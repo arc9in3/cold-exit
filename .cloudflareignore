@@ -1,0 +1,9 @@
+.git
+  .gitignore
+  .gitattributes
+  worker
+  README.md
+  BACKLOG.md
+  DESIGN.md
+  bugs
+  .claude
