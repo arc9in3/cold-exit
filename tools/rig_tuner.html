@@ -1,0 +1,541 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<title>tacticalrogue · rig tuner</title>
+<style>
+  :root {
+    color-scheme: dark;
+  }
+  html, body {
+    margin: 0; padding: 0;
+    width: 100%; height: 100%;
+    background: #0c0c10;
+    font-family: system-ui, -apple-system, Segoe UI, sans-serif;
+    color: #cbd2dc;
+    overflow: hidden;
+  }
+  #stage {
+    position: absolute; inset: 0;
+  }
+  #crumb {
+    position: absolute; top: 10px; left: 14px;
+    font-size: 12px; color: #60697a;
+    background: rgba(14,16,22,0.7);
+    padding: 6px 10px;
+    border-radius: 4px;
+    pointer-events: none;
+    user-select: none;
+  }
+  #crumb b { color: #c9a87a; }
+  #crumb span.hint { color: #566173; margin-left: 10px; }
+  #export-toast {
+    position: absolute; bottom: 20px; left: 50%; transform: translateX(-50%);
+    background: #1f2a18; border: 1px solid #3e5a2e;
+    color: #a8d68a; padding: 8px 14px;
+    border-radius: 4px; font-size: 12px;
+    opacity: 0; transition: opacity 0.3s;
+    pointer-events: none;
+  }
+  #export-toast.show { opacity: 1; }
+</style>
+<script type="importmap">
+{
+  "imports": {
+    "three": "https://unpkg.com/three@0.161.0/build/three.module.js",
+    "three/addons/": "https://unpkg.com/three@0.161.0/examples/jsm/",
+    "lil-gui": "https://unpkg.com/lil-gui@0.19.2/dist/lil-gui.esm.min.js"
+  }
+}
+</script>
+</head>
+<body>
+<div id="stage"></div>
+<div id="crumb">
+  <b>rig tuner</b> · drag to orbit · wheel to zoom
+  <span class="hint">dims sliders on the right · "pose editor" → enable edit mode → click a body part → drag the gizmo rings to rotate</span>
+</div>
+<div id="export-toast">Copied dims + colors to clipboard.</div>
+<script type="module">
+import * as THREE from 'three';
+import { OrbitControls } from 'three/addons/controls/OrbitControls.js';
+import { TransformControls } from 'three/addons/controls/TransformControls.js';
+import GUI from 'lil-gui';
+import {
+  buildRig, initAnim, updateAnim, DEFAULT_DIMS,
+} from '../src/actor_rig.js';
+
+// ---------- scene ----------
+const stage = document.getElementById('stage');
+const renderer = new THREE.WebGLRenderer({ antialias: true });
+renderer.setPixelRatio(Math.min(2, window.devicePixelRatio || 1));
+renderer.setSize(window.innerWidth, window.innerHeight);
+renderer.shadowMap.enabled = true;
+renderer.shadowMap.type = THREE.PCFSoftShadowMap;
+stage.appendChild(renderer.domElement);
+
+const scene = new THREE.Scene();
+scene.background = new THREE.Color(0x0c0c10);
+scene.fog = new THREE.Fog(0x0c0c10, 18, 42);
+
+const aspect = window.innerWidth / window.innerHeight;
+const camera = new THREE.PerspectiveCamera(32, aspect, 0.1, 100);
+camera.position.set(2.6, 2.0, 3.2);
+
+const controls = new OrbitControls(camera, renderer.domElement);
+controls.target.set(0, 1.0, 0);
+controls.enableDamping = true;
+controls.dampingFactor = 0.1;
+controls.minDistance = 1.5;
+controls.maxDistance = 12;
+controls.update();
+
+// Lighting: mirror scene.js so the colors match the in-game rendering.
+scene.add(new THREE.HemisphereLight(0x3a4258, 0x06070a, 0.25));
+const key = new THREE.DirectionalLight(0xffcf96, 1.25);
+key.position.set(3.0, 4.0, 2.0);
+key.castShadow = true;
+key.shadow.mapSize.set(1024, 1024);
+const s = 4;
+key.shadow.camera.left = -s; key.shadow.camera.right = s;
+key.shadow.camera.top = s;   key.shadow.camera.bottom = -s;
+key.shadow.bias = -0.0005;
+scene.add(key);
+const fill = new THREE.DirectionalLight(0x2a3c5e, 0.35);
+fill.position.set(-2.0, 1.5, -2.5);
+scene.add(fill);
+const rim = new THREE.DirectionalLight(0x6a88bf, 0.45);
+rim.position.set(-1.0, 2.2, 3.5);
+scene.add(rim);
+
+const ground = new THREE.Mesh(
+  new THREE.PlaneGeometry(40, 40),
+  new THREE.MeshStandardMaterial({ color: 0x12141a, roughness: 0.95 }),
+);
+ground.rotation.x = -Math.PI / 2;
+ground.receiveShadow = true;
+scene.add(ground);
+scene.add(new THREE.GridHelper(40, 40, 0x1a1c24, 0x0e1014));
+
+// Reference 1m pillar so the scale of the rig is readable at a glance.
+(() => {
+  const pillar = new THREE.Mesh(
+    new THREE.CylinderGeometry(0.02, 0.02, 1.85, 8),
+    new THREE.MeshStandardMaterial({ color: 0x3a4050, roughness: 0.85 }),
+  );
+  pillar.position.set(1.4, 1.85 / 2, 0);
+  scene.add(pillar);
+  const cap = new THREE.Mesh(
+    new THREE.CylinderGeometry(0.06, 0.06, 0.005, 16),
+    new THREE.MeshStandardMaterial({ color: 0xc9a87a }),
+  );
+  cap.position.set(1.4, 1.85, 0);
+  scene.add(cap);
+})();
+
+// ---------- state ----------
+// Deep clone so GUI edits are local — DEFAULT_DIMS stays pristine.
+const state = {
+  dims: structuredClone(DEFAULT_DIMS),
+  colors: {
+    body: 0x1c1e22,
+    head: 0x141518,
+    leg:  0x121317,
+    arm:  0x1a1c20,
+    hand: 0x0d0e10,
+    gear: 0x2a2c30,
+    boot: 0x0a0b0c,
+  },
+  pose: {
+    preset: 'idle',
+    freeze: false,
+    speed: 0,
+    aimYaw: 0,
+    aimPitch: 0,
+    aiming: 0,
+    crouched: 0,
+    rifleHold: false,
+    meleeStance: false,
+    dashing: false,
+    // Edit-pose mode: when true, animation is paused and clicking a
+    // body part attaches a rotation gizmo to its joint pivot.
+    editPose: false,
+  },
+};
+
+const POSE_PRESETS = {
+  idle:        { speed: 0,   aimYaw: 0,    aimPitch: 0,   aiming: 0, crouched: 0, rifleHold: false, meleeStance: false, dashing: false },
+  walk:        { speed: 1.8, aimYaw: 0,    aimPitch: 0,   aiming: 0, crouched: 0, rifleHold: false, meleeStance: false, dashing: false },
+  run:         { speed: 4.5, aimYaw: 0,    aimPitch: 0,   aiming: 0, crouched: 0, rifleHold: false, meleeStance: false, dashing: false },
+  aim:         { speed: 0,   aimYaw: 0,    aimPitch: 0,   aiming: 1, crouched: 0, rifleHold: false, meleeStance: false, dashing: false },
+  rifle:       { speed: 0,   aimYaw: 0,    aimPitch: 0,   aiming: 1, crouched: 0, rifleHold: true,  meleeStance: false, dashing: false },
+  crouch:      { speed: 0,   aimYaw: 0,    aimPitch: 0,   aiming: 0, crouched: 1, rifleHold: false, meleeStance: false, dashing: false },
+  'crouch-aim':{ speed: 0,   aimYaw: 0,    aimPitch: 0,   aiming: 1, crouched: 1, rifleHold: true,  meleeStance: false, dashing: false },
+  melee:       { speed: 0,   aimYaw: 0,    aimPitch: 0,   aiming: 0, crouched: 0, rifleHold: false, meleeStance: true,  dashing: false },
+  dash:        { speed: 6.0, aimYaw: 0,    aimPitch: 0,   aiming: 0, crouched: 0, rifleHold: false, meleeStance: false, dashing: true  },
+};
+
+function applyPreset(name) {
+  const p = POSE_PRESETS[name];
+  if (!p) return;
+  Object.assign(state.pose, p);
+  state.pose.preset = name;
+  // Reflect onto GUI controls so sliders match.
+  for (const ctrl of poseControls) ctrl.updateDisplay();
+}
+
+// ---------- rig ----------
+let rig = null;
+// Joint map: clickable mesh → { pivot, name }. Rebuilt each time the
+// rig is re-instantiated so the gizmo always drives live geometry.
+let jointMap = new Map();
+let jointNames = new Map();       // pivot → display name (for editor label)
+let selectedJoint = null;         // { pivot, name } or null
+let refreshEditorUI = () => {};   // set later; called on selection change
+let tControls = null;             // TransformControls, assigned below
+
+function rebuildJointMap() {
+  jointMap = new Map();
+  jointNames = new Map();
+  const reg = (mesh, pivot, name) => {
+    if (mesh) jointMap.set(mesh, { pivot, name });
+    jointNames.set(pivot, name);
+  };
+  reg(rig.pelvis,      rig.hips,    'hips');
+  reg(rig.stomachMesh, rig.stomach, 'stomach');
+  reg(rig.chestMesh,   rig.chest,   'chest');
+  reg(rig.chestPlate,  rig.chest,   'chest');
+  reg(rig.belt,        rig.chest,   'chest');
+  reg(rig.collar,      rig.chest,   'chest');
+  reg(rig.neckMesh,    rig.neck,    'neck');
+  reg(rig.headMesh,    rig.head,    'head');
+  reg(rig.jawMesh,     rig.head,    'head');
+  for (const [side, arm] of [['left', rig.leftArm], ['right', rig.rightArm]]) {
+    reg(arm.shoulder.mesh, arm.shoulder.pivot, `${side}Shoulder`);
+    reg(arm.shoulderBulge, arm.shoulder.pivot, `${side}Shoulder`);
+    reg(arm.shoulderPad,   arm.shoulder.pivot, `${side}Shoulder`);
+    reg(arm.forearm.mesh,  arm.elbow,          `${side}Elbow`);
+    reg(arm.elbowBulge,    arm.elbow,          `${side}Elbow`);
+    reg(arm.wristCuff,     arm.elbow,          `${side}Elbow`);
+    reg(arm.hand.mesh,     arm.wrist,          `${side}Wrist`);
+  }
+  for (const [side, leg] of [['left', rig.leftLeg], ['right', rig.rightLeg]]) {
+    reg(leg.thigh.mesh, leg.thigh.pivot, `${side}Thigh`);
+    reg(leg.hipBulge,   leg.thigh.pivot, `${side}Thigh`);
+    reg(leg.thighRig,   leg.thigh.pivot, `${side}Thigh`);
+    reg(leg.calf.mesh,  leg.knee,        `${side}Knee`);
+    reg(leg.kneeBulge,  leg.knee,        `${side}Knee`);
+    reg(leg.kneePad,    leg.knee,        `${side}Knee`);
+    reg(leg.bootTop,    leg.knee,        `${side}Knee`);
+    reg(leg.foot.mesh,  leg.ankle,       `${side}Ankle`);
+  }
+}
+
+function rebuildRig() {
+  if (rig) {
+    scene.remove(rig.group);
+    rig.group.traverse((o) => {
+      if (o.isMesh) {
+        o.geometry?.dispose?.();
+        // Don't dispose shared materials blindly (toon gradient map is
+        // shared globally). The handful of materials leak between
+        // rebuilds — fine for a dev tool.
+      }
+    });
+  }
+  rig = buildRig({
+    scale: 1.0,
+    dims: state.dims,
+    bodyColor: state.colors.body,
+    headColor: state.colors.head,
+    legColor:  state.colors.leg,
+    armColor:  state.colors.arm,
+    handColor: state.colors.hand,
+    gearColor: state.colors.gear,
+    bootColor: state.colors.boot,
+  });
+  initAnim(rig);
+  scene.add(rig.group);
+  rebuildJointMap();
+  // Stale pivot references from the previous rig are gone — drop any
+  // active gizmo attachment.
+  if (tControls?.object) {
+    tControls.detach();
+  }
+  selectedJoint = null;
+  refreshEditorUI();
+}
+rebuildRig();
+
+// ---------- pose-editor gizmo ----------
+// TransformControls in rotate mode gives x/y/z ring handles around the
+// attached object. Attaching to a joint PIVOT group lets the user
+// rotate the limb by dragging one of the rings. We disable orbit
+// during drag so the camera doesn't fight the gizmo.
+tControls = new TransformControls(camera, renderer.domElement);
+tControls.setMode('rotate');
+tControls.setSize(0.85);
+tControls.addEventListener('dragging-changed', (e) => {
+  controls.enabled = !e.value;
+});
+tControls.addEventListener('change', () => refreshEditorUI());
+scene.add(tControls);
+
+// Raycast click-to-select. Only fires in edit-pose mode, and skips
+// clicks that hit the gizmo itself (TransformControls sets its own
+// dragging state when you grab a handle).
+const raycaster = new THREE.Raycaster();
+const pointer = new THREE.Vector2();
+renderer.domElement.addEventListener('pointerdown', (e) => {
+  if (!state.pose.editPose) return;
+  if (tControls.dragging) return;
+  if (e.button !== 0) return;                      // left click only
+  const rect = renderer.domElement.getBoundingClientRect();
+  pointer.x = ((e.clientX - rect.left) / rect.width) * 2 - 1;
+  pointer.y = -((e.clientY - rect.top) / rect.height) * 2 + 1;
+  raycaster.setFromCamera(pointer, camera);
+  const meshes = Array.from(jointMap.keys());
+  const hits = raycaster.intersectObjects(meshes, false);
+  if (hits.length > 0) {
+    const entry = jointMap.get(hits[0].object);
+    selectJoint(entry);
+  } else {
+    selectJoint(null);
+  }
+});
+
+function selectJoint(entry) {
+  if (!entry) {
+    tControls.detach();
+    selectedJoint = null;
+  } else {
+    tControls.attach(entry.pivot);
+    selectedJoint = entry;
+  }
+  refreshEditorUI();
+}
+
+function setEditPose(on) {
+  state.pose.editPose = on;
+  if (!on) {
+    selectJoint(null);
+  }
+  refreshEditorUI();
+}
+
+// ---------- GUI ----------
+const gui = new GUI({ title: 'rig · tuner' });
+gui.domElement.style.setProperty('--width', '340px');
+gui.domElement.style.maxHeight = '95vh';
+gui.domElement.style.overflowY = 'auto';
+
+// Collect every control so preset-applies can refresh displays.
+const poseControls = [];
+
+// --- pose ---
+{
+  const f = gui.addFolder('pose');
+  f.add(state.pose, 'preset', Object.keys(POSE_PRESETS)).name('preset').onChange(applyPreset);
+  poseControls.push(f.add(state.pose, 'freeze').name('freeze (pause anim)'));
+  poseControls.push(f.add(state.pose, 'speed', 0, 6, 0.05).name('speed (walk/run)'));
+  poseControls.push(f.add(state.pose, 'aimYaw',  -1.5, 1.5, 0.01).name('aim yaw'));
+  poseControls.push(f.add(state.pose, 'aimPitch',-1.2, 1.2, 0.01).name('aim pitch'));
+  poseControls.push(f.add(state.pose, 'aiming',  0, 1, 0.01).name('aim blend'));
+  poseControls.push(f.add(state.pose, 'crouched',0, 1, 0.01).name('crouch'));
+  poseControls.push(f.add(state.pose, 'rifleHold').name('rifle hold'));
+  poseControls.push(f.add(state.pose, 'meleeStance').name('melee stance'));
+  poseControls.push(f.add(state.pose, 'dashing').name('dashing'));
+}
+
+// --- pose editor (click-to-select + rotate gizmo) ---
+{
+  const f = gui.addFolder('pose editor');
+  const labelProxy = { selected: '(none)' };
+  const ed = f.add(state.pose, 'editPose').name('edit mode (click parts)');
+  ed.onChange((on) => setEditPose(on));
+  const labelCtrl = f.add(labelProxy, 'selected').disable().listen();
+  f.add({
+    mode: 'rotate',
+  }, 'mode', ['rotate', 'translate']).name('gizmo mode').onChange((m) => {
+    tControls.setMode(m);
+  });
+  f.add({
+    deselect: () => selectJoint(null),
+  }, 'deselect').name('deselect');
+  f.add({
+    zero: () => {
+      if (!selectedJoint) return;
+      selectedJoint.pivot.rotation.set(0, 0, 0);
+      refreshEditorUI();
+    },
+  }, 'zero').name('zero selected rotation');
+  f.add({
+    zeroAll: () => {
+      for (const pivot of jointNames.keys()) pivot.rotation.set(0, 0, 0);
+      refreshEditorUI();
+    },
+  }, 'zeroAll').name('zero ALL rotations');
+  f.add({
+    exportPose: () => {
+      const pose = {};
+      // Also capture the bag of transient rotations that updateAnim
+      // normally controls — position writes too (hips.position.y).
+      for (const [pivot, name] of jointNames) {
+        const r = pivot.rotation;
+        const eps = 1e-4;
+        if (Math.abs(r.x) > eps || Math.abs(r.y) > eps || Math.abs(r.z) > eps) {
+          pose[name] = {
+            x: +r.x.toFixed(4),
+            y: +r.y.toFixed(4),
+            z: +r.z.toFixed(4),
+          };
+        }
+      }
+      const json = JSON.stringify({ pose }, null, 2);
+      const toast = document.getElementById('export-toast');
+      navigator.clipboard?.writeText(json).then(
+        () => {
+          toast.textContent = 'Copied pose to clipboard.';
+          toast.classList.add('show');
+          setTimeout(() => toast.classList.remove('show'), 1600);
+        },
+        () => { console.warn('[rig tuner] clipboard write failed'); },
+      );
+      console.log('[rig tuner] exported pose:\n' + json);
+    },
+  }, 'exportPose').name('export pose → clipboard');
+  refreshEditorUI = () => {
+    if (selectedJoint) {
+      const r = selectedJoint.pivot.rotation;
+      labelProxy.selected = `${selectedJoint.name}  (${r.x.toFixed(2)}, ${r.y.toFixed(2)}, ${r.z.toFixed(2)})`;
+    } else {
+      labelProxy.selected = state.pose.editPose ? '(click a body part)' : '(none)';
+    }
+    labelCtrl.updateDisplay();
+  };
+  refreshEditorUI();
+}
+
+// --- colors ---
+{
+  const f = gui.addFolder('colors');
+  const addColor = (key, label) => {
+    // lil-gui needs a string-backed object for hex color.
+    const proxy = { c: '#' + state.colors[key].toString(16).padStart(6, '0') };
+    f.addColor(proxy, 'c').name(label).onChange((hex) => {
+      state.colors[key] = parseInt(hex.replace('#', ''), 16);
+      rebuildRig();
+    });
+  };
+  addColor('body', 'body');
+  addColor('head', 'head');
+  addColor('leg',  'legs / pelvis');
+  addColor('arm',  'arms');
+  addColor('hand', 'hands');
+  addColor('gear', 'gear');
+  addColor('boot', 'boots');
+}
+
+// --- dims ---
+// Walk the DEFAULT_DIMS tree and make a slider for every numeric leaf.
+// Range heuristic: clamp to [0, 2x default] with a sensible min step.
+// Booleans and non-numeric keys are skipped (none currently, but a
+// guard rail for future additions).
+function rangeFor(value) {
+  const a = Math.abs(value);
+  if (a === 0) return { min: -0.5, max: 0.5, step: 0.005 };
+  if (a < 0.05) return { min: -a * 3, max: a * 3, step: 0.001 };
+  if (a < 0.5)  return { min: 0, max: a * 2.5, step: 0.005 };
+  return { min: 0, max: a * 2, step: 0.01 };
+}
+
+function addDimsFolder(gui, obj, path) {
+  for (const [k, v] of Object.entries(obj)) {
+    if (v !== null && typeof v === 'object' && !Array.isArray(v)) {
+      const sub = gui.addFolder(k);
+      sub.close();
+      addDimsFolder(sub, v, [...path, k]);
+    } else if (typeof v === 'number') {
+      const { min, max, step } = rangeFor(v);
+      gui.add(obj, k, min, max, step).onChange(() => rebuildRig());
+    }
+  }
+}
+
+let dimsFolder = gui.addFolder('dimensions');
+addDimsFolder(dimsFolder, state.dims, []);
+
+// --- actions ---
+{
+  const f = gui.addFolder('actions');
+  const toast = document.getElementById('export-toast');
+  const showToast = (msg) => {
+    toast.textContent = msg;
+    toast.classList.add('show');
+    setTimeout(() => toast.classList.remove('show'), 1600);
+  };
+  f.add({
+    export: () => {
+      const payload = {
+        dims: state.dims,
+        colors: state.colors,
+      };
+      const json = JSON.stringify(payload, null, 2);
+      navigator.clipboard?.writeText(json).then(
+        () => showToast('Copied dims + colors to clipboard.'),
+        () => showToast('Copy failed — see console.'),
+      );
+      console.log('[rig tuner] exported payload:\n' + json);
+    },
+  }, 'export').name('export → clipboard');
+  f.add({
+    reset: () => {
+      state.dims = structuredClone(DEFAULT_DIMS);
+      state.pose.preset = 'idle';
+      applyPreset('idle');
+      // Rebuild the dims folder: destroy and re-add.
+      dimsFolder.destroy();
+      dimsFolder = gui.addFolder('dimensions');
+      addDimsFolder(dimsFolder, state.dims, []);
+      rebuildRig();
+      showToast('Reset to defaults.');
+    },
+  }, 'reset').name('reset dims');
+  f.add({
+    log: () => {
+      console.log('[rig tuner] current state:', {
+        dims: state.dims, colors: state.colors, pose: state.pose,
+      });
+      showToast('Logged to console.');
+    },
+  }, 'log').name('log to console');
+}
+
+// ---------- loop ----------
+let last = performance.now() / 1000;
+function tick() {
+  const now = performance.now() / 1000;
+  const dt = Math.min(0.05, now - last);
+  last = now;
+
+  // In edit mode, updateAnim is suppressed so gizmo-driven rotations
+  // stick. The normal `freeze` flag still works the same way when not
+  // in edit mode.
+  if (!state.pose.freeze && !state.pose.editPose) {
+    updateAnim(rig, state.pose, dt);
+  }
+  controls.update();
+  renderer.render(scene, camera);
+  requestAnimationFrame(tick);
+}
+tick();
+
+// ---------- resize ----------
+window.addEventListener('resize', () => {
+  camera.aspect = window.innerWidth / window.innerHeight;
+  camera.updateProjectionMatrix();
+  renderer.setSize(window.innerWidth, window.innerHeight);
+});
+</script>
+</body>
+</html>

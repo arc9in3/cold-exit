@@ -1,0 +1,454 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<title>tacticalrogue — model viewer</title>
+<style>
+  html, body { margin: 0; padding: 0; background: #121316; color: #ddd;
+               font: 12px/1.4 ui-monospace, Menlo, Consolas, monospace; }
+  header { position: sticky; top: 0; z-index: 10;
+           background: #1b1d22; border-bottom: 1px solid #2a2d34;
+           padding: 10px 16px; display: flex; gap: 10px; align-items: center; flex-wrap: wrap; }
+  header h1 { margin: 0 16px 0 0; font-size: 14px; color: #c9a87a; font-weight: 600; }
+  header select, header input {
+    background: #0f1014; color: #ddd; border: 1px solid #2a2d34;
+    padding: 4px 8px; border-radius: 3px; font: inherit; min-width: 180px;
+  }
+  header .count { margin-left: auto; color: #888; }
+  .grid { display: grid; gap: 10px; padding: 14px;
+          grid-template-columns: repeat(auto-fill, minmax(180px, 1fr)); }
+  .tile { background: #181a1e; border: 1px solid #2a2d34; border-radius: 4px;
+          overflow: hidden; position: relative; }
+  .tile canvas { display: block; width: 100%; height: 160px; background: #0d0e11; cursor: grab; }
+  .tile .label { padding: 6px 8px; border-top: 1px solid #23262c;
+                 font-size: 11px; line-height: 1.3; word-break: break-all; }
+  .tile .label b { color: #c9a87a; }
+  .tile .cat { position: absolute; top: 4px; left: 4px; padding: 1px 6px;
+               background: rgba(0,0,0,0.6); border-radius: 2px;
+               font-size: 10px; color: #9aa; pointer-events: none; }
+  .tile.missing canvas { opacity: 0.25; }
+  .tile .error { position: absolute; top: 70px; left: 0; right: 0; text-align: center;
+                 color: #a54; font-size: 10px; pointer-events: none; }
+  .tile .assigned { padding: 4px 8px; font-size: 10px; color: #7a9a7a;
+                    border-top: 1px solid #23262c; background: #12181a; }
+  .tile .assigned.none { color: #555; }
+  .tile .annotation { display: block; width: 100%; box-sizing: border-box;
+                      background: #0f1014; color: #ddd; border: 0; border-top: 1px solid #23262c;
+                      padding: 6px 8px; font: inherit; resize: vertical; min-height: 34px; }
+  .tile .annotation:focus { outline: 1px solid #c9a87a; }
+  .tile .annotation.saved { border-top-color: #2a6030; transition: border-top-color 1.5s; }
+  header button { background: #2a2d34; color: #ddd; border: 1px solid #3a3d44;
+                  padding: 4px 10px; border-radius: 3px; font: inherit; cursor: pointer; }
+  header button:hover { background: #3a3d44; }
+</style>
+</head>
+<body>
+
+<header>
+  <h1>model viewer</h1>
+  <select id="category"><option value="">all categories</option></select>
+  <select id="status-filter">
+    <option value="all">all items</option>
+    <option value="unassigned">unassigned only</option>
+    <option value="assigned">assigned only</option>
+    <option value="annotated">annotated only</option>
+    <option value="unannotated">unannotated only</option>
+  </select>
+  <input id="search" type="search" placeholder="filter by name (regex ok)…" autocomplete="off">
+  <button id="export-btn" type="button" title="Download all your notes as JSON">Export annotations</button>
+  <button id="render-btn" type="button" title="Render a PNG icon for every model currently mapped in the manifest, then download as a zip">Render icons</button>
+  <span class="count" id="count">loading…</span>
+</header>
+
+<div id="file-protocol-banner" style="
+  display: none; padding: 10px 16px; background: #3a1a1a; color: #ffcaca;
+  border-bottom: 1px solid #7a2a2a; font-size: 12px;
+">
+  Running over <code>file://</code>. Browsers block <code>fetch</code> of local FBX files,
+  so every tile will say "fetch blocked". Serve via HTTP instead:
+  <code>python -m http.server 8000</code>, then open
+  <code>http://localhost:8000/tools/model_viewer.html</code>.
+</div>
+
+<script>
+  if (location.protocol === 'file:') {
+    document.getElementById('file-protocol-banner').style.display = 'block';
+  }
+</script>
+
+<div class="grid" id="grid"></div>
+
+<script type="importmap">
+{
+  "imports": {
+    "three": "https://unpkg.com/three@0.161.0/build/three.module.js",
+    "three/addons/": "https://unpkg.com/three@0.161.0/examples/jsm/"
+  }
+}
+</script>
+
+<!-- Classic script (not a module) so this works over file:// — Chrome
+     blocks ES module imports of local files due to null-origin CORS. -->
+<script src="../Assets/models/_index.js"></script>
+
+<!-- JSZip for bundling rendered icons into a single download. -->
+<script src="https://cdn.jsdelivr.net/npm/jszip@3.10.1/dist/jszip.min.js"></script>
+
+<script type="module">
+import * as THREE from 'three';
+import { FBXLoader } from 'three/addons/loaders/FBXLoader.js';
+// Live-read the manifest so the viewer always reflects current assignments.
+// Falls back gracefully if the file is unreachable (e.g., over file://).
+let MODEL_BY_WEAPON_NAME = {}, MODEL_BY_ITEM_ID = {};
+try {
+  const m = await import('../src/model_manifest.js');
+  MODEL_BY_WEAPON_NAME = m.MODEL_BY_WEAPON_NAME || {};
+  MODEL_BY_ITEM_ID    = m.MODEL_BY_ITEM_ID    || {};
+} catch (e) {
+  console.warn('manifest import failed; assignments will all show "unassigned"', e);
+}
+
+const INDEX = window.MODEL_INDEX;
+if (!INDEX) {
+  document.getElementById('count').textContent =
+    'failed: window.MODEL_INDEX not set (check console)';
+  throw new Error('_index.js did not populate window.MODEL_INDEX — ' +
+    'either the file failed to load, or regenerate it with the latest script.');
+}
+
+const MODEL_BASE = '../Assets/models/';
+
+// Reverse lookup — `cat/file.fbx` → array of manifest keys that point at it.
+const assignedByPath = {};
+for (const [name, path] of Object.entries(MODEL_BY_WEAPON_NAME)) {
+  (assignedByPath[path] = assignedByPath[path] || []).push({ kind: 'weapon', key: name });
+}
+for (const [id, path] of Object.entries(MODEL_BY_ITEM_ID)) {
+  (assignedByPath[path] = assignedByPath[path] || []).push({ kind: 'item', key: id });
+}
+
+// Annotations persist in localStorage. Keyed by `cat/file.fbx`.
+const ANNOT_KEY = 'tacticalrogue.model_annotations';
+let annotations = {};
+try { annotations = JSON.parse(localStorage.getItem(ANNOT_KEY) || '{}'); }
+catch { annotations = {}; }
+function saveAnnotations() {
+  localStorage.setItem(ANNOT_KEY, JSON.stringify(annotations));
+}
+
+const grid = document.getElementById('grid');
+const catSel = document.getElementById('category');
+const search = document.getElementById('search');
+const statusSel = document.getElementById('status-filter');
+const exportBtn = document.getElementById('export-btn');
+const count = document.getElementById('count');
+
+exportBtn.addEventListener('click', () => {
+  const out = {};
+  for (const t of tiles) {
+    const path = `${t.cat}/${t.file}`;
+    const note = annotations[path];
+    if (!note) continue;
+    out[path] = { note, assigned: (assignedByPath[path] || []).map(a => `${a.kind}:${a.key}`) };
+  }
+  const blob = new Blob([JSON.stringify(out, null, 2)], { type: 'application/json' });
+  const a = document.createElement('a');
+  a.href = URL.createObjectURL(blob);
+  a.download = 'model_annotations.json';
+  a.click();
+});
+
+document.getElementById('render-btn').addEventListener('click', renderAllIcons);
+
+async function renderAllIcons() {
+  // Render every tile that has a manifest assignment into a PNG,
+  // packaged as a single zip. Renders at 256×256 transparent so the
+  // output drops into the Assets/UI/Military/ folder as a Clean-variant
+  // replacement (or wherever the icon resolver points).
+  const targets = tiles.filter(t => assignedByPath[`${t.cat}/${t.file}`]);
+  if (!targets.length) { count.textContent = 'no assigned models to render'; return; }
+  if (typeof JSZip === 'undefined') { count.textContent = 'JSZip failed to load'; return; }
+
+  const zip = new JSZip();
+  const SIZE = 256;
+
+  // Swap renderer to the export resolution temporarily.
+  const prevSize = new THREE.Vector2();
+  renderer.getSize(prevSize);
+  renderer.setSize(SIZE, SIZE, false);
+
+  for (let i = 0; i < targets.length; i++) {
+    const t = targets[i];
+    count.textContent = `rendering ${i + 1} / ${targets.length} …`;
+    await renderOneForExport(t);
+    if (!t.scene) continue;
+    renderer.render(t.scene, t.camera);
+    // Canvas-to-blob, named by the first assignment key so icons drop
+    // into their manifest slot without guesswork.
+    const assignments = assignedByPath[`${t.cat}/${t.file}`] || [];
+    const baseName = (assignments[0]?.key || t.file.replace(/\.fbx$/i, ''))
+      .replace(/[^A-Za-z0-9_\-]+/g, '_');
+    const blob = await new Promise(r => renderer.domElement.toBlob(r, 'image/png'));
+    if (blob) zip.file(`${baseName}.png`, blob);
+  }
+
+  renderer.setSize(prevSize.x, prevSize.y, false);
+  count.textContent = `zipping ${targets.length} icons …`;
+  const zipBlob = await zip.generateAsync({ type: 'blob' });
+  const a = document.createElement('a');
+  a.href = URL.createObjectURL(zipBlob);
+  a.download = 'rendered_icons.zip';
+  a.click();
+  count.textContent = `rendered ${targets.length} icons`;
+}
+
+// Promise-wrapped single-model load + setup. Returns once t.scene is
+// ready to render (or never, if load failed — caller guards with
+// `if (!t.scene) continue`).
+function renderOneForExport(t) {
+  if (t.scene) return Promise.resolve();
+  return new Promise((resolve) => {
+    if (!t.loaded) t.loaded = true;
+    const url = MODEL_BASE + t.cat + '/' + t.file;
+    loader.load(
+      url,
+      (obj) => { t.obj = obj; fitAndRender(t); resolve(); },
+      undefined,
+      () => resolve(),
+    );
+  });
+}
+
+const loader = new FBXLoader();
+const texLoader = new THREE.TextureLoader();
+const renderer = new THREE.WebGLRenderer({ antialias: true, alpha: true });
+renderer.setPixelRatio(window.devicePixelRatio);
+// Offscreen shared renderer — we copy its pixels into each tile's canvas
+// so 800 WebGL contexts don't crash the browser.
+renderer.setSize(320, 320, false);
+
+// Atlas textures shared across all tiles of a category. Animpic POLY
+// meshes UV into these to get their colors.
+const atlasCache = {};
+function getAtlas(cat) {
+  if (cat in atlasCache) return atlasCache[cat];
+  const tex = texLoader.load(`${MODEL_BASE}${cat}/_atlas.png`,
+    (t) => {
+      t.colorSpace = THREE.SRGBColorSpace;
+      t.magFilter = THREE.NearestFilter;
+      t.minFilter = THREE.LinearMipmapLinearFilter;
+      t.needsUpdate = true;
+    });
+  atlasCache[cat] = tex;
+  return tex;
+}
+
+const tiles = [];  // { el, canvas, obj, name, category }
+
+buildTiles(INDEX);
+
+function buildTiles(index) {
+  const cats = Object.keys(index);
+  for (const c of cats) {
+    const o = document.createElement('option'); o.value = c; o.textContent = c;
+    catSel.appendChild(o);
+  }
+
+  let total = 0;
+  for (const cat of cats) {
+    for (const file of index[cat]) {
+      total++;
+      const path = `${cat}/${file}`;
+      const assigned = assignedByPath[path];
+
+      const tile = document.createElement('div');
+      tile.className = 'tile';
+      tile.dataset.category = cat;
+      tile.dataset.name = file;
+      tile.dataset.assigned = assigned ? '1' : '0';
+
+      const canvas = document.createElement('canvas');
+      canvas.width = 320; canvas.height = 320;
+      const cat_el = document.createElement('div'); cat_el.className = 'cat'; cat_el.textContent = cat;
+      const label = document.createElement('div'); label.className = 'label';
+      label.innerHTML = `<b>${file.replace(/\.fbx$/i, '')}</b><br>${cat}/`;
+
+      const assignedEl = document.createElement('div');
+      if (assigned) {
+        assignedEl.className = 'assigned';
+        assignedEl.innerHTML = 'used by: ' +
+          assigned.map(a => `<b style="color:#c9a87a">${a.key}</b>`).join(', ');
+      } else {
+        assignedEl.className = 'assigned none';
+        assignedEl.textContent = 'unassigned';
+      }
+
+      const noteEl = document.createElement('textarea');
+      noteEl.className = 'annotation';
+      noteEl.placeholder = 'what is this? (e.g. M16A4, Winchester 1894…)';
+      noteEl.value = annotations[path] || '';
+      noteEl.rows = 1;
+      noteEl.dataset.annotated = noteEl.value ? '1' : '0';
+      // Save on blur to avoid localStorage writes per keystroke.
+      noteEl.addEventListener('blur', () => {
+        const v = noteEl.value.trim();
+        if (v) annotations[path] = v; else delete annotations[path];
+        saveAnnotations();
+        noteEl.dataset.annotated = v ? '1' : '0';
+        tile.dataset.annotated = v ? '1' : '0';
+        noteEl.classList.add('saved');
+        setTimeout(() => noteEl.classList.remove('saved'), 1500);
+        applyFilters();  // re-apply in case "annotated only" is active
+      });
+
+      tile.dataset.annotated = noteEl.value ? '1' : '0';
+      tile.append(canvas, cat_el, label, assignedEl, noteEl);
+      grid.appendChild(tile);
+      tiles.push({ el: tile, canvas, file, cat, path, obj: null, loaded: false, error: null });
+    }
+  }
+  count.textContent = `${total} models`;
+  lazyLoadVisible();
+  window.addEventListener('scroll', lazyLoadVisible, { passive: true });
+  catSel.addEventListener('change', applyFilters);
+  search.addEventListener('input', applyFilters);
+  statusSel.addEventListener('change', applyFilters);
+}
+
+function applyFilters() {
+  const cat = catSel.value;
+  const q = search.value.trim();
+  const status = statusSel.value;
+  let rx = null;
+  if (q) {
+    try { rx = new RegExp(q, 'i'); } catch { rx = null; }
+  }
+  let visible = 0;
+  for (const t of tiles) {
+    const assigned = t.el.dataset.assigned === '1';
+    const annotated = t.el.dataset.annotated === '1';
+    let statusOk = true;
+    if (status === 'unassigned') statusOk = !assigned;
+    else if (status === 'assigned')   statusOk = assigned;
+    else if (status === 'annotated')  statusOk = annotated;
+    else if (status === 'unannotated') statusOk = !annotated;
+    const ok = statusOk && (!cat || t.cat === cat) && (!rx || rx.test(t.file));
+    t.el.style.display = ok ? '' : 'none';
+    if (ok) visible++;
+  }
+  count.textContent = `${visible} shown`;
+  lazyLoadVisible();
+}
+
+function lazyLoadVisible() {
+  const vpTop = window.scrollY;
+  const vpBot = vpTop + window.innerHeight + 400;
+  for (const t of tiles) {
+    if (t.loaded || t.el.style.display === 'none') continue;
+    const r = t.el.getBoundingClientRect();
+    const top = r.top + window.scrollY;
+    if (top < vpBot && top + r.height > vpTop - 400) {
+      t.loaded = true;
+      loadTile(t);
+    }
+  }
+}
+
+function loadTile(t) {
+  const url = MODEL_BASE + t.cat + '/' + t.file;
+  loader.load(
+    url,
+    (obj) => { t.obj = obj; fitAndRender(t); },
+    undefined,
+    (err) => {
+      const msg = err?.message || String(err);
+      t.error = msg;
+      t.el.classList.add('missing');
+      const e = document.createElement('div'); e.className = 'error';
+      // Short, meaningful hint instead of just "load failed".
+      e.textContent = /fetch|network|CORS/i.test(msg) ? 'fetch blocked' : 'load failed';
+      e.title = msg;  // full error on hover
+      t.el.appendChild(e);
+      console.warn(`[${t.file}]`, err);
+    },
+  );
+}
+
+function fitAndRender(t) {
+  const scene = new THREE.Scene();
+  scene.background = null;
+  scene.add(new THREE.AmbientLight(0xffffff, 0.55));
+  const key = new THREE.DirectionalLight(0xffffff, 1.1); key.position.set(3, 5, 2); scene.add(key);
+  const fill = new THREE.DirectionalLight(0x8fbaff, 0.35); fill.position.set(-3, 2, -1); scene.add(fill);
+
+  // Animpic POLY FBX materials reference textures outside the FBX —
+  // replace them with a standard lit material that samples the shared pack atlas.
+  const atlas = getAtlas(t.cat);
+  t.obj.traverse(obj => {
+    if (!obj.isMesh) return;
+    const hasUV = !!obj.geometry?.attributes?.uv;
+    const hasVC = !!obj.geometry?.attributes?.color;
+    const oldMat = obj.material;
+    obj.material = new THREE.MeshStandardMaterial({
+      color: 0xffffff,
+      map: hasUV ? atlas : null,
+      vertexColors: !hasUV && hasVC,
+      roughness: 0.55, metalness: 0.1,
+    });
+    if (oldMat) {
+      if (Array.isArray(oldMat)) oldMat.forEach(m => m.dispose?.());
+      else oldMat.dispose?.();
+    }
+  });
+
+  // Fit: push centering onto children so obj.rotation orbits the centroid.
+  t.obj.updateMatrixWorld(true);
+  const box = new THREE.Box3().setFromObject(t.obj);
+  if (box.isEmpty()) { t.el.classList.add('missing'); return; }
+  const size = new THREE.Vector3(); box.getSize(size);
+  const center = new THREE.Vector3(); box.getCenter(center);
+  const maxDim = Math.max(size.x, size.y, size.z) || 1;
+  const scale = 2 / maxDim;
+  const localCenter = t.obj.worldToLocal(center.clone());
+  for (const child of t.obj.children) child.position.sub(localCenter);
+  t.obj.scale.setScalar(scale);
+  scene.add(t.obj);
+
+  const camera = new THREE.PerspectiveCamera(40, 1, 0.1, 100);
+  camera.position.set(2.4, 1.8, 2.4);
+  camera.lookAt(0, 0, 0);
+
+  const ctx = t.canvas.getContext('2d');
+  t.scene = scene; t.camera = camera;
+  renderTile(t);
+}
+
+function renderTile(t) {
+  if (!t.scene) return;
+  t.obj.rotation.y += 0.0;  // static snapshot; turntable controlled by animation loop below
+  renderer.render(t.scene, t.camera);
+  const ctx = t.canvas.getContext('2d');
+  ctx.clearRect(0, 0, t.canvas.width, t.canvas.height);
+  ctx.drawImage(renderer.domElement, 0, 0, t.canvas.width, t.canvas.height);
+}
+
+// Shared animation loop — rotates visible loaded tiles and re-snapshots them.
+let last = performance.now();
+function animate(now) {
+  const dt = Math.min(0.05, (now - last) / 1000); last = now;
+  for (const t of tiles) {
+    if (!t.scene || t.el.style.display === 'none') continue;
+    const r = t.el.getBoundingClientRect();
+    if (r.bottom < 0 || r.top > window.innerHeight) continue;  // offscreen
+    t.obj.rotation.y += dt * 0.7;
+    renderer.render(t.scene, t.camera);
+    const ctx = t.canvas.getContext('2d');
+    ctx.clearRect(0, 0, t.canvas.width, t.canvas.height);
+    ctx.drawImage(renderer.domElement, 0, 0, t.canvas.width, t.canvas.height);
+  }
+  requestAnimationFrame(animate);
+}
+requestAnimationFrame(animate);
+</script>
+</body>
+</html>

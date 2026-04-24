@@ -1,0 +1,689 @@
+fileFormatVersion: 2
+guid: 1b5e3ce11dc5f5945b4902bf4cb6365e
+TextureImporter:
+  internalIDToNameTable:
+  - first:
+      213: 686051536045514998
+    second: ICON_MilitaryCombat_Special_Microchip_01_Clean_0
+  - first:
+      213: -6593816704671283142
+    second: ICON_MilitaryCombat_Special_Microchip_01_Clean_1
+  - first:
+      213: -7082623744670073147
+    second: ICON_MilitaryCombat_Special_Microchip_01_Clean_2
+  - first:
+      213: 6882466624276306184
+    second: ICON_MilitaryCombat_Special_Microchip_01_Clean_3
+  - first:
+      213: -8385290895288291712
+    second: ICON_MilitaryCombat_Special_Microchip_01_Clean_4
+  - first:
+      213: -4905266170309507597
+    second: ICON_MilitaryCombat_Special_Microchip_01_Clean_5
+  - first:
+      213: 7171447655526604604
+    second: ICON_MilitaryCombat_Special_Microchip_01_Clean_6
+  - first:
+      213: 306589363864165047
+    second: ICON_MilitaryCombat_Special_Microchip_01_Clean_7
+  - first:
+      213: 3771213001124348814
+    second: ICON_MilitaryCombat_Special_Microchip_01_Clean_8
+  - first:
+      213: -4586805527124767391
+    second: ICON_MilitaryCombat_Special_Microchip_01_Clean_9
+  - first:
+      213: 2836301513987641578
+    second: ICON_MilitaryCombat_Special_Microchip_01_Clean_10
+  - first:
+      213: 2128412926291312834
+    second: ICON_MilitaryCombat_Special_Microchip_01_Clean_11
+  - first:
+      213: -7880477466403882420
+    second: ICON_MilitaryCombat_Special_Microchip_01_Clean_12
+  - first:
+      213: 2796996054569402905
+    second: ICON_MilitaryCombat_Special_Microchip_01_Clean_13
+  - first:
+      213: 3596297837060457526
+    second: ICON_MilitaryCombat_Special_Microchip_01_Clean_14
+  - first:
+      213: -7770657155354655534
+    second: ICON_MilitaryCombat_Special_Microchip_01_Clean_15
+  - first:
+      213: -4780220788434846740
+    second: ICON_MilitaryCombat_Special_Microchip_01_Clean_16
+  - first:
+      213: -264403683960028397
+    second: ICON_MilitaryCombat_Special_Microchip_01_Clean_17
+  - first:
+      213: -1034329541654206854
+    second: ICON_MilitaryCombat_Special_Microchip_01_Clean_18
+  - first:
+      213: 3702222466894001678
+    second: ICON_MilitaryCombat_Special_Microchip_01_Clean_19
+  - first:
+      213: -5540929794279364456
+    second: ICON_MilitaryCombat_Special_Microchip_01_Clean_20
+  externalObjects: {}
+  serializedVersion: 13
+  mipmaps:
+    mipMapMode: 0
+    enableMipMap: 0
+    sRGBTexture: 1
+    linearTexture: 0
+    fadeOut: 0
+    borderMipMap: 0
+    mipMapsPreserveCoverage: 0
+    alphaTestReferenceValue: 0.5
+    mipMapFadeDistanceStart: 1
+    mipMapFadeDistanceEnd: 3
+  bumpmap:
+    convertToNormalMap: 0
+    externalNormalMap: 0
+    heightScale: 0.25
+    normalMapFilter: 0
+    flipGreenChannel: 0
+  isReadable: 0
+  streamingMipmaps: 0
+  streamingMipmapsPriority: 0
+  vTOnly: 0
+  ignoreMipmapLimit: 0
+  grayScaleToAlpha: 0
+  generateCubemap: 6
+  cubemapConvolution: 0
+  seamlessCubemap: 0
+  textureFormat: 1
+  maxTextureSize: 2048
+  textureSettings:
+    serializedVersion: 2
+    filterMode: 1
+    aniso: 1
+    mipBias: 0
+    wrapU: 1
+    wrapV: 1
+    wrapW: 1
+  nPOTScale: 0
+  lightmap: 0
+  compressionQuality: 50
+  spriteMode: 1
+  spriteExtrude: 1
+  spriteMeshType: 1
+  alignment: 0
+  spritePivot: {x: 0.5, y: 0.5}
+  spritePixelsToUnits: 100
+  spriteBorder: {x: 0, y: 0, z: 0, w: 0}
+  spriteGenerateFallbackPhysicsShape: 1
+  alphaUsage: 1
+  alphaIsTransparency: 1
+  spriteTessellationDetail: -1
+  textureType: 8
+  textureShape: 1
+  singleChannelComponent: 0
+  flipbookRows: 1
+  flipbookColumns: 1
+  maxTextureSizeSet: 0
+  compressionQualitySet: 0
+  textureFormatSet: 0
+  ignorePngGamma: 0
+  applyGammaDecoding: 0
+  swizzle: 50462976
+  cookieLightType: 0
+  platformSettings:
+  - serializedVersion: 4
+    buildTarget: DefaultTexturePlatform
+    maxTextureSize: 256
+    resizeAlgorithm: 0
+    textureFormat: -1
+    textureCompression: 1
+    compressionQuality: 50
+    crunchedCompression: 0
+    allowsAlphaSplitting: 0
+    overridden: 0
+    ignorePlatformSupport: 0
+    androidETC2FallbackOverride: 0
+    forceMaximumCompressionQuality_BC6H_BC7: 0
+  - serializedVersion: 4
+    buildTarget: Standalone
+    maxTextureSize: 2048
+    resizeAlgorithm: 0
+    textureFormat: -1
+    textureCompression: 1
+    compressionQuality: 50
+    crunchedCompression: 0
+    allowsAlphaSplitting: 0
+    overridden: 0
+    ignorePlatformSupport: 0
+    androidETC2FallbackOverride: 0
+    forceMaximumCompressionQuality_BC6H_BC7: 0
+  - serializedVersion: 4
+    buildTarget: Android
+    maxTextureSize: 2048
+    resizeAlgorithm: 0
+    textureFormat: -1
+    textureCompression: 1
+    compressionQuality: 50
+    crunchedCompression: 0
+    allowsAlphaSplitting: 0
+    overridden: 0
+    ignorePlatformSupport: 0
+    androidETC2FallbackOverride: 0
+    forceMaximumCompressionQuality_BC6H_BC7: 0
+  - serializedVersion: 4
+    buildTarget: iOS
+    maxTextureSize: 2048
+    resizeAlgorithm: 0
+    textureFormat: -1
+    textureCompression: 1
+    compressionQuality: 50
+    crunchedCompression: 0
+    allowsAlphaSplitting: 0
+    overridden: 0
+    ignorePlatformSupport: 0
+    androidETC2FallbackOverride: 0
+    forceMaximumCompressionQuality_BC6H_BC7: 0
+  spriteSheet:
+    serializedVersion: 2
+    sprites:
+    - serializedVersion: 2
+      name: ICON_MilitaryCombat_Special_Microchip_01_Clean_0
+      rect:
+        serializedVersion: 2
+        x: 68
+        y: 203
+        width: 20
+        height: 30
+      alignment: 0
+      pivot: {x: 0, y: 0}
+      border: {x: 0, y: 0, z: 0, w: 0}
+      customData: 
+      outline: []
+      physicsShape: []
+      tessellationDetail: -1
+      bones: []
+      spriteID: 6f0aa97bc38558900800000000000000
+      internalID: 686051536045514998
+      vertices: []
+      indices: 
+      edges: []
+      weights: []
+    - serializedVersion: 2
+      name: ICON_MilitaryCombat_Special_Microchip_01_Clean_1
+      rect:
+        serializedVersion: 2
+        x: 93
+        y: 204
+        width: 19
+        height: 29
+      alignment: 0
+      pivot: {x: 0, y: 0}
+      border: {x: 0, y: 0, z: 0, w: 0}
+      customData: 
+      outline: []
+      physicsShape: []
+      tessellationDetail: -1
+      bones: []
+      spriteID: a38080484ae0e74a0800000000000000
+      internalID: -6593816704671283142
+      vertices: []
+      indices: 
+      edges: []
+      weights: []
+    - serializedVersion: 2
+      name: ICON_MilitaryCombat_Special_Microchip_01_Clean_2
+      rect:
+        serializedVersion: 2
+        x: 118
+        y: 204
+        width: 20
+        height: 29
+      alignment: 0
+      pivot: {x: 0, y: 0}
+      border: {x: 0, y: 0, z: 0, w: 0}
+      customData: 
+      outline: []
+      physicsShape: []
+      tessellationDetail: -1
+      bones: []
+      spriteID: 5ce7135ca3775bd90800000000000000
+      internalID: -7082623744670073147
+      vertices: []
+      indices: 
+      edges: []
+      weights: []
+    - serializedVersion: 2
+      name: ICON_MilitaryCombat_Special_Microchip_01_Clean_3
+      rect:
+        serializedVersion: 2
+        x: 143
+        y: 204
+        width: 20
+        height: 29
+      alignment: 0
+      pivot: {x: 0, y: 0}
+      border: {x: 0, y: 0, z: 0, w: 0}
+      customData: 
+      outline: []
+      physicsShape: []
+      tessellationDetail: -1
+      bones: []
+      spriteID: 809987e0eee638f50800000000000000
+      internalID: 6882466624276306184
+      vertices: []
+      indices: 
+      edges: []
+      weights: []
+    - serializedVersion: 2
+      name: ICON_MilitaryCombat_Special_Microchip_01_Clean_4
+      rect:
+        serializedVersion: 2
+        x: 169
+        y: 204
+        width: 19
+        height: 29
+      alignment: 0
+      pivot: {x: 0, y: 0}
+      border: {x: 0, y: 0, z: 0, w: 0}
+      customData: 
+      outline: []
+      physicsShape: []
+      tessellationDetail: -1
+      bones: []
+      spriteID: 08e2600ab5671ab80800000000000000
+      internalID: -8385290895288291712
+      vertices: []
+      indices: 
+      edges: []
+      weights: []
+    - serializedVersion: 2
+      name: ICON_MilitaryCombat_Special_Microchip_01_Clean_5
+      rect:
+        serializedVersion: 2
+        x: 23
+        y: 168
+        width: 30
+        height: 19
+      alignment: 0
+      pivot: {x: 0, y: 0}
+      border: {x: 0, y: 0, z: 0, w: 0}
+      customData: 
+      outline: []
+      physicsShape: []
+      tessellationDetail: -1
+      bones: []
+      spriteID: 3f506f5486efcebb0800000000000000
+      internalID: -4905266170309507597
+      vertices: []
+      indices: 
+      edges: []
+      weights: []
+    - serializedVersion: 2
+      name: ICON_MilitaryCombat_Special_Microchip_01_Clean_6
+      rect:
+        serializedVersion: 2
+        x: 59
+        y: 56
+        width: 141
+        height: 142
+      alignment: 0
+      pivot: {x: 0, y: 0}
+      border: {x: 0, y: 0, z: 0, w: 0}
+      customData: 
+      outline: []
+      physicsShape: []
+      tessellationDetail: -1
+      bones: []
+      spriteID: c3f98f095a9168360800000000000000
+      internalID: 7171447655526604604
+      vertices: []
+      indices: 
+      edges: []
+      weights: []
+    - serializedVersion: 2
+      name: ICON_MilitaryCombat_Special_Microchip_01_Clean_7
+      rect:
+        serializedVersion: 2
+        x: 206
+        y: 168
+        width: 28
+        height: 20
+      alignment: 0
+      pivot: {x: 0, y: 0}
+      border: {x: 0, y: 0, z: 0, w: 0}
+      customData: 
+      outline: []
+      physicsShape: []
+      tessellationDetail: -1
+      bones: []
+      spriteID: 7ba590de669314400800000000000000
+      internalID: 306589363864165047
+      vertices: []
+      indices: 
+      edges: []
+      weights: []
+    - serializedVersion: 2
+      name: ICON_MilitaryCombat_Special_Microchip_01_Clean_8
+      rect:
+        serializedVersion: 2
+        x: 23
+        y: 142
+        width: 30
+        height: 20
+      alignment: 0
+      pivot: {x: 0, y: 0}
+      border: {x: 0, y: 0, z: 0, w: 0}
+      customData: 
+      outline: []
+      physicsShape: []
+      tessellationDetail: -1
+      bones: []
+      spriteID: e830a586e3a065430800000000000000
+      internalID: 3771213001124348814
+      vertices: []
+      indices: 
+      edges: []
+      weights: []
+    - serializedVersion: 2
+      name: ICON_MilitaryCombat_Special_Microchip_01_Clean_9
+      rect:
+        serializedVersion: 2
+        x: 206
+        y: 142
+        width: 28
+        height: 20
+      alignment: 0
+      pivot: {x: 0, y: 0}
+      border: {x: 0, y: 0, z: 0, w: 0}
+      customData: 
+      outline: []
+      physicsShape: []
+      tessellationDetail: -1
+      bones: []
+      spriteID: 16d0eedcca46850c0800000000000000
+      internalID: -4586805527124767391
+      vertices: []
+      indices: 
+      edges: []
+      weights: []
+    - serializedVersion: 2
+      name: ICON_MilitaryCombat_Special_Microchip_01_Clean_10
+      rect:
+        serializedVersion: 2
+        x: 23
+        y: 117
+        width: 30
+        height: 20
+      alignment: 0
+      pivot: {x: 0, y: 0}
+      border: {x: 0, y: 0, z: 0, w: 0}
+      customData: 
+      outline: []
+      physicsShape: []
+      tessellationDetail: -1
+      bones: []
+      spriteID: ae0d22913319c5720800000000000000
+      internalID: 2836301513987641578
+      vertices: []
+      indices: 
+      edges: []
+      weights: []
+    - serializedVersion: 2
+      name: ICON_MilitaryCombat_Special_Microchip_01_Clean_11
+      rect:
+        serializedVersion: 2
+        x: 206
+        y: 117
+        width: 28
+        height: 20
+      alignment: 0
+      pivot: {x: 0, y: 0}
+      border: {x: 0, y: 0, z: 0, w: 0}
+      customData: 
+      outline: []
+      physicsShape: []
+      tessellationDetail: -1
+      bones: []
+      spriteID: 2c081f69744a98d10800000000000000
+      internalID: 2128412926291312834
+      vertices: []
+      indices: 
+      edges: []
+      weights: []
+    - serializedVersion: 2
+      name: ICON_MilitaryCombat_Special_Microchip_01_Clean_12
+      rect:
+        serializedVersion: 2
+        x: 23
+        y: 92
+        width: 30
+        height: 19
+      alignment: 0
+      pivot: {x: 0, y: 0}
+      border: {x: 0, y: 0, z: 0, w: 0}
+      customData: 
+      outline: []
+      physicsShape: []
+      tessellationDetail: -1
+      bones: []
+      spriteID: c4ab6823f7be2a290800000000000000
+      internalID: -7880477466403882420
+      vertices: []
+      indices: 
+      edges: []
+      weights: []
+    - serializedVersion: 2
+      name: ICON_MilitaryCombat_Special_Microchip_01_Clean_13
+      rect:
+        serializedVersion: 2
+        x: 206
+        y: 92
+        width: 28
+        height: 20
+      alignment: 0
+      pivot: {x: 0, y: 0}
+      border: {x: 0, y: 0, z: 0, w: 0}
+      customData: 
+      outline: []
+      physicsShape: []
+      tessellationDetail: -1
+      bones: []
+      spriteID: 91247cea71de0d620800000000000000
+      internalID: 2796996054569402905
+      vertices: []
+      indices: 
+      edges: []
+      weights: []
+    - serializedVersion: 2
+      name: ICON_MilitaryCombat_Special_Microchip_01_Clean_14
+      rect:
+        serializedVersion: 2
+        x: 23
+        y: 67
+        width: 30
+        height: 20
+      alignment: 0
+      pivot: {x: 0, y: 0}
+      border: {x: 0, y: 0, z: 0, w: 0}
+      customData: 
+      outline: []
+      physicsShape: []
+      tessellationDetail: -1
+      bones: []
+      spriteID: 6348e7c24dd98e130800000000000000
+      internalID: 3596297837060457526
+      vertices: []
+      indices: 
+      edges: []
+      weights: []
+    - serializedVersion: 2
+      name: ICON_MilitaryCombat_Special_Microchip_01_Clean_15
+      rect:
+        serializedVersion: 2
+        x: 206
+        y: 68
+        width: 28
+        height: 19
+      alignment: 0
+      pivot: {x: 0, y: 0}
+      border: {x: 0, y: 0, z: 0, w: 0}
+      customData: 
+      outline: []
+      physicsShape: []
+      tessellationDetail: -1
+      bones: []
+      spriteID: 2d40db7ec74192490800000000000000
+      internalID: -7770657155354655534
+      vertices: []
+      indices: 
+      edges: []
+      weights: []
+    - serializedVersion: 2
+      name: ICON_MilitaryCombat_Special_Microchip_01_Clean_16
+      rect:
+        serializedVersion: 2
+        x: 69
+        y: 21
+        width: 19
+        height: 28
+      alignment: 0
+      pivot: {x: 0, y: 0}
+      border: {x: 0, y: 0, z: 0, w: 0}
+      customData: 
+      outline: []
+      physicsShape: []
+      tessellationDetail: -1
+      bones: []
+      spriteID: ceb3765058e39adb0800000000000000
+      internalID: -4780220788434846740
+      vertices: []
+      indices: 
+      edges: []
+      weights: []
+    - serializedVersion: 2
+      name: ICON_MilitaryCombat_Special_Microchip_01_Clean_17
+      rect:
+        serializedVersion: 2
+        x: 93
+        y: 21
+        width: 20
+        height: 28
+      alignment: 0
+      pivot: {x: 0, y: 0}
+      border: {x: 0, y: 0, z: 0, w: 0}
+      customData: 
+      outline: []
+      physicsShape: []
+      tessellationDetail: -1
+      bones: []
+      spriteID: 31302441046a45cf0800000000000000
+      internalID: -264403683960028397
+      vertices: []
+      indices: 
+      edges: []
+      weights: []
+    - serializedVersion: 2
+      name: ICON_MilitaryCombat_Special_Microchip_01_Clean_18
+      rect:
+        serializedVersion: 2
+        x: 118
+        y: 21
+        width: 20
+        height: 28
+      alignment: 0
+      pivot: {x: 0, y: 0}
+      border: {x: 0, y: 0, z: 0, w: 0}
+      customData: 
+      outline: []
+      physicsShape: []
+      tessellationDetail: -1
+      bones: []
+      spriteID: a76220113c255a1f0800000000000000
+      internalID: -1034329541654206854
+      vertices: []
+      indices: 
+      edges: []
+      weights: []
+    - serializedVersion: 2
+      name: ICON_MilitaryCombat_Special_Microchip_01_Clean_19
+      rect:
+        serializedVersion: 2
+        x: 143
+        y: 21
+        width: 20
+        height: 28
+      alignment: 0
+      pivot: {x: 0, y: 0}
+      border: {x: 0, y: 0, z: 0, w: 0}
+      customData: 
+      outline: []
+      physicsShape: []
+      tessellationDetail: -1
+      bones: []
+      spriteID: e06ffaae7bfe06330800000000000000
+      internalID: 3702222466894001678
+      vertices: []
+      indices: 
+      edges: []
+      weights: []
+    - serializedVersion: 2
+      name: ICON_MilitaryCombat_Special_Microchip_01_Clean_20
+      rect:
+        serializedVersion: 2
+        x: 169
+        y: 21
+        width: 20
+        height: 28
+      alignment: 0
+      pivot: {x: 0, y: 0}
+      border: {x: 0, y: 0, z: 0, w: 0}
+      customData: 
+      outline: []
+      physicsShape: []
+      tessellationDetail: -1
+      bones: []
+      spriteID: 898a99e85b9aa13b0800000000000000
+      internalID: -5540929794279364456
+      vertices: []
+      indices: 
+      edges: []
+      weights: []
+    outline: []
+    customData: 
+    physicsShape: []
+    bones: []
+    spriteID: 5e97eb03825dee720800000000000000
+    internalID: 0
+    vertices: []
+    indices: 
+    edges: []
+    weights: []
+    secondaryTextures: []
+    spriteCustomMetadata:
+      entries: []
+    nameFileIdTable:
+      ICON_MilitaryCombat_Special_Microchip_01_Clean_0: 686051536045514998
+      ICON_MilitaryCombat_Special_Microchip_01_Clean_1: -6593816704671283142
+      ICON_MilitaryCombat_Special_Microchip_01_Clean_10: 2836301513987641578
+      ICON_MilitaryCombat_Special_Microchip_01_Clean_11: 2128412926291312834
+      ICON_MilitaryCombat_Special_Microchip_01_Clean_12: -7880477466403882420
+      ICON_MilitaryCombat_Special_Microchip_01_Clean_13: 2796996054569402905
+      ICON_MilitaryCombat_Special_Microchip_01_Clean_14: 3596297837060457526
+      ICON_MilitaryCombat_Special_Microchip_01_Clean_15: -7770657155354655534
+      ICON_MilitaryCombat_Special_Microchip_01_Clean_16: -4780220788434846740
+      ICON_MilitaryCombat_Special_Microchip_01_Clean_17: -264403683960028397
+      ICON_MilitaryCombat_Special_Microchip_01_Clean_18: -1034329541654206854
+      ICON_MilitaryCombat_Special_Microchip_01_Clean_19: 3702222466894001678
+      ICON_MilitaryCombat_Special_Microchip_01_Clean_2: -7082623744670073147
+      ICON_MilitaryCombat_Special_Microchip_01_Clean_20: -5540929794279364456
+      ICON_MilitaryCombat_Special_Microchip_01_Clean_3: 6882466624276306184
+      ICON_MilitaryCombat_Special_Microchip_01_Clean_4: -8385290895288291712
+      ICON_MilitaryCombat_Special_Microchip_01_Clean_5: -4905266170309507597
+      ICON_MilitaryCombat_Special_Microchip_01_Clean_6: 7171447655526604604
+      ICON_MilitaryCombat_Special_Microchip_01_Clean_7: 306589363864165047
+      ICON_MilitaryCombat_Special_Microchip_01_Clean_8: 3771213001124348814
+      ICON_MilitaryCombat_Special_Microchip_01_Clean_9: -4586805527124767391
+  mipmapLimitGroupName: 
+  pSDRemoveMatte: 0
+  userData: 
+  assetBundleName: 
+  assetBundleVariant: 

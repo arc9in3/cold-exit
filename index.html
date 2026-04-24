@@ -1,0 +1,2960 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>Cold Exit</title>
+  <meta name="description" content="An isometric extraction shooter. Walk in quiet, walk out rich, or don't walk out.">
+  <meta name="theme-color" content="#10121a">
+  <meta property="og:title" content="Cold Exit">
+  <meta property="og:description" content="An isometric extraction shooter. Walk in quiet, walk out rich, or don't walk out.">
+  <meta property="og:type" content="website">
+  <style>
+    html, body {
+      margin: 0;
+      padding: 0;
+      width: 100%;
+      height: 100%;
+      overflow: hidden;
+      background: #0a0a0c;
+      color: #ddd;
+      font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+    }
+    #app { position: fixed; inset: 0; }
+    #hud {
+      position: fixed;
+      top: 8px;
+      left: 8px;
+      padding: 6px 10px;
+      background: rgba(0, 0, 0, 0.55);
+      border: 1px solid #222;
+      border-radius: 4px;
+      font-size: 12px;
+      line-height: 1.4;
+      pointer-events: none;
+      user-select: none;
+    }
+    #hud b { color: #c9a87a; }
+    #hp {
+      position: fixed;
+      left: 8px;
+      bottom: 8px;
+      width: 260px;
+      padding: 6px 8px;
+      background: rgba(0, 0, 0, 0.6);
+      border: 1px solid #222;
+      border-radius: 4px;
+      font-size: 12px;
+      user-select: none;
+      pointer-events: none;
+    }
+    #hp-bar {
+      position: relative;
+      margin-top: 4px;
+      width: 100%;
+      height: 10px;
+      background: #1b1b1f;
+      border: 1px solid #333;
+      border-radius: 3px;
+      overflow: hidden;
+    }
+    /* Dark green backing shows how much HP can be regenerated naturally
+       (width = regenCap / maxHealth). Bright fill on top shows the actual
+       current HP. The gap between regenCap and maxHealth reads as the
+       "locked" pool that only healing items can restore. */
+    #hp-regen {
+      position: absolute; top: 0; left: 0; height: 100%;
+      background: #2f6a3a;
+      transition: width 0.2s linear;
+    }
+    #hp-fill {
+      position: absolute; top: 0; left: 0; height: 100%;
+      width: 100%;
+      background: #6abe5a;
+      transition: width 0.1s linear, background 0.2s linear;
+    }
+    #hp-status-row {
+      display: flex; gap: 6px; margin-top: 3px; min-height: 14px;
+    }
+    .hp-status-badge {
+      display: inline-flex; align-items: center; gap: 4px;
+      font-size: 9px; letter-spacing: 1.5px; text-transform: uppercase;
+      padding: 1px 6px 1px 4px; border-radius: 2px; font-weight: 700;
+    }
+    .hp-status-badge img { width: 14px; height: 14px; image-rendering: auto; }
+    .hp-status-badge.bleed { color: #ff5a5a; background: rgba(90,14,14,0.6); border: 1px solid #803030; }
+    .hp-status-badge.broken { color: #ffb560; background: rgba(60,30,10,0.7); border: 1px solid #805a20; }
+    #sta-bar {
+      margin-top: 3px;
+      width: 100%;
+      height: 8px;
+      background: #1b1b1f;
+      border: 1px solid #2c2c34;
+      border-radius: 3px;
+      overflow: hidden;
+    }
+    #sta-fill {
+      height: 100%;
+      width: 100%;
+      background: #6aaedc;
+      transition: width 0.07s linear, background 0.2s linear;
+    }
+    #sta-text { opacity: 0.8; font-size: 11px; }
+
+    #reload-wrap { margin-top: 6px; }
+    #reload-label { color: #6abe5a; }
+    #reload-label.active { color: #e0a04a; }
+    #reload-bar {
+      margin-top: 3px;
+      width: 100%;
+      height: 8px;
+      background: #1b1b1f;
+      border: 1px solid #2c2c34;
+      border-radius: 3px;
+      overflow: hidden;
+    }
+    #reload-fill {
+      height: 100%;
+      width: 100%;
+      background: #6abe5a;
+      transition: width 0.05s linear, background 0.2s linear;
+    }
+    #reload-fill.active { background: #e0a04a; }
+
+    #resources {
+      position: fixed;
+      top: 8px;
+      right: 8px;
+      z-index: 2;
+      display: flex;
+      flex-direction: column;
+      gap: 4px;
+      background: rgba(0, 0, 0, 0.55);
+      border: 1px solid #222;
+      border-radius: 4px;
+      padding: 6px 10px;
+      font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+      color: #f2e7c9;
+      font-weight: 700;
+      font-size: 13px;
+      pointer-events: none;
+      user-select: none;
+    }
+    .resource-row { display: flex; align-items: center; gap: 6px; }
+    .resource-icon {
+      width: 20px;
+      height: 20px;
+      filter: drop-shadow(0 1px 1px rgba(0,0,0,0.7));
+    }
+
+    /* Rarity outlines */
+    .rarity-common    { box-shadow: 0 0 0 1px rgba(138,143,153,0.4) inset; }
+    .rarity-uncommon  { box-shadow: 0 0 0 1px #4a9a5a inset, 0 0 8px rgba(74,154,90,0.25); border-color: #4a9a5a !important; }
+    .rarity-rare      { box-shadow: 0 0 0 1px #4a7ac9 inset, 0 0 10px rgba(74,122,201,0.35); border-color: #4a7ac9 !important; }
+    .rarity-epic      { box-shadow: 0 0 0 1px #9a5ac9 inset, 0 0 12px rgba(154,90,201,0.45); border-color: #9a5ac9 !important; }
+    .rarity-legendary { box-shadow: 0 0 0 1px #d0a038 inset, 0 0 14px rgba(208,160,56,0.55); border-color: #d0a038 !important; }
+
+    /* Inventory panel */
+    /* Item details modal (right-click on any cell) */
+    #details-root {
+      position: fixed; inset: 0;
+      background: rgba(0, 0, 0, 0.55);
+      display: flex; align-items: center; justify-content: center;
+      z-index: 22;
+      font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+    }
+    #details-card {
+      width: 460px; max-width: 92vw; max-height: 88vh;
+      overflow-y: auto;
+      background: linear-gradient(180deg, #181b21 0%, #10121a 100%);
+      border: 1px solid #c9a87a;
+      border-radius: 8px;
+      padding: 18px 20px 14px;
+      color: #e8dfc8;
+      box-shadow: 0 14px 50px rgba(0, 0, 0, 0.85);
+    }
+    .details-header {
+      display: flex; align-items: center; gap: 12px;
+      padding-left: 10px;
+      margin-bottom: 10px;
+    }
+    .details-swatch {
+      width: 48px; height: 48px; border-radius: 5px;
+      display: flex; align-items: center; justify-content: center;
+      box-shadow: inset 0 0 0 1px rgba(0,0,0,0.3);
+    }
+    .details-swatch img { width: 36px; height: 36px; image-rendering: auto; filter: drop-shadow(0 1px 1px rgba(0,0,0,0.6)); }
+    .details-preview {
+      margin: 0 -4px 10px;
+      height: 160px;
+      border-radius: 4px;
+      background: radial-gradient(ellipse at center, #1a1d26 0%, #0a0b10 80%);
+      border: 1px solid rgba(201,168,122,0.25);
+      display: flex; align-items: center; justify-content: center;
+      overflow: hidden;
+    }
+    .details-preview canvas { display: block; width: 100%; height: 100%; }
+    .details-title-col { flex: 1; min-width: 0; }
+    .details-name { font-size: 18px; font-weight: 700; letter-spacing: 1px; overflow-wrap: anywhere; }
+    .details-subtitle { font-size: 10px; color: #9b8b6a; letter-spacing: 2px; text-transform: uppercase; margin-top: 2px; }
+    .details-subtitle > span { margin-right: 8px; }
+    .details-lore {
+      font-style: italic;
+      color: #b9a680;
+      margin: 8px 2px 12px;
+      font-size: 12px;
+      line-height: 1.45;
+      border-left: 2px solid rgba(201,168,122,0.3);
+      padding-left: 10px;
+    }
+    .details-section {
+      margin-top: 10px;
+      padding: 8px 10px;
+      background: rgba(255,255,255,0.02);
+      border-radius: 4px;
+    }
+    .details-section-title {
+      font-size: 10px; letter-spacing: 2px;
+      color: #c9a87a; text-transform: uppercase;
+      margin-bottom: 6px;
+    }
+    .details-stat-row {
+      display: grid;
+      grid-template-columns: 1fr auto auto;
+      gap: 8px;
+      font-size: 12px;
+      padding: 2px 0;
+    }
+    .details-stat-row .k { color: #9b8b6a; }
+    .details-stat-row .v { color: #e8dfc8; font-weight: 700; }
+    .details-diff { font-weight: 700; font-size: 11px; }
+    .details-diff.good { color: #6abe5a; }
+    .details-diff.bad  { color: #e67a3a; }
+    .details-affix { font-size: 11px; color: #8fbf70; line-height: 1.4; }
+    .details-perk { font-size: 11px; line-height: 1.4; }
+    .details-perk-name { color: #e6b94a; font-weight: 700; }
+    .details-perk-desc { color: #c9a87a; }
+    .details-set-tier {
+      display: grid;
+      grid-template-columns: 20px 40px 1fr;
+      align-items: center;
+      font-size: 11px;
+      padding: 2px 0;
+    }
+    .details-set-tier.met { color: #6abe5a; }
+    .details-set-tier.missing { color: #8a7a5a; }
+    .details-set-mark { font-weight: 700; }
+    .details-set-count { color: #c9a87a; }
+    .details-set-progress { font-size: 10px; color: #9b8b6a; letter-spacing: 1px; margin-left: 6px; }
+    .details-durability {
+      margin-top: 10px; font-size: 11px; color: #9b8b6a;
+    }
+    .details-durability b { color: #e8dfc8; }
+    .details-dur-bar {
+      margin-top: 3px; height: 4px; background: #1b1b1f;
+      border: 1px solid #2c2c34; border-radius: 2px; overflow: hidden;
+    }
+    .details-dur-bar > div { height: 100%; background: #4a8aa5; }
+    .details-compare-hint {
+      margin-top: 10px;
+      font-size: 10px; color: #9b8b6a; letter-spacing: 1px;
+    }
+    .details-compare-hint b { color: #e8dfc8; }
+    .details-footer {
+      margin-top: 12px; text-align: center;
+      font-size: 10px; color: #6f6754; letter-spacing: 2px; text-transform: uppercase;
+    }
+
+    /* Esc game menu */
+    #menu-root {
+      position: fixed; inset: 0;
+      background: radial-gradient(ellipse at center, rgba(0,0,0,0.78), rgba(0,0,0,0.94));
+      display: flex; align-items: center; justify-content: center;
+      z-index: 20;
+      font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+    }
+    #menu-card {
+      width: 360px; max-width: 92vw;
+      background: linear-gradient(180deg, #181b21 0%, #0e1018 100%);
+      border: 1px solid #c9a87a;
+      border-radius: 10px;
+      padding: 20px 22px;
+      box-shadow: 0 14px 50px rgba(0,0,0,0.85);
+      color: #e8dfc8;
+    }
+    #menu-title {
+      font-size: 15px; font-weight: 700; letter-spacing: 3px;
+      color: #c9a87a; text-transform: uppercase; text-align: center;
+      margin-bottom: 16px;
+    }
+    #menu-body { display: flex; flex-direction: column; gap: 8px; }
+    #menu-footer {
+      margin-top: 14px; text-align: center;
+      font-size: 10px; color: #6f6754; letter-spacing: 2px; text-transform: uppercase;
+    }
+    .menu-btn {
+      width: 100%;
+      padding: 10px 12px;
+      background: linear-gradient(180deg, #1d2028, #15181f);
+      color: #e8dfc8; font-family: inherit; font-size: 13px; letter-spacing: 2px;
+      text-transform: uppercase; text-align: left;
+      border: 1px solid #2c323c; border-radius: 5px;
+      cursor: pointer;
+      transition: border-color 0.12s, transform 0.05s;
+    }
+    .menu-btn:hover { border-color: #c9a87a; transform: translateX(2px); }
+    .menu-btn.danger { border-color: #703a3a; color: #d49a9a; }
+    .menu-btn.danger:hover { border-color: #c94a3a; }
+    .menu-row label { font-size: 11px; color: #9b8b6a; letter-spacing: 1.5px; text-transform: uppercase; display: flex; justify-content: space-between; margin-bottom: 4px; }
+    .menu-row-val { color: #c9a87a; }
+    .menu-row input[type=range] { width: 100%; }
+    .menu-row .menu-select {
+      width: 100%;
+      padding: 6px 8px;
+      background: #15181f;
+      color: #e8dfc8;
+      border: 1px solid #2c323c;
+      border-radius: 4px;
+      font-family: inherit;
+      font-size: 12px;
+      letter-spacing: 1px;
+    }
+    .menu-row .menu-select:focus { outline: 1px solid #c9a87a; }
+    .menu-row .menu-row-hint {
+      font-size: 10px;
+      color: #6a7280;
+      letter-spacing: 0.5px;
+      margin-top: 4px;
+    }
+    .menu-flash {
+      margin-top: 6px; padding: 6px 10px;
+      font-size: 11px; letter-spacing: 1px; color: #8fbf70;
+      border: 1px solid #2a3a22; border-radius: 4px; text-align: center;
+      background: rgba(143,191,112,0.08);
+    }
+    .menu-input {
+      width: 100%; padding: 6px 8px;
+      background: #15181f; color: #e8dfc8;
+      border: 1px solid #2c323c; border-radius: 4px;
+      font-family: inherit; font-size: 12px; letter-spacing: 1px;
+    }
+    .menu-input:focus { outline: 1px solid #c9a87a; }
+    .menu-check { transform: scale(1.2); accent-color: #c9a87a; }
+    .menu-leaderboard { display: grid; grid-template-columns: 1fr 1fr; gap: 10px; margin-bottom: 10px; }
+    .menu-lb-col { border: 1px solid #2c323c; border-radius: 4px; padding: 8px; background: #15181f; }
+    .menu-lb-heading { font-size: 11px; color: #c9a87a; letter-spacing: 1.5px; text-transform: uppercase; margin-bottom: 6px; }
+    .menu-lb-row { font-size: 11px; color: #e8dfc8; padding: 2px 0; letter-spacing: 0.5px; }
+    .menu-lb-empty { font-size: 11px; color: #6a7280; text-align: center; padding: 6px 0; }
+
+    /* Main menu (landing screen) — reuses menu-card styling but wider */
+    #main-menu-root {
+      position: fixed; inset: 0;
+      background: radial-gradient(ellipse at center, rgba(0,0,0,0.82), rgba(0,0,0,0.97));
+      display: flex; align-items: center; justify-content: center;
+      z-index: 22;
+      font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+    }
+    #main-menu-card {
+      width: 520px; max-width: 92vw;
+      background: linear-gradient(180deg, #181b21 0%, #0e1018 100%);
+      border: 1px solid #c9a87a; border-radius: 10px;
+      padding: 24px 26px;
+      box-shadow: 0 14px 50px rgba(0,0,0,0.85);
+      color: #e8dfc8;
+    }
+    #main-menu-title {
+      font-size: 22px; font-weight: 700; letter-spacing: 4px;
+      color: #c9a87a; text-transform: uppercase; text-align: center;
+      margin-bottom: 4px;
+    }
+    #main-menu-subtitle {
+      font-size: 11px; letter-spacing: 3px; text-transform: uppercase;
+      color: #6a7280; text-align: center; margin-bottom: 20px;
+    }
+    #main-menu-body { display: flex; flex-direction: column; gap: 8px; }
+
+    /* Starting store upgrade panel */
+    #store-upgrade-root {
+      position: fixed; inset: 0;
+      background: radial-gradient(ellipse at center, rgba(0,0,0,0.82), rgba(0,0,0,0.97));
+      display: flex; align-items: center; justify-content: center;
+      z-index: 23;
+      font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+    }
+    #store-upgrade-card {
+      width: 560px; max-width: 92vw;
+      background: linear-gradient(180deg, #181b21 0%, #0e1018 100%);
+      border: 1px solid #c9a87a; border-radius: 10px;
+      padding: 24px 26px; color: #e8dfc8;
+    }
+    #store-upgrade-title {
+      font-size: 16px; font-weight: 700; letter-spacing: 3px;
+      color: #c9a87a; text-transform: uppercase; text-align: center;
+      margin-bottom: 6px;
+    }
+    #store-upgrade-sub {
+      font-size: 11px; color: #9b8b6a; text-align: center; margin-bottom: 10px;
+    }
+    #store-upgrade-chips {
+      text-align: center; font-size: 13px; color: #d0a038; letter-spacing: 2px; margin-bottom: 16px;
+    }
+    .store-row {
+      border: 1px solid #2c323c; border-radius: 5px; padding: 10px 12px;
+      margin-bottom: 10px; background: #15181f;
+    }
+    .store-row-label { font-size: 12px; color: #e8dfc8; letter-spacing: 1px; margin-bottom: 4px; }
+    .store-row-label b { color: #c9a87a; }
+    .store-row-desc { font-size: 10px; color: #7a8290; margin-bottom: 8px; }
+    .store-row .menu-btn { width: 100%; }
+
+    /* Store roll (pick-a-weapon on run start) */
+    #store-roll-root {
+      position: fixed; inset: 0;
+      background: radial-gradient(ellipse at center, rgba(0,0,0,0.85), rgba(0,0,0,0.97));
+      display: flex; align-items: center; justify-content: center;
+      z-index: 24;
+      font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+    }
+    #store-roll-card {
+      width: 720px; max-width: 94vw;
+      background: linear-gradient(180deg, #181b21 0%, #0e1018 100%);
+      border: 1px solid #c9a87a; border-radius: 10px;
+      padding: 24px 26px; color: #e8dfc8;
+    }
+    #store-roll-title {
+      font-size: 16px; font-weight: 700; letter-spacing: 3px;
+      color: #c9a87a; text-transform: uppercase; text-align: center;
+      margin-bottom: 4px;
+    }
+    #store-roll-sub {
+      font-size: 11px; color: #9b8b6a; text-align: center; margin-bottom: 16px;
+    }
+    #store-roll-grid {
+      display: grid; grid-template-columns: repeat(auto-fill, minmax(160px, 1fr)); gap: 10px;
+      margin-bottom: 14px;
+    }
+    .store-roll-card {
+      border: 1px solid #2c323c; border-radius: 5px; padding: 12px;
+      background: #15181f; color: #e8dfc8;
+      font-family: inherit; font-size: 12px;
+      cursor: pointer; text-align: left;
+      transition: border-color 0.12s, transform 0.05s;
+    }
+    .store-roll-card:hover { border-color: #c9a87a; transform: translateY(-1px); }
+    .store-roll-name  { font-size: 13px; font-weight: 700; letter-spacing: 1px; margin-bottom: 4px; }
+    .store-roll-class { font-size: 10px; color: #9b8b6a; text-transform: uppercase; letter-spacing: 2px; margin-bottom: 6px; }
+    .store-roll-rarity { font-size: 10px; color: #c9a87a; text-transform: uppercase; letter-spacing: 2px; }
+    .store-roll-card.rarity-common    { border-color: #6a6e74; }
+    .store-roll-card.rarity-uncommon  { border-color: #4a8a4a; }
+    .store-roll-card.rarity-rare      { border-color: #4a7ac9; }
+    .store-roll-card.rarity-epic      { border-color: #9a5ac9; }
+    .store-roll-card.rarity-legendary { border-color: #d0a038; }
+
+    #start-root {
+      position: fixed; inset: 0;
+      background: radial-gradient(ellipse at center, rgba(0,0,0,0.85), rgba(0,0,0,0.97));
+      display: flex; align-items: center; justify-content: center;
+      z-index: 30;
+      font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+    }
+    #start-card {
+      width: 520px; max-width: 94vw;
+      background: linear-gradient(180deg, #181b21 0%, #0e1018 100%);
+      border: 1px solid #c9a87a;
+      border-radius: 10px;
+      padding: 22px 26px;
+      box-shadow: 0 14px 50px rgba(0,0,0,0.85);
+      color: #e8dfc8;
+    }
+    #start-title {
+      font-size: 15px; font-weight: 700; letter-spacing: 3px;
+      color: #c9a87a; text-transform: uppercase; text-align: center;
+      margin-bottom: 6px;
+    }
+    #start-subtitle {
+      font-size: 11px; color: #9b8b6a; letter-spacing: 0.5px;
+      text-align: center; margin-bottom: 18px; line-height: 1.5;
+    }
+    #start-grid {
+      display: grid; grid-template-columns: 1fr 1fr; gap: 8px;
+    }
+    .start-choice {
+      padding: 12px 14px;
+      background: linear-gradient(180deg, #1d2028, #15181f);
+      border: 1px solid #2c323c; border-radius: 5px;
+      color: #e8dfc8; font-family: inherit; cursor: pointer;
+      text-align: left;
+      transition: border-color 0.12s, transform 0.05s;
+    }
+    .start-choice:hover {
+      border-color: #c9a87a; transform: translateX(2px);
+    }
+    .start-choice-label {
+      font-size: 13px; font-weight: 700; letter-spacing: 2px;
+      text-transform: uppercase; color: #e8dfc8;
+    }
+    .start-choice-hint {
+      font-size: 10px; color: #9b8b6a; margin-top: 3px; letter-spacing: 0.5px;
+    }
+
+    #inv-root {
+      position: fixed;
+      inset: 0;
+      background: radial-gradient(ellipse at center, rgba(0,0,0,0.45), rgba(0,0,0,0.7));
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      z-index: 10;
+      font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+    }
+    #inv-card {
+      width: 100vw;
+      height: 100vh;
+      max-width: 100vw;
+      max-height: 100vh;
+      overflow: hidden;
+      background: linear-gradient(180deg, #181b21 0%, #10121a 100%);
+      border: 0;
+      border-radius: 0;
+      color: #e8dfc8;
+      padding: 14px 20px 10px;
+      display: flex;
+      flex-direction: column;
+      box-shadow: none;
+    }
+    /* Inventory body fills the remaining card height so each column
+       can scroll independently. */
+    #inv-body {
+      flex: 1;
+      min-height: 0;
+      display: flex;
+      gap: 22px;
+      align-items: stretch;
+    }
+    /* Each column scrolls on its own Y — paperdoll stack on the left,
+       pockets / rig / backpack / pouch on the right. */
+    #inv-equipment, #inv-backpack {
+      overflow-y: auto;
+      height: 100%;
+      padding-right: 4px;
+    }
+    #inv-title {
+      font-size: 16px;
+      font-weight: 700;
+      color: #c9a87a;
+      letter-spacing: 2px;
+      margin-bottom: 14px;
+      text-transform: uppercase;
+    }
+    /* (Layout superseded by the full-screen override above — kept
+       here for historical reference.) */
+    #inv-equipment { width: 700px; position: relative; }
+    #inv-backpack { flex: 1; min-width: 0; }
+    .inv-heading {
+      font-size: 10px;
+      color: #9b8b6a;
+      letter-spacing: 2px;
+      text-transform: uppercase;
+      margin-bottom: 8px;
+      opacity: 0.8;
+    }
+    #inv-grid {
+      position: relative;
+      display: grid;
+      grid-template-columns: 200px 290px 200px;
+      grid-template-rows: repeat(7, 70px);
+      gap: 5px;
+    }
+    /* Equipment slot cells are sized to fill the 62px row — swatch on
+       the right, name + one desc line to the left. */
+    .inv-slot .cell-swatch { width: 26px; height: 26px; float: right; }
+    .inv-slot .cell-icon { width: 20px; height: 20px; }
+    .inv-slot .cell-name { font-size: 11px; }
+    .inv-slot .cell-desc {
+      font-size: 9px; color: #9b8b6a; line-height: 1.2; margin-top: 1px;
+      max-height: 22px; overflow: hidden;
+    }
+    .inv-slot .cell-empty-ico {
+      font-size: 22px; color: #3c4250; text-align: center;
+      line-height: 1.2; opacity: 0.75;
+    }
+    .inv-slot .cell-label { font-size: 9px; color: #7a6f54; }
+    #inv-silhouette {
+      /* Placed via grid into col 2 spanning all 7 rows — sits cleanly
+         between the left and right slot rails without absolute math. */
+      grid-column: 2;
+      grid-row: 1 / span 7;
+      width: 100%;
+      height: 100%;
+      pointer-events: none;
+      opacity: 0.65;
+    }
+    /* Skills readout layered over the avatar silhouette. Each line shows
+       the skill name + level so players can read their build without
+       switching panels. */
+    #inv-skills-overlay {
+      grid-column: 2;
+      grid-row: 1 / span 7;
+      align-self: end;
+      justify-self: stretch;
+      margin: 0 8px 8px;
+      padding: 8px 10px;
+      background: linear-gradient(180deg, rgba(14, 16, 22, 0.88), rgba(14, 16, 22, 0.98));
+      border: 1px solid rgba(201, 168, 122, 0.35);
+      border-radius: 5px;
+      z-index: 2;
+      max-height: 58%;
+      overflow-y: auto;
+      pointer-events: auto;
+    }
+    .inv-skills-heading {
+      font-size: 10px;
+      color: #c9a87a;
+      letter-spacing: 2px;
+      text-transform: uppercase;
+      margin-bottom: 5px;
+      text-align: center;
+    }
+    #inv-skills-overlay #inv-skill-list {
+      display: grid;
+      grid-template-columns: 1fr;
+      gap: 3px 6px;
+      font-size: 10px;
+    }
+    #inv-skills-overlay .skill-row {
+      display: flex; gap: 5px; align-items: baseline;
+      white-space: nowrap;
+      overflow: hidden;
+      text-overflow: ellipsis;
+    }
+    #inv-skills-overlay .skill-ico { color: #e6b94a; width: 14px; text-align: center; }
+    #inv-skills-overlay .skill-name { color: #e8dfc8; font-weight: 700; }
+    #inv-skills-overlay .skill-lv { color: #9b8b6a; font-weight: 400; margin-left: 2px; }
+    #inv-skills-overlay .skill-desc {
+      color: #9b8b6a;
+      font-size: 9px;
+      overflow: hidden;
+      text-overflow: ellipsis;
+    }
+    #inv-skills-overlay .skill-empty {
+      font-size: 9px; color: #6f6754; text-align: center; font-style: italic;
+    }
+    .inv-slot {
+      position: relative;
+      z-index: 1;
+      border: 1px solid #2c323c;
+      border-radius: 5px;
+      background: linear-gradient(180deg, rgba(27,30,36,0.82), rgba(20,23,29,0.82));
+      padding: 4px;
+      cursor: pointer;
+      transition: border-color 0.12s, box-shadow 0.12s;
+      font-size: 10px;
+      overflow: hidden;
+      display: grid;
+      grid-template-columns: 52px 1fr;
+      gap: 5px;
+      align-items: center;
+    }
+    .inv-slot .cell-art { width: 52px; height: 52px; }
+    .inv-slot .cell-art-img { width: 86%; height: 86%; }
+    .inv-slot .cell-name-overlay { font-size: 9px; padding: 8px 3px 1px; }
+    .inv-slot .cell-stats { font-size: 9px; }
+    .inv-slot .cell-stat { font-size: 9px; }
+    .inv-slot .cell-empty-ico {
+      grid-column: 1 / -1;
+      font-size: 22px; color: #3c4250; text-align: center;
+      line-height: 1.2; opacity: 0.75; padding: 4px 0;
+    }
+    .inv-slot .cell-label {
+      grid-column: 1 / -1;
+      font-size: 9px; color: #7a6f54;
+      text-align: center;
+    }
+    .inv-slot:hover { border-color: #6a7588; box-shadow: 0 0 8px rgba(201,168,122,0.2); }
+    .inv-slot.filled {
+      background: linear-gradient(180deg, rgba(38,43,52,0.95), rgba(28,32,40,0.95));
+      border-color: #4a5968;
+    }
+    .inv-slot.drop-ok { border-color: #c9a87a; box-shadow: 0 0 10px rgba(201,168,122,0.5); }
+    /* Slot pulse: while an item is being dragged, every slot that could
+       accept it breathes a gold glow so the drop targets announce
+       themselves. Drop-ok (the slot the pointer is actually over) keeps
+       the stronger solid highlight. */
+    .inv-slot.slot-compatible {
+      border-color: #8b7a58;
+      animation: slot-pulse 1.0s ease-in-out infinite;
+    }
+    @keyframes slot-pulse {
+      0%, 100% { box-shadow: 0 0 6px rgba(201,168,122,0.25); }
+      50%      { box-shadow: 0 0 14px rgba(201,168,122,0.55); }
+    }
+    /* Tarkov-style pockets grid. Cells are fixed 48px squares; items
+       overlay the grid as absolutely-positioned tiles that span their
+       own w×h footprint. */
+    #inv-grids-stack {
+      display: flex;
+      flex-direction: column;
+      gap: 14px;
+      padding: 2px;
+    }
+    .inv-grid-block {
+      display: flex;
+      flex-direction: column;
+      gap: 4px;
+    }
+    .inv-grid-block .inv-heading {
+      font-size: 11px;
+      letter-spacing: 1px;
+      color: #c9a87a;
+      text-transform: uppercase;
+      padding-left: 2px;
+    }
+    .pockets-grid {
+      position: relative;
+      background: #0a0c10;
+      padding: 0;
+      user-select: none;
+      /* Wrap is the sole pointer-event target for the grid. Tiles are
+         `pointer-events: none` and exist only for rendering — all
+         drag / click handling lives on the wrap with grid-coordinate
+         hit-testing. Cursor lives here so hovering any cell in the
+         grid reads as grabbable (JS refines per filled cell if
+         desired). */
+      cursor: grab;
+    }
+    .pockets-grid:active { cursor: grabbing; }
+    .pocket-cell {
+      position: absolute;
+      box-sizing: border-box;
+      background: #161a21;
+      border: 1px solid #22272f;
+      border-radius: 2px;
+    }
+    .pocket-cell.drop-ok {
+      border-color: #6fb46f;
+      background: #1b231b;
+    }
+    .pocket-item {
+      position: absolute;
+      box-sizing: border-box;
+      background: #20242c;
+      border: 1px solid #3a4050;
+      border-radius: 3px;
+      cursor: grab;
+      overflow: hidden;
+      transition: box-shadow 0.12s;
+      /* Tile is pointer-events: none — the `.pockets-grid` wrap owns
+         all mouse input and hit-tests against the underlying grid
+         data. Tile is purely visual. (Set inline in JS as well so
+         reorder doesn't drop the rule.) */
+      pointer-events: none;
+      user-select: none;
+    }
+    /* The drag ghost is a live tile clone floating over the page;
+       keep it visible above modals. */
+    .custom-drag-ghost {
+      pointer-events: none !important;
+    }
+    .pocket-item:hover {
+      box-shadow: inset 0 0 0 1px #c9a87a, 0 0 8px rgba(201,168,122,0.25);
+      z-index: 2;
+    }
+    .pocket-item.dragging { opacity: 0.5; pointer-events: none; }
+    .pocket-item.rarity-uncommon  { border-color: #4a9a5a; }
+    .pocket-item.rarity-rare      { border-color: #4a7ac9; }
+    .pocket-item.rarity-epic      { border-color: #9a5ac9; }
+    .pocket-item.rarity-legendary { border-color: #d0a038; }
+    .pocket-item.rarity-mythic    { border-color: #e04040; box-shadow: 0 0 8px rgba(224,64,64,0.35); }
+    .pocket-item .pkt-thumb {
+      position: absolute;
+      /* Pattern lifted from the footprint-grid body tiles: absolute
+         positioning with inset + auto width/height + max-w/h + margin
+         auto is the one reliable recipe for TRUE centering (both axes)
+         of an image inside a rect. Inset values scaled with the new
+         96px cell so the thumb + name tag keep their proportions. */
+      inset: 6px 6px 22px 6px;
+      width: auto; height: auto;
+      max-width: 100%; max-height: 100%;
+      margin: auto;
+      object-fit: contain;
+      object-position: center center;
+      pointer-events: none;
+      transition: transform 0.1s ease;
+    }
+    /* Rotated items: spin the thumb 90° so a wide weapon icon reads
+       tall inside a tall footprint (Tarkov-style rotation). Name tag
+       stays horizontal at the bottom so it remains readable. */
+    .pocket-item.rotated .pkt-thumb {
+      transform: rotate(90deg);
+    }
+    .pocket-item .pkt-glyph {
+      position: absolute; inset: 0; display: flex;
+      align-items: center; justify-content: center;
+      font-size: 22px; color: #6a7280;
+    }
+    .pocket-item .pkt-name {
+      position: absolute;
+      left: 4px; right: 4px; bottom: 8px;
+      font-size: 12px;
+      letter-spacing: 0.3px;
+      color: #d8d3c4;
+      text-shadow: 0 0 4px rgba(0,0,0,0.9);
+      white-space: nowrap;
+      overflow: hidden; text-overflow: ellipsis;
+      text-align: center;
+      font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+      pointer-events: none;
+    }
+    .pocket-item .pkt-dur {
+      position: absolute;
+      left: 4px; right: 4px; bottom: 3px;
+      height: 4px;
+      background: rgba(0,0,0,0.6);
+      border-radius: 1px;
+      overflow: hidden;
+      pointer-events: none;
+    }
+    .pocket-item .pkt-dur-fill {
+      height: 100%;
+      transition: width 0.18s ease-out;
+    }
+    .pocket-item .pkt-ammo {
+      position: absolute;
+      top: 4px; right: 5px;
+      font-size: 11px;
+      color: #f2e7c9;
+      background: rgba(0,0,0,0.6);
+      padding: 1px 4px;
+      border-radius: 3px;
+      pointer-events: none;
+      font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+    }
+    .pocket-preview {
+      position: absolute;
+      box-sizing: border-box;
+      pointer-events: none;
+      border-radius: 3px;
+    }
+    .pocket-preview.ok {
+      background: rgba(90, 180, 120, 0.22);
+      border: 1px solid rgba(90, 180, 120, 0.8);
+    }
+    .pocket-preview.bad {
+      background: rgba(200, 80, 80, 0.22);
+      border: 1px solid rgba(200, 80, 80, 0.8);
+    }
+    #inv-backpack-heading { margin-top: 6px; }
+    .inv-cell {
+      position: relative;
+      border: 1px solid #2c323c;
+      border-radius: 5px;
+      background: linear-gradient(180deg, #1d2028, #151821);
+      padding: 4px;
+      /* Fixed-size cells — pin both min AND max so affix/perk roll variety
+         doesn't cause the grid to reflow every render. Overflowing info is
+         clipped; the right-click details panel shows the full breakdown. */
+      height: 82px;
+      min-height: 82px;
+      max-height: 82px;
+      overflow: hidden;
+      cursor: pointer;
+      transition: border-color 0.12s, box-shadow 0.12s;
+      /* Icon art on left, stats on right. */
+      display: grid;
+      grid-template-columns: 74px 1fr;
+      gap: 6px;
+    }
+    /* Icon art tile — fills the icon grid column; width comes from the
+       cell's grid-template-columns, height from the row. */
+    .cell-art {
+      position: relative;
+      width: 100%;
+      height: 100%;
+      border-radius: 3px;
+      box-shadow: inset 0 0 0 1px rgba(0, 0, 0, 0.35);
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      overflow: hidden;
+    }
+    .cell-art-img {
+      width: 96%;
+      height: 96%;
+      object-fit: contain;
+      image-rendering: auto;
+      filter: drop-shadow(0 1px 2px rgba(0, 0, 0, 0.7));
+    }
+    /* Clean + Stroke overlay layers sit on top of the Underlay image.
+       Absolute positioning stacks them in the parent cell-art box. */
+    .cell-art-layer {
+      position: absolute;
+      inset: 0;
+      margin: auto;
+      filter: none;
+      pointer-events: none;
+    }
+    .cell-name-overlay {
+      position: absolute;
+      left: 0; right: 0; bottom: 0;
+      padding: 10px 5px 2px;
+      font-size: 10px;
+      font-weight: 700;
+      color: #f2e7c9;
+      background: linear-gradient(to top, rgba(0,0,0,0.9) 0%, rgba(0,0,0,0.5) 60%, rgba(0,0,0,0) 100%);
+      white-space: nowrap;
+      overflow: hidden;
+      text-overflow: ellipsis;
+      text-shadow: 0 1px 2px rgba(0,0,0,0.9);
+      line-height: 1.1;
+    }
+    /* Stat column to the right of the art tile. */
+    .cell-stats {
+      display: flex;
+      flex-direction: column;
+      gap: 2px;
+      min-width: 0;
+      overflow: hidden;
+      font-size: 10px;
+      color: #9b8b6a;
+    }
+    .cell-stat {
+      display: block;
+      font-size: 10px;
+      color: #c9a87a;
+      white-space: nowrap;
+      overflow: hidden;
+      text-overflow: ellipsis;
+    }
+    .cell-stat b { color: #f2e7c9; font-weight: 700; }
+    /* Legacy rarity-tinted border hook — still used on .rarity-* class. */
+    .inv-cell .cell-name { overflow-wrap: anywhere; }
+    .inv-cell:hover { border-color: #6a7588; }
+    .inv-cell.filled {
+      background: linear-gradient(180deg, #272c36, #1b1e27);
+      border-color: #4a5968;
+    }
+    .inv-cell.drop-ok { border-color: #c9a87a; box-shadow: 0 0 10px rgba(201,168,122,0.5); }
+    .cell-label {
+      font-size: 10px;
+      color: #6f6754;
+      text-transform: uppercase;
+      letter-spacing: 1.2px;
+    }
+    .cell-empty-ico {
+      font-size: 24px;
+      color: #3c4250;
+      text-align: center;
+      line-height: 1.8;
+      opacity: 0.75;
+    }
+    .cell-swatch {
+      width: 22px;
+      height: 22px;
+      border-radius: 3px;
+      float: right;
+      box-shadow: 0 0 6px rgba(255, 255, 255, 0.15), inset 0 0 0 1px rgba(0,0,0,0.3);
+      display: flex;
+      align-items: center;
+      justify-content: center;
+    }
+    .cell-type-ico {
+      font-size: 11px;
+      color: rgba(0, 0, 0, 0.65);
+      text-shadow: 0 0 2px rgba(255,255,255,0.3);
+    }
+    .cell-icon {
+      width: 18px;
+      height: 18px;
+      image-rendering: auto;
+      filter: drop-shadow(0 1px 1px rgba(0,0,0,0.6));
+    }
+    .cust-btn {
+      position: absolute;
+      top: 3px;
+      right: 3px;
+      width: 20px;
+      height: 20px;
+      border: 1px solid #3a414c;
+      border-radius: 3px;
+      background: #14161b;
+      color: #c9a87a;
+      font-size: 12px;
+      line-height: 1;
+      cursor: pointer;
+      z-index: 2;
+      padding: 0;
+    }
+    .cust-btn:hover { background: #22262e; border-color: #c9a87a; }
+    .cell-name {
+      font-size: 12px;
+      font-weight: 700;
+      color: #f2e7c9;
+      margin-bottom: 2px;
+      /* One-line name with ellipsis — prevents long names from wrapping
+         and shoving descriptions out of the fixed-height cell. */
+      white-space: nowrap;
+      overflow: hidden;
+      text-overflow: ellipsis;
+    }
+    .cell-desc {
+      font-size: 10px;
+      color: #9b8b6a;
+      line-height: 1.25;
+      /* Two-line clamp — descriptions stay tidy, full text lives in the
+         right-click details panel. */
+      display: -webkit-box;
+      -webkit-line-clamp: 2;
+      -webkit-box-orient: vertical;
+      overflow: hidden;
+      overflow-wrap: anywhere;
+    }
+    .cell-affixes, .cell-perks {
+      overflow: hidden;
+      max-height: 16px;
+    }
+    .cell-affixes { white-space: nowrap; text-overflow: ellipsis; }
+    .cell-perks .perk {
+      display: block;
+      white-space: nowrap;
+      overflow: hidden;
+      text-overflow: ellipsis;
+    }
+    .cell-ammo {
+      font-size: 10px;
+      color: #c9a87a;
+      margin-top: 2px;
+    }
+    .cell-dur {
+      position: relative;
+      margin-top: 4px;
+      width: 100%;
+      height: 9px;           /* thicker so the state is readable */
+      background: #1b1b1f;
+      border: 1px solid #2c2c34;
+      border-radius: 2px;
+      overflow: hidden;
+    }
+    .cell-dur-fill {
+      height: 100%;
+      background: #4a8aa5;    /* overridden inline by threshold color */
+      transition: width 0.15s, background 0.15s;
+    }
+    .cell-dur-label {
+      position: absolute;
+      top: 0; left: 0; right: 0; bottom: 0;
+      display: flex; align-items: center; justify-content: center;
+      font-size: 9px;
+      font-weight: 700;
+      color: rgba(255,255,255,0.9);
+      text-shadow: 0 0 3px rgba(0,0,0,0.9);
+      letter-spacing: 1px;
+      pointer-events: none;
+    }
+    .cell-dur-text { font-size: 9px; color: #6f6754; margin-top: 1px; }
+    .cell-affixes {
+      font-size: 10px;
+      color: #8fbf70;
+      line-height: 1.4;
+      margin-top: 2px;
+    }
+    .cell-perks {
+      font-size: 10px;
+      line-height: 1.4;
+      margin-top: 2px;
+    }
+    .cell-perks .perk {
+      display: block;
+      overflow-wrap: anywhere;
+    }
+    .cell-perks .perk-name {
+      color: #e6b94a;
+      text-shadow: 0 0 4px rgba(230, 185, 74, 0.35);
+      font-weight: 700;
+    }
+    .cell-perks .perk-desc {
+      color: #c9a87a;
+      opacity: 0.85;
+    }
+
+    #inv-weapon-detail { margin-top: 14px; }
+    .attach-header {
+      font-size: 12px;
+      color: #c9a87a;
+      margin-bottom: 6px;
+    }
+    .attach-row {
+      display: grid;
+      grid-template-columns: 110px 1fr;
+      gap: 6px;
+      padding: 4px 0;
+      border-bottom: 1px solid #1e2228;
+    }
+    .attach-slot-label {
+      font-size: 10px;
+      color: #9b8b6a;
+      text-transform: uppercase;
+      letter-spacing: 1px;
+      align-self: center;
+    }
+    .attach-slot-content {
+      display: flex;
+      gap: 8px;
+      align-items: center;
+      padding: 4px 8px;
+      border: 1px solid #2c323c;
+      border-radius: 3px;
+      background: #1b1e24;
+      cursor: pointer;
+      min-height: 26px;
+      font-size: 11px;
+    }
+    .attach-slot-content:hover { border-color: #4c5968; }
+    .attach-slot-content.filled { background: #22262e; }
+    .attach-swatch {
+      width: 12px;
+      height: 12px;
+      border-radius: 2px;
+      flex-shrink: 0;
+    }
+    .attach-name { font-weight: 700; color: #f2e7c9; }
+    .attach-desc { color: #9b8b6a; font-size: 10px; }
+    .attach-empty { color: #6f6754; font-size: 10px; }
+    .attach-bag-list {
+      grid-column: 2;
+      display: flex;
+      flex-direction: column;
+      gap: 3px;
+      margin-top: 4px;
+    }
+    .attach-option {
+      display: flex;
+      gap: 8px;
+      align-items: center;
+      padding: 4px 8px;
+      border: 1px solid #3a3024;
+      border-radius: 3px;
+      background: #1b1e24;
+      color: inherit;
+      font-family: inherit;
+      font-size: 11px;
+      text-align: left;
+      cursor: pointer;
+    }
+    .attach-option:hover { border-color: #c9a87a; background: #22262e; }
+
+    /* Customize modal */
+    #cust-root {
+      position: fixed;
+      inset: 0;
+      background: radial-gradient(ellipse at center, rgba(0,0,0,0.55), rgba(0,0,0,0.8));
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      /* Sit above the loot modal so opening customize from a loot-modal
+         weapon cell actually layers on top. */
+      z-index: 19;
+      font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+    }
+    #cust-card {
+      width: 880px;
+      max-width: 96vw;
+      background: linear-gradient(180deg, #181b21 0%, #10121a 100%);
+      border: 1px solid #3a3024;
+      border-radius: 8px;
+      color: #e8dfc8;
+      padding: 18px 20px;
+      box-shadow: 0 12px 40px rgba(0, 0, 0, 0.75);
+    }
+    #cust-header {
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      margin-bottom: 12px;
+    }
+    #cust-title {
+      font-size: 14px;
+      font-weight: 700;
+      color: #c9a87a;
+      letter-spacing: 2px;
+      text-transform: uppercase;
+    }
+    #cust-close {
+      background: transparent;
+      border: 1px solid #3a414c;
+      color: #c9a87a;
+      border-radius: 3px;
+      width: 24px;
+      height: 24px;
+      cursor: pointer;
+      font-size: 12px;
+      line-height: 1;
+    }
+    #cust-close:hover { background: #22262e; }
+    #cust-body {
+      display: grid;
+      grid-template-columns: 220px 1fr;
+      gap: 16px;
+      margin-bottom: 12px;
+      align-items: start;
+    }
+    #cust-weapon {
+      display: flex;
+      align-items: center;
+      gap: 10px;
+      padding: 10px;
+      border: 1px solid #3a3024;
+      border-radius: 5px;
+      background: linear-gradient(180deg, #1d2028, #14171f);
+    }
+    .cust-wswatch {
+      width: 40px;
+      height: 40px;
+      border-radius: 4px;
+      box-shadow: 0 0 8px rgba(255,255,255,0.15), inset 0 0 0 1px rgba(0,0,0,0.3);
+    }
+    /* Weapon-art frame — tinted background + rendered weapon thumbnail
+       centered inside, so players see the actual silhouette of the gun
+       they're customizing instead of a flat color chip. */
+    .cust-wart {
+      position: relative;
+      width: 84px;
+      height: 58px;
+      border-radius: 4px;
+      overflow: hidden;
+      flex-shrink: 0;
+      box-shadow: 0 0 10px rgba(255,255,255,0.12), inset 0 0 0 1px rgba(0,0,0,0.4);
+    }
+    .cust-wart-img {
+      position: absolute;
+      inset: 4px;
+      width: auto;
+      height: auto;
+      max-width: calc(100% - 8px);
+      max-height: calc(100% - 8px);
+      margin: auto;
+      object-fit: contain;
+      filter: drop-shadow(0 1px 2px rgba(0,0,0,0.6));
+    }
+    .cust-winfo {
+      display: flex;
+      flex-direction: column;
+      justify-content: center;
+      min-width: 0;
+    }
+    .cust-wname {
+      font-size: 14px;
+      font-weight: 700;
+      color: #f2e7c9;
+    }
+    .cust-wsub {
+      font-size: 11px;
+      color: #9b8b6a;
+      margin-top: 2px;
+    }
+    #cust-slots {
+      position: relative;
+      min-height: 260px;
+      border: 1px solid #2a2f38;
+      border-radius: 5px;
+      background: linear-gradient(180deg, #141821 0%, #0b0d14 100%);
+      overflow: hidden;
+    }
+    .cust-diagram {
+      position: absolute;
+      inset: 0;
+      pointer-events: none;
+      opacity: 0.95;
+    }
+    .cust-diagram svg {
+      width: 100%;
+      height: 100%;
+      display: block;
+    }
+    .cust-slot.aligned {
+      position: absolute;
+      width: 82px;
+      min-height: 42px;
+      padding: 3px 5px;
+      transform: translate(-50%, -50%);
+      font-size: 10px;
+      line-height: 1.15;
+    }
+    .cust-slot.aligned .cust-slot-row .attach-desc { display: none; }
+    .cust-slot.aligned .cust-slot-row .attach-name {
+      font-size: 10px;
+      white-space: nowrap;
+      overflow: hidden;
+      text-overflow: ellipsis;
+      max-width: 60px;
+    }
+    .cust-slot {
+      border: 1px dashed #3a414c;
+      border-radius: 5px;
+      padding: 6px 8px;
+      min-height: 52px;
+      background: rgba(20, 24, 32, 0.85);
+      cursor: grab;
+      transition: border-color 0.12s, background 0.12s;
+    }
+    .cust-slot.filled {
+      border-style: solid;
+      background: linear-gradient(180deg, #262b34, #1b1e27);
+      border-color: #4a5968;
+    }
+    .cust-slot.drop-ok { border-color: #c9a87a; box-shadow: 0 0 10px rgba(201,168,122,0.4); }
+    .cust-slot.match {
+      border-color: #6abe8a;
+      box-shadow: 0 0 14px rgba(106, 190, 138, 0.55), inset 0 0 12px rgba(106, 190, 138, 0.25);
+      animation: slotPulse 0.6s infinite alternate;
+    }
+    @keyframes slotPulse {
+      from { box-shadow: 0 0 8px rgba(106,190,138,0.35), inset 0 0 8px rgba(106,190,138,0.15); }
+      to   { box-shadow: 0 0 18px rgba(106,190,138,0.7),  inset 0 0 14px rgba(106,190,138,0.35); }
+    }
+    .cust-slot-label {
+      font-size: 9px;
+      color: #6f6754;
+      text-transform: uppercase;
+      letter-spacing: 1.5px;
+      margin-bottom: 3px;
+    }
+    .cust-slot-row {
+      display: flex;
+      gap: 6px;
+      align-items: center;
+    }
+    .cust-slot-empty {
+      font-size: 10px;
+      color: #4a5362;
+      font-style: italic;
+    }
+    .cust-empty {
+      color: #6f6754;
+      font-size: 11px;
+      padding: 8px;
+    }
+    #cust-stats {
+      font-size: 11px;
+      color: #c9c4b0;
+      padding: 10px 12px;
+      border: 1px solid #2a2f38;
+      border-radius: 5px;
+      background: rgba(20,23,29,0.75);
+      line-height: 1.8;
+      margin-bottom: 12px;
+    }
+    #cust-stats b { color: #c9a87a; font-weight: 700; }
+    #cust-bag-grid {
+      display: grid;
+      grid-template-columns: repeat(3, 1fr);
+      gap: 6px;
+    }
+    .attach-bag-cell {
+      min-height: 70px;
+    }
+    .cell-slot-tag {
+      position: absolute;
+      top: 3px;
+      right: 4px;
+      font-size: 8px;
+      color: #6f6754;
+      text-transform: uppercase;
+      letter-spacing: 1px;
+    }
+
+    /* Loot modal */
+    #loot-root {
+      position: fixed;
+      inset: 0;
+      background: radial-gradient(ellipse at center, rgba(0,0,0,0.55), rgba(0,0,0,0.8));
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      z-index: 15;
+      font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+    }
+    #loot-card {
+      width: 100vw;
+      height: 100vh;
+      max-width: 100vw;
+      max-height: 100vh;
+      overflow: hidden;
+      background: linear-gradient(180deg, #181b21 0%, #10121a 100%);
+      border: 0;
+      border-radius: 0;
+      color: #e8dfc8;
+      padding: 14px 18px 10px;
+      display: flex;
+      flex-direction: column;
+      box-shadow: none;
+    }
+    #loot-header {
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      margin-bottom: 12px;
+    }
+    #loot-title {
+      font-size: 14px;
+      font-weight: 700;
+      color: #e0a060;
+      letter-spacing: 2px;
+      text-transform: uppercase;
+    }
+    #loot-close {
+      background: transparent;
+      border: 1px solid #3a414c;
+      color: #c9a87a;
+      border-radius: 3px;
+      width: 24px;
+      height: 24px;
+      cursor: pointer;
+    }
+    #loot-body {
+      display: grid;
+      /* Player side takes ~2/3 of the width; body side is a narrow
+         vertical stack (paperdoll → rig → pockets → backpack). Gives
+         the player room to see the tactical rig and pockets at the
+         new 96px cell size without the right column leaving dead space
+         next to its own paperdoll. */
+      grid-template-columns: minmax(0, 2fr) minmax(0, 1fr);
+      gap: 18px;
+      margin-bottom: 0;
+      flex: 1;
+      min-height: 0;
+      overflow: hidden;
+    }
+    /* Each loot pane is a flex column: the header pins to the top,
+       `.loot-col-inner` owns the scroll, and the `#loot-body-footer`
+       (Take All) pins to the bottom. The column itself must clip —
+       otherwise it inherits the whole content height and the footer
+       scrolls off-screen. */
+    #loot-body > * { overflow: hidden; padding-right: 6px; }
+    /* When the body column is dismissed, collapse to a single column so the
+       player panel expands to fill the modal. The player side then switches
+       to the main inventory's two-pane layout (silhouette left, pockets +
+       backpack right) with full-sized slot cells. */
+    /* Body-hidden: only the player column remains — widen the avatar
+       inner column so the expanded layout breathes. */
+    /* Player-side grid stack inside the loot modal — mirrors the main
+       inventory's pockets/rig/backpack stack so the player can see
+       their actual capacity while looting. */
+    #loot-player-grids-stack {
+      display: flex;
+      flex-direction: column;
+      gap: 12px;
+    }
+    .loot-player-grid-block {
+      display: flex;
+      flex-direction: column;
+      gap: 6px;
+    }
+    .loot-player-grid-heading {
+      font-size: 10px; color: #c9a87a; letter-spacing: 2px;
+      text-transform: uppercase;
+    }
+    .loot-pockets-grid {
+      position: relative;
+      background: rgba(14,16,22,0.35);
+      padding: 0;
+      border-radius: 4px;
+    }
+    #loot-body.body-hidden { grid-template-columns: 1fr; }
+    #loot-body.body-hidden .loot-col-left { width: 520px; }
+    #loot-body.body-hidden #loot-player-slots {
+      grid-template-columns: 150px 200px 150px;
+      grid-template-rows: repeat(7, 68px);
+      gap: 5px;
+    }
+    .loot-col { min-width: 0; }
+    .loot-col-title {
+      font-size: 10px; color: #c9a87a; letter-spacing: 2px;
+      text-transform: uppercase; margin-bottom: 8px;
+    }
+    .loot-grid {
+      display: grid;
+      grid-template-columns: repeat(4, 1fr);
+      gap: 6px;
+      margin-bottom: 8px;
+    }
+    .loot-btn {
+      background: #2c2018;
+      border: 1px solid #c9a87a;
+      color: #f2e7c9;
+      font-family: inherit;
+      font-size: 11px;
+      padding: 6px 14px;
+      border-radius: 3px;
+      cursor: pointer;
+      letter-spacing: 1px;
+      text-transform: uppercase;
+    }
+    .loot-btn:hover { background: #3a2a20; }
+    .loot-hint { font-size: 10px; color: #6f6754; margin-top: 4px; }
+    .loot-col-subtitle {
+      font-size: 9px; color: #8a7a5a; letter-spacing: 1.5px;
+      text-transform: uppercase; margin: 10px 0 6px;
+    }
+    /* Distinct side backgrounds: player in warm gold-lined, body in
+       red-tinted with a darker base so they read at a glance. */
+    .loot-col-player {
+      padding: 10px 12px;
+      background: rgba(26,23,20,0.5);
+      border: 1px solid #3a2e20;
+      border-radius: 6px;
+    }
+    .loot-col-body {
+      padding: 10px 12px;
+      /* Flat background — the old 180deg linear-gradient produced a
+         visible fade at the bottom of the body column. */
+      background: rgba(32,18,20,0.55);
+      border: 1px dashed #5a2828;
+      border-radius: 6px;
+    }
+    .loot-col-player .loot-col-title { color: #c9a87a; }
+    .loot-col-body .loot-col-title { color: #d06a6a; }
+    /* Legacy header style kept for loot-col-body's dismiss button. */
+    #loot-slots {
+      position: relative;
+      display: grid;
+      grid-template-columns: 115px 160px 115px;
+      grid-template-rows: repeat(7, 62px);
+      gap: 4px;
+      margin-bottom: 6px;
+    }
+    #loot-silhouette {
+      grid-column: 2;
+      grid-row: 1 / span 7;
+      width: 100%;
+      height: 100%;
+      pointer-events: none;
+      opacity: 0.55;
+    }
+    /* Loot-side slot cells match the main inventory typography so players
+       can read full names, descriptions, affixes, and perks. */
+    .loot-slot { font-size: 10px; padding: 4px 6px; }
+    .loot-slot .cell-swatch { width: 20px; height: 20px; }
+    .loot-slot .cell-icon { width: 16px; height: 16px; }
+    .loot-slot .cell-name { font-size: 11px; }
+    .loot-slot .cell-desc { font-size: 10px; color: #9b8b6a; line-height: 1.25; }
+    .loot-slot .cell-empty-ico { font-size: 14px; line-height: 1.3; }
+    .loot-slot .cell-label { font-size: 9px; }
+    .loot-slot.filled { background: linear-gradient(180deg, #2a2220, #1a1215); border-color: #7a4a4a; }
+    /* Body loot pile — footprint grid (Tarkov-style). Switches layout
+       via the `as-footprint-grid` class added by the renderer so the
+       fallback flat grid still applies if future code re-uses the el. */
+    .loot-col-body #loot-misc-grid.as-footprint-grid {
+      position: relative;
+      display: block;
+      margin: 0 auto;
+      height: auto;
+      /* Wrap owns pointerdown for custom drag; cursor here so hovering
+         any cell reads as grabbable. */
+      cursor: grab;
+    }
+    .loot-col-body #loot-misc-grid.as-footprint-grid:active { cursor: grabbing; }
+    #loot-misc-grid.as-footprint-grid .bg-cell {
+      position: absolute;
+      background: rgba(58,40,40,0.35);
+      border: 1px solid #422828;
+      border-radius: 2px;
+      box-sizing: border-box;
+    }
+    #loot-misc-grid.as-footprint-grid .bg-cell.drop-ok {
+      border-color: #c9a87a;
+      box-shadow: 0 0 8px rgba(201,168,122,0.45);
+    }
+    #loot-misc-grid.as-footprint-grid .bg-tile {
+      position: absolute;
+      background: linear-gradient(180deg, #2a1f22, #1a1014);
+      border: 1px solid #5a3838;
+      border-radius: 3px;
+      cursor: grab;
+      box-sizing: border-box;
+      overflow: hidden;
+    }
+    #loot-misc-grid.as-footprint-grid .bg-tile:hover { border-color: #c9a87a; }
+    #loot-misc-grid.as-footprint-grid .bg-tile.dragging { opacity: 0.5; pointer-events: none; }
+    #loot-misc-grid.as-footprint-grid .bg-tile.rarity-uncommon  { border-color: #4a9a5a; }
+    #loot-misc-grid.as-footprint-grid .bg-tile.rarity-rare      { border-color: #4a7ac9; }
+    #loot-misc-grid.as-footprint-grid .bg-tile.rarity-epic      { border-color: #9a5ac9; }
+    #loot-misc-grid.as-footprint-grid .bg-tile.rarity-legendary { border-color: #d0a038; }
+    #loot-misc-grid.as-footprint-grid .bg-tile.rarity-mythic    { border-color: #e04040; box-shadow: 0 0 8px rgba(224,64,64,0.35); }
+    /* Body-tile content: fit the thumbnail into the available space
+       (above the name label) and center it. Shares class names with
+       .ws-tile children so we re-declare the rules for .bg-tile to
+       ensure they apply in this scope (the .ws-tile selector alone
+       doesn't match). */
+    #loot-misc-grid.as-footprint-grid .bg-tile .ws-thumb {
+      position: absolute;
+      inset: 5px 5px 20px 5px;
+      width: auto; height: auto;
+      max-width: 100%; max-height: 100%;
+      margin: auto;
+      object-fit: contain;
+      pointer-events: none;
+    }
+    #loot-misc-grid.as-footprint-grid .bg-tile .ws-glyph {
+      position: absolute; inset: 0;
+      display: flex; align-items: center; justify-content: center;
+      font-size: 34px; color: #6a7280;
+    }
+    #loot-misc-grid.as-footprint-grid .bg-tile .ws-name {
+      position: absolute; left: 4px; right: 4px; bottom: 6px;
+      font-size: 11.5px; color: #d8d3c4; letter-spacing: 0.2px;
+      text-shadow: 0 0 4px rgba(0,0,0,0.9);
+      white-space: nowrap; overflow: hidden; text-overflow: ellipsis;
+      text-align: center; pointer-events: none;
+    }
+    #loot-misc-grid.as-footprint-grid .bg-tile .ws-ammo {
+      position: absolute; right: 5px; top: 5px;
+      font-size: 12px; color: #c9a87a;
+      background: rgba(0,0,0,0.7); padding: 2px 5px; border-radius: 3px;
+      pointer-events: none;
+    }
+    /* Fallback flat-grid layout if as-footprint-grid isn't applied. */
+    .loot-col-body #loot-misc-grid:not(.as-footprint-grid) {
+      grid-template-columns: repeat(4, 1fr);
+      gap: 5px;
+    }
+    .loot-col-body #loot-misc-grid:not(.as-footprint-grid) .inv-cell {
+      height: 78px;
+      min-height: 78px;
+      max-height: 78px;
+      padding: 4px;
+      overflow: hidden;
+      grid-template-columns: 68px 1fr;
+    }
+    .loot-quickbar {
+      grid-template-columns: repeat(4, 1fr) !important;
+      gap: 5px;
+    }
+    .loot-quickbar .quickbar-slot {
+      height: 64px;
+      min-height: 64px;
+      max-height: 64px;
+      position: relative;
+      border: 1px solid #4a4238;
+      background: linear-gradient(180deg, #201c18, #14110c);
+      display: grid;
+      grid-template-columns: 42px 1fr;
+      gap: 4px;
+      padding: 3px;
+    }
+    .loot-quickbar .quickbar-slot .cell-art { width: 42px; height: 42px; }
+    .loot-quickbar .quickbar-slot .cell-art-img { width: 85%; height: 85%; }
+    .loot-quickbar .quickbar-slot .cell-name-overlay { font-size: 8px; padding: 6px 3px 1px; }
+    .loot-quickbar .quickbar-slot .cell-stats { font-size: 9px; }
+    .loot-quickbar .quickbar-slot.filled { border-color: #c9a87a; }
+    .quickbar-key {
+      position: absolute; top: 3px; left: 5px;
+      font-size: 9px; color: #c9a87a; font-weight: 700;
+      pointer-events: none;
+    }
+    /* Loot columns use flex: header on top, inner body fills space,
+       optional footer (Take All) pinned to the bottom via sticky. */
+    .loot-col-player,
+    .loot-col-body {
+      display: flex;
+      flex-direction: column;
+      min-height: 0;
+    }
+    .loot-col-header {
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      min-height: 36px;
+      margin-bottom: 8px;
+    }
+    .loot-col-title-row {
+      display: flex;
+      align-items: baseline;
+      gap: 10px;
+      flex: 1;
+      min-width: 0;
+    }
+    /* Two-column body layout inside each loot column: avatar + pockets on
+       the left, backpack on the right. Owns the vertical scroll for its
+       loot column so the header + Take All footer stay pinned while
+       only the item grids scroll underneath. */
+    .loot-col-inner {
+      display: flex;
+      gap: 18px;
+      align-items: flex-start;
+      flex: 1;
+      min-height: 0;
+      overflow-y: auto;
+      overflow-x: hidden;
+    }
+    .loot-col-left {
+      width: 390px;
+      flex-shrink: 0;
+    }
+    .loot-col-right {
+      flex: 1;
+      min-width: 0;
+    }
+    /* Take All footer — lives inside the body column so it locks to
+       the bottom of the body panel (not the whole modal). Sits
+       outside `.loot-col-inner` so scrolling the pockets grid never
+       moves it. Opaque background + elevated z-index + explicit
+       pointer-events guarantee it stays on top and clickable even
+       when the grid content is taller than the viewport. */
+    #loot-body-footer {
+      position: relative;
+      z-index: 5;
+      display: flex;
+      justify-content: center;
+      padding: 12px 0 8px;
+      margin-top: 6px;
+      background: #10121a;
+      border-top: 1px solid #2a2f38;
+      flex-shrink: 0;
+      pointer-events: auto;
+    }
+    #loot-body-footer .loot-btn { pointer-events: auto; }
+
+    /* Work space — staging grid that spans the bottom of the loot modal.
+       Visual style echoes the main inventory's pockets grid so the two
+       areas feel like they're part of the same UX. */
+    #loot-workspace {
+      grid-column: 1 / -1;
+      margin-top: 6px;
+      padding: 10px 12px;
+      border: 1px dashed #3a414c;
+      border-radius: 6px;
+      background: rgba(0,0,0,0.25);
+    }
+    .loot-workspace-head {
+      display: flex;
+      align-items: baseline;
+      justify-content: space-between;
+      margin-bottom: 8px;
+    }
+    .loot-workspace-title {
+      font-size: 10px; color: #c9a87a; letter-spacing: 2px;
+      text-transform: uppercase;
+    }
+    .loot-workspace-hint {
+      font-size: 9px; color: #6a7280; letter-spacing: 0.5px;
+    }
+    #loot-workspace-grid {
+      position: relative;
+      margin: 0 auto;
+    }
+    #loot-workspace-grid .ws-cell {
+      position: absolute;
+      background: rgba(28,33,40,0.6);
+      border: 1px solid #2a2f38;
+      border-radius: 2px;
+      box-sizing: border-box;
+    }
+    .ws-tile {
+      position: absolute;
+      background: linear-gradient(180deg, #222832, #171a22);
+      border: 1px solid #4a5262;
+      border-radius: 3px;
+      cursor: grab;
+      box-sizing: border-box;
+      overflow: hidden;
+    }
+    .ws-tile:hover { border-color: #c9a87a; }
+    .ws-tile.dragging { opacity: 0.5; pointer-events: none; }
+    .ws-tile.rarity-uncommon  { border-color: #4a9a5a; }
+    .ws-tile.rarity-rare      { border-color: #4a7ac9; }
+    .ws-tile.rarity-epic      { border-color: #9a5ac9; }
+    .ws-tile.rarity-legendary { border-color: #d0a038; }
+    .ws-tile.rarity-mythic    { border-color: #e04040; box-shadow: 0 0 8px rgba(224,64,64,0.35); }
+    .ws-tile .ws-thumb {
+      position: absolute; inset: 5px 5px 20px 5px;
+      width: auto; height: auto;
+      max-width: 100%; max-height: 100%;
+      margin: auto;
+      object-fit: contain; object-position: center center;
+      pointer-events: none;
+      transition: transform 0.1s ease;
+    }
+    .ws-tile.rotated .ws-thumb { transform: rotate(90deg); }
+    .ws-tile .ws-glyph {
+      position: absolute; inset: 0; display: flex;
+      align-items: center; justify-content: center;
+      font-size: 36px; color: #6a7280;
+    }
+    .ws-tile .ws-name {
+      position: absolute; left: 4px; right: 4px; bottom: 6px;
+      font-size: 11.5px; color: #d8d3c4; letter-spacing: 0.2px;
+      text-shadow: 0 0 4px rgba(0,0,0,0.9);
+      white-space: nowrap; overflow: hidden; text-overflow: ellipsis;
+      text-align: center; pointer-events: none;
+    }
+    .ws-tile .ws-ammo {
+      position: absolute; right: 5px; top: 5px;
+      font-size: 12px; color: #c9a87a;
+      background: rgba(0,0,0,0.65); padding: 2px 5px; border-radius: 3px;
+      pointer-events: none;
+    }
+    .ws-preview {
+      position: absolute;
+      box-sizing: border-box;
+      pointer-events: none;
+      border-radius: 2px;
+    }
+    .ws-preview.ok  { background: rgba(90,180,110,0.22); border: 1px solid #6abe8a; }
+    .ws-preview.bad { background: rgba(200,80,80,0.22);  border: 1px solid #d24040; }
+    .loot-body-type {
+      font-size: 11px;
+      letter-spacing: 2px;
+      text-transform: uppercase;
+      font-weight: 700;
+      padding: 2px 8px;
+      border-radius: 3px;
+      color: #9b8b6a;
+      border: 1px solid rgba(155, 139, 106, 0.4);
+      background: rgba(32, 24, 20, 0.55);
+    }
+    .loot-body-type.tier-normal   { color: #a6c0d0; border-color: rgba(166,192,208,0.5); }
+    .loot-body-type.tier-subBoss  { color: #b38cff; border-color: rgba(179,140,255,0.55); }
+    .loot-body-type.tier-boss     { color: #ff6a5a; border-color: rgba(255,106,90,0.6); background: rgba(64,16,20,0.55); }
+    .loot-body-type.tier-ground   { color: #8fbf70; border-color: rgba(143,191,112,0.5); }
+
+    #loot-player-slots {
+      position: relative;
+      display: grid;
+      grid-template-columns: 115px 160px 115px;
+      grid-template-rows: repeat(7, 62px);
+      gap: 4px;
+      margin-bottom: 6px;
+    }
+    #loot-player-sil {
+      grid-column: 2;
+      grid-row: 1 / span 7;
+      width: 100%;
+      height: 100%;
+      pointer-events: none;
+      opacity: 0.55;
+    }
+    #loot-player-sil svg { width: 100%; height: 100%; }
+    .loot-slot-player { font-size: 10px; padding: 4px 6px; }
+    .loot-slot-player .cell-swatch { width: 20px; height: 20px; }
+    .loot-slot-player .cell-icon { width: 16px; height: 16px; }
+    .loot-slot-player .cell-name { font-size: 11px; }
+    .loot-slot-player .cell-desc { font-size: 10px; color: #9b8b6a; line-height: 1.25; }
+    .loot-slot-player .cell-empty-ico { font-size: 14px; line-height: 1.3; }
+    .loot-slot-player.filled { background: linear-gradient(180deg, #262a30, #181c22); border-color: #5a6a7a; }
+    .loot-col-player #loot-player-pockets,
+    .loot-col-player #loot-player-backpack {
+      display: grid;
+      grid-template-columns: repeat(4, 1fr);
+      gap: 5px;
+    }
+    .loot-col-player #loot-player-pockets {
+      margin-bottom: 6px;
+      padding-bottom: 6px;
+      border-bottom: 1px dashed rgba(201, 168, 122, 0.22);
+    }
+    /* Loot cells are a touch shorter than the main inventory so the loot
+       modal never needs to scroll. Still locked so roll variety doesn't
+       reflow the grid. */
+    .loot-col-player #loot-player-pockets .inv-cell,
+    .loot-col-player #loot-player-backpack .inv-cell {
+      height: 78px;
+      min-height: 78px;
+      max-height: 78px;
+      padding: 4px;
+      overflow: hidden;
+      grid-template-columns: 68px 1fr;
+    }
+    /* Body column header with a ✕ to dismiss the body section. */
+    .loot-col-body .loot-col-header {
+      display: flex; align-items: center; justify-content: space-between;
+      margin-bottom: 6px;
+    }
+    #loot-body-dismiss {
+      background: transparent;
+      border: 1px solid #5a2828;
+      color: #d06a6a;
+      border-radius: 3px;
+      width: 20px; height: 20px;
+      cursor: pointer;
+      font-size: 11px;
+      line-height: 1;
+    }
+    #loot-body-dismiss:hover { background: rgba(90, 30, 30, 0.4); border-color: #c94a3a; }
+    .loot-item {
+      display: flex;
+      align-items: center;
+      gap: 10px;
+      padding: 8px 10px;
+      border: 1px solid #2c323c;
+      border-radius: 5px;
+      background: linear-gradient(180deg, #1d2028, #15181f);
+      cursor: pointer;
+      transition: border-color 0.1s, transform 0.06s;
+    }
+    .loot-item:hover { transform: translateX(2px); }
+    .loot-swatch {
+      width: 22px;
+      height: 22px;
+      border-radius: 3px;
+      box-shadow: inset 0 0 0 1px rgba(0,0,0,0.3);
+    }
+    .loot-text { flex: 1; }
+    .loot-name { font-weight: 700; color: #f2e7c9; font-size: 12px; }
+    .loot-desc { font-size: 11px; color: #9b8b6a; margin-top: 2px; }
+    .loot-rarity {
+      font-size: 9px;
+      color: #9b8b6a;
+      text-transform: uppercase;
+      letter-spacing: 1.5px;
+    }
+    .loot-empty { color: #6f6754; font-size: 12px; padding: 12px; text-align: center; }
+    #loot-actions {
+      display: flex;
+      align-items: center;
+      gap: 12px;
+    }
+    #loot-take-all {
+      background: #2c2018;
+      border: 1px solid #c9a87a;
+      color: #f2e7c9;
+      font-family: inherit;
+      font-size: 11px;
+      padding: 6px 16px;
+      border-radius: 3px;
+      cursor: pointer;
+      letter-spacing: 1px;
+      text-transform: uppercase;
+    }
+    #loot-take-all:hover { background: #3a2a20; }
+    #loot-hint { font-size: 10px; color: #6f6754; }
+
+    /* Shop / Merchant modal */
+    #shop-root {
+      position: fixed;
+      inset: 0;
+      background: radial-gradient(ellipse at center, rgba(0,0,0,0.55), rgba(0,0,0,0.8));
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      z-index: 16;
+      font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+    }
+    #shop-card {
+      width: 1800px;
+      max-width: 98vw;
+      height: 94vh;
+      max-height: 94vh;
+      display: flex;
+      flex-direction: column;
+      overflow: hidden;
+      background: linear-gradient(180deg, #181b21 0%, #10121a 100%);
+      border: 1px solid #c9a87a;
+      border-radius: 8px;
+      color: #e8dfc8;
+      padding: 18px 22px;
+      box-shadow: 0 12px 40px rgba(0, 0, 0, 0.75);
+    }
+    #shop-header {
+      display: flex;
+      align-items: center;
+      gap: 14px;
+      margin-bottom: 12px;
+    }
+    #shop-title {
+      font-size: 14px;
+      font-weight: 700;
+      color: #c9a87a;
+      letter-spacing: 2px;
+      text-transform: uppercase;
+    }
+    #shop-credits {
+      flex: 1;
+      text-align: right;
+      color: #ffd27a;
+      font-weight: 700;
+      font-size: 14px;
+    }
+    #shop-close {
+      background: transparent;
+      border: 1px solid #3a414c;
+      color: #c9a87a;
+      border-radius: 3px;
+      width: 24px;
+      height: 24px;
+      cursor: pointer;
+    }
+    #shop-body {
+      display: grid;
+      /* Keeper portrait column on the left, then two scrolling item
+         columns that split the remaining width evenly. */
+      grid-template-columns: 300px 1fr 1fr;
+      gap: 18px;
+      flex: 1;
+      min-height: 0;
+    }
+    .shop-col {
+      display: flex;
+      flex-direction: column;
+      min-height: 0;
+      overflow: hidden;
+    }
+    #shop-keeper {
+      gap: 10px;
+      padding: 14px;
+      border: 1px solid #3a2f1f;
+      border-radius: 6px;
+      background: linear-gradient(180deg, #1a1713 0%, #0f0c09 100%);
+      overflow-y: auto;
+    }
+    #shop-keeper-portrait {
+      width: 100%;
+      aspect-ratio: 1 / 1;
+      border-radius: 4px;
+      border: 1px solid #3a2f1f;
+      overflow: hidden;
+      background: #0a0806;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      flex-shrink: 0;
+    }
+    .shop-keeper-img {
+      width: 100%;
+      height: 100%;
+      object-fit: cover;
+      image-rendering: auto;
+    }
+    /* Rendered 3D portrait of the shopkeeper (matches the in-world
+       avatar). Contained instead of cover so the head + torso aren't
+       cropped to the edges of the square frame. */
+    .shop-keeper-avatar {
+      width: 100%;
+      height: 100%;
+      object-fit: contain;
+      image-rendering: auto;
+    }
+    .shop-keeper-glyph {
+      font-size: 140px;
+      line-height: 1;
+      opacity: 0.85;
+      text-shadow: 0 0 24px currentColor, 0 2px 4px rgba(0,0,0,0.6);
+      filter: drop-shadow(0 4px 8px rgba(0,0,0,0.5));
+    }
+    #shop-keeper-name {
+      font-size: 14px;
+      font-weight: 700;
+      color: #c9a87a;
+      letter-spacing: 1.5px;
+      text-transform: uppercase;
+      text-align: center;
+      margin-top: 4px;
+    }
+    #shop-keeper-flavor {
+      font-size: 11px;
+      color: #9b8b6a;
+      font-style: italic;
+      line-height: 1.5;
+      text-align: left;
+    }
+    /* Stock/bag/buyback render as 3-col grids — same geometry as the
+       player backpack in #inv-bag-grid. Each section scrolls inside its
+       column so the overall shop card always fills the viewport. */
+    #shop-stock, #shop-bag, #shop-buyback {
+      display: grid;
+      grid-template-columns: repeat(3, 1fr);
+      gap: 6px;
+      align-content: start;
+      overflow-y: auto;
+      flex: 1;
+      min-height: 0;
+      padding-right: 4px;
+    }
+    /* Shop cells match the player backpack .inv-cell exactly (74px art
+       tile + 1fr stats column, 82px fixed height) so both grids read as
+       the same UI. Price chip sits as an absolute overlay in the
+       top-right corner so the inner layout stays identical. */
+    .shop-item {
+      position: relative;
+      display: grid;
+      grid-template-columns: 74px 1fr;
+      gap: 6px;
+      align-items: center;
+      padding: 4px;
+      border: 1px solid #2c323c;
+      border-radius: 5px;
+      background: linear-gradient(180deg, #1d2028, #15181f);
+      cursor: pointer;
+      transition: border-color 0.12s, box-shadow 0.12s;
+      height: 82px;
+      min-height: 82px;
+      max-height: 82px;
+      overflow: hidden;
+      font-size: 10px;
+    }
+    .shop-item:hover { border-color: #6a7588; box-shadow: 0 0 8px rgba(201,168,122,0.2); }
+    .shop-item.unaffordable { opacity: 0.45; cursor: not-allowed; }
+    .shop-item .cell-art { width: 74px; height: 74px; }
+    .shop-item .cell-art-img { width: 86%; height: 86%; }
+    .shop-item .cell-name-overlay { font-size: 9px; padding: 8px 3px 1px; }
+    .shop-item .cell-stats { font-size: 9px; }
+    .shop-item .cell-stat { font-size: 9px; }
+    .shop-item.buyback-cell {
+      border-color: #4a6a5a;
+      background: linear-gradient(180deg, #192420, #121a16);
+    }
+    .shop-item.buyback-cell:hover { border-color: #6abe8a; }
+    .shop-col.drop-ok {
+      outline: 2px dashed #c9a87a;
+      outline-offset: 2px;
+    }
+    .shop-price {
+      position: absolute;
+      top: 3px;
+      right: 3px;
+      font-size: 10px;
+      font-weight: 700;
+      letter-spacing: 0.5px;
+      padding: 2px 5px;
+      border-radius: 3px;
+      white-space: nowrap;
+      pointer-events: none;
+      z-index: 2;
+    }
+    .shop-price.buy { color: #ffd27a; background: rgba(201, 168, 122, 0.22); border: 1px solid rgba(201, 168, 122, 0.35); }
+    .shop-price.sell { color: #8fbf70; background: rgba(143, 191, 112, 0.22); border: 1px solid rgba(143, 191, 112, 0.35); }
+    .shop-empty { color: #6f6754; font-size: 12px; padding: 12px; text-align: center; }
+
+    /* Shop footprint grid — same visual language as inventory pockets
+       and the loot workspace, but with a merchant-tan accent. */
+    .shop-footprint-grid {
+      position: relative;
+      display: block !important;
+      margin: 0 auto;
+    }
+    .shop-footprint-grid .shop-cell {
+      position: absolute;
+      background: rgba(44,32,24,0.5);
+      border: 1px solid #3a2c1e;
+      border-radius: 2px;
+      box-sizing: border-box;
+    }
+    .shop-tile {
+      position: absolute;
+      background: linear-gradient(180deg, #2c2218, #1a1510);
+      border: 1px solid #6a5538;
+      border-radius: 3px;
+      cursor: pointer;
+      box-sizing: border-box;
+      overflow: hidden;
+    }
+    .shop-tile:hover { border-color: #c9a87a; }
+    .shop-tile.unaffordable { opacity: 0.5; filter: grayscale(0.3); }
+    .shop-tile.rarity-uncommon  { border-color: #4a9a5a; }
+    .shop-tile.rarity-rare      { border-color: #4a7ac9; }
+    .shop-tile.rarity-epic      { border-color: #9a5ac9; }
+    .shop-tile.rarity-legendary { border-color: #d0a038; }
+    .shop-tile.rarity-mythic    { border-color: #e04040; box-shadow: 0 0 8px rgba(224,64,64,0.35); }
+    .shop-tile .ws-thumb {
+      position: absolute; inset: 3px 3px 24px 3px;
+      width: auto; height: auto;
+      max-width: 100%; max-height: 100%;
+      margin: auto;
+      object-fit: contain; object-position: center center;
+      pointer-events: none;
+      transition: transform 0.1s ease;
+    }
+    .shop-tile.rotated .ws-thumb { transform: rotate(90deg); }
+    .shop-tile .ws-glyph {
+      position: absolute; inset: 0; display: flex;
+      align-items: center; justify-content: center;
+      font-size: 20px; color: #6a7280;
+    }
+    .shop-tile .ws-name {
+      position: absolute; left: 2px; right: 2px; bottom: 13px;
+      font-size: 8px; color: #e8dfc8; letter-spacing: 0.2px;
+      text-shadow: 0 0 4px rgba(0,0,0,0.9);
+      white-space: nowrap; overflow: hidden; text-overflow: ellipsis;
+      text-align: center; pointer-events: none;
+    }
+    .shop-tile .shop-price {
+      position: absolute; left: 2px; right: 2px; bottom: 2px;
+      top: auto;
+      font-size: 9px; font-weight: 700;
+      padding: 1px 4px;
+      text-align: center;
+      color: #ffd27a;
+      background: rgba(0,0,0,0.55);
+      border: 1px solid rgba(201, 168, 122, 0.35);
+      letter-spacing: 0.3px;
+    }
+    .shop-tile .ws-ammo {
+      position: absolute; right: 3px; top: 3px;
+      font-size: 9px; color: #c9a87a;
+      background: rgba(0,0,0,0.7); padding: 1px 3px; border-radius: 2px;
+      pointer-events: none;
+    }
+    #shop-footer {
+      margin-top: 10px;
+      font-size: 10px;
+      color: #6f6754;
+      text-align: center;
+    }
+    #shop-footer b { color: #c9a87a; }
+
+    #shop-trade {
+      margin-bottom: 12px;
+      padding: 10px 12px;
+      border: 1px solid #d0b080;
+      border-radius: 5px;
+      background: linear-gradient(180deg, rgba(60,40,20,0.6), rgba(30,20,10,0.6));
+      box-shadow: 0 0 14px rgba(255,220,140,0.15) inset;
+    }
+    .bear-prompt {
+      font-size: 12px;
+      color: #ffe8b0;
+      font-style: italic;
+      margin-bottom: 8px;
+    }
+    .bear-tokens {
+      display: grid;
+      grid-template-columns: repeat(4, 1fr);
+      gap: 6px;
+      margin-bottom: 8px;
+    }
+    .bear-token {
+      font-size: 11px;
+      text-align: center;
+      padding: 4px 6px;
+      border-radius: 3px;
+      border: 1px solid #3a414c;
+      background: #1b1e24;
+    }
+    .bear-token.got {
+      color: #ffe8b0;
+      border-color: #d0a060;
+      box-shadow: 0 0 8px rgba(255,220,140,0.3) inset;
+    }
+    .bear-token.missing { color: #6f6754; }
+    .bear-progress {
+      text-align: center;
+      color: #9b8b6a;
+      font-size: 11px;
+    }
+    .bear-trade-btn {
+      display: block;
+      width: 100%;
+      padding: 10px;
+      border: 1px solid #ffe8b0;
+      border-radius: 4px;
+      background: linear-gradient(180deg, #3a2818, #1e140a);
+      color: #ffe8b0;
+      font-family: inherit;
+      font-weight: 700;
+      letter-spacing: 1.5px;
+      font-size: 13px;
+      cursor: pointer;
+      text-transform: uppercase;
+      transition: background 0.12s, transform 0.05s;
+    }
+    .bear-trade-btn:hover { background: linear-gradient(180deg, #4a3020, #2a1c10); transform: translateY(-1px); }
+
+    /* Death modal */
+    #death-root {
+      position: fixed; inset: 0;
+      background: radial-gradient(ellipse at center, rgba(40, 0, 0, 0.7), rgba(0, 0, 0, 0.9));
+      display: flex; align-items: center; justify-content: center;
+      z-index: 20;
+      font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+    }
+    #death-card {
+      background: #15070a;
+      border: 1px solid #a03038;
+      border-radius: 8px;
+      padding: 36px 44px;
+      text-align: center;
+      color: #f2e7c9;
+      box-shadow: 0 0 60px rgba(160, 48, 56, 0.5);
+    }
+    #death-title {
+      font-size: 36px;
+      font-weight: 700;
+      color: #e04848;
+      letter-spacing: 6px;
+      margin-bottom: 12px;
+    }
+    #death-sub {
+      font-size: 12px;
+      color: #a88070;
+      margin-bottom: 20px;
+      max-width: 380px;
+    }
+    #death-btn, #death-menu-btn {
+      background: #2a1018;
+      border: 1px solid #e04848;
+      color: #f2e7c9;
+      padding: 10px 26px;
+      font-family: inherit;
+      font-size: 13px;
+      font-weight: 700;
+      letter-spacing: 2px;
+      text-transform: uppercase;
+      cursor: pointer;
+      margin: 4px;
+    }
+    #death-btn:hover { background: #3a1520; }
+    #death-menu-btn {
+      background: #101820;
+      border-color: #4a6070;
+      color: #c9d4e0;
+    }
+    #death-menu-btn:hover { background: #182430; }
+    #death-note {
+      font-size: 11px;
+      color: #7a7060;
+      margin-bottom: 16px;
+      max-width: 380px;
+      letter-spacing: 0.5px;
+    }
+
+    /* Perks modal */
+    #perk-root {
+      position: fixed; inset: 0;
+      background: radial-gradient(ellipse at center, rgba(0,0,0,0.55), rgba(0,0,0,0.8));
+      display: flex; align-items: center; justify-content: center;
+      z-index: 14;
+      font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+    }
+    #perk-card {
+      width: 1200px; max-width: 97vw; max-height: 88vh; overflow-y: auto;
+      background: linear-gradient(180deg, #181b21 0%, #10121a 100%);
+      border: 1px solid #8a5ac9;
+      border-radius: 8px;
+      color: #e8dfc8;
+      padding: 20px 22px;
+      box-shadow: 0 12px 40px rgba(0, 0, 0, 0.75);
+    }
+    #perk-header {
+      display: flex; align-items: center; gap: 14px; margin-bottom: 14px;
+    }
+    #perk-title {
+      font-size: 14px; font-weight: 700; color: #9a5ac9;
+      letter-spacing: 2px; text-transform: uppercase;
+    }
+    #perk-points {
+      flex: 1; text-align: right; color: #c9a5ff; font-size: 13px;
+    }
+    #perk-points b { font-size: 16px; }
+    #perk-close {
+      background: transparent; border: 1px solid #3a414c;
+      color: #c9a87a; border-radius: 3px; width: 24px; height: 24px; cursor: pointer;
+    }
+    #perk-body { display: grid; grid-template-columns: 1fr 1fr; gap: 18px; }
+    .perk-col { min-width: 0; }
+    .perk-col-title {
+      font-size: 10px; color: #c9a87a; letter-spacing: 2px;
+      text-transform: uppercase; margin-bottom: 8px;
+    }
+    #perk-general-list, #perk-class-list { display: flex; flex-direction: column; gap: 6px; }
+    .perk-row {
+      display: grid;
+      grid-template-columns: 28px 1fr 80px;
+      gap: 10px; align-items: center;
+      padding: 8px 10px;
+      border: 1px solid #2c323c;
+      border-radius: 5px;
+      background: linear-gradient(180deg, #1d2028, #15181f);
+      cursor: pointer;
+      transition: border-color 0.12s, transform 0.06s;
+    }
+    .perk-row:hover { transform: translateX(2px); border-color: #9a5ac9; }
+    .perk-row.owned {
+      border-color: #4a9a5a;
+      background: linear-gradient(180deg, #1c2520, #101a14);
+      cursor: default;
+    }
+    .perk-row.owned:hover { transform: none; }
+    .perk-row.locked { opacity: 0.55; cursor: not-allowed; border-style: dashed; }
+    .perk-row.unaffordable { opacity: 0.65; cursor: not-allowed; }
+    .perk-row.class { cursor: default; }
+    .perk-row.class:hover { transform: none; border-color: #2c323c; }
+    .perk-row.class.owned:hover { border-color: #4a9a5a; }
+    .perk-icon { font-size: 18px; color: #c9a5ff; text-align: center; }
+    .perk-main { min-width: 0; }
+    .perk-main .perk-name { font-weight: 700; color: #f2e7c9; font-size: 13px; overflow-wrap: anywhere; }
+    .perk-main .perk-lv { color: #c9a87a; font-weight: 400; font-size: 11px; margin-left: 4px; }
+    .perk-main .perk-desc { font-size: 11px; color: #9b8b6a; overflow-wrap: anywhere; line-height: 1.35; margin-top: 2px; }
+    .perk-main .perk-req { font-size: 10px; color: #6f6754; margin-top: 3px; }
+    .perk-main .perk-req .req.met { color: #7fa66a; }
+    .perk-main .perk-req .req.missing { color: #a56a6a; }
+    .perk-cost {
+      text-align: right; font-size: 12px; font-weight: 700;
+      color: #c9a5ff; letter-spacing: 1px;
+    }
+    .perk-row.owned .perk-cost { color: #8fbf70; }
+    .class-section { border: 1px solid #2a1e3a; border-radius: 5px; padding: 8px 10px; margin-bottom: 8px; background: linear-gradient(180deg, #1a1420, #120f18); }
+    .class-section .class-head { display: flex; justify-content: space-between; font-size: 11px; margin-bottom: 3px; }
+    .class-section .class-name { color: #e6b94a; font-weight: 700; }
+    .class-section .class-lv { color: #9b8b6a; font-weight: 400; margin-left: 4px; }
+    .class-section .class-xp { color: #c9a87a; font-size: 10px; }
+    .class-section .class-bar { height: 4px; background: #1b1b1f; border: 1px solid #2c2c34; border-radius: 2px; overflow: hidden; margin-bottom: 6px; }
+    .class-section .class-bar-fill { height: 100%; background: #c9a87a; }
+
+    /* Mastery pick modal — triggered when a class crosses an XP threshold. */
+    #mastery-pick-root {
+      position: fixed; inset: 0;
+      background: radial-gradient(ellipse at center, rgba(0,0,0,0.7), rgba(0,0,0,0.9));
+      display: flex; align-items: center; justify-content: center;
+      z-index: 18;
+      font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+    }
+    #mastery-pick-card {
+      width: 880px; max-width: 96vw;
+      background: linear-gradient(180deg, #1a1420 0%, #0e0b14 100%);
+      border: 1px solid #e6b94a; border-radius: 10px;
+      padding: 24px 28px;
+      box-shadow: 0 18px 60px rgba(0,0,0,0.9), 0 0 8px rgba(230,185,74,0.15) inset;
+    }
+    #mastery-pick-title {
+      color: #e6b94a; font-size: 20px; font-weight: 700;
+      letter-spacing: 3px; text-transform: uppercase;
+      text-align: center; text-shadow: 0 0 8px rgba(230,185,74,0.4);
+    }
+    #mastery-pick-sub {
+      color: #9b8b6a; font-size: 11px; letter-spacing: 1.5px;
+      text-transform: uppercase; text-align: center; margin: 6px 0 18px;
+    }
+    #mastery-pick-options {
+      display: grid; grid-template-columns: repeat(3, 1fr); gap: 14px;
+    }
+    .mastery-card {
+      background: linear-gradient(180deg, #201826, #14101a);
+      border: 1px solid #4a3a1e; border-radius: 6px;
+      padding: 14px 14px 16px; cursor: pointer;
+      color: #e8dfc8; text-align: left; font-family: inherit;
+      transition: transform 0.08s, border-color 0.12s, box-shadow 0.12s;
+    }
+    .mastery-card.cross { border-color: #3a3a4a; background: linear-gradient(180deg, #181a24, #10121a); }
+    .mastery-card:hover { transform: translateY(-2px); border-color: #e6b94a; box-shadow: 0 4px 12px rgba(230,185,74,0.25); }
+    .mastery-card.cross:hover { border-color: #9a5ac9; box-shadow: 0 4px 12px rgba(154,90,201,0.2); }
+    .mastery-card-tag {
+      font-size: 10px; letter-spacing: 1.5px; text-transform: uppercase;
+      color: #e6b94a; margin-bottom: 4px;
+    }
+    .mastery-card.cross .mastery-card-tag { color: #9a5ac9; }
+    .mastery-card-name { font-size: 15px; font-weight: 700; color: #f2e7c9; margin-bottom: 2px; }
+    .mastery-card-level { font-size: 11px; color: #c9a87a; margin-bottom: 8px; }
+    .mastery-card-desc { font-size: 12px; color: #9b8b6a; line-height: 1.4; overflow-wrap: anywhere; }
+    .perk-section-title {
+      font-size: 10px;
+      color: #c9a87a;
+      letter-spacing: 2px;
+      text-transform: uppercase;
+      margin: 14px 0 6px;
+    }
+    #class-list { display: flex; flex-direction: column; gap: 6px; max-height: 240px; overflow-y: auto; }
+    .class-row {
+      padding: 6px 10px;
+      border: 1px solid #2c323c;
+      border-radius: 5px;
+      background: linear-gradient(180deg, #1d2028, #15181f);
+    }
+    .class-head { display: flex; justify-content: space-between; font-size: 11px; }
+    .class-name { color: #f2e7c9; font-weight: 700; }
+    .class-lv { color: #9b8b6a; font-weight: 400; margin-left: 4px; }
+    .class-xp { color: #c9a87a; font-size: 10px; }
+    .class-bar {
+      margin-top: 3px;
+      height: 4px;
+      background: #1b1b1f;
+      border: 1px solid #2c2c34;
+      border-radius: 2px;
+      overflow: hidden;
+    }
+    .class-bar-fill { height: 100%; background: #c9a87a; transition: width 0.2s linear; }
+    .class-perk {
+      font-size: 10px;
+      margin-top: 2px;
+      letter-spacing: 0.3px;
+      overflow-wrap: anywhere;
+      line-height: 1.4;
+    }
+    .class-perk.on { color: #8fbf70; }
+    .class-perk.off { color: #5a5550; opacity: 0.6; }
+    .class-perk.capstone.on { color: #e6b94a; text-shadow: 0 0 4px rgba(230, 185, 74, 0.4); font-weight: bold; }
+    .class-perk.capstone.off { color: #6b5630; opacity: 0.55; font-style: italic; }
+    #inv-skills { margin-top: 14px; }
+    #inv-skill-list {
+      display: grid;
+      grid-template-columns: 1fr 1fr;
+      gap: 4px 18px;
+      font-size: 11px;
+    }
+    .skill-row { display: flex; gap: 6px; align-items: baseline; }
+    .skill-ico { color: #c9a87a; font-size: 14px; width: 14px; text-align: center; }
+    .skill-name { color: #f2e7c9; font-weight: 700; }
+    .skill-lv { color: #9b8b6a; font-weight: 400; }
+    .skill-desc { color: #9b8b6a; margin-left: 4px; }
+    .skill-empty { color: #6f6754; font-size: 11px; }
+    #inv-footer {
+      margin-top: 12px;
+      font-size: 10px;
+      color: #6f6754;
+      letter-spacing: 0.5px;
+    }
+
+    /* Skill pick modal */
+    #skill-pick-root {
+      position: fixed;
+      inset: 0;
+      background: rgba(0, 0, 0, 0.7);
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      z-index: 20;
+      font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+    }
+    #skill-pick-card {
+      background: #14161a;
+      border: 1px solid #3a3024;
+      border-radius: 6px;
+      padding: 24px 28px;
+      color: #e8dfc8;
+      box-shadow: 0 12px 40px rgba(0, 0, 0, 0.7);
+    }
+    #skill-pick-title {
+      font-size: 18px;
+      font-weight: 700;
+      color: #c9a87a;
+      letter-spacing: 1.5px;
+      text-align: center;
+      margin-bottom: 18px;
+    }
+    #skill-pick-options {
+      display: flex;
+      gap: 14px;
+    }
+    .skill-card {
+      width: 210px;
+      background: #1b1e24;
+      border: 1px solid #3a3024;
+      border-radius: 6px;
+      padding: 16px;
+      text-align: center;
+      cursor: pointer;
+      color: inherit;
+      font-family: inherit;
+      transition: border-color 0.12s, background 0.12s, transform 0.06s;
+    }
+    .skill-card:hover {
+      border-color: #c9a87a;
+      background: #22262e;
+      transform: translateY(-2px);
+    }
+    .skill-card-ico {
+      font-size: 32px;
+      color: #c9a87a;
+      margin-bottom: 8px;
+    }
+    .skill-card-name {
+      font-size: 14px;
+      font-weight: 700;
+      color: #f2e7c9;
+      margin-bottom: 4px;
+    }
+    .skill-card-level {
+      font-size: 11px;
+      color: #9b8b6a;
+      margin-bottom: 10px;
+    }
+    .skill-card-desc {
+      font-size: 12px;
+      color: #c9c4b0;
+      line-height: 1.4;
+    }
+    .dmg-number {
+      position: fixed;
+      pointer-events: none;
+      user-select: none;
+      font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+      font-weight: 700;
+      font-size: 14px;
+      color: #f2e7c9;
+      text-shadow: 0 1px 2px rgba(0,0,0,0.9), 0 0 4px rgba(0,0,0,0.6);
+      transform: translate(-50%, -50%);
+      animation: dmg-rise 0.9s ease-out forwards;
+      will-change: transform, opacity;
+    }
+    .dmg-number.crit {
+      color: #ffb04a;
+      font-size: 18px;
+    }
+    .dmg-number.legs {
+      color: #8cd3ff;
+    }
+    .dmg-number.arm {
+      color: #ff88c4;
+    }
+    #melee-hud {
+      position: fixed;
+      top: 50%;
+      left: 50%;
+      transform: translate(-50%, -50%) translateY(-130px);
+      padding: 10px 16px;
+      background: rgba(0, 0, 0, 0.55);
+      border: 1px solid #4a2a2a;
+      border-radius: 4px;
+      color: #f2e7c9;
+      font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+      font-size: 13px;
+      line-height: 1.5;
+      text-align: center;
+      display: none;
+      user-select: none;
+      pointer-events: none;
+      text-shadow: 0 1px 2px rgba(0,0,0,0.9);
+    }
+    #melee-hud b {
+      color: #ffb04a;
+    }
+    #overhead-layer {
+      position: fixed;
+      inset: 0;
+      pointer-events: none;
+      z-index: 3;
+    }
+    #stealth-vignette {
+      position: fixed;
+      inset: 0;
+      pointer-events: none;
+      z-index: 1;
+      opacity: 0;
+      transition: opacity 0.2s linear;
+      background: radial-gradient(
+        ellipse at center,
+        rgba(0, 10, 30, 0) 45%,
+        rgba(0, 10, 30, 0.55) 80%,
+        rgba(0, 5, 18, 0.85) 100%
+      );
+      box-shadow: inset 0 0 60px rgba(60, 120, 180, 0.35);
+    }
+    #stealth-vignette.active { opacity: 1; }
+    #stealth-status {
+      position: fixed;
+      top: 16px;
+      left: 50%;
+      transform: translateX(-50%);
+      z-index: 4;
+      pointer-events: none;
+      font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+      font-size: 12px;
+      letter-spacing: 4px;
+      text-transform: uppercase;
+      font-weight: 700;
+      padding: 5px 14px;
+      border-radius: 3px;
+      opacity: 0;
+      transition: opacity 0.15s linear, color 0.15s linear;
+      text-shadow: 0 0 6px currentColor;
+    }
+    #stealth-status.undetected {
+      color: #8aa9b9;
+      background: rgba(12, 20, 28, 0.45);
+      border: 1px solid rgba(138, 169, 185, 0.35);
+      opacity: 1;
+    }
+    #stealth-status.hidden {
+      color: #6abe8a;
+      background: rgba(10, 24, 16, 0.55);
+      border: 1px solid rgba(106, 190, 138, 0.45);
+      opacity: 1;
+    }
+    #stealth-status.seen {
+      color: #e67a3a;
+      background: rgba(30, 14, 8, 0.6);
+      border: 1px solid rgba(230, 122, 58, 0.6);
+      opacity: 1;
+    }
+    #stealth-status.detected {
+      color: #e63a3a;
+      background: rgba(30, 8, 8, 0.75);
+      border: 1px solid rgba(230, 58, 58, 0.8);
+      opacity: 1;
+      animation: pulseRed 0.6s infinite alternate;
+    }
+    @keyframes pulseRed {
+      from { text-shadow: 0 0 4px currentColor; }
+      to   { text-shadow: 0 0 12px currentColor; }
+    }
+    .overhead-eye {
+      position: absolute;
+      transform: translate(-50%, -50%);
+      pointer-events: none;
+      font-size: 20px;
+      color: #7ad1ff;
+      filter: drop-shadow(0 0 6px rgba(122, 209, 255, 0.7));
+    }
+    .overhead-ring {
+      position: absolute;
+      width: 34px;
+      height: 34px;
+      transform: translate(-50%, -50%);
+      border-radius: 50%;
+      background: conic-gradient(#c9a87a var(--fill, 0deg), rgba(0,0,0,0.55) var(--fill, 0deg));
+      border: 2px solid rgba(201, 168, 122, 0.7);
+      box-shadow: 0 0 8px rgba(0, 0, 0, 0.55);
+    }
+    .overhead-ring::after {
+      content: '';
+      position: absolute;
+      inset: 3px;
+      background: rgba(18, 20, 26, 0.9);
+      border-radius: 50%;
+    }
+    .overhead-ring.enemy {
+      background: conic-gradient(#c95a5a var(--fill, 0deg), rgba(0,0,0,0.55) var(--fill, 0deg));
+      border-color: rgba(201, 90, 90, 0.7);
+    }
+    .overhead-marker {
+      position: absolute;
+      transform: translate(-50%, -50%);
+      pointer-events: none;
+      font-size: 18px;
+      filter: drop-shadow(0 0 4px rgba(0,0,0,0.8));
+    }
+    .overhead-star {
+      color: #ffd766;
+    }
+    .overhead-flash {
+      color: #ffffff;
+      animation: overhead-flash 0.18s infinite alternate;
+    }
+    .overhead-threat {
+      color: #ff4040;
+      font-size: 18px;
+      text-shadow: 0 0 6px rgba(255, 64, 64, 0.8), 0 0 10px rgba(255, 64, 64, 0.5);
+      animation: overhead-threat 0.8s infinite alternate;
+    }
+    @keyframes overhead-threat {
+      from { opacity: 0.55; transform: translate(-50%, -50%) scale(0.9); }
+      to   { opacity: 1; transform: translate(-50%, -50%) scale(1.1); }
+    }
+    @keyframes overhead-flash {
+      from { opacity: 0.35; }
+      to { opacity: 1; }
+    }
+    #action-bar {
+      position: fixed;
+      bottom: 8px;
+      left: 50%;
+      transform: translateX(-50%);
+      display: flex;
+      gap: 6px;
+      z-index: 12;
+      pointer-events: auto;
+    }
+    #weapon-bar {
+      position: fixed;
+      bottom: 8px;
+      left: 50%;
+      transform: translateX(calc(-50% - 250px));
+      display: flex;
+      gap: 6px;
+      z-index: 12;
+      pointer-events: auto;
+    }
+    .weapon-slot {
+      width: 56px;
+      height: 56px;
+      position: relative;
+      border: 1px solid #3a414c;
+      border-radius: 5px;
+      background: linear-gradient(180deg, rgba(27,30,36,0.82), rgba(20,23,29,0.82));
+      cursor: pointer;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+      color: #e8dfc8;
+      transition: border-color 0.12s, box-shadow 0.12s;
+    }
+    .weapon-slot.active { border-color: #c9a87a; box-shadow: 0 0 10px rgba(201,168,122,0.45); }
+    .weapon-slot .action-key {
+      position: absolute;
+      top: 3px;
+      left: 5px;
+      font-size: 10px;
+      color: #c9a87a;
+      font-weight: 700;
+      pointer-events: none;
+    }
+    .weapon-slot img { width: 36px; height: 36px; image-rendering: pixelated; }
+    .weapon-slot .weapon-label {
+      position: absolute;
+      bottom: 2px;
+      right: 4px;
+      font-size: 9px;
+      color: #9b8b6a;
+      pointer-events: none;
+    }
+    .weapon-slot.empty .weapon-label { color: #4a4a4a; }
+    .action-slot {
+      width: 56px;
+      height: 56px;
+      position: relative;
+      border: 1px solid #3a414c;
+      border-radius: 5px;
+      background: linear-gradient(180deg, rgba(27,30,36,0.82), rgba(20,23,29,0.82));
+      cursor: pointer;
+      transition: border-color 0.12s, box-shadow 0.12s;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+      color: #e8dfc8;
+    }
+    .action-slot:hover { border-color: #6a7588; }
+    .action-slot.drop-ok { border-color: #c9a87a; box-shadow: 0 0 10px rgba(201,168,122,0.5); }
+    .action-slot .action-key {
+      position: absolute;
+      top: 3px;
+      left: 5px;
+      font-size: 10px;
+      color: #c9a87a;
+      font-weight: 700;
+      pointer-events: none;
+    }
+    .action-slot img {
+      width: 30px;
+      height: 30px;
+      filter: drop-shadow(0 1px 1px rgba(0,0,0,0.7));
+    }
+    .action-slot .action-count {
+      position: absolute;
+      bottom: 2px;
+      right: 4px;
+      font-size: 10px;
+      color: #fff;
+      font-weight: 700;
+    }
+    /* Throwable cooldown overlay — semi-transparent dark fill that
+       drains from bottom → top as the cooldown elapses, plus a
+       centred "Ns" countdown. The `empty-charges` class greys the
+       slot when charges = 0 so the player knows the hotkey is idle. */
+    .action-slot .action-cd {
+      position: absolute;
+      inset: 0;
+      pointer-events: none;
+      overflow: hidden;
+      border-radius: 4px;
+    }
+    .action-slot .action-cd-fill {
+      position: absolute;
+      left: 0; right: 0; bottom: 0;
+      background: rgba(0, 0, 0, 0.55);
+      transition: height 0.2s linear;
+    }
+    .action-slot .action-cd-text {
+      position: absolute;
+      inset: 0;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      font-size: 12px;
+      font-weight: 700;
+      color: #f2e7c9;
+      text-shadow: 0 1px 2px rgba(0,0,0,0.9);
+    }
+    .action-slot.empty-charges { opacity: 0.55; border-color: #4a2a2a; }
+    #prompt {
+      position: fixed;
+      left: 50%;
+      bottom: 60px;
+      transform: translateX(-50%);
+      padding: 6px 12px;
+      background: rgba(0, 0, 0, 0.65);
+      border: 1px solid #3a3a3a;
+      border-radius: 4px;
+      color: #f2e7c9;
+      font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+      font-size: 13px;
+      font-weight: 700;
+      letter-spacing: 0.5px;
+      display: none;
+      user-select: none;
+      pointer-events: none;
+    }
+    @keyframes dmg-rise {
+      0%   { transform: translate(-50%, -50%) scale(0.9); opacity: 0; }
+      15%  { transform: translate(-50%, -70%) scale(1.1); opacity: 1; }
+      100% { transform: translate(-50%, -160%) scale(1.0); opacity: 0; }
+    }
+  </style>
+</head>
+<body>
+  <div id="app"></div>
+  <div id="hud">
+    <div><b>WASD</b> move &middot; <b>Shift</b> sprint &middot; <b>C</b> crouch toggle &middot; <b>Space</b> dash / dbl-tap roll</div>
+    <div><b>LMB</b> fire/combo &middot; <b>RMB</b> ADS / melee-block &middot; <b>Shift</b>+sprint+<b>C</b> slide</div>
+    <div><b>melee</b> LMB mid-combo branches to next hit &middot; <b>block+LMB</b> parry (redirect)</div>
+    <div><b>1..N</b> weapon &middot; <b>Q</b> cycle &middot; <b>E</b> pick/trade &middot; <b>F</b> swipe/execute &middot; <b>R</b> reload &middot; <b>H</b> medkit &middot; <b>Tab</b> inventory &middot; <b>K</b> perks</div>
+    <div id="hud-stats"></div>
+  </div>
+  <div id="hp">
+    <div><b style="color:#c9a87a">HP</b> <span id="hp-text"></span></div>
+    <div id="hp-bar">
+      <div id="hp-regen"></div>
+      <div id="hp-fill"></div>
+    </div>
+    <div id="hp-status-row"></div>
+    <div><b style="color:#6aaedc">STA</b> <span id="sta-text"></span></div>
+    <div id="sta-bar"><div id="sta-fill"></div></div>
+    <div id="reload-wrap">
+      <div><b id="reload-label">READY</b> <span id="reload-text"></span></div>
+      <div id="reload-bar"><div id="reload-fill"></div></div>
+    </div>
+  </div>
+  <div id="resources">
+    <div class="resource-row"><img class="resource-icon" src="Assets/UI/Icons/ui_icon_currency_diamond.png" alt=""><span id="credit-text">0</span></div>
+    <div class="resource-row"><img class="resource-icon" src="Assets/UI/Icons/ui_icon_currency_xp.png" alt=""><span id="xp-text">0</span></div>
+    <div class="resource-row" id="sp-row" style="display:none"><img class="resource-icon" src="Assets/UI/Icons/ui_icon_currency_lightning.png" alt=""><span id="sp-text">0</span></div>
+  </div>
+  <div id="stealth-vignette"></div>
+  <div id="stealth-status"></div>
+  <div id="overhead-layer"></div>
+  <div id="weapon-bar">
+    <div class="weapon-slot" data-idx="0"><span class="action-key">1</span></div>
+    <div class="weapon-slot" data-idx="1"><span class="action-key">2</span></div>
+    <div class="weapon-slot" data-idx="2"><span class="action-key">3</span></div>
+    <div class="weapon-slot" data-idx="3"><span class="action-key">4</span></div>
+  </div>
+  <div id="action-bar">
+    <div class="action-slot" data-idx="0"><span class="action-key">5</span></div>
+    <div class="action-slot" data-idx="1"><span class="action-key">6</span></div>
+    <div class="action-slot" data-idx="2"><span class="action-key">7</span></div>
+    <div class="action-slot action-slot-bonus" data-idx="3" style="display:none"><span class="action-key">8</span></div>
+  </div>
+  <div id="prompt"></div>
+  <div id="melee-hud"></div>
+  <div id="death-root" style="display:none">
+    <div id="death-card">
+      <div id="death-title">YOU DIED</div>
+      <div id="death-sub">Restart the level with what you had on entry, or bail back to the main menu.</div>
+      <div id="death-note">Restarting voids this run on the leaderboard and scales down chip earnings for the rest of the run.</div>
+      <button id="death-btn" type="button">Restart Level</button>
+      <button id="death-menu-btn" type="button">Back to Main Menu</button>
+    </div>
+  </div>
+
+  <script type="importmap">
+  {
+    "imports": {
+      "three": "https://unpkg.com/three@0.161.0/build/three.module.js",
+      "three/addons/": "https://unpkg.com/three@0.161.0/examples/jsm/",
+      "lil-gui": "https://unpkg.com/lil-gui@0.19.2/dist/lil-gui.esm.min.js"
+    }
+  }
+  </script>
+
+  <script type="module" src="./src/main.js"></script>
+</body>
+</html>

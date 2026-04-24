@@ -1,0 +1,17 @@
+name = "tacticalrogue-api"
+main = "src/index.js"
+compatibility_date = "2025-01-01"
+
+# Cloudflare Workers KV namespace for the leaderboard.
+# After `npx wrangler kv namespace create LEADERBOARD`, paste the
+# returned id into `id` below. Wrangler prints the exact toml snippet
+# it wants you to add — you can copy that verbatim.
+[[kv_namespaces]]
+binding = "LEADERBOARD"
+id = "REPLACE_ME"
+
+# CORS origin allowlist — empty means "allow any origin" (handy while
+# you're iterating locally + on preview deploys). Tighten to your
+# pages.dev / custom domain once the URL stabilises.
+[vars]
+ALLOWED_ORIGINS = ""

@@ -1,0 +1,91 @@
+// Lightweight localStorage-backed user preferences. One module per flag
+// type — we keep key names stable so the format matches across sessions
+// without a schema migration hop.
+
+const DEV_TOOLS_KEY = 'tacticalrogue_dev_tools_v1';
+const PLAYER_NAME_KEY = 'tacticalrogue_player_name_v1';
+const STORE_STATE_KEY = 'tacticalrogue_starting_store_v1';
+const CHARACTER_STYLE_KEY = 'tacticalrogue_character_style_v1';
+
+function _read(key, fallback) {
+  try {
+    const raw = localStorage.getItem(key);
+    if (raw == null) return fallback;
+    return JSON.parse(raw);
+  } catch (_) { return fallback; }
+}
+function _write(key, value) {
+  try { localStorage.setItem(key, JSON.stringify(value)); } catch (_) {}
+}
+
+export function getDevToolsEnabled() { return !!_read(DEV_TOOLS_KEY, false); }
+export function setDevToolsEnabled(v) { _write(DEV_TOOLS_KEY, !!v); }
+
+export function getPlayerName() { return _read(PLAYER_NAME_KEY, '') || ''; }
+export function setPlayerName(v) {
+  const trimmed = String(v ?? '').trim().slice(0, 16);
+  _write(PLAYER_NAME_KEY, trimmed);
+}
+
+// Starting-store state: { slots: 3..9, rarityTier: 0..4 }.
+// Slots = number of gear offers shown on new-run start.
+// rarityTier biases the rarity roll for each offer:
+//   0 = only common
+//   1 = common (80%) / uncommon (20%)
+//   2 = common (50%) / uncommon (40%) / rare (10%)
+//   3 = uncommon (45%) / rare (40%) / epic (15%)
+//   4 = rare (40%) / epic (45%) / legendary (15%)
+export function getStartingStoreState() {
+  const s = _read(STORE_STATE_KEY, null);
+  if (!s || typeof s !== 'object') return { slots: 3, rarityTier: 0 };
+  return {
+    slots: Math.max(3, Math.min(9, s.slots | 0 || 3)),
+    rarityTier: Math.max(0, Math.min(4, s.rarityTier | 0 || 0)),
+  };
+}
+export function setStartingStoreState(s) { _write(STORE_STATE_KEY, s); }
+
+// Character silhouette style. 'operator' (default) = the tactical-
+// operator primitive rig. 'marine' = cartoon Warhammer 40K space-
+// marine decorations (big pauldrons, power pack, helmet) on top of
+// the same rig. Switching recolours materials + toggles decorations
+// live via player.applyCharacterStyle().
+export function getCharacterStyle() {
+  const v = _read(CHARACTER_STYLE_KEY, 'operator');
+  return v === 'marine' ? 'marine' : 'operator';
+}
+export function setCharacterStyle(v) {
+  _write(CHARACTER_STYLE_KEY, v === 'marine' ? 'marine' : 'operator');
+}
+
+// Persistent pouch slot count. Starts at 1 — the player spends
+// contract chips to unlock more slots, up to a cap of 9. Very expensive
+// ramp: the last slot should feel like a milestone upgrade, not a
+// trickle. Costs are in chips; see POUCH_SLOT_COSTS below.
+const POUCH_SLOTS_KEY = 'tacticalrogue_pouch_slots_v1';
+export const POUCH_SLOT_MIN = 1;
+export const POUCH_SLOT_MAX = 9;
+// Cost to buy the Nth slot (index 0 = buying slot #2 from the base 1).
+export const POUCH_SLOT_COSTS = [
+  40,    // slot #2
+  80,    // slot #3
+  140,   // slot #4
+  220,   // slot #5
+  320,   // slot #6
+  460,   // slot #7
+  640,   // slot #8
+  880,   // slot #9
+];
+export function getPouchSlots() {
+  const n = _read(POUCH_SLOTS_KEY, POUCH_SLOT_MIN) | 0;
+  return Math.max(POUCH_SLOT_MIN, Math.min(POUCH_SLOT_MAX, n || POUCH_SLOT_MIN));
+}
+export function setPouchSlots(n) {
+  const clamped = Math.max(POUCH_SLOT_MIN, Math.min(POUCH_SLOT_MAX, n | 0));
+  _write(POUCH_SLOTS_KEY, clamped);
+}
+export function pouchNextSlotCost(currentSlots) {
+  if (currentSlots >= POUCH_SLOT_MAX) return null;
+  // currentSlots = 1 → buying slot #2 → index 0 of POUCH_SLOT_COSTS.
+  return POUCH_SLOT_COSTS[currentSlots - POUCH_SLOT_MIN];
+}

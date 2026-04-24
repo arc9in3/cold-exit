@@ -1,0 +1,1674 @@
+import * as THREE from 'three';
+import { tunables } from './tunables.js';
+import { buildRig, initAnim, updateAnim, pokeHit, pokeRecoil, pokeDeath } from './actor_rig.js';
+import { spawnSpeechBubble } from './hud.js';
+import { loadModelClone, fitToRadius } from './gltf_cache.js';
+import { modelForItem } from './model_manifest.js';
+
+// NOTE: Skinned-rig path has been removed from the live code — we're
+// committing to the primitive rig as the shipping art style. The
+// tooling (`tools/rebind_hanging.py`, `tools/retarget_character.md`)
+// and the bridge module (`src/character_model.js`) remain in the
+// tree for reference if we ever revive the pipeline with a proper
+// retargeter, but none of that runs in-game anymore.
+
+// Idle-chatter phrases rolled on a per-enemy cooldown. Kept short
+// enough to read at a glance; mixed terse + narrative for flavor.
+const CHATTER_LINES = [
+  'All quiet.', 'Stay sharp.', 'You hear that?', 'Just the wind.',
+  'Shift change yet?', 'I need a smoke.', 'Anyone on radio?',
+  '*coughs*', 'Boss says keep eyes up.', 'Hate this detail.',
+  'Thought I saw something.', "This place gives me the creeps.",
+  'Relax, rookie.', 'Another long one.', '...', "Can't wait to clock out.",
+];
+
+// Ranged AI with simple flanking. Two roles: 'rusher' (approaches straight
+// along the line to the player) and 'flanker' (approaches while maintaining
+// an angular offset). Aim is intentionally worse than the player's — weapon
+// spread multiplied by `tunables.ai.spreadMultiplier`.
+const STATE = { IDLE: 'idle', ALERTED: 'alerted', FIRING: 'firing', DEAD: 'dead', SLEEP: 'sleep' };
+
+// Per-variant profile overlay. `standard` is baseline; others tweak stats and
+// enable/disable behaviors (burst settle, dash, cover reposition).
+const VARIANT_PROFILES = {
+  standard: {
+    scale: 1.0, hp: 1.0, dmg: 1.0,
+    moveSpeedMult: 1.0, preferredRange: null, rangeTolerance: null,
+    reactionMult: 1.0, settlePause: true,
+    strafe: false, dash: false, coverSeek: false,
+    tint: null,
+  },
+  tank: {
+    // Broad and stout — tall enough to read as "big" but not so tall that
+    // shots fly over a crouched player. scaleY is deliberately modest.
+    scale: 1.6, scaleY: 0.95, hp: 3.0, dmg: 1.4,
+    moveSpeedMult: 0.55, preferredRange: 7, rangeTolerance: 1.5,
+    reactionMult: 1.2, settlePause: false,
+    strafe: false, dash: false, coverSeek: false,
+    tint: 0x3a241a,
+  },
+  dasher: {
+    scale: 0.9, hp: 0.55, dmg: 0.9,
+    moveSpeedMult: 1.85, preferredRange: 15, rangeTolerance: 4,
+    reactionMult: 0.4, settlePause: false,
+    strafe: true, dash: true, coverSeek: false,
+    tint: 0x1f3a4a,
+  },
+  coverSeeker: {
+    scale: 1.0, hp: 1.0, dmg: 1.0,
+    moveSpeedMult: 1.1, preferredRange: 13, rangeTolerance: 3,
+    reactionMult: 0.8, settlePause: true,
+    strafe: false, dash: false, coverSeek: true,
+    tint: 0x2a3a22,
+  },
+  // Runner — close cousin of the dasher at human-normal mobility.
+  // Normal run speed + the dash burst, aggressive strafe, zero settle
+  // pause so they commit to mag-dump bursts instead of trickling shots.
+  // Pairs best with auto weapons (SMG, rifle, LMG) where the sustained
+  // fire reads as an aggressive player-mirror.
+  runner: {
+    scale: 1.0, hp: 0.95, dmg: 0.95,
+    moveSpeedMult: 1.0, preferredRange: 11, rangeTolerance: 3.5,
+    reactionMult: 0.55, settlePause: false,
+    strafe: true, dash: true, coverSeek: false,
+    tint: 0x3a1e4a,
+  },
+  shieldedPistol: {
+    // Partial shield reduces frontal damage until broken. Fills the role of
+    // a tanky pistol rusher who closes while eating chip damage.
+    scale: 1.1, hp: 1.8, dmg: 0.9,
+    moveSpeedMult: 1.15, preferredRange: 6, rangeTolerance: 2,
+    reactionMult: 0.7, settlePause: false,
+    strafe: false, dash: false, coverSeek: false,
+    tint: 0x6a5a3a,
+    shield: 'partial',
+  },
+};
+
+export class GunmanManager {
+  constructor(scene) {
+    this.scene = scene;
+    this.gunmen = [];
+    this._baseBody = new THREE.Color(0x3a2530);
+    this._baseHead = new THREE.Color(0x2a1820);
+    this._hurt = new THREE.Color(0xff4a4a);
+  }
+
+  _pickWeapon() {
+    const ws = tunables.weapons;
+    return ws[Math.floor(Math.random() * ws.length)];
+  }
+
+  // Attach a front shield. `opts.full` = true for the impenetrable melee
+  // variant; otherwise it's the partial pistol-rusher shield.
+  _attachShield(g, opts = {}) {
+    const full = !!opts.full;
+    const w = full ? 1.4 : 1.1;
+    const h = full ? 2.0 : 1.3;
+    const mat = new THREE.MeshStandardMaterial({
+      color: full ? 0x4a6a88 : 0x6a5a3a,
+      roughness: 0.55, metalness: 0.3,
+      emissive: full ? 0x0a1420 : 0x14100a,
+    });
+    const mesh = new THREE.Mesh(new THREE.BoxGeometry(w, h, 0.15), mat);
+    mesh.position.set(0, 1.2, 0.75);
+    mesh.castShadow = true;
+    mesh.userData = { zone: 'shield', owner: g };
+    g.group.add(mesh);
+    g.shield = {
+      mesh,
+      hp: full ? 220 : 80,
+      maxHp: full ? 220 : 80,
+      fullBlock: full,
+    };
+  }
+  _disableShield(g) {
+    if (!g.shield) return;
+    if (g.shield.mesh) {
+      g.group.remove(g.shield.mesh);
+      g.shield.mesh.geometry.dispose();
+      g.shield.mesh.material.dispose();
+    }
+    g.shield = null;
+  }
+
+  spawn(x, z, weapon, opts = {}) {
+    const tier = opts.tier || 'normal';
+    const roomId = opts.roomId ?? -1;
+    const difficultyHp = opts.hpMult || 1;
+    const baseDamageMult = opts.damageMult || 1;
+    const variantId = opts.variant && VARIANT_PROFILES[opts.variant] ? opts.variant : 'standard';
+    // Clone the variant profile so we can overlay boss-tier tactical
+    // traits (strafe + coverSeek) without mutating the shared
+    // VARIANT_PROFILES entry for other enemies.
+    const baseProfile = VARIANT_PROFILES[variantId];
+    const profile = { ...baseProfile };
+    if (tier === 'boss') {
+      // Bosses always strafe while firing and reposition between
+      // bursts so they feel like they're hunting, not lane-fighting.
+      profile.strafe = true;
+      profile.coverSeek = true;
+      // Tighter settle — firing pauses shorter so there's always
+      // pressure, but they still pause to "think" between bursts.
+      profile.reactionMult = Math.min(profile.reactionMult ?? 1, 0.7);
+    }
+    if (tier === 'subBoss') {
+      profile.coverSeek = true;   // mini-bosses weave in and out of cover
+    }
+
+    const tierHp = (tier === 'boss' ? 3.2 : tier === 'subBoss' ? 1.8 : 1);
+    const hpMult = tierHp * profile.hp * difficultyHp;
+    const damageMult = baseDamageMult * profile.dmg;
+    // Tier sizing was ballooning into "giant-robot" territory because
+    // tier×variant compounded (tank=1.6 × boss=1.35 ≈ 2.2×). Clamp the
+    // combined size so bosses read as "noticeably bigger" without
+    // looking comedic.
+    const tierScale = tier === 'boss' ? 1.18 : (tier === 'subBoss' ? 1.08 : 1);
+    const MAX_SCALE = 1.45;
+    const scaleXZ = Math.min(MAX_SCALE, tierScale * profile.scale);
+    const scaleY  = Math.min(MAX_SCALE, tierScale * (profile.scaleY ?? profile.scale));
+
+    const baseBodyHex = profile.tint ?? this._baseBody.getHex();
+    const baseHeadHex = profile.tint ? (profile.tint & 0x555555) : this._baseHead.getHex();
+    const bodyHex = tier === 'boss' ? 0x5a1a1a : (tier === 'subBoss' ? 0x3a1e58 : baseBodyHex);
+    const headHex = tier === 'boss' ? 0x3a0f10 : (tier === 'subBoss' ? 0x22103e : baseHeadHex);
+    // Per-tier gear accent — bosses get bronze kit, sub-bosses red,
+    // variants pick up their profile tint. Makes tier readable at a
+    // glance via the chest-plate / pauldrons / knee-pads alone.
+    const gearHex = tier === 'boss' ? 0x7a5020
+                  : tier === 'subBoss' ? 0x6a1e2a
+                  : (profile.tint ? ((profile.tint & 0xf8f8f8) >> 1) : 0x2a2a30);
+
+    // Jointed rig (shared actor_rig). The rig's root group is what we
+    // position/scale; all hit-zone meshes already carry userData.zone
+    // tags. We grab named parts below so the existing code paths
+    // (hit-flash lerp, disarm visibility, weapon attach) keep working.
+    const rigOpts = {
+      scale: 0.77,          // ~1.85m baseline; outer scaleXZ/scaleY drives actor size
+      bodyColor: bodyHex,
+      headColor: headHex,
+      legColor: 0x231418,
+      armColor: bodyHex,
+      handColor: 0x2a1f1a,
+      gearColor: gearHex,
+      bootColor: 0x0e0a08,
+    };
+    const rig = buildRig(rigOpts);
+    initAnim(rig);
+    const group = rig.group;
+    group.position.set(x, 0, z);
+    group.scale.set(scaleXZ, scaleY, scaleXZ);
+
+    const leftLeg  = rig.leftLeg.thigh.mesh;
+    const rightLeg = rig.rightLeg.thigh.mesh;
+    const torso    = rig.chestMesh;
+    const head     = rig.headMesh;
+    const leftArm  = rig.leftArm.shoulder.mesh;
+    const rightArm = rig.rightArm.shoulder.mesh;
+    const { bodyMat, headMat, legMat } = rig.materials;
+
+    // Visible gear — simple primitive helmet / chest plate cues parented
+    // to the rig's head / chest so they track the animation pose.
+    // Skipped for skinned rigs: the customization kit provides its own
+    // clothing, and the primitive gear cues are sized for the primitive
+    // 1.85m body so they'd float around the skinned model.
+    const gearLevel = opts.gearLevel ?? 0;
+    // Helmet + chest plate cues sized for the slimmer cylindrical
+    // rig. Helmet is a half-sphere sitting just above the head
+    // sphere; chest plate mirrors the rig's own chestPlate bounds.
+    if (tier === 'boss' || Math.random() < 0.35 + gearLevel * 0.08) {
+      const helmet = new THREE.Mesh(
+        new THREE.SphereGeometry(0.17, 14, 8, 0, Math.PI * 2, 0, Math.PI * 0.55),
+        new THREE.MeshStandardMaterial({
+          color: tier === 'boss' ? 0x6a1a1a : 0x3f4a54,
+          roughness: 0.55, metalness: 0.3,
+        }),
+      );
+      helmet.position.y = 0.18;
+      helmet.castShadow = true;
+      rig.head.add(helmet);
+    }
+    if (tier === 'boss' || variantId === 'tank' || Math.random() < 0.28 + gearLevel * 0.08) {
+      // Curved heavy plate sitting OVER the rig's default chestPlate —
+      // open-ended cylinder arc centred on the front, slightly larger
+      // radius than the chest so it stands proud. Matches the new
+      // tapered cylindrical torso instead of a flat slab.
+      const plate = new THREE.Mesh(
+        new THREE.CylinderGeometry(
+          0.32, 0.28,       // match chest taper + stand-off
+          0.4,
+          14, 1,
+          true,
+          -Math.PI / 2.4,   // -75°, centred on +Z front
+          Math.PI / 1.2,    // 150° arc
+        ),
+        new THREE.MeshStandardMaterial({
+          color: tier === 'boss' ? 0x7a2222 : 0x3a4a5c,
+          roughness: 0.6, metalness: 0.35,
+          side: THREE.DoubleSide,
+        }),
+      );
+      plate.position.set(0, 0.24, 0);
+      plate.scale.z = 0.72;         // match rig's torsoDepthRatio
+      plate.castShadow = true;
+      rig.chest.add(plate);
+    }
+
+    const chosen = weapon || this._pickWeapon();
+    const gunMat = new THREE.MeshStandardMaterial({
+      color: 0x111111, roughness: 0.45, metalness: 0.6,
+      emissive: new THREE.Color(chosen.tracerColor).multiplyScalar(0.15),
+    });
+    // Weapon attachment — mirrors player.js setWeapon. Long guns
+    // (rifle / shotgun / lmg / sniper) mount at the dominant shoulder
+    // anchor with the stock at the shoulder and the barrel extending
+    // +Z forward. Pistols / SMGs / flame stay at the wrist.
+    const ws = rig.scale || 1.0;
+    const cls = chosen.class;
+    const isShouldered = cls === 'rifle' || cls === 'shotgun'
+      || cls === 'lmg' || cls === 'sniper';
+    const handPivot = isShouldered ? rig.rightShoulderAnchor : rig.rightArm.wrist;
+
+    const gun = new THREE.Mesh(
+      new THREE.BoxGeometry(chosen.muzzleGirth, chosen.muzzleGirth, chosen.muzzleLength),
+      gunMat,
+    );
+    gun.scale.setScalar(ws);
+    gun.castShadow = true;
+    const muzzle = new THREE.Object3D();
+
+    if (isShouldered) {
+      gun.rotation.set(0, 0, 0);
+      gun.position.set(0, 0, (0.1 + chosen.muzzleLength / 2) * ws);
+      muzzle.position.set(0, 0, (0.1 + chosen.muzzleLength) * ws);
+    } else {
+      gun.rotation.set(Math.PI / 2, 0, 0);
+      gun.position.set(0, -(0.1 + chosen.muzzleLength / 2) * ws, 0);
+      muzzle.position.set(0, -(0.1 + chosen.muzzleLength) * ws, 0);
+    }
+    handPivot.add(gun);
+    handPivot.add(muzzle);
+
+    // FBX model for the enemy's equipped weapon — same load pipeline
+    // as the player. Replaces the placeholder box once ready; failed
+    // loads keep the primitive forever.
+    const weaponModel = new THREE.Group();
+    weaponModel.scale.setScalar(ws);
+    if (isShouldered) weaponModel.rotation.set(0, 0, 0);
+    else              weaponModel.rotation.set(Math.PI / 2, 0, 0);
+    weaponModel.position.copy(gun.position);
+    weaponModel.visible = false;
+    handPivot.add(weaponModel);
+    const modelUrl = modelForItem(chosen);
+    if (modelUrl) {
+      loadModelClone(modelUrl).then((clone) => {
+        if (!clone) return;
+        const CLASS_SCALE = {
+          pistol: 0.45, smg: 0.65, rifle: 0.75, shotgun: 0.75,
+          lmg: 0.75, flame: 0.7, melee: 0.7, sniper: 0.75,
+        };
+        const cs = CLASS_SCALE[chosen.class] ?? 0.7;
+        fitToRadius(clone, chosen.muzzleLength * cs);
+        const r = chosen.modelRotation;
+        if (r) clone.rotation.set(r.x || 0, r.y || 0, r.z || 0);
+        else   clone.rotation.set(0, Math.PI / 2, 0);
+        clone.position.set(0, 0, 0);
+        weaponModel.add(clone);
+        weaponModel.visible = true;
+        gun.visible = false;
+      }).catch(() => {});
+    }
+
+    const alertMat = new THREE.MeshBasicMaterial({
+      color: 0xff3030, transparent: true, opacity: 0, depthTest: false,
+    });
+    const alert = new THREE.Mesh(new THREE.ConeGeometry(0.15, 0.3, 8), alertMat);
+    alert.position.y = 2.45;
+    alert.rotation.x = Math.PI;
+    alert.renderOrder = 2;
+    group.add(alert);
+
+    this.scene.add(group);
+
+    const role = Math.random() < tunables.ai.flankChance ? 'flanker' : 'rusher';
+    // Flankers pick a signed angular offset so some circle left, some right.
+    const flankAngle = role === 'flanker'
+      ? (Math.random() < 0.5 ? -1 : 1) * (Math.PI / 180) * (45 + Math.random() * 35)
+      : 0;
+
+    const g = {
+      group, leftLeg, rightLeg, torso, head, leftArm, rightArm, gun, muzzle,
+      alert, alertMat, bodyMat, headMat, legMat,
+      rig,
+      rightArmGroup: rig.rightArm.shoulder.pivot,
+      weapon: chosen,
+      disarmed: false,
+      tier,
+      roomId,
+      damageMult,
+      variant: variantId,
+      profile,
+      hp: tunables.ai.maxHealth * hpMult,
+      maxHp: tunables.ai.maxHealth * hpMult,
+      alive: true,
+      state: STATE.IDLE,
+      role,
+      flankAngle,
+      strafeDir: Math.random() < 0.5 ? -1 : 1,
+      strafeSwitchT: 0.5 + Math.random() * 0.7,
+      dashCdT: 1.5 + Math.random(),
+      dashT: 0, dashVx: 0, dashVz: 0,
+      repositionT: 0, repositionDirX: 0, repositionDirZ: 0,
+      flashT: 0, deathT: 0,
+      reactionT: 0, loseTargetT: 0,
+      fireT: 0, burstLeft: 0,
+      slowT: 0,
+      knockVel: new THREE.Vector3(),
+      burnT: 0,
+      surpriseT: 0,   // brief freeze after a throwable detonation; see main.js
+      blindT: 0,
+      dazzleT: 0,
+      patrolT: 1 + Math.random() * 2,
+      patrolTargetX: x, patrolTargetZ: z,
+      homeX: x, homeZ: z,
+      // Suspicion meter — accumulates on partial detection (edge of
+      // view cone, long range, stealth-reduced signal) and drains when
+      // LoS drops. Binary cone test used to mean "sneaking behind a
+      // patrolling guard was impossible if you ever crossed their
+      // view"; with the meter you can cross briefly and sneak away
+      // before it crests the aggro threshold (1.0).
+      suspicion: 0,
+      // Sleep system — idle enemies can nod off after a while, and
+      // wake from shot noise or a close presence. Hits connecting on
+      // a sleeping enemy are guaranteed crits (see applyHit).
+      sleepCheckT: 6 + Math.random() * 10,   // next "should I nap?" roll
+      // Per-actor chatter cooldown + seat at a shared conversation
+      // line in main.js. Initialised lazily.
+      chatterT: 4 + Math.random() * 8,
+      // Stuck detection — records last world position + time since the
+      // enemy last moved meaningfully. Main loop retargets on timeout.
+      stuckX: x, stuckZ: z, stuckT: 0,
+      // Major-boss flags (drives HP bar, loot tier, archetype AI).
+      majorBoss: !!opts.majorBoss,
+      archetype: opts.archetype || null,
+      // Per-archetype state scratch.
+      archT: 0,                           // general-purpose archetype timer
+      archEvadeDir: Math.random() < 0.5 ? -1 : 1,
+      archMagSize: 0, archMagLeft: 0,
+      archReloadT: 0,
+      archVolleyT: 0,
+      assassinPhase: 'closing',
+      assassinDmgTaken: 0,
+    };
+    g.manager = this;
+    // Every rig mesh carries an owner pointer so raycasts resolve back
+    // to the gunman record regardless of which part took the hit.
+    if (rig) for (const m of rig.meshes) m.userData.owner = g;
+    leftLeg.userData.owner = g;
+    rightLeg.userData.owner = g;
+    torso.userData.owner = g;
+    head.userData.owner = g;
+    leftArm.userData.owner = g;
+    rightArm.userData.owner = g;
+
+    if (profile.shield === 'partial') this._attachShield(g, { full: false });
+
+    this.gunmen.push(g);
+    return g;
+  }
+
+  removeAll() {
+    // Traverse each gunman's group and dispose GPU resources so level
+    // regenerations don't leak geometry/materials.
+    for (const g of this.gunmen) {
+      g.group.traverse((obj) => {
+        if (obj.geometry) obj.geometry.dispose();
+        if (obj.material) {
+          if (Array.isArray(obj.material)) obj.material.forEach(m => m.dispose());
+          else obj.material.dispose();
+        }
+      });
+      this.scene.remove(g.group);
+    }
+    this.gunmen = [];
+  }
+
+  hittables() {
+    const out = [];
+    for (const g of this.gunmen) {
+      if (!g.alive) continue;
+      // Every rig mesh carries a zone tag and (since spawn) an owner
+      // pointer, so we can hand the whole list to the raycaster.
+      // Right-arm chain is filtered when the enemy is disarmed.
+      if (g.rig) {
+        // Include every right-arm-chain sub-mesh (segments, joint
+        // spheres, pad, cuff) so disarm filtering hides the whole
+        // arm cleanly instead of leaving floating joint spheres.
+        const leftArmMeshes = new Set([
+          g.rig.leftArm.shoulder.mesh,
+          g.rig.leftArm.shoulderBulge,
+          g.rig.leftArm.shoulderPad,
+          g.rig.leftArm.forearm.mesh,
+          g.rig.leftArm.elbowBulge,
+          g.rig.leftArm.wristCuff,
+          g.rig.leftArm.hand.mesh,
+        ]);
+        const rightArmMeshes = new Set([
+          g.rig.rightArm.shoulder.mesh,
+          g.rig.rightArm.shoulderBulge,
+          g.rig.rightArm.shoulderPad,
+          g.rig.rightArm.forearm.mesh,
+          g.rig.rightArm.elbowBulge,
+          g.rig.rightArm.wristCuff,
+          g.rig.rightArm.hand.mesh,
+        ]);
+        for (const m of g.rig.meshes) {
+          if (g.disarmed && rightArmMeshes.has(m)) continue;
+          out.push(m);
+        }
+      }
+      if (g.shield && g.shield.hp > 0) out.push(g.shield.mesh);
+    }
+    return out;
+  }
+
+  applyHit(g, damage, zone, hitDir, opts = {}) {
+    const drops = [];
+    if (!g.alive) return { drops, blocked: false };
+
+    // Shield absorption — frontal hits + any bullet that lands on the
+    // shield mesh itself get soaked until the shield breaks. Shotgun slugs
+    // and melee swipes destroy the shield outright.
+    if (g.shield && g.shield.hp > 0 && (zone === 'shield' || hitDir)) {
+      const fx = Math.sin(g.group.rotation.y), fz = Math.cos(g.group.rotation.y);
+      const frontDot = hitDir ? -hitDir.x * fx - hitDir.z * fz : 1;
+      if (zone === 'shield' || frontDot > 0.2) {
+        const wClass = opts.weaponClass;
+        const shieldBreaker = wClass === 'shotgun' || wClass === 'melee';
+        if (shieldBreaker) {
+          g.shield.hp = 0;
+          this._disableShield(g);
+          return { drops, blocked: false, shieldBroke: true };
+        }
+        // Partial shield lets some damage bleed through.
+        const reductionPct = g.shield.fullBlock ? 1.0 : 0.6;
+        const absorbed = damage * reductionPct;
+        g.shield.hp -= absorbed;
+        damage -= absorbed;
+        if (g.shield.hp <= 0) this._disableShield(g);
+        if (damage <= 0) {
+          g.flashT = tunables.enemy.hitFlashTime;
+          if (g.state === STATE.IDLE) g.state = STATE.ALERTED;
+          return { drops, blocked: g.shield === null, shieldHit: true };
+        }
+      }
+    }
+
+    // Sleep-crit — any hit that lands on a sleeping enemy deals
+    // double damage and then wakes them. Rewards stealth approaches
+    // on a nodded-off patrol.
+    if (g.state === STATE.SLEEP) {
+      damage *= 2.0;
+      g.group.rotation.x = 0;
+    }
+    g.hp -= damage;
+    g.flashT = tunables.enemy.hitFlashTime;
+    if (g.state === STATE.IDLE || g.state === STATE.SLEEP) g.state = STATE.ALERTED;
+    g.loseTargetT = tunables.ai.loseTargetTime;
+    // Boss phase-2 transition — when a boss crosses 50% HP, rev
+    // their tactical profile: faster movement, shorter settle, more
+    // dashes. One-shot so it only fires once per boss.
+    if (g.tier === 'boss' && !g.phase2 && g.hp <= g.maxHp * 0.5) {
+      g.phase2 = true;
+      g.profile.moveSpeedMult *= 1.25;
+      g.profile.reactionMult *= 0.65;
+      g.profile.dash = true;      // enable dashes if they weren't already
+      g.reactionT = 0;
+      g.aiSettleT = 0;
+    }
+    // Hand the hit to the animation layer so the body flinches in the
+    // direction of the impact. Magnitude scales with damage relative to
+    // max HP so heavy hits rotate further than chip damage. Melee hits
+    // get a ~1.7× bump so a sword/fist reads as a visible stagger
+    // rather than the small bullet-flinch reaction.
+    const isMelee = opts.weaponClass === 'melee';
+    let hitMag = Math.max(0.3, Math.min(1.5, damage / Math.max(1, g.maxHp * 0.25)));
+    if (isMelee) hitMag = Math.min(2.5, hitMag * 1.7);
+    if (hitDir && g.rig) pokeHit(g.rig, hitDir.x, hitDir.z, hitMag);
+    if (hitDir) {
+      // Melee hits carry bigger positional push — 3× the bullet nudge —
+      // and pause the enemy's AI for a short stagger so the player gets
+      // a clean follow-up window.
+      const knockScale = isMelee ? 0.45 : 0.15;
+      g.group.position.x += hitDir.x * tunables.enemy.knockback * knockScale;
+      g.group.position.z += hitDir.z * tunables.enemy.knockback * knockScale;
+      if (isMelee) {
+        g.staggerT = Math.max(g.staggerT || 0, 0.4);
+      }
+    }
+    if (zone === 'legs') {
+      g.slowT = tunables.zones.legs.slowDuration;
+    } else if (zone === 'arm' && !g.disarmed && g.weapon
+      && Math.random() <= tunables.zones.arm.disarmChance
+        * (g.tier === 'boss' ? 0.10 : g.tier === 'subBoss' ? 0.20 : 1)) {
+      // Boss disarm is rare — the fight loses its teeth the moment
+      // the boss is weaponless, so we gate the roll hard. 10× harder
+      // for bosses, 5× for sub-bosses; grunts unchanged.
+      drops.push({ weapon: g.weapon, position: g.group.position.clone() });
+      g.disarmed = true;
+      // Hide the whole right-arm chain (upper arm + forearm + hand) by
+      // toggling the shoulder pivot group, not just the upper-arm mesh.
+      if (g.rightArmGroup) g.rightArmGroup.visible = false;
+      else g.rightArm.visible = false;
+      g.gun.visible = false;
+      g.weapon = null;
+      g.burstLeft = 0;
+      g.fireT = 0.8;
+      // Boss / sub-boss disarm reaction — flee briefly, then look
+      // for a replacement gun, else charge and melee. See the
+      // disarm-AI block in _updateRanged below.
+      if (g.tier === 'boss' || g.tier === 'subBoss') {
+        g.disarmedPhase = 'flee';
+        g.disarmedPhaseT = 1.2 + Math.random() * 0.6;
+      }
+    }
+    if (g.hp <= 0) {
+      g.alive = false;
+      g.state = STATE.DEAD;
+      g.deathT = 0;
+      // Seed the death-fall impulse for the animation layer — same
+      // direction as the killing blow, heavier damage = further rotation.
+      if (g.rig && hitDir) {
+        const deathMag = Math.max(0.6, Math.min(3.0, damage / Math.max(1, g.maxHp * 0.3)));
+        pokeDeath(g.rig, hitDir.x, hitDir.z, deathMag);
+      }
+      // Seed a brief ragdoll-lite physics pass: the body drifts in the
+      // hit direction, falls under gravity, and tests XZ collision
+      // against the same blockers the AI used. When it comes to rest
+      // the physics flag flips off and the rig holds its final pose.
+      g.deathPhys = {
+        vx: (hitDir?.x || 0) * 3.2,
+        vy: 2.6 + Math.random() * 0.8,
+        vz: (hitDir?.z || 0) * 3.2,
+        settled: false,
+        settleT: 0,
+      };
+      // Weapon stays on the body for looting (see main.onEnemyKilled).
+    }
+    return { drops, blocked: false };
+  }
+
+  applyKnockback(g, impulse) {
+    g.knockVel.x += impulse.x;
+    g.knockVel.z += impulse.z;
+  }
+
+  update(ctx) {
+    const dt = ctx.dt;
+    for (const g of this.gunmen) {
+      if (g.flashT > 0) {
+        g.flashT = Math.max(0, g.flashT - dt);
+        const k = g.flashT / tunables.enemy.hitFlashTime;
+        g.bodyMat.color.copy(this._baseBody).lerp(this._hurt, k);
+        g.headMat.color.copy(this._baseHead).lerp(this._hurt, k);
+      }
+      g.slowT = Math.max(0, g.slowT - dt);
+      g.blindT = Math.max(0, (g.blindT || 0) - dt);
+      g.dazzleT = Math.max(0, (g.dazzleT || 0) - dt);
+      g.aiSettleT = Math.max(0, (g.aiSettleT || 0) - dt);
+
+      // Burn DoT (flamethrower etc.).
+      if (g.burnT > 0 && g.alive) {
+        g.burnT = Math.max(0, g.burnT - dt);
+        const tickDmg = tunables.burn.dps * dt;
+        g.hp -= tickDmg;
+        ctx.onBurnDamage?.(g, tickDmg);
+        if (g.hp <= 0) {
+          g.alive = false;
+          g.state = STATE.DEAD;
+          g.deathT = 0;
+          if (!g.disarmed && g.weapon && ctx.onBurnKill) ctx.onBurnKill(g);
+        }
+      }
+
+      // Knockback decay + collision-aware application.
+      if (g.knockVel.lengthSq() > 0.001) {
+        const nx = g.group.position.x + g.knockVel.x * dt;
+        const nz = g.group.position.z + g.knockVel.z * dt;
+        const res = ctx.resolveCollision(g.group.position.x, g.group.position.z, nx, nz, tunables.ai.collisionRadius);
+        g.group.position.x = res.x;
+        g.group.position.z = res.z;
+        g.knockVel.multiplyScalar(Math.max(0, 1 - 10 * dt));
+      }
+
+      if (!g.alive) {
+        g.deathT += dt;
+        g.alertMat.opacity = 0;
+        // Ragdoll-lite physics for the first fraction of a second:
+        // gravity pulls the body down, hit-direction drift scoots it
+        // off the kill spot, and the shared collision resolver stops
+        // it against walls / props. Once the vertical velocity is
+        // small and the body is on the ground, flag settled so the
+        // rig stops updating and holds its final pose.
+        const dp = g.deathPhys;
+        if (dp && !dp.settled) {
+          dp.vy -= 18 * dt;          // gravity
+          // Drag — slight horizontal damping each frame so the slide
+          // decays into a rest rather than continuing forever.
+          const drag = 1 - Math.min(1, 3.5 * dt);
+          dp.vx *= drag; dp.vz *= drag;
+          const nx = g.group.position.x + dp.vx * dt;
+          const nz = g.group.position.z + dp.vz * dt;
+          const res = ctx.resolveCollision
+            ? ctx.resolveCollision(g.group.position.x, g.group.position.z, nx, nz, tunables.ai.collisionRadius)
+            : { x: nx, z: nz };
+          g.group.position.x = res.x;
+          g.group.position.z = res.z;
+          g.group.position.y = Math.max(0, g.group.position.y + dp.vy * dt);
+          if (g.group.position.y <= 0) {
+            g.group.position.y = 0;
+            dp.vy = 0;
+            // Ground contact drags XZ velocity harder — friction.
+            dp.vx *= 0.4; dp.vz *= 0.4;
+            dp.settleT += dt;
+            const horiz = Math.hypot(dp.vx, dp.vz);
+            if (horiz < 0.3 && dp.settleT > 0.15) dp.settled = true;
+          }
+        }
+        // The rig's death-fall overrides body rotation based on the
+        // directional impulse poked in applyHit. No manual tipping here.
+        if (g.rig) updateAnim(g.rig, { dying: true }, dt);
+        // No respawn — bodies persist for looting.
+        continue;
+      }
+
+      if (!tunables.ai.active) {
+        g.state = STATE.IDLE;
+        g.alertMat.opacity = THREE.MathUtils.lerp(g.alertMat.opacity, 0, Math.min(1, dt * 10));
+        if (g.rig) updateAnim(g.rig, { speed: 0 }, dt);
+        continue;
+      }
+
+      // Melee-hit stagger — pause decision-making while the rig's
+      // hit-flinch plays out.
+      if ((g.staggerT || 0) > 0) {
+        g.staggerT = Math.max(0, g.staggerT - dt);
+        if (g.rig) {
+          updateAnim(g.rig, { speed: 0, aiming: false, aimYaw: 0, aimPitch: 0 }, dt);
+        }
+        continue;
+      }
+
+      this._updateRanged(g, ctx, dt);
+
+      // Procedural animation layer — pose the limbs on top of whatever
+      // position/yaw _updateRanged just resolved. Speed is derived from
+      // the frame delta so we don't need the AI to explicitly report it.
+      if (g.rig) {
+        const lastX = g._animLastX ?? g.group.position.x;
+        const lastZ = g._animLastZ ?? g.group.position.z;
+        const dx = g.group.position.x - lastX;
+        const dz = g.group.position.z - lastZ;
+        const speed = dt > 0 ? Math.hypot(dx, dz) / dt : 0;
+        g._animLastX = g.group.position.x;
+        g._animLastZ = g.group.position.z;
+        const aiming = g.state === STATE.ALERTED || g.state === STATE.FIRING;
+        const wcls = g.weapon?.class;
+        const rifleHold = wcls === 'rifle' || wcls === 'shotgun'
+          || wcls === 'lmg' || wcls === 'sniper';
+        updateAnim(g.rig, {
+          speed,
+          aiming,
+          sleeping: g.state === STATE.SLEEP,
+          rifleHold,
+          aimYaw: 0, aimPitch: 0,
+        }, dt);
+      }
+    }
+  }
+
+  _respawn(g) {
+    g.alive = true;
+    g.hp = tunables.ai.maxHealth;
+    g.deathT = 0;
+    g.group.rotation.x = 0;
+    g.group.position.set(g.homeX, 0, g.homeZ);
+    g.state = STATE.IDLE;
+    g.reactionT = 0;
+    g.loseTargetT = 0;
+    g.fireT = 0;
+    g.burstLeft = 0;
+    g.slowT = 0;
+    g.knockVel.set(0, 0, 0);
+    g.weapon = this._pickWeapon();
+    g.disarmed = false;
+    if (g.rightArmGroup) g.rightArmGroup.visible = true;
+    else g.rightArm.visible = true;
+    g.gun.visible = true;
+    g.gun.geometry.dispose();
+    g.gun.geometry = new THREE.BoxGeometry(
+      g.weapon.muzzleGirth, g.weapon.muzzleGirth, g.weapon.muzzleLength,
+    );
+    g.gun.position.z = 0.5 + g.weapon.muzzleLength / 2;
+    g.muzzle.position.z = 0.5 + g.weapon.muzzleLength;
+    g.gun.material.emissive.copy(new THREE.Color(g.weapon.tracerColor)).multiplyScalar(0.15);
+  }
+
+  _updateRanged(g, ctx, dt) {
+    // Panic — dragonbreath / other ignite-on-hit weapons mark normal
+    // enemies as `panicT > 0`. They flail + run in random directions
+    // and can't attack until the timer drains (they typically die
+    // to the burn DoT before it does). Bosses ignore panic.
+    if ((g.panicT || 0) > 0) {
+      g.panicT -= dt;
+      if (!g.panicDir || Math.random() < 0.04) {
+        const a = Math.random() * Math.PI * 2;
+        g.panicDir = { x: Math.cos(a), z: Math.sin(a) };
+      }
+      const step = tunables.ai.moveSpeed * 1.35 * dt;
+      const res = ctx.resolveCollision(
+        g.group.position.x, g.group.position.z,
+        g.group.position.x + g.panicDir.x * step,
+        g.group.position.z + g.panicDir.z * step,
+        tunables.ai.collisionRadius,
+      );
+      if (res.x === g.group.position.x && res.z === g.group.position.z) {
+        // Hit a wall — pick a fresh direction next frame.
+        g.panicDir = null;
+      }
+      g.group.position.x = res.x;
+      g.group.position.z = res.z;
+      g.group.rotation.y = Math.atan2(g.panicDir?.x || 0, g.panicDir?.z || 1);
+      return;
+    }
+    // Sleep dart — force the enemy into SLEEP immediately.
+    if (g.forceSleep && g.state !== STATE.SLEEP) {
+      g.state = STATE.SLEEP;
+      g.forceSleep = false;
+      g.zzzT = 0;
+    }
+
+    const eye = g.torso.getWorldPosition(new THREE.Vector3());
+    // Lower aim when the player is crouched — body scales to ~55%, so the
+    // torso sits around y ≈ 0.7. Standing body center ≈ 1.0.
+    const aimY = ctx.playerCrouched ? 0.65 : 1.0;
+    const target = ctx.playerPos.clone(); target.y = aimY;
+    const toPlayer = new THREE.Vector3().subVectors(target, eye);
+    const dist = Math.hypot(toPlayer.x, toPlayer.z);
+    const dir2d = new THREE.Vector3(toPlayer.x, 0, toPlayer.z);
+    if (dir2d.lengthSq() > 0.0001) dir2d.normalize();
+
+    // Door-state gating was removed with the keycard redesign —
+    // doors are open by default now, so detection runs purely on
+    // LoS + suspicion + shot-noise below.
+    const roomActive = true;
+
+    // Stealth multiplier only gates *initial* detection while idle. Once
+    // alerted, the enemy keeps aggro as long as LoS holds — with the
+    // caveat that they can't see through the back of their own head.
+    const hasLos = roomActive
+      && ctx.combat.hasLineOfSight(eye, target, ctx.obstacles);
+    const fwd = new THREE.Vector3(Math.sin(g.group.rotation.y), 0, Math.cos(g.group.rotation.y));
+    const facingDot = fwd.dot(dir2d);
+    // Player is in the rear ~90° cone (45° each side of directly-behind).
+    // Rear blindspot widened — facingDot < -0.4 is roughly anything
+    // more than 115° off the enemy's forward, which reads to the
+    // player as "clearly behind me". Prior -0.7 required nearly dead-
+    // behind and let side-rear sneak attempts still trigger aggro.
+    const inRearBlindspot = facingDot < -0.4;
+
+    // --- suspicion ramp -----------------------------------------------
+    // Compute the raw detection signal this frame: 0 when the enemy
+    // absolutely cannot see the player, 1 when the player is dead-
+    // center in the cone at close range with no stealth penalty.
+    // Suspicion lerps toward the signal (fast up, slow down) so a
+    // brief peek across the view cone doesn't instantly trigger
+    // aggro — the player has a window to break LoS and decay it back.
+    const stealthMult = ctx.playerStealthMult || 1;
+    const baseRange = tunables.ai.detectionRange * stealthMult;
+    const cosHalfCone = Math.cos((tunables.ai.detectionAngleDeg * Math.PI / 180) * 0.5);
+    // Point-blank presence: if the player is within arm's reach with a
+    // clear sight line AND isn't directly behind, the enemy notices
+    // regardless of stealth or cone falloff. Still respects the rear
+    // blindspot so a proper sneak-up from behind is rewarded.
+    const proximity = hasLos && !inRearBlindspot && dist < tunables.ai.proximityRange;
+    let signal = 0;
+    if (proximity) {
+      signal = 1;
+    } else if (hasLos && !inRearBlindspot) {
+      // Distance factor: full at center, fades out past 1.5× range.
+      const maxRange = baseRange * 1.5;
+      const distK = Math.max(0, 1 - dist / maxRange);
+      // Cone factor: full at facing dead-on, fades at cone edge, 0 at
+      // side. Allows peripheral noticing rather than a hard 0/1 cone.
+      const coneSpan = 1 - cosHalfCone;
+      const coneK = coneSpan > 0
+        ? Math.max(0, (facingDot - cosHalfCone + coneSpan * 0.6) / (coneSpan * 1.6))
+        : (facingDot >= cosHalfCone ? 1 : 0);
+      signal = Math.min(1, distK * coneK);
+    }
+    // Alerted enemies keep saturating suspicion so they don't relax
+    // while they still have LoS; idle enemies accept the raw signal.
+    const suspTarget = g.state !== STATE.IDLE && hasLos && !inRearBlindspot
+      ? 1 : signal;
+    const rampRate = suspTarget > g.suspicion ? 1.8 : 0.35;  // up fast, down slow
+    g.suspicion += Math.sign(suspTarget - g.suspicion)
+      * Math.min(Math.abs(suspTarget - g.suspicion), rampRate * dt);
+    g.suspicion = Math.max(0, Math.min(1.2, g.suspicion));  // tiny headroom
+
+    // canSee fires only when suspicion crests full detection. Anything
+    // below is pre-aggro — patrol keeps running, but the enemy may
+    // rotate toward the player's last-seen direction (see below).
+    let canSee = false;
+    if (g.state !== STATE.IDLE) {
+      canSee = hasLos && !inRearBlindspot && dist <= tunables.ai.detectionRange * 2;
+    } else if (g.suspicion >= 1.0) {
+      canSee = true;
+    }
+    // Chatter — idle enemies occasionally mutter to themselves. Uses
+    // a per-enemy cooldown so squads don't all speak at once, and
+    // skips entirely when canSee to keep the combat beat clean.
+    if (g.state === STATE.IDLE && ctx.camera) {
+      g.chatterT -= dt;
+      if (g.chatterT <= 0) {
+        g.chatterT = 9 + Math.random() * 14;
+        if (Math.random() < 0.55) {
+          const head = g.rig ? g.rig.head.getWorldPosition(new THREE.Vector3())
+                             : g.group.position.clone().setY(2);
+          head.y += 0.5;
+          const line = CHATTER_LINES[Math.floor(Math.random() * CHATTER_LINES.length)];
+          spawnSpeechBubble(head, ctx.camera, line, 2.4);
+        }
+      }
+    }
+
+    // Disarmed-boss behavior — bosses & sub-bosses who've lost their
+    // gun flee briefly, then look for a dropped weapon to pick up.
+    // If nothing's nearby they charge the player and swing for a
+    // short melee attack. Normal grunts don't get this logic (they
+    // just stay disarmed + run).
+    if (g.disarmed && (g.tier === 'boss' || g.tier === 'subBoss') && g.alive) {
+      g.disarmedPhaseT = Math.max(0, (g.disarmedPhaseT || 0) - dt);
+      const bossSpeed = tunables.ai.moveSpeed * g.profile.moveSpeedMult
+        * (g.tier === 'boss' ? 1.35 : 1.15);
+      // Phase 1 — flee straight away from the player.
+      if (g.disarmedPhase === 'flee') {
+        const fdx = g.group.position.x - ctx.playerPos.x;
+        const fdz = g.group.position.z - ctx.playerPos.z;
+        const fd = Math.hypot(fdx, fdz) || 1;
+        const step = bossSpeed * 1.2 * dt;
+        const res = ctx.resolveCollision(
+          g.group.position.x, g.group.position.z,
+          g.group.position.x + (fdx / fd) * step,
+          g.group.position.z + (fdz / fd) * step,
+          tunables.ai.collisionRadius,
+        );
+        g.group.position.x = res.x;
+        g.group.position.z = res.z;
+        g.group.rotation.y = Math.atan2(fdx / fd, fdz / fd);
+        if (g.disarmedPhaseT <= 0) {
+          // Decide fetch or rush based on what's around.
+          let pickup = null;
+          if (ctx.loot && ctx.loot.items) {
+            let bestD = 15;
+            for (const lt of ctx.loot.items) {
+              const w = lt.item;
+              if (!w || w.type !== 'ranged') continue;
+              const dx = lt.group.position.x - g.group.position.x;
+              const dz = lt.group.position.z - g.group.position.z;
+              const d = Math.hypot(dx, dz);
+              if (d < bestD) { bestD = d; pickup = lt; }
+            }
+          }
+          g.disarmedPhase = pickup ? 'fetch' : 'rush';
+          g.disarmedTarget = pickup;
+          g.disarmedPhaseT = pickup ? 6 : 4;
+          if (ctx.camera && g.rig) {
+            const head = g.rig.head.getWorldPosition(new THREE.Vector3());
+            head.y += 0.6;
+            const line = pickup ? 'Pick it up!' : 'Get over here!';
+            spawnSpeechBubble(head, ctx.camera, line, 2.0);
+          }
+        }
+      }
+      // Phase 2a — fetch a dropped gun. Walk to it, then re-arm.
+      else if (g.disarmedPhase === 'fetch' && g.disarmedTarget) {
+        const target = g.disarmedTarget;
+        if (!target.group || !ctx.loot.items.includes(target)) {
+          // Someone else grabbed the pickup — escalate to rush.
+          g.disarmedPhase = 'rush';
+          g.disarmedPhaseT = 4;
+        } else {
+          const tdx = target.group.position.x - g.group.position.x;
+          const tdz = target.group.position.z - g.group.position.z;
+          const td = Math.hypot(tdx, tdz);
+          if (td < 1.3) {
+            // Re-arm: adopt the weapon, destroy the ground loot,
+            // restore visibility + chatter a quip.
+            g.weapon = target.item;
+            g.disarmed = false;
+            if (g.rightArmGroup) g.rightArmGroup.visible = true;
+            else if (g.rightArm) g.rightArm.visible = true;
+            if (g.gun) g.gun.visible = true;
+            g.aiMagLeft = g.weapon?.magSize || 30;
+            g.aiReloadT = 0;
+            ctx.loot.remove?.(target);
+            g.disarmedPhase = null;
+            g.disarmedTarget = null;
+            if (ctx.camera && g.rig) {
+              const head = g.rig.head.getWorldPosition(new THREE.Vector3());
+              head.y += 0.6;
+              spawnSpeechBubble(head, ctx.camera, 'Now you die.', 2.0);
+            }
+          } else if (td > 0.1) {
+            const step = bossSpeed * 1.1 * dt;
+            const res = ctx.resolveCollision(
+              g.group.position.x, g.group.position.z,
+              g.group.position.x + (tdx / td) * step,
+              g.group.position.z + (tdz / td) * step,
+              tunables.ai.collisionRadius,
+            );
+            g.group.position.x = res.x;
+            g.group.position.z = res.z;
+            g.group.rotation.y = Math.atan2(tdx / td, tdz / td);
+          }
+          // If the fetch path expires (target unreachable), drop to rush.
+          if (g.disarmedPhaseT <= 0) {
+            g.disarmedPhase = 'rush';
+            g.disarmedPhaseT = 4;
+          }
+        }
+      }
+      // Phase 2b — melee rush. Charge the player; punch on contact.
+      else if (g.disarmedPhase === 'rush') {
+        const pdx = ctx.playerPos.x - g.group.position.x;
+        const pdz = ctx.playerPos.z - g.group.position.z;
+        const pd = Math.hypot(pdx, pdz) || 1;
+        const step = bossSpeed * 1.35 * dt;    // faster when unarmed
+        const res = ctx.resolveCollision(
+          g.group.position.x, g.group.position.z,
+          g.group.position.x + (pdx / pd) * step,
+          g.group.position.z + (pdz / pd) * step,
+          tunables.ai.collisionRadius,
+        );
+        g.group.position.x = res.x;
+        g.group.position.z = res.z;
+        g.group.rotation.y = Math.atan2(pdx / pd, pdz / pd);
+        // Melee swing on contact, then internal cooldown.
+        g.disarmedSwingT = Math.max(0, (g.disarmedSwingT || 0) - dt);
+        if (pd < 1.6 && g.disarmedSwingT <= 0 && ctx.onMeleePlayer) {
+          const meleeDmg = 18 * g.damageMult;
+          ctx.onMeleePlayer(meleeDmg);
+          g.disarmedSwingT = 0.9;   // punch cadence
+        }
+      }
+      // Skip all other AI branches while handling disarm.
+      return;
+    }
+
+    // Sleep — idle enemies occasionally nod off. Wakes on any
+    // aggro signal (canSee, suspicion crest, or a nearby shot which
+    // main.js routes through the usual alert()). Sleeping enemies
+    // tip over slightly (rotation.x) so the silhouette reads as
+    // "down" even with the rig static.
+    if (g.state === STATE.IDLE) {
+      g.sleepCheckT = (g.sleepCheckT || 0) - dt;
+      if (g.sleepCheckT <= 0) {
+        g.sleepCheckT = 5 + Math.random() * 8;
+        if (Math.random() < 0.10 && g.suspicion < 0.1) {
+          g.state = STATE.SLEEP;
+          g.zzzT = 0;                    // kick first Zzz on next update
+        }
+      }
+    }
+    if (g.state === STATE.SLEEP) {
+      // Near-proximity wake: player inside ~3m or suspicion climbing.
+      const ddx = ctx.playerPos.x - g.group.position.x;
+      const ddz = ctx.playerPos.z - g.group.position.z;
+      const proximitySq = ddx * ddx + ddz * ddz;
+      if (proximitySq < 9 || g.suspicion > 0.2 || hasLos) {
+        g.state = STATE.ALERTED;
+        g.reactionT = tunables.ai.reactionTime * 1.4;  // groggy
+        ctx.onAlert?.(g);
+      }
+      // Zzz emitter — one letter every ~1.3s while sleeping. Random
+      // case + extra z's so the effect feels handmade, not ticking.
+      g.zzzT = (g.zzzT || 0) - dt;
+      if (g.zzzT <= 0 && ctx.camera) {
+        g.zzzT = 1.1 + Math.random() * 0.8;
+        const head = g.rig ? g.rig.head.getWorldPosition(new THREE.Vector3())
+                           : g.group.position.clone().setY(2);
+        head.y += 0.4;
+        head.x += (Math.random() - 0.5) * 0.25;
+        const zs = Math.random() < 0.3 ? 'ZZZ' : Math.random() < 0.5 ? 'zz' : 'z';
+        spawnSpeechBubble(head, ctx.camera, zs, 1.6);
+      }
+      // Don't run any other AI logic while asleep.
+      return;
+    }
+
+    // While suspicious but not yet aggroed, turn the head toward the
+    // player — visible "wait, did I see something?" tell without
+    // committing to a chase.
+    if (!canSee && g.state === STATE.IDLE && g.suspicion > 0.25 && dir2d.lengthSq() > 0) {
+      const lookYaw = Math.atan2(dir2d.x, dir2d.z);
+      const curYaw = g.group.rotation.y;
+      // Smoothly rotate toward the player over a few frames.
+      let delta = lookYaw - curYaw;
+      while (delta > Math.PI) delta -= Math.PI * 2;
+      while (delta < -Math.PI) delta += Math.PI * 2;
+      g.group.rotation.y += delta * Math.min(1, dt * 3);
+    }
+
+    // Boss aggression overlay — bosses react faster and push closer.
+    const bossAggro = g.tier === 'boss' ? 0.5 : (g.tier === 'subBoss' ? 0.75 : 1);
+    const reactionT = tunables.ai.reactionTime * g.profile.reactionMult * bossAggro;
+    const preferredRange = (g.profile.preferredRange ?? tunables.ai.preferredRange)
+      * (g.tier === 'boss' ? 0.75 : 1);
+    const rangeTolerance = g.profile.rangeTolerance ?? tunables.ai.rangeTolerance;
+    const moveSpeed = tunables.ai.moveSpeed * g.profile.moveSpeedMult
+      * (g.tier === 'boss' ? 1.35 : g.tier === 'subBoss' ? 1.15 : 1);
+
+    if (canSee) {
+      if (g.state === STATE.IDLE) {
+        g.state = STATE.ALERTED;
+        g.reactionT = reactionT;
+        ctx.onAlert?.(g);
+      }
+      g.loseTargetT = tunables.ai.loseTargetTime;
+    } else if (g.state === STATE.IDLE) {
+      // Patrol: wander within a small radius of the spawn point,
+      // OR (25% of rolls) drift into an adjacent room so the squad
+      // doesn't feel rooted to its spawn. Between-room drift uses
+      // the neighbor's centre as the goal, and the door-seek pass
+      // below picks the actual waypoint to get there.
+      g.patrolT -= dt;
+      if (g.patrolT <= 0) {
+        g.patrolT = 2 + Math.random() * 3;
+        // Idle enemies stay in their spawn room. The previous between-
+        // room drift (25% chance to wander to a neighbour's centre with
+        // no door-aware pathing) made everyone pile up at the first
+        // choke point on level start. Cross-room movement happens when
+        // they're *alerted* — door-graph pathing lives in that path.
+        g.patrolTargetX = g.homeX + (Math.random() - 0.5) * 6;
+        g.patrolTargetZ = g.homeZ + (Math.random() - 0.5) * 6;
+      }
+      const tx = g.patrolTargetX - g.group.position.x;
+      const tz = g.patrolTargetZ - g.group.position.z;
+      const td = Math.hypot(tx, tz);
+      if (td > 0.4) {
+        const pdir = { x: tx / td, z: tz / td };
+        g.group.rotation.y = Math.atan2(pdir.x, pdir.z);
+        const step = tunables.ai.moveSpeed * 0.35 * dt;
+        const nx = g.group.position.x + pdir.x * step;
+        const nz = g.group.position.z + pdir.z * step;
+        const res = ctx.resolveCollision(g.group.position.x, g.group.position.z, nx, nz,
+          tunables.ai.collisionRadius);
+        g.group.position.x = res.x;
+        g.group.position.z = res.z;
+      }
+    }
+
+    // Once alerted, the enemy stays alerted for the rest of the fight —
+    // they may lose line of sight, but they'll push toward the last known
+    // position and keep engaging the moment LoS returns.
+    if (!canSee && g.state !== STATE.IDLE) {
+      if (g.lastKnownX === undefined) {
+        g.lastKnownX = ctx.playerPos.x;
+        g.lastKnownZ = ctx.playerPos.z;
+      }
+      g.noLosT = (g.noLosT || 0) + dt;
+    } else {
+      g.lastKnownX = ctx.playerPos.x;
+      g.lastKnownZ = ctx.playerPos.z;
+      g.noLosT = 0;
+    }
+
+    // Stuck detection — if the enemy has been trying to move but
+    // hasn't shifted more than ~2cm/frame for over a second, pick
+    // a fresh waypoint. Now also cancels mid-dash bursts so dashers
+    // can't oscillate against a doorway for seconds at a time.
+    const dmX = g.group.position.x - g.stuckX;
+    const dmZ = g.group.position.z - g.stuckZ;
+    const moved = dmX * dmX + dmZ * dmZ;
+    if (moved < 0.0025) {
+      g.stuckT = (g.stuckT || 0) + dt;
+      // Cancel a stuck dash immediately and add a long cool-down so
+      // the dasher has time to re-path before attempting another one.
+      if (g.stuckT > 0.25 && (g.dashT || 0) > 0) {
+        g.dashT = 0;
+        g.dashVx = 0; g.dashVz = 0;
+        g.dashCdT = 2.5 + Math.random() * 1.5;
+      }
+      if (g.stuckT > 1.2) {
+        g.patrolTargetX = g.homeX + (Math.random() - 0.5) * 10;
+        g.patrolTargetZ = g.homeZ + (Math.random() - 0.5) * 10;
+        g.patrolT = 1 + Math.random() * 2;
+        // Jiggle a tiny amount perpendicular to facing so the body
+        // separation pass can finish the escape.
+        const jx = -Math.cos(g.group.rotation.y) * 0.12;
+        const jz = Math.sin(g.group.rotation.y) * 0.12;
+        const jRes = ctx.resolveCollision(g.group.position.x, g.group.position.z,
+          g.group.position.x + jx, g.group.position.z + jz,
+          tunables.ai.collisionRadius);
+        g.group.position.x = jRes.x;
+        g.group.position.z = jRes.z;
+        g.stuckT = 0;
+      }
+    } else {
+      g.stuckT = 0;
+    }
+    g.stuckX = g.group.position.x;
+    g.stuckZ = g.group.position.z;
+
+    const targetAlpha =
+      g.state === STATE.FIRING ? 1.0 :
+      g.state === STATE.ALERTED ? 0.6 : 0;
+    g.alertMat.opacity = THREE.MathUtils.lerp(g.alertMat.opacity, targetAlpha, Math.min(1, dt * 10));
+
+    // Face the player only when they're actually visible. Otherwise face
+    // the last-known direction (or pose idle) so the AI's gun doesn't
+    // clip through walls pointing at a target they can't see.
+    if (g.state !== STATE.IDLE) {
+      if (canSee && dir2d.lengthSq() > 0) {
+        g.group.rotation.y = Math.atan2(dir2d.x, dir2d.z);
+      } else if (typeof g.lastKnownX === 'number') {
+        const lx = g.lastKnownX - g.group.position.x;
+        const lz = g.lastKnownZ - g.group.position.z;
+        const ll = Math.hypot(lx, lz);
+        if (ll > 0.0001) g.group.rotation.y = Math.atan2(lx / ll, lz / ll);
+      }
+    }
+
+    // Door-seeking — when the player is in a different room, follow
+    // a BFS path through the door-graph instead of aiming at the
+    // single nearest door. This keeps the enemy on a *natural*
+    // route instead of bee-lining into the nearest wall. Path is
+    // cached per-enemy for ~0.6s so BFS isn't run every frame, and
+    // is invalidated when the player crosses a room boundary.
+    let doorTarget = null;
+    if (!canSee && (g.noLosT || 0) > 0.6
+        && ctx.level
+        && typeof ctx.playerRoomId === 'number'
+        && ctx.playerRoomId >= 0) {
+      const here = ctx.level.roomAt(g.group.position.x, g.group.position.z);
+      const hereId = here ? here.id : g.roomId;
+      if (hereId !== ctx.playerRoomId) {
+        g.pathCache = g.pathCache || { t: 0, toId: -1, nextDoor: null };
+        g.pathCache.t -= dt;
+        if (g.pathCache.t <= 0 || g.pathCache.toId !== ctx.playerRoomId) {
+          g.pathCache.t = 0.4 + Math.random() * 0.3;
+          g.pathCache.toId = ctx.playerRoomId;
+          const doors = ctx.level.pathDoorsFrom(hereId, ctx.playerRoomId);
+          g.pathCache.nextDoor = (doors && doors.length) ? doors[0] : null;
+        }
+        const nd = g.pathCache.nextDoor;
+        if (nd && nd.userData) {
+          doorTarget = {
+            x: nd.userData.cx, z: nd.userData.cz,
+            unlocked: !!nd.userData.unlocked,
+          };
+        }
+      }
+    }
+    // Fallback: if the path-graph couldn't find a route (e.g. the
+    // rooms graph hit a key-gated dead end) still try the direct
+    // nearest-door lookup so the enemy doesn't just stand still.
+    if (!doorTarget && !canSee && (g.noLosT || 0) > 0.8
+        && typeof ctx.playerRoomId === 'number'
+        && ctx.playerRoomId !== g.roomId
+        && ctx.findDoorToward) {
+      const door = ctx.findDoorToward(g.roomId, g.group.position);
+      if (door) doorTarget = door;
+    }
+
+    // Escort formation — standard / cover-seeker gunmen will nestle behind
+    // a shield bearer in the same room so the shield protects them from
+    // the player's fire. Dashers and tanks ignore the escort urge.
+    let escortTarget = null;
+    const escortish = g.variant === 'standard' || g.variant === 'coverSeeker';
+    if (escortish && ctx.shieldBearers?.length && g.state !== STATE.IDLE) {
+      let best = null, bestD = 40;
+      for (const sb of ctx.shieldBearers) {
+        if (sb.roomId !== undefined && g.roomId !== undefined && sb.roomId !== g.roomId) continue;
+        const sdx = sb.group.position.x - g.group.position.x;
+        const sdz = sb.group.position.z - g.group.position.z;
+        const sd = Math.hypot(sdx, sdz);
+        if (sd < bestD) { best = sb; bestD = sd; }
+      }
+      if (best) {
+        const sbPos = best.group.position;
+        const toPlayerX = ctx.playerPos.x - sbPos.x;
+        const toPlayerZ = ctx.playerPos.z - sbPos.z;
+        const tLen = Math.hypot(toPlayerX, toPlayerZ) || 1;
+        // Escort spot sits ~1.6m behind the shield from the player's side.
+        escortTarget = {
+          x: sbPos.x - (toPlayerX / tLen) * 1.6,
+          z: sbPos.z - (toPlayerZ / tLen) * 1.6,
+        };
+      }
+    }
+
+    if (g.state === STATE.ALERTED || g.state === STATE.FIRING) {
+      // Flankers approach along a direction rotated by `flankAngle`. When
+      // the player is hidden behind cover for a moment, everyone starts
+      // flanking — the baseline angle widens so enemies detour sideways to
+      // regain line of sight rather than waiting behind the same wall.
+      //
+      // Crouched player behind cover is a special case: the shorter
+      // silhouette means LoS is being broken by low props the AI can
+      // easily walk around. Trigger cover-flanking twice as fast and
+      // push the angle wider so they commit to swinging around the
+      // cover rather than standing still in front of it.
+      const approachDir = dir2d.clone();
+      const crouchedHiding = !!ctx.playerCrouched;
+      const coverDelay = crouchedHiding ? 0.6 : 1.2;
+      const coverFlanking = (g.noLosT || 0) > coverDelay && typeof g.lastKnownX === 'number';
+      const crouchAngleBoost = crouchedHiding ? 1.35 : 1.0;
+      const flankAng = g.role === 'flanker'
+        ? (coverFlanking ? g.flankAngle * 1.5 * crouchAngleBoost : g.flankAngle)
+        : (coverFlanking ? (g.coverFlankSide || 1) * (Math.PI * 0.35) * crouchAngleBoost : 0);
+      if (flankAng !== 0) {
+        const c = Math.cos(flankAng), s = Math.sin(flankAng);
+        approachDir.set(dir2d.x * c - dir2d.z * s, 0, dir2d.x * s + dir2d.z * c);
+      }
+      if (coverFlanking && g.coverFlankSide === undefined) {
+        g.coverFlankSide = Math.random() < 0.5 ? -1 : 1;
+      }
+      if (!coverFlanking) g.coverFlankSide = undefined;
+      // Stuck-avoidance: if a recent move got clamped by a wall, deflect the
+      // approach direction perpendicularly for a short window so they slide
+      // around instead of pressing into geometry.
+      if (g.stuckT > 0) {
+        g.stuckT -= dt;
+        const side = (g.stuckSide || 1);
+        // perpendicular = (-z, x)
+        const nx = -approachDir.z * side;
+        const nz = approachDir.x * side;
+        approachDir.set(
+          approachDir.x * 0.4 + nx * 0.9,
+          0,
+          approachDir.z * 0.4 + nz * 0.9,
+        );
+        if (approachDir.lengthSq() > 0.0001) approachDir.normalize();
+      }
+
+      const pref = preferredRange;
+      const tol = rangeTolerance;
+      let moveSign = 0;
+      // Priority of navigation targets:
+      //   1. door-seeking — when the player is in another room, path to
+      //      the door first rather than pushing into a wall.
+      //   2. escort — stand behind the shield bearer if present.
+      //   3. default — circle the preferred range around the player.
+      if (doorTarget) {
+        const ddx = doorTarget.x - g.group.position.x;
+        const ddz = doorTarget.z - g.group.position.z;
+        const dd = Math.hypot(ddx, ddz);
+        if (dd > 0.6) {
+          approachDir.set(ddx / dd, 0, ddz / dd);
+          moveSign = 1;
+        } else {
+          // Standing in the doorway — earlier revision stopped here
+          // (moveSign = 0) and a whole squad piled up at the threshold
+          // instead of crossing. Keep moving toward the player so the
+          // enemy actually passes through into the next room; the path
+          // cache replans shortly after and picks up the next door.
+          const pdx = ctx.playerPos.x - g.group.position.x;
+          const pdz = ctx.playerPos.z - g.group.position.z;
+          const pdL = Math.hypot(pdx, pdz);
+          if (pdL > 0.0001) {
+            approachDir.set(pdx / pdL, 0, pdz / pdL);
+            moveSign = 1;
+          } else {
+            moveSign = 0;
+          }
+        }
+      } else if (escortTarget) {
+        const edx = escortTarget.x - g.group.position.x;
+        const edz = escortTarget.z - g.group.position.z;
+        const ed = Math.hypot(edx, edz);
+        if (ed > 0.5) {
+          approachDir.set(edx / ed, 0, edz / ed);
+          moveSign = 1;
+        } else {
+          moveSign = 0;
+        }
+      } else {
+        if (dist > pref + tol) moveSign = 1;
+        else if (dist < pref - tol) moveSign = -1;
+      }
+      const slowK = g.slowT > 0 ? tunables.zones.legs.slowFactor : 1;
+
+      // Strafe (dasher/coverSeeker): perpendicular sidestep while in range.
+      const strafeVec = { x: 0, z: 0 };
+      if (g.profile.strafe && g.state === STATE.FIRING) {
+        g.strafeSwitchT -= dt;
+        if (g.strafeSwitchT <= 0) {
+          g.strafeDir = -g.strafeDir;
+          g.strafeSwitchT = 0.4 + Math.random() * 0.9;
+        }
+        const perpX = -dir2d.z * g.strafeDir;
+        const perpZ = dir2d.x * g.strafeDir;
+        strafeVec.x = perpX * moveSpeed * 0.7;
+        strafeVec.z = perpZ * moveSpeed * 0.7;
+      }
+
+      // Dash (dasher): periodic burst of speed toward a random sidestep.
+      g.dashCdT = Math.max(0, (g.dashCdT ?? 0) - dt);
+      if (g.profile.dash && g.state === STATE.FIRING && g.dashCdT <= 0 && g.dashT <= 0) {
+        const side = Math.random() < 0.5 ? -1 : 1;
+        g.dashVx = -dir2d.z * side * moveSpeed * 2.2;
+        g.dashVz = dir2d.x * side * moveSpeed * 2.2;
+        g.dashT = 0.25;
+        g.dashCdT = 1.8 + Math.random() * 1.5;
+      }
+      g.dashT = Math.max(0, (g.dashT ?? 0) - dt);
+
+      // Cover reposition — coverSeeker flees perpendicular after a burst.
+      g.repositionT = Math.max(0, (g.repositionT ?? 0) - dt);
+
+      // --- major-boss archetype overrides ---------------------------
+      // Evasive Gunner — read the player's facing vector and sidestep
+      // perpendicular whenever the muzzle is lined up on the boss.
+      // Pauses evasion during reload (vulnerable window, with chatter).
+      if (g.archetype === 'evasive' && ctx.playerFacing && g.archReloadT <= 0) {
+        const toBoss = new THREE.Vector3(
+          g.group.position.x - ctx.playerPos.x, 0,
+          g.group.position.z - ctx.playerPos.z,
+        );
+        if (toBoss.lengthSq() > 0.0001) {
+          toBoss.normalize();
+          // Dot > 0.55 ≈ player is pointing within ~56° of the boss.
+          const aimedAt = toBoss.dot(ctx.playerFacing);
+          if (aimedAt > 0.55) {
+            const side = g.archEvadeDir;
+            g.repositionDirX = -ctx.playerFacing.z * side;
+            g.repositionDirZ =  ctx.playerFacing.x * side;
+            g.repositionT = 0.35;
+            // Flip-flop the dodge direction periodically so the boss
+            // doesn't always juke the same way.
+            g.archT -= dt;
+            if (g.archT <= 0) {
+              g.archEvadeDir = Math.random() < 0.5 ? -1 : 1;
+              g.archT = 0.7 + Math.random() * 0.9;
+            }
+          }
+        }
+      }
+
+      // Elite Gunman — always strafing, always dashing on a short
+      // cadence. Override dasher's passive cooldown with a faster one.
+      if (g.archetype === 'elite' && g.state === STATE.FIRING) {
+        if ((g.dashCdT || 0) <= 0 && (g.dashT || 0) <= 0) {
+          const side = Math.random() < 0.5 ? -1 : 1;
+          g.dashVx = -dir2d.z * side * moveSpeed * 2.4;
+          g.dashVz =  dir2d.x * side * moveSpeed * 2.4;
+          g.dashT = 0.25;
+          g.dashCdT = 0.9 + Math.random() * 0.6;   // ~half the normal cd
+        }
+      }
+
+      const vx = approachDir.x * moveSpeed * slowK * moveSign
+        + strafeVec.x * slowK
+        + (g.dashT > 0 ? g.dashVx : 0)
+        + (g.repositionT > 0 ? g.repositionDirX * moveSpeed * 0.9 * slowK : 0);
+      const vz = approachDir.z * moveSpeed * slowK * moveSign
+        + strafeVec.z * slowK
+        + (g.dashT > 0 ? g.dashVz : 0)
+        + (g.repositionT > 0 ? g.repositionDirZ * moveSpeed * 0.9 * slowK : 0);
+      const nx = g.group.position.x + vx * dt;
+      const nz = g.group.position.z + vz * dt;
+      const beforeX = g.group.position.x, beforeZ = g.group.position.z;
+      const res = ctx.resolveCollision(beforeX, beforeZ, nx, nz, tunables.ai.collisionRadius);
+      g.group.position.x = res.x;
+      g.group.position.z = res.z;
+      // Bosses stay in their arena — never wander into adjacent rooms
+      // or corridors. Prevents the "player enters sealed boss room and
+      // the boss is stranded outside" trap. Clamp after the collision
+      // pass so the boss still respects cover inside the room.
+      if (g.tier === 'boss' && ctx.level && g.roomId >= 0) {
+        const room = ctx.level.rooms[g.roomId];
+        if (room) {
+          const b = room.bounds;
+          const m = tunables.ai.collisionRadius + 0.4;
+          g.group.position.x = Math.max(b.minX + m, Math.min(b.maxX - m, g.group.position.x));
+          g.group.position.z = Math.max(b.minZ + m, Math.min(b.maxZ - m, g.group.position.z));
+        }
+      }
+      // Detect clamp: wanted to move but barely did. Tanks don't wiggle —
+      // they just shove straight in until they hit the player.
+      if ((moveSign !== 0 || g.dashT > 0 || g.repositionT > 0) && g.variant !== 'tank') {
+        const wantedLen = Math.hypot(nx - beforeX, nz - beforeZ);
+        const actualLen = Math.hypot(res.x - beforeX, res.z - beforeZ);
+        if (wantedLen > 0.01 && actualLen < wantedLen * 0.3 && g.stuckT <= 0) {
+          g.stuckT = 0.8;
+          g.stuckSide = Math.random() < 0.5 ? -1 : 1;
+        }
+      }
+
+      // Grenade / flash / stun surprise — brief freeze before the
+      // ALERTED-to-FIRING transition lands, so an unalerted enemy
+      // caught by a throwable reads as "startled for a second, then
+      // reacts" instead of snapping straight to full combat.
+      if (g.surpriseT > 0) g.surpriseT = Math.max(0, g.surpriseT - dt);
+      if (g.state === STATE.ALERTED) {
+        if (g.surpriseT > 0) {
+          // Hold — don't drain reactionT while surprised.
+        } else {
+          g.reactionT -= dt;
+          if (g.reactionT <= 0) {
+            g.state = STATE.FIRING;
+            g.fireT = 0;
+            g.burstLeft = 0;
+          }
+        }
+      }
+
+      // Suppressive fire — a short one-second flurry toward the
+      // last-seen position immediately after LoS drops, then stop.
+      // Previous implementation fired indefinitely at last-known
+      // which read as "enemy shooting at nothing through walls".
+      let suppressing = false;
+      if (!canSee && g.state === STATE.FIRING
+          && typeof g.lastKnownX === 'number'
+          && (g.noLosT || 0) > 0.3
+          && (g.noLosT || 0) < 1.1
+          && dist <= (g.weapon?.range || 0) * 1.2) {
+        const mTest = g.muzzle.getWorldPosition(new THREE.Vector3());
+        const aTest = new THREE.Vector3(g.lastKnownX, mTest.y, g.lastKnownZ);
+        if (ctx.combat.hasLineOfSight(mTest, aTest, ctx.obstacles)) {
+          suppressing = true;
+        }
+      }
+
+      // Final gate: only fire when we have a clean path to the aim point.
+      // For visible targets, re-check from the muzzle so close-wall cases
+      // (gun poking past a corner) don't let the shot through.
+      //
+      // Bullet Hell boss ignores the weapon's range gate — the whole
+      // point of the archetype is to zone large open arenas, so a
+      // random 20m-range pistol can't lock him out of firing.
+      let muzzleLos = false;
+      const rangeOk = g.archetype === 'bulletHell'
+        ? true
+        : dist <= (g.weapon?.range || 0) * 1.2;
+      if (g.state === STATE.FIRING && g.weapon && rangeOk
+          && (g.dazzleT || 0) <= 0) {
+        const mTest = g.muzzle.getWorldPosition(new THREE.Vector3());
+        if (canSee) {
+          const aTest = new THREE.Vector3(ctx.playerPos.x, mTest.y, ctx.playerPos.z);
+          muzzleLos = ctx.combat.hasLineOfSight(mTest, aTest, ctx.obstacles);
+        } else if (suppressing) {
+          muzzleLos = true; // already validated above
+        }
+      }
+
+      // AI reload gate: once the magazine hits zero, pause firing for the
+      // weapon's reloadTime (lightly penalized vs player so encounters
+      // still feel threatening). Blocks the firing block entirely.
+      if ((g.aiReloadT || 0) > 0) {
+        g.aiReloadT -= dt;
+        if (g.aiReloadT <= 0) {
+          g.aiReloadT = 0;
+          // Restore the same cycle count used on first load so the
+          // volley-then-vulnerable rhythm is preserved each reload.
+          g.aiMagLeft = g.archetype === 'bulletHell' ? 6 : (g.weapon?.magSize || 30);
+        }
+      }
+
+      if (muzzleLos && (g.aiReloadT || 0) <= 0) {
+        g.fireT -= dt;
+        if (g.fireT <= 0) {
+          // Snapshot — a parry-redirect could disarm *this* gunman mid-loop
+          // (hit.owner.applyHit → g.weapon = null), so we can't read from
+          // g.weapon again until we're done firing this burst.
+          const weapon = g.weapon;
+          const muzzleWorld = g.muzzle.getWorldPosition(new THREE.Vector3());
+          // Suppressive shots aim at the last-known spot, not the live player.
+          const aim = suppressing
+            ? new THREE.Vector3(g.lastKnownX, 0, g.lastKnownZ)
+            : ctx.playerPos.clone();
+          // Aim at body center vertically; when crouched that's lower so
+          // shots don't fly over the player's head.
+          aim.y = ctx.playerCrouched ? 0.65 : muzzleWorld.y;
+          const shotDir = new THREE.Vector3().subVectors(aim, muzzleWorld);
+          if (shotDir.lengthSq() > 0.0001) {
+            shotDir.normalize();
+            const pellets = weapon.pelletCount || 1;
+            const blindMul = g.blindT > 0 ? 2.0 : 1.0;
+            // Crouched target = smaller silhouette; tighten spread so AI
+            // actually threatens the stealthed player once spotted.
+            const crouchFocus = ctx.playerCrouched ? 0.7 : 1.0;
+            // Suppressive shots intentionally scatter wider and fire less
+            // frequently so cover isn't a free 100% safe space.
+            const suppMul = suppressing ? 2.2 : 1.0;
+            let volleyCount = pellets;
+            let volleySpread = weapon.hipSpread * tunables.ai.spreadMultiplier * blindMul * crouchFocus * suppMul;
+            let evenSpacing = false;
+            // Bullet Hell boss — fires a wide, evenly-spaced fan of
+            // many shots instead of a single muzzle burst. Spacing
+            // is deterministic so the player reads it as a volley
+            // pattern to dodge, not random spread.
+            if (g.archetype === 'bulletHell') {
+              // Tighter fan that actually converges on the player —
+              // was 14 shots across 114° which meant a clean miss
+              // most of the time regardless of aim. 7 shots across
+              // ~40° gives the "barrage" read AND lands 2-3 shots
+              // on a stationary player at range.
+              volleyCount = 7;
+              volleySpread = 0.35;
+              evenSpacing = true;
+            }
+            for (let i = 0; i < volleyCount; i++) {
+              const a = evenSpacing
+                ? (volleyCount <= 1 ? 0 : ((i / (volleyCount - 1)) - 0.5) * 2 * volleySpread)
+                : (Math.random() - 0.5) * 2 * volleySpread;
+              const c = Math.cos(a), s = Math.sin(a);
+              const jittered = new THREE.Vector3(
+                shotDir.x * c - shotDir.z * s,
+                shotDir.y,
+                shotDir.x * s + shotDir.z * c,
+              );
+              ctx.onFireAt(muzzleWorld, jittered, weapon, g.damageMult);
+            }
+            // Kick the recoil spring once per fire tick (not per pellet
+            // so shotguns don't get N× the visible kick).
+            if (g.rig) pokeRecoil(g.rig);
+          }
+          // Magazine counter — drains one per fire tick; when empty,
+          // trigger reload (firing gate above will short-circuit until
+          // reload completes).
+          if (g.aiMagLeft === undefined) {
+            // Bullet Hell gets a tight 6-shot cycle so the fight
+            // becomes "dodge the volley, rush him, punish during
+            // reload" — the long reload (below) is the intended
+            // counterplay window.
+            g.aiMagLeft = g.archetype === 'bulletHell' ? 6 : (weapon.magSize || 30);
+          }
+          g.aiMagLeft -= 1;
+          if (g.aiMagLeft <= 0 && weapon.fireMode !== 'flame' && weapon.class !== 'flame') {
+            // Evasive Gunner boss reloads slowly (5–7 s) and tells
+            // the player about it — the vulnerable window is the
+            // intended counterplay. Normal enemies use the baseline.
+            if (g.archetype === 'evasive') {
+              g.aiReloadT = 5 + Math.random() * 2;
+              if (ctx.camera && g.rig) {
+                const head = g.rig.head.getWorldPosition(new THREE.Vector3());
+                head.y += 0.55;
+                const EVA_RELOAD_LINES = [
+                  'Reloading!', "Wait — I'm out!",
+                  "Out of ammo again?!", 'Reload, reload!',
+                  'Just a sec — fresh mag!', 'Cover me!',
+                ];
+                spawnSpeechBubble(
+                  head, ctx.camera,
+                  EVA_RELOAD_LINES[Math.floor(Math.random() * EVA_RELOAD_LINES.length)],
+                  2.0,
+                );
+              }
+            } else if (g.archetype === 'bulletHell') {
+              // Long, committed reload — the "rush him now" window.
+              g.aiReloadT = 3.5 + Math.random() * 0.6;
+            } else {
+              g.aiReloadT = (weapon.reloadTime || 1.0) * 1.3;
+            }
+          }
+
+          // Bullet Hell — fast volleys (~0.7s between) so the pressure
+          // is constant until he reloads. Was 2-3s which felt lazy.
+          if (g.archetype === 'bulletHell') {
+            g.fireT = 0.55 + Math.random() * 0.30;
+          }
+          // Flamethrowers have fireRate=0 in tunables — pull from the
+          // dedicated flameTickRate so the AI actually streams flame.
+          else if (weapon.fireMode === 'flame' || weapon.class === 'flame') {
+            g.fireT = 1 / Math.max(1, weapon.flameTickRate || 12);
+          } else if (weapon.burstCount > 1) {
+            // Per-weapon burst cadence (e.g. rifle burst of 3) uses burstLeft.
+            if (g.burstLeft <= 0) g.burstLeft = weapon.burstCount;
+            g.burstLeft -= 1;
+            g.fireT = g.burstLeft > 0
+              ? (weapon.burstInterval || 0.07)
+              : 1 / Math.max(0.1, weapon.fireRate);
+          } else {
+            g.fireT = 1 / Math.max(0.1, weapon.fireRate);
+          }
+          // Large bosses fire on a tighter cadence than a grunt with
+          // the same weapon — compressing the gap between shots is the
+          // main knob for "this fight feels relentless". bulletHell is
+          // excluded because its volley pacing is the fight's rhythm.
+          if (g.tier === 'boss' && g.archetype !== 'bulletHell') {
+            g.fireT *= 0.55;
+          } else if (g.tier === 'subBoss') {
+            g.fireT *= 0.80;
+          }
+          // AI firing discipline: every 3-5 shots take a settle pause so
+          // bloom doesn't balloon forever and the player gets a window to
+          // reposition. Dashers and tanks skip the pause — they're meant to
+          // feel relentless.
+          if (g.aiShotsThisBurst === undefined) g.aiShotsThisBurst = 0;
+          if (g.aiBurstLimit === undefined) g.aiBurstLimit = 3 + Math.floor(Math.random() * 3);
+          g.aiShotsThisBurst += 1;
+          if (g.aiShotsThisBurst >= g.aiBurstLimit && g.burstLeft <= 0) {
+            g.aiShotsThisBurst = 0;
+            g.aiBurstLimit = 3 + Math.floor(Math.random() * 3);
+            if (g.profile.settlePause) {
+              const settle = 0.7 + Math.random() * 0.8;
+              g.aiSettleT = settle;
+              g.aiSettleDur = settle;
+              g.fireT += settle;
+            }
+            // Cover-seekers break contact between bursts: dart perpendicular.
+            if (g.profile.coverSeek) {
+              const side = Math.random() < 0.5 ? -1 : 1;
+              g.repositionDirX = -dir2d.z * side;
+              g.repositionDirZ = dir2d.x * side;
+              g.repositionT = 1.0 + Math.random() * 0.7;
+            }
+          }
+        }
+      }
+    }
+  }
+}

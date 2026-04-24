@@ -1,0 +1,23 @@
+# Cloudflare Pages reads this file to set per-path response headers.
+# Docs: https://developers.cloudflare.com/pages/configuration/headers/
+
+# Don't cache the shell — otherwise a deploy ships new modules but
+# browsers keep serving the old index.html that references the old
+# hashes, so players see stale builds until they force-reload.
+/
+  Cache-Control: no-store
+
+/index.html
+  Cache-Control: no-store
+
+# Three.js modules + game source. Modules are fetched by URL (no
+# bundler hashing), so we can't cache forever — 1 minute gives fast
+# reloads during playtest iteration without crushing the CDN.
+/src/*
+  Cache-Control: public, max-age=60
+
+# Assets (models, textures, audio) are larger and change less often.
+# Long cache with must-revalidate lets browsers skip redownloads for
+# repeat visits but still pick up replacements on next reload.
+/Assets/*
+  Cache-Control: public, max-age=3600, must-revalidate

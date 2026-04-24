@@ -1,0 +1,242 @@
+// Landing screen shown on page load (and re-shown after Quit-to-title).
+// Four buttons: Play, Starting Store, Leaderboard, Settings. The play
+// button chains into the class-picker; the other three open sub-views
+// inline without leaving the menu.
+//
+// This screen isn't the in-game Esc menu — it's a separate modal that
+// owns its own lifecycle. The existing `GameMenuUI` still handles the
+// Esc pause / save / load flow during a run.
+
+export class MainMenuUI {
+  constructor({ onPlay, onOpenStore, getLeaderboard, getVolume, setVolume,
+                getQuality, setQuality, getDevTools, setDevTools,
+                getPlayerName, setPlayerName,
+                getCharacterStyle, setCharacterStyle }) {
+    this.onPlay = onPlay;
+    this.onOpenStore = onOpenStore;
+    this.getLeaderboard = getLeaderboard || (() => null);
+    this.getVolume = getVolume || (() => 0.7);
+    this.setVolume = setVolume || (() => {});
+    this.getQuality = getQuality || (() => 'high');
+    this.setQuality = setQuality || (() => {});
+    this.getDevTools = getDevTools || (() => false);
+    this.setDevTools = setDevTools || (() => {});
+    this.getPlayerName = getPlayerName || (() => '');
+    this.setPlayerName = setPlayerName || (() => {});
+    this.getCharacterStyle = getCharacterStyle || (() => 'operator');
+    this.setCharacterStyle = setCharacterStyle || (() => {});
+
+    this.visible = false;
+    this.view = 'root';   // 'root' | 'settings' | 'leaderboard'
+
+    this.root = document.createElement('div');
+    this.root.id = 'main-menu-root';
+    this.root.style.display = 'none';
+    this.root.innerHTML = `
+      <div id="main-menu-card">
+        <div id="main-menu-title">tactical rogue</div>
+        <div id="main-menu-subtitle">prototype build</div>
+        <div id="main-menu-body"></div>
+      </div>
+    `;
+    document.body.appendChild(this.root);
+    this.bodyEl = this.root.querySelector('#main-menu-body');
+    this.titleEl = this.root.querySelector('#main-menu-title');
+    this.subEl = this.root.querySelector('#main-menu-subtitle');
+  }
+
+  show() { this.visible = true; this.view = 'root'; this.root.style.display = 'flex'; this.render(); }
+  hide() { this.visible = false; this.root.style.display = 'none'; }
+  isOpen() { return this.visible; }
+
+  _btn(label, onClick, extra = '') {
+    const b = document.createElement('button');
+    b.type = 'button';
+    b.className = `menu-btn${extra}`;
+    b.textContent = label;
+    b.addEventListener('click', onClick);
+    return b;
+  }
+
+  _renderRoot() {
+    this.titleEl.textContent = 'tactical rogue';
+    this.subEl.textContent = 'prototype build';
+    this.subEl.style.display = '';
+    this.bodyEl.innerHTML = '';
+    this.bodyEl.appendChild(this._btn('Play', () => {
+      this.hide();
+      this.onPlay?.();
+    }));
+    this.bodyEl.appendChild(this._btn('Starting Store', () => {
+      this.onOpenStore?.();
+    }));
+    this.bodyEl.appendChild(this._btn('Leaderboard', () => { this.view = 'leaderboard'; this.render(); }));
+    this.bodyEl.appendChild(this._btn('Settings',    () => { this.view = 'settings';    this.render(); }));
+  }
+
+  _renderSettings() {
+    this.titleEl.textContent = 'Settings';
+    this.subEl.style.display = 'none';
+    this.bodyEl.innerHTML = '';
+
+    const vol = this.getVolume();
+    const volRow = document.createElement('div');
+    volRow.className = 'menu-row';
+    volRow.innerHTML = `
+      <label>Master Volume <span class="menu-row-val">${Math.round(vol * 100)}%</span></label>
+      <input type="range" min="0" max="100" value="${Math.round(vol * 100)}">
+    `;
+    const slider = volRow.querySelector('input');
+    const valEl  = volRow.querySelector('.menu-row-val');
+    slider.addEventListener('input', () => {
+      const v = +slider.value / 100;
+      this.setVolume(v);
+      valEl.textContent = `${slider.value}%`;
+    });
+    this.bodyEl.appendChild(volRow);
+
+    const muteRow = document.createElement('div');
+    muteRow.className = 'menu-row';
+    const muted = this.getVolume() <= 0.0001;
+    muteRow.innerHTML = `
+      <label>Mute <span class="menu-row-val">${muted ? 'On' : 'Off'}</span></label>
+      <input type="checkbox" class="menu-check" ${muted ? 'checked' : ''}>
+    `;
+    const muteCheck = muteRow.querySelector('input');
+    const muteVal = muteRow.querySelector('.menu-row-val');
+    muteCheck.addEventListener('change', () => {
+      if (muteCheck.checked) {
+        this._savedVol = this.getVolume() || 0.7;
+        this.setVolume(0);
+        slider.value = 0;
+        valEl.textContent = '0%';
+        muteVal.textContent = 'On';
+      } else {
+        const restore = this._savedVol || 0.7;
+        this.setVolume(restore);
+        slider.value = Math.round(restore * 100);
+        valEl.textContent = `${slider.value}%`;
+        muteVal.textContent = 'Off';
+      }
+    });
+    this.bodyEl.appendChild(muteRow);
+
+    const currentQ = this.getQuality();
+    const qRow = document.createElement('div');
+    qRow.className = 'menu-row';
+    qRow.innerHTML = `
+      <label>Quality <span class="menu-row-val">${currentQ === 'low' ? 'Low' : 'High'}</span></label>
+      <select class="menu-select">
+        <option value="high"${currentQ === 'high' ? ' selected' : ''}>High</option>
+        <option value="low"${currentQ === 'low'  ? ' selected' : ''}>Low (performance)</option>
+      </select>
+      <div class="menu-row-hint">AA change needs reload; other effects are live.</div>
+    `;
+    const sel = qRow.querySelector('select');
+    const qValEl = qRow.querySelector('.menu-row-val');
+    sel.addEventListener('change', () => {
+      this.setQuality(sel.value);
+      qValEl.textContent = sel.value === 'low' ? 'Low' : 'High';
+    });
+    this.bodyEl.appendChild(qRow);
+
+    const nameRow = document.createElement('div');
+    nameRow.className = 'menu-row';
+    nameRow.innerHTML = `
+      <label>Player Name</label>
+      <input type="text" class="menu-input" maxlength="16" value="${(this.getPlayerName() || '').replace(/"/g, '&quot;')}">
+    `;
+    const nameInput = nameRow.querySelector('input');
+    nameInput.addEventListener('input', () => this.setPlayerName(nameInput.value));
+    this.bodyEl.appendChild(nameRow);
+
+    const devRow = document.createElement('div');
+    devRow.className = 'menu-row';
+    const devChecked = this.getDevTools() ? 'checked' : '';
+    devRow.innerHTML = `
+      <label>Dev Tools Panel <span class="menu-row-val">${this.getDevTools() ? 'On' : 'Off'}</span></label>
+      <input type="checkbox" class="menu-check" ${devChecked}>
+      <div class="menu-row-hint">Live-tunable lil-gui panel. Off by default.</div>
+    `;
+    const devCheck = devRow.querySelector('input');
+    const devValEl = devRow.querySelector('.menu-row-val');
+    devCheck.addEventListener('change', () => {
+      this.setDevTools(devCheck.checked);
+      devValEl.textContent = devCheck.checked ? 'On' : 'Off';
+    });
+    this.bodyEl.appendChild(devRow);
+
+    // Character style toggle — cosmetic-only, live-applied.
+    const styleCurrent = this.getCharacterStyle();
+    const styleRow = document.createElement('div');
+    styleRow.className = 'menu-row';
+    styleRow.innerHTML = `
+      <label>Character Style <span class="menu-row-val">${styleCurrent === 'marine' ? 'Space Marine' : 'Operator'}</span></label>
+      <select class="menu-select">
+        <option value="operator"${styleCurrent === 'operator' ? ' selected' : ''}>Operator (default)</option>
+        <option value="marine"${styleCurrent === 'marine' ? ' selected' : ''}>Space Marine</option>
+      </select>
+      <div class="menu-row-hint">Cosmetic only — pauldrons, power pack, helmet from primitives.</div>
+    `;
+    const styleSel = styleRow.querySelector('select');
+    const styleValEl = styleRow.querySelector('.menu-row-val');
+    styleSel.addEventListener('change', () => {
+      this.setCharacterStyle(styleSel.value);
+      styleValEl.textContent = styleSel.value === 'marine' ? 'Space Marine' : 'Operator';
+    });
+    this.bodyEl.appendChild(styleRow);
+
+    this.bodyEl.appendChild(this._btn('Back', () => { this.view = 'root'; this.render(); }));
+  }
+
+  _renderLeaderboard() {
+    this.titleEl.textContent = 'Leaderboard';
+    this.subEl.style.display = 'none';
+    this.bodyEl.innerHTML = '';
+    const lb = this.getLeaderboard();
+    if (!lb) {
+      this.bodyEl.appendChild(document.createTextNode('Leaderboard unavailable.'));
+      this.bodyEl.appendChild(this._btn('Back', () => { this.view = 'root'; this.render(); }));
+      return;
+    }
+    const cats = [
+      { key: 'credits', label: 'Most Value', fmt: (e) => e.credits },
+      { key: 'levels',  label: 'Furthest',   fmt: (e) => `Lv ${e.levels}` },
+      { key: 'damage',  label: 'Most Dmg',   fmt: (e) => e.damage },
+      { key: 'kills',   label: 'Most Kills', fmt: (e) => e.kills },
+    ];
+    const wrap = document.createElement('div');
+    wrap.className = 'menu-leaderboard';
+    for (const c of cats) {
+      const col = document.createElement('div');
+      col.className = 'menu-lb-col';
+      const h = document.createElement('div');
+      h.className = 'menu-lb-heading';
+      h.textContent = c.label;
+      col.appendChild(h);
+      const top = lb.top(c.key, 10);
+      if (top.length === 0) {
+        const empty = document.createElement('div');
+        empty.className = 'menu-lb-empty';
+        empty.textContent = '—';
+        col.appendChild(empty);
+      } else {
+        top.forEach((e, i) => {
+          const row = document.createElement('div');
+          row.className = 'menu-lb-row';
+          row.textContent = `${i + 1}. ${c.fmt(e)} — ${e.playerName || 'anon'}`;
+          col.appendChild(row);
+        });
+      }
+      wrap.appendChild(col);
+    }
+    this.bodyEl.appendChild(wrap);
+    this.bodyEl.appendChild(this._btn('Back', () => { this.view = 'root'; this.render(); }));
+  }
+
+  render() {
+    if (this.view === 'settings') this._renderSettings();
+    else if (this.view === 'leaderboard') this._renderLeaderboard();
+    else this._renderRoot();
+  }
+}
