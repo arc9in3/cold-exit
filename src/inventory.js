@@ -1875,16 +1875,23 @@ export class Inventory {
     return out;
   }
 
-  // Aggregate gear/armor stats. Armor with 0 durability stops protecting.
+  // Aggregate gear/armor stats. Broken items (durability.current <= 0)
+  // contribute NOTHING — no reduction, no speed / stealth modifiers,
+  // no apply() callback, no affixes, no perks. Players need to repair
+  // broken gear at a shop to get the stats back. Set membership still
+  // counts via countEquippedSetPieces (separate code path) so a broken
+  // 4-piece set stays "equipped" for set-bonus tracking — design call
+  // we can flip if it feels wrong.
   applyTo(stats) {
     for (const slot of SLOT_IDS) {
       const item = this.equipment[slot];
       if (!item) continue;
       const broken = item.durability && item.durability.current <= 0;
-      if (item.reduction && !broken) stats.dmgReduction += item.reduction;
+      if (broken) continue;
+      if (item.reduction) stats.dmgReduction += item.reduction;
       if (item.speedMult) stats.moveSpeedMult *= item.speedMult;
       if (item.stealthMult) stats.stealthMult = (stats.stealthMult || 1) * item.stealthMult;
-      if (typeof item.apply === 'function' && !broken) item.apply(stats);
+      if (typeof item.apply === 'function') item.apply(stats);
       // Random affixes (Diablo-style) — kind describes the stat it bumps.
       for (const aff of item.affixes || []) applyAffix(aff, stats);
       // Gear perks — each item can roll up to 3 on legendary.

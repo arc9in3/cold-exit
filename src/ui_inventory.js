@@ -360,8 +360,12 @@ export class InventoryUI {
     const ammoLine = (entry.item.type === 'ranged' && typeof entry.item.ammo === 'number')
       ? `<span class="pkt-ammo">${entry.item.ammo}/${entry.item.magSize ?? '—'}</span>`
       : '';
+    const isBroken = dur && dur.current <= 0;
+    if (isBroken) tile.classList.add('item-broken');
+    const brokenTag = isBroken ? `<div class="pkt-broken-tag">BROKEN</div>` : '';
     tile.innerHTML = `
       ${thumb ? `<img class="pkt-thumb" src="${thumb}" alt="" draggable="false">` : `<span class="pkt-glyph">${TYPE_ICONS[entry.item.type] || '◇'}</span>`}
+      ${brokenTag}
       <div class="pkt-name">${label}</div>
       ${durPct >= 0 ? `<div class="pkt-dur"><div class="pkt-dur-fill" style="width:${durPct.toFixed(0)}%;background:${durPct > 60 ? '#6abe8a' : durPct > 30 ? '#e0c040' : '#d24040'}"></div></div>` : ''}
       ${ammoLine}

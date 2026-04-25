@@ -1900,8 +1900,13 @@ export class LootUI {
         ${more > 0 ? `<div class="ws-bonus-more">+${more} more</div>` : ''}
       </div>`;
     }
+    const dur = entry.item.durability;
+    const isBroken = dur && dur.current <= 0;
+    if (isBroken) tile.classList.add('item-broken');
+    const brokenTag = isBroken ? `<div class="pkt-broken-tag">BROKEN</div>` : '';
     tile.innerHTML = `
       ${thumb ? `<img class="ws-thumb" src="${thumb}" alt="" draggable="false">` : `<span class="ws-glyph">${TYPE_ICONS[entry.item.type] || '◇'}</span>`}
+      ${brokenTag}
       <div class="ws-name">${entry.item.name || ''}</div>
       ${ammo}
       ${bonusHtml}

@@ -83,9 +83,18 @@ export function renderItemCell(item, slotId = null, opts = {}) {
       </div>`;
   }
 
+  // Broken overlay — when durability drops to 0, all stat bonuses
+  // are nullified (see Inventory.applyTo) and weapons can't fire.
+  // Visually call this out with a red BROKEN tag stamped over the
+  // middle of the cell art so the player can spot broken gear in
+  // the inventory grid without opening the details panel.
+  const isBroken = !!(dur && dur.current <= 0);
+  const brokenTag = isBroken ? `<div class="cell-broken-tag">BROKEN</div>` : '';
+
   return `
-    <div class="cell-art" style="background:${tintStr}">
+    <div class="cell-art ${isBroken ? 'cell-art-broken' : ''}" style="background:${tintStr}">
       ${artInner}
+      ${brokenTag}
       <div class="cell-name-overlay">${item.name}</div>
     </div>
     <div class="cell-stats">

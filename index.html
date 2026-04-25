@@ -1575,6 +1575,46 @@
          drop-shadow stays for depth. */
       filter: brightness(1.30) contrast(1.05) drop-shadow(0 1px 2px rgba(0, 0, 0, 0.55));
     }
+    /* Broken gear visual — desaturate the art and stamp a red BROKEN
+       tag across the middle of the cell. Stat bonuses are nullified
+       in Inventory.applyTo so the tag matches the actual mechanical
+       state. Player can repair at any shop (see ui_shop). */
+    .cell-art-broken .cell-art-img,
+    .cell-art-broken .cell-art-layer {
+      filter: brightness(0.55) contrast(0.85) saturate(0.30) drop-shadow(0 1px 2px rgba(0, 0, 0, 0.7));
+    }
+    .cell-broken-tag,
+    .pkt-broken-tag {
+      position: absolute;
+      left: 50%; top: 50%;
+      transform: translate(-50%, -50%) rotate(-12deg);
+      font-family: var(--ce-font-tech, ui-monospace, Menlo, Consolas, monospace);
+      font-size: 12px;
+      font-weight: 900;
+      letter-spacing: 2px;
+      color: #ffd0d0;
+      background: rgba(160, 30, 30, 0.85);
+      border: 1px solid rgba(255, 80, 80, 0.85);
+      padding: 1px 8px;
+      border-radius: 2px;
+      text-transform: uppercase;
+      text-shadow: 0 1px 2px rgba(0, 0, 0, 0.9);
+      box-shadow: 0 0 10px rgba(255, 50, 50, 0.45);
+      pointer-events: none;
+      z-index: 3;
+      white-space: nowrap;
+    }
+    /* Same desaturate-and-overlay treatment for the inventory pocket
+       tiles and body-loot tiles, so broken gear reads identically
+       wherever it shows up in the UI. */
+    .pocket-item.item-broken .pkt-thumb,
+    #loot-misc-grid .bg-tile.item-broken .ws-thumb {
+      filter: brightness(0.55) contrast(0.85) saturate(0.30);
+    }
+    .pocket-item.item-broken .pkt-name,
+    #loot-misc-grid .bg-tile.item-broken .ws-name {
+      color: #b08080;
+    }
     /* Clean + Stroke overlay layers sit on top of the Underlay image.
        Absolute positioning stacks them in the parent cell-art box. */
     .cell-art-layer {
@@ -2878,6 +2918,8 @@
     }
     .shop-price.buy { color: #ffd27a; background: rgba(201, 168, 122, 0.22); border: 1px solid rgba(201, 168, 122, 0.35); }
     .shop-price.sell { color: #8fbf70; background: rgba(143, 191, 112, 0.22); border: 1px solid rgba(143, 191, 112, 0.35); }
+    .shop-price.repair { color: #ffd0d0; background: rgba(160, 30, 30, 0.30); border: 1px solid rgba(255, 80, 80, 0.55); font-weight: 800; }
+    .shop-cell-broken { box-shadow: 0 0 0 1px rgba(255, 80, 80, 0.40) inset, 0 0 8px rgba(255, 50, 50, 0.20); }
     .shop-empty { color: #6f6754; font-size: 12px; padding: 12px; text-align: center; }
 
     /* Shop footprint grid — same visual language as inventory pockets

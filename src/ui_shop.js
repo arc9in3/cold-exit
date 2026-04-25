@@ -124,6 +124,16 @@ export function priceFor(item, shopMult = 1) {
   const mult = (item.priceMult ?? 1) * (1 + _affixPerkPremium(item));
   return Math.max(1, Math.round(price * mult * shopMult));
 }
+// Cost to repair a broken item. Scales with the item's full buy price
+// (including the floor's shop multiplier) so a rare epic costs serious
+// credits to bring back to working condition. ~30% of buy is the
+// pricing target — cheaper than re-buying, but a real economic dent.
+export function repairPriceFor(item, shopMult = 1) {
+  if (!item) return 0;
+  const base = priceFor(item, shopMult);
+  return Math.max(1, Math.round(base * 0.30));
+}
+
 // Sell price uses the unfluxed base so selling is predictable. Junk sells
 // at full unfluxed `sellValue`.
 export function sellPriceFor(item) {
@@ -286,6 +296,22 @@ export class ShopUI {
     this.render();
   }
 
+  // Repair a broken item — restore durability to max in exchange for
+  // a fraction of the item's buy price. No-op if the item isn't
+  // actually broken or the player can't afford it. After repair we
+  // call back through `onClose`'s recompute path via `__recomputeStats`
+  // (exposed on window by main.js) so the freshly-restored stats land
+  // immediately rather than waiting for the next equipment change.
+  _repair(item) {
+    if (!item || !item.durability || item.durability.current > 0) return;
+    const cost = repairPriceFor(item, this.getShopMult());
+    if (this.getCredits() < cost) return;
+    if (!this.spendCredits(cost)) return;
+    item.durability.current = item.durability.max;
+    if (typeof window.__recomputeStats === 'function') window.__recomputeStats();
+    this.render();
+  }
+
   _buybackAt(i) {
     const entry = this.buyback[i];
     if (!entry) return;
@@ -374,20 +400,26 @@ export class ShopUI {
     });
 
     // Backpack — drag to shop (or click) to sell; accepts drops from shop stock to buy.
+    // Broken items show a repair price + "REPAIR" badge instead of sell;
+    // right-click on a broken item repairs it instead of selling.
     this.bagEl.innerHTML = '';
     let hasAny = false;
     for (let i = 0; i < this.inventory.backpack.length; i++) {
       const it = this.inventory.backpack[i];
       if (!it) continue;
       hasAny = true;
-      const sellPrice = sellPriceFor(it);
-      const cell = this._buildCell(it, sellPrice, 'sell');
+      const isBroken = it.durability && it.durability.current <= 0;
+      const action = isBroken ? 'repair' : 'sell';
+      const price = isBroken ? repairPriceFor(it, this.getShopMult()) : sellPriceFor(it);
+      const cell = this._buildCell(it, price, action);
+      if (isBroken) cell.classList.add('shop-cell-broken');
       cell.addEventListener('click', () => {
         if (window.__showDetails) window.__showDetails(it);
       });
       cell.addEventListener('contextmenu', (e) => {
         e.preventDefault();
-        this._sell(i);
+        if (isBroken) this._repair(it);
+        else this._sell(i);
       });
       cell.setAttribute('draggable', 'true');
       cell.addEventListener('dragstart', (e) => {
@@ -482,9 +514,12 @@ export class ShopUI {
     // Reuse the shared inventory/loot cell renderer so art, stats, desc,
     // perks, affixes, and durability all look identical to the backpack.
     // Price chip is layered on top via a dedicated column in .shop-item.
+    // Repair mode swaps the price chip label so the player understands
+    // they're paying TO restore the item, not selling it.
+    const priceLabel = mode === 'repair' ? `REPAIR ${price}c` : `${price}c`;
     cell.innerHTML = `
-      ${renderItemCell(item, null, { owned: mode === 'sell' })}
-      <div class="shop-price ${mode}">${price}c</div>
+      ${renderItemCell(item, null, { owned: mode === 'sell' || mode === 'repair' })}
+      <div class="shop-price ${mode}">${priceLabel}</div>
     `;
     return cell;
   }

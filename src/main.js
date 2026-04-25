@@ -622,6 +622,9 @@ const masteryPickUI = new MasteryPickUI(skillTree);
 
 const detailsUI = new DetailsUI({ inventory });
 window.__showDetails = (item) => detailsUI.show(item);  // called from UI right-click
+// Exposed so shop / inventory paths can re-derive stats after side
+// effects like repair without an explicit import dance.
+window.__recomputeStats = () => { try { recomputeStats(); } catch (_) {} };
 window.__hudMsg = (msg, duration) => transientHudMsg(msg, duration);
 
 const gameMenuUI = new GameMenuUI({
@@ -3066,6 +3069,9 @@ function fireOneShot(playerInfo, weapon, aimPoint, isADS) {
   }
 }
 
+// Throttle for the "Weapon broken" toast in tickShooting — held
+// triggers would otherwise spam the message at frame rate.
+let _brokenToastT = 0;
 function tickShooting(dt, playerInfo, inputState, aimInfo) {
   // Reload timers tick for EVERY weapon the player has rotated in, not
   // only the active one. Otherwise swapping away from a reloading gun
@@ -3078,6 +3084,18 @@ function tickShooting(dt, playerInfo, inputState, aimInfo) {
   const weapon = currentWeapon();
   if (!weapon) return;
   if (weapon.type === 'melee') return;
+  // Broken weapons can't fire — repair at a shop. Throttled HUD msg
+  // so a held trigger doesn't spam the toast.
+  if (weapon.durability && weapon.durability.current <= 0) {
+    if (inputState.attackHeld || inputState.attackPressed) {
+      const now = performance.now();
+      if (!_brokenToastT || now - _brokenToastT > 1500) {
+        transientHudMsg('Weapon broken — repair at a shop', 1.2);
+        _brokenToastT = now;
+      }
+    }
+    return;
+  }
   if (weapon.fireMode === 'flame') { tickFlame(dt, playerInfo, weapon, inputState, aimInfo); return; }
   playerFireCooldown = Math.max(0, playerFireCooldown - dt);
   playerBurstTimer = Math.max(0, playerBurstTimer - dt);
