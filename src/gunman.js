@@ -736,6 +736,16 @@ export class GunmanManager {
       }
 
       if (!g.alive) {
+        // Settled corpses — body is at rest, rig is in its dying
+        // pose. Skip the entire per-frame update for these. Only
+        // touch them every ~16 frames so the corpse fade / cleanup
+        // logic still progresses without paying the per-frame
+        // animation + physics cost. Late-game rooms fill with 8+
+        // corpses; that's 8 wasted updateAnim calls/frame otherwise.
+        if (g.deathPhys && g.deathPhys.settled) {
+          if ((this._frame & 15) === 0) g.deathT += dt * 16;
+          continue;
+        }
         g.deathT += dt;
         g.alertMat.opacity = 0;
         // Ragdoll-lite physics for the first fraction of a second:
@@ -766,7 +776,13 @@ export class GunmanManager {
             dp.vx *= 0.4; dp.vz *= 0.4;
             dp.settleT += dt;
             const horiz = Math.hypot(dp.vx, dp.vz);
-            if (horiz < 0.3 && dp.settleT > 0.15) dp.settled = true;
+            if (horiz < 0.3 && dp.settleT > 0.15) {
+              dp.settled = true;
+              // Drop the corpse from the shadow map pass — saves a
+              // chunk of GPU per frame in late-game rooms with 8+
+              // bodies. Shadows on prone corpses read poorly anyway.
+              g.group.traverse((obj) => { if (obj.isMesh) obj.castShadow = false; });
+            }
           }
         }
         // The rig's death-fall overrides body rotation based on the

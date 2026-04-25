@@ -162,20 +162,17 @@ export class MeleeEnemyManager {
     alert.renderOrder = 2;
     group.add(alert);
 
-    // Windup telegraph — a small ring that fills as they ready the swing.
-    const telMat = new THREE.MeshBasicMaterial({
-      color: 0xff5030, transparent: true, opacity: 0, depthWrite: false,
-    });
-    const telegraph = new THREE.Mesh(new THREE.TorusGeometry(0.55, 0.07, 8, 20), telMat);
-    telegraph.rotation.x = Math.PI / 2;
-    telegraph.position.y = 1.3;
-    group.add(telegraph);
+    // (The old windup-telegraph torus was retired — we read swing
+    // intent off the rig animation now. A no-op stub material is
+    // kept around so the legacy state-machine code that touches
+    // `e.telMat.opacity` keeps working without per-call branching.)
+    const telMat = { opacity: 0 };
 
     this.scene.add(group);
 
     const e = {
       group, leftLeg, rightLeg, torso, head, weaponArm, blade, offArm, alert, alertMat,
-      telegraph, telMat,
+      telMat,
       tipMarker,
       // Prev-frame blade-tip world position; filled while in WINDUP
       // or SWING state so the trail stitches segment-to-segment
@@ -480,6 +477,15 @@ export class MeleeEnemyManager {
       }
 
       if (!e.alive) {
+        // Settled-corpse LOD — same approach as gunman.js. Once the
+        // ragdoll has come to rest there's nothing to animate and
+        // nothing to physic. Tick the corpse at 1/16 rate so the
+        // deathT counter still advances for any cleanup logic
+        // downstream without paying the per-frame updateAnim cost.
+        if (e.deathPhys && e.deathPhys.settled) {
+          if ((this._frame & 15) === 0) e.deathT += dt * 16;
+          continue;
+        }
         e.deathT += dt;
         e.alertMat.opacity = 0;
         e.telMat.opacity = 0;
@@ -502,7 +508,12 @@ export class MeleeEnemyManager {
             dp.vx *= 0.4; dp.vz *= 0.4;
             dp.settleT += dt;
             const horiz = Math.hypot(dp.vx, dp.vz);
-            if (horiz < 0.3 && dp.settleT > 0.15) dp.settled = true;
+            if (horiz < 0.3 && dp.settleT > 0.15) {
+              dp.settled = true;
+              // Drop from the shadow map pass — same rationale as
+              // GunmanManager. Saves real GPU time in late-game rooms.
+              e.group.traverse((obj) => { if (obj.isMesh) obj.castShadow = false; });
+            }
           }
         }
         if (e.rig) updateAnim(e.rig, { dying: true }, dt);
