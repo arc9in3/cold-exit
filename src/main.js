@@ -198,11 +198,15 @@ function renderBossBar() {
     bossBarRoot.root.style.display = 'none';
     return;
   }
-  // Only show once the player enters the boss room (same signal the
-  // arena-lock uses). Prevents the bar from floating over the hud
-  // while the player is still fighting through earlier rooms.
+  // Show whenever the player has entered the boss room OR the boss is
+  // currently aggroed (alerted / firing / chasing). The aggro trigger
+  // matters because bosses can leave their rooms now — a chasing boss
+  // out in the corridor still deserves a healthbar.
   const here = level.roomAt(player.mesh.position.x, player.mesh.position.z);
-  if (!here || here.id !== boss.roomId) {
+  const inBossRoom = here && here.id === boss.roomId;
+  const aggroState = boss.state && boss.state !== 'idle'
+    && boss.state !== 'sleep' && boss.state !== 'dead';
+  if (!inBossRoom && !aggroState) {
     bossBarRoot.root.style.display = 'none';
     return;
   }
@@ -4084,15 +4088,19 @@ function onProjectileExplode(pos, explosion, owner, p) {
     spawnFlashDome(pos, radius, 0xffffff);
     // Player-side flash blind — when an enemy throws this and the
     // player has LoS to the detonation, paint a fading white overlay
-    // for flashDur seconds. Reuses the existing #flash-overlay DOM
-    // node so we don't allocate per-fire.
+    // for flashDur seconds. Mitigated by distance from the blast and
+    // by whether the player is facing toward or away from the
+    // detonation: a player squinted away from a flashbang only
+    // catches a fraction of the blind.
     if (owner === 'enemy') {
       const dx = player.mesh.position.x - pos.x;
       const dz = player.mesh.position.z - pos.z;
-      if (dx * dx + dz * dz < rSq) {
+      const d2 = dx * dx + dz * dz;
+      if (d2 < rSq) {
         const eye = new THREE.Vector3(player.mesh.position.x, 1.2, player.mesh.position.z);
         if (combat.hasLineOfSight(pos, eye, blockers)) {
-          playerFlashT = Math.max(playerFlashT, flashDur);
+          const dur = _scalePlayerThrowableEffect(flashDur, pos, radius, /* facingMatters */ true);
+          if (dur > 0.05) playerFlashT = Math.max(playerFlashT, dur);
         }
       }
     }
@@ -4117,11 +4125,16 @@ function onProjectileExplode(pos, explosion, owner, p) {
     // from the flashbang at a glance.
     spawnFlashDome(pos, radius, 0xc0d8ff);
     // Player-side stun — camera waver. Only when an enemy threw it
-    // and the blast caught the player; same radius check.
+    // and the blast caught the player; same radius check. Stun is
+    // concussive so it falls off with distance (further = less
+    // shockwave) but doesn't care which way the player is facing.
     if (owner === 'enemy') {
       const dx = player.mesh.position.x - pos.x;
       const dz = player.mesh.position.z - pos.z;
-      if (dx * dx + dz * dz < rSq) playerStunT = Math.max(playerStunT, stunDur);
+      if (dx * dx + dz * dz < rSq) {
+        const dur = _scalePlayerThrowableEffect(stunDur, pos, radius, /* facingMatters */ false);
+        if (dur > 0.05) playerStunT = Math.max(playerStunT, dur);
+      }
     }
     if (sfx.explode) sfx.explode();
     triggerShake(0.25, 0.22);
@@ -5536,8 +5549,8 @@ function spawnDronesAt(x, z) {
 // position. Uses the same projectile system the player throws into.
 const AI_THROWABLE_POOL = [
   { kind: 'frag',  fuse: 1.6, aoeRadius: 5.0, aoeDamage: 60, color: 0x60a040 },
-  { kind: 'flash', fuse: 1.0, aoeRadius: 7.0, blindDuration: 3.5, color: 0xfff0a0 },
-  { kind: 'stun',  fuse: 1.2, aoeRadius: 5.5, stunDuration: 2.4,  color: 0x80a0ff },
+  { kind: 'flash', fuse: 1.0, aoeRadius: 4.5, blindDuration: 3.0, color: 0xfff0a0 },
+  { kind: 'stun',  fuse: 1.2, aoeRadius: 3.8, stunDuration: 2.2,  color: 0x80a0ff },
 ];
 function spawnAiThrowable(g, kindOverride) {
   if (!g || !g.alive || !player) return;
@@ -5580,6 +5593,37 @@ function spawnAiThrowable(g, kindOverride) {
 // catches the player. Tick consumed in renderHud / camera path.
 let playerFlashT = 0;
 let playerStunT = 0;
+// Mitigate an enemy throwable's effect on the player based on distance
+// to the blast (further = less effect) and, optionally, where the
+// player is looking (squinted away from a flash takes far less than
+// staring straight at it). Returns the scaled duration in seconds.
+//   distMul  — 1.0 at ground zero, 0.25 at the blast edge.
+//   faceMul  — 1.0 facing the blast, 0.4 looking away (only applied
+//              when facingMatters === true; stun ignores facing
+//              because it's concussive, not a light pulse).
+function _scalePlayerThrowableEffect(baseDur, blastPos, radius, facingMatters) {
+  const px = player.mesh.position.x;
+  const pz = player.mesh.position.z;
+  const dx = px - blastPos.x;
+  const dz = pz - blastPos.z;
+  const dist = Math.hypot(dx, dz);
+  const distNorm = radius > 0 ? Math.min(1, dist / radius) : 1;
+  const distMul = 1 - 0.75 * distNorm;
+  let faceMul = 1;
+  if (facingMatters && lastAim) {
+    const fx = lastAim.x - px;
+    const fz = lastAim.z - pz;
+    const fl = Math.hypot(fx, fz);
+    if (fl > 0.001 && dist > 0.001) {
+      // Direction from player toward the blast.
+      const tx = -dx / dist;
+      const tz = -dz / dist;
+      const dot = (fx / fl) * tx + (fz / fl) * tz;   // -1 facing away, +1 facing toward
+      faceMul = 0.4 + 0.6 * Math.max(0, dot);        // 0.4 .. 1.0
+    }
+  }
+  return baseDur * distMul * faceMul;
+}
 // ADS camera-peek snapshot — captured at the rising edge of ADS so
 // the camera anchors to a fixed forward offset for the duration of
 // the ADS hold (no more chase-the-cursor wobble while aiming).
@@ -6091,15 +6135,10 @@ function propagateAggro(alerted) {
 }
 
 function onRoomFirstEntered(room) {
-  // Boss-arena lock-in: walking into a live boss room slams every
-  // connected door shut and tints them red. Unlock chain runs from
-  // onEnemyKilled when the boss dies. Only fires if the boss is
-  // still alive on entry (so a post-kill revisit isn't punished).
-  // Note: the actual seal now runs from tryBossSeal each tick so we
-  // don't trap the player inside with the boss stranded outside.
-  if (room.type === 'boss') {
-    tryBossSeal(room);
-  }
+  // Boss arenas no longer auto-seal on entry. Bosses can pursue out
+  // through doorways now, and locking the player in with a boss that
+  // has wandered into the corridor was creating "boss stranded
+  // outside" softlocks. Aggro just propagates normally.
   if (room.type !== 'combat' && room.type !== 'subBoss' && room.type !== 'boss') return;
   // Crouched / crouch-sprint entries are stealth attempts — no surprise
   // rush. Only standing entries risk tripping an enemy's "heard that".
@@ -6131,97 +6170,11 @@ function inputStateCrouchHeld() {
   return !!(lastSampledInput && lastSampledInput.crouchHeld);
 }
 
-// Seal boss doors only when the boss is actually inside the boss-room
-// bounds. Earlier version fired on player's first entry regardless of
-// the boss's position — if the boss had pathed out into the corridor
-// chasing the player, the seal locked the player in with the boss
-// stranded outside and unreachable. This gets called every frame the
-// player is in the boss room until the seal fires exactly once.
-function tryBossSeal(room) {
-  if (!room || room.type !== 'boss' || room._sealed) return;
-  const b = room.bounds;
-  const insideRoom = (c) => {
-    const p = c.group.position;
-    return p.x >= b.minX && p.x <= b.maxX && p.z >= b.minZ && p.z <= b.maxZ;
-  };
-  let bossInside = false;
-  let bossExists = false;
-  for (const g of gunmen.gunmen) {
-    if (!g.alive || g.tier !== 'boss' || g.roomId !== room.id) continue;
-    bossExists = true;
-    if (insideRoom(g)) bossInside = true;
-  }
-  for (const m of melees.enemies) {
-    if (!m.alive || m.tier !== 'boss' || m.roomId !== room.id) continue;
-    bossExists = true;
-    if (insideRoom(m)) bossInside = true;
-  }
-  if (!bossExists) {
-    // Boss was killed before the seal fired — mark sealed so we don't
-    // keep checking. Doors stay open so the player can leave.
-    room._sealed = true;
-    return;
-  }
-  if (!bossInside) return;   // wait for the boss to come back inside
-  level.lockDoorsForRoom(room.id);
-  room._sealed = true;
-  // Nudge the player out of any door they're currently standing inside.
-  // Without this, a door that seals while the player is mid-threshold
-  // re-materialises around them as a solid collision wall and traps
-  // them against their own hitbox. Push them a meter into the boss
-  // room along the door-to-room-centre axis.
-  _ejectPlayerFromSealedDoors(room);
-  transientHudMsg('DOORS SEALED — BOSS FIGHT', 2.2);
-}
-
-function _ejectPlayerFromSealedDoors(room) {
-  const pr = tunables.player.collisionRadius;
-  const px = player.mesh.position.x;
-  const pz = player.mesh.position.z;
-  for (const mesh of level.obstacles) {
-    if (!mesh.userData.isDoor) continue;
-    if (!mesh.userData.connects?.includes(room.id)) continue;
-    const b = mesh.userData.collisionXZ;
-    if (!b) continue;
-    // Player AABB overlap test (circle-vs-AABB approximation — circle
-    // centre inside the door box expanded by pr).
-    if (px < b.minX - pr || px > b.maxX + pr) continue;
-    if (pz < b.minZ - pr || pz > b.maxZ + pr) continue;
-    // Push toward the boss room's centre so the player ends up on the
-    // arena side of the sealed threshold. Add a 0.2 m safety margin on
-    // top of the radius so the collision resolver doesn't immediately
-    // clamp them back into the door.
-    let toRoomX = room.cx - mesh.userData.cx;
-    let toRoomZ = room.cz - mesh.userData.cz;
-    const l = Math.hypot(toRoomX, toRoomZ) || 1;
-    toRoomX /= l; toRoomZ /= l;
-    // Distance along the toRoom vector needed to exit the door's AABB
-    // on the room-side, plus the player's radius and a 0.2 m margin
-    // so the collision resolver doesn't clamp them straight back in.
-    const geo = mesh.geometry?.parameters;
-    const halfW = (geo?.width || 1.2) / 2;
-    const halfD = (geo?.depth || 1.2) / 2;
-    const halfExtent = halfW * Math.abs(toRoomX) + halfD * Math.abs(toRoomZ);
-    const push = halfExtent + pr + 0.2;
-    player.mesh.position.x = mesh.userData.cx + toRoomX * push;
-    player.mesh.position.z = mesh.userData.cz + toRoomZ * push;
-    // One overlap is enough — bail after the first eject so two doors
-    // don't fight over the player's new position.
-    return;
-  }
-}
-
 function updateRoomClearance(playerPos) {
   const here = level.roomAt(playerPos.x, playerPos.z);
   if (here && !here.entered) {
     here.entered = true;
     onRoomFirstEntered(here);
-  }
-  // Keep retrying the boss seal every frame the player is standing in
-  // the boss room. Catches the case where the boss is outside on first
-  // entry but wanders back in later.
-  if (here && here.type === 'boss' && !here._sealed) {
-    tryBossSeal(here);
   }
   for (const r of level.rooms) {
     if (r.cleared || !r.entered) continue;

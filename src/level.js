@@ -996,6 +996,39 @@ export class Level {
           && (z - d / 2) >= b.minZ + PAD && (z + d / 2) <= b.maxZ - PAD;
     };
 
+    // AABB-vs-AABB rejection using the prop's actual rotated footprint
+    // plus a margin. The center-radius `_collidesAt` test is still used
+    // as a cheap coarse pass; this runs after to catch overlaps the
+    // radius approximation misses (long thin props next to a column,
+    // two desks placed corner-to-corner, etc.) and to enforce a real
+    // walking gap between props instead of letting them touch.
+    const PROP_GAP = 0.45;
+    const _propFootprintFree = (x, z, prop, yaw) => {
+      const col = prop.collision;
+      if (!col) return true;
+      let w = col.w, d = col.d;
+      const yawAbs = Math.abs(yaw || 0) % Math.PI;
+      const axisAligned = yawAbs < 0.05 || Math.abs(yawAbs - Math.PI / 2) < 0.05;
+      if (!axisAligned) {
+        const bound = Math.max(w, d);
+        w = bound; d = bound;
+      } else if (Math.abs(yawAbs - Math.PI / 2) < 0.05) {
+        [w, d] = [d, w];
+      }
+      const halfW = w / 2 + PROP_GAP;
+      const halfD = d / 2 + PROP_GAP;
+      for (const o of this.obstacles) {
+        const ob = o.userData.collisionXZ;
+        if (!ob) continue;
+        if (x + halfW <= ob.minX) continue;
+        if (x - halfW >= ob.maxX) continue;
+        if (z + halfD <= ob.minZ) continue;
+        if (z - halfD >= ob.maxZ) continue;
+        return false;
+      }
+      return true;
+    };
+
     const placeAlongWall = (prop, opts = {}) => {
       const yaw = opts.yaw;       // if provided, override rotation
       const col = prop.collision;
@@ -1012,6 +1045,7 @@ export class Level {
         if (this._collidesAt(x, z, radius)) continue;
         const finalYaw = yaw ?? facing;
         if (!_propFitsInBounds(prop, x, z, finalYaw)) continue;
+        if (!_propFootprintFree(x, z, prop, finalYaw)) continue;
         prop.group.position.set(x, 0, z);
         prop.group.rotation.y = finalYaw;
         return this._registerProp(prop);
@@ -1029,6 +1063,7 @@ export class Level {
         if (this._collidesAt(x, z, radius)) continue;
         const yaw = (Math.floor(Math.random() * 4)) * Math.PI / 2;
         if (!_propFitsInBounds(prop, x, z, yaw)) continue;
+        if (!_propFootprintFree(x, z, prop, yaw)) continue;
         prop.group.position.set(x, 0, z);
         prop.group.rotation.y = yaw;
         return this._registerProp(prop);
@@ -1224,11 +1259,12 @@ export class Level {
     mesh.position.set(x, WALL_HEIGHT / 2, z);
     mesh.castShadow = false;     // see _addObstacle — walls don't cast
     mesh.receiveShadow = true;
-    // Approximate the round column with a square AABB (0.9× radius) so the
-    // existing collision system (axis-aligned boxes) still treats it as
-    // solid without feeling square when the player hugs it.
-    const s = radius * 0.9;
-    mesh.userData.collisionXZ = { minX: x - s, maxX: x + s, minZ: z - s, maxZ: z + s };
+    // Square AABB matching the column's full radius. Earlier the box
+    // was 0.9× radius (so the player wouldn't feel "square corners"
+    // hugging the pillar) but that left a 10% gap that prop placement
+    // was sometimes squeezing tables into. The player rarely actually
+    // hugs columns in combat, so accuracy wins here.
+    mesh.userData.collisionXZ = { minX: x - radius, maxX: x + radius, minZ: z - radius, maxZ: z + radius };
     this.obstacles.push(mesh);
     this.scene.add(mesh);
     return mesh;

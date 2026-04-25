@@ -138,7 +138,10 @@ export function repairPriceFor(item, shopMult = 1) {
 // sells at full unfluxed `sellValue`. Stack-aware — selling a stack
 // of N junk pays N × sellValue, and a stack of N consumables pays
 // N × per-unit price (so the player isn't penalised for having
-// merged stacks).
+// merged stacks). Broken gear takes a steep discount because no
+// merchant pays full coin for a busted weapon or shredded vest —
+// player should usually repair-then-sell or just dump the item.
+const BROKEN_SELL_MULT = 0.15;
 export function sellPriceFor(item) {
   const count = (item?.count | 0) || 1;
   if (item.type === 'junk' && typeof item.sellValue === 'number') {
@@ -148,7 +151,11 @@ export function sellPriceFor(item) {
   let rawBuy = base;
   if (item.type === 'consumable') rawBuy = Math.round(base * 0.5);
   else if (item.type === 'attachment') rawBuy = Math.round(base * 1.2);
-  return Math.max(1, Math.round(rawBuy * tunables.currency.sellMult * count));
+  let price = Math.round(rawBuy * tunables.currency.sellMult * count);
+  if (item.durability && item.durability.current <= 0) {
+    price = Math.round(price * BROKEN_SELL_MULT);
+  }
+  return Math.max(1, price);
 }
 
 export class ShopUI {

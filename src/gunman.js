@@ -1788,16 +1788,12 @@ export class GunmanManager {
       const res = ctx.resolveCollision(beforeX, beforeZ, nx, nz, tunables.ai.collisionRadius);
       g.group.position.x = res.x;
       g.group.position.z = res.z;
-      // (Bosses used to be clamped to their arena bounds here — same
-      // pattern as the melee-boss clamp in melee_enemy.js. Removed
-      // so bosses can pursue the player through doorways into
-      // adjacent rooms / corridors. Without this, players could
-      // stand at a doorway and shoot in without ever being engaged.
-      // Door-graph pathing already routes the boss back through any
-      // open door, and the boss-arena seal (tryBossSeal) still fires
-      // on first entry so the player can't just kite a sealed boss
-      // forever — the seal locks all doors connected to the room
-      // once the boss is inside, and the unlock fires on boss kill.)
+      // (Bosses used to be clamped to their arena bounds here. Removed
+      // so they can pursue the player through doorways into adjacent
+      // rooms / corridors — without it, players could stand at a
+      // doorway and shoot in without ever being engaged. The boss-
+      // arena door-seal was dropped at the same time so the player
+      // can't get sealed in with a boss stranded out in the hall.)
       // Detect clamp: wanted to move but barely did. Tanks don't wiggle —
       // they just shove straight in until they hit the player.
       if ((moveSign !== 0 || g.dashT > 0 || g.repositionT > 0) && g.variant !== 'tank') {
