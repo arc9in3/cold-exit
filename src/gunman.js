@@ -977,7 +977,12 @@ export class GunmanManager {
     // Stealth multiplier only gates *initial* detection while idle. Once
     // alerted, the enemy keeps aggro as long as LoS holds — with the
     // caveat that they can't see through the back of their own head.
-    const hasLos = roomActive
+    // Smoke zones (player throwables) override the LoS test entirely:
+    // if the player is standing in smoke, no detection check passes.
+    const playerInSmoke = ctx.isInsideSmoke
+      ? ctx.isInsideSmoke(ctx.playerPos.x, ctx.playerPos.z)
+      : false;
+    const hasLos = roomActive && !playerInSmoke
       && ctx.combat.hasLineOfSight(eye, target, ctx.obstacles);
     const fwd = _g_fwd.set(Math.sin(g.group.rotation.y), 0, Math.cos(g.group.rotation.y));
     const facingDot = fwd.dot(dir2d);
@@ -1588,6 +1593,23 @@ export class GunmanManager {
               g.archT = 0.7 + Math.random() * 0.9;
             }
           }
+        }
+      }
+
+      // Boss / sub-boss anti-camp throwable. When the player has
+      // been roughly stationary for a few seconds, lob a random
+      // throwable (frag / flash / stun) at them to force movement.
+      // Per-enemy 8-12s cooldown so they don't spam, and each enemy
+      // skips when they've LoS (no point throwing blind unless the
+      // player is camping out of sight too — handled by the "camping"
+      // check independent of LoS).
+      if ((g.tier === 'boss' || g.tier === 'subBoss') && ctx.isPlayerCamping
+          && ctx.spawnAiThrowable) {
+        g.antiCampThrowT = (g.antiCampThrowT || 0) - dt;
+        if (g.antiCampThrowT <= 0 && ctx.isPlayerCamping()) {
+          const baseCd = g.tier === 'boss' ? 8 : 12;
+          g.antiCampThrowT = baseCd + Math.random() * 4;
+          ctx.spawnAiThrowable(g);
         }
       }
 

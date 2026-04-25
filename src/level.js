@@ -186,19 +186,23 @@ export class Level {
         else if (r < 0.98) layout = 'zigzag';
         // else remains 'open'
       } else if (type === 'boss') {
-        // Boss room arenas — pick from a pool of 5 layouts each
-        // tuned to a different boss-fight feel:
-        //   columns-6        — classic "stately ring", LoS pillars
-        //   columns-cross    — symmetric cross of pillars, all-angle play
-        //   boss-arena       — open floor with a low ring barrier
-        //                      (great for snipers + dashers needing room)
-        //   boss-pillars     — scattered tall pillars across the whole
-        //                      room (LoS breakers for dash bosses)
-        //   boss-perch       — one raised platform along a wall
-        //                      (ranged-boss elevation, player needs to flank)
-        const bossPool = ['columns-6', 'columns-cross',
-                          'boss-arena', 'boss-pillars', 'boss-perch'];
-        layout = bossPool[Math.floor(Math.random() * bossPool.length)];
+        // Boss room layout — 50/50 split between dedicated boss
+        // arenas and wider combat layouts so bosses surface in many
+        // different room types. Cramped variants (closet, alcove)
+        // are explicitly excluded; partition can corner the boss
+        // depending on door placement so it's also out. The
+        // remaining pool guarantees enough open floor for the boss
+        // to reposition without getting cornered against a wall —
+        // critical safety promise the user called out.
+        if (Math.random() < 0.5) {
+          const bossPool = ['columns-6', 'columns-cross',
+                            'boss-arena', 'boss-pillars', 'boss-perch'];
+          layout = bossPool[Math.floor(Math.random() * bossPool.length)];
+        } else {
+          const altPool = ['open', 'split', 'hallway', 'lshape',
+                           'bunker', 'pillars-grid', 'center-pit', 'zigzag'];
+          layout = altPool[Math.floor(Math.random() * altPool.length)];
+        }
       }
       rooms.push({
         id: i,

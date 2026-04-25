@@ -689,7 +689,11 @@ export class MeleeEnemyManager {
 
     // Perception — looser than gunman since they just need to notice you.
     // Stealth only gates the first spot; once chasing, LoS alone decides.
-    const hasLos = roomActive && ctx.combat.hasLineOfSight(
+    // Smoke zones override LoS the same way they do for gunmen.
+    const playerInSmoke = ctx.isInsideSmoke
+      ? ctx.isInsideSmoke(ctx.playerPos.x, ctx.playerPos.z)
+      : false;
+    const hasLos = roomActive && !playerInSmoke && ctx.combat.hasLineOfSight(
       e.torso.getWorldPosition(_m_eye),
       _m_aimAt.copy(ctx.playerPos).setY(1.0),
       ctx.obstacles,

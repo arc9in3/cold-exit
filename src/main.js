@@ -4000,6 +4000,20 @@ function onProjectileExplode(pos, explosion, owner, p) {
     // concussive light pulse. Tint slightly warm so it doesn't look
     // identical to the stun grenade.
     spawnFlashDome(pos, radius, 0xffffff);
+    // Player-side flash blind — when an enemy throws this and the
+    // player has LoS to the detonation, paint a fading white overlay
+    // for flashDur seconds. Reuses the existing #flash-overlay DOM
+    // node so we don't allocate per-fire.
+    if (owner === 'enemy') {
+      const dx = player.mesh.position.x - pos.x;
+      const dz = player.mesh.position.z - pos.z;
+      if (dx * dx + dz * dz < rSq) {
+        const eye = new THREE.Vector3(player.mesh.position.x, 1.2, player.mesh.position.z);
+        if (combat.hasLineOfSight(pos, eye, blockers)) {
+          playerFlashT = Math.max(playerFlashT, flashDur);
+        }
+      }
+    }
     if (sfx.explode) sfx.explode();
     triggerShake(0.3, 0.25);
     return;
@@ -4020,8 +4034,25 @@ function onProjectileExplode(pos, explosion, owner, p) {
     // Pale-blue tint on the white dome so the stun reads distinctly
     // from the flashbang at a glance.
     spawnFlashDome(pos, radius, 0xc0d8ff);
+    // Player-side stun — camera waver. Only when an enemy threw it
+    // and the blast caught the player; same radius check.
+    if (owner === 'enemy') {
+      const dx = player.mesh.position.x - pos.x;
+      const dz = player.mesh.position.z - pos.z;
+      if (dx * dx + dz * dz < rSq) playerStunT = Math.max(playerStunT, stunDur);
+    }
     if (sfx.explode) sfx.explode();
     triggerShake(0.25, 0.22);
+    return;
+  }
+  if (kind === 'smoke') {
+    spawnSmokeZone(pos, radius, p.smokeDuration || 9.0);
+    if (sfx.explode) sfx.explode();
+    return;
+  }
+  if (kind === 'decoy') {
+    spawnDecoyBeacon(pos, p.decoyDuration || 7.0);
+    if (sfx.explode) sfx.explode();
     return;
   }
 
@@ -5226,6 +5257,187 @@ function _tickBurnReadouts(dt) {
 }
 
 const _fireZones = [];
+// --- Smoke + decoy throwables --------------------------------------
+// Smoke zones block enemy line-of-sight while alive. Visualised as a
+// slowly-expanding low-opacity dome that fades over the zone's life.
+// Decoy beacons attract enemy navigation toward the beacon position
+// (consumed by gunman / melee detection — they treat the decoy as
+// `playerPos` while it's alive). Both register on a module-level
+// list so the per-frame tick can update visuals + expire them.
+const _smokeZones = [];
+const _decoys = [];
+
+function spawnSmokeZone(pos, radius, duration) {
+  // Cheap visual: one disc + one dome, both transparent. No particle
+  // system — keeps the per-frame cost flat regardless of zone count.
+  const baseMat = new THREE.MeshBasicMaterial({
+    color: 0x9aa4ad, transparent: true, opacity: 0.35,
+    depthWrite: false, side: THREE.DoubleSide,
+  });
+  const ring = new THREE.Mesh(new THREE.CircleGeometry(radius, 24), baseMat);
+  ring.rotation.x = -Math.PI / 2;
+  ring.position.set(pos.x, 0.05, pos.z);
+  scene.add(ring);
+  const domeMat = new THREE.MeshBasicMaterial({
+    color: 0xb8c0c8, transparent: true, opacity: 0.30,
+    depthWrite: false,
+  });
+  const dome = new THREE.Mesh(new THREE.SphereGeometry(radius, 16, 8, 0, Math.PI * 2, 0, Math.PI / 2), domeMat);
+  dome.position.set(pos.x, 0, pos.z);
+  scene.add(dome);
+  _smokeZones.push({ x: pos.x, z: pos.z, radius, life: duration, t: 0, ring, dome });
+}
+
+function spawnDecoyBeacon(pos, duration) {
+  // Spinning yellow rod + ground ring so the beacon reads as "active".
+  const rodMat = new THREE.MeshBasicMaterial({ color: 0xe0c040, transparent: true, opacity: 0.85 });
+  const rod = new THREE.Mesh(new THREE.CylinderGeometry(0.08, 0.08, 0.55, 8), rodMat);
+  rod.position.set(pos.x, 0.30, pos.z);
+  scene.add(rod);
+  const ringMat = new THREE.MeshBasicMaterial({
+    color: 0xe0c040, transparent: true, opacity: 0.45,
+    depthWrite: false, side: THREE.DoubleSide,
+  });
+  const ring = new THREE.Mesh(new THREE.RingGeometry(0.4, 0.55, 18), ringMat);
+  ring.rotation.x = -Math.PI / 2;
+  ring.position.set(pos.x, 0.05, pos.z);
+  scene.add(ring);
+  _decoys.push({ x: pos.x, z: pos.z, life: duration, t: 0, rod, ring });
+}
+
+// Tick + cleanup for smoke + decoys. Visuals fade over the last 30%
+// of life; mesh + material disposed on expiry.
+function _tickThrowableZones(dt) {
+  for (let i = _smokeZones.length - 1; i >= 0; i--) {
+    const z = _smokeZones[i];
+    z.t += dt;
+    const fade = z.t > z.life * 0.7
+      ? Math.max(0, (z.life - z.t) / (z.life * 0.3))
+      : 1;
+    z.ring.material.opacity = 0.35 * fade;
+    z.dome.material.opacity = 0.30 * fade;
+    if (z.t >= z.life) {
+      scene.remove(z.ring); z.ring.geometry.dispose(); z.ring.material.dispose();
+      scene.remove(z.dome); z.dome.geometry.dispose(); z.dome.material.dispose();
+      _smokeZones.splice(i, 1);
+    }
+  }
+  for (let i = _decoys.length - 1; i >= 0; i--) {
+    const d = _decoys[i];
+    d.t += dt;
+    d.rod.rotation.y += dt * 4;
+    const fade = d.t > d.life * 0.7
+      ? Math.max(0, (d.life - d.t) / (d.life * 0.3))
+      : 1;
+    d.rod.material.opacity = 0.85 * fade;
+    d.ring.material.opacity = 0.45 * fade;
+    if (d.t >= d.life) {
+      scene.remove(d.rod); d.rod.geometry.dispose(); d.rod.material.dispose();
+      scene.remove(d.ring); d.ring.geometry.dispose(); d.ring.material.dispose();
+      _decoys.splice(i, 1);
+    }
+  }
+}
+
+// Public predicates the AI tick uses to alter detection / target.
+function isInsideSmoke(x, z) {
+  for (const zone of _smokeZones) {
+    const dx = x - zone.x, dz = z - zone.z;
+    if (dx * dx + dz * dz < zone.radius * zone.radius) return true;
+  }
+  return false;
+}
+function activeDecoy() {
+  // Return the freshest active decoy (last spawned), or null.
+  if (_decoys.length === 0) return null;
+  return _decoys[_decoys.length - 1];
+}
+
+// --- Camping detection -----------------------------------------------
+// Track how long the player has held roughly-the-same position. Boss
+// AI uses this to decide whether to throw a grenade and force the
+// player out of cover. Reset whenever the player moves more than ~2m
+// from the last sampled spot.
+let playerCampingT = 0;
+const playerCampingThreshold = 3.5;   // seconds of stillness before "camping"
+const _campingAnchor = new THREE.Vector3();
+function _tickCamping(dt) {
+  if (!player) return;
+  const p = player.mesh.position;
+  if (_campingAnchor.lengthSq() === 0) _campingAnchor.copy(p);
+  const dx = p.x - _campingAnchor.x;
+  const dz = p.z - _campingAnchor.z;
+  if (dx * dx + dz * dz > 2.0 * 2.0) {
+    _campingAnchor.copy(p);
+    playerCampingT = 0;
+  } else {
+    playerCampingT += dt;
+  }
+}
+
+// AI throwable spawn — boss / sub-boss tier only, kicked off from
+// gunman.update when isPlayerCamping returns true and the per-enemy
+// throwable cooldown has elapsed. Picks a random throwable kind from
+// the boss pool, ballistically arcs it onto the player's last known
+// position. Uses the same projectile system the player throws into.
+const AI_THROWABLE_POOL = [
+  { kind: 'frag',  fuse: 1.6, aoeRadius: 5.0, aoeDamage: 60, color: 0x60a040 },
+  { kind: 'flash', fuse: 1.0, aoeRadius: 7.0, blindDuration: 3.5, color: 0xfff0a0 },
+  { kind: 'stun',  fuse: 1.2, aoeRadius: 5.5, stunDuration: 2.4,  color: 0x80a0ff },
+];
+function spawnAiThrowable(g, kindOverride) {
+  if (!g || !g.alive || !player) return;
+  const muzzleFrom = (g.rig && g.rig.head)
+    ? g.rig.head.getWorldPosition(new THREE.Vector3())
+    : new THREE.Vector3(g.group.position.x, 1.6, g.group.position.z);
+  const aim = new THREE.Vector3(player.mesh.position.x, 0, player.mesh.position.z);
+  const gravity = 9.8;
+  const dx = aim.x - muzzleFrom.x, dz = aim.z - muzzleFrom.z;
+  const throwDist = Math.hypot(dx, dz);
+  const apex = 0.8 + Math.min(2.4, throwDist / 8);
+  const vel = ProjectileManager.ballisticVelocityApex(muzzleFrom, aim, apex, gravity);
+  const def = kindOverride
+    ? AI_THROWABLE_POOL.find(d => d.kind === kindOverride) || AI_THROWABLE_POOL[0]
+    : AI_THROWABLE_POOL[Math.floor(Math.random() * AI_THROWABLE_POOL.length)];
+  projectiles.spawn({
+    pos: muzzleFrom,
+    vel,
+    type: 'grenade',
+    lifetime: def.fuse,
+    radius: 0.07,
+    color: def.color,
+    explosion: {
+      radius: def.aoeRadius,
+      damage: def.aoeDamage || 0,
+      shake: 0.35,
+    },
+    owner: 'enemy',
+    gravity,
+    bounciness: 0.40,
+    fuseAfterLand: true,
+    throwKind: def.kind,
+    blindDuration: def.blindDuration,
+    stunDuration: def.stunDuration,
+  });
+}
+
+// --- Player-side flash + stun state --------------------------------
+// Set when an enemy throws a flashbang / stun grenade and the blast
+// catches the player. Tick consumed in renderHud / camera path.
+let playerFlashT = 0;
+let playerStunT = 0;
+const _flashOverlayEl = (() => {
+  const el = document.createElement('div');
+  el.id = 'flash-overlay';
+  Object.assign(el.style, {
+    position: 'fixed', inset: '0', zIndex: 49,
+    background: '#ffffff', opacity: '0', pointerEvents: 'none',
+    transition: 'opacity 0.05s linear',
+  });
+  document.body.appendChild(el);
+  return el;
+})();
+
 function spawnFireZone(pos, radius, duration, dps) {
   const ringMat = new THREE.MeshBasicMaterial({
     color: 0xff6020, transparent: true, opacity: 0.35,
@@ -6120,6 +6332,19 @@ function tick() {
   _tickFireOrbs(dt);
   _tickBurnReadouts(dt);
   _tickBuffAuras(dt);
+  _tickThrowableZones(dt);
+  _tickCamping(dt);
+  // Player flash + stun decay. Flash drives a fullscreen white
+  // overlay that fades from 1.0 → 0 over the duration; stun decays
+  // separately, the camera waver reads it below.
+  if (playerFlashT > 0) {
+    playerFlashT = Math.max(0, playerFlashT - dt);
+    const k = Math.min(1, playerFlashT / 1.2);  // hold full white the first 1.2s, then fade
+    _flashOverlayEl.style.opacity = String((k > 0.6 ? 1 : k / 0.6).toFixed(3));
+  } else if (_flashOverlayEl.style.opacity !== '0') {
+    _flashOverlayEl.style.opacity = '0';
+  }
+  if (playerStunT > 0) playerStunT = Math.max(0, playerStunT - dt);
   syncLighting();
   dummies.update(dt);
   level.animateNPCs(dt);
@@ -6179,6 +6404,10 @@ function tick() {
     isRoomActive,
     spawnAiGrenade: (g) => spawnAiGrenade(g),
     spawnSniperShot: (g) => spawnSniperShot(g),
+    isInsideSmoke,                  // smoke-grenade LoS override
+    activeDecoy,                    // decoy beacon target hijack
+    spawnAiThrowable: (g, kind) => spawnAiThrowable(g, kind),
+    isPlayerCamping: () => playerCampingT > playerCampingThreshold,
   });
   melees.update({
     dt,
@@ -6191,6 +6420,8 @@ function tick() {
     playerStealthMult: stealthMult,
     onAlert: (e) => propagateAggro(e),
     isRoomActive,
+    isInsideSmoke,
+    activeDecoy,
     onPlayerHit: (d, enemy) => {
       if (playerInfo.blocking) {
         const hitPt = new THREE.Vector3(
@@ -6281,6 +6512,20 @@ function tick() {
     camera.position.y += (Math.random() - 0.5) * amp * 0.6;
     camera.position.z += (Math.random() - 0.5) * amp;
     if (shakeT <= 0) shakeMag = 0;
+  }
+  // Stun-grenade camera waver — slower than shake, smooth sinusoidal
+  // sway driven by playerStunT. Makes precise aim painful while the
+  // stun is active; full waver at peak fade-out toward 0 over the last
+  // 30% of life. Independent of shakeT so an explosion+stun stack.
+  if (playerStunT > 0) {
+    const stunMax = 2.5;
+    const k = Math.min(1, playerStunT / stunMax);
+    const fadeK = k > 0.7 ? 1 : (k / 0.7);
+    const t = performance.now() / 1000;
+    const amp = 0.35 * fadeK;
+    camera.position.x += Math.sin(t * 6.4) * amp;
+    camera.position.y += Math.sin(t * 4.2 + 1.3) * amp * 0.5;
+    camera.position.z += Math.cos(t * 5.7 + 0.6) * amp;
   }
 
   updateHealthHud(playerInfo);

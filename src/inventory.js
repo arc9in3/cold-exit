@@ -1133,6 +1133,24 @@ export const THROWABLE_DEFS = {
     maxCharges: 1, cooldownSec: 30,
     description: 'Dazes enemies in radius for 2.5s · 30s cooldown',
   },
+  smokeGrenade: {
+    id: 'thr_smoke', name: 'Smoke Grenade', type: 'throwable', rarity: 'uncommon',
+    tint: 0xa0a8b0,
+    throwKind: 'smoke',
+    aoeRadius: 4.5, fuse: 0.8,   // pops fast on land, then lingers
+    smokeDuration: 9.0,
+    maxCharges: 2, cooldownSec: 60,
+    description: 'Vision-blocking smoke for 9s · breaks enemy line of sight',
+  },
+  decoy: {
+    id: 'thr_decoy', name: 'Decoy Beacon', type: 'throwable', rarity: 'uncommon',
+    tint: 0xe0c040,
+    throwKind: 'decoy',
+    aoeRadius: 1.2, fuse: 0.8,   // arms quickly on land
+    decoyDuration: 7.0,
+    maxCharges: 2, cooldownSec: 50,
+    description: 'Audio + visual lure pulls enemies to a location for 7s',
+  },
 };
 export const ALL_THROWABLES = Object.values(THROWABLE_DEFS);
 // Clone a throwable def into a live item instance — sets initial
