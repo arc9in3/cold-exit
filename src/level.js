@@ -2873,6 +2873,14 @@ export class Level {
   // along the line away from the threat. Returns the closest such
   // point with a clear LoS-vs-threat (i.e., the prop blocks). Used by
   // gunmen during reload + suppression.
+  //
+  // Cost-tight: per-prop work is one walkability check (`_collidesAt`,
+  // O(walls), early-outs on first hit) plus a constant-time "does the
+  // threat→spot line cross the prop's AABB" test. Earlier version
+  // called `_segmentClear` against every obstacle for every prop and
+  // burned ~150k AABB tests per call on a late-game level — that
+  // showed up as a per-shot hitch when reloading gunmen kept polling
+  // for a new spot.
   findCoverNear(pos, threatPos, maxR) {
     let best = null, bestD = Infinity;
     const px = pos.x, pz = pos.z;
@@ -2902,15 +2910,46 @@ export class Level {
       if (fl < 0.001) continue;
       const sx = cx + (fx / fl) * (propR + 0.4);
       const sz = cz + (fz / fl) * (propR + 0.4);
-      // Spot must be walkable and in the same room as the seeker
-      // (don't try to hide on the other side of a wall).
+      // Spot must be walkable.
       if (this._collidesAt(sx, sz, 0.45)) continue;
-      // The straight line from threat to spot should cross the prop —
-      // _segmentClear returning false means something blocks it.
-      if (this._segmentClear(tx, tz, sx, sz, 0.3)) continue;
+      // Cheap LoS check: the threat→spot segment must cross THIS prop's
+      // AABB. If it does, the prop is between threat and spot by
+      // construction — no need to scan every other obstacle.
+      if (!_segmentIntersectsAABB(tx, tz, sx, sz, b)) continue;
       const d = Math.sqrt(d2);
       if (d < bestD) { bestD = d; best = { x: sx, z: sz }; }
     }
     return best;
   }
+}
+
+// 2D segment-vs-AABB clip (Liang-Barsky-lite). Returns true if the
+// segment from (ax,az) to (bx,bz) intersects the axis-aligned box `b`
+// (minX/maxX/minZ/maxZ). Constant-time, no allocs.
+function _segmentIntersectsAABB(ax, az, bx, bz, b) {
+  let tMin = 0, tMax = 1;
+  const dx = bx - ax, dz = bz - az;
+  // X slab.
+  if (Math.abs(dx) < 1e-6) {
+    if (ax < b.minX || ax > b.maxX) return false;
+  } else {
+    let t1 = (b.minX - ax) / dx;
+    let t2 = (b.maxX - ax) / dx;
+    if (t1 > t2) { const tmp = t1; t1 = t2; t2 = tmp; }
+    tMin = Math.max(tMin, t1);
+    tMax = Math.min(tMax, t2);
+    if (tMin > tMax) return false;
+  }
+  // Z slab.
+  if (Math.abs(dz) < 1e-6) {
+    if (az < b.minZ || az > b.maxZ) return false;
+  } else {
+    let t1 = (b.minZ - az) / dz;
+    let t2 = (b.maxZ - az) / dz;
+    if (t1 > t2) { const tmp = t1; t1 = t2; t2 = tmp; }
+    tMin = Math.max(tMin, t1);
+    tMax = Math.min(tMax, t2);
+    if (tMin > tMax) return false;
+  }
+  return true;
 }

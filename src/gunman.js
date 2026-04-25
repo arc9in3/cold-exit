@@ -1799,16 +1799,30 @@ export class GunmanManager {
       // the gunman is about to walk into. Bosses + dashers especially
       // were getting wedged against couches when chasing. Skipped
       // during a dash burst (intentional commit) and for tanks (which
-      // are designed to just plow forward).
-      if (ctx.level && ctx.level.steerAround && g.dashT <= 0 && g.variant !== 'tank') {
+      // are designed to just plow forward). Run every-other-frame per
+      // gunman (each carries its own phase) so 30+ enemies don't all
+      // pay the look-ahead probes on the same frame.
+      g._steerPhase = (g._steerPhase || 0) + 1;
+      if ((g._steerPhase & 1) === 0 && ctx.level && ctx.level.steerAround
+          && g.dashT <= 0 && g.variant !== 'tank') {
         const speed = Math.hypot(vx, vz);
         if (speed > 0.05) {
           const lookAhead = Math.max(0.8, speed * 0.35);
           const steered = ctx.level.steerAround(g.group.position.x, g.group.position.z,
             vx / speed, vz / speed,
             tunables.ai.collisionRadius + 0.15, lookAhead);
+          // Cache the steered direction so the off-frame still uses
+          // the deflected heading (avoids visible 30Hz jitter).
+          g._steerDirX = steered.x;
+          g._steerDirZ = steered.z;
           vx = steered.x * speed;
           vz = steered.z * speed;
+        }
+      } else if (g._steerDirX !== undefined) {
+        const speed = Math.hypot(vx, vz);
+        if (speed > 0.05) {
+          vx = g._steerDirX * speed;
+          vz = g._steerDirZ * speed;
         }
       }
       const nx = g.group.position.x + vx * dt;

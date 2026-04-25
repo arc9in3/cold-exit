@@ -867,18 +867,23 @@ export class MeleeEnemyManager {
 
       const beforeX = e.group.position.x, beforeZ = e.group.position.z;
       // Proactive steering — before we commit to the desired heading,
-      // ask the level to whisker-test for an obstacle ahead. If the
-      // straight line is blocked, take the closest open whisker
-      // direction instead so the enemy curves around props rather
-      // than walking into them. Cheap (one to seven _collidesAt
-      // probes); only happens when blocked.
-      if (ctx.level && ctx.level.steerAround) {
+      // ask the level to whisker-test for an obstacle ahead. Run
+      // every-other-frame per enemy and cache the deflection so the
+      // off-frame still uses the corrected heading; halves the cost
+      // when many adds are chasing.
+      e._steerPhase = (e._steerPhase || 0) + 1;
+      if ((e._steerPhase & 1) === 0 && ctx.level && ctx.level.steerAround) {
         const lookAhead = Math.max(0.8, moveSpeed * 0.35);
         const steered = ctx.level.steerAround(beforeX, beforeZ,
           approach.x, approach.z,
           tunables.meleeEnemy.collisionRadius + 0.15, lookAhead);
+        e._steerDirX = steered.x;
+        e._steerDirZ = steered.z;
         approach.x = steered.x;
         approach.z = steered.z;
+      } else if (e._steerDirX !== undefined) {
+        approach.x = e._steerDirX;
+        approach.z = e._steerDirZ;
       }
       const nx = beforeX + approach.x * moveSpeed * dt;
       const nz = beforeZ + approach.z * moveSpeed * dt;
