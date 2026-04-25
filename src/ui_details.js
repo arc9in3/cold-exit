@@ -3,6 +3,7 @@ import { inferRarity, SLOT_LABEL, SET_DEFS, countEquippedSetPieces } from './inv
 import { thumbnailFor } from './item_thumbnails.js';
 import { modelForItem } from './model_manifest.js';
 import { loadModelClone, fitToRadius, applyEmissiveTint, addOutlines } from './gltf_cache.js';
+import { BASE_STATS } from './skills.js';
 
 // Verbose item details panel — opens on right-click. Shows lore, full
 // stat breakdown, affixes/perks, set bonus progress, and (when the item
@@ -129,6 +130,85 @@ const RARITY_COLORS = {
   legendary: '#e6b94a',
 };
 
+// Stat key → render config for the apply()-driven effect surfacer below.
+// Each entry says how to label a base-stats key, the math used to
+// convert the raw delta into a player-facing number, the suffix unit,
+// and which direction reads as a "good" change for the diff colouring
+// in the comparison panel ('+' = higher is better, '-' = lower is
+// better). When a key isn't listed we skip it rather than printing
+// `magicMult: 1.234567` — the goal is readability.
+const APPLY_STAT_LABELS = {
+  // Movement / survival
+  moveSpeedMult:        { label: 'Move Speed',         kind: 'mult', dir: '+' },
+  staminaRegenMult:     { label: 'Stamina Regen',      kind: 'mult', dir: '+' },
+  maxStaminaBonus:      { label: 'Max Stamina',        kind: 'add',  dir: '+' },
+  maxHealthBonus:       { label: 'Max HP',             kind: 'add',  dir: '+' },
+  healthRegenMult:      { label: 'Health Regen',       kind: 'mult', dir: '+' },
+  healthRegenDelayBonus:{ label: 'Regen Delay',        kind: 'addS', dir: '-' },
+  dmgReduction:         { label: 'Damage Reduction',   kind: 'pct',  dir: '+' },
+  highHpReduction:      { label: 'Full-HP Reduction',  kind: 'pct',  dir: '+' },
+  cornerReduction:      { label: 'Low-HP Reduction',   kind: 'pct',  dir: '+' },
+  fireResist:           { label: 'Fire Resist',        kind: 'pct',  dir: '+' },
+  ballisticResist:      { label: 'Ballistic Resist',   kind: 'pct',  dir: '+' },
+  flashResist:          { label: 'Flash Resist',       kind: 'pct',  dir: '+' },
+  // Combat
+  rangedDmgMult:        { label: 'Ranged Damage',      kind: 'mult', dir: '+' },
+  meleeDmgMult:         { label: 'Melee Damage',       kind: 'mult', dir: '+' },
+  knockbackMult:        { label: 'Knockback',          kind: 'mult', dir: '+' },
+  critChance:           { label: 'Crit Chance',        kind: 'pct',  dir: '+' },
+  fireRateMult:         { label: 'Fire Rate',          kind: 'mult', dir: '+' },
+  reloadSpeedMult:      { label: 'Reload Speed',       kind: 'mult', dir: '+' },
+  magSizeMult:          { label: 'Magazine',           kind: 'mult', dir: '+' },
+  rangeMult:            { label: 'Range',              kind: 'mult', dir: '+' },
+  rangedSpreadMult:     { label: 'Spread',             kind: 'mult', dir: '-' },
+  hipSpreadOnlyMult:    { label: 'Hip Spread',         kind: 'mult', dir: '-' },
+  adsSpreadOnlyMult:    { label: 'ADS Spread',         kind: 'mult', dir: '-' },
+  // Stealth / sense
+  stealthMult:          { label: 'Detection',          kind: 'mult', dir: '-' },
+  hearingRange:         { label: 'Sense Range',        kind: 'addM', dir: '+' },
+  hearingAlpha:         { label: 'Ghost Visibility',   kind: 'addF', dir: '+' },
+  crouchDmgMult:        { label: 'Crouched Damage',    kind: 'mult', dir: '+' },
+  crouchMoveBonus:      { label: 'Crouched Speed',     kind: 'mult', dir: '+' },
+  // Throwables
+  throwableChargeBonus: { label: 'Throwable Charges',  kind: 'add',  dir: '+' },
+  throwableCooldownMult:{ label: 'Throwable Cooldown', kind: 'mult', dir: '-' },
+  // Economy
+  creditDropMult:       { label: 'Credit Drops',       kind: 'mult', dir: '+' },
+  shopPriceMult:        { label: 'Shop Prices',        kind: 'mult', dir: '-' },
+  pocketsBonus:         { label: 'Pockets',            kind: 'add',  dir: '+' },
+};
+
+// Run the item's apply() on a sentinel BASE_STATS object and surface
+// every meaningful diff. Without this, gear that grants its effects
+// through apply() (most belts, gloves, boots, and the entire ears
+// slot) showed nothing in the structured Stats section — players had
+// to read the description to learn what the item did. This bridges
+// that gap so the description can stop carrying numbers.
+function applyDrivenStats(item) {
+  if (!item || typeof item.apply !== 'function') return [];
+  const before = BASE_STATS();
+  const after = BASE_STATS();
+  try { item.apply(after); } catch (_) { return []; }
+  const rows = [];
+  for (const [key, cfg] of Object.entries(APPLY_STAT_LABELS)) {
+    const a = after[key], b = before[key];
+    if (typeof a !== 'number' || typeof b !== 'number') continue;
+    if (Math.abs(a - b) < 1e-6) continue;
+    let val, suffix;
+    switch (cfg.kind) {
+      case 'mult': val = ((a / b - 1) * 100).toFixed(0); suffix = '%'; break;
+      case 'pct':  val = ((a - b) * 100).toFixed(0);     suffix = '%'; break;
+      case 'add':  val = (a - b).toFixed(0);             suffix = '';  break;
+      case 'addM': val = (a - b).toFixed(0);             suffix = 'm'; break;
+      case 'addS': val = (a - b).toFixed(1);             suffix = 's'; break;
+      case 'addF': val = (a - b).toFixed(2);             suffix = '';  break;
+      default: continue;
+    }
+    rows.push([cfg.label, +val, cfg.dir, suffix]);
+  }
+  return rows;
+}
+
 // Readable list of (key,value) stat rows. `item` is any inventory entry.
 function collectStats(item) {
   const rows = [];
@@ -154,13 +234,21 @@ function collectStats(item) {
     if (typeof item.reduction === 'number') rows.push(['Damage Reduction', (item.reduction * 100).toFixed(0), '+', '%']);
     if (typeof item.pockets === 'number') rows.push(['Pockets', item.pockets, '+']);
     if (typeof item.speedMult === 'number') rows.push(['Move Speed', ((item.speedMult - 1) * 100).toFixed(0), '+', '%']);
-    if (typeof item.stealthMult === 'number') rows.push(['Stealth', ((1 - item.stealthMult) * 100).toFixed(0), '+', '%']);
+    if (typeof item.stealthMult === 'number') rows.push(['Detection', ((1 - item.stealthMult) * 100).toFixed(0), '-', '%']);
   } else if (item.type === 'consumable') {
     const e = item.useEffect;
     if (e?.kind === 'heal') rows.push(['Heal', e.amount, '+', ' HP']);
     if (e?.cures?.length) rows.push(['Cures', e.cures.join(', '), '']);
   } else if (item.type === 'junk') {
     if (typeof item.sellValue === 'number') rows.push(['Sell Value', item.sellValue, '+', 'c']);
+  }
+  // Add any stats granted via apply() that weren't already covered by
+  // the structured fields above. Dedupe by label so a belt that has
+  // both `pockets: 1` and `apply(s) { s.pocketsBonus++ }` doesn't show
+  // Pockets twice.
+  const seen = new Set(rows.map(r => r[0]));
+  for (const row of applyDrivenStats(item)) {
+    if (!seen.has(row[0])) { rows.push(row); seen.add(row[0]); }
   }
   return rows;
 }
@@ -328,7 +416,20 @@ export class DetailsUI {
     const rarity = inferRarity(item);
     const rColor = RARITY_COLORS[rarity] || '#b9b9b9';
     const icon = thumbnailFor(item);
-    const lore = ITEM_LORE[item.name] || item.description || '';
+    // Lore is purely flavor — only ever the curated ITEM_LORE entry.
+    // The raw item.description field on most gear is a stat summary
+    // (e.g. "−18% dmg, +5% stam regen") and now renders structurally
+    // through collectStats, so showing it here too would duplicate
+    // the same numbers the player already sees in the Stats section.
+    const lore = ITEM_LORE[item.name] || '';
+    // Description is suppressed when it looks stat-like (any %, ×, or
+    // signed-number token). Non-stat descriptions still render below
+    // the stats section as plain notes — useful for items like backpacks
+    // where the description is "5 pack slots" and that's already
+    // covered, vs. consumables with prose-only flavour.
+    const descRaw = (item.description || '').trim();
+    const hasNumeric = /[+\-−]?\d/.test(descRaw) || /%/.test(descRaw);
+    const noteText = (descRaw && !hasNumeric && descRaw !== lore) ? descRaw : '';
     const rows = collectStats(item);
     const diffs = diffStats(item, compareTo);
     const tint = item.tint ?? 0x888888;
@@ -448,6 +549,7 @@ export class DetailsUI {
         <div class="details-section-title">Stats</div>
         ${statRows}
       </div>` : ''}
+      ${noteText ? `<div class="details-notes">${noteText}</div>` : ''}
       ${lossRows}
       ${affixBlock}
       ${perkBlock}

@@ -227,7 +227,10 @@
     .resource-icon {
       width: 20px;
       height: 20px;
-      filter: drop-shadow(0 1px 1px rgba(0,0,0,0.7));
+      /* Brighten + slight contrast bump on top of a soft shadow.
+         Many of the source PNGs in Assets/UI/Icons/ are dark-on-dark
+         and read poorly against the panel background without a lift. */
+      filter: brightness(1.35) contrast(1.05) drop-shadow(0 1px 1px rgba(0,0,0,0.55));
     }
     .resource-label {
       flex: 1;
@@ -420,6 +423,18 @@
     }
     .details-loss-row .k { color: #d28a7a; }
     .details-loss-row .v { color: #e67a3a; font-weight: 800; }
+    /* Plain notes — non-stat description text. Distinct from the
+       italic lore block so prose flavour isn't visually conflated
+       with mechanical info. */
+    .details-notes {
+      margin-top: 8px;
+      padding: 6px 10px;
+      font-size: 11px;
+      color: #b9a680;
+      line-height: 1.4;
+      background: rgba(255,255,255,0.02);
+      border-radius: 4px;
+    }
     .details-header {
       display: flex; align-items: center; gap: 12px;
       padding-left: 10px;
@@ -430,7 +445,7 @@
       display: flex; align-items: center; justify-content: center;
       box-shadow: inset 0 0 0 1px rgba(0,0,0,0.3);
     }
-    .details-swatch img { width: 36px; height: 36px; image-rendering: auto; filter: drop-shadow(0 1px 1px rgba(0,0,0,0.6)); }
+    .details-swatch img { width: 36px; height: 36px; image-rendering: auto; filter: brightness(1.25) contrast(1.05) drop-shadow(0 1px 1px rgba(0,0,0,0.55)); }
     .details-preview {
       margin: 0 -4px 10px;
       height: 160px;
@@ -1386,6 +1401,9 @@
       object-position: center center;
       pointer-events: none;
       transition: transform 0.1s ease;
+      /* Most asset thumbs ship dark-on-dark; brighten in-place so they
+         read against the slot's gradient background. */
+      filter: brightness(1.25) contrast(1.05);
     }
     /* Rotated items: spin the thumb 90° so a wide weapon icon reads
        tall inside a tall footprint (Tarkov-style rotation). Name tag
@@ -1488,7 +1506,10 @@
       height: 96%;
       object-fit: contain;
       image-rendering: auto;
-      filter: drop-shadow(0 1px 2px rgba(0, 0, 0, 0.7));
+      /* Brighten + slight contrast bump so the gear / consumable
+         icons read clearly inside dark slot tiles. Original
+         drop-shadow stays for depth. */
+      filter: brightness(1.30) contrast(1.05) drop-shadow(0 1px 2px rgba(0, 0, 0, 0.55));
     }
     /* Clean + Stroke overlay layers sit on top of the Underlay image.
        Absolute positioning stacks them in the parent cell-art box. */
@@ -1572,7 +1593,7 @@
       width: 18px;
       height: 18px;
       image-rendering: auto;
-      filter: drop-shadow(0 1px 1px rgba(0,0,0,0.6));
+      filter: brightness(1.30) contrast(1.05) drop-shadow(0 1px 1px rgba(0,0,0,0.55));
     }
     .cust-btn {
       position: absolute;
@@ -3438,7 +3459,7 @@
       font-weight: 700;
       pointer-events: none;
     }
-    .weapon-slot img { width: 36px; height: 36px; image-rendering: pixelated; }
+    .weapon-slot img { width: 36px; height: 36px; image-rendering: pixelated; filter: brightness(1.25) contrast(1.05); }
     .weapon-slot .weapon-label {
       position: absolute;
       bottom: 2px;
@@ -3477,7 +3498,7 @@
     .action-slot img {
       width: 30px;
       height: 30px;
-      filter: drop-shadow(0 1px 1px rgba(0,0,0,0.7));
+      filter: brightness(1.30) contrast(1.05) drop-shadow(0 1px 1px rgba(0,0,0,0.55));
     }
     .action-slot .action-count {
       position: absolute;
