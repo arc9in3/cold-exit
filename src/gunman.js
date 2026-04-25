@@ -643,6 +643,13 @@ export class GunmanManager {
       g.alive = false;
       g.state = STATE.DEAD;
       g.deathT = 0;
+      // Sniper paint laser is parented to the world (not the body
+      // group), so it doesn't auto-hide when the corpse fades. Cut
+      // it explicitly on death.
+      if (g.snipLaser) {
+        g.snipLaser.visible = false;
+        g.snipPhase = 'idle';
+      }
       // Seed the death-fall impulse for the animation layer — same
       // direction as the killing blow, heavier damage = further rotation.
       if (g.rig && hitDir) {
@@ -694,6 +701,7 @@ export class GunmanManager {
           g.alive = false;
           g.state = STATE.DEAD;
           g.deathT = 0;
+          if (g.snipLaser) { g.snipLaser.visible = false; g.snipPhase = 'idle'; }
           if (!g.disarmed && g.weapon && ctx.onBurnKill) ctx.onBurnKill(g);
         }
       }
@@ -1517,7 +1525,7 @@ export class GunmanManager {
       // (so reading the laser + dodging right before the shot wins).
       // Cooldown after firing keeps them from chain-bursting. They
       // also retreat if the player closes inside ~10m.
-      if (g.profile.sniper && ctx.spawnSniperShot) {
+      if (g.profile.sniper && ctx.spawnSniperShot && g.alive) {
         const dxs = ctx.playerPos.x - g.group.position.x;
         const dzs = ctx.playerPos.z - g.group.position.z;
         const distSn = Math.hypot(dxs, dzs);
