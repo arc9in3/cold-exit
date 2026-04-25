@@ -220,6 +220,12 @@ export class LootUI {
   _updateBodyType() {
     if (!this.bodyTypeEl) return;
     const t = this.target;
+    // Containers carry their own label + colour-coded type tag.
+    if (t && t.kind === 'container') {
+      this.bodyTypeEl.textContent = t.name || 'Container';
+      this.bodyTypeEl.className = `loot-body-type container-${t.containerType || 'general'}`;
+      return;
+    }
     if (!t || !t._groundRefs && !t.tier && !t.variant) {
       // Ground pile — no type.
       this.bodyTypeEl.textContent = '';

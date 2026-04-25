@@ -4814,7 +4814,8 @@ function updateReloadHud(weapon, effWeapon) {
 function updateLootPrompt() {
   const near = loot.nearest(player.mesh.position, tunables.loot.pickupRadius);
   const body = !near ? nearestBody(player.mesh.position, 2.2) : null;
-  const npc = (!near && !body) ? level.nearestNPC(player.mesh.position, 2.5) : null;
+  const containerHit = (!near && !body) ? level.nearestContainer(player.mesh.position, 1.8) : null;
+  const npc = (!near && !body && !containerHit) ? level.nearestNPC(player.mesh.position, 2.5) : null;
   if (promptEl) {
     if (near) {
       const pile = loot.allWithin(player.mesh.position, tunables.loot.pickupRadius);
@@ -4828,6 +4829,9 @@ function updateLootPrompt() {
     } else if (body && body.looted) {
       promptEl.style.display = 'block';
       promptEl.textContent = `(body looted)`;
+    } else if (containerHit) {
+      promptEl.style.display = 'block';
+      promptEl.textContent = `[E] open ${containerHit.container.name}`;
     } else if (npc && npc.kind === 'merchant') {
       promptEl.style.display = 'block';
       promptEl.textContent = `[E] trade with merchant`;
@@ -4865,10 +4869,10 @@ function updateLootPrompt() {
       promptEl.style.display = 'none';
     }
   }
-  return { nearItem: near, body, npc };
+  return { nearItem: near, body, npc, container: containerHit };
 }
 
-function tryInteract({ nearItem, body, npc }) {
+function tryInteract({ nearItem, body, npc, container }) {
   if (nearItem) {
     // Two or more items in the pickup radius — open the ground-loot modal
     // instead of auto-picking one. Otherwise fast single-item pickup.
@@ -4894,6 +4898,15 @@ function tryInteract({ nearItem, body, npc }) {
   }
   if (body && !body.looted && body.loot && body.loot.length > 0) {
     lootUI.open(body);
+    return;
+  }
+  if (container && !container.container.looted) {
+    // Containers reuse the body-loot UI flow — same {loot, looted}
+    // shape — and stay visually present after looting (just no
+    // longer interactable). Items inside auto-load the same way
+    // body items do via lootUI.open.
+    lootUI.open(container.container);
+    sfx.uiAccept?.();
     return;
   }
   if (npc && ['merchant', 'bearMerchant', 'healer', 'gunsmith',

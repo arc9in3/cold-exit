@@ -2,6 +2,7 @@ import * as THREE from 'three';
 import { tunables } from './tunables.js';
 import { buildProp } from './props.js';
 import { buildRig, initAnim, updateAnim } from './actor_rig.js';
+import { makeContainer, pickContainerType, pickContainerSize, buildContainerMesh } from './containers.js';
 
 // Shopkeeper palette per kind — body / head / pants / gear tint so
 // each shop's NPC reads as a distinct role in the world. Exported so
@@ -49,6 +50,10 @@ export class Level {
     this.playerSpawn = new THREE.Vector3();
     this.enemySpawns = [];
     this.npcs = [];
+    // Lootable containers — each entry is { container, group, x, z, r }
+    // where `r` is the proximity-radius the player must be inside to
+    // interact. Cleared every regenerate.
+    this.containers = [];
     this.index = 0;
     this.bossRoomId = -1;
     // Registered ambient light sources (ceiling lamps, prop lamps,
@@ -69,9 +74,11 @@ export class Level {
       if (m.material) m.material.dispose();
     }
     for (const npc of this.npcs) this.scene.remove(npc.group);
+    for (const c of this.containers) this.scene.remove(c.group);
     this.obstacles = [];
     this.decorations = [];
     this.npcs = [];
+    this.containers = [];
     if (this.exitGroup) {
       this.scene.remove(this.exitGroup);
       this.exitGroup = null;
@@ -366,6 +373,15 @@ export class Level {
     for (const room of rooms) {
       if (room.type === 'start') continue;
       this._scatterCover(room);
+    }
+
+    // Lootable containers — boxes / chests scattered through combat
+    // and boss rooms. Density scales with room area; types and sizes
+    // are rolled per spawn slot. Body drops were trimmed in this same
+    // pass, so containers carry the bulk of the loot now.
+    for (const room of rooms) {
+      if (room.type === 'start') continue;
+      this._scatterContainers(room);
     }
 
     // Themed props — pick a theme per combat-tier room (library, lobby,
@@ -722,6 +738,74 @@ export class Level {
         break;
       }
     }
+  }
+
+  // Drop 1–3 lootable containers into a non-start room. Density tied
+  // to room area so big rooms get more boxes. Boss rooms get a small
+  // bump and a guaranteed slot for a masterwork roll. Containers are
+  // collidable obstacles — the player walks around them like cover —
+  // and carry their loot list on userData.container for the interact
+  // handler in main.js.
+  _scatterContainers(room) {
+    const b = room.bounds;
+    const area = (b.maxX - b.minX) * (b.maxZ - b.minZ);
+    let count = 1 + Math.floor(Math.random() * 2);          // 1..2 baseline
+    if (area > 60) count += 1;                              // big rooms +1
+    if (room.type === 'boss') count += 1;                    // boss room bonus
+    if (room.type === 'subBoss' && Math.random() < 0.5) count += 1;
+    for (let i = 0; i < count; i++) {
+      for (let attempt = 0; attempt < 30; attempt++) {
+        const x = b.minX + 3 + Math.random() * (b.maxX - b.minX - 6);
+        const z = b.minZ + 3 + Math.random() * (b.maxZ - b.minZ - 6);
+        // Use the same proxy-radius logic as low cover so containers
+        // don't pile onto each other or onto a piece of themed
+        // furniture. Slightly tighter radius than cover since a box
+        // is smaller than a couch.
+        if (this._collidesAt(x, z, 1.6)) continue;
+        const type = pickContainerType();
+        const size = pickContainerSize(type);
+        const container = makeContainer(type, size, this.index);
+        const group = buildContainerMesh(container, x, 0, z);
+        this.scene.add(group);
+        // Collision proxy — invisible AABB matching the lid footprint
+        // so player + enemies path around the container.
+        const { w, d } = container.geo;
+        const proxy = new THREE.Mesh(
+          new THREE.BoxGeometry(w, container.geo.h, d),
+          new THREE.MeshBasicMaterial({ transparent: true, opacity: 0, depthWrite: false }),
+        );
+        proxy.position.set(x, container.geo.h / 2, z);
+        proxy.userData.collisionXZ = {
+          minX: x - w / 2, maxX: x + w / 2,
+          minZ: z - d / 2, maxZ: z + d / 2,
+        };
+        proxy.userData.isProp = true;
+        proxy.userData.containerRef = container;
+        this.scene.add(proxy);
+        this.obstacles.push(proxy);
+        // Interact radius — a generous 1.8m so the prompt doesn't feel
+        // pixel-hunty against the visible mesh.
+        this.containers.push({ container, group, x, z, r: 1.8 });
+        break;
+      }
+    }
+  }
+
+  // Find the closest unlooted container within `radius`. Looted ones
+  // are skipped so the prompt doesn't keep firing on empty crates the
+  // player has already searched.
+  nearestContainer(playerPos, radius = 1.8) {
+    let best = null;
+    let bestD = Infinity;
+    for (const c of this.containers) {
+      if (c.container.looted) continue;
+      const dx = playerPos.x - c.x;
+      const dz = playerPos.z - c.z;
+      const d = dx * dx + dz * dz;
+      if (d > radius * radius) continue;
+      if (d < bestD) { bestD = d; best = c; }
+    }
+    return best;
   }
 
   // Theme the given combat room with a set of primitive props that
