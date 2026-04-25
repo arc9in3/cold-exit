@@ -2425,8 +2425,21 @@ function resolveCollision(oldX, oldZ, newX, newZ, radius) {
 
 // Enemy movement resolver: walls first, then push away from the player so
 // enemies can't overlap and flip the camera/aim.
+//
+// Doorway-stuck recovery: resolveCollision is a strict bisector — if the
+// CURRENT position already overlaps an obstacle (knockback nudge into a
+// wall, two enemies crowding a doorway, door collision changing state
+// mid-frame), every axis test reverts to oldX/oldZ and the enemy can
+// never move. Unstick the start position via level.unstickFrom first
+// so the AI has somewhere clear to step from. Cheap O(walls) check
+// per call, no-op when the enemy isn't stuck.
 function enemyResolveCollision(oldX, oldZ, newX, newZ, radius) {
-  const wallRes = level.resolveCollision(oldX, oldZ, newX, newZ, radius);
+  let sx = oldX, sz = oldZ;
+  if (level._collidesAt && level._collidesAt(sx, sz, radius)) {
+    const fixed = level.unstickFrom(sx, sz, radius);
+    sx = fixed.x; sz = fixed.z;
+  }
+  const wallRes = level.resolveCollision(sx, sz, newX, newZ, radius);
   const px = player.mesh.position.x;
   const pz = player.mesh.position.z;
   const minDist = radius + (tunables.player.collisionRadius || 0.4);
@@ -2439,7 +2452,7 @@ function enemyResolveCollision(oldX, oldZ, newX, newZ, radius) {
   const pushX = px + (dx / dist) * minDist;
   const pushZ = pz + (dz / dist) * minDist;
   // Re-check walls so we don't push the enemy through geometry.
-  return level.resolveCollision(oldX, oldZ, pushX, pushZ, radius);
+  return level.resolveCollision(sx, sz, pushX, pushZ, radius);
 }
 
 function resolveAim(muzzleWorld) {
