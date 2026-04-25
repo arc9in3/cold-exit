@@ -1788,19 +1788,16 @@ export class GunmanManager {
       const res = ctx.resolveCollision(beforeX, beforeZ, nx, nz, tunables.ai.collisionRadius);
       g.group.position.x = res.x;
       g.group.position.z = res.z;
-      // Bosses stay in their arena — never wander into adjacent rooms
-      // or corridors. Prevents the "player enters sealed boss room and
-      // the boss is stranded outside" trap. Clamp after the collision
-      // pass so the boss still respects cover inside the room.
-      if (g.tier === 'boss' && ctx.level && g.roomId >= 0) {
-        const room = ctx.level.rooms[g.roomId];
-        if (room) {
-          const b = room.bounds;
-          const m = tunables.ai.collisionRadius + 0.4;
-          g.group.position.x = Math.max(b.minX + m, Math.min(b.maxX - m, g.group.position.x));
-          g.group.position.z = Math.max(b.minZ + m, Math.min(b.maxZ - m, g.group.position.z));
-        }
-      }
+      // (Bosses used to be clamped to their arena bounds here — same
+      // pattern as the melee-boss clamp in melee_enemy.js. Removed
+      // so bosses can pursue the player through doorways into
+      // adjacent rooms / corridors. Without this, players could
+      // stand at a doorway and shoot in without ever being engaged.
+      // Door-graph pathing already routes the boss back through any
+      // open door, and the boss-arena seal (tryBossSeal) still fires
+      // on first entry so the player can't just kite a sealed boss
+      // forever — the seal locks all doors connected to the room
+      // once the boss is inside, and the unlock fires on boss kill.)
       // Detect clamp: wanted to move but barely did. Tanks don't wiggle —
       // they just shove straight in until they hit the player.
       if ((moveSign !== 0 || g.dashT > 0 || g.repositionT > 0) && g.variant !== 'tank') {
