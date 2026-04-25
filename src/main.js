@@ -5027,10 +5027,15 @@ function throwItem(item) {
     },
     owner: 'player',
     gravity,
-    // Grenades bounce just a touch — enough that they land short and
-    // settle, instead of rolling across a room. Molotov still
-    // shatters on impact.
-    bounciness: item.throwKind === 'molotov' ? 0.0 : 0.15,
+    // Grenades visibly bounce now — bumped from 0.15 → 0.40 so the
+    // throw reads as a hand-held device skipping off the floor before
+    // settling. Molotov still shatters on impact (bounciness 0).
+    bounciness: item.throwKind === 'molotov' ? 0.0 : 0.40,
+    // Fuse-after-landing — frag/flash/stun all want to bounce and
+    // settle before going off. Molotov detonates on impact and
+    // bypasses this entirely (bounciness 0 → ground-contact branch
+    // detonates immediately, lifetime never matters).
+    fuseAfterLand: item.throwKind !== 'molotov',
     throwKind: item.throwKind || 'frag',
     fireDuration: item.fireDuration,
     fireTickDps: item.fireTickDps,
@@ -5327,11 +5332,28 @@ function renderWeaponBar() {
   const rotation = inventory.getWeaponRotation();
   const slots = bar.querySelectorAll('.weapon-slot');
   slots.forEach((el, i) => {
+    // Weapon-bar is now the lower 4 slots (0-3) of the unified hotbar.
+    // If the player has bound an item to this slot via drag-to-bind,
+    // render it through the shared hotbar-slot helper. Otherwise fall
+    // back to the auto-display of whatever weapon sits at rotation[i]
+    // so equipped weapons still appear in slots 1-3 by default.
+    el.classList.remove('drop-ok');
+    const bound = inventory.actionSlotItem(i);
+    if (bound) {
+      el.classList.remove('empty');
+      // Active highlight only meaningful when the bound item IS the
+      // currently-active weapon in the rotation.
+      const rotIdx = rotation.indexOf(bound);
+      el.classList.toggle('active', rotIdx >= 0 && rotIdx === currentWeaponIndex);
+      _renderHotbarSlot(el, i, String(i + 1));
+      return;
+    }
     const w = rotation[i] || null;
     const keyLabel = `<span class="action-key">${i + 1}</span>`;
     const active = w && i === currentWeaponIndex;
     el.classList.toggle('active', !!active);
     el.classList.toggle('empty', !w);
+    el.classList.remove('filled');
     if (!w) {
       el.innerHTML = `${keyLabel}<span class="weapon-label">—</span>`;
       return;
@@ -5339,80 +5361,88 @@ function renderWeaponBar() {
     const icon = thumbnailFor(w);
     const label = w.class || w.type || '';
     el.innerHTML = `${keyLabel}${icon ? `<img src="${icon}" alt="">` : ''}<span class="weapon-label">${label}</span>`;
-    // One-time hookup — click to swap, right-click for details.
-    if (!el._wired) {
-      el._wired = true;
-      el.addEventListener('click', () => {
-        const rot = inventory.getWeaponRotation();
-        if (rot[i]) setWeaponIndex(i);
-      });
-      el.addEventListener('contextmenu', (e) => {
-        e.preventDefault();
-        const rot = inventory.getWeaponRotation();
-        const it = rot[i];
-        if (it && window.__showDetails) window.__showDetails(it);
-      });
-    }
   });
+}
+
+// Render an actionBar slot into a HUD slot element. `barIdx` is the
+// 0..7 index into `inventory.actionBar`; `keyLabelText` is what the
+// player sees in the corner ("1".."8"). Shared by both renderWeaponBar
+// (slots 0-3, keys 1-4) and renderActionBar (slots 4-7, keys 5-8) so
+// the two clusters render identically when an item is bound.
+function _renderHotbarSlot(el, barIdx, keyLabelText) {
+  const item = inventory.actionSlotItem(barIdx);
+  const keyLabel = `<span class="action-key">${keyLabelText}</span>`;
+  if (!item) {
+    el.innerHTML = keyLabel;
+    el.classList.remove('filled');
+    el.classList.remove('empty-charges');
+    return false;
+  }
+  const icon = thumbnailFor(item);
+  const tint = item.tint ?? 0xaaaaaa;
+  const tintStr = `#${tint.toString(16).padStart(6, '0')}`;
+  let extra = `<span class="action-count" style="color:${tintStr}">${item.name}</span>`;
+  let cooldownOverlay = '';
+  if (item.type === 'throwable') {
+    const max = throwableMaxCharges(item);
+    const charges = item.charges | 0;
+    extra = `<span class="action-count" style="color:${tintStr}">${item.name} · ${charges}/${max}</span>`;
+    if (charges < max && (item.cooldownT || 0) > 0) {
+      const total = throwableCooldownSec(item);
+      const pct = Math.max(0, Math.min(1, 1 - (item.cooldownT / total)));
+      const secs = Math.ceil(item.cooldownT);
+      cooldownOverlay = `<div class="action-cd"><div class="action-cd-fill" style="height:${((1 - pct) * 100).toFixed(0)}%"></div><div class="action-cd-text">${secs}s</div></div>`;
+    }
+  }
+  el.innerHTML = `${keyLabel}${icon ? `<img src="${icon}" alt="">` : ''}${extra}${cooldownOverlay}`;
+  el.classList.add('filled');
+  el.classList.toggle('empty-charges',
+    item.type === 'throwable' && (item.charges | 0) <= 0);
+  return true;
 }
 
 function renderActionBar() {
   const slots = document.querySelectorAll('.action-slot');
-  const maxSlots = inventory.maxActionSlots();
+  // All 4 slots are always usable now — display them unconditionally.
   slots.forEach((el, i) => {
-    // Hide slots beyond the current gear-granted maximum (e.g. the bonus
-    // 4th slot appears only when a belt/plate-carrier unlocks it).
-    if (i >= maxSlots) {
-      el.style.display = 'none';
-      return;
-    }
     el.style.display = '';
-    const item = inventory.actionSlotItem(i);
-    const keyLabel = `<span class="action-key">${i + 5}</span>`;
-    if (!item) {
-      el.innerHTML = keyLabel;
-      el.classList.remove('filled');
-      return;
-    }
-    const icon = thumbnailFor(item);
-    const tint = item.tint ?? 0xaaaaaa;
-    const tintStr = `#${tint.toString(16).padStart(6, '0')}`;
-    // Throwables show charges + cooldown progress; heal / buff
-    // consumables fall back to the plain name label.
-    let extra = `<span class="action-count" style="color:${tintStr}">${item.name}</span>`;
-    let cooldownOverlay = '';
-    if (item.type === 'throwable') {
-      const max = throwableMaxCharges(item);
-      const charges = item.charges | 0;
-      extra = `<span class="action-count" style="color:${tintStr}">${item.name} · ${charges}/${max}</span>`;
-      if (charges < max && (item.cooldownT || 0) > 0) {
-        const total = throwableCooldownSec(item);
-        const pct = Math.max(0, Math.min(1, 1 - (item.cooldownT / total)));
-        const secs = Math.ceil(item.cooldownT);
-        cooldownOverlay = `<div class="action-cd"><div class="action-cd-fill" style="height:${((1 - pct) * 100).toFixed(0)}%"></div><div class="action-cd-text">${secs}s</div></div>`;
-      }
-    }
-    el.innerHTML = `${keyLabel}${icon ? `<img src="${icon}" alt="">` : ''}${extra}${cooldownOverlay}`;
-    el.classList.add('filled');
-    el.classList.toggle('empty-charges',
-      item.type === 'throwable' && (item.charges | 0) <= 0);
+    _renderHotbarSlot(el, i + 4, String(i + 5));
   });
 }
 
-function wireActionBar() {
-  const slots = document.querySelectorAll('.action-slot');
+// Wire identical drag-drop / click handlers to every hotbar slot
+// element. `selector` picks the cluster (.weapon-slot or .action-slot);
+// `slotOffset` is the actionBar index of the cluster's first slot
+// (0 for weapon-bar, 4 for action-bar). The tail callback re-renders
+// the appropriate cluster after a state change.
+function _wireHotbarCluster(selector, slotOffset, rerender) {
+  const slots = document.querySelectorAll(selector);
   slots.forEach((el, i) => {
-    el.addEventListener('click', () => useActionSlot(i));
+    const barIdx = slotOffset + i;
+    el.addEventListener('click', () => {
+      // Empty weapon-bar slots (0-3) fall back to "switch to the
+      // weapon at rotation[i]" so a freshly-equipped weapon still
+      // works on click without the player needing to manually bind.
+      if (slotOffset === 0 && !inventory.actionSlotItem(barIdx)) {
+        const rot = inventory.getWeaponRotation();
+        if (rot[barIdx]) setWeaponIndex(barIdx);
+        return;
+      }
+      useActionSlot(barIdx);
+    });
     el.addEventListener('contextmenu', (e) => {
       e.preventDefault();
-      const item = inventory.actionSlotItem(i);
+      let item = inventory.actionSlotItem(barIdx);
+      if (!item && slotOffset === 0) {
+        const rot = inventory.getWeaponRotation();
+        item = rot[barIdx] || null;
+      }
       if (item && window.__showDetails) window.__showDetails(item);
     });
-    // Start a drag for swap — the slot remembers its own index.
     el.addEventListener('dragstart', (e) => {
-      const item = inventory.actionSlotItem(i);
+      const item = inventory.actionSlotItem(barIdx);
       if (!item) { e.preventDefault(); return; }
-      setDragState({ from: 'actionBar', slot: i, item });
+      setDragState({ from: 'actionBar', slot: barIdx, item });
       e.dataTransfer.effectAllowed = 'move';
     });
     el.addEventListener('dragend', () => {
@@ -5434,22 +5464,23 @@ function wireActionBar() {
       const d = getDragState();
       if (!d) return;
       if (d.from === 'actionBar') {
-        inventory.swapActionSlots(d.slot, i);
+        inventory.swapActionSlots(d.slot, barIdx);
       } else if (d.item && isQuickslotEligible(d.item)) {
-        inventory.assignActionSlot(i, d.item);
+        inventory.assignActionSlot(barIdx, d.item);
       } else {
         return;
       }
       setDragState(null);
+      renderWeaponBar();
       renderActionBar();
     });
+    el.setAttribute('draggable', 'true');
   });
-  // Slots need to be draggable for HTML5 drag to even fire dragstart.
-  slots.forEach((el) => el.setAttribute('draggable', 'true'));
+  rerender?.();
 }
-wireActionBar();
-renderActionBar();
-renderWeaponBar();
+
+_wireHotbarCluster('.weapon-slot', 0, renderWeaponBar);
+_wireHotbarCluster('.action-slot', 4, renderActionBar);
 // Exposed so the inventory UI's custom pointer-drag can refresh the
 // HUD after dropping an item into an action slot.
 window.__renderActionBar = renderActionBar;
@@ -5837,7 +5868,15 @@ function tick() {
 
   exitCooldown = Math.max(0, exitCooldown - dt);
 
-  if (inputState.weaponSwitch !== null) setWeaponIndex(inputState.weaponSwitch);
+  if (inputState.weaponSwitch !== null) {
+    // Keys 1-4 are now full hotbar slots (actionBar 0-3) — try the
+    // bound item first; fall back to weapon-rotation swap if the slot
+    // is empty so equipping a new weapon still gives a sane default
+    // hotkey for it.
+    const idx = inputState.weaponSwitch;
+    if (inventory.actionSlotItem(idx)) useActionSlot(idx);
+    else setWeaponIndex(idx);
+  }
   else if (inputState.weaponCycle) {
     const rotation = getRotation();
     if (rotation.length > 0) {
@@ -5977,7 +6016,10 @@ function tick() {
     sfx.uiAccept?.();
   }
   if (inputState.healPressed) tryUseMedkit();
-  if (inputState.actionSlotPressed >= 0) useActionSlot(inputState.actionSlotPressed);
+  // Keys 5-8 fire the upper four hotbar slots. actionSlotPressed
+  // arrives as 0..3 from the input layer (legacy naming) so we offset
+  // by 4 to land in the right unified-actionBar slot.
+  if (inputState.actionSlotPressed >= 0) useActionSlot(inputState.actionSlotPressed + 4);
 
   tickLight(playerInfo, aimInfo);
   updateBeamAndCone(playerInfo, aimInfo, inputState);

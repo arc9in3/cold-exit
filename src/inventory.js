@@ -1100,7 +1100,9 @@ export const THROWABLE_DEFS = {
     tint: 0x4a5040,
     throwKind: 'frag',
     aoeRadius: 5.0, aoeDamage: 90, aoeShake: 0.55,
-    fuse: 2.2,
+    // Fuse runs from first ground contact now (fuseAfterLand). 1.5s
+    // gives the grenade visible bounce + settle before going off.
+    fuse: 1.5,
     maxCharges: 1, cooldownSec: 90,
     description: 'Timed fragmentation grenade · 5m blast · 90s cooldown',
   },
@@ -1117,7 +1119,7 @@ export const THROWABLE_DEFS = {
     id: 'thr_flash', name: 'Flashbang', type: 'throwable', rarity: 'uncommon',
     tint: 0xe0e0a0,
     throwKind: 'flash',
-    aoeRadius: 7.5, fuse: 1.6,
+    aoeRadius: 7.5, fuse: 1.0,   // counts from landing (fuseAfterLand)
     blindDuration: 4.0,
     maxCharges: 2, cooldownSec: 60,
     description: 'Blinds enemies in radius for 4s · 2 charges, 60s each',
@@ -1126,7 +1128,7 @@ export const THROWABLE_DEFS = {
     id: 'thr_stun', name: 'Stun Grenade', type: 'throwable', rarity: 'uncommon',
     tint: 0x6080e0,
     throwKind: 'stun',
-    aoeRadius: 5.5, fuse: 1.8,
+    aoeRadius: 5.5, fuse: 1.2,   // counts from landing (fuseAfterLand)
     stunDuration: 2.5,
     maxCharges: 1, cooldownSec: 30,
     description: 'Dazes enemies in radius for 2.5s · 30s cooldown',
@@ -1289,8 +1291,13 @@ export function wrapWeapon(w, opts = {}) {
 const BASE_POCKET_W = 4;
 const BASE_POCKET_H = 2;
 const BASE_POCKETS = BASE_POCKET_W * BASE_POCKET_H;
-export const ACTION_SLOT_COUNT = 4;      // max hardware slots (3 base + 1 bonus)
-export const BASE_ACTION_SLOT_COUNT = 3; // always available
+// Eight unified hotbar slots — keys 1-4 map to indices 0-3 (the
+// "weapon bar" cluster), keys 5-8 to indices 4-7 (the "quick bar"
+// cluster). Both clusters accept any usable item (consumable,
+// throwable, weapon — press to swap-to). The split exists in the HUD
+// for visual rhythm only; under the hood it's one `actionBar` array.
+export const ACTION_SLOT_COUNT = 8;      // total hotbar slots
+export const BASE_ACTION_SLOT_COUNT = 8; // all slots always usable
 
 
 export class Inventory {

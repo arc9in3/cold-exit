@@ -54,6 +54,13 @@ export class ProjectileManager {
       age: 0,
       bounces: 0,
       dead: false,
+      // Fuse-after-landing tracking — set to the projectile's age the
+      // first time it touches ground. Detonation timer runs from then
+      // on instead of from spawn, so a thrown grenade arcs, bounces,
+      // and settles before going off. Stays -1 for impact-detonating
+      // projectiles (rockets, molotov) where the fuse never gates
+      // detonation in the first place.
+      fuseStartT: -1,
     });
   }
 
@@ -65,14 +72,31 @@ export class ProjectileManager {
       if (p.dead) continue;
       p.age += dt;
 
-      // Fuse timeout — checked FIRST so a rolling / bouncing grenade
-      // that spends its life ricocheting off walls still detonates on
-      // schedule. Previous version ran this only after the move/
-      // collision block, and a `continue` on every bounce meant the
-      // Kingsmaker could bounce forever without ever exploding.
-      if (p.lifetime > 0 && p.age >= p.lifetime) {
-        this._detonate(p, p.pos.clone(), onExplode);
-        continue;
+      // Fuse timeout. Behaviour depends on whether the projectile
+      // wants its fuse to start on landing (player throwables — give
+      // them time to bounce + settle before going off) or at spawn
+      // (rockets, molotovs that detonate on impact). When
+      // `fuseAfterLand` is set, we don't even consider the fuse until
+      // `fuseStartT` has been stamped by the first ground contact;
+      // a `maxAge` safety cap (4× the fuse) catches anything that
+      // somehow never lands so a stuck grenade can't roam forever.
+      if (p.lifetime > 0) {
+        if (p.fuseAfterLand) {
+          if (p.fuseStartT >= 0 && (p.age - p.fuseStartT) >= p.lifetime) {
+            this._detonate(p, p.pos.clone(), onExplode);
+            continue;
+          }
+          // Safety cap — defuse anything that's spent 4× its fuse in
+          // flight without ever touching ground (caught in geometry,
+          // launched off the level edge, etc.).
+          if (p.age >= p.lifetime * 4) {
+            this._detonate(p, p.pos.clone(), onExplode);
+            continue;
+          }
+        } else if (p.age >= p.lifetime) {
+          this._detonate(p, p.pos.clone(), onExplode);
+          continue;
+        }
       }
 
       // Integrate gravity + position.
@@ -117,6 +141,10 @@ export class ProjectileManager {
         p.vel.x *= 1 - 0.25 * p.bounciness;
         p.vel.z *= 1 - 0.25 * p.bounciness;
         p.bounces += 1;
+        // First ground touch starts the fuse for fuseAfterLand
+        // throwables. Subsequent bounces don't reset it — once the
+        // grenade has hit ground, the countdown is committed.
+        if (p.fuseAfterLand && p.fuseStartT < 0) p.fuseStartT = p.age;
         p.body.position.copy(p.pos);
         p.trail.position.copy(p.pos);
         continue;

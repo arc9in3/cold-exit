@@ -2333,6 +2333,32 @@
       background: rgba(0,0,0,0.7); padding: 2px 5px; border-radius: 3px;
       pointer-events: none;
     }
+    /* Inline bonuses summary on body-loot tiles — affixes / perks /
+       set membership shown so the player can read what's worth taking
+       at a glance. Pinned to the top-left corner under any ammo chip
+       so it doesn't crowd the thumbnail or the name footer. */
+    #loot-misc-grid.as-footprint-grid .bg-tile .ws-bonuses {
+      position: absolute; left: 4px; top: 4px; right: 4px;
+      display: flex; flex-direction: column; gap: 1px;
+      font-size: 8.5px; line-height: 1.2;
+      pointer-events: none;
+      max-height: 50%;
+      overflow: hidden;
+      text-shadow: 0 0 4px rgba(0,0,0,0.95);
+    }
+    #loot-misc-grid.as-footprint-grid .bg-tile .ws-bonus {
+      padding: 1px 4px;
+      background: rgba(0,0,0,0.55);
+      border-radius: 2px;
+      white-space: nowrap; overflow: hidden; text-overflow: ellipsis;
+    }
+    #loot-misc-grid.as-footprint-grid .bg-tile .ws-bonus-affix { color: #8fbf70; }
+    #loot-misc-grid.as-footprint-grid .bg-tile .ws-bonus-perk  { color: #e6b94a; font-weight: 700; }
+    #loot-misc-grid.as-footprint-grid .bg-tile .ws-bonus-set   { color: #c97aff; }
+    #loot-misc-grid.as-footprint-grid .bg-tile .ws-bonus-more {
+      font-size: 8px; color: #9b8b6a; text-align: center;
+      padding-top: 1px;
+    }
     /* Fallback flat-grid layout if as-footprint-grid isn't applied. */
     .loot-col-body #loot-misc-grid:not(.as-footprint-grid) {
       grid-template-columns: repeat(4, 1fr);

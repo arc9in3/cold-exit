@@ -1877,10 +1877,32 @@ export class LootUI {
     const ammo = (entry.item.type === 'ranged' && typeof entry.item.ammo === 'number')
       ? `<span class="ws-ammo">${entry.item.ammo}/${entry.item.magSize ?? '—'}</span>`
       : '';
+    // Bonuses summary — surface affixes / perks / set membership so
+    // the player can read what's worth taking without right-clicking
+    // every loot pile. Capped at 3 lines so a heavily-rolled item
+    // doesn't blow out the tile height; an overflow indicator shows
+    // when more bonuses exist than fit.
+    const bonusLines = [];
+    const affixes = (entry.item.affixes || []).filter(a => a.kind !== 'setMark');
+    for (const a of affixes) bonusLines.push({ kind: 'affix', text: a.label });
+    const perks = entry.item.perks || [];
+    for (const p of perks) bonusLines.push({ kind: 'perk', text: `◆ ${p.name}` });
+    const setMark = (entry.item.affixes || []).find(a => a.kind === 'setMark');
+    if (setMark) bonusLines.push({ kind: 'set', text: setMark.label });
+    let bonusHtml = '';
+    if (bonusLines.length) {
+      const shown = bonusLines.slice(0, 3);
+      const more = bonusLines.length - shown.length;
+      bonusHtml = `<div class="ws-bonuses">
+        ${shown.map(b => `<div class="ws-bonus ws-bonus-${b.kind}">${b.text}</div>`).join('')}
+        ${more > 0 ? `<div class="ws-bonus-more">+${more} more</div>` : ''}
+      </div>`;
+    }
     tile.innerHTML = `
       ${thumb ? `<img class="ws-thumb" src="${thumb}" alt="" draggable="false">` : `<span class="ws-glyph">${TYPE_ICONS[entry.item.type] || '◇'}</span>`}
       <div class="ws-name">${entry.item.name || ''}</div>
       ${ammo}
+      ${bonusHtml}
     `;
     return tile;
   }
