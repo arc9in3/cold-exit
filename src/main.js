@@ -1,6 +1,7 @@
 import * as THREE from 'three';
 import { createScene } from './scene.js';
 import { createPostFx } from './postfx.js';
+import { createLosMask } from './los_mask.js';
 import { createPlayer } from './player.js';
 import { Input } from './input.js';
 import { Combat } from './combat.js';
@@ -346,6 +347,14 @@ applyQuality(initialQuality, { renderer, scene, keyLight, fillLight, rimLight, g
 // when qualityFlags.postFx is on; low mode falls back to a direct
 // renderer.render call.
 const postFx = createPostFx(renderer, scene, camera);
+
+// Player line-of-sight darkening pass. The mask is rendered each
+// frame from a top-down visibility fan into a half-res RT, then read
+// by the postfx finisher to multiply scene brightness by ~0.30 outside
+// the fan. Hooked up below — postFx is told to consume the texture as
+// long as quality is high (low mode skips the composer entirely).
+const losMask = createLosMask(renderer, camera);
+postFx.setLosMask(losMask.texture, true);
 
 // Footstep emitter state — accumulates horizontal distance travelled
 // and emits a sample when the step-distance threshold is crossed. Step
@@ -1317,6 +1326,7 @@ window.addEventListener('resize', () => {
   renderer.setSize(window.innerWidth, window.innerHeight);
   resize();
   postFx.resize(window.innerWidth, window.innerHeight);
+  losMask.resize(window.innerWidth, window.innerHeight);
 });
 
 // Safety net for the `ui-grid-dragging` body class — without this,
@@ -5693,6 +5703,21 @@ function tick() {
 function _safeRender(rawDt) {
   if (_ctxLost) return;
   try {
+    // Refresh the LoS mask before the composer reads it. Skip in low
+    // quality mode (direct render bypasses the composer + mask), while
+    // the player is dead, or before a level exists (title screen):
+    // either way we toggle the post-fx pass off so a stale mask
+    // texture doesn't leave the menu darkened.
+    const losActive = qualityFlags.postFx && !playerDead
+                   && level && level.visionBlockers
+                   && player && player.mesh
+                   && !mainMenuUI?.isOpen?.();
+    if (losActive) {
+      losMask.update(player.mesh.position, level.visionBlockers());
+      postFx.setLosMask(losMask.texture, true);
+    } else {
+      postFx.setLosMask(losMask.texture, false);
+    }
     if (qualityFlags.postFx) postFx.render(rawDt);
     else renderer.render(scene, camera);
   } catch (err) {

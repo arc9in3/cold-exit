@@ -23,6 +23,13 @@ const FinisherShader = {
     uStrength: { value: 0.22 },    // vignette darkness at corners
     uGrain:    { value: 0.0 },     // grain disabled — read as static noise in play
     uChroma:   { value: 0.0015 },  // chromatic edge split (in UV units)
+    // LoS mask — texture written by los_mask.js each frame. UVs match
+    // the main camera's screen so we sample by vUv directly. Mask is
+    // 1.0 where the player can see, 0.0 where occluded.
+    tLosMask:  { value: null },
+    uLosOn:    { value: 0.0 },     // 0 disables the LoS pass entirely (toggle / saves)
+    uLosDark:  { value: 0.30 },    // floor brightness applied outside LoS
+    uLosSoft:  { value: 0.06 },    // smoothstep edge width on the mask
   },
   vertexShader: /* glsl */`
     varying vec2 vUv;
@@ -34,10 +41,14 @@ const FinisherShader = {
   fragmentShader: /* glsl */`
     varying vec2 vUv;
     uniform sampler2D tDiffuse;
+    uniform sampler2D tLosMask;
     uniform float uTime;
     uniform float uStrength;
     uniform float uGrain;
     uniform float uChroma;
+    uniform float uLosOn;
+    uniform float uLosDark;
+    uniform float uLosSoft;
 
     // Classic hash for per-pixel noise; the per-frame time shift
     // animates the grain so it reads as film instead of a static
@@ -61,6 +72,23 @@ const FinisherShader = {
       // Vignette — smooth falloff so the darkening doesn't band.
       float vig = smoothstep(0.75, 0.2, length(c));
       col *= mix(1.0 - uStrength, 1.0, vig);
+
+      // LoS darkening — sample the visibility mask written by
+      // los_mask.js. White inside the player's visibility fan, black
+      // elsewhere. Smoothstep widens shadow edges so the boundary
+      // doesn't read as a hard line. Tap a 4-sample box-blur to soften
+      // any aliasing at the half-resolution mask edge.
+      if (uLosOn > 0.5) {
+        vec2 px = vec2(0.0015, 0.002);
+        float m  = texture2D(tLosMask, uv).r;
+        m += texture2D(tLosMask, uv + vec2( px.x, 0.0)).r;
+        m += texture2D(tLosMask, uv + vec2(-px.x, 0.0)).r;
+        m += texture2D(tLosMask, uv + vec2(0.0,  px.y)).r;
+        m += texture2D(tLosMask, uv + vec2(0.0, -px.y)).r;
+        m *= 0.2;
+        float vis = smoothstep(0.0, max(0.001, uLosSoft), m);
+        col *= mix(uLosDark, 1.0, vis);
+      }
 
       // Animated grain — additive, small amplitude.
       float n = hash(gl_FragCoord.xy + uTime * 60.0) - 0.5;
@@ -106,5 +134,13 @@ export function createPostFx(renderer, scene, camera) {
     composer.render();
   }
 
-  return { composer, bloom, finisher, render, resize };
+  // Wire the LoS visibility mask and toggle the darkening pass on.
+  // Pass null/false to disable. Once wired, the mask texture is read
+  // each composer.render so the caller just needs to keep it updated.
+  function setLosMask(texture, enabled = true) {
+    finisher.uniforms.tLosMask.value = texture || null;
+    finisher.uniforms.uLosOn.value = enabled && texture ? 1.0 : 0.0;
+  }
+
+  return { composer, bloom, finisher, render, resize, setLosMask };
 }
