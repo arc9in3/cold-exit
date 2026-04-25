@@ -165,20 +165,21 @@ export class Level {
       // the start/boss/merchant rooms have their own built-in furnishing.
       let layout = 'open';
       if (type === 'combat') {
+        // Layout pool widened with `bunker` (staggered short walls)
+        // and `pillars-grid` (2x3 stub pillars) so the rotation past
+        // ~30 rooms feels less repetitive. Probabilities re-tuned so
+        // the new variants both land at ~7-8% each.
         const r = Math.random();
-        if      (r < 0.10) layout = 'columns-4';
-        else if (r < 0.17) layout = 'columns-6';
-        else if (r < 0.22) layout = 'columns-cross';
-        else if (r < 0.33) layout = 'split';
-        // Hallway / L-shape probabilities doubled so players see long
-        // narrow corridors more often instead of a parade of square boxes.
-        else if (r < 0.50) layout = 'hallway';
-        else if (r < 0.64) layout = 'lshape';
-        // Partition and closet — subdivide the cell into multiple
-        // linked sub-rooms (partition) or carve out a small alcove
-        // with its own doorway (closet). Combined 20% chance.
-        else if (r < 0.76) layout = 'partition';
-        else if (r < 0.84) layout = 'closet';
+        if      (r < 0.09) layout = 'columns-4';
+        else if (r < 0.15) layout = 'columns-6';
+        else if (r < 0.20) layout = 'columns-cross';
+        else if (r < 0.30) layout = 'split';
+        else if (r < 0.45) layout = 'hallway';
+        else if (r < 0.58) layout = 'lshape';
+        else if (r < 0.68) layout = 'partition';
+        else if (r < 0.76) layout = 'closet';
+        else if (r < 0.84) layout = 'bunker';
+        else if (r < 0.92) layout = 'pillars-grid';
         // else remains 'open'
       } else if (type === 'boss') {
         // Bosses always get a stately column ring to tell the eye they're
@@ -360,7 +361,8 @@ export class Level {
     for (const room of rooms) {
       if (room.layout === 'split' || room.layout === 'hallway' || room.layout === 'lshape'
           || room.layout === 'corridor' || room.layout === 'partition'
-          || room.layout === 'closet') {
+          || room.layout === 'closet'  || room.layout === 'bunker'
+          || room.layout === 'pillars-grid') {
         this._buildInterior(room);
       }
       if (room.layout === 'columns-4') this._decorateColumns(room, '4-corner');
@@ -1304,6 +1306,54 @@ export class Level {
         const stripX2 = b.maxX - margin;
         this._addObstacle(stripX1, WALL_HEIGHT / 2, cz, WALL_THICK, WALL_HEIGHT, walLen, FULL_WALL_COLOR);
         this._addObstacle(stripX2, WALL_HEIGHT / 2, cz, WALL_THICK, WALL_HEIGHT, walLen, FULL_WALL_COLOR);
+      }
+    } else if (room.layout === 'bunker') {
+      // Bunker — three half-height short walls staggered across the
+      // room's long axis. Each is 3.5–4m long and offset alternately
+      // toward the top and bottom edge so the player has to weave
+      // through cover lanes. Walls are full-height for line-of-sight
+      // breaks. Skipped if any segment would sit within a door's
+      // approach strip.
+      const segLen = 3.8;
+      const offset = 2.6;
+      const placeWall = (x, z, w, d) => {
+        if (this._blocksDoor(room, x, z, 1.4)) return;
+        this._addObstacle(x, WALL_HEIGHT / 2, z, w, WALL_HEIGHT, d, FULL_WALL_COLOR);
+      };
+      if (longX) {
+        const span = b.maxX - b.minX;
+        const x1 = b.minX + span * 0.25;
+        const x2 = b.minX + span * 0.50;
+        const x3 = b.minX + span * 0.75;
+        placeWall(x1, cz - offset, segLen, WALL_THICK);
+        placeWall(x2, cz + offset, segLen, WALL_THICK);
+        placeWall(x3, cz - offset, segLen, WALL_THICK);
+      } else {
+        const span = b.maxZ - b.minZ;
+        const z1 = b.minZ + span * 0.25;
+        const z2 = b.minZ + span * 0.50;
+        const z3 = b.minZ + span * 0.75;
+        placeWall(cx - offset, z1, WALL_THICK, segLen);
+        placeWall(cx + offset, z2, WALL_THICK, segLen);
+        placeWall(cx - offset, z3, WALL_THICK, segLen);
+      }
+    } else if (room.layout === 'pillars-grid') {
+      // Pillars grid — 2×3 arrangement of stub pillars across the
+      // room. Each pillar is a 0.6×0.6 collidable obstacle at half
+      // wall height so the player and enemies break LoS while moving
+      // through. Centres skipped if too close to a doorway approach.
+      const cols = longX ? 3 : 2;
+      const rows = longX ? 2 : 3;
+      const pad = 3.0;
+      const usableW = (b.maxX - b.minX) - pad * 2;
+      const usableD = (b.maxZ - b.minZ) - pad * 2;
+      for (let i = 0; i < cols; i++) {
+        for (let j = 0; j < rows; j++) {
+          const x = b.minX + pad + (cols === 1 ? usableW / 2 : (usableW * i) / (cols - 1));
+          const z = b.minZ + pad + (rows === 1 ? usableD / 2 : (usableD * j) / (rows - 1));
+          if (this._blocksDoor(room, x, z, 1.6)) continue;
+          this._addObstacle(x, WALL_HEIGHT / 2, z, 0.6, WALL_HEIGHT, 0.6, FULL_WALL_COLOR);
+        }
       }
     }
   }
@@ -2310,10 +2360,17 @@ export class Level {
     if (this.exitGroup || !this._exitPendingBounds) return;
     const { cx, cz, r } = this._exitPendingBounds;
     const group = new THREE.Group();
+    // Exit visual is emissive-only — no PointLight. Adding a live
+    // point light here triggered a per-material shader recompile
+    // (lighting uniform changed) for every nearby surface, which
+    // showed up as a noticeable hitch the moment the boss died.
+    // Bloom on the bright unlit material in postfx gives us the
+    // glow effect without the lighting-pipeline cost. Ring segment
+    // count dropped 40 → 24, still reads round at iso distance.
     const ring = new THREE.Mesh(
-      new THREE.RingGeometry(r * 0.7, r, 40),
+      new THREE.RingGeometry(r * 0.7, r, 24),
       new THREE.MeshBasicMaterial({
-        color: EXIT_COLOR, transparent: true, opacity: 0.6, side: THREE.DoubleSide,
+        color: EXIT_COLOR, transparent: true, opacity: 0.85, side: THREE.DoubleSide,
       }),
     );
     ring.rotation.x = -Math.PI / 2;
@@ -2321,13 +2378,10 @@ export class Level {
     group.add(ring);
     const pillar = new THREE.Mesh(
       new THREE.CylinderGeometry(0.1, 0.1, 2.5, 8),
-      new THREE.MeshBasicMaterial({ color: EXIT_COLOR, transparent: true, opacity: 0.35 }),
+      new THREE.MeshBasicMaterial({ color: EXIT_COLOR, transparent: true, opacity: 0.55 }),
     );
     pillar.position.y = 1.25;
     group.add(pillar);
-    const light = new THREE.PointLight(EXIT_COLOR, 1.0, 7);
-    light.position.y = 1.5;
-    group.add(light);
     group.position.set(cx, 0, cz);
     this.scene.add(group);
     this.exitGroup = group;
