@@ -54,6 +54,8 @@ import { DetailsUI } from './ui_details.js';
 import { STATUS_ICONS } from './inventory.js';
 import { thumbnailFor } from './item_thumbnails.js';
 import { RunStats, Leaderboard } from './leaderboard.js';
+import { fireHint, tickHints, resetHints } from './ui_hints.js';
+window.__resetHints = resetHints;
 
 const appEl = document.getElementById('app');
 const hudStatsEl = document.getElementById('hud-stats');
@@ -587,6 +589,10 @@ function _seedStarterKit() {
 // Wipe and re-equip the starter loadout: pants, top, small pack, and
 // a common-rarity weapon of the chosen class. Auto-equips the armor.
 function startNewRun(weaponClass) {
+  // First-run welcome hint — only fires on the very first ever run
+  // because fireHint persists per-player. Subsequent fresh runs see
+  // nothing here.
+  fireHint('move');
   for (const slot in inventory.equipment) inventory.equipment[slot] = null;
   inventory.pocketsGrid.clear();
   inventory._recomputeCapacity();
@@ -3571,6 +3577,10 @@ function damagePlayer(amount, damageType = 'generic') {
     if (!item || !item.reduction || !item.durability) continue;
     if (item.durability.current <= 0) continue;
     item.durability.current = Math.max(0, item.durability.current - amount * ratio);
+    // First time a piece of armour breaks, surface the repair
+    // mechanic — players might not realise broken gear gives no
+    // bonuses + needs a shop visit.
+    if (item.durability.current <= 0) fireHint('brokenItem');
   }
   // Second Wind — intercept damage that would kill and spend a charge to
   // revive at 40% of max HP instead.
@@ -4851,18 +4861,22 @@ function updateLootPrompt() {
       promptEl.textContent = pile.length >= 2
         ? `[E] examine ${pile.length} items on the ground`
         : `[E] pick up ${near.item.name}`;
+      fireHint('pickup');
     } else if (body && !body.looted && body.loot && body.loot.length) {
       promptEl.style.display = 'block';
       promptEl.textContent = `[E] search body`;
+      fireHint('searchBody');
     } else if (body && body.looted) {
       promptEl.style.display = 'block';
       promptEl.textContent = `(body looted)`;
     } else if (containerHit) {
       promptEl.style.display = 'block';
       promptEl.textContent = `[E] open ${containerHit.container.name}`;
+      fireHint('openContainer');
     } else if (npc && npc.kind === 'merchant') {
       promptEl.style.display = 'block';
       promptEl.textContent = `[E] trade with merchant`;
+      fireHint('shop');
     } else if (npc && npc.kind === 'bearMerchant') {
       promptEl.style.display = 'block';
       promptEl.textContent = `[E] speak with the Great Bear`;
@@ -4958,6 +4972,7 @@ function tryInteract({ nearItem, body, npc, container }) {
       transientHudMsg(`${keyResult.consumed.toUpperCase()} KEY USED`, 1.4);
     } else if (keyResult.needsKey) {
       transientHudMsg(`Need ${keyResult.needsKey.toUpperCase()} keycard`, 1.4);
+      fireHint('keycard');
       sfx.empty();
     }
     return;
@@ -5759,7 +5774,10 @@ function updateRoomClearance(playerPos) {
       level.unlockDoorsForRoom(r.id);
       sfx.roomClear();
       sfx.doorUnlock();
-      if (r.id === level.bossRoomId) level.revealExit();
+      if (r.id === level.bossRoomId) {
+        level.revealExit();
+        fireHint('exit');
+      }
       // Bloodied Rosary artifact — heal a chunk of max HP on clear.
       const heal = (derivedStats.roomClearHealFrac || 0);
       if (heal > 0) {
@@ -5844,6 +5862,29 @@ function tick() {
   const rawDt = clock.getDelta();           // real elapsed since last frame
   let dt = Math.min(rawDt, 1 / 30);         // clamped for physics stability
   _perf.start('frame');
+  // Tutorial hint queue ticks on rawDt so its fade timing is stable
+  // even during hit-stop / pause windows. Internal queue is empty
+  // for veterans; cost is one read + branch.
+  tickHints(rawDt);
+  // Time-gated tutorial hints — surface "secondary" controls a few
+  // seconds after the run starts so the player has a moment to read
+  // the move hint first. Each gate is internally idempotent (fireHint
+  // no-ops once an id has fired), so spamming is safe.
+  if (runStats && runStats.startedAt) {
+    const runSec = (Date.now() - runStats.startedAt) / 1000;
+    if (runSec > 8)  fireHint('inventory');
+    if (runSec > 18) fireHint('crouch');
+    if (runSec > 30) fireHint('dash');
+    if (runSec > 50) fireHint('hotbar');
+  }
+  // HP-driven heal hint — fires the first time the player drops below
+  // 50% HP, surfacing the H quick-heal binding.
+  if (lastPlayerInfo && lastPlayerInfo.maxHealth > 0
+      && lastPlayerInfo.health < lastPlayerInfo.maxHealth * 0.5) {
+    fireHint('heal');
+  }
+  // First skill point earned → perk-tree hint.
+  if (playerSkillPoints > 0) fireHint('perks');
   // Hit-stop — brief world-freeze on strong hits / kills. Timer runs
   // on rawDt so it counts down even while gameplay dt is zeroed out.
   if (hitStopT > 0) {
