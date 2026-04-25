@@ -6,6 +6,28 @@ import { loadModelClone, fitToRadius } from './gltf_cache.js';
 import { modelForItem } from './model_manifest.js';
 import { buildMeleePrimitive } from './melee_primitives.js';
 
+// Strip the held weapon meshes off a dead enemy — detach the primitive
+// gun box, the FBX weaponModel group, and the muzzle anchor from the
+// rig so the renderer stops walking them. Cuts the per-corpse draw
+// calls down to just the body silhouette, which compounds on dense
+// late-game rooms with several downed enemies.
+//
+// References are intentionally left intact (g.gun, g.muzzle still
+// resolve) so any defensive code path that still touches them after
+// death doesn't crash on a null. Geometry / materials aren't disposed
+// either — level regen drops the gunman array and the meshes get GC'd
+// in one batch, which is cheaper than disposing per-node here. Safe to
+// call multiple times via the _weaponStripped guard.
+function _stripDeadEnemyWeapon(g) {
+  if (!g || g._weaponStripped) return;
+  g._weaponStripped = true;
+  const meshes = g._heldWeaponMeshes;
+  if (!meshes) return;
+  for (const m of meshes) {
+    if (m && m.parent) m.parent.remove(m);
+  }
+}
+
 // Module-level scratch vectors. The gunman update loop runs once per
 // alive enemy per frame and previously allocated 5+ Vector3 instances
 // per call (eye, target, toPlayer, dir2d, fwd, etc.). With 10-20
@@ -401,6 +423,12 @@ export class GunmanManager {
     const g = {
       group, leftLeg, rightLeg, torso, head, leftArm, rightArm, gun, muzzle,
       alert, alertMat, bodyMat, headMat, legMat,
+      // Held weapon meshes — referenced for the on-death strip pass
+      // that pulls them off the rig to drop draw-call count once the
+      // body is just a corpse. The actual loot drop comes from
+      // enemy.loot (built in main.onEnemyKilled), independent of
+      // these visual meshes.
+      _heldWeaponMeshes: [gun, muzzle, weaponModel],
       rig,
       rightArmGroup: rig.rightArm.shoulder.pivot,
       weapon: chosen,
@@ -680,7 +708,11 @@ export class GunmanManager {
         settled: false,
         settleT: 0,
       };
-      // Weapon stays on the body for looting (see main.onEnemyKilled).
+      // The visible weapon mesh on the rig isn't needed once the
+      // body is a corpse — strip it for draw-call savings. Loot
+      // generation pulls the weapon def from enemy.weapon, not the
+      // visible mesh, so the body still drops it on search.
+      _stripDeadEnemyWeapon(g);
     }
     return { drops, blocked: false };
   }
@@ -735,6 +767,7 @@ export class GunmanManager {
           g.deathT = 0;
           if (g.snipLaser) { g.snipLaser.visible = false; g.snipPhase = 'idle'; }
           if (!g.disarmed && g.weapon && ctx.onBurnKill) ctx.onBurnKill(g);
+          _stripDeadEnemyWeapon(g);
         }
       }
 

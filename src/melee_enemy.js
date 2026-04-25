@@ -13,6 +13,18 @@ const STATE = { IDLE: 'idle', CHASE: 'chase', WINDUP: 'windup', SWING: 'swing', 
 // list.
 const _enemyTipTmp = new THREE.Vector3();
 
+// Strip the held melee weapon mesh (the blade primitive) off a dead
+// rusher — detach from the wrist anchor so it stops drawing. Reference
+// is left intact (e.blade still resolves) so any post-death code path
+// that pokes blade.visible doesn't crash on a null; geometry survives
+// for the level-regen GC pass.
+function _stripDeadEnemyBlade(e) {
+  if (!e || e._weaponStripped) return;
+  e._weaponStripped = true;
+  const blade = e.blade;
+  if (blade && blade.parent) blade.parent.remove(blade);
+}
+
 // Module-level scratches for the per-enemy per-frame AI tick. Same
 // motivation as gunman.js: prior code newed 4 vectors per call which
 // added up under crowded encounters. Confined to the function scope
@@ -408,6 +420,7 @@ export class MeleeEnemyManager {
         settled: false,
         settleT: 0,
       };
+      _stripDeadEnemyBlade(e);
     }
     return { drops, blocked: false };
   }
@@ -473,6 +486,7 @@ export class MeleeEnemyManager {
           e.state = STATE.DEAD;
           e.deathT = 0;
           if (ctx.onBurnKill) ctx.onBurnKill(e);
+          _stripDeadEnemyBlade(e);
         }
       }
 
