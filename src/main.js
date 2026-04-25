@@ -1721,6 +1721,111 @@ window.addEventListener('keydown', (ev) => {
   });
 })();
 
+// Dev key — F4 dumps render-pipeline state to the console. Targets
+// the "world goes black but gameplay continues" class of bug: prints
+// WebGL context status, renderer state, camera position, scene
+// summary, lighting intensities, postFx + LoS pipeline flags, and
+// the tunable values that drive lighting. Copy/paste the output when
+// reporting; "what's set to zero" is usually the smoking gun.
+window.addEventListener('keydown', (ev) => {
+  if (ev.code !== 'F4') return;
+  ev.preventDefault();
+  try {
+    const ctxLost = !!_ctxLost;
+    const rt = renderer.getRenderTarget();
+    const sceneChildren = scene.children.length;
+    const lightCount = scene.children.filter(o => o.isLight).length;
+    const auraLight = player?.mesh?.userData?.auraLight;
+    const dump = {
+      timestamp: new Date().toISOString(),
+      ctxLost,
+      renderer: {
+        currentRenderTarget: rt ? `RenderTarget(${rt.width}x${rt.height})` : 'canvas',
+        autoClear: renderer.autoClear,
+        info: {
+          calls: renderer.info.render.calls,
+          triangles: renderer.info.render.triangles,
+          frame: renderer.info.render.frame,
+        },
+      },
+      camera: {
+        pos: {
+          x: +camera.position.x.toFixed(2),
+          y: +camera.position.y.toFixed(2),
+          z: +camera.position.z.toFixed(2),
+        },
+        type: camera.isOrthographicCamera ? 'ortho' : 'persp',
+        bounds: camera.isOrthographicCamera
+          ? { l: +camera.left.toFixed(1), r: +camera.right.toFixed(1),
+              t: +camera.top.toFixed(1),  b: +camera.bottom.toFixed(1) }
+          : null,
+      },
+      player: player?.mesh ? {
+        pos: {
+          x: +player.mesh.position.x.toFixed(2),
+          y: +player.mesh.position.y.toFixed(2),
+          z: +player.mesh.position.z.toFixed(2),
+        },
+        visible: player.mesh.visible,
+        dead: !!playerDead,
+      } : null,
+      scene: {
+        children: sceneChildren,
+        lights: lightCount,
+        background: scene.background?.getHexString
+          ? `#${scene.background.getHexString()}` : null,
+        fog: scene.fog
+          ? { type: scene.fog.isFogExp2 ? 'exp2' : 'linear',
+              color: `#${scene.fog.color.getHexString()}`,
+              density: +(scene.fog.density ?? 0).toFixed(4) }
+          : null,
+      },
+      lighting: {
+        // Current live values driving the scene. Compare against
+        // tunables.lighting if anything looks off.
+        keyIntensity:   keyLight?.intensity ?? null,
+        fillIntensity:  fillLight?.intensity ?? null,
+        rimIntensity:   rimLight?.intensity ?? null,
+        hemiIntensity:  hemiLight?.intensity ?? null,
+        playerAuraInt:  auraLight?.intensity ?? null,
+        playerAuraDist: auraLight?.distance ?? null,
+      },
+      tunablesLighting: { ...(tunables.lighting || {}) },
+      postFx: {
+        active: !!qualityFlags.postFx,
+        uLosOn:    postFx?.finisher?.uniforms?.uLosOn?.value ?? null,
+        uLosDark:  postFx?.finisher?.uniforms?.uLosDark?.value ?? null,
+        uLosSoft:  postFx?.finisher?.uniforms?.uLosSoft?.value ?? null,
+        vignette:  postFx?.finisher?.uniforms?.uStrength?.value ?? null,
+        chroma:    postFx?.finisher?.uniforms?.uChroma?.value ?? null,
+        grain:     postFx?.finisher?.uniforms?.uGrain?.value ?? null,
+      },
+      losMask: losMask ? {
+        textureUuid: losMask.texture?.uuid?.slice(0, 8) ?? null,
+      } : null,
+      modal: {
+        inventory:  inventoryUI?.visible ?? false,
+        gameMenu:   !!gameMenuUI?.isOpen?.(),
+        shop:       !!shopUI?.isOpen?.(),
+        loot:       !!lootUI?.isOpen?.(),
+        customize:  !!customizeUI?.isOpen?.(),
+        perk:       !!perkUI?.isOpen?.(),
+        mainMenu:   !!mainMenuUI?.isOpen?.(),
+        paused:     !!paused,
+      },
+      qualityFlags: { ...qualityFlags },
+      localStorageKeys: Object.keys(localStorage).filter(k =>
+        k.startsWith('tacticalrogue') || k.startsWith('tunables')),
+    };
+    console.log('=== RENDER DIAG (F4) ===');
+    console.log(JSON.stringify(dump, null, 2));
+    console.log('=== END RENDER DIAG ===');
+    transientHudMsg?.('render diag → console', 1.2);
+  } catch (e) {
+    console.warn('render diag failed:', e);
+  }
+});
+
 // Dev key — Backquote toggles the per-system perf overlay. Off by
 // default; tap once to start sampling, again to hide. Form inputs are
 // guarded out by the input module's focus check so typing in a name
