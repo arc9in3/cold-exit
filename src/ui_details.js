@@ -120,6 +120,86 @@ export const ITEM_LORE = {
   'Adrenaline Shot':'Auto-injector. Heart rate doubles; caution evaporates.',
   'Combat Stim':'Military-grade cocktail. Makes every punch land harder.',
   'Energy Drink':'Sugar, caffeine, dubious vitamins. Runs you ragged later.',
+  'IFAK':      'Individual First Aid Kit. The pouch every grunt wears and every grunt forgets.',
+  'Defibrillator': 'Two paddles, one shock, no apologies. For when bandages run out of arguments.',
+  'Morphine Injector': 'Auto-injector pulled from a dead medic. Pain stops mattering for a while.',
+  'Regen Injector': 'Black-market peptides in a hand-warm syringe. The healing keeps coming long after the needle.',
+
+  // Throwables
+  'Frag Grenade': 'M67-pattern fragmentation. Pull, count to three, and donate it to the room.',
+  'Molotov Cocktail': 'Fuel and oil in a bottle, rag for a wick. Crude. Effective. Loud about it.',
+  'Flashbang': 'M84 stun device. One bang, one flash, one room of blind men.',
+  'Stun Grenade': 'Russian-pattern dazer. Less light, more concussion — the room forgets you for a beat.',
+
+  // Exotic / mythic weapons
+  'Hailstorm Minigun': 'Six-barrel Gatling, harness-fed. Spins up slow and mulches anything that doesn\'t leave the room first.',
+  'Kingsmaker GL':     'Six-shot revolver grenade launcher. The kind of weapon that ends arguments and ceilings.',
+  'Stormbreaker':      'Custom-built railgun, capacitor still warm. Fires a slug that turns interior walls into suggestions.',
+  'Whisper Dart':      'Gas-piston dart pistol. Subsonic, unmarked, the kind of round nobody finds during the autopsy.',
+  'Widowmaker Rocket': 'Shoulder-launched HE rocket. Reusable launcher, single-use rooms.',
+  'Dragonbreath':      'Pump shotgun loaded with incendiary slug shells. Each shot leaves a lane of fire and apologies.',
+
+  // Gear — face / head / ears / hands / belts / pants / boots
+  'Combat Helmet':       'Military-issue half-shell, scuffed paint, replaceable padding. Standard issue, standard luck.',
+  'Tactical Helmet NVG': 'Combat helmet with a forward-mounted NVG bracket. Heavier than it looks, lighter than nothing.',
+  'NVG Rig':             'Quad-tube night vision strapped to a forehead mount. Green-and-white world, blind spots in colour.',
+  'Tactical Shades':     'Polarised ballistic eyewear. Cuts a flashbang to a mild headache.',
+  'Earmuffs':            'Bulk passive earpro. Less situational awareness, less ringing.',
+  "Captain's Hat":       'Embroidered peaked cap. Costs nothing, says everything. The grunts hand over their tips.',
+  'Reinforced Pants':    'Plate inserts behind the thighs. Heavier walk, fewer femoral artery problems.',
+
+  // Belt / chest gear (rigs)
+  'Quickdraw Rig':       'Holster harness with a forward release. Reload faster than the room reacts.',
+  'Mag Pouch':           'Triple-mag MOLLE pouch. Small, loud, full.',
+  'Grenade Pouch':       'Two velcro slots, one stays full. The other one is the answer.',
+
+  // Junk — sells for credits, occasionally part of an artifact recipe
+  'Scrap Metal':         'Twisted rebar and rusted steel. The merchant takes it all.',
+  'Copper Scrap':        'Stripped wire and pipe ends. Sells slow, sells steady.',
+  'Brass Lighter':       'Zippo-style with somebody\'s initials engraved. Still sparks.',
+  'Silver Coin':         'Old commemorative round. Probably not worth the silver content. Probably.',
+  'Silver Cigarette Case': 'Engraved hinged case, mostly empty. Smells faintly of someone else\'s lungs.',
+  'Gold Watch':          'Stopped at 2:47. Doesn\'t matter — the band is the part the merchant wants.',
+  'Diamond Ring':        'Solitaire setting, simple band. Whatever promise it carried isn\'t yours to keep.',
+  'Jeweled Monocle':     'Antique brass eyepiece, tiny gem inlay. Useless. Beautiful. Sells.',
+  'Antique Vase':        'Hairline crack along the rim, painted river scene. Older than the war.',
+  'Duck Statue':         'Painted ceramic mallard. Heavier than it looks. Has a story it isn\'t telling.',
+  'Emerald Skull':       'Polished obsidian carved into a grin and inlaid with green stone. Black-market collectors line up.',
+  'Dog Tags':            'Stamped name and serial. The next of kin already got the letter.',
+  'Encrypted Drive':     'Sealed thumb drive, military stamp. Worth more than its data — somebody pays for the silence.',
+  'Classified Document': 'Sealed envelope, redaction tape across the flap. Still warm.',
+  'Field Radio':         'Handset and battery pack. Heavy, scratched, wired to a frequency nobody monitors anymore.',
+  'Car Battery':         '12-volt lead-acid. Surprisingly hard to ignore in a backpack.',
+
+  // Toys — feed Jessica's Rage at the Great Bear
+  'Beary Doll':          'Stitched plush bear, one button eye. Found in a duffel bag the courier never came back for.',
+  'Joke Bear':           'Wind-up novelty bear, cracked grin. The mechanism still cycles, but the laughter\'s gone wrong somewhere.',
+  'Sleep Duck':          'Felt-and-bean sleep companion. Smells like a child\'s room. Doesn\'t belong in this one.',
+  'Defibrillator Toy':   'Toy paddles, plastic shock. Children\'s playset, except for the blood under the handles.',
+
+  // Attachments — small, telegraphic, focus on what they FEEL like
+  'Suppressor':       'Threaded baffle stack. Drops the report to a hiss; bullets still bite.',
+  'Compensator':      'Slotted muzzle brake. Pushes the muzzle climb back where it belongs.',
+  'Long Barrel':      'Free-float extension. Faster bullets, longer reach, slower handling.',
+  'Short Barrel':     'Cut-down rebarrel. Faster swings, looser groups.',
+  'Red Dot':          'Unmagnified parallax-free reticle. Both eyes open.',
+  'Reflex Sight':     'Wide-window holographic with a circle-and-dot. Fast on the move.',
+  'Holographic':      'Battery-powered holosight. Crisp at any zoom — when the battery holds.',
+  'Mid Scope':        'Variable 1-6×. The compromise optic — close enough for room work, long enough for hallways.',
+  'Red Laser':        'Visible laser module. Dot on target, no excuses.',
+  'Green Laser':      'High-visibility green dot, daylight-readable. Brighter at the cost of battery life.',
+  'Blue Laser':       'Tactical blue beam. Subtle in daylight, vivid in shadow.',
+  'Laser Module':     'Generic IR/visible combo. Cheap, common, works.',
+  'Tactical Light':   'Weapon-mounted 600-lumen torch. White-out for whoever\'s in the cone.',
+  'Strobe Light':     'Pulsing high-intensity bulb. Makes the room into a stop-motion you don\'t want to be in.',
+  'Flashlight':       'Plain weapon light. Throws a clean cone. Doesn\'t do much else.',
+  'Vertical Foregrip': 'Polymer broomstick under the rail. Recoil control for the price of a mounting screw.',
+  'Bipod':            'Spring-loaded folding bipod. Worth its weight when you stop moving.',
+  'Heavy Stock':      'Hydraulic-buffered replacement stock. Soaks up recoil at the cost of a slower swing.',
+  'Match Grip':       'Stippled rubber wrap. Wet hands stop being a problem.',
+  'Match Trigger':    'Polished competition trigger. Lighter pull, faster reset, no creep.',
+  'Extended Mag':     'Welded base plate adds rounds. Loads slower, runs longer.',
+  'Drum Magazine':    'Twin-stack rotary mag. Ugly silhouette, generous capacity.',
 };
 
 const RARITY_COLORS = {
