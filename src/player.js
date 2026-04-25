@@ -163,9 +163,29 @@ export function createPlayer(scene) {
       : rig.leftShoulderAnchor;
   }
 
+  // Per-weapon clone cache. Weapon swaps used to dispose the FBX
+  // hierarchy (geometry + materials per node) and then re-clone the
+  // template for the new weapon — both operations traverse the entire
+  // tree and stalled the main thread for a few frames on rifles /
+  // shotguns. Now we hide-and-keep instead: each weapon's prepared
+  // clone (rotated, scaled, positioned for the in-hand pivot) gets
+  // cached by its key once and reused on every subsequent swap-back.
+  // Melee primitives use the same map; their key is `melee:<name>`.
+  const _weaponCloneCache = new Map();
+
   function clearInHandModel() {
-    while (inHandModel.children.length) {
-      const c = inHandModel.children[0];
+    // Hide every cached clone instead of disposing. The prepared
+    // clones stay parented to inHandModel so they survive across
+    // swaps; we just toggle visibility. Anything not in the cache
+    // (legacy direct-add path, defensive fallback) still gets
+    // removed + disposed so we don't leak.
+    const cached = new Set(_weaponCloneCache.values());
+    for (let i = inHandModel.children.length - 1; i >= 0; i--) {
+      const c = inHandModel.children[i];
+      if (cached.has(c)) {
+        c.visible = false;
+        continue;
+      }
       inHandModel.remove(c);
       c.traverse?.(obj => {
         if (obj.geometry) obj.geometry.dispose();
@@ -279,11 +299,14 @@ export function createPlayer(scene) {
     gunMesh.visible = true;
     weaponExtras.visible = true;
     if (weapon.type === 'melee') {
-      const prim = buildMeleePrimitive(weapon);
-      // Container is rotated π/2 around X so the primitive's +Z axis
-      // points along the hand's forward (-Y) direction. Drop the
-      // primitive in centred — it was authored around its own origin.
-      inHandModel.add(prim);
+      const meleeKey = `melee:${weapon.name}`;
+      let prim = _weaponCloneCache.get(meleeKey);
+      if (!prim) {
+        prim = buildMeleePrimitive(weapon);
+        _weaponCloneCache.set(meleeKey, prim);
+        inHandModel.add(prim);
+      }
+      prim.visible = true;
       inHandModel.visible = true;
       gunMesh.visible = false;
       weaponExtras.visible = false;
@@ -294,6 +317,18 @@ export function createPlayer(scene) {
     }
     const modelUrl = modelForItem(weapon);
     if (modelUrl) {
+      // Cache hit — reuse the prepared clone, no work needed.
+      const cached = _weaponCloneCache.get(modelUrl);
+      if (cached) {
+        cached.visible = true;
+        window.__activeWeaponClone = cached;
+        window.__activeWeaponUrl = modelUrl;
+        inHandModel.visible = true;
+        gunMesh.visible = false;
+        weaponExtras.visible = false;
+        state.parryT = 0;
+        return;
+      }
       loadModelClone(modelUrl).then(clone => {
         if (!clone || mySerial !== weaponLoadSerial) return;
         // Size per weapon class. `muzzleLength` on the tunables doesn't
@@ -339,6 +374,10 @@ export function createPlayer(scene) {
         if (gripOff) {
           clone.position.set(gripOff.x || 0, gripOff.y || 0, gripOff.z || 0);
         }
+        // Cache the prepared clone so subsequent swaps to this same
+        // weapon URL are zero-work (just visibility toggles in the
+        // hide-and-keep clearInHandModel above).
+        _weaponCloneCache.set(modelUrl, clone);
         // Expose the active clone for live tuning — see
         // __debug.tuneWeapon / __debug.inspectWeapon in main.js.
         window.__activeWeaponClone = clone;
