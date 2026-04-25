@@ -47,16 +47,7 @@ export class InventoryUI {
         <div id="inv-body">
           <div id="inv-equipment">
             <div class="inv-heading">Equipment</div>
-            <div id="inv-grid">
-              <div id="inv-progression-overlay">
-                <div class="inv-prog-heading">Progression</div>
-                <div id="inv-prog-list"></div>
-              </div>
-              <div id="inv-skills-overlay">
-                <div class="inv-skills-heading">Skills</div>
-                <div id="inv-skill-list"></div>
-              </div>
-            </div>
+            <div id="inv-grid"></div>
           </div>
           <div id="inv-backpack">
             <div id="inv-grids-stack"></div>
@@ -69,11 +60,35 @@ export class InventoryUI {
 
     this.gridEl = this.root.querySelector('#inv-grid');
     this.gridsStackEl = this.root.querySelector('#inv-grids-stack');
-    this.skillListEl = this.root.querySelector('#inv-skill-list');
-    this.progListEl = this.root.querySelector('#inv-prog-list');
 
+    // Build silhouette + slots FIRST (this clears gridEl), then mount
+    // the overlay panels as children. Without this ordering, the
+    // overlays were getting wiped by _buildSilhouette's innerHTML = ''
+    // and `progListEl` / `skillListEl` ended up referencing orphan
+    // nodes that were never visible.
     this._buildSilhouette();
+    this._mountOverlays();
     this.render();
+  }
+
+  _mountOverlays() {
+    const prog = document.createElement('div');
+    prog.id = 'inv-progression-overlay';
+    prog.innerHTML = `
+      <div class="inv-prog-heading">Progression</div>
+      <div id="inv-prog-list"></div>
+    `;
+    this.gridEl.appendChild(prog);
+    this.progListEl = prog.querySelector('#inv-prog-list');
+
+    const skills = document.createElement('div');
+    skills.id = 'inv-skills-overlay';
+    skills.innerHTML = `
+      <div class="inv-skills-heading">Skills</div>
+      <div id="inv-skill-list"></div>
+    `;
+    this.gridEl.appendChild(skills);
+    this.skillListEl = skills.querySelector('#inv-skill-list');
   }
 
   toggle() {
