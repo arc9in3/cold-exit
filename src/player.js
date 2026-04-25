@@ -1395,8 +1395,45 @@ export function createPlayer(scene) {
   }
   applyCharacterStyle(getCharacterStyle());
 
+  // Pre-load + clone + cache a weapon's FBX without changing the
+  // currently-equipped weapon. Used by main.regenerateLevel to warm
+  // every weapon in the player's rotation during level-transition,
+  // so the first swap to each one in-game is a free visibility
+  // toggle instead of a multi-frame stall on FBX clone + traversal.
+  // Melee weapons + missing models no-op cleanly.
+  function prewarmWeapon(weapon) {
+    if (!weapon || weapon.type === 'melee') return;
+    const modelUrl = modelForItem(weapon);
+    if (!modelUrl || _weaponCloneCache.has(modelUrl)) return;
+    loadModelClone(modelUrl).then((clone) => {
+      if (!clone || _weaponCloneCache.has(modelUrl)) return;
+      const len = weapon.muzzleLength;
+      const CLASS_SCALE = {
+        pistol: 0.45, smg: 0.65, rifle: 0.75, shotgun: 0.75,
+        lmg: 0.75, flame: 0.7, melee: 0.7,
+      };
+      const cs = CLASS_SCALE[weapon.class] ?? 0.9;
+      fitToRadius(clone, len * cs);
+      const r = weapon.modelRotation;
+      const rotOverride = rotationOverrideForModelPath(modelUrl);
+      if (rotOverride) {
+        clone.rotation.set(rotOverride.x || 0, rotOverride.y || 0, rotOverride.z || 0);
+      } else if (r) {
+        clone.rotation.set(r.x || 0, r.y || 0, r.z || 0);
+      } else {
+        clone.rotation.set(0, Math.PI / 2, 0);
+      }
+      const gripOff = gripOffsetForModelPath(modelUrl);
+      if (gripOff) clone.position.set(gripOff.x || 0, gripOff.y || 0, gripOff.z || 0);
+      else         clone.position.set(0, 0, 0);
+      clone.visible = false;
+      inHandModel.add(clone);
+      _weaponCloneCache.set(modelUrl, clone);
+    }).catch(() => {});
+  }
+
   return {
-    mesh: group, body, rig, update, setWeapon, takeDamage, heal, applyStatus,
+    mesh: group, body, rig, update, setWeapon, prewarmWeapon, takeDamage, heal, applyStatus,
     tryMeleeAttack, tryQuickMelee, cancelCombo,
     tryParry, isBlocking, isParryActive,
     consumeStamina, refundStamina, applyDerivedStats, restoreFullHealth,

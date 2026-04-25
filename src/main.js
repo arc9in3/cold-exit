@@ -1320,6 +1320,14 @@ function regenerateLevel() {
   melees.removeAll();
   loot.removeAll();
   playerKeys.clear();
+  // Pre-warm the FBX clone for every weapon currently in the player's
+  // rotation. The clone+fit+rotate pass takes a few frames per
+  // weapon; doing it during regen (when the screen's already in
+  // transition) means the first in-game swap to each weapon is a
+  // free visibility toggle.
+  if (player && player.prewarmWeapon) {
+    for (const w of inventory.getWeaponRotation()) player.prewarmWeapon(w);
+  }
   const diff = difficultyScale();
   const gearLevel = level.index || 0;
   // Keycard assignment — hand each level.keycardColors entry to a

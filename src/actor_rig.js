@@ -687,8 +687,12 @@ export function updateAnim(rig, state, dt) {
   const speed = state.speed || 0;
   const walkT = Math.min(1, speed / 2.4);
   const runT  = Math.min(1, Math.max(0, (speed - 2.4) / 3.0));
-  a.blendWalk = lerpT(a.blendWalk, walkT, 8, dt);
-  a.blendRun  = lerpT(a.blendRun,  runT,  8, dt);
+  // Slower blends (was 8 → now 5.5) so starting/stopping doesn't snap
+  // the legs into pose — half a beat of ease in and out reads as
+  // momentum/inertia. Critical for walk→idle transitions which used
+  // to look like the character hit the brakes.
+  a.blendWalk = lerpT(a.blendWalk, walkT, 5.5, dt);
+  a.blendRun  = lerpT(a.blendRun,  runT,  5.5, dt);
   // Cycle speed: idle sway ~0.9 Hz, walk ~1.6 Hz, run ~2.5 Hz. Halved
   // from the previous values — was running too fast for actual ground
   // speed, feet sliding. Each cycle covers ONE left+right step pair.
@@ -766,12 +770,20 @@ export function updateAnim(rig, state, dt) {
   const aimTarget = typeof state.aiming === 'number'
     ? Math.max(0, Math.min(1, state.aiming))
     : (state.aiming ? 1 : 0);
-  a.aimBlend = lerpT(a.aimBlend, aimTarget, 10, dt);
+  // Aim blend rate softened (was 10 → 6.5) so ADS up/down has visible
+  // ramp instead of teleporting the arms between chest-hold and head
+  // aim. Still fast enough that combat reads as responsive — eyeballs
+  // can track the arms moving through the transition rather than
+  // seeing them snap.
+  a.aimBlend = lerpT(a.aimBlend, aimTarget, 6.5, dt);
   // --- dash lean ----------------------------------------------------
   // Dashing pitches the whole body forward like a lunge; blends back
-  // smoothly on exit so the character doesn't snap upright.
+  // smoothly on exit so the character doesn't snap upright. Was 12 →
+  // 8 for a softer ease back to upright; the dash itself still kicks
+  // in fast because the impulse on `dashing=true` is one frame of full
+  // blend toward 1.
   if (a.dashBlend === undefined) a.dashBlend = 0;
-  a.dashBlend = lerpT(a.dashBlend, state.dashing ? 1 : 0, 12, dt);
+  a.dashBlend = lerpT(a.dashBlend, state.dashing ? 1 : 0, 8, dt);
   // --- crouch + kneel blends ----------------------------------------
   // Crouch is the "low-ready shuffle" pose. Kneel kicks in on top of
   // crouch when the player is nearly stationary — one knee touches
@@ -965,10 +977,19 @@ export function updateAnim(rig, state, dt) {
   const idleStandStrength = idleStrength * (1 - crouch * 0.5);
   // Weight-shift: hips roll side-to-side on a slow cycle, and one
   // shoulder drops in sympathy so the character "rests on one leg".
-  // weightShift cycles -1..+1 over ~4.5s.
+  // weightShift cycles -1..+1 over ~4.5s. Bumped hip roll ~50% so
+  // standing characters visibly settle their weight back and forth
+  // rather than reading as a mannequin.
   const idleHeadYaw = Math.sin(a.breathT * 0.35 + 1.2) * 0.22 * idleStandStrength;
-  const idleHipRoll = weightShift * 0.055 * idleStandStrength;
+  const idleHipRoll = weightShift * 0.085 * idleStandStrength;
   const idleShoulderDrop = -weightShift * 0.08 * idleStandStrength;
+  // Idle weapon micro-drift — a tiny breath-driven offset on the
+  // weapon-side shoulder so a stationary aiming pose has the gun
+  // gently rising / falling with the actor's chest. Real shooters
+  // can never hold a weapon perfectly still; this sells "alive" at
+  // ranged-hold time. Suppressed during walk/run so it doesn't fight
+  // the gait sway.
+  const idleWeaponDrift = breath * 0.022 * (1 - moveBlend) * (0.4 + a.aimBlend * 0.6);
   // Breath — chest pitches very slightly and the upper body rises a
   // hair (hips stay planted). Amplitude is subtle because even a
   // little motion reads as alive.
@@ -1245,10 +1266,13 @@ export function updateAnim(rig, state, dt) {
   // side" so the character reads as leaning on one leg.
   const weaponSideSway  = (handed === 'right' ? rightArmSway : leftArmSway) * 0.5;
   const supportSideSway = (handed === 'right' ? leftArmSway  : rightArmSway);
-  weaponArm.shoulder.pivot.rotation.x = rightShoulder - armLeanComp - recoilKick + swingX + weaponSideSway + idleShoulderDrop;
+  weaponArm.shoulder.pivot.rotation.x = rightShoulder - armLeanComp - recoilKick + swingX + weaponSideSway + idleShoulderDrop + idleWeaponDrift;
   weaponArm.shoulder.pivot.rotation.z = -aimShoulderYaw + swingZ;
   const elbowPump = Math.abs(weaponSideSway) * 0.5;
-  weaponArm.elbow.rotation.x = rightElbow + recK * 0.25 + swingElbowExt - elbowPump;
+  // Tiny breath-driven elbow pulse on top of the recoil-kick recovery
+  // so the weapon arm settles with a hint of life when stationary,
+  // not just when firing. Couples the support arm's elbow below.
+  weaponArm.elbow.rotation.x = rightElbow + recK * 0.25 + swingElbowExt - elbowPump + idleWeaponDrift * 0.4;
   // Stash upper-body swing contributions on scratch fields — the
   // chest assignment below (after this block) picks them up so
   // twist applies AFTER chestAimYaw has been set. Avoids the
@@ -1262,12 +1286,12 @@ export function updateAnim(rig, state, dt) {
   // arm inward across the torso so the support hand meets the weapon
   // at centerline. Sign is flipped for left-handed hold.
   const supportShoulderYaw = 0.55 * supportYawSign;
-  supportArm.shoulder.pivot.rotation.x = rightShoulder - armLeanComp + supportSideSway - idleShoulderDrop;
+  supportArm.shoulder.pivot.rotation.x = rightShoulder - armLeanComp + supportSideSway - idleShoulderDrop + idleWeaponDrift;
   supportArm.shoulder.pivot.rotation.z = supportShoulderYaw;
   // Support elbow a touch more bent so the hand meets the weapon a
   // bit further inboard without over-extending.
   const supportElbowPump = Math.abs(supportSideSway) * 0.4;
-  supportArm.elbow.rotation.x = rightElbow - 0.18 - supportElbowPump;
+  supportArm.elbow.rotation.x = rightElbow - 0.18 - supportElbowPump + idleWeaponDrift * 0.4;
 
   // Grip curl — rotate each hand pivot forward so the hand reads as
   // a closed fist on the weapon grip, not a flat palm hanging off
