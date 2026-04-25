@@ -182,8 +182,41 @@ export const ATTACHMENT_DEFS = {
 
 export const ALL_ATTACHMENTS = Object.values(ATTACHMENT_DEFS);
 function clone(def) { return { ...def, modifier: { ...def.modifier } }; }
+
+// Lazy import — attachments.js loads before inventory.js, so we
+// require the helper at call time to dodge the import cycle.
+let _maybeApplyMastercraft = null;
+function _lazyMC() {
+  if (_maybeApplyMastercraft) return _maybeApplyMastercraft;
+  try {
+    // dynamic require pattern via window.__inv shim populated in inventory.js
+    _maybeApplyMastercraft = (typeof window !== 'undefined' && window.__inv?.maybeApplyMastercraft) || null;
+  } catch (_) {}
+  return _maybeApplyMastercraft;
+}
+
 export function randomAttachment() {
-  return clone(ALL_ATTACHMENTS[Math.floor(Math.random() * ALL_ATTACHMENTS.length)]);
+  const att = clone(ALL_ATTACHMENTS[Math.floor(Math.random() * ALL_ATTACHMENTS.length)]);
+  // Apply universal mastercraft roll. Mastercraft attachments boost
+  // every numeric modifier toward the player (multipliers >1 × 1.5,
+  // <1 multipliers tightened by 1.5× toward zero) so the mod sheet
+  // reads as a clearly-better roll.
+  const mc = _lazyMC();
+  if (mc) {
+    const before = !!att.mastercraft;
+    mc(att);
+    if (att.mastercraft && !before && att.modifier) {
+      const m = att.modifier;
+      // Numeric boost — bump values that the player perceives as
+      // "stronger." Mults >1 grow, <1 shrink further (more bonus).
+      const grow = (k) => { if (typeof m[k] === 'number') m[k] = +(m[k] * 1.5).toFixed(3); };
+      const tighten = (k) => { if (typeof m[k] === 'number' && m[k] < 1) m[k] = +(m[k] / 1.5).toFixed(3); };
+      grow('damageMult'); grow('rangeMult'); grow('fireRateMult'); grow('magSizeMult');
+      tighten('hipSpreadMult'); tighten('adsSpreadMult'); tighten('reloadTimeMult');
+      if (typeof m.magSizeBonus === 'number') m.magSizeBonus = Math.round(m.magSizeBonus * 1.5);
+    }
+  }
+  return att;
 }
 
 // Compute the *effective* (base × attachments) version of a weapon. Returns a

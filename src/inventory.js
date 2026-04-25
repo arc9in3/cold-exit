@@ -336,7 +336,7 @@ export const STATUS_ICONS = {
 
 export function randomJunk() {
   const pick = ALL_JUNK[Math.floor(Math.random() * ALL_JUNK.length)];
-  return stampItemDims(jitterJunkValue({ ...pick }));
+  return maybeApplyMastercraft(stampItemDims(jitterJunkValue({ ...pick })));
 }
 
 // Convenience: build an item with default durability fields.
@@ -368,7 +368,60 @@ function _affixLevelScale() {
 // so the cell renderer can render the rainbow-glow border, and every
 // affix value / numeric perk roll bumps by 1.5×.
 const MASTERCRAFT_CHANCE = 0.005;
-function _rollMastercraft() { return Math.random() < MASTERCRAFT_CHANCE; }
+export function rollMastercraft() { return Math.random() < MASTERCRAFT_CHANCE; }
+// Backwards-compatible internal alias used by withAffixes / wrapWeapon.
+function _rollMastercraft() { return rollMastercraft(); }
+
+// Universal mastercraft application — works for any item that doesn't
+// go through withAffixes/wrapWeapon (consumables, throwables, junk,
+// toys, attachments). Adds the visual tag + bumps numeric stats by
+// 1.5× where applicable. For items WITH affixes/perks the roll
+// happens internally (withAffixes/wrapWeapon) and this helper just
+// short-circuits if already tagged.
+// Bridge for circular-import-shy modules (attachments.js) to call
+// maybeApplyMastercraft without triggering the load cycle.
+if (typeof window !== 'undefined') {
+  window.__inv = window.__inv || {};
+  // Populated below the function definition — see end of module.
+}
+export function maybeApplyMastercraft(item) {
+  if (!item || item.mastercraft) return item;
+  if (!rollMastercraft()) return item;
+  item.mastercraft = true;
+  // Stamp the visible MASTERCRAFT tag once.
+  if (typeof item.name === 'string' && !item.name.includes('mastercraft-tag')) {
+    item.name = `<span class="mastercraft-tag">MASTERCRAFT</span> ${item.name}`;
+  }
+  // Numeric boosts. Each item kind gets the bump in the field that
+  // makes it visibly stronger:
+  //   consumables → heal / amplitude / duration
+  //   throwables  → aoeRadius, aoeDamage, charges, blind/stun durations
+  //   junk        → sellValue
+  //   attachments → no per-affix path; modifier already lives in
+  //                 attachment def, leave as-is unless caller boosts.
+  const e = item.useEffect;
+  if (e) {
+    if (typeof e.amount === 'number')   e.amount   = Math.round(e.amount * 1.5);
+    if (typeof e.duration === 'number') e.duration = +(e.duration * 1.5).toFixed(2);
+    if (typeof e.dmgMult === 'number')  e.dmgMult  = +(e.dmgMult  * 1.5).toFixed(2);
+    if (typeof e.regen === 'number')    e.regen    = +(e.regen    * 1.5).toFixed(2);
+  }
+  if (typeof item.aoeRadius === 'number') item.aoeRadius = +(item.aoeRadius * 1.5).toFixed(2);
+  if (typeof item.aoeDamage === 'number') item.aoeDamage = Math.round(item.aoeDamage * 1.5);
+  if (typeof item.maxCharges === 'number') item.maxCharges = Math.max(1, Math.round(item.maxCharges * 1.5));
+  if (typeof item.blindDuration === 'number') item.blindDuration = +(item.blindDuration * 1.5).toFixed(2);
+  if (typeof item.stunDuration === 'number')  item.stunDuration  = +(item.stunDuration  * 1.5).toFixed(2);
+  if (typeof item.fireDuration === 'number')  item.fireDuration  = +(item.fireDuration  * 1.5).toFixed(2);
+  if (typeof item.fireTickDps === 'number')   item.fireTickDps   = +(item.fireTickDps   * 1.5).toFixed(2);
+  if (typeof item.sellValue === 'number')     item.sellValue     = Math.round(item.sellValue * 1.5);
+  // Throwable charges in flight may already be set (charges = maxCharges
+  // at construction). Re-sync so the in-hand stack matches the bumped
+  // ceiling.
+  if (typeof item.maxCharges === 'number' && typeof item.charges === 'number') {
+    item.charges = item.maxCharges;
+  }
+  return item;
+}
 
 // Slot-availability gate. Until the player reaches certain levels,
 // only the "core" body slots (head, chest, hands, boots, pants) drop
@@ -965,7 +1018,7 @@ export const TOY_DEFS = {
 };
 export const ALL_TOYS = Object.values(TOY_DEFS);
 export function randomToy() {
-  return stampItemDims({ ...ALL_TOYS[Math.floor(Math.random() * ALL_TOYS.length)] });
+  return maybeApplyMastercraft(stampItemDims({ ...ALL_TOYS[Math.floor(Math.random() * ALL_TOYS.length)] }));
 }
 
 // Consumables (live in backpack only).
@@ -1086,12 +1139,22 @@ export function makeThrowable(def) {
   const item = { ...def };
   item.charges = def.maxCharges | 0;
   item.cooldownT = 0;
-  return stampItemDims(item);
+  // Throwables roll the universal mastercraft chance — boosted aoe /
+  // charges / duration on a hit. Skip when the caller forces no-roll
+  // (e.g. starter inventory packs that should always be vanilla).
+  return maybeApplyMastercraft(stampItemDims(item));
 }
 export function randomThrowable() {
   return makeThrowable(ALL_THROWABLES[Math.floor(Math.random() * ALL_THROWABLES.length)]);
 }
 
+// Expose the mastercraft helper on a window bridge so attachments.js
+// (and any other late-loading module) can consume it without the
+// circular-import dance.
+if (typeof window !== 'undefined') {
+  window.__inv = window.__inv || {};
+  window.__inv.maybeApplyMastercraft = maybeApplyMastercraft;
+}
 export const ALL_ARMOR = Object.values(ARMOR_DEFS);
 export const ALL_GEAR = Object.values(GEAR_DEFS);
 export const ALL_CONSUMABLES = Object.values(CONSUMABLE_DEFS);
@@ -1156,7 +1219,9 @@ export function randomGear() {
   const src = pool.length ? pool : ALL_GEAR;
   return rollActionSlotBonus(withAffixes(clone(src[Math.floor(Math.random() * src.length)])));
 }
-export function randomConsumable() { return stampItemDims(clone(ALL_CONSUMABLES[Math.floor(Math.random() * ALL_CONSUMABLES.length)])); }
+export function randomConsumable() {
+  return maybeApplyMastercraft(stampItemDims(clone(ALL_CONSUMABLES[Math.floor(Math.random() * ALL_CONSUMABLES.length)])));
+}
 
 // Wraps a weapon tunable into an inventory item with per-instance state
 // (ammo, durability, reload). The instance is decoupled from the tunable so
