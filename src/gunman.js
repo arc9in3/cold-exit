@@ -6,6 +6,19 @@ import { loadModelClone, fitToRadius } from './gltf_cache.js';
 import { modelForItem } from './model_manifest.js';
 import { buildMeleePrimitive } from './melee_primitives.js';
 
+// Module-level scratch vectors. The gunman update loop runs once per
+// alive enemy per frame and previously allocated 5+ Vector3 instances
+// per call (eye, target, toPlayer, dir2d, fwd, etc.). With 10-20
+// gunmen alive on late-game floors that's hundreds of throwaway
+// vectors per second going to GC. Reusing module-scope scratches
+// removes that pressure entirely. Safe because none of these escape
+// the function scope they're used in.
+const _g_eye      = new THREE.Vector3();
+const _g_target   = new THREE.Vector3();
+const _g_toPlayer = new THREE.Vector3();
+const _g_dir2d    = new THREE.Vector3();
+const _g_fwd      = new THREE.Vector3();
+
 // NOTE: Skinned-rig path has been removed from the live code — we're
 // committing to the primitive rig as the shipping art style. The
 // tooling (`tools/rebind_hanging.py`, `tools/retarget_character.md`)
@@ -898,14 +911,16 @@ export class GunmanManager {
       g.zzzT = 0;
     }
 
-    const eye = g.torso.getWorldPosition(new THREE.Vector3());
+    // Reuse module-scope scratch vectors (see _g_* above) instead of
+    // newing one per gunman per frame.
+    const eye = g.torso.getWorldPosition(_g_eye);
     // Lower aim when the player is crouched — body scales to ~55%, so the
     // torso sits around y ≈ 0.7. Standing body center ≈ 1.0.
     const aimY = ctx.playerCrouched ? 0.65 : 1.0;
-    const target = ctx.playerPos.clone(); target.y = aimY;
-    const toPlayer = new THREE.Vector3().subVectors(target, eye);
+    const target = _g_target.copy(ctx.playerPos); target.y = aimY;
+    const toPlayer = _g_toPlayer.subVectors(target, eye);
     const dist = Math.hypot(toPlayer.x, toPlayer.z);
-    const dir2d = new THREE.Vector3(toPlayer.x, 0, toPlayer.z);
+    const dir2d = _g_dir2d.set(toPlayer.x, 0, toPlayer.z);
     if (dir2d.lengthSq() > 0.0001) dir2d.normalize();
 
     // Door-state gating was removed with the keycard redesign —
@@ -918,7 +933,7 @@ export class GunmanManager {
     // caveat that they can't see through the back of their own head.
     const hasLos = roomActive
       && ctx.combat.hasLineOfSight(eye, target, ctx.obstacles);
-    const fwd = new THREE.Vector3(Math.sin(g.group.rotation.y), 0, Math.cos(g.group.rotation.y));
+    const fwd = _g_fwd.set(Math.sin(g.group.rotation.y), 0, Math.cos(g.group.rotation.y));
     const facingDot = fwd.dot(dir2d);
     // Player is in the rear ~90° cone (45° each side of directly-behind).
     // Rear blindspot widened — facingDot < -0.4 is roughly anything

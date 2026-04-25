@@ -13,6 +13,16 @@ const STATE = { IDLE: 'idle', CHASE: 'chase', WINDUP: 'windup', SWING: 'swing', 
 // list.
 const _enemyTipTmp = new THREE.Vector3();
 
+// Module-level scratches for the per-enemy per-frame AI tick. Same
+// motivation as gunman.js: prior code newed 4 vectors per call which
+// added up under crowded encounters. Confined to the function scope
+// they're used in so they can't be corrupted by reuse.
+const _m_toPlayer = new THREE.Vector3();
+const _m_dir2d    = new THREE.Vector3();
+const _m_eye      = new THREE.Vector3();
+const _m_aimAt    = new THREE.Vector3();
+const _m_fwd      = new THREE.Vector3();
+
 // Smash-themed chatter — deliberately louder/angrier than gunman
 // chatter so rushers read as unhinged. Rolls on an IDLE cooldown.
 const MELEE_CHATTER = [
@@ -641,9 +651,9 @@ export class MeleeEnemyManager {
 
   _updateAI(e, ctx, dt) {
     e.cooldownT = Math.max(0, e.cooldownT - dt);
-    const toPlayer = new THREE.Vector3().subVectors(ctx.playerPos, e.group.position);
+    const toPlayer = _m_toPlayer.subVectors(ctx.playerPos, e.group.position);
     const dist = Math.hypot(toPlayer.x, toPlayer.z);
-    const dir2d = new THREE.Vector3(toPlayer.x, 0, toPlayer.z);
+    const dir2d = _m_dir2d.set(toPlayer.x, 0, toPlayer.z);
     if (dir2d.lengthSq() > 0.0001) dir2d.normalize();
     e._lastRangeToPlayer = dist;   // read by applyHit for assassin block
 
@@ -654,8 +664,8 @@ export class MeleeEnemyManager {
     // Perception — looser than gunman since they just need to notice you.
     // Stealth only gates the first spot; once chasing, LoS alone decides.
     const hasLos = roomActive && ctx.combat.hasLineOfSight(
-      e.torso.getWorldPosition(new THREE.Vector3()),
-      ctx.playerPos.clone().setY(1.0),
+      e.torso.getWorldPosition(_m_eye),
+      _m_aimAt.copy(ctx.playerPos).setY(1.0),
       ctx.obstacles,
     );
     const detRangeIdle = tunables.meleeEnemy.detectionRange * (ctx.playerStealthMult || 1);
@@ -669,7 +679,7 @@ export class MeleeEnemyManager {
     // is clearly behind the rusher's heading (patrol direction), they
     // can get close without triggering. Mirrors the gunman logic so
     // stealth-approach works against both archetypes.
-    const fwd = new THREE.Vector3(
+    const fwd = _m_fwd.set(
       Math.sin(e.group.rotation.y), 0, Math.cos(e.group.rotation.y),
     );
     const facingDot = fwd.dot(dir2d);
