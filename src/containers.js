@@ -37,15 +37,18 @@ const TYPE_NAMES = {
   masterwork: ['Masterwork Chest'],
 };
 
-// Size profile — number of items rolled per open. Large skews toward
-// fewer high-quality items (a single masterpiece in a footlocker reads
-// better than 6 commons), so it's bimodal rather than always 6.
+// Size profile — number of *real* items rolled per open. Every
+// container also carries a guaranteed piece of junk on top of this
+// (added in makeContainer below), so the totals players see are this
+// + 1. Counts are intentionally lean — a typical small box hands the
+// player one or two things, large boxes lean toward a single nicer
+// roll rather than a pile of common filler.
 const SIZE_PROFILES = {
-  s: { items: () => 1 + Math.floor(Math.random() * 2),   geo: { w: 0.7, h: 0.55, d: 0.5 } },
-  m: { items: () => 2 + Math.floor(Math.random() * 3),   geo: { w: 1.0, h: 0.75, d: 0.7 } },
-  l: { items: () => Math.random() < 0.30
+  s: { items: () => Math.random() < 0.65 ? 0 : 1,       geo: { w: 0.7, h: 0.55, d: 0.5 } },
+  m: { items: () => 1 + (Math.random() < 0.35 ? 1 : 0), geo: { w: 1.0, h: 0.75, d: 0.7 } },
+  l: { items: () => Math.random() < 0.55
                        ? 1
-                       : 2 + Math.floor(Math.random() * 5),  // 2..6
+                       : 2 + Math.floor(Math.random() * 2),  // 2..3
         geo: { w: 1.4, h: 1.0, d: 0.95 } },
 };
 
@@ -108,7 +111,9 @@ function rollItemForType(type, levelIdx) {
 
 // Build a complete container descriptor. Caller spawns the mesh and
 // places it in world; this function builds the data side (loot list,
-// label, type metadata).
+// label, type metadata). Every container — except the masterwork
+// chest — carries a piece of junk on top of its rolled items so even
+// a "low" roll is never completely dry.
 export function makeContainer(type, size, levelIdx = 1) {
   const sizeProfile = SIZE_PROFILES[size] || SIZE_PROFILES.m;
   const itemCount = type === 'masterwork' ? 1 : sizeProfile.items();
@@ -116,6 +121,13 @@ export function makeContainer(type, size, levelIdx = 1) {
   for (let i = 0; i < itemCount; i++) {
     const it = rollItemForType(type, levelIdx);
     if (it) loot.push(it);
+  }
+  // Junk floor — every non-masterwork container coughs up at least
+  // one piece of junk so opening it always feels worth the prompt.
+  // Masterwork chests stay pristine — single mythic item, no filler.
+  if (type !== 'masterwork') {
+    const j = randomJunk();
+    if (j) loot.push(j);
   }
   const names = TYPE_NAMES[type] || TYPE_NAMES.general;
   const name = names[Math.floor(Math.random() * names.length)];
@@ -132,11 +144,13 @@ export function makeContainer(type, size, levelIdx = 1) {
 }
 
 // Pick a container type for a generic spawn slot. Masterwork is
-// intentionally rare. General dominates so a typical room reads as
-// "boxes" with the occasional themed stash.
+// exceptionally rare — combined with the per-room spawn roll in
+// level.js, a player should see one every several runs at most.
+// General dominates so a typical room reads as "boxes" with the
+// occasional themed stash.
 export function pickContainerType(rng = Math.random) {
   const r = rng();
-  if (r < 0.012) return 'masterwork';   // ~1% — feels mythic
+  if (r < 0.003) return 'masterwork';   // ~0.3% — exceptional find
   if (r < 0.25)  return 'medical';
   if (r < 0.45)  return 'armor';
   if (r < 0.65)  return 'weapon';

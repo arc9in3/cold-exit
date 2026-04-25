@@ -742,19 +742,25 @@ export class Level {
     }
   }
 
-  // Drop 1–3 lootable containers into a non-start room. Density tied
-  // to room area so big rooms get more boxes. Boss rooms get a small
-  // bump and a guaranteed slot for a masterwork roll. Containers are
-  // collidable obstacles — the player walks around them like cover —
-  // and carry their loot list on userData.container for the interact
-  // handler in main.js.
+  // Roll-per-room container spawn. Most rooms get NO container at
+  // all — boxes are an occasional find, not a fixture. When a room
+  // does roll a spawn it's almost always a single box; only big
+  // boss rooms occasionally roll a second. No tier gets a bonus
+  // masterwork — masterwork lives at ~0.3% in pickContainerType()
+  // so it stays exceptional regardless of where the spawn lands.
   _scatterContainers(room) {
     const b = room.bounds;
     const area = (b.maxX - b.minX) * (b.maxZ - b.minZ);
-    let count = 1 + Math.floor(Math.random() * 2);          // 1..2 baseline
-    if (area > 60) count += 1;                              // big rooms +1
-    if (room.type === 'boss') count += 1;                    // boss room bonus
-    if (room.type === 'subBoss' && Math.random() < 0.5) count += 1;
+    // Per-room roll: most rooms get nothing.
+    const spawnChance = room.type === 'boss' ? 0.55
+      : room.type === 'subBoss' ? 0.45
+      : 0.30;
+    if (Math.random() > spawnChance) return;
+    // When a box does spawn, almost always exactly one. Big rooms +
+    // boss/sub-boss tier occasionally roll a second.
+    let count = 1;
+    if (area > 60 && Math.random() < 0.20) count += 1;
+    if ((room.type === 'boss' || room.type === 'subBoss') && Math.random() < 0.20) count += 1;
     for (let i = 0; i < count; i++) {
       for (let attempt = 0; attempt < 30; attempt++) {
         const x = b.minX + 3 + Math.random() * (b.maxX - b.minX - 6);
