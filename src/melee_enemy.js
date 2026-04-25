@@ -427,7 +427,21 @@ export class MeleeEnemyManager {
 
   update(ctx) {
     const dt = ctx.dt;
+    // LOD scheduler — same approach as the gunman manager. Idle
+    // melee enemies more than 28m from the player tick at half
+    // rate, cutting AI cost on big rooms / dense levels.
+    const px = ctx.playerPos?.x ?? 0;
+    const pz = ctx.playerPos?.z ?? 0;
+    const farSq = 28 * 28;
+    if (this._frame === undefined) this._frame = 0;
+    this._frame++;
+    const odd = (this._frame & 1) === 1;
     for (const e of this.enemies) {
+      if (e.alive && e.state === STATE.IDLE) {
+        const dx = e.group.position.x - px;
+        const dz = e.group.position.z - pz;
+        if (dx * dx + dz * dz > farSq && odd) continue;
+      }
       if (e.flashT > 0) {
         e.flashT = Math.max(0, e.flashT - dt);
         const k = e.flashT / tunables.enemy.hitFlashTime;

@@ -679,7 +679,26 @@ export class GunmanManager {
 
   update(ctx) {
     const dt = ctx.dt;
+    // LOD scheduler — distant idle gunmen tick at half rate. Cuts AI
+    // cost roughly in half on big late-game rooms with 6+ gunmen
+    // sprinkled across adjacent rooms. Active enemies (alerted /
+    // firing / chasing / fighting) always tick every frame; only
+    // patrol-state enemies far from the player downgrade.
+    const px = ctx.playerPos?.x ?? 0;
+    const pz = ctx.playerPos?.z ?? 0;
+    const farSq = 28 * 28;
+    if (this._frame === undefined) this._frame = 0;
+    this._frame++;
+    const odd = (this._frame & 1) === 1;
     for (const g of this.gunmen) {
+      if (g.alive) {
+        const isIdle = g.state === STATE.IDLE || g.state === STATE.SLEEP;
+        if (isIdle) {
+          const dx = g.group.position.x - px;
+          const dz = g.group.position.z - pz;
+          if (dx * dx + dz * dz > farSq && odd) continue;
+        }
+      }
       if (g.flashT > 0) {
         g.flashT = Math.max(0, g.flashT - dt);
         const k = g.flashT / tunables.enemy.hitFlashTime;

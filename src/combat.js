@@ -432,6 +432,55 @@ export class Combat {
     this.impacts.push({ mesh: m, t: 0, life: tunables.attack.impactLife });
   }
 
+  // Wipe every transient effect — blood pools, gore, impacts,
+  // explosions, bloods, arcs. Called on level regen so dead-enemy
+  // pools from the previous level don't carry over and accumulate.
+  // Tracers + flashes are pool-backed (no allocations to release)
+  // so they're handled with a simple hide pass.
+  clearAll() {
+    const dispose = (arr) => {
+      for (const it of arr) {
+        const m = it.mesh || it.line || it;
+        if (m) {
+          if (m.parent) m.parent.remove(m);
+          else if (this.scene && m.isObject3D) this.scene.remove(m);
+          if (m.geometry?.dispose) m.geometry.dispose();
+          if (m.material?.dispose) m.material.dispose();
+        }
+      }
+      arr.length = 0;
+    };
+    dispose(this.pools);
+    dispose(this.gore);
+    dispose(this.impacts);
+    dispose(this.bloods);
+    dispose(this.arcs);
+    // Explosions are { fireball, ring, light, ... } — dispose each.
+    for (const e of this.explosions) {
+      if (e.fireball) { this.scene.remove(e.fireball); e.fireball.geometry?.dispose(); e.fireball.material?.dispose(); }
+      if (e.ring)     { this.scene.remove(e.ring);     e.ring.geometry?.dispose();     e.ring.material?.dispose(); }
+      if (e.light)    { this.scene.remove(e.light); }
+    }
+    this.explosions.length = 0;
+    // Pooled tracers / flashes — return to pool, no dispose.
+    if (this._tracerPool) {
+      for (const t of this._tracerPool) {
+        if (t.inUse) { t.line.visible = false; t.inUse = false; }
+      }
+    }
+    if (this._flashPool) {
+      for (const f of this._flashPool) {
+        if (f.inUse) {
+          f.mesh.visible = false;
+          if (f.light) f.light.intensity = 0;
+          f.inUse = false;
+        }
+      }
+    }
+    this.tracers.length = 0;
+    this.flashes.length = 0;
+  }
+
   update(dt) {
     // Tracers — pool-backed. On expire, hide + return the entry
     // instead of disposing its resources.

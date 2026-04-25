@@ -760,26 +760,47 @@ export class Level {
       return dx * dx + dz * dz < 4 * 4;  // 4m exclusion around elevator
     };
 
+    // True when a prop's full footprint fits inside the room's bbox
+    // — accounts for axis-aligned vs rotated yaw via the same
+    // square-bound rule _registerProp uses for collision proxies.
+    // Without this guard, low-EDGE_CLEAR placements with wide props
+    // (bookshelves, couches) could push their visible mesh past
+    // a room's outer wall and read as floating in the void.
+    const _propFitsInBounds = (prop, x, z, yaw) => {
+      const col = prop.collision;
+      if (!col) return true;
+      let w = col.w, d = col.d;
+      const yawAbs = Math.abs(yaw || 0) % Math.PI;
+      const axisAligned = yawAbs < 0.05 || Math.abs(yawAbs - Math.PI / 2) < 0.05;
+      if (!axisAligned) {
+        const bound = Math.max(w, d);
+        w = bound; d = bound;
+      } else if (Math.abs(yawAbs - Math.PI / 2) < 0.05) {
+        [w, d] = [d, w];
+      }
+      const PAD = 0.05;        // tight margin so the proxy never kisses the wall
+      return (x - w / 2) >= b.minX + PAD && (x + w / 2) <= b.maxX - PAD
+          && (z - d / 2) >= b.minZ + PAD && (z + d / 2) <= b.maxZ - PAD;
+    };
+
     const placeAlongWall = (prop, opts = {}) => {
       const yaw = opts.yaw;       // if provided, override rotation
       const col = prop.collision;
-      // More generous radius to avoid prop-on-prop visual overlap.
-      // Using max(w,d) + 0.6m buffer means the sparser pass reads
-      // as "breathing room" instead of "line of furniture".
       const radius = col ? Math.max(col.w, col.d) * 0.7 + 0.6 : 1.2;
       for (let tries = 0; tries < 25; tries++) {
-        // Pick a wall side (0=N,1=E,2=S,3=W) and a random distance along it.
         const side = Math.floor(Math.random() * 4);
         const t = 0.15 + Math.random() * 0.7;
         let x, z, facing;
-        if (side === 0)      { x = b.minX + t * roomW; z = b.minZ + EDGE_CLEAR; facing = 0; }           // facing +Z
-        else if (side === 1) { x = b.maxX - EDGE_CLEAR; z = b.minZ + t * roomD; facing = -Math.PI / 2; } // facing -X
-        else if (side === 2) { x = b.minX + t * roomW; z = b.maxZ - EDGE_CLEAR; facing = Math.PI; }      // facing -Z
-        else                 { x = b.minX + EDGE_CLEAR; z = b.minZ + t * roomD; facing = Math.PI / 2; }  // facing +X
+        if (side === 0)      { x = b.minX + t * roomW; z = b.minZ + EDGE_CLEAR; facing = 0; }
+        else if (side === 1) { x = b.maxX - EDGE_CLEAR; z = b.minZ + t * roomD; facing = -Math.PI / 2; }
+        else if (side === 2) { x = b.minX + t * roomW; z = b.maxZ - EDGE_CLEAR; facing = Math.PI; }
+        else                 { x = b.minX + EDGE_CLEAR; z = b.minZ + t * roomD; facing = Math.PI / 2; }
         if (tooCloseToElev(x, z)) continue;
         if (this._collidesAt(x, z, radius)) continue;
+        const finalYaw = yaw ?? facing;
+        if (!_propFitsInBounds(prop, x, z, finalYaw)) continue;
         prop.group.position.set(x, 0, z);
-        prop.group.rotation.y = yaw ?? facing;
+        prop.group.rotation.y = finalYaw;
         return this._registerProp(prop);
       }
       return false;
@@ -793,12 +814,10 @@ export class Level {
         const z = b.minZ + INTERIOR_CLEAR + Math.random() * (roomD - INTERIOR_CLEAR * 2);
         if (tooCloseToElev(x, z)) continue;
         if (this._collidesAt(x, z, radius)) continue;
+        const yaw = (Math.floor(Math.random() * 4)) * Math.PI / 2;
+        if (!_propFitsInBounds(prop, x, z, yaw)) continue;
         prop.group.position.set(x, 0, z);
-        // Snap to one of four cardinal yaws so the collision AABB
-        // (_registerProp uses axis-aligned bounds) matches the
-        // rendered prop footprint. Arbitrary yaws produced a square
-        // bounding box that always felt larger than the visual.
-        prop.group.rotation.y = (Math.floor(Math.random() * 4)) * Math.PI / 2;
+        prop.group.rotation.y = yaw;
         return this._registerProp(prop);
       }
       return false;

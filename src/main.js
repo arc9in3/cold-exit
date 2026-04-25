@@ -1248,6 +1248,10 @@ function regenerateLevel() {
   // dropped geometries. Called BEFORE level.generate which replaces
   // the obstacle list.
   if (level.obstacles) for (let i = 0; i < level.obstacles.length; i++) disposeMesh(level.obstacles[i]);
+  // Flush every transient combat effect from the previous level —
+  // blood pools, gore, impacts, explosions, etc. These persisted
+  // across level transitions and accumulated across a long run.
+  if (combat.clearAll) combat.clearAll();
   level.generate();
   // Loot scaling context — every random armor/gear/weapon roll reads
   // this to gate slot drops, scale affix ranges, and weight rarity
@@ -4471,6 +4475,20 @@ function updateEnemyVisibility() {
       _setEnemyGhost(e, false);
       e.group.visible = false;
       continue;
+    }
+    // Cheap distance pre-filter — enemies further than (range + 4m)
+    // can't possibly become visible this frame. Skips the LoS
+    // raycast entirely for far-room enemies, which is the dominant
+    // cost scaling with enemy count in big late-game levels.
+    {
+      const dxe = e.group.position.x - px;
+      const dze = e.group.position.z - pz;
+      const farSq = (range + 4) * (range + 4);
+      if (dxe * dxe + dze * dze > farSq) {
+        _setEnemyGhost(e, false);
+        e.group.visible = false;
+        continue;
+      }
     }
     _visTarget.set(e.group.position.x, 1.2, e.group.position.z);
     const los = combat.hasLineOfSight(_visFrom, _visTarget, visionBlockers);
