@@ -5439,20 +5439,13 @@ const _flashOverlayEl = (() => {
 })();
 
 function spawnFireZone(pos, radius, duration, dps) {
-  const ringMat = new THREE.MeshBasicMaterial({
-    color: 0xff6020, transparent: true, opacity: 0.35,
-    depthWrite: false, side: THREE.DoubleSide,
-  });
-  const ring = new THREE.Mesh(new THREE.CircleGeometry(radius, 24), ringMat);
-  ring.rotation.x = -Math.PI / 2;
-  ring.position.set(pos.x, 0.05, pos.z);
-  scene.add(ring);
-  // Fire zones are now visualised by continuous upward-rising orbs
-  // spawned from `_tickFireZones`, not a fixed ring of bobbing
-  // flames. The ground ring stays for the DoT footprint read.
+  // No ground decal — the zone is visualised purely by continuous
+  // upward-rising flame orbs spawned from `_tickFireZones`. Reads as
+  // a flamethrower-style emission from the floor instead of an
+  // orange disc telegraph. DoT footprint is the orb cluster itself.
   _fireZones.push({
     x: pos.x, z: pos.z, radius, life: duration, t: 0,
-    dps, ring,
+    dps,
     emitT: 0,            // cooldown between orb bursts
   });
 }
@@ -5460,22 +5453,20 @@ function _tickFireZones(dt) {
   for (let i = _fireZones.length - 1; i >= 0; i--) {
     const z = _fireZones[i];
     z.t += dt;
-    // Periodic orb bursts while the zone is alive — a handful every
-    // ~0.25s, scaled down near the end of life so the emission fades
-    // with the DoT footprint. Feeds `_fireOrbs` which each rise and
-    // disappear independently.
+    // Continuous flame emission across the disc — denser bursts than
+    // before so the zone reads as a sustained flamethrower-style
+    // sheet of flame from the ground rather than scattered embers.
+    // Cap total active orbs to keep the late-game / multi-zone case
+    // from runaway-spawning into a frame stall.
     z.emitT -= dt;
-    if (z.emitT <= 0) {
+    if (z.emitT <= 0 && _fireOrbs.length < 220) {
       const lifeLeft = Math.max(0, 1 - z.t / z.life);
-      const emitCount = Math.max(0, Math.round(3 * lifeLeft));
+      const emitCount = Math.max(0, Math.round(8 * lifeLeft));
       if (emitCount > 0) {
         spawnFireOrbBurst({ x: z.x, z: z.z }, z.radius, emitCount);
       }
-      z.emitT = 0.22 + Math.random() * 0.1;
+      z.emitT = 0.10 + Math.random() * 0.06;
     }
-    // Fade the ground ring out over the last 25% of life.
-    const fadeT = Math.max(0, (z.t - z.life * 0.75) / (z.life * 0.25));
-    z.ring.material.opacity = 0.35 * (1 - fadeT);
     // DoT — burn every alive enemy within the disc.
     const rSq = z.radius * z.radius;
     const apply = (list) => {
@@ -5497,12 +5488,88 @@ function _tickFireZones(dt) {
     };
     apply(gunmen.gunmen);
     apply(melees.enemies);
-    if (z.t >= z.life) {
-      scene.remove(z.ring);
-      z.ring.geometry.dispose();
-      z.ring.material.dispose();
-      _fireZones.splice(i, 1);
+    // Player burn — same disc test, but routed through damagePlayer
+    // and the burn-flames signal so the visual matches the DoT.
+    if (player) {
+      const pdx = player.mesh.position.x - z.x;
+      const pdz = player.mesh.position.z - z.z;
+      if (pdx * pdx + pdz * pdz < rSq) {
+        const tickDmg = z.dps * dt;
+        player.takeDamage(tickDmg);
+        window.__playerBurnT = Math.max(window.__playerBurnT || 0, 1.0);
+      }
     }
+    if (z.t >= z.life) _fireZones.splice(i, 1);
+  }
+}
+
+// Per-actor burn flames — small flame particles spawn around any
+// burning actor (enemy or player) so the burn DoT has a visible
+// signal beyond just the damage numbers. Reuses the _fireOrbs pool
+// so one tick + one cleanup path covers all flame VFX.
+//
+// Each emit appends 1-2 small flame orbs at random offsets around
+// the actor's torso, which then rise + fade like normal fire orbs.
+// Spawn rate is throttled per actor via `_burnEmitT` and globally
+// gated by the same _fireOrbs cap as the fire-zone path.
+function _spawnActorBurnFlames(actor) {
+  if (_fireOrbs.length >= 240) return;
+  const pos = actor.group ? actor.group.position : actor.mesh?.position;
+  if (!pos) return;
+  // Two small puffs offset around the torso. Cheap geometry +
+  // additive blending — same look as flamethrower orbs but smaller
+  // and shorter-lived so they read as "the actor is on fire".
+  for (let i = 0; i < 2; i++) {
+    const a = Math.random() * Math.PI * 2;
+    const r = 0.28 + Math.random() * 0.18;
+    const x = pos.x + Math.cos(a) * r;
+    const z = pos.z + Math.sin(a) * r;
+    const sz = 0.05 + Math.random() * 0.05;
+    const color = Math.random() < 0.5 ? 0xff8030 : 0xffc060;
+    const mesh = new THREE.Mesh(
+      new THREE.SphereGeometry(sz, 4, 3),
+      new THREE.MeshBasicMaterial({
+        color, transparent: true, opacity: 0.85,
+        depthWrite: false, blending: THREE.AdditiveBlending,
+      }),
+    );
+    mesh.position.set(x, 0.5 + Math.random() * 0.6, z);
+    scene.add(mesh);
+    _fireOrbs.push({
+      mesh,
+      vy: 0.6 + Math.random() * 0.6,
+      drift: { x: (Math.random() - 0.5) * 0.15, z: (Math.random() - 0.5) * 0.15 },
+      life: 0.45 + Math.random() * 0.25,
+      t: 0,
+    });
+  }
+}
+
+// Sweep all burning enemies + the player each tick, emit flame
+// puffs while burnT > 0. Throttled per-actor so even a fully-on-
+// fire room stays under the orb cap.
+function _tickBurnFlames(dt) {
+  const emit = (c, slot) => {
+    if (!c || (c.burnT || 0) <= 0) return;
+    if (c.alive === false) return;
+    c[slot] = (c[slot] || 0) - dt;
+    if (c[slot] <= 0) {
+      _spawnActorBurnFlames(c);
+      c[slot] = 0.10 + Math.random() * 0.05;
+    }
+  };
+  for (const g of gunmen.gunmen) emit(g, '_burnEmitT');
+  for (const e of melees.enemies) emit(e, '_burnEmitT');
+  // Player-side burn flames — exposed via window.__playerBurnT
+  // (set in damagePlayer when burn applies). Mirrors the actor
+  // path so the same particles show.
+  if ((window.__playerBurnT || 0) > 0 && player) {
+    window.__playerBurnEmitT = (window.__playerBurnEmitT || 0) - dt;
+    if (window.__playerBurnEmitT <= 0) {
+      _spawnActorBurnFlames(player);
+      window.__playerBurnEmitT = 0.10 + Math.random() * 0.05;
+    }
+    window.__playerBurnT = Math.max(0, window.__playerBurnT - dt);
   }
 }
 
@@ -6334,6 +6401,7 @@ function tick() {
   _tickBuffAuras(dt);
   _tickThrowableZones(dt);
   _tickCamping(dt);
+  _tickBurnFlames(dt);
   // Player flash + stun decay. Flash drives a fullscreen white
   // overlay that fades from 1.0 → 0 over the duration; stun decays
   // separately, the camera waver reads it below.
