@@ -501,7 +501,8 @@ export class InventoryUI {
   _updateCustomDropPreview(clientX, clientY) {
     this._clearCellPreview();
     this.gridEl.querySelectorAll('.inv-slot.drop-ok').forEach(el => el.classList.remove('drop-ok'));
-    document.querySelectorAll('.action-slot.drop-ok').forEach(el => el.classList.remove('drop-ok'));
+    document.querySelectorAll('.action-slot.drop-ok, .weapon-slot.drop-ok')
+      .forEach(el => el.classList.remove('drop-ok'));
     const target = document.elementFromPoint(clientX, clientY);
     if (!target) return;
     const wrap = this._closest(target, '.pockets-grid');
@@ -525,13 +526,18 @@ export class InventoryUI {
       }
       return;
     }
-    const actionSlot = this._closest(target, '.action-slot');
-    if (actionSlot) {
+    // Hotbar slots — both clusters (.weapon-slot keys 1-4 and
+    // .action-slot keys 5-8) accept any quickslot-eligible item.
+    // Without including .weapon-slot here, drags from the inventory
+    // panel showed no drop affordance on slots 1-4 and silently
+    // failed.
+    const hotSlot = this._closest(target, '.weapon-slot') || this._closest(target, '.action-slot');
+    if (hotSlot) {
       const d = this.getDragState();
       const ok = d && d.item && (window.__isQuickslotEligible
         ? window.__isQuickslotEligible(d.item)
         : (d.item.type === 'consumable' || d.item.type === 'throwable'));
-      if (ok) actionSlot.classList.add('drop-ok');
+      if (ok) hotSlot.classList.add('drop-ok');
     }
   }
 
@@ -581,19 +587,29 @@ export class InventoryUI {
       this.render();
       return;
     }
-    // Drop onto an action-bar slot (consumable / throwable / weapon bind).
-    const actionSlot = this._closest(target, '.action-slot');
-    const ok = actionSlot && (window.__isQuickslotEligible
+    // Drop onto a hotbar slot. Both clusters accept any quickslot-
+    // eligible item (consumables, throwables, weapons). Cluster-aware
+    // index resolution: .weapon-slot maps to actionBar 0-3 (keys 1-4),
+    // .action-slot maps to actionBar 4-7 (keys 5-8). Without checking
+    // .weapon-slot, drags from the inventory panel onto slots 1-4
+    // silently failed.
+    const weaponSlot = this._closest(target, '.weapon-slot');
+    const actionSlot = !weaponSlot && this._closest(target, '.action-slot');
+    const hotSlot = weaponSlot || actionSlot;
+    const ok = hotSlot && (window.__isQuickslotEligible
       ? window.__isQuickslotEligible(item)
       : (item.type === 'consumable' || item.type === 'throwable'));
     if (ok) {
-      const slotsEl = document.querySelectorAll('.action-slot');
-      const idx = Array.from(slotsEl).indexOf(actionSlot);
+      const sameClusterSelector = weaponSlot ? '.weapon-slot' : '.action-slot';
+      const slotOffset = weaponSlot ? 0 : 4;
+      const slotsEl = document.querySelectorAll(sameClusterSelector);
+      const idx = Array.from(slotsEl).indexOf(hotSlot);
       if (idx >= 0) {
-        this.inventory.assignActionSlot(idx, item);
+        this.inventory.assignActionSlot(slotOffset + idx, item);
         // Keep the item in its grid — action slot just references it.
         this.render();
         window.__renderActionBar?.();
+        window.__renderWeaponBar?.();
       }
     }
   }

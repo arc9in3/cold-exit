@@ -5484,6 +5484,7 @@ _wireHotbarCluster('.action-slot', 4, renderActionBar);
 // Exposed so the inventory UI's custom pointer-drag can refresh the
 // HUD after dropping an item into an action slot.
 window.__renderActionBar = renderActionBar;
+window.__renderWeaponBar = renderWeaponBar;
 
 async function runExtract() {
   paused = true;
