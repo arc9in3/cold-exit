@@ -5513,6 +5513,12 @@ function spawnAiThrowable(g, kindOverride) {
 // catches the player. Tick consumed in renderHud / camera path.
 let playerFlashT = 0;
 let playerStunT = 0;
+// ADS camera-peek snapshot — captured at the rising edge of ADS so
+// the camera anchors to a fixed forward offset for the duration of
+// the ADS hold (no more chase-the-cursor wobble while aiming).
+const _adsPeekDir = new THREE.Vector3();
+let _adsPeekActive = false;
+let _adsPrevAmount = 0;
 const _flashOverlayEl = (() => {
   const el = document.createElement('div');
   el.id = 'flash-overlay';
@@ -6693,12 +6699,31 @@ function tick() {
 
   const weapon = currentWeapon();
   const effWeapon = weapon ? effectiveWeapon(weapon) : null;
+  // ADS peek snapshot — when the player first ramps into ADS (rising
+  // edge of adsAmount), capture the cursor's offset from the player
+  // RIGHT NOW. The camera then anchors at that fixed offset for the
+  // entire ADS hold instead of chasing the cursor every frame, which
+  // was making precise tracking impossible. Edge-of-screen cursor
+  // pans the anchor outward so the player can still look further;
+  // see updateCamera in scene.js for that logic.
+  const adsRising = playerInfo.adsAmount > 0.05 && (_adsPrevAmount || 0) <= 0.05;
+  if (adsRising && aimInfo.point && playerInfo.position) {
+    const dx = aimInfo.point.x - playerInfo.position.x;
+    const dz = aimInfo.point.z - playerInfo.position.z;
+    const len = Math.hypot(dx, dz) || 1;
+    _adsPeekDir.set(dx / len, 0, dz / len);
+    _adsPeekActive = true;
+  }
+  if (playerInfo.adsAmount <= 0.01) _adsPeekActive = false;
+  _adsPrevAmount = playerInfo.adsAmount;
   updateCamera(dt, {
     target: playerInfo.position,
     aim: aimInfo.point,
     adsAmount: playerInfo.adsAmount,
     adsZoom: effWeapon?.adsZoom,
     adsPeekDistance: effWeapon?.adsPeekDistance,
+    adsPeekDir: _adsPeekActive ? _adsPeekDir : null,
+    cursorNDC: input.hasAim ? input.mouseNDC : null,
   });
   // Camera shake overlay — applied AFTER the follow solve so the
   // base transform isn't permanently nudged. Decays over shakeT.

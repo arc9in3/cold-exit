@@ -38,33 +38,26 @@ export function createScene() {
     camera.updateProjectionMatrix();
   }
 
+  // Edge-of-screen pan budget for ADS. While ADS-anchored, when the
+  // cursor leaves the deadzone (NDC magnitude > EDGE_THRESHOLD) we
+  // nudge the look-at target outward in that direction so the player
+  // can still see further. Capped at MAX_EDGE_OFFSET metres of
+  // additional displacement so the camera can't run away. Lives at
+  // module scope so it persists smoothly across frames.
+  const _adsEdgePan = new THREE.Vector3();
+
   function updateCamera(dt, opts = {}) {
     const adsAmt = opts.adsAmount ?? 0;
     const weaponZoom = opts.adsZoom ?? 0.7;
     const weaponPeek = opts.adsPeekDistance ?? 5;
-    // Halved from 0.55 — previous ADS was zooming hard enough that
-    // the center-of-screen jitter became a real aim problem. 0.275
-    // still reads as "scoped in" without the whiplash.
-    const ADS_ZOOM_STRENGTH = 0.275;
+    // ADS zoom — eased and clamped. Stronger zoom on scopier weapons
+    // (sniper sight has a small adsZoom value, e.g. 0.4 = 60% closer
+    // crop). Stays modest enough that the world doesn't whiplash on
+    // press.
+    const ADS_ZOOM_STRENGTH = 0.40;
     const adsEased = adsAmt * adsAmt * (3 - 2 * adsAmt);
-
-    // Cursor-distance gating. Close cursor → effectively no ADS
-    // influence, far cursor → full. Smoothstep ramp.
     const base = opts.target || new THREE.Vector3();
-    let distFactor = 1;
-    let aimDist = 0;
-    if (opts.aim) {
-      const toAim = opts.aim.clone().sub(base);
-      toAim.y = 0;
-      aimDist = toAim.length();
-      const near = 2.5;
-      const far  = 10.0;
-      const t = Math.min(1, Math.max(0, (aimDist - near) / (far - near)));
-      distFactor = t * t * (3 - 2 * t);
-    }
-    const effectiveAds = adsEased * distFactor;
-
-    const zoomK = THREE.MathUtils.lerp(1, weaponZoom, effectiveAds * ADS_ZOOM_STRENGTH);
+    const zoomK = THREE.MathUtils.lerp(1, weaponZoom, adsEased * ADS_ZOOM_STRENGTH);
     const halfH = (tunables.camera.viewHeight * zoomK) / 2;
     const aspect = window.innerWidth / window.innerHeight;
     camera.left = -halfH * aspect;
@@ -73,15 +66,55 @@ export function createScene() {
     camera.bottom = -halfH;
     camera.updateProjectionMatrix();
 
-    // Peek is back but at half strength so the cursor-chase drift is
-    // subtle. The distFactor gate still keeps it off at close range.
+    // ADS peek — fixed-direction shift snapshotted at ADS press in
+    // main.js (`opts.adsPeekDir`). Camera anchors at player + dir ×
+    // weaponPeek for the entire ADS hold. NO continuous cursor chase
+    // — that's the whole point. Tracking an enemy with the mouse
+    // doesn't slide the world around anymore.
     const desired = base.clone();
-    if (effectiveAds > 0 && opts.aim && aimDist > 0.001) {
-      const toAim = opts.aim.clone().sub(base);
-      toAim.y = 0;
-      const PEEK_STRENGTH = 0.5;
-      toAim.multiplyScalar(Math.min(1, weaponPeek / aimDist) * effectiveAds * PEEK_STRENGTH);
-      desired.add(toAim);
+    if (adsEased > 0.05 && opts.adsPeekDir) {
+      const peekStrength = adsEased * weaponPeek * 0.55;
+      desired.x += opts.adsPeekDir.x * peekStrength;
+      desired.z += opts.adsPeekDir.z * peekStrength;
+      // Edge-of-screen pan — once the cursor reaches the outer 30%
+      // of the viewport, slide the anchor in that direction so the
+      // player can scan further off-frame. Smoothstep ramp from
+      // EDGE_THRESHOLD → 1.0 so the transition reads as "lean" not
+      // "snap". Pan budget capped at MAX_EDGE_OFFSET metres.
+      const ndc = opts.cursorNDC;
+      if (ndc) {
+        const EDGE_THRESHOLD = 0.65;
+        const MAX_EDGE_OFFSET = 4.5;
+        const computeAxis = (v) => {
+          const a = Math.abs(v);
+          if (a <= EDGE_THRESHOLD) return 0;
+          const t = Math.min(1, (a - EDGE_THRESHOLD) / (1 - EDGE_THRESHOLD));
+          return Math.sign(v) * t * t * (3 - 2 * t);
+        };
+        const ex = computeAxis(ndc.x);
+        const ey = computeAxis(ndc.y);
+        // NDC y points UP; iso forward is roughly -Z, so a positive
+        // ndc.y nudges the anchor toward -Z. NDC x maps to +X
+        // directly (camera's right axis is roughly world +X under
+        // iso framing).
+        const targetEdgeX = ex * MAX_EDGE_OFFSET * adsEased;
+        const targetEdgeZ = -ey * MAX_EDGE_OFFSET * adsEased;
+        // Smoothly chase the target edge offset so the lean eases in
+        // / out instead of snapping when the cursor crosses the
+        // deadzone boundary.
+        const ek = 1 - Math.exp(-6 * dt);
+        _adsEdgePan.x += (targetEdgeX - _adsEdgePan.x) * ek;
+        _adsEdgePan.z += (targetEdgeZ - _adsEdgePan.z) * ek;
+        desired.x += _adsEdgePan.x;
+        desired.z += _adsEdgePan.z;
+      } else {
+        // No cursor data — decay the edge pan to zero.
+        _adsEdgePan.multiplyScalar(0.85);
+      }
+    } else {
+      // ADS released — bleed the edge-pan offset back to zero so the
+      // next press starts cleanly.
+      _adsEdgePan.multiplyScalar(0.85);
     }
 
     const k = 1 - Math.exp(-tunables.camera.followLerp * dt);
