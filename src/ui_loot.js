@@ -209,15 +209,21 @@ export class LootUI {
     this.bodyHidden = false;
     this.bodyColEl.style.display = '';
     if (this.bodyEl) this.bodyEl.classList.remove('body-hidden');
-    // Containers don't have a body — no paperdoll silhouette, no
-    // equipment slot grid, just the contents footprint and the
-    // container name as the column title. Toggling a class lets the
-    // CSS hide everything body-specific in one place.
-    this.bodyColEl.classList.toggle('is-container', target?.kind === 'container');
+    // Containers AND ground piles both use the no-body layout — no
+    // paperdoll silhouette, no equipment slot grid, just a contents
+    // grid + the column title. Toggling a single class hides
+    // everything body-specific via CSS.
+    const isContainerLike = target?.kind === 'container' || !!target?._groundRefs;
+    this.bodyColEl.classList.toggle('is-container', isContainerLike);
     const titleEl = this.bodyColEl.querySelector('.loot-col-title');
-    if (titleEl) titleEl.textContent = target?.kind === 'container' ? 'Container' : 'Body';
+    if (titleEl) {
+      titleEl.textContent = target?.kind === 'container' ? 'Container'
+        : target?._groundRefs ? 'Ground Pile' : 'Body';
+    }
     const subtitleEl = this.bodyColEl.querySelector('.loot-col-subtitle');
-    if (subtitleEl) subtitleEl.textContent = target?.kind === 'container' ? 'Contents' : 'Pockets';
+    if (subtitleEl) {
+      subtitleEl.textContent = isContainerLike ? 'Contents' : 'Pockets';
+    }
     this.root.style.display = 'flex';
     this._updateBodyType();
     this.render();
