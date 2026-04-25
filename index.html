@@ -2205,6 +2205,12 @@
     }
     .loot-col-player .loot-col-title { color: #c9a87a; }
     .loot-col-body .loot-col-title { color: #d06a6a; }
+    /* Container view — hides the paperdoll silhouette + equipment-slot
+       cells so the column reads as "name + contents" only. The body
+       column header chip (.loot-body-type) still shows the container
+       type. */
+    .loot-col-body.is-container #loot-avatar { display: none; }
+    .loot-col-body.is-container .loot-col-title { color: #d4ad7a; }
     /* Legacy header style kept for loot-col-body's dismiss button. */
     #loot-slots {
       position: relative;

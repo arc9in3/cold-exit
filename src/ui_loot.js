@@ -209,6 +209,15 @@ export class LootUI {
     this.bodyHidden = false;
     this.bodyColEl.style.display = '';
     if (this.bodyEl) this.bodyEl.classList.remove('body-hidden');
+    // Containers don't have a body — no paperdoll silhouette, no
+    // equipment slot grid, just the contents footprint and the
+    // container name as the column title. Toggling a class lets the
+    // CSS hide everything body-specific in one place.
+    this.bodyColEl.classList.toggle('is-container', target?.kind === 'container');
+    const titleEl = this.bodyColEl.querySelector('.loot-col-title');
+    if (titleEl) titleEl.textContent = target?.kind === 'container' ? 'Container' : 'Body';
+    const subtitleEl = this.bodyColEl.querySelector('.loot-col-subtitle');
+    if (subtitleEl) subtitleEl.textContent = target?.kind === 'container' ? 'Contents' : 'Pockets';
     this.root.style.display = 'flex';
     this._updateBodyType();
     this.render();
@@ -941,18 +950,25 @@ export class LootUI {
     const items = this.target.loot || [];
     this._bySlot = {};
     const miscIdxs = [];
-    const usedSlots = new Set();
-    items.forEach((it, idx) => {
-      const t = classifyItem(it);
-      if (t === 'misc') { miscIdxs.push(idx); return; }
-      let slot = t;
-      if (usedSlots.has(slot)) {
-        if (slot === 'weapon1' && !usedSlots.has('weapon2')) slot = 'weapon2';
-        else { miscIdxs.push(idx); return; }
-      }
-      usedSlots.add(slot);
-      this._bySlot[slot] = { item: it, lootIdx: idx };
-    });
+    // Containers don't have an avatar — every item goes straight to
+    // the contents grid so the player sees a flat list, not a fake
+    // "what the chest is wearing" layout.
+    if (this.target.kind === 'container') {
+      items.forEach((_it, idx) => miscIdxs.push(idx));
+    } else {
+      const usedSlots = new Set();
+      items.forEach((it, idx) => {
+        const t = classifyItem(it);
+        if (t === 'misc') { miscIdxs.push(idx); return; }
+        let slot = t;
+        if (usedSlots.has(slot)) {
+          if (slot === 'weapon1' && !usedSlots.has('weapon2')) slot = 'weapon2';
+          else { miscIdxs.push(idx); return; }
+        }
+        usedSlots.add(slot);
+        this._bySlot[slot] = { item: it, lootIdx: idx };
+      });
+    }
     for (const slot of SLOT_IDS) {
       const cell = this._slotCells[slot];
       if (!cell) continue;
