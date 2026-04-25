@@ -3041,9 +3041,35 @@
     #death-sub {
       font-size: 12px;
       color: #a88070;
-      margin-bottom: 20px;
+      margin-bottom: 12px;
       max-width: 380px;
     }
+    /* Death-screen run summary — compact stats panel between the
+       sub-text and the action buttons. Each row reads as a label /
+       value pair; the panel inherits the death-card's red palette. */
+    #death-summary {
+      display: grid;
+      grid-template-columns: 1fr;
+      gap: 4px;
+      padding: 10px 14px;
+      margin-bottom: 16px;
+      background: rgba(40, 12, 16, 0.55);
+      border: 1px solid rgba(160, 48, 56, 0.45);
+      border-radius: 4px;
+      max-width: 320px;
+      margin-left: auto;
+      margin-right: auto;
+    }
+    .death-stat-row {
+      display: flex;
+      justify-content: space-between;
+      align-items: baseline;
+      font-size: 11px;
+      letter-spacing: 1.2px;
+      text-transform: uppercase;
+    }
+    .death-stat-label { color: #a88070; }
+    .death-stat-val { color: #f2e7c9; font-weight: 700; font-size: 13px; }
     #death-btn, #death-menu-btn {
       background: #2a1018;
       border: 1px solid #e04848;
@@ -3778,6 +3804,13 @@
     <div id="death-card">
       <div id="death-title">YOU DIED</div>
       <div id="death-sub">Restart the level with what you had on entry, or bail back to the main menu.</div>
+      <div id="death-summary">
+        <div class="death-stat-row"><span class="death-stat-label">Floor reached</span><span id="death-stat-level" class="death-stat-val">—</span></div>
+        <div class="death-stat-row"><span class="death-stat-label">Kills</span><span id="death-stat-kills" class="death-stat-val">—</span></div>
+        <div class="death-stat-row"><span class="death-stat-label">Damage dealt</span><span id="death-stat-damage" class="death-stat-val">—</span></div>
+        <div class="death-stat-row"><span class="death-stat-label">Credits earned</span><span id="death-stat-credits" class="death-stat-val">—</span></div>
+        <div class="death-stat-row"><span class="death-stat-label">Run time</span><span id="death-stat-time" class="death-stat-val">—</span></div>
+      </div>
       <div id="death-note">Restarting voids this run on the leaderboard and scales down chip earnings for the rest of the run.</div>
       <button id="death-btn" type="button">Restart Level</button>
       <button id="death-menu-btn" type="button">Back to Main Menu</button>

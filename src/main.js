@@ -6252,6 +6252,22 @@ function tick() {
     runStats.deathAt = Date.now();
     runStats.playerName = getPlayerName() || 'anon';
     try { Leaderboard.submitRun(runStats); } catch (e) { console.warn(e); }
+    // Populate the death-screen run-summary panel with the freshly-
+    // sealed stats. Mirrors the leaderboard fields so the player gets
+    // immediate feedback about how the run went without having to
+    // open the leaderboard tab.
+    const setDS = (id, val) => {
+      const el = document.getElementById(id);
+      if (el) el.textContent = String(val);
+    };
+    const runSec = Math.max(0, Math.round((Date.now() - (runStats.startedAt || Date.now())) / 1000));
+    const mins = Math.floor(runSec / 60);
+    const secs = runSec % 60;
+    setDS('death-stat-level', `${(runStats.deathLevel | 0) + 1}`);
+    setDS('death-stat-kills', `${runStats.kills | 0}`);
+    setDS('death-stat-damage', `${Math.round(runStats.damage || 0)}`);
+    setDS('death-stat-credits', `${Math.round(runStats.credits || 0)}c`);
+    setDS('death-stat-time', `${mins}m ${secs}s`);
     if (deathRootEl) deathRootEl.style.display = 'flex';
   }
   if (hudStatsEl) {
