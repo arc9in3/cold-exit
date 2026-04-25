@@ -134,17 +134,21 @@ export function repairPriceFor(item, shopMult = 1) {
   return Math.max(1, Math.round(base * 0.30));
 }
 
-// Sell price uses the unfluxed base so selling is predictable. Junk sells
-// at full unfluxed `sellValue`.
+// Sell price uses the unfluxed base so selling is predictable. Junk
+// sells at full unfluxed `sellValue`. Stack-aware — selling a stack
+// of N junk pays N × sellValue, and a stack of N consumables pays
+// N × per-unit price (so the player isn't penalised for having
+// merged stacks).
 export function sellPriceFor(item) {
+  const count = (item?.count | 0) || 1;
   if (item.type === 'junk' && typeof item.sellValue === 'number') {
-    return Math.max(1, item.sellValue);
+    return Math.max(1, item.sellValue * count);
   }
   const base = tunables.currency.basePrice[inferRarity(item)] ?? 25;
   let rawBuy = base;
   if (item.type === 'consumable') rawBuy = Math.round(base * 0.5);
   else if (item.type === 'attachment') rawBuy = Math.round(base * 1.2);
-  return Math.max(1, Math.round(rawBuy * tunables.currency.sellMult));
+  return Math.max(1, Math.round(rawBuy * tunables.currency.sellMult * count));
 }
 
 export class ShopUI {

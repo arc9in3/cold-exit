@@ -973,29 +973,36 @@ export const GEAR_DEFS = {
 // Junk items — pure loot; drops in combat and sells to merchants. `sellValue`
 // is a base; dropped copies fluctuate ±15% so identical items sell for
 // varying amounts (see jitterJunkValue below).
+// Per-def stackMax: roughly tracks "how many of these would you
+// actually stuff in your bag without it getting absurd". Small loose
+// pieces (coins, scraps, dog tags, drives, docs, rings) cap at 9;
+// medium-bulky single items (watches, lighters, walkie-talkies) at
+// 5; awkward / heavy / bulky items (vases, statues, skulls, radios,
+// car batteries) at 3. Toys are intentionally absent here — the
+// add() path treats anything without stackMax as non-stacking.
 export const JUNK_DEFS = {
   // Common — cheap trinkets the player sees constantly.
-  silverCoin:   { id: 'junk_silver',   name: 'Silver Coin',        type: 'junk', tint: 0xd0d0d0, sellValue: 55,   rarity: 'common',    description: 'Trinket · sells well' },
-  dogTags:      { id: 'junk_dogtags',  name: 'Dog Tags',           type: 'junk', tint: 0x8a8a8a, sellValue: 45,   rarity: 'common',    description: 'ID metal · low value' },
-  scrapCopper:  { id: 'junk_copper',   name: 'Copper Scrap',       type: 'junk', tint: 0xb87a4a, sellValue: 35,   rarity: 'common',    description: 'Scrap metal · fence it' },
-  oldLighter:   { id: 'junk_lighter',  name: 'Brass Lighter',      type: 'junk', tint: 0xaa8a3a, sellValue: 70,   rarity: 'common',    description: 'Pocket curio' },
+  silverCoin:   { id: 'junk_silver',   name: 'Silver Coin',        type: 'junk', tint: 0xd0d0d0, sellValue: 55,   rarity: 'common',    description: 'Trinket · sells well',  stackMax: 9 },
+  dogTags:      { id: 'junk_dogtags',  name: 'Dog Tags',           type: 'junk', tint: 0x8a8a8a, sellValue: 45,   rarity: 'common',    description: 'ID metal · low value',  stackMax: 9 },
+  scrapCopper:  { id: 'junk_copper',   name: 'Copper Scrap',       type: 'junk', tint: 0xb87a4a, sellValue: 35,   rarity: 'common',    description: 'Scrap metal · fence it', stackMax: 9 },
+  oldLighter:   { id: 'junk_lighter',  name: 'Brass Lighter',      type: 'junk', tint: 0xaa8a3a, sellValue: 70,   rarity: 'common',    description: 'Pocket curio',          stackMax: 5 },
   // Uncommon — small step up.
-  goldWatch:    { id: 'junk_watch',    name: 'Gold Watch',         type: 'junk', tint: 0xe8c050, sellValue: 160,  rarity: 'uncommon',  description: 'Trinket · sells well' },
-  encryptedDrv: { id: 'junk_drive',    name: 'Encrypted Drive',    type: 'junk', tint: 0x60b0ff, sellValue: 260,  rarity: 'uncommon',  description: 'Data · valuable' },
-  monocle:      { id: 'junk_monocle',  name: 'Jeweled Monocle',    type: 'junk', tint: 0xf0d070, sellValue: 210,  rarity: 'uncommon',  description: 'Fancy eyewear' },
-  cigaretteCase:{ id: 'junk_cigcase',  name: 'Silver Cigarette Case', type: 'junk', tint: 0xbfbfbf, sellValue: 185, rarity: 'uncommon', description: 'Engraved silver' },
+  goldWatch:    { id: 'junk_watch',    name: 'Gold Watch',         type: 'junk', tint: 0xe8c050, sellValue: 160,  rarity: 'uncommon',  description: 'Trinket · sells well',  stackMax: 5 },
+  encryptedDrv: { id: 'junk_drive',    name: 'Encrypted Drive',    type: 'junk', tint: 0x60b0ff, sellValue: 260,  rarity: 'uncommon',  description: 'Data · valuable',       stackMax: 9 },
+  monocle:      { id: 'junk_monocle',  name: 'Jeweled Monocle',    type: 'junk', tint: 0xf0d070, sellValue: 210,  rarity: 'uncommon',  description: 'Fancy eyewear',         stackMax: 3 },
+  cigaretteCase:{ id: 'junk_cigcase',  name: 'Silver Cigarette Case', type: 'junk', tint: 0xbfbfbf, sellValue: 185, rarity: 'uncommon', description: 'Engraved silver',        stackMax: 5 },
   // Rare — meaningful fence money.
-  rareDoc:      { id: 'junk_doc',      name: 'Classified Document',type: 'junk', tint: 0x8a9eff, sellValue: 400,  rarity: 'rare',      description: 'Intel · sells well' },
-  diamondRing:  { id: 'junk_ring',     name: 'Diamond Ring',       type: 'junk', tint: 0xeaeaff, sellValue: 580,  rarity: 'rare',      description: 'Jewelry · high value' },
-  emeraldSkull: { id: 'junk_skull',    name: 'Emerald Skull',      type: 'junk', tint: 0x30c080, sellValue: 640,  rarity: 'rare',      description: 'Cursed gemstone' },
+  rareDoc:      { id: 'junk_doc',      name: 'Classified Document',type: 'junk', tint: 0x8a9eff, sellValue: 400,  rarity: 'rare',      description: 'Intel · sells well',    stackMax: 9 },
+  diamondRing:  { id: 'junk_ring',     name: 'Diamond Ring',       type: 'junk', tint: 0xeaeaff, sellValue: 580,  rarity: 'rare',      description: 'Jewelry · high value',  stackMax: 9 },
+  emeraldSkull: { id: 'junk_skull',    name: 'Emerald Skull',      type: 'junk', tint: 0x30c080, sellValue: 640,  rarity: 'rare',      description: 'Cursed gemstone',       stackMax: 3 },
   // Epic — rare big payouts.
-  antiqueVase:  { id: 'junk_vase',     name: 'Antique Vase',       type: 'junk', tint: 0xc99a6a, sellValue: 900,  rarity: 'epic',      description: 'Art · fence for credits' },
-  kingsRing:    { id: 'junk_kingring', name: "King's Signet",      type: 'junk', tint: 0xd48040, sellValue: 1150, rarity: 'epic',      description: 'Royal seal · heirloom' },
+  antiqueVase:  { id: 'junk_vase',     name: 'Antique Vase',       type: 'junk', tint: 0xc99a6a, sellValue: 900,  rarity: 'epic',      description: 'Art · fence for credits', stackMax: 3 },
+  kingsRing:    { id: 'junk_kingring', name: "King's Signet",      type: 'junk', tint: 0xd48040, sellValue: 1150, rarity: 'epic',      description: 'Royal seal · heirloom',  stackMax: 5 },
   // Chr_Attach electronics — mid-tier junk pickups.
-  walkieTalkie: { id: 'junk_walkie',   name: 'Walkie-Talkie',      type: 'junk', tint: 0x2a2a30, sellValue: 220,  rarity: 'uncommon',  description: 'Battered comms · still works' },
-  radio:        { id: 'junk_radio',    name: 'Field Radio',        type: 'junk', tint: 0x3a3a2a, sellValue: 340,  rarity: 'rare',      description: 'Encrypted military handset' },
-  carBattery:   { id: 'junk_carbatt',  name: 'Car Battery',        type: 'junk', tint: 0x6a6a70, sellValue: 420,  rarity: 'rare',      description: 'Lead-acid brick · heavy, valuable' },
-  scrapMetal:   { id: 'junk_scrap',    name: 'Scrap Metal',        type: 'junk', tint: 0x8a8a8a, sellValue: 30,   rarity: 'common',    description: 'Mixed fragments · fence it' },
+  walkieTalkie: { id: 'junk_walkie',   name: 'Walkie-Talkie',      type: 'junk', tint: 0x2a2a30, sellValue: 220,  rarity: 'uncommon',  description: 'Battered comms · still works', stackMax: 5 },
+  radio:        { id: 'junk_radio',    name: 'Field Radio',        type: 'junk', tint: 0x3a3a2a, sellValue: 340,  rarity: 'rare',      description: 'Encrypted military handset',   stackMax: 3 },
+  carBattery:   { id: 'junk_carbatt',  name: 'Car Battery',        type: 'junk', tint: 0x6a6a70, sellValue: 420,  rarity: 'rare',      description: 'Lead-acid brick · heavy, valuable', stackMax: 3 },
+  scrapMetal:   { id: 'junk_scrap',    name: 'Scrap Metal',        type: 'junk', tint: 0x8a8a8a, sellValue: 30,   rarity: 'common',    description: 'Mixed fragments · fence it', stackMax: 9 },
 };
 export const ALL_JUNK = Object.values(JUNK_DEFS);
 
@@ -1317,6 +1324,13 @@ const BASE_POCKETS = BASE_POCKET_W * BASE_POCKET_H;
 export const ACTION_SLOT_COUNT = 8;      // total hotbar slots
 export const BASE_ACTION_SLOT_COUNT = 8; // all slots always usable
 
+// Stacking cap for consumables (bandages / medkits / stims). Picking
+// up a consumable when an existing stack of the same id is in the
+// inventory merges into that stack first; only the spillover lands
+// as a fresh instance. Throwables stay charges-based and don't
+// participate in stacking.
+export const CONSUMABLE_STACK_MAX = 5;
+
 
 export class Inventory {
   constructor() {
@@ -1489,11 +1503,48 @@ export class Inventory {
   consumeActionSlot(slotIdx) {
     const it = this.actionSlotItem(slotIdx);
     if (!it) return null;
+    // Stack-aware consume — if the bound consumable is part of a
+    // stack of multiple, decrement the count and keep the slot bound
+    // to the same item. Only when the stack hits zero do we remove
+    // the item from the grid and try to auto-refill the slot from
+    // another matching consumable in the inventory.
+    if (it.type === 'consumable' && ((it.count | 0) || 1) > 1) {
+      // Return a freshly-cloned item for the caller to apply (so the
+      // caller's path can mutate / consume it independently of the
+      // stack). count: 1 since the caller is using exactly one.
+      const single = { ...it, count: 1 };
+      it.count = (it.count | 0) - 1;
+      this._bump();
+      return single;
+    }
     const g = this.gridOf(it);
     if (g) g.remove(it);
     this.actionBar[slotIdx] = null;
+    // Auto-refill — find another consumable of the same id anywhere
+    // in the inventory and bind it to the now-empty slot. Players
+    // expect their bandage hotkey to keep being a bandage hotkey
+    // until they're physically out of bandages.
+    if (it.type === 'consumable') {
+      const replacement = this._findReplacementConsumable(it);
+      if (replacement) this.assignActionSlot(slotIdx, replacement);
+    }
     this._bump();
     return it;
+  }
+
+  // Walk every grid + the pouch looking for a consumable matching
+  // `like.id` (same item kind). Returns the first match or null.
+  // Used by consumeActionSlot's auto-refill path.
+  _findReplacementConsumable(like) {
+    if (!like || !like.id) return null;
+    for (const g of this.allGridsIncludingPouch()) {
+      for (const e of g.entries()) {
+        const it = e.item;
+        if (!it || it.type !== 'consumable') continue;
+        if (it.id === like.id) return it;
+      }
+    }
+    return null;
   }
   _bump() {
     this.version += 1;
@@ -1662,8 +1713,41 @@ export class Inventory {
   add(item) {
     if (!item) return { placed: false };
     stampItemDims(item);
-    // Consumables, throwables, and attachments all live loose in any grid.
-    if (item.type === 'consumable' || item.type === 'throwable' || item.type === 'attachment') {
+    // Stackable items — consumables (5 per stack universal) and
+    // junk (per-def stackMax of 3 / 5 / 9 by realistic carry load).
+    // Toys, throwables, and attachments deliberately don't stack:
+    // toys are unique souvenirs, throwables use charges, attachments
+    // each carry their own rolled stats.
+    if (item.type === 'consumable' || (item.type === 'junk' && item.stackMax)) {
+      const cap = item.type === 'consumable'
+        ? CONSUMABLE_STACK_MAX
+        : Math.max(1, item.stackMax | 0);
+      let remaining = (item.count | 0) || 1;
+      for (const g of this.allGridsIncludingPouch()) {
+        for (const e of g.entries()) {
+          const ex = e.item;
+          if (!ex || ex.id !== item.id || ex.type !== item.type) continue;
+          const exCount = (ex.count | 0) || 1;
+          if (exCount >= cap) continue;
+          const room = cap - exCount;
+          const moved = Math.min(room, remaining);
+          ex.count = exCount + moved;
+          remaining -= moved;
+          if (remaining <= 0) { this._bump(); return { placed: true, merged: true }; }
+        }
+      }
+      // Anything left over places as a fresh instance with the
+      // remaining count — autoPlaceAnywhere finds a spot.
+      item.count = remaining;
+      const r = this.autoPlaceAnywhere(item);
+      if (!r) return { placed: false };
+      this._bump();
+      return { placed: true, pocketEntry: r.entry };
+    }
+    // Throwables, attachments, junk-without-stackMax (defensive),
+    // and toys all live loose but never stack.
+    if (item.type === 'throwable' || item.type === 'attachment'
+        || item.type === 'junk'   || item.type === 'toy') {
       const r = this.autoPlaceAnywhere(item);
       if (!r) return { placed: false };
       this._bump();

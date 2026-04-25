@@ -1904,9 +1904,13 @@ export class LootUI {
     const isBroken = dur && dur.current <= 0;
     if (isBroken) tile.classList.add('item-broken');
     const brokenTag = isBroken ? `<div class="pkt-broken-tag">BROKEN</div>` : '';
+    const count = (entry.item.count | 0) || 1;
+    const stackBadge = ((entry.item.type === 'consumable' || entry.item.type === 'junk') && count > 1)
+      ? `<span class="pkt-stack">×${count}</span>` : '';
     tile.innerHTML = `
       ${thumb ? `<img class="ws-thumb" src="${thumb}" alt="" draggable="false">` : `<span class="ws-glyph">${TYPE_ICONS[entry.item.type] || '◇'}</span>`}
       ${brokenTag}
+      ${stackBadge}
       <div class="ws-name">${entry.item.name || ''}</div>
       ${ammo}
       ${bonusHtml}

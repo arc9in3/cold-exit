@@ -5663,8 +5663,20 @@ function _tickBurnFlames(dt) {
 function tryUseMedkit() {
   const found = inventory.findFirstConsumable(it => it.useEffect?.kind === 'heal');
   if (!found) return;
-  const it = inventory.takeFromBackpack(found.idx);
-  if (it) applyConsumable(it);
+  // Stack-aware consume — decrement count if there's more than one
+  // in the stack, otherwise pull the item out entirely. Without
+  // this, pressing H on a 5-bandage stack would consume the whole
+  // stack at once.
+  const stack = found.item;
+  const stackCount = (stack.count | 0) || 1;
+  if (stackCount > 1) {
+    stack.count = stackCount - 1;
+    inventory._bump?.();
+    applyConsumable({ ...stack, count: 1 });
+  } else {
+    const it = inventory.takeFromBackpack(found.idx);
+    if (it) applyConsumable(it);
+  }
   inventoryUI.render();
 }
 
@@ -5813,7 +5825,14 @@ function _renderHotbarSlot(el, barIdx, keyLabelText) {
       cooldownOverlay = `<div class="action-cd"><div class="action-cd-fill" style="height:${((1 - pct) * 100).toFixed(0)}%"></div><div class="action-cd-text">${secs}s</div></div>`;
     }
   }
-  el.innerHTML = `${keyLabel}${icon ? `<img src="${icon}" alt="">` : ''}${extra}${cooldownOverlay}`;
+  // Stack count badge — top-right corner when a consumable stacks
+  // multiple in one inventory cell. Players need to see at a glance
+  // how many bandages they have left in the bound stack.
+  let stackBadge = '';
+  if (item.type === 'consumable' && ((item.count | 0) || 1) > 1) {
+    stackBadge = `<span class="action-stack">×${item.count | 0}</span>`;
+  }
+  el.innerHTML = `${keyLabel}${icon ? `<img src="${icon}" alt="">` : ''}${extra}${cooldownOverlay}${stackBadge}`;
   el.classList.add('filled');
   el.classList.toggle('empty-charges',
     item.type === 'throwable' && (item.charges | 0) <= 0);

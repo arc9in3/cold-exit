@@ -363,9 +363,15 @@ export class InventoryUI {
     const isBroken = dur && dur.current <= 0;
     if (isBroken) tile.classList.add('item-broken');
     const brokenTag = isBroken ? `<div class="pkt-broken-tag">BROKEN</div>` : '';
+    // Stack count badge for consumables — shows in the top-right of
+    // the cell so a 5-stack of bandages reads instantly.
+    const count = (entry.item.count | 0) || 1;
+    const stackBadge = ((entry.item.type === 'consumable' || entry.item.type === 'junk') && count > 1)
+      ? `<span class="pkt-stack">×${count}</span>` : '';
     tile.innerHTML = `
       ${thumb ? `<img class="pkt-thumb" src="${thumb}" alt="" draggable="false">` : `<span class="pkt-glyph">${TYPE_ICONS[entry.item.type] || '◇'}</span>`}
       ${brokenTag}
+      ${stackBadge}
       <div class="pkt-name">${label}</div>
       ${durPct >= 0 ? `<div class="pkt-dur"><div class="pkt-dur-fill" style="width:${durPct.toFixed(0)}%;background:${durPct > 60 ? '#6abe8a' : durPct > 30 ? '#e0c040' : '#d24040'}"></div></div>` : ''}
       ${ammoLine}
