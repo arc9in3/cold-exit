@@ -73,11 +73,41 @@ export class LootManager {
       light.position.y = 0.2;
       group.add(light);
 
+      // Pre-allocated rarity beacon — vertical column of light + a
+      // pulse PointLight, parked invisible at the bottom of the
+      // group. Activated for epic / legendary / mythic / mastercraft
+      // drops; previously these were allocated per drop, which
+      // pushed a fresh light into the scene and forced a shader
+      // recompile EVERY hit (the visible "freeze on drop" hitch).
+      // Geometry is shared across slots; per-slot material so the
+      // colour can be set independently.
+      if (!this._sharedBeamGeom) {
+        this._sharedBeamGeom = new THREE.CylinderGeometry(0.18, 0.32, 1, 8, 1, true);
+      }
+      const beamMat = new THREE.MeshBasicMaterial({
+        color: 0xffffff,
+        transparent: true,
+        opacity: 0,
+        depthWrite: false,
+        side: THREE.DoubleSide,
+        blending: THREE.AdditiveBlending,
+      });
+      const beam = new THREE.Mesh(this._sharedBeamGeom, beamMat);
+      beam.userData.isProp = true;
+      beam.userData.beam = true;
+      beam.visible = false;
+      beam.position.y = 0.5;
+      group.add(beam);
+      const beamPulse = new THREE.PointLight(0xffffff, 0, 5.5);
+      beamPulse.position.y = 0.4;
+      group.add(beamPulse);
+
       group.visible = false;
       group.position.set(0, -1000, 0);
       this.scene.add(group);
       this._pool.push({
         group, mesh, mat, light,
+        beam, beamMat, beamPulse,
         sprite, canvas, ctx: canvas.getContext('2d'), tex,
         inUse: false,
       });
@@ -176,44 +206,41 @@ export class LootManager {
     return entry;
   }
 
-  // Rare-tier ground beacon. Epic / legendary / mythic / mastercraft
-  // items get a colored vertical column of light planted at the drop
-  // so the player can spot them across a room. Uses a tall thin box
-  // with additive-blended translucent material for a minimal-cost
-  // visual; one per dropped rare item is fine even at 50+ drops.
+  // Rare-tier ground beacon — re-tints the pre-allocated beam mesh +
+  // pulse light owned by the pool slot. No allocations, no light
+  // count changes (beamPulse always exists at intensity 0 when idle),
+  // no shader recompile. Epic / legendary / mythic / mastercraft
+  // each get a distinct color / height / intensity profile.
   _maybeAttachBeacon(entry, item) {
-    if (!entry || !item) return;
+    if (!entry || !item || !entry.slot) return;
+    const slot = entry.slot;
     const rarity = item.rarity || 'common';
     const isMaster = !!item.mastercraft;
-    if (!isMaster && rarity !== 'epic' && rarity !== 'legendary' && rarity !== 'mythic') return;
-    // Color/intensity profile per rarity. Mastercraft beats rarity
-    // for visual identity — gold/cyan rim regardless of base rarity.
+    if (!isMaster && rarity !== 'epic' && rarity !== 'legendary' && rarity !== 'mythic') {
+      // Make sure the slot's beacon is hidden (a previous use of this
+      // slot may have shown one).
+      if (slot.beam) slot.beam.visible = false;
+      if (slot.beamPulse) slot.beamPulse.intensity = 0;
+      return;
+    }
     const profile = isMaster
-      ? { color: 0xffd040, height: 6.5, opacity: 0.55 }
-      : rarity === 'mythic'    ? { color: 0xff3a55, height: 7.5, opacity: 0.65 }
-      : rarity === 'legendary' ? { color: 0xffc040, height: 5.5, opacity: 0.5 }
-      :                          { color: 0xb060ff, height: 4.5, opacity: 0.45 }; // epic
-    const beamGeom = new THREE.CylinderGeometry(0.18, 0.32, profile.height, 8, 1, true);
-    const beamMat = new THREE.MeshBasicMaterial({
-      color: profile.color,
-      transparent: true,
-      opacity: profile.opacity,
-      depthWrite: false,
-      side: THREE.DoubleSide,
-      blending: THREE.AdditiveBlending,
-    });
-    const beam = new THREE.Mesh(beamGeom, beamMat);
-    beam.position.y = profile.height / 2 - 0.45;
-    beam.userData.isProp = true;        // skip wall-occlusion fade tracking
-    beam.userData.beam = true;
-    entry.group.add(beam);
-    entry.beam = beam;
-    // Brighter pulse light at the base so the column also reads on
-    // dim floors. Reuse a small PointLight; cost is in the noise.
-    const pulse = new THREE.PointLight(profile.color, 1.6, 5.5);
-    pulse.position.y = 0.4;
-    entry.group.add(pulse);
-    entry.beamPulse = pulse;
+      ? { color: 0xffd040, height: 6.5, opacity: 0.55, pulse: 1.7 }
+      : rarity === 'mythic'    ? { color: 0xff3a55, height: 7.5, opacity: 0.65, pulse: 2.0 }
+      : rarity === 'legendary' ? { color: 0xffc040, height: 5.5, opacity: 0.5,  pulse: 1.6 }
+      :                          { color: 0xb060ff, height: 4.5, opacity: 0.45, pulse: 1.4 }; // epic
+    if (slot.beam) {
+      slot.beamMat.color.setHex(profile.color);
+      slot.beamMat.opacity = profile.opacity;
+      // Pre-allocated geometry is unit-height; scale Y to the
+      // profile height. Position pivots from the drop origin upward.
+      slot.beam.scale.set(1, profile.height, 1);
+      slot.beam.position.y = profile.height / 2 - 0.45;
+      slot.beam.visible = true;
+    }
+    if (slot.beamPulse) {
+      slot.beamPulse.color.setHex(profile.color);
+      slot.beamPulse.intensity = profile.pulse;
+    }
   }
 
   // Toys still use the old one-off group path — small, fixed count,
@@ -413,6 +440,11 @@ export class LootManager {
       entry.slot.group.position.set(0, -1000, 0);
       entry.slot.sprite.visible = false;
       entry.slot.light.intensity = 0;
+      // Hide the rare-drop beacon if this slot had one. Geometry +
+      // material stay alive on the slot, ready for the next rare
+      // drop with a re-tint instead of a re-alloc.
+      if (entry.slot.beam) entry.slot.beam.visible = false;
+      if (entry.slot.beamPulse) entry.slot.beamPulse.intensity = 0;
       entry.slot.inUse = false;
       return;
     }
