@@ -329,38 +329,71 @@ export class GameMenuUI {
       return;
     }
     const cats = [
-      { key: 'credits', label: 'Most Value', fmt: (e) => e.credits },
-      { key: 'levels',  label: 'Furthest',   fmt: (e) => `Lv ${e.levels}` },
-      { key: 'damage',  label: 'Most Dmg',   fmt: (e) => e.damage },
-      { key: 'kills',   label: 'Most Kills', fmt: (e) => e.kills },
+      { key: 'credits', label: 'Most Value', fmt: (e) => e.credits ?? e.score },
+      { key: 'levels',  label: 'Furthest',   fmt: (e) => `Lv ${e.levels ?? e.score}` },
+      { key: 'damage',  label: 'Most Dmg',   fmt: (e) => e.damage ?? e.score },
+      { key: 'kills',   label: 'Most Kills', fmt: (e) => e.kills ?? e.score },
     ];
+    // Source badge — flips to GLOBAL or LOCAL once the remote
+    // fetches resolve. Same flow as the main-menu leaderboard.
+    const badge = document.createElement('div');
+    badge.style.cssText = 'font-size:10px;letter-spacing:1.5px;color:#9b8b6a;margin-bottom:6px;text-align:center;';
+    badge.textContent = 'loading global scores…';
+    this.bodyEl.appendChild(badge);
     const wrap = document.createElement('div');
     wrap.className = 'menu-leaderboard';
-    for (const c of cats) {
-      const top = lb.top(c.key, 10);
-      const col = document.createElement('div');
-      col.className = 'menu-lb-col';
+    const colByKey = new Map();
+    const fillCol = (col, entries, fmt) => {
+      col.innerHTML = '';
       const h = document.createElement('div');
       h.className = 'menu-lb-heading';
-      h.textContent = c.label;
+      h.textContent = col._label;
       col.appendChild(h);
-      if (top.length === 0) {
+      if (!entries || entries.length === 0) {
         const empty = document.createElement('div');
         empty.className = 'menu-lb-empty';
         empty.textContent = '—';
         col.appendChild(empty);
-      } else {
-        top.forEach((e, i) => {
-          const row = document.createElement('div');
-          row.className = 'menu-lb-row';
-          row.textContent = `${i + 1}. ${c.fmt(e)} — ${e.playerName}`;
-          col.appendChild(row);
-        });
+        return;
       }
+      entries.forEach((e, i) => {
+        const row = document.createElement('div');
+        row.className = 'menu-lb-row';
+        const who = e.name || e.playerName || 'anon';
+        row.textContent = `${i + 1}. ${fmt(e)} — ${who}`;
+        col.appendChild(row);
+      });
+    };
+    for (const c of cats) {
+      const col = document.createElement('div');
+      col.className = 'menu-lb-col';
+      col._label = c.label;
+      fillCol(col, lb.top(c.key, 10), c.fmt);
       wrap.appendChild(col);
+      colByKey.set(c.key, col);
     }
     this.bodyEl.appendChild(wrap);
     this.bodyEl.appendChild(this._btn('Back', () => { this.view = 'root'; this.render(); }));
+    // Background remote refresh — replaces each column's content as
+    // its fetch resolves. Bails silently if the user navigates away.
+    let anyRemote = false;
+    let resolved = 0;
+    const finalise = () => {
+      if (resolved !== cats.length || !badge.parentNode) return;
+      badge.textContent = anyRemote ? 'GLOBAL · live scores from cold-exit.pages.dev'
+                                    : 'LOCAL · global service unavailable';
+      badge.style.color = anyRemote ? '#6abe5a' : '#a88070';
+    };
+    for (const c of cats) {
+      const col = colByKey.get(c.key);
+      Promise.resolve(lb.remoteTop(c.key, 10)).then((res) => {
+        if (!col || !col.parentNode) return;
+        if (res?.source === 'remote') anyRemote = true;
+        fillCol(col, res?.entries || [], c.fmt);
+        resolved += 1;
+        finalise();
+      }).catch(() => { resolved += 1; finalise(); });
+    }
   }
 
   render() {

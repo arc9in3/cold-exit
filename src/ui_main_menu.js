@@ -237,13 +237,23 @@ export class MainMenuUI {
       return;
     }
     const cats = [
-      { key: 'credits', label: 'Most Value', fmt: (e) => e.credits },
-      { key: 'levels',  label: 'Furthest',   fmt: (e) => `Lv ${e.levels}` },
-      { key: 'damage',  label: 'Most Dmg',   fmt: (e) => e.damage },
-      { key: 'kills',   label: 'Most Kills', fmt: (e) => e.kills },
+      { key: 'credits', label: 'Most Value', fmt: (e) => e.credits ?? e.score },
+      { key: 'levels',  label: 'Furthest',   fmt: (e) => `Lv ${e.levels ?? e.score}` },
+      { key: 'damage',  label: 'Most Dmg',   fmt: (e) => e.damage ?? e.score },
+      { key: 'kills',   label: 'Most Kills', fmt: (e) => e.kills ?? e.score },
     ];
     const wrap = document.createElement('div');
     wrap.className = 'menu-leaderboard';
+    // Source badge — switches between "GLOBAL" and "LOCAL" once the
+    // remote fetches resolve. Initial render shows local data so the
+    // panel isn't empty during the round-trip; remote data overlays
+    // each column as it lands.
+    const badge = document.createElement('div');
+    badge.className = 'menu-lb-source';
+    badge.textContent = 'loading global scores…';
+    badge.style.cssText = 'font-size:10px;letter-spacing:1.5px;color:#9b8b6a;margin-bottom:6px;text-align:center;';
+    this.bodyEl.appendChild(badge);
+    const colByKey = new Map();
     for (const c of cats) {
       const col = document.createElement('div');
       col.className = 'menu-lb-col';
@@ -251,24 +261,67 @@ export class MainMenuUI {
       h.className = 'menu-lb-heading';
       h.textContent = c.label;
       col.appendChild(h);
-      const top = lb.top(c.key, 10);
-      if (top.length === 0) {
-        const empty = document.createElement('div');
-        empty.className = 'menu-lb-empty';
-        empty.textContent = '—';
-        col.appendChild(empty);
-      } else {
-        top.forEach((e, i) => {
-          const row = document.createElement('div');
-          row.className = 'menu-lb-row';
-          row.textContent = `${i + 1}. ${c.fmt(e)} — ${e.playerName || 'anon'}`;
-          col.appendChild(row);
-        });
-      }
+      // Initial fill — local list so the player isn't staring at a
+      // blank panel for the network round-trip.
+      this._fillLbCol(col, lb.top(c.key, 10), c.fmt);
       wrap.appendChild(col);
+      colByKey.set(c.key, col);
     }
     this.bodyEl.appendChild(wrap);
     this.bodyEl.appendChild(this._btn('Back', () => { this.view = 'root'; this.render(); }));
+    // Remote refresh — fire all four categories in parallel, replace
+    // the column body with remote entries when each resolves. Falls
+    // back silently to the local data we already painted on failure.
+    let anyRemote = false;
+    let resolved = 0;
+    for (const c of cats) {
+      const col = colByKey.get(c.key);
+      Promise.resolve(lb.remoteTop(c.key, 10)).then((res) => {
+        // Bail if the user already navigated away — `col.parentNode`
+        // goes null when the body is wiped by a re-render.
+        if (!col || !col.parentNode) return;
+        if (res?.source === 'remote') anyRemote = true;
+        // Re-fill the column with whatever remoteTop returned (remote
+        // entries when available, otherwise the same local list).
+        col.innerHTML = '';
+        const h = document.createElement('div');
+        h.className = 'menu-lb-heading';
+        h.textContent = c.label;
+        col.appendChild(h);
+        this._fillLbCol(col, res?.entries || [], c.fmt);
+        resolved += 1;
+        if (resolved === cats.length && badge.parentNode) {
+          badge.textContent = anyRemote ? 'GLOBAL · live scores from cold-exit.pages.dev'
+                                        : 'LOCAL · global service unavailable';
+          badge.style.color = anyRemote ? '#6abe5a' : '#a88070';
+        }
+      }).catch(() => {
+        resolved += 1;
+        if (resolved === cats.length && badge.parentNode) {
+          badge.textContent = anyRemote ? 'GLOBAL · live scores from cold-exit.pages.dev'
+                                        : 'LOCAL · global service unavailable';
+          badge.style.color = anyRemote ? '#6abe5a' : '#a88070';
+        }
+      });
+    }
+  }
+
+  _fillLbCol(col, entries, fmt) {
+    if (!entries || entries.length === 0) {
+      const empty = document.createElement('div');
+      empty.className = 'menu-lb-empty';
+      empty.textContent = '—';
+      col.appendChild(empty);
+      return;
+    }
+    entries.forEach((e, i) => {
+      const row = document.createElement('div');
+      row.className = 'menu-lb-row';
+      // Remote rows expose `name`; local rows expose `playerName`.
+      const who = e.name || e.playerName || 'anon';
+      row.textContent = `${i + 1}. ${fmt(e)} — ${who}`;
+      col.appendChild(row);
+    });
   }
 
   render() {

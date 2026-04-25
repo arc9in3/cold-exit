@@ -197,9 +197,6 @@ function _lazyMC() {
 
 // Roll a rarity for a freshly-spawned attachment. Distribution mirrors
 // loot rarity weights (most common, occasional rare+, very rare epic+).
-// Modifier values are intentionally NOT scaled per-rarity here — the
-// rarity is purely cosmetic (stronger sight reticle glow, distinct
-// outline) so the mechanical balance stays as authored.
 function _rollAttachmentRarity() {
   const r = Math.random();
   if (r < 0.65) return 'common';
@@ -209,12 +206,49 @@ function _rollAttachmentRarity() {
   return 'legendary';
 }
 
+// Per-rarity scaling factor for an attachment's mechanical modifier.
+// Bonuses (mults > 1) grow further; penalties / spread reductions
+// (mults < 1) tighten further toward 0; flat additive bonuses scale
+// up. A common attachment sits at the authored values; a legendary
+// roughly doubles the effect strength.
+const RARITY_BOOST = {
+  common:    1.00,
+  uncommon:  1.15,
+  rare:      1.35,
+  epic:      1.65,
+  legendary: 2.00,
+};
+
+function _scaleModifierByRarity(mod, rarity) {
+  if (!mod) return;
+  const k = RARITY_BOOST[rarity] || 1.0;
+  if (k === 1.0) return;
+  for (const key of Object.keys(mod)) {
+    const v = mod[key];
+    if (typeof v !== 'number') continue;
+    if (v > 1) {
+      // Bonus multiplier — grow by (k − 1) above 1.
+      mod[key] = +(1 + (v - 1) * k).toFixed(3);
+    } else if (v < 1) {
+      // Penalty / reduction multiplier — shrink the gap below 1.
+      mod[key] = +(1 - (1 - v) * k).toFixed(3);
+    } else {
+      // Flat additive (rare in this system) — scale by k.
+      mod[key] = +(v * k).toFixed(3);
+    }
+  }
+}
+
 export function randomAttachment() {
   const att = clone(ALL_ATTACHMENTS[Math.floor(Math.random() * ALL_ATTACHMENTS.length)]);
-  // Stamp a rolled rarity onto every freshly-spawned attachment so
-  // the inventory grid + cursor sight reticles can show distinct
-  // visual variants per attachment instance.
-  if (!att.rarity) att.rarity = _rollAttachmentRarity();
+  // Stamp a rolled rarity and scale the modifier to match — common
+  // sits at the authored balance, legendary roughly doubles the
+  // mechanical effect. Sight reticles read uniformly clear at every
+  // rarity (rarity is mechanical, not cosmetic, for attachments).
+  if (!att.rarity) {
+    att.rarity = _rollAttachmentRarity();
+    _scaleModifierByRarity(att.modifier, att.rarity);
+  }
   // Apply universal mastercraft roll. Mastercraft attachments boost
   // every numeric modifier toward the player (multipliers >1 × 1.5,
   // <1 multipliers tightened by 1.5× toward zero) so the mod sheet
