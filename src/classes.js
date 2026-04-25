@@ -232,10 +232,23 @@ export class ClassMastery {
   }
 
   awardXp(id, amount) {
-    if (!(id in this.xp)) return false;
+    // Backfill missing keys — a save loaded from before sniper / exotic
+    // classes existed wouldn't have them, so xp would silently drop.
+    if (!(id in this.xp)) {
+      if (!CLASS_IDS.includes(id)) return false;
+      this.xp[id] = 0;
+    }
     const before = this.level(id);
     this.xp[id] += amount;
     return this.level(id) > before; // true if leveled up this kill
+  }
+
+  // Ensure every known class has a numeric xp entry. Call after
+  // loading a save so old data doesn't leave new classes orphaned.
+  fillMissing() {
+    for (const id of CLASS_IDS) {
+      if (typeof this.xp[id] !== 'number') this.xp[id] = 0;
+    }
   }
 
   applyTo(stats, weapon) {

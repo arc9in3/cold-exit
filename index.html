@@ -2773,6 +2773,50 @@
     .class-section .class-xp { color: #c9a87a; font-size: 10px; }
     .class-section .class-bar { height: 4px; background: #1b1b1f; border: 1px solid #2c2c34; border-radius: 2px; overflow: hidden; margin-bottom: 6px; }
     .class-section .class-bar-fill { height: 100%; background: #c9a87a; }
+    .class-section .class-tiers { display: flex; flex-direction: column; gap: 2px; margin: 6px 0 4px; }
+    .class-tier-row {
+      display: grid;
+      grid-template-columns: 38px 1fr 2fr;
+      gap: 8px;
+      align-items: baseline;
+      font-size: 10px;
+      color: #6f6754;
+      padding: 3px 6px;
+      border-left: 2px solid #2c2c34;
+      background: rgba(20, 16, 28, 0.4);
+      letter-spacing: 0.3px;
+    }
+    .class-tier-row.owned {
+      color: #d6c9a8;
+      border-left-color: #c9a87a;
+      background: rgba(40, 32, 20, 0.5);
+    }
+    .class-tier-row.capstone {
+      border-left-color: #00e6ff;
+    }
+    .class-tier-row.capstone.owned {
+      border-left-color: #00e6ff;
+      background: rgba(0, 30, 40, 0.45);
+      color: #d8ecf2;
+    }
+    .class-tier-tag {
+      font-weight: 700;
+      color: #8a97a8;
+      letter-spacing: 0.6px;
+    }
+    .class-tier-row.owned .class-tier-tag { color: #c9a87a; }
+    .class-tier-row.capstone .class-tier-tag { color: #00e6ff; }
+    .class-tier-name {
+      color: inherit;
+      font-weight: 700;
+    }
+    .class-tier-desc {
+      color: #8a97a8;
+      font-size: 9px;
+      line-height: 1.35;
+      grid-column: 2 / span 2;
+    }
+    .class-tier-row.owned .class-tier-desc { color: #b8a780; }
 
     /* Mastery pick modal — triggered when a class crosses an XP threshold. */
     #mastery-pick-root {

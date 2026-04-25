@@ -141,6 +141,26 @@ export class PerkUI {
         </div>
         <div class="class-bar"><div class="class-bar-fill" style="width:${pct}%"></div></div>
       `;
+      // Auto-applied tier perks from CLASS_DEFS — earned passively at
+      // each XP threshold. Rendered here so the player can SEE what
+      // they've unlocked + what's coming next, instead of these being
+      // invisible until they happen to read the patch notes.
+      const tiersWrap = document.createElement('div');
+      tiersWrap.className = 'class-tiers';
+      for (const t of def.levels) {
+        const owned = lv >= t.level;
+        const isCapstone = t.level === 5;
+        const row = document.createElement('div');
+        row.className = `class-tier-row${owned ? ' owned' : ''}${isCapstone ? ' capstone' : ''}`;
+        row.innerHTML = `
+          <span class="class-tier-tag">L${t.level}${isCapstone ? ' ★' : ''}</span>
+          <span class="class-tier-name">${t.name}</span>
+          <span class="class-tier-desc">${t.desc}</span>
+        `;
+        tiersWrap.appendChild(row);
+      }
+      section.appendChild(tiersWrap);
+      // Tree nodes earned via mastery offers — interactive picks.
       for (const node of classNodes(cid)) {
         section.appendChild(this._renderClassRow(node, lv));
       }

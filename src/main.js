@@ -606,6 +606,7 @@ const gameMenuUI = new GameMenuUI({
     playerXp = s.xp || 0;
     skills.levels = { ...(s.skills || {}) };
     classMastery.xp = { ...(s.classXp || {}) };
+    classMastery.fillMissing();
     specialPerks.unlocked = new Set(s.specialPerks || []);
     skillTree.levels = { ...(s.skillTree || {}) };
     // Full inventory restore mirrors the extraction snapshot path.
@@ -1489,6 +1490,7 @@ function restoreFromSnapshot() {
   playerXp = s.xp;
   skills.levels = { ...s.skills };
   classMastery.xp = { ...s.classXp };
+  classMastery.fillMissing();
   specialPerks.unlocked = new Set(s.specialPerks || []);
   skillTree.levels = { ...(s.skillTree || {}) };
   artifacts.owned = new Set(s.artifacts || []);
