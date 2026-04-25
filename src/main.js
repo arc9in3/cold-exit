@@ -3953,36 +3953,91 @@ function updateStealthStatus(playerInfo) {
   stealthStatusEl.textContent = txt;
 }
 
-// Fog-of-war render: enemies outside line of sight fade to near-invisible
-// ghosts. "Hearing" stat from gear widens the radius + brightens the ghost,
-// so better ear accessories let the player sense more through walls.
-// Ghost-alpha ramp when a target is out of line-of-sight. Max alpha is
-// intentionally low so wall-sensed enemies read as phantoms, not faded
-// duplicates. `GHOST_BASE_ALPHA` is the nearest-ghost floor; it fades to
-// ~0 at the edge of hearing range.
-const GHOST_NEAR_ALPHA = 0.32;   // close, just behind a wall
-const GHOST_FAR_ALPHA  = 0.06;   // at the edge of hearing range
-const GHOST_ACTIVE_BOOST = 0.12; // extra visibility when actively firing
+// Fog-of-war render. Three modes per enemy:
+//   • LoS              → full brightness, original materials.
+//   • out of LoS, sensed → fresnel-shader "ghost" — fuzzy grey outline
+//                          with a transparent body, alpha edge-driven so
+//                          the silhouette reads against a dark room.
+//   • out of LoS, beyond sense → hidden.
+// The fresnel material is cloned per enemy so per-frame opacity can be
+// driven from distance + active-state without cloning materials in hot
+// loops. Originals are cached the first time we swap a mesh into ghost
+// mode and restored on the swap back.
+const GHOST_NEAR_ALPHA = 0.55;     // close, just behind a wall
+const GHOST_FAR_ALPHA  = 0.12;     // at the edge of hearing range
+const GHOST_ACTIVE_BOOST = 0.18;   // extra visibility when actively firing
 const GHOST_BASE_RANGE = 7;
-function _applyEnemyAlpha(e, alpha) {
-  // Small-delta culling — avoid material churn when the value is steady.
-  if (e.__alpha !== undefined && Math.abs(e.__alpha - alpha) < 0.003) return;
-  e.__alpha = alpha;
-  const transparent = alpha < 0.999;
-  const mats = [e.bodyMat, e.headMat, e.legMat, e.armMat];
-  for (const m of mats) {
-    if (!m) continue;
-    m.transparent = transparent;
-    m.opacity = alpha;
-  }
-  if (e.blade) { e.blade.material.transparent = transparent; e.blade.material.opacity = alpha; }
-  if (e.gun)   { e.gun.material.transparent = transparent;   e.gun.material.opacity = alpha; }
-  if (e.shield?.mesh) {
-    e.shield.mesh.material.transparent = transparent;
-    e.shield.mesh.material.opacity = alpha;
-  }
-  e.group.visible = alpha > 0.004;
+
+function _makeGhostMaterial() {
+  return new THREE.ShaderMaterial({
+    uniforms: {
+      uColor:   { value: new THREE.Color(0xb3b8c0) },
+      uEdge:    { value: new THREE.Color(0xe2e6ee) },
+      uPower:   { value: 2.6 },
+      uOpacity: { value: 0.5 },
+    },
+    vertexShader: /* glsl */`
+      varying vec3 vNormalW;
+      varying vec3 vViewDirW;
+      void main() {
+        vec4 worldPos = modelMatrix * vec4(position, 1.0);
+        vNormalW  = normalize(mat3(modelMatrix) * normal);
+        vViewDirW = normalize(cameraPosition - worldPos.xyz);
+        gl_Position = projectionMatrix * viewMatrix * worldPos;
+      }
+    `,
+    fragmentShader: /* glsl */`
+      uniform vec3  uColor;
+      uniform vec3  uEdge;
+      uniform float uPower;
+      uniform float uOpacity;
+      varying vec3 vNormalW;
+      varying vec3 vViewDirW;
+      void main() {
+        vec3 N = normalize(vNormalW);
+        vec3 V = normalize(vViewDirW);
+        float ndv = clamp(dot(N, V), 0.0, 1.0);
+        // Fresnel rim — strong at glancing angles, near zero face-on.
+        float fres = pow(1.0 - ndv, uPower);
+        // Body fill is faint so the rim does the silhouette work; edges
+        // brighten toward a paler grey for the fuzzy-outline read.
+        vec3 col   = mix(uColor, uEdge, fres);
+        float a    = uOpacity * (0.08 + 1.05 * fres);
+        gl_FragColor = vec4(col, clamp(a, 0.0, 1.0));
+      }
+    `,
+    transparent: true,
+    depthWrite: false,
+    blending: THREE.NormalBlending,
+    side: THREE.FrontSide,
+  });
 }
+
+// Swap an enemy's renderable meshes between original materials and the
+// fresnel ghost. Caches the originals on the mesh's userData the first
+// time we visit it, so re-swaps are a flat reference assignment.
+function _setEnemyGhost(e, ghosted) {
+  if (!e.group) return;
+  const wantGhost = !!ghosted;
+  if (e.__ghosted === wantGhost) return;
+  if (wantGhost && !e.__ghostMat) e.__ghostMat = _makeGhostMaterial();
+  e.group.traverse((obj) => {
+    if (!obj.isMesh) return;
+    if (wantGhost) {
+      if (obj.userData.__origMat === undefined) obj.userData.__origMat = obj.material;
+      obj.material = e.__ghostMat;
+      obj.castShadow = false;
+      obj.userData.__origRenderOrder = obj.renderOrder;
+      obj.renderOrder = 5;   // draw on top of darker scene fill
+    } else if (obj.userData.__origMat) {
+      obj.material = obj.userData.__origMat;
+      obj.castShadow = obj.userData.__origCast !== false;
+      if (obj.userData.__origRenderOrder !== undefined) obj.renderOrder = obj.userData.__origRenderOrder;
+    }
+  });
+  e.__ghosted = wantGhost;
+}
+
 // Returns true for enemies currently in an aggressive state that the
 // player should see through walls (so they can react to incoming threats).
 function _isEnemyActive(e) {
@@ -3997,44 +4052,47 @@ function updateEnemyVisibility() {
   const from = new THREE.Vector3(px, 1.2, pz);
   const target = new THREE.Vector3();
   const everyone = [...gunmen.gunmen, ...melees.enemies];
-  // Only WALLS count as vision-occluding for the ghost fade — props
-  // (bookshelves, couches, etc.) shouldn't flip enemies into ghost
-  // form just because the proxy sits in the LoS line. The player can
-  // see over / around furniture; only closed doors + walls + elevator
-  // panels are true sight blockers here.
-  // Use the cached vision list — same membership as the old filter
-  // above but rebuilt only when obstacles change, not every frame.
+  // Only WALLS count as vision-occluding for the ghost swap — props
+  // shouldn't flip enemies into ghost form just because the proxy sits
+  // in the LoS line. The player can see over / around furniture.
   const visionBlockers = level.visionBlockers();
   for (const e of everyone) {
     if (!e.alive) {
-      // Corpses fade in quickly from whatever transparent state they were in.
-      const next = e.__alpha === undefined ? 1 : (e.__alpha + (1 - e.__alpha) * 0.3);
-      _applyEnemyAlpha(e, next);
+      // Corpses always render fully — fresnel ghost is for live enemies.
+      _setEnemyGhost(e, false);
+      e.group.visible = true;
       continue;
     }
     target.set(e.group.position.x, 1.2, e.group.position.z);
     const los = combat.hasLineOfSight(from, target, visionBlockers);
     e._occluded = !los;
-    let targetAlpha;
     if (los) {
-      targetAlpha = 1;
-    } else {
-      const d = Math.hypot(e.group.position.x - px, e.group.position.z - pz);
-      if (d >= range) targetAlpha = 0;
-      else {
-        // Smooth gradient: closer → more visible, farther → almost invisible.
-        const t = Math.max(0, Math.min(1, d / range));  // 0 near, 1 at edge
-        // Ease out — the curve holds alpha a bit longer up close before
-        // trailing off, so near-wall ghosts pop and distant ones whisper.
-        const eased = 1 - (1 - t) * (1 - t);
-        targetAlpha = nearAlpha + (GHOST_FAR_ALPHA - nearAlpha) * eased;
-        if (_isEnemyActive(e)) targetAlpha = Math.min(0.9, targetAlpha + GHOST_ACTIVE_BOOST);
-      }
+      _setEnemyGhost(e, false);
+      e.group.visible = true;
+      continue;
     }
-    // Per-frame lerp so transitions (enter LoS / leave LoS) don't snap.
-    const prev = e.__alpha === undefined ? targetAlpha : e.__alpha;
-    const smoothed = prev + (targetAlpha - prev) * 0.18;
-    _applyEnemyAlpha(e, smoothed);
+    const d = Math.hypot(e.group.position.x - px, e.group.position.z - pz);
+    if (d >= range) {
+      // Beyond hearing range — hide entirely.
+      _setEnemyGhost(e, false);
+      e.group.visible = false;
+      continue;
+    }
+    // Within hearing range, out of LoS — render as a fresnel ghost.
+    // Per-enemy opacity drives the silhouette strength: closer + active
+    // = stronger rim, farther = whisper.
+    const t = Math.max(0, Math.min(1, d / range));
+    const eased = 1 - (1 - t) * (1 - t);
+    let opacity = nearAlpha + (GHOST_FAR_ALPHA - nearAlpha) * eased;
+    if (_isEnemyActive(e)) opacity = Math.min(0.95, opacity + GHOST_ACTIVE_BOOST);
+    _setEnemyGhost(e, true);
+    e.group.visible = true;
+    if (e.__ghostMat) {
+      // Smoothly approach the target so flicker between LoS edges
+      // doesn't strobe the ghost. ~5-frame ease-in.
+      const cur = e.__ghostMat.uniforms.uOpacity.value;
+      e.__ghostMat.uniforms.uOpacity.value = cur + (opacity - cur) * 0.25;
+    }
   }
 }
 
