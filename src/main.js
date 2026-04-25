@@ -1346,6 +1346,71 @@ const _muzzlePlane = new THREE.Plane(new THREE.Vector3(0, 1, 0), 0);
 
 let playerDead = false;
 let frameCounter = 0;   // used by quality throttles (e.g. enemy LoS every other frame in low mode)
+
+// --- Per-system perf timing ------------------------------------------------
+// Lightweight timing — hand-rolled instead of bringing in stats.js, since
+// we want per-system breakdown not a single fps number. `_perf.start(key)`
+// stamps performance.now(); `_perf.end(key)` accumulates the elapsed ms
+// into a 60-frame running average. Toggle the overlay via Backquote (`)
+// or by setting window.__perf = true. Overhead per call: ~0.001ms.
+const _perf = (() => {
+  const totals = {};   // key → array of last 60 frame ms values
+  const stamps = {};   // key → start timestamp
+  const order = [];    // insertion order for stable display ordering
+  const SAMPLES = 60;
+  let visible = false;
+  let el = null;
+  function start(key) {
+    if (!visible) return;
+    stamps[key] = performance.now();
+  }
+  function end(key) {
+    if (!visible) return;
+    const t0 = stamps[key];
+    if (t0 === undefined) return;
+    const dt = performance.now() - t0;
+    let arr = totals[key];
+    if (!arr) { arr = totals[key] = []; order.push(key); }
+    arr.push(dt);
+    if (arr.length > SAMPLES) arr.shift();
+  }
+  function toggle() {
+    visible = !visible;
+    if (!el) {
+      el = document.createElement('div');
+      el.id = 'perf-overlay';
+      el.style.cssText = `
+        position: fixed; top: 12px; right: 12px; z-index: 9999;
+        background: rgba(5,6,7,0.85); color: #00e6ff;
+        font: 11px ui-monospace, Menlo, Consolas, monospace;
+        padding: 8px 10px; border: 1px solid rgba(0,230,255,0.3);
+        border-radius: 4px; pointer-events: none; min-width: 180px;
+        white-space: pre; line-height: 1.45;
+      `;
+      document.body.appendChild(el);
+    }
+    el.style.display = visible ? 'block' : 'none';
+    if (!visible) { for (const k of order) totals[k] = []; }
+  }
+  function render(fps) {
+    if (!visible || !el) return;
+    let total = 0;
+    let lines = `FPS  ${fps.toFixed(0).padStart(4)}\n`;
+    for (const k of order) {
+      const arr = totals[k];
+      if (!arr || arr.length === 0) continue;
+      let sum = 0;
+      for (let i = 0; i < arr.length; i++) sum += arr[i];
+      const avg = sum / arr.length;
+      total += avg;
+      lines += `${k.padEnd(10)} ${avg.toFixed(2).padStart(5)} ms\n`;
+    }
+    lines += `${'TOTAL'.padEnd(10)} ${total.toFixed(2).padStart(5)} ms`;
+    el.textContent = lines;
+  }
+  return { start, end, toggle, render, isVisible: () => visible };
+})();
+window.__perf = _perf;
 let levelStartSnapshot = null;
 
 function snapshotItem(item) {
@@ -1640,6 +1705,18 @@ window.addEventListener('keydown', (ev) => {
     setVisible(hud.style.display === 'none');
   });
 })();
+
+// Dev key — Backquote toggles the per-system perf overlay. Off by
+// default; tap once to start sampling, again to hide. Form inputs are
+// guarded out by the input module's focus check so typing in a name
+// field doesn't accidentally flip it.
+window.addEventListener('keydown', (ev) => {
+  if (ev.code !== 'Backquote') return;
+  const tag = (document.activeElement?.tagName || '').toLowerCase();
+  if (tag === 'input' || tag === 'textarea') return;
+  ev.preventDefault();
+  _perf.toggle();
+});
 
 // Dev key — F3 dumps the current `tunables.lighting` block to the
 // console in copy-paste-ready form so you can iterate on values in
@@ -4055,26 +4132,31 @@ function _isEnemyActive(e) {
   return s === 'firing' || s === 'alerted' || s === 'chase'
     || s === 'windup' || s === 'swing' || s === 'recovery';
 }
+// Persistent scratch values for updateEnemyVisibility — recreating
+// these every frame ran roughly 60 × 2 Vector3 allocs/sec at 60fps,
+// plus the spread allocation for `everyone`.
+const _visFrom = new THREE.Vector3();
+const _visTarget = new THREE.Vector3();
 function updateEnemyVisibility() {
   const range = GHOST_BASE_RANGE + (derivedStats.hearingRange || 0);
   const nearAlpha = Math.min(0.85, GHOST_NEAR_ALPHA + (derivedStats.hearingAlpha || 0));
   const px = player.mesh.position.x, pz = player.mesh.position.z;
-  const from = new THREE.Vector3(px, 1.2, pz);
-  const target = new THREE.Vector3();
-  const everyone = [...gunmen.gunmen, ...melees.enemies];
-  // Only WALLS count as vision-occluding for the ghost swap — props
-  // shouldn't flip enemies into ghost form just because the proxy sits
-  // in the LoS line. The player can see over / around furniture.
+  _visFrom.set(px, 1.2, pz);
+  // Walk both enemy lists by index to avoid the spread-allocation that
+  // [...gunmen.gunmen, ...melees.enemies] used to do per frame.
+  const gunmenList = gunmen.gunmen;
+  const meleesList = melees.enemies;
   const visionBlockers = level.visionBlockers();
-  for (const e of everyone) {
+  for (let i = 0, total = gunmenList.length + meleesList.length; i < total; i++) {
+    const e = i < gunmenList.length ? gunmenList[i] : meleesList[i - gunmenList.length];
     if (!e.alive) {
       // Corpses always render fully — fresnel ghost is for live enemies.
       _setEnemyGhost(e, false);
       e.group.visible = true;
       continue;
     }
-    target.set(e.group.position.x, 1.2, e.group.position.z);
-    const los = combat.hasLineOfSight(from, target, visionBlockers);
+    _visTarget.set(e.group.position.x, 1.2, e.group.position.z);
+    const los = combat.hasLineOfSight(_visFrom, _visTarget, visionBlockers);
     e._occluded = !los;
     if (los) {
       _setEnemyGhost(e, false);
@@ -4188,8 +4270,29 @@ function _addOcclusionHits(from, target, blockers, outSet) {
   }
 }
 
+// Reused per frame in updateWallOcclusion. The fan offset arrays are
+// constants; constructing them in the function body allocated 11
+// objects per frame (4 enemy fan + 7 cam offsets). _nextFaded is
+// cleared at the start of each call so we can reuse the same Set.
+const _ENEMY_FAN_OFFSETS = [
+  { dx:  0.00, y: 1.75, dz:  0.00 },   // head
+  { dx:  0.00, y: 1.10, dz:  0.00 },   // chest
+  { dx:  0.40, y: 1.20, dz:  0.00 },   // right shoulder
+  { dx: -0.40, y: 1.20, dz:  0.00 },   // left shoulder
+];
+const _CAM_CAST_OFFSETS = [
+  { x:  0.00, y: 1.80, z:  0.00 },   // head centerline
+  { x:  0.00, y: 2.20, z:  0.00 },   // tall-wall case
+  { x:  0.45, y: 1.20, z:  0.00 },   // right shoulder
+  { x: -0.45, y: 1.20, z:  0.00 },   // left shoulder
+  { x:  0.00, y: 1.20, z:  0.45 },   // front of chest
+  { x:  0.00, y: 1.20, z: -0.45 },   // back of chest
+  { x:  0.00, y: 0.30, z:  0.00 },   // shins
+];
+const _nextFaded = new Set();
 function updateWallOcclusion() {
-  const nextFaded = new Set();
+  _nextFaded.clear();
+  const nextFaded = _nextFaded;
   if (level.obstacles && level.obstacles.length && !playerDead) {
     const px = player.mesh.position.x;
     const pz = player.mesh.position.z;
@@ -4211,14 +4314,12 @@ function updateWallOcclusion() {
     //    All of this is still gated behind the quality flag.
     if (qualityFlags.wallOcclusionForEnemies) {
       const idleRangeSq = OCCL_ENEMY_RANGE * OCCL_ENEMY_RANGE;
-      const enemyFan = [
-        { dx:  0.00, y: 1.75, dz:  0.00 },   // head
-        { dx:  0.00, y: 1.10, dz:  0.00 },   // chest
-        { dx:  0.40, y: 1.20, dz:  0.00 },   // right shoulder
-        { dx: -0.40, y: 1.20, dz:  0.00 },   // left shoulder
-      ];
-      const allEnemies = [...gunmen.gunmen, ...melees.enemies];
-      for (const e of allEnemies) {
+      // Walk both lists by index — avoids the [...gunmen.gunmen, ...melees.enemies]
+      // spread allocation that ran every frame.
+      const gunmenList = gunmen.gunmen;
+      const meleesList = melees.enemies;
+      for (let i = 0, total = gunmenList.length + meleesList.length; i < total; i++) {
+        const e = i < gunmenList.length ? gunmenList[i] : meleesList[i - gunmenList.length];
         if (!e.alive) continue;
         const ex = e.group.position.x, ez = e.group.position.z;
         // Active-state detection. Gunman state machine uses strings
@@ -4231,7 +4332,8 @@ function updateWallOcclusion() {
           const d2 = (ex - px) * (ex - px) + (ez - pz) * (ez - pz);
           if (d2 > idleRangeSq) continue;
         }
-        for (const off of enemyFan) {
+        for (let k = 0; k < _ENEMY_FAN_OFFSETS.length; k++) {
+          const off = _ENEMY_FAN_OFFSETS[k];
           _occlTargetPt.set(ex + off.dx, off.y, ez + off.dz);
           _addOcclusionHits(camera.position, _occlTargetPt, level.obstacles, nextFaded);
         }
@@ -4256,16 +4358,8 @@ function updateWallOcclusion() {
     //    or the outer edge of the body while moving / attacking,
     //    which is exactly the "wall transparency stopped working
     //    during melee / locomotion" symptom.
-    const camCastOffsets = [
-      { x:  0.0, y: 1.8, z:  0.0 },   // head centerline
-      { x:  0.0, y: 2.2, z:  0.0 },   // tall-wall case
-      { x:  0.45, y: 1.2, z:  0.0 },  // right shoulder
-      { x: -0.45, y: 1.2, z:  0.0 },  // left shoulder
-      { x:  0.0, y: 1.2, z:  0.45 },  // front of chest
-      { x:  0.0, y: 1.2, z: -0.45 },  // back of chest
-      { x:  0.0, y: 0.3, z:  0.0 },   // shins — catches low walls / desks
-    ];
-    for (const off of camCastOffsets) {
+    for (let i = 0; i < _CAM_CAST_OFFSETS.length; i++) {
+      const off = _CAM_CAST_OFFSETS[i];
       _occlTargetPt.set(px + off.x, off.y, pz + off.z);
       _addOcclusionHits(camera.position, _occlTargetPt, level.obstacles, nextFaded);
     }
@@ -5242,6 +5336,7 @@ function tick() {
   frameCounter = (frameCounter + 1) | 0;
   const rawDt = clock.getDelta();           // real elapsed since last frame
   let dt = Math.min(rawDt, 1 / 30);         // clamped for physics stability
+  _perf.start('frame');
   // Hit-stop — brief world-freeze on strong hits / kills. Timer runs
   // on rawDt so it counts down even while gameplay dt is zeroed out.
   if (hitStopT > 0) {
@@ -5287,7 +5382,13 @@ function tick() {
   tickThrowableCooldowns(rawDt);
 
   if (paused || inventoryUI.visible || customizeUI.isOpen() || lootUI.isOpen() || shopUI.isOpen() || perkUI.isOpen() || gameMenuUI.isOpen() || playerDead) {
-    _safeRender(rawDt);
+    // Modal pause — scene is frozen, so all the per-frame
+    // recomputation (LoS mask raycasts, bloom mip chain, finisher
+    // chroma/grain) is wasted work. Cut to a direct render and
+    // suppress the LoS update for the rest of the pause.
+    _safeRender(rawDt, /* paused */ true);
+    _perf.end('frame');
+    if (_perf.isVisible()) _perf.render(rawDt > 0 ? 1 / rawDt : 0);
     requestAnimationFrame(tick);
     return;
   }
@@ -5627,9 +5728,13 @@ function tick() {
   // Run enemy visibility every frame by default; in low-quality mode
   // halve the cadence since the LoS raycasts are expensive.
   if (qualityFlags.enemyVisibilityEveryFrame || (frameCounter & 1) === 0) {
+    _perf.start('vis');
     updateEnemyVisibility();
+    _perf.end('vis');
   }
+  _perf.start('wallOccl');
   updateWallOcclusion();
+  _perf.end('wallOccl');
   if (creditTextEl) {
     // Include persistent chips alongside run credits so the meta
     // currency is always visible. Format: "credits • chips⚫"
@@ -5692,6 +5797,10 @@ function tick() {
   }
 
   _safeRender(rawDt);
+  _perf.end('frame');
+  // FPS uses raw dt (real wall-clock between frames), not the clamped
+  // gameplay dt. clamp at 1 to avoid divide-by-tiny on first frame.
+  if (_perf.isVisible()) _perf.render(rawDt > 0 ? 1 / rawDt : 0);
   requestAnimationFrame(tick);
 }
 
@@ -5700,26 +5809,41 @@ function tick() {
 // renderer.render() if the postFx composer throws. Without the
 // fallback, a single bad composer frame would leave the canvas black
 // until the next reload.
-function _safeRender(rawDt) {
+function _safeRender(rawDt, modalPaused = false) {
   if (_ctxLost) return;
   try {
     // Refresh the LoS mask before the composer reads it. Skip in low
     // quality mode (direct render bypasses the composer + mask), while
     // the player is dead, or before a level exists (title screen):
     // either way we toggle the post-fx pass off so a stale mask
-    // texture doesn't leave the menu darkened.
+    // texture doesn't leave the menu darkened. Modal pauses also skip
+    // since the scene is frozen — no recomputation needed.
     const losActive = qualityFlags.postFx && !playerDead
+                   && !modalPaused
                    && level && level.visionBlockers
                    && player && player.mesh
                    && !mainMenuUI?.isOpen?.();
     if (losActive) {
+      _perf.start('losMask');
       losMask.update(player.mesh.position, level.visionBlockers());
       postFx.setLosMask(losMask.texture, true);
-    } else {
+      _perf.end('losMask');
+    } else if (!modalPaused) {
       postFx.setLosMask(losMask.texture, false);
     }
-    if (qualityFlags.postFx) postFx.render(rawDt);
-    else renderer.render(scene, camera);
+    // During modal pauses use a direct render path — bypasses the
+    // bloom mip chain + finisher chroma/grain, which is the single
+    // biggest GPU cost per frame. The pause UI typically covers most
+    // of the screen so the visual delta is minimal.
+    _perf.start('render');
+    if (modalPaused) {
+      renderer.render(scene, camera);
+    } else if (qualityFlags.postFx) {
+      postFx.render(rawDt);
+    } else {
+      renderer.render(scene, camera);
+    }
+    _perf.end('render');
   } catch (err) {
     console.warn('[gfx] postFx render threw — falling back to direct render', err);
     qualityFlags.postFx = false;
