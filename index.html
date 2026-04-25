@@ -586,7 +586,7 @@
       font-family: var(--ce-font-tech);
     }
     #menu-card {
-      width: 380px; max-width: 92vw;
+      width: 480px; max-width: 92vw; max-height: 88vh; overflow-y: auto;
       background: var(--ce-navy);
       border: 1px solid var(--ce-ice-25);
       border-radius: 2px;
@@ -651,6 +651,61 @@
       border-color: var(--ce-red);
       color: #ffbaba;
       background: rgba(255, 58, 58, 0.10);
+    }
+    /* Keybind list — three columns: action label, current keyboard
+       binding, current gamepad binding. Each binding is a button so
+       click-to-rebind works without a separate "edit" affordance. */
+    .keybinds-list {
+      display: flex; flex-direction: column;
+      gap: 2px;
+      margin-bottom: 8px;
+    }
+    .keybind-group {
+      font-size: 10px; letter-spacing: 2.5px; text-transform: uppercase;
+      color: var(--ce-ice); font-weight: 700;
+      padding: 8px 0 4px;
+      border-bottom: 1px solid var(--ce-ice-25);
+      margin-bottom: 4px;
+    }
+    .keybind-group:not(:first-child) { margin-top: 6px; }
+    .keybind-row {
+      display: grid;
+      grid-template-columns: 1fr 100px 100px;
+      gap: 6px;
+      align-items: center;
+      padding: 4px 0;
+    }
+    .keybind-label {
+      font-size: 11px; color: var(--ce-soft);
+      letter-spacing: 1.5px; text-transform: uppercase;
+    }
+    .keybind-cell {
+      font-family: var(--ce-font-tech);
+      font-size: 11px;
+      letter-spacing: 1.5px;
+      text-transform: uppercase;
+      padding: 6px 8px;
+      background: var(--ce-black);
+      color: var(--ce-white);
+      border: 1px solid var(--ce-soft-15);
+      border-radius: 2px;
+      cursor: pointer;
+      text-align: center;
+      transition: border-color 0.12s, background 0.12s, color 0.12s;
+    }
+    .keybind-cell:hover {
+      border-color: var(--ce-ice);
+      background: var(--ce-ice-10);
+    }
+    .keybind-cell.keybind-capturing {
+      border-color: var(--ce-amber, #e6b94a);
+      color: var(--ce-amber, #e6b94a);
+      background: rgba(230,185,74,0.10);
+      animation: keybind-pulse 1.0s ease-in-out infinite;
+    }
+    @keyframes keybind-pulse {
+      0%, 100% { opacity: 1; }
+      50%      { opacity: 0.55; }
     }
     /* Form rows inside menu/settings modals — restyled to the style
        guide. Labels use soft-grey tech-mono, values pop in ice-blue,
@@ -3571,6 +3626,7 @@
     <div class="hud-row"><span class="hud-group">Combat</span><b>LMB</b> fire / melee combo &middot; <b>RMB</b> ADS / block &middot; <b>F</b> quick melee / execute &middot; <b>block + LMB</b> parry</div>
     <div class="hud-row"><span class="hud-group">Gear</span><b>1-4</b> weapon slot &middot; <b>X</b> cycle weapons &middot; <b>R</b> reload &middot; <b>H</b> medkit &middot; <b>5-8</b> quickbar (any usable: weapon swap / throwable / consumable) &middot; <b>T</b> toggle lights</div>
     <div class="hud-row"><span class="hud-group">Interact</span><b>E</b> pick up / interact / shop &middot; <b>Tab</b> inventory &middot; <b>K</b> perks &middot; <b>Esc</b> menu</div>
+    <div class="hud-row"><span class="hud-group">Rebind</span>All keys + Xbox-style gamepad bindings can be remapped under <b>Esc → Settings → Keybinds</b>.</div>
     <div id="hud-stats"></div>
   </div>
   <div id="hud-bl">

@@ -1,5 +1,9 @@
-// Esc game menu: Resume, Settings (volume), Save, Load, Quit.
+// Esc game menu: Resume, Settings (volume + keybinds), Save, Load, Quit.
 // Save/Load round-trip through localStorage under a single key.
+import { ACTION_GROUPS, getKeyboardBinding, getGamepadBinding,
+         setKeyboardBinding, setGamepadBinding,
+         displayKeyboard, displayGamepad,
+         resetToDefaults, captureNextGamepadInput } from './keybinds.js';
 
 const SAVE_KEY = 'tacticalrogue_save_v1';
 
@@ -44,6 +48,15 @@ export class GameMenuUI {
     this.view = 'root';
     this.root.style.display = this.visible ? 'flex' : 'none';
     if (this.visible) this.render();
+  }
+  // Show pause menu directly on the keybinds page — used by the
+  // settings → keybinds button so the player doesn't have to click
+  // through the root menu.
+  showKeybinds() {
+    this.visible = true;
+    this.view = 'keybinds';
+    this.root.style.display = 'flex';
+    this.render();
   }
   isOpen() { return this.visible; }
   hide() { this.visible = false; this.root.style.display = 'none'; }
@@ -187,7 +200,115 @@ export class GameMenuUI {
     });
     this.bodyEl.appendChild(styleRow);
 
+    this.bodyEl.appendChild(this._btn('Keybinds', () => { this.view = 'keybinds'; this.render(); }));
     this.bodyEl.appendChild(this._btn('Back', () => { this.view = 'root'; this.render(); }));
+  }
+
+  // Keybinds page — every action shown with its current keyboard +
+  // gamepad binding. Click a binding cell to enter capture mode; the
+  // next keypress (or gamepad button / axis push) becomes the new
+  // binding. Press Escape during capture to cancel without changing.
+  _renderKeybinds() {
+    this.titleEl.textContent = 'Keybinds';
+    this.bodyEl.innerHTML = '';
+
+    const note = document.createElement('div');
+    note.className = 'menu-row-hint';
+    note.style.marginBottom = '6px';
+    note.textContent = 'Click a binding to rebind. Press Escape during capture to cancel. Mouse buttons (LMB / RMB) are not rebindable in this build.';
+    this.bodyEl.appendChild(note);
+
+    const wrap = document.createElement('div');
+    wrap.className = 'keybinds-list';
+    this.bodyEl.appendChild(wrap);
+
+    const renderRow = (action, label) => {
+      const row = document.createElement('div');
+      row.className = 'keybind-row';
+      row.innerHTML = `
+        <span class="keybind-label">${label}</span>
+        <button type="button" class="keybind-cell keybind-kb">${displayKeyboard(getKeyboardBinding(action))}</button>
+        <button type="button" class="keybind-cell keybind-gp">${displayGamepad(getGamepadBinding(action))}</button>
+      `;
+      const kb = row.querySelector('.keybind-kb');
+      const gp = row.querySelector('.keybind-gp');
+      kb.addEventListener('click', () => this._captureKeyboard(action, kb));
+      gp.addEventListener('click', () => this._captureGamepad(action, gp));
+      return row;
+    };
+
+    for (const group of ACTION_GROUPS) {
+      const heading = document.createElement('div');
+      heading.className = 'keybind-group';
+      heading.textContent = group.title;
+      wrap.appendChild(heading);
+      for (const [action, label] of group.items) {
+        wrap.appendChild(renderRow(action, label));
+      }
+    }
+
+    const btnRow = document.createElement('div');
+    btnRow.className = 'menu-row';
+    btnRow.style.marginTop = '8px';
+    btnRow.appendChild(this._btn('Reset to Defaults', () => {
+      resetToDefaults();
+      this.render();
+      this._flash('Keybinds reset.');
+    }));
+    btnRow.appendChild(this._btn('Back', () => { this.view = 'settings'; this.render(); }));
+    this.bodyEl.appendChild(btnRow);
+  }
+
+  _captureKeyboard(action, cellEl) {
+    if (this._capturing) return;
+    this._capturing = true;
+    cellEl.textContent = '… press a key';
+    cellEl.classList.add('keybind-capturing');
+    const onKey = (e) => {
+      e.preventDefault();
+      e.stopPropagation();
+      window.removeEventListener('keydown', onKey, true);
+      this._capturing = false;
+      if (e.code === 'Escape') {
+        // Cancel.
+        cellEl.classList.remove('keybind-capturing');
+        cellEl.textContent = displayKeyboard(getKeyboardBinding(action));
+        return;
+      }
+      setKeyboardBinding(action, e.code);
+      cellEl.classList.remove('keybind-capturing');
+      // Re-render the whole list since reassigning a code clears any
+      // duplicate elsewhere — neighbour rows need to refresh too.
+      this.render();
+    };
+    window.addEventListener('keydown', onKey, true);
+  }
+
+  async _captureGamepad(action, cellEl) {
+    if (this._capturing) return;
+    this._capturing = true;
+    cellEl.textContent = '… press a button';
+    cellEl.classList.add('keybind-capturing');
+    // Race the gamepad capture against an Escape keypress so the user
+    // can bail out without a connected pad.
+    const escPromise = new Promise((resolve) => {
+      const onKey = (e) => {
+        if (e.code === 'Escape') {
+          window.removeEventListener('keydown', onKey, true);
+          resolve('cancel');
+        }
+      };
+      window.addEventListener('keydown', onKey, true);
+    });
+    const result = await Promise.race([
+      captureNextGamepadInput(8000),
+      escPromise,
+    ]);
+    this._capturing = false;
+    if (result && result !== 'cancel') {
+      setGamepadBinding(action, result);
+    }
+    this.render();
   }
 
   _flash(text) {
@@ -245,6 +366,7 @@ export class GameMenuUI {
   render() {
     if (this.view === 'settings') this._renderSettings();
     else if (this.view === 'leaderboard') this._renderLeaderboard();
+    else if (this.view === 'keybinds') this._renderKeybinds();
     else this._renderRoot();
   }
 }

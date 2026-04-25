@@ -1,10 +1,17 @@
 import * as THREE from 'three';
 import { tunables } from './tunables.js';
+import { ACTIONS, actionsForKey, actionsForGamepadCode } from './keybinds.js';
 
-// Centralised input. Buffers edge events (space/ctrl/E presses, mouse clicks)
-// so the game loop can consume them once per frame, and exposes held-state for
-// movement. Raw mouseNDC + a reusable raycaster are exposed for richer aim
-// resolution in main.
+// Centralised input. Buffers edge events (dash/melee/E presses, mouse clicks)
+// so the game loop can consume them once per frame, and exposes held-state
+// for movement. Raw mouseNDC + a reusable raycaster are exposed for richer
+// aim resolution in main.
+//
+// Internally we no longer compare against `e.code` — keypresses resolve to
+// abstract actions through src/keybinds.js. The same routing covers gamepad
+// buttons + sticks, polled in sample(). Callers (main.js) see the same
+// edge-flag / held-state shape they always did, so this refactor is
+// transparent to everything downstream.
 export class Input {
   constructor(domEl, camera, groundPlane) {
     this.dom = domEl;
@@ -14,14 +21,20 @@ export class Input {
     this.mouseNDC = new THREE.Vector2(0, 0);
     this.hasAim = false;
 
-    this.keys = new Set();
+    // Held actions split by input source so a gamepad release can't
+    // erroneously drop an action that the keyboard is still holding
+    // (and vice-versa). The public read uses `_isHeld(action)` which
+    // is "in either set". Edge events fire on either source's rising
+    // edge, but only once per discrete press (per source).
+    this._kbHeld = new Set();
+    this._gpadHeld = new Set();
     this.mouseButtons = new Set();
 
     // Edge events consumed once per frame.
     this.spacePressed = false;
     this.spaceDoublePressed = false;
     this.crouchPressed = false;
-    this.crouchToggled = false;       // toggle state flipped on every C tap
+    this.crouchToggled = false;
     this.attackPressed = false;
     this.interactPressed = false;
     this.meleePressed = false;
@@ -34,7 +47,11 @@ export class Input {
     this.actionSlotPressed = -1;
     this.weaponSwitch = null;
     this.weaponCycle = false;
+    this.handednessToggle = false;
     this.lastSpaceTime = -999;
+
+    // (gamepad edge tracking now uses _gpadHeld vs the freshly polled
+    // `nowHeld` set inside _pollGamepad — no separate prev-set needed.)
 
     this._onKeyDown = this._onKeyDown.bind(this);
     this._onKeyUp = this._onKeyUp.bind(this);
@@ -49,130 +66,105 @@ export class Input {
     window.addEventListener('blur', this._onBlur);
     domEl.addEventListener('mousemove', this._onMouseMove);
     domEl.addEventListener('mousedown', this._onMouseDown);
-    // Capture mouseup on window rather than the canvas so a release
-    // that happens OVER a modal overlay still clears the held-state.
-    // Prior canvas-only binding let a popup (level-up draft, looting,
-    // etc.) swallow the release and leave attackHeld / adsHeld stuck
-    // true indefinitely.
     window.addEventListener('mouseup', this._onMouseUp);
-    // Block the browser context menu anywhere in the tab — the game
-    // uses RMB for ADS and having the menu pop up mid-aim was jarring.
-    // Canvas-only binding let modal overlays leak RMB back to the OS.
     window.addEventListener('contextmenu', this._onContextMenu);
   }
 
-  // Force-clear transient click state. Call when opening a modal /
-  // popup so a click that *triggers* the popup doesn't also register
-  // as a game attack, and a stuck button from focus shenanigans can
-  // be reset manually.
   clearMouseState() {
     this.mouseButtons.clear();
     this.attackPressed = false;
   }
 
+  // Translate a single action firing into the correct edge / held flag.
+  // Movement actions just live in the held set; everything else flips
+  // the matching flag below. Centralising this here means keydown and
+  // gamepad-press paths share the same dispatch — no second copy of
+  // the action → flag table to drift.
+  _fireAction(action) {
+    switch (action) {
+      case ACTIONS.DASH: {
+        const now = performance.now() / 1000;
+        if (now - this.lastSpaceTime <= tunables.dash.doubleTapWindow) {
+          this.spaceDoublePressed = true;
+        } else {
+          this.spacePressed = true;
+        }
+        this.lastSpaceTime = now;
+        break;
+      }
+      case ACTIONS.CROUCH_TOGGLE:
+        this.crouchPressed = true;
+        this.crouchToggled = !this.crouchToggled;
+        break;
+      case ACTIONS.INTERACT:      this.interactPressed = true; break;
+      case ACTIONS.MELEE:         this.meleePressed = true; break;
+      case ACTIONS.RELOAD:        this.reloadPressed = true; break;
+      case ACTIONS.HEAL:          this.healPressed = true; break;
+      case ACTIONS.LIGHT_TOGGLE:  this.lightToggled = true; break;
+      case ACTIONS.SHOULDER_SWAP: this.handednessToggle = true; break;
+      case ACTIONS.WEAPON_CYCLE:  this.weaponCycle = true; break;
+      case ACTIONS.INVENTORY:     this.inventoryToggled = true; break;
+      case ACTIONS.PERKS:         this.perksToggled = true; break;
+      case ACTIONS.MENU:          this.menuToggled = true; break;
+      case ACTIONS.WEAPON_1: this.weaponSwitch = 0; break;
+      case ACTIONS.WEAPON_2: this.weaponSwitch = 1; break;
+      case ACTIONS.WEAPON_3: this.weaponSwitch = 2; break;
+      case ACTIONS.WEAPON_4: this.weaponSwitch = 3; break;
+      case ACTIONS.QUICKSLOT_1: this.actionSlotPressed = 0; break;
+      case ACTIONS.QUICKSLOT_2: this.actionSlotPressed = 1; break;
+      case ACTIONS.QUICKSLOT_3: this.actionSlotPressed = 2; break;
+      case ACTIONS.QUICKSLOT_4: this.actionSlotPressed = 3; break;
+      case ACTIONS.ATTACK:      this.attackPressed = true; break;
+      // ADS / movement / sprint resolve from heldActions in sample();
+      // no edge flag needed.
+    }
+  }
+
   _onKeyDown(e) {
     if (e.repeat) return;
     // Don't eat keys while the player is typing in a form element
-    // (player-name input, leaderboard search, etc.). Without this,
-    // typing "WASD" in a text field moves the character and
-    // preventDefault swallows the letters before they reach the
-    // input. Tab/Escape still pass through — those are modal nav
-    // and the menu system already handles them correctly.
+    // (player-name input, leaderboard search, etc.). Tab/Escape still
+    // pass through — those are modal nav.
     const ae = document.activeElement;
     if (ae && (ae.tagName === 'INPUT' || ae.tagName === 'TEXTAREA' || ae.isContentEditable)) {
       if (e.code !== 'Tab' && e.code !== 'Escape') return;
     }
 
+    // Keep WASD/Space preventDefault even when unbound — in case the
+    // user un-bound movement we still don't want the page to scroll.
     if (['KeyW', 'KeyA', 'KeyS', 'KeyD', 'Space'].includes(e.code)) {
       e.preventDefault();
     }
 
-    if (e.code === 'Space') {
-      const now = performance.now() / 1000;
-      if (now - this.lastSpaceTime <= tunables.dash.doubleTapWindow) {
-        this.spaceDoublePressed = true;
-      } else {
-        this.spacePressed = true;
-      }
-      this.lastSpaceTime = now;
-    }
-
-    // Crouch is a toggle on C — press once to crouch, again to stand.
-    if (e.code === 'KeyC') {
-      this.crouchPressed = true;
-      this.crouchToggled = !this.crouchToggled;
+    const actions = actionsForKey(e.code);
+    if (actions.length) {
       e.preventDefault();
-    }
-
-    if (e.code === 'KeyE') {
-      this.interactPressed = true;
-      e.preventDefault();
-    }
-
-    if (e.code === 'KeyF') {
-      this.meleePressed = true;
-      e.preventDefault();
-    }
-
-    if (e.code.startsWith('Digit') || e.code.startsWith('Numpad')) {
-      const suffix = e.code.startsWith('Digit') ? e.code.slice(5) : e.code.slice(6);
-      const n = parseInt(suffix, 10);
-      if (n >= 5 && n <= 8) {
-        this.actionSlotPressed = n - 5;
-        e.preventDefault();
-      } else if (n >= 1 && n <= 4) {
-        this.weaponSwitch = n - 1;
-        e.preventDefault();
+      for (const a of actions) {
+        // Edge fires only when the action transitions from no-source-
+        // held to keyboard-held. Without checking the gamepad set too,
+        // a player holding the same action on both sources would get
+        // duplicate edge fires.
+        const wasHeld = this._kbHeld.has(a) || this._gpadHeld.has(a);
+        this._kbHeld.add(a);
+        if (!wasHeld) this._fireAction(a);
       }
     }
-
-    // Q swaps the player's firing shoulder (right-handed ↔ left-handed)
-    // so players can peek/fire around a corner from either side.
-    if (e.code === 'KeyQ') {
-      this.handednessToggle = true;
-      e.preventDefault();
-    }
-    // Weapon cycle moved to X so Q is free for shoulder swap.
-    if (e.code === 'KeyX') {
-      this.weaponCycle = true;
-      e.preventDefault();
-    }
-
-    if (e.code === 'Tab') {
-      this.inventoryToggled = true;
-      e.preventDefault();
-    }
-
-    if (e.code === 'KeyK') {
-      this.perksToggled = true;
-      e.preventDefault();
-    }
-
-    if (e.code === 'Escape') {
-      this.menuToggled = true;
-      e.preventDefault();
-    }
-
-    if (e.code === 'KeyR') {
-      this.reloadPressed = true;
-      e.preventDefault();
-    }
-
-    if (e.code === 'KeyT') {
-      this.lightToggled = true;
-      e.preventDefault();
-    }
-
-    if (e.code === 'KeyH') {
-      this.healPressed = true;
-      e.preventDefault();
-    }
-
-    this.keys.add(e.code);
   }
 
-  _onKeyUp(e) { this.keys.delete(e.code); }
-  _onBlur() { this.keys.clear(); this.mouseButtons.clear(); }
+  _onKeyUp(e) {
+    const actions = actionsForKey(e.code);
+    for (const a of actions) this._kbHeld.delete(a);
+  }
+
+  _onBlur() {
+    this._kbHeld.clear();
+    this._gpadHeld.clear();
+    this.mouseButtons.clear();
+  }
+
+  _isHeld(action) {
+    return this._kbHeld.has(action) || this._gpadHeld.has(action);
+  }
 
   _onMouseMove(e) {
     const rect = this.dom.getBoundingClientRect();
@@ -187,8 +179,6 @@ export class Input {
   }
   _onMouseUp(e) { this.mouseButtons.delete(e.button); }
 
-  // Raycast the cursor against the given meshes; fall back to the ground plane.
-  // Returns { point, zone, owner } — zone/owner are null on non-body hits.
   computeAim(targetMeshes) {
     if (!this.hasAim) return { point: null, zone: null, owner: null };
     this.raycaster.setFromCamera(this.mouseNDC, this.camera);
@@ -212,15 +202,76 @@ export class Input {
     return { point: null, zone: null, owner: null };
   }
 
-  sample() {
-    const move = { x: 0, y: 0 };
-    if (this.keys.has('KeyW')) move.y += 1;
-    if (this.keys.has('KeyS')) move.y -= 1;
-    if (this.keys.has('KeyD')) move.x += 1;
-    if (this.keys.has('KeyA')) move.x -= 1;
+  // Poll all connected gamepads and translate the current button /
+  // axis state into the held-action set. Edges fire actions exactly
+  // once per press by diffing against the previous frame. Sticks
+  // contribute to MOVE_* via axis bindings (handled in sample's
+  // movement resolution) and also feed any axis bindings registered
+  // for non-movement actions.
+  _pollGamepad() {
+    const pads = (navigator.getGamepads ? navigator.getGamepads() : []) || [];
+    const pad = Array.from(pads).find(p => p);
+    if (!pad) {
+      // No pad connected — clear gamepad-held set so we don't carry
+      // phantom held actions if the pad disconnects mid-press.
+      this._gpadHeld.clear();
+      return;
+    }
+    const nowHeld = new Set();
+    // Buttons
+    for (let i = 0; i < pad.buttons.length; i++) {
+      if (!pad.buttons[i]) continue;
+      const pressed = pad.buttons[i].value > 0.5 || pad.buttons[i].pressed;
+      if (!pressed) continue;
+      for (const a of actionsForGamepadCode(`btn:${i}`)) nowHeld.add(a);
+    }
+    // Axes — past 0.5 magnitude counts as held in that direction.
+    for (let i = 0; i < pad.axes.length; i++) {
+      const v = pad.axes[i];
+      if (Math.abs(v) <= 0.5) continue;
+      const code = v > 0 ? `axisP:${i}` : `axisN:${i}`;
+      for (const a of actionsForGamepadCode(code)) nowHeld.add(a);
+    }
+    // Edge fire: actions newly held by the pad that no source was
+    // holding before. Suppresses duplicate fires when the keyboard
+    // already had this action down.
+    for (const a of nowHeld) {
+      const wasHeld = this._kbHeld.has(a) || this._gpadHeld.has(a);
+      if (!wasHeld) this._fireAction(a);
+    }
+    // Replace the gamepad-held set wholesale; release of a pad button
+    // only drops the gamepad source — keyboard hold (in _kbHeld) is
+    // untouched and continues to keep the action live for sample().
+    this._gpadHeld = nowHeld;
+  }
 
-    const sprintHeld = this.keys.has('ShiftLeft') || this.keys.has('ShiftRight');
+  sample() {
+    this._pollGamepad();
+
+    // Resolve movement vector. WASD and gamepad MOVE_* bindings both
+    // contribute to the held-action sets; reading via _isHeld unifies
+    // them. Analog stick magnitude is then read directly so the
+    // player can walk, not just sprint, when leaning the stick partway.
+    const move = { x: 0, y: 0 };
+    if (this._isHeld(ACTIONS.MOVE_FORWARD))  move.y += 1;
+    if (this._isHeld(ACTIONS.MOVE_BACKWARD)) move.y -= 1;
+    if (this._isHeld(ACTIONS.MOVE_RIGHT))    move.x += 1;
+    if (this._isHeld(ACTIONS.MOVE_LEFT))     move.x -= 1;
+    const pads = (navigator.getGamepads ? navigator.getGamepads() : []) || [];
+    const pad = Array.from(pads).find(p => p);
+    if (pad && pad.axes.length >= 2) {
+      const ax = pad.axes[0], ay = pad.axes[1];
+      const dz = 0.18;
+      if (Math.abs(ax) > dz || Math.abs(ay) > dz) {
+        move.x = ax;
+        move.y = -ay;  // pad Y is inverted relative to forward
+      }
+    }
+
+    const sprintHeld = this._isHeld(ACTIONS.SPRINT);
     const crouchHeld = this.crouchToggled;
+    const adsFromAction = this._isHeld(ACTIONS.ADS);
+    const attackFromAction = this._isHeld(ACTIONS.ATTACK);
 
     const out = {
       move,
@@ -230,8 +281,8 @@ export class Input {
       spaceDoublePressed: this.spaceDoublePressed,
       crouchPressed: this.crouchPressed,
       attackPressed: this.attackPressed,
-      attackHeld: this.mouseButtons.has(0),
-      adsHeld: this.mouseButtons.has(2),
+      attackHeld: this.mouseButtons.has(0) || attackFromAction,
+      adsHeld: this.mouseButtons.has(2) || adsFromAction,
       interactPressed: this.interactPressed,
       meleePressed: this.meleePressed,
       inventoryToggled: this.inventoryToggled,
