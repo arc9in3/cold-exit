@@ -4082,8 +4082,12 @@ function onProjectileExplode(pos, explosion, owner, p) {
   // spawnExplosionFx (which allocates 16+ meshes + a PointLight per
   // call and causes the hitch).
   if (p?._sniperShot) {
-    const dx = player.body.position.x - pos.x;
-    const dz = player.body.position.z - pos.z;
+    // player.body is a child mesh of the rig group; its `.position`
+    // is in local space and reads near-origin no matter where the
+    // player actually stands. Use the rig group's world position
+    // (player.mesh.position) for distance checks against blasts.
+    const dx = player.mesh.position.x - pos.x;
+    const dz = player.mesh.position.z - pos.z;
     if (dx * dx + dz * dz < rSq) {
       player.takeDamage(explosion.damage || 0);
     }
@@ -4245,8 +4249,8 @@ function onProjectileExplode(pos, explosion, owner, p) {
   // damage bleed on player rockets (only at very close range — 40% of
   // blast radius — so point-blank shots actually hurt).
   if (owner === 'enemy') {
-    const dx = player.body.position.x - pos.x;
-    const dz = player.body.position.z - pos.z;
+    const dx = player.mesh.position.x - pos.x;
+    const dz = player.mesh.position.z - pos.z;
     const d2 = dx * dx + dz * dz;
     if (d2 < rSq) {
       const d = Math.sqrt(d2);
@@ -4258,8 +4262,8 @@ function onProjectileExplode(pos, explosion, owner, p) {
     // caught in the blast. Full radius (not 0.4×) with the same falloff
     // as enemies, but scaled to 60% damage so a sensible mid-range
     // detonation chips hp instead of instant-kill.
-    const dx = player.body.position.x - pos.x;
-    const dz = player.body.position.z - pos.z;
+    const dx = player.mesh.position.x - pos.x;
+    const dz = player.mesh.position.z - pos.z;
     const d2 = dx * dx + dz * dz;
     if (d2 < rSq) {
       const d = Math.sqrt(d2);
