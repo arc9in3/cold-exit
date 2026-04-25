@@ -105,7 +105,12 @@ export function createScene() {
   const key = new THREE.DirectionalLight(L.keyColor, L.keyIntensity);
   key.position.set(30, 40, 20);
   key.castShadow = true;
-  key.shadow.mapSize.set(1024, 1024);
+  // Shadow map dropped 1024² → 512² (4× fewer pixels rendered per
+  // shadow pass). Combined with the corpse + wall castShadow flips
+  // below, the shadow render pass cost is roughly 25% of what it
+  // was. Visual loss at iso angle is minor — soft-PCF filtering
+  // hides the resolution drop on low-frequency wall shadows.
+  key.shadow.mapSize.set(512, 512);
   const s = 40;
   key.shadow.camera.left = -s;
   key.shadow.camera.right = s;

@@ -4364,7 +4364,13 @@ function updateStealthStatus(playerInfo) {
 const GHOST_NEAR_ALPHA = 0.55;     // close, just behind a wall
 const GHOST_FAR_ALPHA  = 0.12;     // at the edge of hearing range
 const GHOST_ACTIVE_BOOST = 0.18;   // extra visibility when actively firing
-const GHOST_BASE_RANGE = 7;
+// Baseline sense range — without perks / artifacts, the player's
+// fresnel-ghost vision only reaches roughly halfway into an adjacent
+// room. Perks (hearingRange affixes), the Ghost Key artifact, and
+// the Oracle set push past this; the floor is intentionally tight
+// so the player has to invest in stealth gear to read past their
+// own room.
+const GHOST_BASE_RANGE = 10;
 
 function _makeGhostMaterial() {
   return new THREE.ShaderMaterial({

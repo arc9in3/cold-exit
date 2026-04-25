@@ -991,7 +991,7 @@ export class Level {
     const mat = new THREE.MeshStandardMaterial({ color: 0x2e3240, roughness: 0.7, metalness: 0.1 });
     const mesh = new THREE.Mesh(geom, mat);
     mesh.position.set(x, WALL_HEIGHT / 2, z);
-    mesh.castShadow = true;
+    mesh.castShadow = false;     // see _addObstacle — walls don't cast
     mesh.receiveShadow = true;
     // Approximate the round column with a square AABB (0.9× radius) so the
     // existing collision system (axis-aligned boxes) still treats it as
@@ -1697,7 +1697,12 @@ export class Level {
     const mat = new THREE.MeshStandardMaterial({ color, roughness: 0.85 });
     const mesh = new THREE.Mesh(new THREE.BoxGeometry(w, h, d), mat);
     mesh.position.set(x, y, z);
-    mesh.castShadow = true;
+    // Walls don't cast shadows. Iso camera angle + room boundaries
+    // mean shadow contribution from walls is barely perceptible —
+    // dropping them from the shadow map pass scales down the
+    // shadow render cost linearly with wall count (often 100+
+    // walls per level).
+    mesh.castShadow = false;
     mesh.receiveShadow = true;
     mesh.userData.collisionXZ = {
       minX: x - w / 2, maxX: x + w / 2,
