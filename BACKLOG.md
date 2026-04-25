@@ -3,12 +3,13 @@
 A snapshot of known gaps, deferred work, and candidate next steps. Not
 exhaustive; living document.
 
-Last updated: 2026-04-24 (post first Cloudflare Pages deploy).
+Last updated: 2026-04-25 (Pages git-connected for auto-deploy).
 
 ## Web deploy shipping notes
 
-- **Live URL:** `cold-exit.pages.dev` (Cloudflare Pages, direct upload
-  via `npx wrangler pages deploy .`).
+- **Live URL:** `cold-exit.pages.dev` (Cloudflare Pages, git-connected
+  to `github.com/arc9in3/cold-exit` — push to `main` auto-deploys.
+  `npx wrangler pages deploy .` still works as a manual override).
 - **Assets ignored from deploy:** source-archive `.zip`s in `Assets/`
   (`poly_*`, `style_*`) — listed in `.assetsignore`. Extracted runtime
   FBX + textures ship fine.

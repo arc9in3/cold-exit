@@ -45,18 +45,22 @@ See `BACKLOG.md` for the full delta.
 
 ## Deploying
 
-Cloudflare Pages, direct-upload. The Assets folder has some huge
-source-archive zips that are **ignored from git AND from Pages
-uploads** (see `.gitignore` and `.assetsignore`); the extracted
-runtime files ship fine. One-time flow:
+Cloudflare Pages, git-connected to `github.com/arc9in3/cold-exit`.
+A push to `main` triggers an auto-build + deploy — watch progress
+in **Workers & Pages → cold-exit → Deployments**. The Assets folder
+has some huge source-archive zips that are **ignored from git AND
+from Pages uploads** (see `.gitignore` and `.assetsignore`); the
+extracted runtime files ship fine.
 
 ```sh
-# 1. Git — source of truth
 git add .
 git commit -m "..."
-git push
+git push                           # auto-deploys to cold-exit.pages.dev
+```
 
-# 2. Cloudflare — direct upload (no CI, no Wrangler workers config)
+Manual deploy still works as an override (e.g. for a dirty tree):
+
+```sh
 npx wrangler pages deploy . --project-name=cold-exit --commit-dirty=true
 ```
 

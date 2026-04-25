@@ -249,5 +249,31 @@ console.log('\n[inv] swapping backpacks migrates fitting items, spills rest');
   ok(stillThere === 10, 'all 10 items still in some grid');
 }
 
+console.log('\n[inv] equipping a belt stored inside the worn belt does not dupe it');
+{
+  const inv = new Inventory();
+  const beltA = item({ slot: 'belt', type: 'gear', name: 'Belt A',
+    gridLayout: { w: 4, h: 2 } });
+  const beltB = item({ slot: 'belt', type: 'gear', name: 'Belt B',
+    gridLayout: { w: 3, h: 2 } });
+  inv.add(beltA);
+  ok(inv.equipment.belt === beltA, 'Belt A equipped');
+  // Park Belt B inside Belt A's rig grid.
+  inv.add(beltB);
+  if (!inv.rigGrid.contains(beltB)) inv.moveInGrid(beltB, inv.rigGrid, 0, 0);
+  ok(inv.rigGrid.contains(beltB), 'Belt B sits inside Belt A rig');
+  // Now swap to Belt B.
+  const swapped = inv.equipBackpack(beltB);
+  ok(swapped, 'equip swap succeeds');
+  ok(inv.equipment.belt === beltB, 'Belt B is equipped');
+  // Count every reference to Belt B across all grids — must be zero
+  // since it is now equipped, not stored.
+  const refs = inv.allGridsIncludingPouch().reduce(
+    (n, g) => n + (g.contains(beltB) ? 1 : 0), 0);
+  ok(refs === 0, 'no stray Belt B reference left in any grid (no dupe)');
+  // Belt A should be back in some grid.
+  ok(inv.gridOf(beltA) !== null, 'Belt A returned to inventory');
+}
+
 console.log(`\n${passed} passed, ${failed} failed`);
 process.exit(failed ? 1 : 0);

@@ -1735,12 +1735,21 @@ export class Inventory {
     const prev = this.equipment[slot];
     const isContainerSlot = (slot === 'backpack' || slot === 'belt');
 
+    // Pull the new item out of its current grid up front so the
+    // container-swap pre-flight below can't double-count it. Without
+    // this, equipping a belt that lives inside the currently-worn
+    // belt's rig grid causes the item to be migrated into the new
+    // rig as well as equipped — the dupe path.
+    const owningGrid = this.gridOf(item);
+    if (owningGrid) owningGrid.remove(item);
+
     // Container swap pre-flight. If we're replacing an equipped
     // backpack/rig with a different one, sim-place every item that
     // currently lives in the old container into the new container's
     // grid (factoring in whatever was saved on the new bag's
     // `_contents` from a previous wear). Refuse the swap if anything
-    // doesn't fit; nothing has mutated yet so the bail is clean.
+    // doesn't fit; on failure we restore `item` to its origin so the
+    // bail is clean.
     let captureFromOld = null;
     if (isContainerSlot && prev) {
       const liveGrid = (slot === 'backpack') ? this.backpackGrid : this.rigGrid;
@@ -1756,6 +1765,7 @@ export class Inventory {
             if (!sim.place(c.item, c.x | 0, c.y | 0, !!c.rotated)) {
               if (!sim.autoPlace(c.item)) {
                 this.lastEquipError = (slot === 'backpack') ? 'tooSmallForBag' : 'tooSmallForRig';
+                if (owningGrid) owningGrid.autoPlace(item);
                 return false;
               }
             }
@@ -1765,6 +1775,7 @@ export class Inventory {
           stampItemDims(entry.item);
           if (!sim.autoPlace(entry.item)) {
             this.lastEquipError = (slot === 'backpack') ? 'tooSmallForBag' : 'tooSmallForRig';
+            if (owningGrid) owningGrid.autoPlace(item);
             return false;
           }
         }
@@ -1779,8 +1790,6 @@ export class Inventory {
       }
     }
 
-    const owningGrid = this.gridOf(item);
-    if (owningGrid) owningGrid.remove(item);
     this.equipment[slot] = item;
     // Refresh rig/backpack grids now (e.g., if we just equipped a
     // new rig, its grid must exist before we try to place the
