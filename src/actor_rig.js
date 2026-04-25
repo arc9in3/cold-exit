@@ -841,10 +841,18 @@ export function updateAnim(rig, state, dt) {
   const crouchThigh = -crouch * 0.55;
   const crouchKnee  =  crouch * 1.10;
   const crouchAnkle = -(crouchThigh + crouchKnee);
-  // Crouch stride shrink reduced 0.60 → 0.30 — the old value made
-  // crouch-walk legs look almost frozen once the squat pose stacked
-  // on top. 70% stride reads as "sneaking" without looking locked.
-  const strideScale = 1 - crouch * 0.30;
+  // Crouch stride bumped from 70% → 90% of standing so the legs
+  // visibly cycle while sneaking instead of mincing in place. The
+  // old 0.30 stride-shrink combined with the asymmetric-front-leg
+  // bias to lock the gait into a stiff limp; both are relaxed here.
+  const strideScale = 1 - crouch * 0.10;
+  // How much the static "leading leg" offset survives when actively
+  // moving. At full crouch-stand (crouchMoveDamp ≈ 1) the front-leg
+  // bias dominates so the character reads as poised on one knee.
+  // Once gait kicks in (crouchMoveDamp eases toward 0 with gaitT),
+  // both legs alternate symmetrically again so neither stays glued
+  // forward — that asymmetry was the "limp" reading.
+  const crouchMoveDamp = Math.max(0, 1 - (a.blendWalk + a.blendRun) * 1.5);
 
   // Gait curve (per leg). Each leg has a 2π cycle; the left leg runs
   // on `a.cycle` and the right leg is offset by π so they alternate.
@@ -877,7 +885,11 @@ export function updateAnim(rig, state, dt) {
   // where the knee leads forward of the body.
   const swingLift = (a.blendWalk * 0.25 + a.blendRun * 0.50) * strideScale;
   // Knee flex during swing — run flexes harder to clear ground.
-  const kneeFlex  = (a.blendWalk * 0.85 + a.blendRun * 1.30) * strideScale;
+  // Crouching adds extra knee flex on top so the swinging leg actually
+  // CLEARS the ground when the hip is already low. Without this, the
+  // knee bend stayed walk-level while the hip dropped 16cm and the
+  // foot dragged through the floor.
+  const kneeFlex  = (a.blendWalk * 0.85 + a.blendRun * 1.30) * strideScale + crouch * 0.45 * gaitT;
   // Ankle heel-toe roll: toe-UP at heel-strike (phase=3π/2), toe-DOWN
   // at toe-off (phase=π/2). Using `sin(phase)` with the convention
   // that positive ankle rotation = plantarflex (toe-down) gives the
@@ -897,28 +909,25 @@ export function updateAnim(rig, state, dt) {
   // Base (walk + crouch) leg rotations — kneel pose will overwrite
   // them below when kneelBlend > 0.
   //
-  // Right leg gets EXTRA forward thigh + knee bend during crouch so
-  // the right knee sits noticeably in front of the left. The prior
-  // symmetric crouch looked unnatural — both knees parked equally
-  // back — whereas a real athletic crouch has the dominant leg
-  // leading forward (ready to push off / rise). Lefts still use the
-  // base `crouchThigh/crouchKnee` so the standing leg stays
-  // grounded.
-  const rightCrouchThigh = crouchThigh * 1.45;   // more forward lean on the front leg
-  const rightCrouchKnee  = crouchKnee  * 1.25;   // deeper bend to match
+  // Right leg gets EXTRA forward thigh + knee bend during STATIC
+  // crouch so the right knee sits noticeably in front of the left
+  // (athletic poised stance). Once the character starts walking, this
+  // asymmetric bias dampens via crouchMoveDamp so the gait reads as
+  // alternating legs instead of a permanent limp.
+  const rightCrouchThigh = crouchThigh * (1 + 0.45 * crouchMoveDamp);
+  const rightCrouchKnee  = crouchKnee  * (1 + 0.25 * crouchMoveDamp);
   let leftThighRot  = leftThighGait  + crouchThigh;
   let rightThighRot = rightThighGait + rightCrouchThigh;
   let leftKneeRot   = leftKneeGait   + crouchKnee;
   let rightKneeRot  = rightKneeGait  + rightCrouchKnee;
-  // Ankle: partial compensation for knee bend (keeps the foot from
-  // slapping into the ground too hard as the knee flexes) + heel-toe
-  // roll + crouch offset.
-  // Right leg's ankle needs its OWN crouch compensation now that
-  // the right thigh / knee take bigger bends — without it the foot
-  // rotates out of flat contact with the ground.
+  // Ankle: partial compensation for knee bend + heel-toe roll +
+  // crouch offset. Heel-toe roll is amplified during a crouch-walk
+  // so sneaking reads as deliberate toe-down/heel-up footing instead
+  // of flat slabs of foot.
+  const sneakRollBoost = 1 + crouch * 0.6 * gaitT;
   const rightCrouchAnkle = -(rightCrouchThigh + rightCrouchKnee);
-  let leftAnkleRot  = -leftKneeGait  * 0.35 + leftFootRoll  + crouchAnkle;
-  let rightAnkleRot = -rightKneeGait * 0.35 + rightFootRoll + rightCrouchAnkle;
+  let leftAnkleRot  = -leftKneeGait  * 0.35 + leftFootRoll  * sneakRollBoost + crouchAnkle;
+  let rightAnkleRot = -rightKneeGait * 0.35 + rightFootRoll * sneakRollBoost + rightCrouchAnkle;
 
   if (kneel > 0.01) {
     // Kneel pose targets — calibrated for the current leg proportions
@@ -1081,7 +1090,14 @@ export function updateAnim(rig, state, dt) {
   rig.head.rotation.x = -aimPitchV * (0.35 + a.aimBlend * 0.45)
                       - crouch * 0.22 - kneel * 0.14
                       - chestPitch * 0.6;
-  rig.hips.rotation.z = idleHipRoll;
+  // Hip roll — combines slow idle weight-shift with a faster gait-driven
+  // sway. The gait component is amplified during crouching since
+  // sneaking shifts more visible weight onto the planted leg per step;
+  // standing walks get only a subtle roll. Sign matches the walk cycle
+  // (cos peaks at heel-strike) so the hip rolls onto whichever foot
+  // just landed.
+  const gaitHipRoll = Math.cos(a.cycle) * 0.05 * gaitT * (1 + crouch * 1.4);
+  rig.hips.rotation.z = idleHipRoll + gaitHipRoll;
 
   // --- pose: arms -----------------------------------------------------
   // Both hands are always on the weapon: the baseline pose is a
