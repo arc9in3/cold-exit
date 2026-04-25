@@ -165,26 +165,40 @@ export class Level {
       // the start/boss/merchant rooms have their own built-in furnishing.
       let layout = 'open';
       if (type === 'combat') {
-        // Layout pool widened with `bunker` (staggered short walls)
-        // and `pillars-grid` (2x3 stub pillars) so the rotation past
-        // ~30 rooms feels less repetitive. Probabilities re-tuned so
-        // the new variants both land at ~7-8% each.
+        // Combat layout pool. Each landing probability targets ~5-12%
+        // so the rotation past ~40 rooms still feels varied. The new
+        // entries (alcove / center-pit / zigzag) all use _blocksDoor
+        // checks during _buildInterior so they never sever a room
+        // from its neighbours.
         const r = Math.random();
-        if      (r < 0.09) layout = 'columns-4';
-        else if (r < 0.15) layout = 'columns-6';
-        else if (r < 0.20) layout = 'columns-cross';
-        else if (r < 0.30) layout = 'split';
-        else if (r < 0.45) layout = 'hallway';
-        else if (r < 0.58) layout = 'lshape';
-        else if (r < 0.68) layout = 'partition';
-        else if (r < 0.76) layout = 'closet';
-        else if (r < 0.84) layout = 'bunker';
-        else if (r < 0.92) layout = 'pillars-grid';
+        if      (r < 0.08) layout = 'columns-4';
+        else if (r < 0.13) layout = 'columns-6';
+        else if (r < 0.18) layout = 'columns-cross';
+        else if (r < 0.27) layout = 'split';
+        else if (r < 0.40) layout = 'hallway';
+        else if (r < 0.51) layout = 'lshape';
+        else if (r < 0.60) layout = 'partition';
+        else if (r < 0.68) layout = 'closet';
+        else if (r < 0.75) layout = 'bunker';
+        else if (r < 0.82) layout = 'pillars-grid';
+        else if (r < 0.88) layout = 'alcove';
+        else if (r < 0.94) layout = 'center-pit';
+        else if (r < 0.98) layout = 'zigzag';
         // else remains 'open'
       } else if (type === 'boss') {
-        // Bosses always get a stately column ring to tell the eye they're
-        // arriving somewhere important.
-        layout = Math.random() < 0.5 ? 'columns-6' : 'columns-cross';
+        // Boss room arenas — pick from a pool of 5 layouts each
+        // tuned to a different boss-fight feel:
+        //   columns-6        — classic "stately ring", LoS pillars
+        //   columns-cross    — symmetric cross of pillars, all-angle play
+        //   boss-arena       — open floor with a low ring barrier
+        //                      (great for snipers + dashers needing room)
+        //   boss-pillars     — scattered tall pillars across the whole
+        //                      room (LoS breakers for dash bosses)
+        //   boss-perch       — one raised platform along a wall
+        //                      (ranged-boss elevation, player needs to flank)
+        const bossPool = ['columns-6', 'columns-cross',
+                          'boss-arena', 'boss-pillars', 'boss-perch'];
+        layout = bossPool[Math.floor(Math.random() * bossPool.length)];
       }
       rooms.push({
         id: i,
@@ -362,7 +376,10 @@ export class Level {
       if (room.layout === 'split' || room.layout === 'hallway' || room.layout === 'lshape'
           || room.layout === 'corridor' || room.layout === 'partition'
           || room.layout === 'closet'  || room.layout === 'bunker'
-          || room.layout === 'pillars-grid') {
+          || room.layout === 'pillars-grid'
+          || room.layout === 'alcove'   || room.layout === 'center-pit'
+          || room.layout === 'zigzag'   || room.layout === 'boss-arena'
+          || room.layout === 'boss-pillars' || room.layout === 'boss-perch') {
         this._buildInterior(room);
       }
       if (room.layout === 'columns-4') this._decorateColumns(room, '4-corner');
@@ -833,10 +850,10 @@ export class Level {
     // get warehouse/library. `boss` rooms favour warehouse or lobby for
     // a dramatic silhouette.
     let themes;
-    if (room.type === 'boss') themes = ['warehouse', 'lobby'];
-    else if (area < 30) themes = ['bedroom', 'lobby'];
-    else if (area < 60) themes = ['bedroom', 'livingRoom', 'lobby', 'library'];
-    else themes = ['warehouse', 'library', 'lobby'];
+    if (room.type === 'boss') themes = ['warehouse', 'lobby', 'office'];
+    else if (area < 30) themes = ['bedroom', 'lobby', 'kitchen'];
+    else if (area < 60) themes = ['bedroom', 'livingRoom', 'lobby', 'library', 'office', 'kitchen'];
+    else themes = ['warehouse', 'library', 'lobby', 'office'];
     const theme = themes[Math.floor(Math.random() * themes.length)];
     room.theme = theme;
 
@@ -943,6 +960,24 @@ export class Level {
       for (let i = 0; i < crates; i++) placeInterior(buildProp('crate'));
       if (Math.random() < 0.6) placeInterior(buildProp('barrel'));
       if (Math.random() < 0.5) placeInterior(buildProp('pallet'));
+    } else if (theme === 'office') {
+      // Cubicle / admin floor — desks against the walls, a chair or
+      // two, a filing cabinet for vertical clutter. Keeps the space
+      // walkable but gives the eye structured furniture rather than
+      // bare floor.
+      placeAlongWall(buildProp('desk'));
+      if (Math.random() < 0.6) placeAlongWall(buildProp('desk'));
+      if (Math.random() < 0.7) placeInterior(buildProp('chair'));
+      if (Math.random() < 0.5) placeAlongWall(buildProp('cabinet'));
+      if (Math.random() < 0.4) placeInterior(buildProp('lamp'));
+    } else if (theme === 'kitchen') {
+      // Break room / mess — a central table with chairs, a cabinet
+      // along the wall. Reads as "people eat here" without needing a
+      // dedicated kitchen prop set.
+      placeInterior(buildProp('table'));
+      if (Math.random() < 0.7) placeInterior(buildProp('chair'));
+      if (Math.random() < 0.5) placeInterior(buildProp('chair'));
+      if (Math.random() < 0.6) placeAlongWall(buildProp('cabinet'));
     }
   }
 
@@ -1360,6 +1395,149 @@ export class Level {
           if (this._blocksDoor(room, x, z, 1.6)) continue;
           this._addObstacle(x, WALL_HEIGHT / 2, z, 0.6, WALL_HEIGHT, 0.6, FULL_WALL_COLOR);
         }
+      }
+    } else if (room.layout === 'alcove') {
+      // Alcove — a single mid-height L of two short walls in one
+      // corner forming a small "hide spot". Useful as a 1-person
+      // cover pocket without splitting room flow.
+      const choices = [
+        { x: b.minX, z: b.minZ, sx: +1, sz: +1 },
+        { x: b.maxX, z: b.minZ, sx: -1, sz: +1 },
+        { x: b.minX, z: b.maxZ, sx: +1, sz: -1 },
+        { x: b.maxX, z: b.maxZ, sx: -1, sz: -1 },
+      ];
+      const corner = choices[Math.floor(Math.random() * choices.length)];
+      const len = 3.5;
+      const inset = 4.0;
+      const wx = corner.x + corner.sx * inset;
+      const wz = corner.z + corner.sz * inset;
+      // Wall along Z axis at wx, spanning len starting from corner.z
+      const zMid = corner.z + corner.sz * (len / 2);
+      const xMid = corner.x + corner.sx * (len / 2);
+      if (!this._blocksDoor(room, wx, zMid, 1.4)) {
+        this._addObstacle(wx, WALL_HEIGHT / 2, zMid, WALL_THICK, WALL_HEIGHT, len, FULL_WALL_COLOR);
+      }
+      if (!this._blocksDoor(room, xMid, wz, 1.4)) {
+        this._addObstacle(xMid, WALL_HEIGHT / 2, wz, len, WALL_HEIGHT, WALL_THICK, FULL_WALL_COLOR);
+      }
+    } else if (room.layout === 'center-pit') {
+      // Center pit — four short walls forming a rectangular cover
+      // ring around the room centre, with corner gaps so players /
+      // AI can flow through. Reads as a "courtyard" cover formation.
+      const halfW = (b.maxX - b.minX) * 0.18;
+      const halfD = (b.maxZ - b.minZ) * 0.18;
+      const segLen = halfW * 1.4;
+      const segDepth = halfD * 1.4;
+      const placeWall = (x, z, w, d) => {
+        if (this._blocksDoor(room, x, z, 1.4)) return;
+        this._addObstacle(x, WALL_HEIGHT / 2, z, w, WALL_HEIGHT, d, FULL_WALL_COLOR);
+      };
+      placeWall(cx, cz - halfD, segLen, WALL_THICK);
+      placeWall(cx, cz + halfD, segLen, WALL_THICK);
+      placeWall(cx - halfW, cz, WALL_THICK, segDepth);
+      placeWall(cx + halfW, cz, WALL_THICK, segDepth);
+    } else if (room.layout === 'zigzag') {
+      // Zigzag — three short walls offset along the room's long axis,
+      // each angled to push the player into the next bay. Forces
+      // engagements at fixed angles instead of clean line-of-sight.
+      const longSpan = longX ? (b.maxX - b.minX) : (b.maxZ - b.minZ);
+      const inset = longSpan * 0.18;
+      const segLen = longSpan * 0.30;
+      const placeWall = (x, z, w, d) => {
+        if (this._blocksDoor(room, x, z, 1.6)) return;
+        this._addObstacle(x, WALL_HEIGHT / 2, z, w, WALL_HEIGHT, d, FULL_WALL_COLOR);
+      };
+      if (longX) {
+        const x1 = b.minX + inset;
+        const x2 = cx;
+        const x3 = b.maxX - inset;
+        placeWall(x1, cz - 1.8, WALL_THICK, segLen);
+        placeWall(x2, cz + 1.8, WALL_THICK, segLen);
+        placeWall(x3, cz - 1.8, WALL_THICK, segLen);
+      } else {
+        const z1 = b.minZ + inset;
+        const z2 = cz;
+        const z3 = b.maxZ - inset;
+        placeWall(cx - 1.8, z1, segLen, WALL_THICK);
+        placeWall(cx + 1.8, z2, segLen, WALL_THICK);
+        placeWall(cx - 1.8, z3, segLen, WALL_THICK);
+      }
+    } else if (room.layout === 'boss-arena') {
+      // Boss arena — keep most of the room open for boss mobility,
+      // but ring the perimeter with three or four low cover walls
+      // sized like a sandbag emplacement. Player gets predictable
+      // hides for resetting LoS; boss has the centre to roam.
+      const segLen = 4.5;
+      const inset = 3.6;
+      const placeWall = (x, z, w, d) => {
+        if (this._blocksDoor(room, x, z, 1.8)) return;
+        this._addObstacle(x, WALL_HEIGHT * 0.40, z, w, WALL_HEIGHT * 0.80, d, LOW_COVER_COLOR);
+      };
+      placeWall(cx, b.minZ + inset, segLen, WALL_THICK);
+      placeWall(cx, b.maxZ - inset, segLen, WALL_THICK);
+      placeWall(b.minX + inset, cz, WALL_THICK, segLen);
+      placeWall(b.maxX - inset, cz, WALL_THICK, segLen);
+    } else if (room.layout === 'boss-pillars') {
+      // Boss pillars — scatter ~7 tall pillars across the room. No
+      // grid; each pillar tries a few placements until it doesn't
+      // collide with another pillar or block a door. Great for dash
+      // bosses where breaking line of sight mid-charge is the play.
+      const pillarRadius = 0.45;
+      const minSep = 3.0;
+      const placed = [];
+      const attempts = 7 * 6;
+      let placedCount = 0;
+      for (let a = 0; a < attempts && placedCount < 7; a++) {
+        const x = b.minX + 2.5 + Math.random() * (b.maxX - b.minX - 5);
+        const z = b.minZ + 2.5 + Math.random() * (b.maxZ - b.minZ - 5);
+        if (this._blocksDoor(room, x, z, 1.8)) continue;
+        let tooClose = false;
+        for (const p of placed) {
+          if (Math.hypot(p.x - x, p.z - z) < minSep) { tooClose = true; break; }
+        }
+        if (tooClose) continue;
+        const geom = new THREE.CylinderGeometry(pillarRadius, pillarRadius, WALL_HEIGHT, 10);
+        const mat = new THREE.MeshStandardMaterial({ color: 0x2a2e38, roughness: 0.7, metalness: 0.1 });
+        const mesh = new THREE.Mesh(geom, mat);
+        mesh.position.set(x, WALL_HEIGHT / 2, z);
+        mesh.castShadow = false;
+        mesh.userData.collisionXZ = {
+          minX: x - pillarRadius, maxX: x + pillarRadius,
+          minZ: z - pillarRadius, maxZ: z + pillarRadius,
+        };
+        this.scene.add(mesh);
+        this.obstacles.push(mesh);
+        placed.push({ x, z });
+        placedCount++;
+      }
+    } else if (room.layout === 'boss-perch') {
+      // Boss perch — a raised platform along one wall the boss can
+      // shoot from. Player has to break LoS or flank around the
+      // platform's open end to engage. Pick whichever wall has no
+      // doorway so the platform doesn't seal off a connection.
+      const sides = [
+        { name: 'north', cx, cz: b.minZ + 2.0, w: 7.5, d: 2.4, dirSafe: !dirs.has('north') },
+        { name: 'south', cx, cz: b.maxZ - 2.0, w: 7.5, d: 2.4, dirSafe: !dirs.has('south') },
+        { name: 'east',  cx: b.maxX - 2.0, cz, w: 2.4, d: 7.5, dirSafe: !dirs.has('east')  },
+        { name: 'west',  cx: b.minX + 2.0, cz, w: 2.4, d: 7.5, dirSafe: !dirs.has('west')  },
+      ].filter(s => s.dirSafe);
+      if (sides.length > 0) {
+        const pick = sides[Math.floor(Math.random() * sides.length)];
+        const platformH = 1.0;
+        // Visible platform (no top wall — bosses + AI navmesh both
+        // ignore this collision, so the player can also walk onto it
+        // off the edge by clipping over). Standard collision proxy
+        // used so bullets / movement treat it as a low solid block.
+        const geom = new THREE.BoxGeometry(pick.w, platformH, pick.d);
+        const mat = new THREE.MeshStandardMaterial({ color: 0x3a3a34, roughness: 0.85 });
+        const mesh = new THREE.Mesh(geom, mat);
+        mesh.position.set(pick.cx, platformH / 2, pick.cz);
+        mesh.userData.collisionXZ = {
+          minX: pick.cx - pick.w / 2, maxX: pick.cx + pick.w / 2,
+          minZ: pick.cz - pick.d / 2, maxZ: pick.cz + pick.d / 2,
+        };
+        this.scene.add(mesh);
+        this.obstacles.push(mesh);
       }
     }
   }
