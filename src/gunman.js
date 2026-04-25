@@ -4,6 +4,7 @@ import { buildRig, initAnim, updateAnim, pokeHit, pokeRecoil, pokeDeath } from '
 import { spawnSpeechBubble } from './hud.js';
 import { loadModelClone, fitToRadius } from './gltf_cache.js';
 import { modelForItem } from './model_manifest.js';
+import { buildMeleePrimitive } from './melee_primitives.js';
 
 // NOTE: Skinned-rig path has been removed from the live code — we're
 // committing to the primitive rig as the shipping art style. The
@@ -299,24 +300,35 @@ export class GunmanManager {
     weaponModel.position.copy(gun.position);
     weaponModel.visible = false;
     handPivot.add(weaponModel);
-    const modelUrl = modelForItem(chosen);
-    if (modelUrl) {
-      loadModelClone(modelUrl).then((clone) => {
-        if (!clone) return;
-        const CLASS_SCALE = {
-          pistol: 0.45, smg: 0.65, rifle: 0.75, shotgun: 0.75,
-          lmg: 0.75, flame: 0.7, melee: 0.7, sniper: 0.75,
-        };
-        const cs = CLASS_SCALE[chosen.class] ?? 0.7;
-        fitToRadius(clone, chosen.muzzleLength * cs);
-        const r = chosen.modelRotation;
-        if (r) clone.rotation.set(r.x || 0, r.y || 0, r.z || 0);
-        else   clone.rotation.set(0, Math.PI / 2, 0);
-        clone.position.set(0, 0, 0);
-        weaponModel.add(clone);
-        weaponModel.visible = true;
-        gun.visible = false;
-      }).catch(() => {});
+    if (chosen.type === 'melee') {
+      // Same procedural-primitive path as the player — see player.js
+      // setWeapon for the rationale (FBX melee meshes don't seat
+      // cleanly in the hand). Built along +Z, container takes care
+      // of the π/2 rotation to align with the hand's forward axis.
+      const prim = buildMeleePrimitive(chosen);
+      weaponModel.add(prim);
+      weaponModel.visible = true;
+      gun.visible = false;
+    } else {
+      const modelUrl = modelForItem(chosen);
+      if (modelUrl) {
+        loadModelClone(modelUrl).then((clone) => {
+          if (!clone) return;
+          const CLASS_SCALE = {
+            pistol: 0.45, smg: 0.65, rifle: 0.75, shotgun: 0.75,
+            lmg: 0.75, flame: 0.7, melee: 0.7, sniper: 0.75,
+          };
+          const cs = CLASS_SCALE[chosen.class] ?? 0.7;
+          fitToRadius(clone, chosen.muzzleLength * cs);
+          const r = chosen.modelRotation;
+          if (r) clone.rotation.set(r.x || 0, r.y || 0, r.z || 0);
+          else   clone.rotation.set(0, Math.PI / 2, 0);
+          clone.position.set(0, 0, 0);
+          weaponModel.add(clone);
+          weaponModel.visible = true;
+          gun.visible = false;
+        }).catch(() => {});
+      }
     }
 
     const alertMat = new THREE.MeshBasicMaterial({

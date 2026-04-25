@@ -4,6 +4,7 @@ import { modelForItem, gripOffsetForModelPath, rotationOverrideForModelPath } fr
 import { getCharacterStyle } from './prefs.js';
 import { loadModelClone, fitToRadius } from './gltf_cache.js';
 import { buildRig, initAnim, updateAnim, pokeHit, pokeRecoil, pokeDeath } from './actor_rig.js';
+import { buildMeleePrimitive } from './melee_primitives.js';
 
 // Isometric camera is rotated 45° around Y. Map input directions so W goes
 // "up the screen" in the iso view rather than along world +Z.
@@ -265,12 +266,33 @@ export function createPlayer(scene) {
     // Kick off the in-hand FBX swap. Primitive gunMesh + extras stay
     // visible as a placeholder while the model loads, then hide once
     // the FBX lands. Load failures keep the primitive forever.
-    const modelUrl = modelForItem(weapon);
+    //
+    // Melee weapons skip the FBX path entirely — the imported melee
+    // models never aligned cleanly with the hand pivot (handle floating,
+    // blade pointing the wrong way) so we build a procedural primitive
+    // instead. melee_primitives.js dispatches on weapon name and uses
+    // tracerColor + muzzleLength + muzzleGirth from the tunable so each
+    // weapon's silhouette tracks its description.
     const mySerial = ++weaponLoadSerial;
     clearInHandModel();
     inHandModel.visible = false;
     gunMesh.visible = true;
     weaponExtras.visible = true;
+    if (weapon.type === 'melee') {
+      const prim = buildMeleePrimitive(weapon);
+      // Container is rotated π/2 around X so the primitive's +Z axis
+      // points along the hand's forward (-Y) direction. Drop the
+      // primitive in centred — it was authored around its own origin.
+      inHandModel.add(prim);
+      inHandModel.visible = true;
+      gunMesh.visible = false;
+      weaponExtras.visible = false;
+      window.__activeWeaponClone = prim;
+      window.__activeWeaponUrl = `(primitive) ${weapon.name}`;
+      state.parryT = 0;
+      return;
+    }
+    const modelUrl = modelForItem(weapon);
     if (modelUrl) {
       loadModelClone(modelUrl).then(clone => {
         if (!clone || mySerial !== weaponLoadSerial) return;
