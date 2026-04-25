@@ -1774,14 +1774,30 @@ export class GunmanManager {
         }
       }
 
-      const vx = approachDir.x * moveSpeed * slowK * moveSign
+      let vx = approachDir.x * moveSpeed * slowK * moveSign
         + strafeVec.x * slowK
         + (g.dashT > 0 ? g.dashVx : 0)
         + (g.repositionT > 0 ? g.repositionDirX * moveSpeed * 0.9 * slowK : 0);
-      const vz = approachDir.z * moveSpeed * slowK * moveSign
+      let vz = approachDir.z * moveSpeed * slowK * moveSign
         + strafeVec.z * slowK
         + (g.dashT > 0 ? g.dashVz : 0)
         + (g.repositionT > 0 ? g.repositionDirZ * moveSpeed * 0.9 * slowK : 0);
+      // Whisker steering — re-aim the velocity vector around props
+      // the gunman is about to walk into. Bosses + dashers especially
+      // were getting wedged against couches when chasing. Skipped
+      // during a dash burst (intentional commit) and for tanks (which
+      // are designed to just plow forward).
+      if (ctx.level && ctx.level.steerAround && g.dashT <= 0 && g.variant !== 'tank') {
+        const speed = Math.hypot(vx, vz);
+        if (speed > 0.05) {
+          const lookAhead = Math.max(0.8, speed * 0.35);
+          const steered = ctx.level.steerAround(g.group.position.x, g.group.position.z,
+            vx / speed, vz / speed,
+            tunables.ai.collisionRadius + 0.15, lookAhead);
+          vx = steered.x * speed;
+          vz = steered.z * speed;
+        }
+      }
       const nx = g.group.position.x + vx * dt;
       const nz = g.group.position.z + vz * dt;
       const beforeX = g.group.position.x, beforeZ = g.group.position.z;
@@ -2018,11 +2034,27 @@ export class GunmanManager {
               g.aiSettleDur = settle;
               g.fireT += settle;
             }
-            // Cover-seekers break contact between bursts: dart perpendicular.
+            // Cover-seekers break contact between bursts. Try to find
+            // an actual prop / column to tuck behind; fall back to a
+            // blind perpendicular dart if there's nothing nearby.
             if (g.profile.coverSeek) {
-              const side = Math.random() < 0.5 ? -1 : 1;
-              g.repositionDirX = -dir2d.z * side;
-              g.repositionDirZ = dir2d.x * side;
+              let coverDirX = 0, coverDirZ = 0;
+              if (ctx.level && ctx.level.findCoverNear && ctx.playerPos) {
+                const spot = ctx.level.findCoverNear(g.group.position, ctx.playerPos, 8);
+                if (spot) {
+                  const dxc = spot.x - g.group.position.x;
+                  const dzc = spot.z - g.group.position.z;
+                  const dl = Math.hypot(dxc, dzc);
+                  if (dl > 0.001) { coverDirX = dxc / dl; coverDirZ = dzc / dl; }
+                }
+              }
+              if (coverDirX === 0 && coverDirZ === 0) {
+                const side = Math.random() < 0.5 ? -1 : 1;
+                coverDirX = -dir2d.z * side;
+                coverDirZ = dir2d.x * side;
+              }
+              g.repositionDirX = coverDirX;
+              g.repositionDirZ = coverDirZ;
               g.repositionT = 1.0 + Math.random() * 0.7;
             }
           }

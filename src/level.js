@@ -2836,4 +2836,81 @@ export class Level {
     }
     return false;
   }
+
+  // Whisker-based steering. Caller passes their position, the heading
+  // they WANT to move along (unit vector), their collision radius, and
+  // a look-ahead distance. We probe a fan of candidate directions and
+  // return the closest-to-desired one whose look-ahead point is open.
+  // If everything is blocked, hand back the original heading and let
+  // the caller's stuck-deflection take over.
+  //
+  // Cheap — each probe is one _collidesAt call (O(walls)). At 30 NPCs
+  // calling this every other frame, the cost is sub-ms on a level
+  // with ~120 obstacles. Run BEFORE the move, not after, so the AI
+  // never tries to walk into a prop in the first place.
+  steerAround(x, z, dirX, dirZ, radius, lookAhead) {
+    if (!dirX && !dirZ) return { x: dirX, z: dirZ };
+    const ax = x + dirX * lookAhead;
+    const az = z + dirZ * lookAhead;
+    if (!this._collidesAt(ax, az, radius)) return { x: dirX, z: dirZ };
+    // Blocked along the desired heading. Try whiskers at ±30°, ±60°,
+    // ±90°. Stop on the first clear one — closer-to-desired wins.
+    const angles = [Math.PI / 6, -Math.PI / 6, Math.PI / 3, -Math.PI / 3, Math.PI / 2, -Math.PI / 2];
+    for (const a of angles) {
+      const c = Math.cos(a), s = Math.sin(a);
+      const nx = dirX * c - dirZ * s;
+      const nz = dirX * s + dirZ * c;
+      const wx = x + nx * lookAhead;
+      const wz = z + nz * lookAhead;
+      if (!this._collidesAt(wx, wz, radius)) return { x: nx, z: nz };
+    }
+    return { x: dirX, z: dirZ };
+  }
+
+  // Find a cover spot near `pos` that hides from `threatPos`. Iterates
+  // every obstacle within `maxR` of the seeker; the candidate point is
+  // the obstacle's centre projected one obstacle-radius PAST the prop
+  // along the line away from the threat. Returns the closest such
+  // point with a clear LoS-vs-threat (i.e., the prop blocks). Used by
+  // gunmen during reload + suppression.
+  findCoverNear(pos, threatPos, maxR) {
+    let best = null, bestD = Infinity;
+    const px = pos.x, pz = pos.z;
+    const tx = threatPos.x, tz = threatPos.z;
+    const maxR2 = maxR * maxR;
+    for (const o of this.obstacles) {
+      const b = o.userData.collisionXZ;
+      if (!b) continue;
+      // Skip doors + walls; we only want low/medium props as cover.
+      if (o.userData.isDoor) continue;
+      if (!o.userData.isProp) continue;
+      const cx = (b.minX + b.maxX) * 0.5;
+      const cz = (b.minZ + b.maxZ) * 0.5;
+      const halfX = (b.maxX - b.minX) * 0.5;
+      const halfZ = (b.maxZ - b.minZ) * 0.5;
+      // Reject tiny props (rugs) and giant ones (full-width bookshelves
+      // crammed up against a wall) — they're either non-cover or the
+      // far-side spot would be inside the wall.
+      const propR = Math.max(halfX, halfZ);
+      if (propR < 0.4 || propR > 1.4) continue;
+      const dxp = cx - px, dzp = cz - pz;
+      const d2 = dxp * dxp + dzp * dzp;
+      if (d2 > maxR2) continue;
+      // Vector from threat to prop = which side is the safe side.
+      const fx = cx - tx, fz = cz - tz;
+      const fl = Math.hypot(fx, fz);
+      if (fl < 0.001) continue;
+      const sx = cx + (fx / fl) * (propR + 0.4);
+      const sz = cz + (fz / fl) * (propR + 0.4);
+      // Spot must be walkable and in the same room as the seeker
+      // (don't try to hide on the other side of a wall).
+      if (this._collidesAt(sx, sz, 0.45)) continue;
+      // The straight line from threat to spot should cross the prop —
+      // _segmentClear returning false means something blocks it.
+      if (this._segmentClear(tx, tz, sx, sz, 0.3)) continue;
+      const d = Math.sqrt(d2);
+      if (d < bestD) { bestD = d; best = { x: sx, z: sz }; }
+    }
+    return best;
+  }
 }
