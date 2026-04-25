@@ -36,8 +36,8 @@ export function renderItemCell(item, slotId = null, opts = {}) {
   // Right-side stat lines.
   const stats = [];
   if (item.type === 'ranged') {
-    if (typeof item.damage === 'number') stats.push(`<span class="cell-stat">DMG <b>${item.damage.toFixed(0)}</b></span>`);
-    if (typeof item.fireRate === 'number' && item.fireRate > 0) stats.push(`<span class="cell-stat">RPS <b>${item.fireRate.toFixed(1)}</b></span>`);
+    if (typeof item.damage === 'number') stats.push(`<span class="cell-stat">DMG <b>${Math.round(item.damage)}</b></span>`);
+    if (typeof item.fireRate === 'number' && item.fireRate > 0) stats.push(`<span class="cell-stat">RPS <b>${Math.round(item.fireRate)}</b></span>`);
     if (typeof item.magSize === 'number') stats.push(`<span class="cell-stat">MAG <b>${item.ammo ?? item.magSize}/${item.magSize}</b></span>`);
   } else if (item.type === 'melee') {
     const step = item.combo?.[0]?.close || item.combo?.[0]?.far;

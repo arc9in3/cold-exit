@@ -814,10 +814,14 @@ export class MeleeEnemyManager {
         const side = (e.stuckSide || 1);
         const nx = -dir2d.z * side;
         const nz = dir2d.x * side;
+        // Deflect almost fully perpendicular — a soft 0.4/0.9 mix
+        // wasn't enough to clear chunky props (couches, desks). Going
+        // mostly sideways for the duration of stuckT slips around the
+        // obstacle even if it's wider than the body.
         approach = new THREE.Vector3(
-          dir2d.x * 0.4 + nx * 0.9,
+          dir2d.x * 0.15 + nx * 1.0,
           0,
-          dir2d.z * 0.4 + nz * 0.9,
+          dir2d.z * 0.15 + nz * 1.0,
         );
         if (approach.lengthSq() > 0.0001) approach.normalize();
       }
@@ -851,8 +855,10 @@ export class MeleeEnemyManager {
       const wantedLen = Math.hypot(nx - beforeX, nz - beforeZ);
       const actualLen = Math.hypot(res.x - beforeX, res.z - beforeZ);
       if (wantedLen > 0.01 && actualLen < wantedLen * 0.3 && e.stuckT <= 0) {
-        e.stuckT = 0.7;
-        e.stuckSide = Math.random() < 0.5 ? -1 : 1;
+        e.stuckT = 1.1;
+        // Flip sides on each stuck-cycle so a melee that bounces off a
+        // wall on one perpendicular tries the other axis next.
+        e.stuckSide = (e.stuckSide || 1) * -1;
       }
 
       // Skip windup while disengaging — the assassin is in escape

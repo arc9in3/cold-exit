@@ -402,17 +402,18 @@ export function maybeApplyMastercraft(item) {
   const e = item.useEffect;
   if (e) {
     if (typeof e.amount === 'number')   e.amount   = Math.round(e.amount * 1.5);
-    if (typeof e.duration === 'number') e.duration = +(e.duration * 1.5).toFixed(2);
+    if (typeof e.duration === 'number') e.duration = Math.max(1, Math.round(e.duration * 1.5));
+    // dmgMult is a damage multiplier (e.g. 1.5×); leave fractional.
     if (typeof e.dmgMult === 'number')  e.dmgMult  = +(e.dmgMult  * 1.5).toFixed(2);
-    if (typeof e.regen === 'number')    e.regen    = +(e.regen    * 1.5).toFixed(2);
+    if (typeof e.regen === 'number')    e.regen    = Math.max(1, Math.round(e.regen * 1.5));
   }
-  if (typeof item.aoeRadius === 'number') item.aoeRadius = +(item.aoeRadius * 1.5).toFixed(2);
+  if (typeof item.aoeRadius === 'number') item.aoeRadius = Math.max(1, Math.round(item.aoeRadius * 1.5));
   if (typeof item.aoeDamage === 'number') item.aoeDamage = Math.round(item.aoeDamage * 1.5);
   if (typeof item.maxCharges === 'number') item.maxCharges = Math.max(1, Math.round(item.maxCharges * 1.5));
-  if (typeof item.blindDuration === 'number') item.blindDuration = +(item.blindDuration * 1.5).toFixed(2);
-  if (typeof item.stunDuration === 'number')  item.stunDuration  = +(item.stunDuration  * 1.5).toFixed(2);
-  if (typeof item.fireDuration === 'number')  item.fireDuration  = +(item.fireDuration  * 1.5).toFixed(2);
-  if (typeof item.fireTickDps === 'number')   item.fireTickDps   = +(item.fireTickDps   * 1.5).toFixed(2);
+  if (typeof item.blindDuration === 'number') item.blindDuration = Math.max(1, Math.round(item.blindDuration * 1.5));
+  if (typeof item.stunDuration === 'number')  item.stunDuration  = Math.max(1, Math.round(item.stunDuration  * 1.5));
+  if (typeof item.fireDuration === 'number')  item.fireDuration  = Math.max(1, Math.round(item.fireDuration  * 1.5));
+  if (typeof item.fireTickDps === 'number')   item.fireTickDps   = Math.max(1, Math.round(item.fireTickDps   * 1.5));
   if (typeof item.sellValue === 'number')     item.sellValue     = Math.round(item.sellValue * 1.5);
   // Throwable charges in flight may already be set (charges = maxCharges
   // at construction). Re-sync so the in-hand stack matches the bumped
@@ -443,29 +444,29 @@ function _slotAllowedAtLevel(slot, lv) {
 // Random affix pool. Each affix has a `kind`, a label template, and an
 // `apply` function that mutates the shared stats bag.
 const AFFIX_POOL = [
-  { kind: 'moveSpeed', roll: () => 3 + Math.random() * 7,
-    label: v => `+${v.toFixed(0)}% move speed`,
+  { kind: 'moveSpeed', roll: () => Math.round(3 + Math.random() * 7),
+    label: v => `+${v}% move speed`,
     apply: (v, s) => { s.moveSpeedMult *= 1 + v / 100; } },
   { kind: 'maxHealth', roll: () => Math.round(5 + Math.random() * 15),
-    label: v => `+${v.toFixed(0)} max HP`,
+    label: v => `+${v} max HP`,
     apply: (v, s) => { s.maxHealthBonus += v; } },
-  { kind: 'rangedDmg', roll: () => 4 + Math.random() * 8,
-    label: v => `+${v.toFixed(0)}% ranged dmg`,
+  { kind: 'rangedDmg', roll: () => Math.round(4 + Math.random() * 8),
+    label: v => `+${v}% ranged dmg`,
     apply: (v, s) => { s.rangedDmgMult *= 1 + v / 100; } },
-  { kind: 'meleeDmg', roll: () => 5 + Math.random() * 10,
-    label: v => `+${v.toFixed(0)}% melee dmg`,
+  { kind: 'meleeDmg', roll: () => Math.round(5 + Math.random() * 10),
+    label: v => `+${v}% melee dmg`,
     apply: (v, s) => { s.meleeDmgMult *= 1 + v / 100; } },
-  { kind: 'staminaRegen', roll: () => 5 + Math.random() * 10,
-    label: v => `+${v.toFixed(0)}% stamina regen`,
+  { kind: 'staminaRegen', roll: () => Math.round(5 + Math.random() * 10),
+    label: v => `+${v}% stamina regen`,
     apply: (v, s) => { s.staminaRegenMult *= 1 + v / 100; } },
-  { kind: 'dmgReduction', roll: () => 2 + Math.random() * 4,
-    label: v => `+${v.toFixed(0)}% dmg reduction`,
+  { kind: 'dmgReduction', roll: () => Math.round(2 + Math.random() * 4),
+    label: v => `+${v}% dmg reduction`,
     apply: (v, s) => { s.dmgReduction += v / 100; } },
   { kind: 'maxStamina', roll: () => Math.round(5 + Math.random() * 15),
-    label: v => `+${v.toFixed(0)} max stamina`,
+    label: v => `+${v} max stamina`,
     apply: (v, s) => { s.maxStaminaBonus += v; } },
-  { kind: 'knockback', roll: () => 8 + Math.random() * 12,
-    label: v => `+${v.toFixed(0)}% knockback`,
+  { kind: 'knockback', roll: () => Math.round(8 + Math.random() * 12),
+    label: v => `+${v}% knockback`,
     apply: (v, s) => { s.knockbackMult *= 1 + v / 100; } },
 ];
 
@@ -1268,9 +1269,9 @@ export function wrapWeapon(w, opts = {}) {
     far:   { ...step.far,   damage: step.far.damage   * sc.dmg },
   })) : undefined;
   const newMag = typeof w.magSize === 'number' ? Math.max(1, Math.round(w.magSize * sc.magSize)) : w.magSize;
-  const newDmg = typeof w.damage === 'number' ? +(w.damage * sc.dmg).toFixed(2) : w.damage;
-  const newFireRate = typeof w.fireRate === 'number' ? +(w.fireRate * sc.fireRate).toFixed(3) : w.fireRate;
-  const newRange = typeof w.range === 'number' ? +(w.range * sc.rangeMult).toFixed(2) : w.range;
+  const newDmg = typeof w.damage === 'number' ? Math.max(1, Math.round(w.damage * sc.dmg)) : w.damage;
+  const newFireRate = typeof w.fireRate === 'number' ? Math.max(1, Math.round(w.fireRate * sc.fireRate)) : w.fireRate;
+  const newRange = typeof w.range === 'number' ? Math.max(1, Math.round(w.range * sc.rangeMult)) : w.range;
   // Mastercraft weapon — same 0.5% gate as armor/gear. Boosts every
   // affix value 1.5×, bumps perk count by 1, and tags the item so the
   // cell renderer paints the rainbow-glow border.
@@ -1295,7 +1296,7 @@ export function wrapWeapon(w, opts = {}) {
     combo: scaledCombo || w.combo,
     description: w.type === 'melee'
       ? `Melee · ${rolledRarity}`
-      : `${w.fireMode} · ${newFireRate ? newFireRate.toFixed(1) + '/s' : 'continuous'} · ${rolledRarity}`,
+      : `${w.fireMode} · ${newFireRate ? newFireRate + '/s' : 'continuous'} · ${rolledRarity}`,
     ammo: newMag,
     reloadingT: 0,
     durability: dur(200, 0.95),

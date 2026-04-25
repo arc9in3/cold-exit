@@ -276,12 +276,12 @@ function applyDrivenStats(item) {
     if (Math.abs(a - b) < 1e-6) continue;
     let val, suffix;
     switch (cfg.kind) {
-      case 'mult': val = ((a / b - 1) * 100).toFixed(0); suffix = '%'; break;
-      case 'pct':  val = ((a - b) * 100).toFixed(0);     suffix = '%'; break;
-      case 'add':  val = (a - b).toFixed(0);             suffix = '';  break;
-      case 'addM': val = (a - b).toFixed(0);             suffix = 'm'; break;
-      case 'addS': val = (a - b).toFixed(1);             suffix = 's'; break;
-      case 'addF': val = (a - b).toFixed(2);             suffix = '';  break;
+      case 'mult': val = Math.round((a / b - 1) * 100); suffix = '%'; break;
+      case 'pct':  val = Math.round((a - b) * 100);     suffix = '%'; break;
+      case 'add':  val = Math.round(a - b);             suffix = '';  break;
+      case 'addM': val = Math.round(a - b);             suffix = 'm'; break;
+      case 'addS': val = Math.round(a - b);             suffix = 's'; break;
+      case 'addF': val = Math.round(a - b);             suffix = '';  break;
       default: continue;
     }
     rows.push([cfg.label, +val, cfg.dir, suffix]);
@@ -311,10 +311,10 @@ function collectStats(item) {
       rows.push(['Knockback', step.knockback, '+']);
     }
   } else if (item.type === 'armor' || item.type === 'gear' || item.slot === 'backpack') {
-    if (typeof item.reduction === 'number') rows.push(['Damage Reduction', (item.reduction * 100).toFixed(0), '+', '%']);
+    if (typeof item.reduction === 'number') rows.push(['Damage Reduction', Math.round(item.reduction * 100), '+', '%']);
     if (typeof item.pockets === 'number') rows.push(['Pockets', item.pockets, '+']);
-    if (typeof item.speedMult === 'number') rows.push(['Move Speed', ((item.speedMult - 1) * 100).toFixed(0), '+', '%']);
-    if (typeof item.stealthMult === 'number') rows.push(['Detection', ((1 - item.stealthMult) * 100).toFixed(0), '-', '%']);
+    if (typeof item.speedMult === 'number') rows.push(['Move Speed', Math.round((item.speedMult - 1) * 100), '+', '%']);
+    if (typeof item.stealthMult === 'number') rows.push(['Detection', Math.round((1 - item.stealthMult) * 100), '-', '%']);
   } else if (item.type === 'consumable') {
     const e = item.useEffect;
     if (e?.kind === 'heal') rows.push(['Heal', e.amount, '+', ' HP']);
@@ -341,7 +341,7 @@ function diffStats(item, equipped) {
   const bMap = Object.fromEntries(b.map(r => [r[0], r[1]]));
   for (const [key, val] of a) {
     if (typeof val !== 'number' || typeof bMap[key] !== 'number') continue;
-    diffs.set(key, +(val - bMap[key]).toFixed(2));
+    diffs.set(key, Math.round(val - bMap[key]));
   }
   return diffs;
 }

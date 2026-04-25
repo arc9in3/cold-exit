@@ -938,8 +938,9 @@ const mainMenuUI = new MainMenuUI({
 // { classId, options:[nodeRef,...] } and gets resolved by the picker modal.
 const pendingMasteryOffers = [];
 
-function awardClassXp(weaponClass, enemyTier) {
+function awardClassXp(weaponClass, enemyTier, enemy) {
   if (!weaponClass) return;
+  if (enemy && enemy.noXp) return;
   const xp = enemyTier === 'boss' ? 60 : enemyTier === 'subBoss' ? 30 : 10;
   const leveledUp = classMastery.awardXp(weaponClass, xp);
   if (leveledUp) {
@@ -2639,7 +2640,7 @@ function tickFlame(dt, playerInfo, weapon, inputState, aimInfo) {
     c.burnT = Math.max(c.burnT || 0, tunables.burn.duration * (derivedStats.burnDurationBonus || 1));
     if (wasAlive && !c.alive) {
       onEnemyKilled(c);
-      awardClassXp('exotic', c.tier);
+      awardClassXp('exotic', c.tier, c);
       if (skillTree.level('bloodlust') > 0) buffs.grant('bloodlust', { moveSpeedMult: 1.55 }, 4);
     }
   }
@@ -3085,7 +3086,7 @@ function fireOneShot(playerInfo, weapon, aimPoint, isADS) {
       }
       if (wasAlive && !hit.owner.alive) {
         onEnemyKilled(hit.owner);
-        awardClassXp(weapon.class, hit.owner.tier);
+        awardClassXp(weapon.class, hit.owner.tier, hit.owner);
         if (hit.zone === 'head' && weaponHasArtifactPerk(weapon, 'popperHead')) {
           popHead(hit.owner, dir);
         }
@@ -3156,7 +3157,7 @@ function fireOneShot(playerInfo, weapon, aimPoint, isADS) {
           ph.owner.manager.applyHit(ph.owner, pdmg, ph.zone, dir, { weaponClass: weapon.class });
           if (wasAlivePh && !ph.owner.alive) {
             onEnemyKilled(ph.owner);
-            awardClassXp(weapon.class, ph.owner.tier);
+            awardClassXp(weapon.class, ph.owner.tier, ph.owner);
           }
           // Visual feedback at the pierce point.
           let pa = hitAgg.get(ph.owner);
@@ -3338,7 +3339,7 @@ function resolveComboHit(attackEvent) {
     }
     if (wasAlive && !c.alive) {
       onEnemyKilled(c);
-      awardClassXp('melee', c.tier);
+      awardClassXp('melee', c.tier, c);
       if (skillTree.level('bloodlust') > 0) buffs.grant('bloodlust', { moveSpeedMult: 1.55 }, 4);
     }
   }
@@ -3372,7 +3373,7 @@ function resolveComboHit(attackEvent) {
       );
       if (wasAlive && !c.alive) {
       onEnemyKilled(c);
-      awardClassXp('melee', c.tier);
+      awardClassXp('melee', c.tier, c);
       if (skillTree.level('bloodlust') > 0) buffs.grant('bloodlust', { moveSpeedMult: 1.55 }, 4);
     }
     }
@@ -3502,11 +3503,20 @@ function onEnemyKilled(enemy, opts = {}) {
   // opts.silent — skip witness alerts and the death sfx. Used by the
   // execute path so a back-stab doesn't give the player's position
   // away to the rest of the room.
-  enemy.loot = buildBodyLoot(enemy);
-  enemy.looted = false;
-  awardKillXp(enemy);
-  const gained = rollCredits(enemy.tier || 'normal');
-  if (gained > 0) { playerCredits += gained; runStats.addCredits(gained); }
+  // Summoned minions (necromant adds, etc.) bypass loot + xp + credits
+  // entirely — they're combat pressure, not a farming target.
+  if (!enemy.noDrops) {
+    enemy.loot = buildBodyLoot(enemy);
+    enemy.looted = false;
+  } else {
+    enemy.loot = [];
+    enemy.looted = true;
+  }
+  if (!enemy.noXp) awardKillXp(enemy);
+  if (!enemy.noXp) {
+    const gained = rollCredits(enemy.tier || 'normal');
+    if (gained > 0) { playerCredits += gained; runStats.addCredits(gained); }
+  }
   runStats.addKill();
   if (enemy.tier === 'subBoss') playerSkillPoints += 1;
   combat.spawnBloodPool(enemy.group.position, 0.75 + Math.random() * 0.25);
@@ -3855,7 +3865,7 @@ function tickMeleeSwipe(dt, inputState, aimInfo, playerInfo) {
     }
     if (wasAlive && !c.alive) {
       onEnemyKilled(c);
-      awardClassXp('melee', c.tier);
+      awardClassXp('melee', c.tier, c);
       if (skillTree.level('bloodlust') > 0) buffs.grant('bloodlust', { moveSpeedMult: 1.55 }, 4);
     }
     hits += 1;
@@ -5529,17 +5539,35 @@ function spawnerTeleportAndSummon(boss) {
   // 'normal' so they go down quickly.
   const addCount = 2 + Math.floor(Math.random() * 2);
   for (let i = 0; i < addCount; i++) {
-    const a = (i / addCount) * Math.PI * 2 + Math.random() * 0.4;
-    const r = 1.2;
-    const ax = tx + Math.cos(a) * r;
-    const az = tz + Math.sin(a) * r;
-    melees.spawn(ax, az, {
+    // Pick an open spot near the boss that ALSO has a clear walkable
+    // segment to the player. Without this last check minions
+    // sometimes spawn behind a couch / column and just stand there.
+    let spawnX = null, spawnZ = null;
+    for (let attempt = 0; attempt < 10; attempt++) {
+      const a = (i / addCount) * Math.PI * 2 + Math.random() * 0.9;
+      const r = 1.2 + Math.random() * 0.6;
+      const ax = tx + Math.cos(a) * r;
+      const az = tz + Math.sin(a) * r;
+      if (level._collidesAt && level._collidesAt(ax, az, 0.5)) continue;
+      if (level._segmentClear && !level._segmentClear(ax, az,
+            player.mesh.position.x, player.mesh.position.z, 0.5)) continue;
+      spawnX = ax; spawnZ = az; break;
+    }
+    if (spawnX === null) continue;   // skip this minion rather than spawn it stuck
+    const minion = melees.spawn(spawnX, spawnZ, {
       tier: 'normal',
       roomId: boss.roomId,
       hpMult: 0.5, damageMult: 0.7,
       reactionMult: 1.0, aimSpreadMult: 1.0,
       aggression: 1.2, gearLevel: 0,
     });
+    if (minion) {
+      // Necromant adds: zero loot, zero XP, zero credits, and they
+      // despawn shortly after dying so the floor doesn't pile up.
+      minion.summoned = true;
+      minion.noDrops = true;
+      minion.noXp = true;
+    }
   }
   if (sfx.uiAccept) sfx.uiAccept();
   triggerShake(0.18, 0.18);
@@ -6297,6 +6325,62 @@ function revealHiddenAmbush(room) {
   transientHudMsg('AMBUSH', 1.6);
 }
 
+// Per-frame sweep that despawns corpses we don't want to keep around.
+// Two cases qualify:
+//   1. Summoned minions (necromant adds) — they're combat clutter, no
+//      loot, no XP, so leaving the bodies around is pure perf cost.
+//   2. Player-looted bodies — once the loot panel emptied them, the
+//      player isn't going back. Fade and recycle the geometry.
+// Bosses + sub-bosses are exempt — those bodies are trophies. Drones
+// already auto-remove on death (see drones.js).
+const CORPSE_FADE_DELAY = 4.0;
+const CORPSE_FADE_DUR = 1.5;
+function tickCorpseDespawn(dt) {
+  const sweep = (manager, list) => {
+    for (let i = list.length - 1; i >= 0; i--) {
+      const c = list[i];
+      if (c.alive) continue;
+      if (c.tier === 'boss' || c.tier === 'subBoss' || c.majorBoss) continue;
+      const isEmpty = c.loot && c.loot.length === 0;
+      const eligible = c.summoned || c.looted || isEmpty;
+      if (!eligible) continue;
+      if (c._despawnT === undefined) {
+        c._despawnT = CORPSE_FADE_DELAY + CORPSE_FADE_DUR;
+        c._despawnTotal = c._despawnT;
+      }
+      c._despawnT -= dt;
+      const fadeStart = CORPSE_FADE_DUR;
+      if (c._despawnT < fadeStart && c.group) {
+        const k = Math.max(0, c._despawnT / fadeStart);
+        c.group.traverse((obj) => {
+          if (obj.material) {
+            const apply = (m) => {
+              if (m._origOpacity === undefined) m._origOpacity = m.opacity ?? 1;
+              m.transparent = true;
+              m.opacity = m._origOpacity * k;
+            };
+            if (Array.isArray(obj.material)) obj.material.forEach(apply);
+            else apply(obj.material);
+          }
+        });
+      }
+      if (c._despawnT <= 0) {
+        c.group.traverse((obj) => {
+          if (obj.geometry) obj.geometry.dispose();
+          if (obj.material) {
+            if (Array.isArray(obj.material)) obj.material.forEach(m => m.dispose());
+            else obj.material.dispose();
+          }
+        });
+        if (c.group.parent) c.group.parent.remove(c.group);
+        list.splice(i, 1);
+      }
+    }
+  };
+  if (gunmen?.gunmen) sweep(gunmen, gunmen.gunmen);
+  if (melees?.enemies) sweep(melees, melees.enemies);
+}
+
 // Tick the per-actor ambush-drop animation set up by revealHiddenAmbush.
 // Each entry has `_ambushDropT` ticking down; we ease its Y back to 0
 // over the timer so it lands with a thud rather than snapping in.
@@ -6702,6 +6786,7 @@ function tick() {
   _tickCamping(dt);
   _tickBurnFlames(dt);
   tickAmbushDrops(dt);
+  tickCorpseDespawn(dt);
   // Player flash + stun decay. Flash drives a fullscreen white
   // overlay that fades from 1.0 → 0 over the duration; stun decays
   // separately, the camera waver reads it below.
@@ -6761,7 +6846,7 @@ function tick() {
     onMeleePlayer: (dmg) => damagePlayer(dmg, 'melee'),
     obstacles: losObstacles,
     onFireAt: aiFire,
-    onBurnKill: (e) => { onEnemyKilled(e); awardClassXp('exotic', e.tier); },
+    onBurnKill: (e) => { onEnemyKilled(e); awardClassXp('exotic', e.tier, e); },
     onBurnDamage: (e, dmg) => trackBurnDamage(e, dmg),
     onAlert: (e) => propagateAggro(e),
     playerStealthMult: stealthMult,
@@ -6828,7 +6913,7 @@ function tick() {
       pulseHurtFlash(0.4);
       sfx.meleeImpact?.();
     },
-    onBurnKill: (e) => { onEnemyKilled(e); awardClassXp('exotic', e.tier); },
+    onBurnKill: (e) => { onEnemyKilled(e); awardClassXp('exotic', e.tier, e); },
     onBurnDamage: (e, dmg) => trackBurnDamage(e, dmg),
     playerIFrames: playerInfo.iFrames,
     playerBlocking: playerInfo.blocking,
