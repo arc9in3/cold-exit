@@ -842,16 +842,12 @@ export class MeleeEnemyManager {
       const res = ctx.resolveCollision(beforeX, beforeZ, nx, nz, tunables.meleeEnemy.collisionRadius);
       e.group.position.x = res.x;
       e.group.position.z = res.z;
-      // Clamp bosses to their arena bounds (see gunman.js for rationale).
-      if (e.tier === 'boss' && ctx.level && e.roomId >= 0) {
-        const room = ctx.level.rooms[e.roomId];
-        if (room) {
-          const b = room.bounds;
-          const m = tunables.meleeEnemy.collisionRadius + 0.4;
-          e.group.position.x = Math.max(b.minX + m, Math.min(b.maxX - m, e.group.position.x));
-          e.group.position.z = Math.max(b.minZ + m, Math.min(b.maxZ - m, e.group.position.z));
-        }
-      }
+      // (Bosses used to be clamped to their arena bounds here. Removed
+      // so melee bosses can chase the player through doorways and
+      // pursue across rooms — the door-graph pathing above already
+      // routes them through cleared corridors. Without this change
+      // the boss got stuck against its arena wall the moment the
+      // player ducked through a door.)
       const wantedLen = Math.hypot(nx - beforeX, nz - beforeZ);
       const actualLen = Math.hypot(res.x - beforeX, res.z - beforeZ);
       if (wantedLen > 0.01 && actualLen < wantedLen * 0.3 && e.stuckT <= 0) {

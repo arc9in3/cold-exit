@@ -57,6 +57,7 @@ import { RunStats, Leaderboard } from './leaderboard.js';
 import { fireHint, tickHints, resetHints } from './ui_hints.js';
 import { TutorialUI } from './ui_tutorial.js';
 import { setCursorForWeapon } from './cursor.js';
+import { DroneManager } from './drones.js';
 window.__resetHints = resetHints;
 
 // Tutorial mode flag — when true, the level generator builds a tiny
@@ -171,10 +172,15 @@ const bossBarRoot = (() => {
   return { root, name, fill };
 })();
 const BOSS_NAMES = {
-  evasive:   'THE DODGER',
-  bulletHell:'THE BARRAGE',
-  assassin:  'NIGHT BLADE',
-  elite:     'THE SPECIALIST',
+  evasive:       'THE DODGER',
+  bulletHell:    'THE BARRAGE',
+  assassin:      'NIGHT BLADE',
+  elite:         'THE SPECIALIST',
+  flamer:        'THE BURN',
+  grenadier:     'THE LOBBER',
+  droneSummoner: 'THE HIVEMASTER',
+  spawner:       'THE NECROMANT',
+  berserker:     'THE FROTH',
 };
 function renderBossBar() {
   // Find the live major boss nearest the player (there's almost
@@ -455,6 +461,7 @@ const combat = new Combat(scene);
 const dummies = new DummyManager(scene);
 const gunmen = new GunmanManager(scene);
 const melees = new MeleeEnemyManager(scene);
+const drones = new DroneManager(scene);
 const loot = new LootManager(scene);
 const level = new Level(scene);
 const projectiles = new ProjectileManager(scene);
@@ -1377,6 +1384,7 @@ function regenerateLevel() {
   runStats.setLevel(level.index | 0);
   gunmen.removeAll();
   melees.removeAll();
+  drones.removeAll();
   loot.removeAll();
   playerKeys.clear();
   // Pre-warm the FBX clone for every weapon currently in the player's
@@ -2414,7 +2422,7 @@ let _hittablesCache = null;
 let _hittablesFrame = -1;
 function allHittables() {
   if (_hittablesFrame === frameCounter && _hittablesCache) return _hittablesCache;
-  _hittablesCache = [...dummies.hittables(), ...gunmen.hittables(), ...melees.hittables()];
+  _hittablesCache = [...dummies.hittables(), ...gunmen.hittables(), ...melees.hittables(), ...drones.hittables()];
   _hittablesFrame = frameCounter;
   return _hittablesCache;
 }
@@ -5462,6 +5470,65 @@ function _tickCamping(dt) {
   }
 }
 
+// Spawner boss — teleport the boss to a random open point in its
+// room, then spawn 3-4 weak melee adds at the new position. Forces
+// the player to manage adds vs. punish the boss during the brief
+// recharge window. Picks open spots via simple random sampling
+// inside the room bounds; walks away if no open spot is found
+// within a few attempts.
+function spawnerTeleportAndSummon(boss) {
+  if (!boss || !boss.alive) return;
+  const room = level.rooms?.find(r => r.id === boss.roomId);
+  if (!room) return;
+  const b = room.bounds;
+  let tx = boss.group.position.x, tz = boss.group.position.z;
+  for (let attempt = 0; attempt < 20; attempt++) {
+    const x = b.minX + 2 + Math.random() * (b.maxX - b.minX - 4);
+    const z = b.minZ + 2 + Math.random() * (b.maxZ - b.minZ - 4);
+    if (level._collidesAt && level._collidesAt(x, z, 0.6)) continue;
+    // Don't teleport on top of the player.
+    const dx = x - player.mesh.position.x, dz = z - player.mesh.position.z;
+    if (dx * dx + dz * dz < 16) continue;
+    tx = x; tz = z; break;
+  }
+  boss.group.position.x = tx;
+  boss.group.position.z = tz;
+  // Spawn 2-3 melee adds in a small ring around the boss. Reuses
+  // melees.spawn so the adds get the standard rig + AI; tier set to
+  // 'normal' so they go down quickly.
+  const addCount = 2 + Math.floor(Math.random() * 2);
+  for (let i = 0; i < addCount; i++) {
+    const a = (i / addCount) * Math.PI * 2 + Math.random() * 0.4;
+    const r = 1.2;
+    const ax = tx + Math.cos(a) * r;
+    const az = tz + Math.sin(a) * r;
+    melees.spawn(ax, az, {
+      tier: 'normal',
+      roomId: boss.roomId,
+      hpMult: 0.5, damageMult: 0.7,
+      reactionMult: 1.0, aimSpreadMult: 1.0,
+      aggression: 1.2, gearLevel: 0,
+    });
+  }
+  if (sfx.uiAccept) sfx.uiAccept();
+  triggerShake(0.18, 0.18);
+}
+
+// Drone summoner — the boss's archetype tick calls this to spawn
+// 2-3 suicide drones at its position. Drones float at chest height
+// and track the player at medium speed; player can shoot them
+// down for 24 HP each, or take a 22-damage AoE blast on contact.
+// See src/drones.js for the per-drone simulation.
+function spawnDronesAt(x, z) {
+  const count = 2 + Math.floor(Math.random() * 2);   // 2-3 per summon
+  for (let i = 0; i < count; i++) {
+    const a = (i / count) * Math.PI * 2 + Math.random() * 0.5;
+    const r = 0.8;
+    drones.spawn(x + Math.cos(a) * r, 1.4, z + Math.sin(a) * r);
+  }
+  if (sfx.uiAccept) sfx.uiAccept();
+}
+
 // AI throwable spawn — boss / sub-boss tier only, kicked off from
 // gunman.update when isPlayerCamping returns true and the per-enemy
 // throwable cooldown has elapsed. Picks a random throwable kind from
@@ -6612,6 +6679,8 @@ function tick() {
     activeDecoy,                    // decoy beacon target hijack
     spawnAiThrowable: (g, kind) => spawnAiThrowable(g, kind),
     isPlayerCamping: () => playerCampingT > playerCampingThreshold,
+    droneSummonAt: (gx, gz) => spawnDronesAt(gx, gz),
+    spawnerTeleportAndSummon: (g) => spawnerTeleportAndSummon(g),
   });
   melees.update({
     dt,
@@ -6626,6 +6695,7 @@ function tick() {
     isRoomActive,
     isInsideSmoke,
     activeDecoy,
+    droneSummonAt: (gx, gz) => spawnDronesAt(gx, gz),
     onPlayerHit: (d, enemy) => {
       if (playerInfo.blocking) {
         const hitPt = new THREE.Vector3(
@@ -6666,6 +6736,21 @@ function tick() {
     playerIFrames: playerInfo.iFrames,
     playerBlocking: playerInfo.blocking,
     resolveCollision: enemyResolveCollision,
+  });
+  // Drone tick — the suicide drones float toward the player at
+  // a fixed speed and detonate on contact. Player-aim raycasts
+  // already see them via allHittables (the manager plugged its
+  // hittables() in alongside gunmen + melees), so bullets damage
+  // them through the standard hit pipeline.
+  drones.update(dt, {
+    playerPos: playerInfo.position,
+    level,
+    onDroneExplode: (pos, explosion) => {
+      // Same payload shape as projectile detonations — route through
+      // the existing onProjectileExplode handler so the AoE damage
+      // + spawn FX match grenades visually + audibly.
+      onProjectileExplode(pos, explosion, 'enemy', { throwKind: null });
+    },
   });
 
   // Keep enemies from stacking so crowd counts read at a glance.

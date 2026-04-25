@@ -1266,7 +1266,8 @@ export class GunmanManager {
     const rangeTolerance = g.profile.rangeTolerance ?? tunables.ai.rangeTolerance;
     const moveSpeed = tunables.ai.moveSpeed * g.profile.moveSpeedMult
       * (g.tier === 'boss' ? 1.35 : g.tier === 'subBoss' ? 1.15 : 1)
-      * (g.tier === 'boss' ? Math.min(1.6, g.aggression || 1) : 1);
+      * (g.tier === 'boss' ? Math.min(1.6, g.aggression || 1) : 1)
+      * (g._berserkMoveMult || 1);
 
     if (canSee) {
       if (g.state === STATE.IDLE) {
@@ -1610,6 +1611,59 @@ export class GunmanManager {
           const baseCd = g.tier === 'boss' ? 8 : 12;
           g.antiCampThrowT = baseCd + Math.random() * 4;
           ctx.spawnAiThrowable(g);
+        }
+      }
+
+      // Drone-summoner boss — on a slow cooldown, summons 2-3
+      // suicide drones at its position. The boss itself is fragile-
+      // ish in direct combat; the threat is the drone wave. Player
+      // must shoot drones down before they detonate on contact.
+      if (g.archetype === 'droneSummoner') {
+        g.archT = (g.archT || 0) - dt;
+        if (g.archT <= 0 && ctx.droneSummonAt && (g.canSeePlayer || canSee)) {
+          // Cooldown shortens with aggression so a level-10 summoner
+          // pulses every ~3.5s; level-1 every ~6s. Caps below.
+          const baseCd = 6.5;
+          g.archT = Math.max(2.5, baseCd / Math.max(0.5, g.aggression || 1));
+          ctx.droneSummonAt(g.group.position.x, g.group.position.z);
+        }
+      }
+      // Berserker boss — HP-driven phases. Above 60% HP: patient
+      // pacer (no extra speed). Below 60%: sprints (movement +40%).
+      // Below 30%: rage — extra speed, lifesteal on hits, knockback
+      // immunity. Punishes spam tactics; rewards burst-kill builds.
+      if (g.archetype === 'berserker') {
+        const hpFrac = g.maxHp > 0 ? g.hp / g.maxHp : 1;
+        g._berserkPhase = hpFrac < 0.30 ? 'rage'
+                        : hpFrac < 0.60 ? 'sprint'
+                                        : 'patient';
+        // Speed multiplier — drives the move scale via a stash field
+        // the AI tick honours below for its actual locomotion. Ramps
+        // up smoothly so the transition reads as commitment, not a
+        // snap.
+        const targetMult = g._berserkPhase === 'rage' ? 1.55
+                         : g._berserkPhase === 'sprint' ? 1.40
+                         : 1.0;
+        g._berserkMoveMult = (g._berserkMoveMult || 1) * 0.92
+                           + targetMult * 0.08;
+        // Knockback immunity in rage phase — clear any incoming
+        // knock velocity so they keep advancing through hits.
+        if (g._berserkPhase === 'rage' && g.knockVel) {
+          g.knockVel.x *= 0.0; g.knockVel.z *= 0.0;
+        }
+      }
+      // Spawner boss — high HP, minimal direct damage. Periodically
+      // teleports to a random point in the boss room and spawns 3-4
+      // melee adds at its new position. Player has to clear adds OR
+      // pressure the boss during the brief recharge window where it
+      // can be shot. Same droneSummonAt-style hook is reused for the
+      // teleport via spawnerTeleport, defined in main.js.
+      if (g.archetype === 'spawner') {
+        g.archT = (g.archT || 0) - dt;
+        if (g.archT <= 0 && ctx.spawnerTeleportAndSummon) {
+          const baseCd = 5.5;
+          g.archT = Math.max(2.5, baseCd / Math.max(0.5, g.aggression || 1));
+          ctx.spawnerTeleportAndSummon(g);
         }
       }
 

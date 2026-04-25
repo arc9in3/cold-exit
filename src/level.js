@@ -1826,26 +1826,33 @@ export class Level {
       // `bulletHell` fat-target volley thrower; `assassin` dash-melee
       // (spawns as a melee enemy below); `elite` constant fire + dash.
       const archRoll = Math.random();
-      // Six archetypes — the four originals (evasive, bulletHell,
-      // elite, assassin) plus two new pressure-bosses: flamer
-      // (relentless flamethrower rush) and grenadier (constant arc
-      // throws + dash). Distribution is even-ish so a run of 4-6
-      // boss rooms lands a varied roster.
-      const bossArchetype = archRoll < 0.18 ? 'evasive'
-                          : archRoll < 0.36 ? 'bulletHell'
-                          : archRoll < 0.54 ? 'elite'
-                          : archRoll < 0.70 ? 'assassin'
-                          : archRoll < 0.85 ? 'flamer'
-                          :                   'grenadier';
+      // Nine archetypes now — the original six plus three new
+      // pressure-bosses: droneSummoner (suicide-drone wave control),
+      // spawner (teleport + add-spawn), berserker (HP-driven phase
+      // tank). Roughly equal-ish distribution.
+      const bossArchetype = archRoll < 0.12 ? 'evasive'
+                          : archRoll < 0.24 ? 'bulletHell'
+                          : archRoll < 0.36 ? 'elite'
+                          : archRoll < 0.48 ? 'assassin'
+                          : archRoll < 0.60 ? 'flamer'
+                          : archRoll < 0.72 ? 'grenadier'
+                          : archRoll < 0.82 ? 'droneSummoner'
+                          : archRoll < 0.91 ? 'spawner'
+                          :                   'berserker';
       const archVariant =
-        bossArchetype === 'bulletHell' ? 'tank'
-      : bossArchetype === 'assassin'   ? 'standard'    // melee variant slot
-      : bossArchetype === 'elite'      ? 'dasher'
-      : bossArchetype === 'flamer'     ? 'tank'        // beefy rush
-      : bossArchetype === 'grenadier'  ? 'dasher'      // fast + dashy
-      :                                  'coverSeeker';
+        bossArchetype === 'bulletHell'    ? 'tank'
+      : bossArchetype === 'assassin'      ? 'standard'    // melee variant slot
+      : bossArchetype === 'elite'         ? 'dasher'
+      : bossArchetype === 'flamer'        ? 'tank'        // beefy rush
+      : bossArchetype === 'grenadier'     ? 'dasher'      // fast + dashy
+      : bossArchetype === 'droneSummoner' ? 'coverSeeker' // hangs back, lets drones do work
+      : bossArchetype === 'spawner'       ? 'tank'        // beefy because adds are the threat
+      : bossArchetype === 'berserker'     ? 'standard'    // melee variant slot
+      :                                     'coverSeeker';
       const bossVariant = archVariant;
-      const bossKind = bossArchetype === 'assassin' ? 'melee' : 'gunman';
+      // Berserker spawns as a melee enemy (close-quarters tank).
+      // Other archetypes use the gunman manager.
+      const bossKind = (bossArchetype === 'assassin' || bossArchetype === 'berserker') ? 'melee' : 'gunman';
       this.enemySpawns.push({
         x: p.x, z: p.z,
         kind: bossKind, tier: 'boss', roomId: room.id,
