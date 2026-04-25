@@ -93,6 +93,11 @@ export class Level {
   generate() {
     this.clear();
     this.index += 1;
+    // Tutorial mode override — build the practice room layout
+    // instead of random-walking a normal chain.
+    if (typeof window !== 'undefined' && window.__tutorialMode && window.__tutorialMode()) {
+      return this.generateTutorial();
+    }
 
     // --- Layout: random-walk chain so each level bends differently --------
     // Combat-room count grows with level — L1 picks 2-4, L5 picks 4-6,
@@ -740,6 +745,97 @@ export class Level {
     mesh.userData.cx = cx;
     mesh.userData.cz = cz;
 
+  }
+
+  // Build the tutorial level — a single 30×30 practice room with an
+  // outer wall ring, a player spawn at one end, an extract zone at
+  // the far end (revealed immediately), one container, and one
+  // sleeping dummy enemy spawn. No doors, no boss, no wandering AI;
+  // the room exists so the player can practice every control without
+  // dying. Stays within the same Level invariants used by the random
+  // generator (rooms list, exitBounds, playerSpawn, enemySpawns) so
+  // downstream code (HUD, collision, etc.) works unchanged.
+  generateTutorial() {
+    const W = 30, D = 26;
+    const cx = 0, cz = 0;
+    const bounds = {
+      minX: cx - W / 2, maxX: cx + W / 2,
+      minZ: cz - D / 2, maxZ: cz + D / 2,
+    };
+    const room = {
+      id: 0,
+      type: 'start',
+      layout: 'open',
+      bounds,
+      cx, cz,
+      cellX: 0, cellZ: 0,
+      neighbors: [],
+      hasElevator: false,
+      doubled: false,
+      giant: false,
+    };
+    this.rooms = [room];
+    // Outer walls — four full-height segments. No door gaps; the
+    // tutorial ends via the extract zone, not by opening a door.
+    const T = WALL_THICK;
+    const H = WALL_HEIGHT;
+    this._addObstacle(cx,  H / 2, bounds.minZ, W + T, H, T, OUTER_WALL_COLOR);
+    this._addObstacle(cx,  H / 2, bounds.maxZ, W + T, H, T, OUTER_WALL_COLOR);
+    this._addObstacle(bounds.minX, H / 2, cz, T, H, D, OUTER_WALL_COLOR);
+    this._addObstacle(bounds.maxX, H / 2, cz, T, H, D, OUTER_WALL_COLOR);
+    // A few low-cover blocks so the player can practice taking cover
+    // and hopping between sight lines.
+    this._addObstacle(cx - 4, 0.4, cz - 2, 1.6, 0.8, 1.0, LOW_COVER_COLOR);
+    this._addObstacle(cx + 3, 0.4, cz + 1, 1.4, 0.8, 1.2, LOW_COVER_COLOR);
+    this._addObstacle(cx + 5, 0.4, cz - 4, 1.2, 0.8, 1.4, LOW_COVER_COLOR);
+    // Practice container — placed off-centre so the player has to
+    // walk to it. Built via the same containers.js path so the loot
+    // UI flow matches a real run.
+    {
+      const container = makeContainer('general', 'm', 1);
+      // Stuff a guaranteed bandage + medkit + throwable so the
+      // pickup / heal / throwable steps all have something usable.
+      container.loot.unshift({
+        id: 'cons_bandage', name: 'Bandage', type: 'consumable', rarity: 'common',
+        useEffect: { kind: 'heal', amount: 30 },
+      });
+      container.loot.push({
+        id: 'cons_medkit', name: 'Medkit', type: 'consumable', rarity: 'common',
+        useEffect: { kind: 'heal', amount: 60 },
+      });
+      const cx2 = cx - 6, cz2 = cz + 4;
+      const group = buildContainerMesh(container, cx2, 0, cz2);
+      this.scene.add(group);
+      const { w, h, d } = container.geo;
+      const proxy = new THREE.Mesh(
+        new THREE.BoxGeometry(w, h, d),
+        new THREE.MeshBasicMaterial({ transparent: true, opacity: 0, depthWrite: false }),
+      );
+      proxy.position.set(cx2, h / 2, cz2);
+      proxy.userData.collisionXZ = {
+        minX: cx2 - w / 2, maxX: cx2 + w / 2,
+        minZ: cz2 - d / 2, maxZ: cz2 + d / 2,
+      };
+      proxy.userData.isProp = true;
+      this.scene.add(proxy);
+      this.obstacles.push(proxy);
+      this.containers.push({ container, group, x: cx2, z: cz2, r: 1.8 });
+    }
+    // Extract zone — pinned at the far +Z end of the room, revealed
+    // immediately so the tutorial player can see where to head.
+    this._exitPendingBounds = { cx: cx, cz: bounds.maxZ - 4, r: 2.4 };
+    this.revealExit();
+    // Player spawn at the opposite end of the room.
+    this.playerSpawn.set(cx, 0, bounds.minZ + 3);
+    // Single dummy enemy spawn so the fire / melee / reload steps
+    // have a target. Marked low-aggression via opts the spawner
+    // honours; passive AI tuning happens in main.js when these
+    // spawn slots are consumed.
+    this.enemySpawns = [{
+      x: cx + 4, z: cz + 5, roomId: 0, tier: 'normal',
+      tutorialDummy: true,
+    }];
+    return;
   }
 
   _scatterCover(room) {

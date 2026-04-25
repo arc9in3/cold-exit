@@ -55,7 +55,17 @@ import { STATUS_ICONS } from './inventory.js';
 import { thumbnailFor } from './item_thumbnails.js';
 import { RunStats, Leaderboard } from './leaderboard.js';
 import { fireHint, tickHints, resetHints } from './ui_hints.js';
+import { TutorialUI } from './ui_tutorial.js';
 window.__resetHints = resetHints;
+
+// Tutorial mode flag — when true, the level generator builds a tiny
+// fixed practice room with no aggressive enemies and the
+// TutorialUI overlay tracks player-action checkboxes. The flag is
+// flipped on by the main-menu Tutorial button and cleared when the
+// player extracts or quits to title.
+let tutorialMode = false;
+const tutorialUI = new TutorialUI();
+window.__tutorialMode = () => tutorialMode;
 
 const appEl = document.getElementById('app');
 const hudStatsEl = document.getElementById('hud-stats');
@@ -857,6 +867,26 @@ const mainMenuUI = new MainMenuUI({
     storeRollUI.show(offers, { slots, tier: rarityTier });
   },
   onOpenStore: () => { mainMenuUI.hide(); storeUpgradeUI.show(); },
+  onTutorial: () => {
+    // Tutorial mode — pistol-class run on a single fixed practice
+    // room. Resets the contextual hint registry too so the
+    // first-time hint flow plays for the tutorial player even if
+    // they already cleared it on a real run.
+    tutorialMode = true;
+    tutorialUI.reset();
+    tutorialUI.show();
+    resetHints();
+    startNewRun('pistol');
+    currentWeaponIndex = 0;
+    level.index = 0;
+    runStats.reset();
+    playerDead = false;
+    if (deathRootEl) deathRootEl.style.display = 'none';
+    recomputeStats();
+    player.restoreFullHealth();
+    regenerateLevel();
+    sfx.ambientStart();
+  },
   getLeaderboard: () => Leaderboard,
   getVolume: getMasterVolume,
   setVolume: setMasterVolume,
@@ -1380,6 +1410,13 @@ function regenerateLevel() {
       archetype: s.archetype,
       majorBoss: !!s.majorBoss,
     };
+    // Tutorial dummies — passive, never alert, low HP for easy
+    // practice kills.
+    if (s.tutorialDummy) {
+      opts.hpMult = 0.4;
+      opts.aggression = 0;
+      opts.aimSpreadMult = 99;       // can't aim well even if it tries
+    }
     if (s.kind === 'melee') {
       const e = melees.spawn(s.x, s.z, opts);
       const colour = keyAssignments.get(s);
@@ -4967,6 +5004,7 @@ function tryInteract({ nearItem, body, npc, container }) {
     if (result.slot === 'primary' || result.slot === 'melee') onInventoryChanged();
     recomputeStats();
     inventoryUI.render();
+    if (tutorialMode) tutorialUI.markStep('pickup');
     return;
   }
   if (body && !body.looted && body.loot && body.loot.length > 0) {
@@ -4980,6 +5018,7 @@ function tryInteract({ nearItem, body, npc, container }) {
     // body items do via lootUI.open.
     lootUI.open(container.container);
     sfx.uiAccept?.();
+    if (tutorialMode) tutorialUI.markStep('container');
     return;
   }
   if (npc && ['merchant', 'bearMerchant', 'healer', 'gunsmith',
@@ -5009,6 +5048,17 @@ function tryInteract({ nearItem, body, npc, container }) {
     return;
   }
   if (level.isPlayerInExit(player.mesh.position) && exitCooldown <= 0) {
+    // Tutorial extract — bypass the normal runExtract flow and
+    // bounce back to the main menu so the player doesn't roll into
+    // a real run by accident.
+    if (tutorialMode) {
+      tutorialUI.markStep('extract');
+      tutorialMode = false;
+      tutorialUI.hide();
+      sfx.ambientStop();
+      mainMenuUI.show();
+      return;
+    }
     extractPending = true;
   }
 }
@@ -5604,6 +5654,7 @@ function useActionSlot(idx) {
     inventoryUI.render();
     renderActionBar();
     renderWeaponBar();
+    if (tutorialMode) tutorialUI.markStep('throwable');
     return;
   }
   // Everything else (heal / buff consumables) is single-use: pull
@@ -6155,6 +6206,23 @@ function tick() {
     if (runSec > 18) fireHint('crouch');
     if (runSec > 30) fireHint('dash');
     if (runSec > 50) fireHint('hotbar');
+  }
+  // Tutorial step ticking — runs every frame in tutorial mode and
+  // advances the checklist as the player performs each action.
+  // No-op for normal runs (cheap branch).
+  if (tutorialMode) {
+    const move = inputState.move;
+    if (move && (move.x !== 0 || move.y !== 0)) tutorialUI.markStep('move');
+    if (inputState.adsHeld) tutorialUI.markStep('aim');
+    if (inputState.attackPressed) tutorialUI.markStep('fire');
+    if (inputState.reloadPressed) tutorialUI.markStep('reload');
+    if (inputState.meleePressed) tutorialUI.markStep('melee');
+    if (inputState.crouchPressed) tutorialUI.markStep('crouch');
+    if (inputState.spacePressed || inputState.spaceDoublePressed) tutorialUI.markStep('dash');
+    if (inputState.inventoryToggled) tutorialUI.markStep('inventory');
+    if (inputState.healPressed) tutorialUI.markStep('heal');
+    // Extract step is marked when the player walks into the exit
+    // zone — handled in the extract handler below.
   }
   // HP-driven heal hint — fires the first time the player drops below
   // 50% HP, surfacing the H quick-heal binding.

@@ -8,11 +8,12 @@
 // Esc pause / save / load flow during a run.
 
 export class MainMenuUI {
-  constructor({ onPlay, onOpenStore, getLeaderboard, getVolume, setVolume,
+  constructor({ onPlay, onTutorial, onOpenStore, getLeaderboard, getVolume, setVolume,
                 getQuality, setQuality, getDevTools, setDevTools,
                 getPlayerName, setPlayerName,
                 getCharacterStyle, setCharacterStyle }) {
     this.onPlay = onPlay;
+    this.onTutorial = onTutorial;
     this.onOpenStore = onOpenStore;
     this.getLeaderboard = getLeaderboard || (() => null);
     this.getVolume = getVolume || (() => 0.7);
@@ -94,6 +95,10 @@ export class MainMenuUI {
     this.bodyEl.appendChild(this._btn('New Game', () => {
       this.hide();
       this.onPlay?.();
+    }));
+    this.bodyEl.appendChild(this._btn('Tutorial', () => {
+      this.hide();
+      this.onTutorial?.();
     }));
     this.bodyEl.appendChild(this._btn('Store', () => {
       this.onOpenStore?.();
