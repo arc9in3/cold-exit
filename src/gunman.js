@@ -956,6 +956,19 @@ export class GunmanManager {
       g.forceSleep = false;
       g.zzzT = 0;
     }
+    // Deep-sleep timer (whisper dart). While > 0 the enemy is locked
+    // in SLEEP; the alert + propagate paths in main.js skip them
+    // entirely so neither sound nor witness wakes them. Tick down,
+    // and on expiry release them back to IDLE so they resume patrol
+    // (un-aggroed — the dart wiped suspicion + lastKnown at hit).
+    if (g.deepSleepT && g.deepSleepT > 0) {
+      g.deepSleepT -= dt;
+      if (g.state !== STATE.SLEEP) g.state = STATE.SLEEP;
+      if (g.deepSleepT <= 0) {
+        g.deepSleepT = 0;
+        g.state = STATE.IDLE;
+      }
+    }
 
     // Reuse module-scope scratch vectors (see _g_* above) instead of
     // newing one per gunman per frame.

@@ -3075,10 +3075,21 @@ function fireOneShot(playerInfo, weapon, aimPoint, isADS) {
           hit.owner.panicT = Math.max(hit.owner.panicT || 0, 4.0);
         }
       }
-      // Sleep-dart weapon — silent knock-out on normal tier.
+      // Sleep-dart weapon — silent knock-out on normal tier. Dart
+      // also DE-aggros: any current alertness, suspicion, or last-
+      // known-player breadcrumb is wiped, and the enemy can't be
+      // re-alerted (witness, gunfire, propagation) for the full
+      // sleep duration. Duration rolls 10s..5min so the player can
+      // either creep past a darted patrol or count on the room
+      // staying clear long enough to do something deliberate.
       if (weapon.sleepOnHit && hit.owner.alive
           && (hit.owner.tier === 'normal' || !hit.owner.tier)) {
         hit.owner.forceSleep = true;
+        hit.owner.deepSleepT = 10 + Math.random() * 290;
+        hit.owner.suspicion = 0;
+        hit.owner.reactionT = 0;
+        hit.owner.lastKnownX = undefined;
+        hit.owner.lastKnownZ = undefined;
       }
       // Shock on crit — briefly dazzle the target (blurs their aim via dazzleT).
       if (crit && (derivedStats.shockOnCrit || 0) > 0 && hit.owner.alive) {
@@ -6138,6 +6149,9 @@ function alertEnemiesFromShot(origin) {
     // Hidden ambush bosses + minions stay completely deaf until the
     // player crosses the threshold and revealHiddenAmbush flips them.
     if (e.hidden) return;
+    // Deep-sleep (whisper dart) — neither sound nor witness wakes
+    // them. Dart wears off via the per-tick timer in gunman/melee.
+    if (e.deepSleepT && e.deepSleepT > 0) return;
     // Room gate — skip any enemy whose room isn't in the audible set.
     // Enemies with roomId -1 (unassigned) fall back to radius-only so
     // we don't regress to silence for anything the level didn't tag.
@@ -6172,6 +6186,7 @@ function propagateAggro(alerted) {
   if (rid === -1 || rid === undefined) return;
   for (const g of gunmen.gunmen) {
     if (!g.alive || g === alerted || g.roomId !== rid || g.hidden) continue;
+    if (g.deepSleepT && g.deepSleepT > 0) continue;
     if (g.state === 'idle') {
       g.state = 'alerted';
       g.reactionT = tunables.ai.reactionTime;
@@ -6179,6 +6194,7 @@ function propagateAggro(alerted) {
   }
   for (const m of melees.enemies) {
     if (!m.alive || m === alerted || m.roomId !== rid || m.hidden) continue;
+    if (m.deepSleepT && m.deepSleepT > 0) continue;
     if (m.state === 'idle') m.state = 'chase';
   }
 }

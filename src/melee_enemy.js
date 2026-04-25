@@ -676,6 +676,31 @@ export class MeleeEnemyManager {
   }
 
   _updateAI(e, ctx, dt) {
+    // Whisper-dart deep sleep — locks the rusher to IDLE for the full
+    // dart duration, ignoring suspicion + perception entirely. The
+    // alert / propagate paths in main.js also skip them so neither
+    // sound nor a visible player can wake them. On expiry they snap
+    // back to IDLE patrol with zero suspicion (dart wiped it at hit).
+    if (e.deepSleepT && e.deepSleepT > 0) {
+      e.deepSleepT -= dt;
+      e.state = STATE.IDLE;
+      e.suspicion = 0;
+      if (e.deepSleepT <= 0) e.deepSleepT = 0;
+      // Drop the alert ring so it visually reads as un-aggroed.
+      if (e.alertMat) {
+        e.alertMat.opacity = THREE.MathUtils.lerp(e.alertMat.opacity, 0, Math.min(1, dt * 10));
+      }
+      if (e.rig) updateAnim(e.rig, { speed: 0, meleeStance: true }, dt);
+      return;
+    }
+    if (e.forceSleep) {
+      e.forceSleep = false;
+      e.state = STATE.IDLE;
+      e.suspicion = 0;
+      if (e.alertMat) e.alertMat.opacity = 0;
+      if (e.rig) updateAnim(e.rig, { speed: 0, meleeStance: true }, dt);
+      return;
+    }
     e.cooldownT = Math.max(0, e.cooldownT - dt);
     const toPlayer = _m_toPlayer.subVectors(ctx.playerPos, e.group.position);
     const dist = Math.hypot(toPlayer.x, toPlayer.z);
