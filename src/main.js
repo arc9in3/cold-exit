@@ -572,6 +572,18 @@ function _pickStarterWeapon(weaponClass) {
   if (!candidates.length) return tunables.weapons[0];  // fallback
   return candidates[Math.floor(Math.random() * candidates.length)];
 }
+// Adds the standard starter consumable kit — 3 bandages + 1 random
+// throwable — so a fresh run isn't completely defenseless against bleeds
+// or grouped enemies. Called from both startNewRun and the store-rolled
+// startRunWithWeaponDef paths.
+function _seedStarterKit() {
+  for (let i = 0; i < 3; i++) {
+    inventory.add({ ...CONSUMABLE_DEFS.bandage });
+  }
+  const t = randomThrowable();
+  if (t) inventory.add(t);
+}
+
 // Wipe and re-equip the starter loadout: pants, top, small pack, and
 // a common-rarity weapon of the chosen class. Auto-equips the armor.
 function startNewRun(weaponClass) {
@@ -591,6 +603,7 @@ function startNewRun(weaponClass) {
   // Starter weapon — common rarity, chosen class.
   const weaponDef = _pickStarterWeapon(weaponClass);
   inventory.add(wrapWeapon(weaponDef, { rarity: 'common' }));
+  _seedStarterKit();
   inventory._bump();
 }
 
@@ -765,6 +778,7 @@ function startRunWithWeaponDef(def) {
   if (pack)  { pack.rarity  = 'common'; inventory.equipment.backpack = pack; }
   inventory._recomputeCapacity();
   inventory.add(wrapWeapon({ ...def }, { rarity: def.rarity || 'common' }));
+  _seedStarterKit();
   inventory._bump();
   currentWeaponIndex = 0;
   level.index = 0;
@@ -928,7 +942,16 @@ const shopUI = new ShopUI({
   spendCredits: (n) => { if (playerCredits < n) return false; playerCredits -= n; return true; },
   earnCredits: (n) => { playerCredits += n; runStats.addCredits(n); },
   onClose: () => inventoryUI.render(),
-  getShopMult: () => derivedStats.shopPriceMult || 1,
+  // Shop multiplier folds three things: the player's intrinsic
+  // shopPriceMult (perks / set bonuses), the per-level price ramp
+  // (later floors charge more), and a fixed scalar for "rare items
+  // really cost". Computed live so changing levels updates prices.
+  getShopMult: () => {
+    const ramp = tunables.currency.levelPriceRamp || 0;
+    const lv = Math.max(1, level?.index || 1);
+    const levelFactor = 1 + ramp * (lv - 1);
+    return (derivedStats.shopPriceMult || 1) * levelFactor;
+  },
   onAcquireArtifact: (id) => {
     const ok = artifacts.acquire(id);
     if (ok) {
@@ -973,15 +996,36 @@ function rollPriceMult() {
 function fluxify(item) { item.priceMult = rollPriceMult(); return item; }
 
 // Shops bias toward higher-rarity items — they're the supply side, and
-// rare gear is mostly seen through them rather than enemy drops.
-function shopUpgradeRarity(item, { baseChance = 0.35, epicChance = 0.10 } = {}) {
+// rare gear is mostly seen through them rather than enemy drops. The
+// `levelOffset` shifts the rarity floor up by ~0..3 tiers (rolled per
+// item) so a level-5 shop reliably stocks rare/epic gear that a
+// level-1 shop wouldn't.
+const RARITY_LADDER = ['common', 'uncommon', 'rare', 'epic', 'legendary'];
+function shopUpgradeRarity(item, { baseChance = 0.55, epicChance = 0.18 } = {}) {
   if (!item) return item;
   if (item.type === 'ranged' || item.type === 'melee') return item; // weapons roll via wrap
+  // Roll a 0..3 tier bump biased by the current floor level so later
+  // shops legitimately offer items "0-3 levels ahead". Sub-1 floors
+  // act as level 1 — the floor is at least 1 once a run begins.
+  const lv = Math.max(1, level?.index || 1);
+  const offsetCap = Math.min(3, Math.floor(lv / 2));   // 0..3 max
+  const offset = offsetCap > 0 ? Math.floor(Math.random() * (offsetCap + 1)) : 0;
   if (Math.random() < baseChance) {
     const r = Math.random();
-    if (r < epicChance) item.rarity = 'epic';
-    else if (r < epicChance + 0.45) item.rarity = 'rare';
-    else item.rarity = 'uncommon';
+    let tier;
+    if (r < epicChance) tier = 'epic';
+    else if (r < epicChance + 0.45) tier = 'rare';
+    else tier = 'uncommon';
+    // Apply level offset by walking the ladder up `offset` slots.
+    let idx = RARITY_LADDER.indexOf(tier);
+    if (idx >= 0) idx = Math.min(RARITY_LADDER.length - 1, idx + offset);
+    item.rarity = RARITY_LADDER[idx] || tier;
+  } else if (offset > 0) {
+    // Non-upgrade roll still gets a small offset — at level 6+ a
+    // "common" item may quietly become uncommon/rare.
+    let idx = RARITY_LADDER.indexOf(item.rarity || 'common');
+    if (idx >= 0) idx = Math.min(RARITY_LADDER.length - 1, idx + offset);
+    item.rarity = RARITY_LADDER[idx] || item.rarity;
   }
   return item;
 }
@@ -3212,38 +3256,41 @@ function buildBodyLoot(enemy) {
   const levelIdx = (level && level.index) || 0;
   const isMeleeEnemy = melees.enemies.includes(enemy);
 
-  // Weapons: every enemy drops what they were using. Basic grunts carry a
-  // knife/club/bat (common melees); sub-bosses occasionally pack a fancier
-  // blade; boss tier can roll the full melee pool.
-  if (enemy.weapon) items.push(wrapWeapon(enemy.weapon));
-  const meleePool = tunables.weapons.filter(w =>
-    w.type === 'melee' && !w.mythic && w.rarity !== 'mythic');
-  const lowTierMelees = meleePool.filter(w => w.rarity === 'common' || w.rarity === 'uncommon');
-  if (isMeleeEnemy) {
-    const pool = tier === 'boss'
-      ? meleePool
-      : tier === 'subBoss'
-        ? (Math.random() < 0.2 ? meleePool : lowTierMelees)
-        : lowTierMelees;
-    const pick = pool[Math.floor(Math.random() * pool.length)];
-    if (pick) items.push(wrapWeapon(pick));
-  } else if (tier === 'subBoss' && Math.random() < 0.35) {
-    const pick = lowTierMelees[Math.floor(Math.random() * lowTierMelees.length)];
-    if (pick) items.push(wrapWeapon(pick));
-  } else if (tier === 'boss') {
-    const pick = meleePool[Math.floor(Math.random() * meleePool.length)];
-    if (pick) items.push(wrapWeapon(pick));
+  // Drop economy is intentionally lean — containers in the level
+  // carry the bulk of the items, so bodies are mostly weapon + maybe
+  // a single extra. Regular grunts can come up entirely empty so the
+  // player has to engage with containers to keep stocked.
+  const isEmptyBody = tier === 'normal' && Math.random() < 0.35;
+
+  if (!isEmptyBody) {
+    // Weapons: most enemies drop what they were using. Some grunts
+    // come up gun-only (no melee fallback).
+    if (enemy.weapon) items.push(wrapWeapon(enemy.weapon));
+    const meleePool = tunables.weapons.filter(w =>
+      w.type === 'melee' && !w.mythic && w.rarity !== 'mythic');
+    const lowTierMelees = meleePool.filter(w => w.rarity === 'common' || w.rarity === 'uncommon');
+    if (isMeleeEnemy) {
+      const pool = tier === 'boss'
+        ? meleePool
+        : tier === 'subBoss'
+          ? (Math.random() < 0.2 ? meleePool : lowTierMelees)
+          : lowTierMelees;
+      const pick = pool[Math.floor(Math.random() * pool.length)];
+      if (pick) items.push(wrapWeapon(pick));
+    } else if (tier === 'boss') {
+      const pick = meleePool[Math.floor(Math.random() * meleePool.length)];
+      if (pick) items.push(wrapWeapon(pick));
+    }
+    // Sub-bosses no longer auto-roll an extra melee weapon — keep the
+    // drop count tight.
   }
 
-  // Armor scaling: always at least one piece, growing slowly with level.
-  // Rare / epic upgrades are intentionally uncommon — most drops stay
-  // common/uncommon so rare gear still feels like a find.
-  let armorCount = 1 + Math.floor(levelIdx / 3);
-  if (tier === 'subBoss') armorCount += 1;
-  else if (tier === 'boss') armorCount += 2;
-  // Upgrade chance — kept intentionally low so rare+ drops feel earned.
-  // Most grunts never roll above uncommon; sub-bosses occasionally rare;
-  // only bosses really push epic.
+  // Armor — bosses drop two pieces, sub-bosses one, grunts almost
+  // never. Containers handle most armor distribution now.
+  let armorCount = 0;
+  if (tier === 'boss')         armorCount = 2;
+  else if (tier === 'subBoss') armorCount = 1;
+  else if (!isEmptyBody && Math.random() < 0.10) armorCount = 1;
   const upgradeChance = Math.min(
     0.25,
     (levelIdx * 0.025) + (tier === 'boss' ? 0.18 : tier === 'subBoss' ? 0.08 : 0),
@@ -3267,13 +3314,11 @@ function buildBodyLoot(enemy) {
     items.push(piece);
   }
 
-  // Healing — enemies sometimes carry medical supplies. Chance scales by
-  // tier; boss rooms reliably offer something to patch up afterwards.
-  const healChance = tier === 'boss' ? 0.85 : tier === 'subBoss' ? 0.55 : 0.22;
+  // Healing — bosses guarantee, sub-bosses sometimes, grunts rarely.
+  const healChance = tier === 'boss' ? 0.75 : tier === 'subBoss' ? 0.30 : (isEmptyBody ? 0 : 0.08);
   if (Math.random() < healChance) {
     const heals = ALL_CONSUMABLES.filter(c => c.useEffect?.kind === 'heal');
     if (heals.length) {
-      // Bias toward bandage/painkillers on regular grunts; better packs on bosses.
       const pool = tier === 'boss' ? heals
         : tier === 'subBoss' ? heals.filter(h => h.rarity !== 'rare')
         : heals.filter(h => h.rarity === 'common');
@@ -3282,49 +3327,29 @@ function buildBodyLoot(enemy) {
     }
   }
 
-  // Tier-specific extras — rarity distribution concentrates rare+ on
-  // minibosses and bosses. Regular grunts hold common/uncommon so a
-  // full run feels weighted toward the big fights for upgrades.
+  // Tier-specific extras — bosses still feel rewarding but drop
+  // ~half the bonus items they used to. Sub-bosses lose one bonus
+  // roll. Grunts lose almost everything.
   if (tier === 'boss') {
     const g = randomGear();
     const gearR = Math.random();
-    items.push({ ...g, rarity: gearR < 0.25 ? 'legendary' : gearR < 0.60 ? 'epic' : 'rare',
+    items.push({ ...g, rarity: gearR < 0.20 ? 'legendary' : gearR < 0.55 ? 'epic' : 'rare',
       durability: { ...(g.durability || { current: 100, max: 100, repairability: 0.9 }) } });
-    const extraRoll = Math.random();
-    if (extraRoll < 0.55) {
-      const g2 = randomGear();
-      items.push({ ...g2, rarity: Math.random() < 0.35 ? 'epic' : 'rare',
-        durability: { ...(g2.durability || { current: 100, max: 100, repairability: 0.9 }) } });
-    }
-    if (Math.random() < 0.55) items.push(randomAttachment());
-    items.push(randomJunk());
-    if (Math.random() < 0.08) items.push(randomToy());
-    // Bosses occasionally drop a throwable alongside the main loot.
-    if (Math.random() < 0.35) items.push(randomThrowable());
+    if (Math.random() < 0.30) items.push(randomAttachment());
+    if (Math.random() < 0.50) items.push(randomJunk());
+    if (Math.random() < 0.20) items.push(randomThrowable());
   } else if (tier === 'subBoss') {
-    const g = randomGear();
-    const r = Math.random();
-    items.push({ ...g, rarity: r < 0.15 ? 'epic' : r < 0.55 ? 'rare' : 'uncommon',
-      durability: { ...(g.durability || { current: 100, max: 100, repairability: 0.9 }) } });
-    if (Math.random() < 0.40) items.push(randomAttachment());
-    if (Math.random() < 0.55) items.push(randomJunk());
-    if (Math.random() < 0.25) items.push(randomThrowable());
-  } else {
-    // Regular grunts — junk + small consumable rolls, never rare+ gear.
-    if (Math.random() < 0.10) items.push(randomAttachment());
-    if (Math.random() < 0.18) {
-      // Clamp stray consumable definitions that are authored as rare/
-      // epic down to the common/uncommon band for grunt drops.
-      const c = randomConsumable();
-      if (c && (c.rarity === 'rare' || c.rarity === 'epic' || c.rarity === 'legendary')) {
-        c.rarity = Math.random() < 0.3 ? 'uncommon' : 'common';
-      }
-      items.push(c);
+    if (Math.random() < 0.55) {
+      const g = randomGear();
+      const r = Math.random();
+      items.push({ ...g, rarity: r < 0.15 ? 'epic' : r < 0.55 ? 'rare' : 'uncommon',
+        durability: { ...(g.durability || { current: 100, max: 100, repairability: 0.9 }) } });
     }
-    if (Math.random() < 0.35) items.push(randomJunk());
-    if (Math.random() < 0.18) items.push(randomJunk());
-    // Small chance for a throwable from a grunt.
-    if (Math.random() < 0.06) items.push(randomThrowable());
+    if (Math.random() < 0.20) items.push(randomAttachment());
+    if (Math.random() < 0.30) items.push(randomJunk());
+  } else if (!isEmptyBody) {
+    if (Math.random() < 0.05) items.push(randomAttachment());
+    if (Math.random() < 0.12) items.push(randomJunk());
   }
   return items;
 }

@@ -2256,6 +2256,29 @@
       border-color: #c9a87a;
       box-shadow: 0 0 8px rgba(201,168,122,0.45);
     }
+    /* "Nothing on the body" empty state — replaces the loot grid when
+       both the slot drops and the misc grid are empty. Keeps the
+       footprint area visible so the loot column still reads as a
+       column, just with a clear "nothing here" message. */
+    #loot-misc-grid.body-empty {
+      width: 220px;
+      min-height: 80px;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      cursor: default;
+      background: rgba(20,12,12,0.55);
+      border: 1px dashed #422828;
+      border-radius: 4px;
+    }
+    .body-empty-msg {
+      font-size: 11px;
+      letter-spacing: 2px;
+      color: #6a5240;
+      font-style: italic;
+      text-transform: uppercase;
+      pointer-events: none;
+    }
     #loot-misc-grid.as-footprint-grid .bg-tile {
       position: absolute;
       background: linear-gradient(180deg, #2a1f22, #1a1014);

@@ -203,15 +203,22 @@ export const tunables = {
       boss:    [110, 180],
     },
     sellMult: 0.35,
+    // Shop prices, set so a rare/epic/legendary purchase is a real
+    // commitment rather than a casual pickup. Roughly 5–10× the
+    // pre-rebalance numbers; rare gear is intentionally a big spend.
     basePrice: {
-      common:    275,
-      uncommon:  700,
-      rare:      1600,
-      epic:      3600,
-      legendary: 8000,
+      common:    1500,
+      uncommon:  4500,
+      rare:      12000,
+      epic:      32000,
+      legendary: 80000,
     },
     // Random ±% price fluctuation rolled when a merchant's stock is generated.
     priceFluxRange: 0.25,
+    // Per-level shop price ramp — every level past 1 adds this to the
+    // price multiplier. priceFor(item, shopMult) gets shopMult that
+    // already includes this factor (computed in main.js via getShopMult).
+    levelPriceRamp: 0.18,
   },
   healer: {
     smallHeal: 40,

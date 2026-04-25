@@ -1529,6 +1529,24 @@ export class LootUI {
     this.miscEl.innerHTML = '';
     this.miscEl.classList.add('as-footprint-grid');
     const grid = this.bodyGrid;
+    // If the body has no equipment-slot items either AND the grid is
+    // empty, surface a clear "Nothing on the body" message instead
+    // of a silent empty grid. Equipment-slot drops still render
+    // through their own _slotCells, so we only show the empty-state
+    // when the entire body is bare.
+    const hasSlotItems = Object.keys(this._bySlot || {}).length > 0;
+    if (grid.entries().length === 0 && !hasSlotItems) {
+      this.miscEl.style.width  = '';
+      this.miscEl.style.height = '';
+      this.miscEl.classList.add('body-empty');
+      const empty = document.createElement('div');
+      empty.className = 'body-empty-msg';
+      empty.textContent = 'Nothing on the body';
+      this.miscEl.appendChild(empty);
+      this._wireBodyGridWrap();
+      return;
+    }
+    this.miscEl.classList.remove('body-empty');
     this.miscEl.style.width  = `${grid.w * BG_CELL_PX + (grid.w - 1) * BG_CELL_GAP}px`;
     this.miscEl.style.height = `${grid.h * BG_CELL_PX + (grid.h - 1) * BG_CELL_GAP}px`;
     for (let y = 0; y < grid.h; y++) {
