@@ -341,23 +341,38 @@ export class LootUI {
           // compatible with the item).
           this._takeOneIntoSlot(d.lootIdx, slot);
         } else if (d.from === 'pockets' && d.entry) {
-          // Equip from player grid. Remove from its source grid and
-          // swap with whatever's currently on the slot.
+          // Equip from player grid. Container slots (bag / rig) route
+          // through equipBackpack so the contents-migration pre-flight
+          // applies; weapons / armor / ammo go through the direct
+          // swap as before.
           const item = d.item;
           if (this.inventory.canSlotHold(slot, item)) {
-            const prev = this.inventory.equipment[slot];
-            const srcGrid = this.inventory.gridOf(item);
-            if (srcGrid) srcGrid.remove(item);
-            this.inventory.equipment[slot] = item;
-            this.inventory._recomputeCapacity();
-            if (prev && !this.inventory.autoPlaceAnywhere(prev)) {
-              // Rollback — no room for the displaced item.
-              this.inventory.equipment[slot] = prev;
+            if (slot === 'backpack' || slot === 'belt') {
+              const ok = this.inventory.equipBackpack(item);
+              if (!ok) {
+                const err = this.inventory.lastEquipError;
+                if (err === 'tooSmallForBag') {
+                  window.__hudMsg?.('Too many items to swap bags — use the workspace to make room.', 3.0);
+                } else if (err === 'tooSmallForRig') {
+                  window.__hudMsg?.('Too many items to swap rigs — use the workspace to make room.', 3.0);
+                }
+              }
+              this.render();
+            } else {
+              const prev = this.inventory.equipment[slot];
+              const srcGrid = this.inventory.gridOf(item);
+              if (srcGrid) srcGrid.remove(item);
+              this.inventory.equipment[slot] = item;
               this.inventory._recomputeCapacity();
-              this.inventory.autoPlaceAnywhere(item);
+              if (prev && !this.inventory.autoPlaceAnywhere(prev)) {
+                // Rollback — no room for the displaced item.
+                this.inventory.equipment[slot] = prev;
+                this.inventory._recomputeCapacity();
+                this.inventory.autoPlaceAnywhere(item);
+              }
+              this.inventory._bump();
+              this.render();
             }
-            this.inventory._bump();
-            this.render();
           }
         } else if (d.from === 'workspace' && d.entry) {
           // Equip from the workspace. If the slot is incompatible or
@@ -820,7 +835,17 @@ export class LootUI {
       e.preventDefault();
       // Right-click = equip.
       const item = this.inventory.backpack[bagIdx];
-      if (item && this.inventory.equipBackpack) this.inventory.equipBackpack(bagIdx);
+      if (item && this.inventory.equipBackpack) {
+        const ok = this.inventory.equipBackpack(bagIdx);
+        if (!ok) {
+          const err = this.inventory.lastEquipError;
+          if (err === 'tooSmallForBag') {
+            window.__hudMsg?.('Too many items to swap bags — use the workspace to make room.', 3.0);
+          } else if (err === 'tooSmallForRig') {
+            window.__hudMsg?.('Too many items to swap rigs — use the workspace to make room.', 3.0);
+          }
+        }
+      }
       this.render();
     });
     cell.addEventListener('dragstart', (e) => {
@@ -1305,7 +1330,17 @@ export class LootUI {
       const entry = grid.at(gx, gy);
       if (!entry) return;
       // Right-click = equip to first compatible slot.
-      if (this.inventory.equipBackpack(entry.item)) this.render();
+      const ok = this.inventory.equipBackpack(entry.item);
+      if (ok) {
+        this.render();
+      } else {
+        const err = this.inventory.lastEquipError;
+        if (err === 'tooSmallForBag') {
+          window.__hudMsg?.('Too many items to swap bags — use the workspace to make room.', 3.0);
+        } else if (err === 'tooSmallForRig') {
+          window.__hudMsg?.('Too many items to swap rigs — use the workspace to make room.', 3.0);
+        }
+      }
     });
   }
 

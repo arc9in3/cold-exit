@@ -191,21 +191,39 @@ export class InventoryUI {
       if (!d || !d.item) return;
       if (!this.inventory.canSlotHold(slot, d.item)) return;
       if (d.from === 'pockets') {
-        const item = d.item;
-        const srcGrid = this.inventory.gridOf(item);
-        if (!srcGrid) return;
-        const prev = this.inventory.equipment[slot];
-        srcGrid.remove(item);
-        this.inventory.equipment[slot] = item;
-        this.inventory._recomputeCapacity?.();
-        if (prev) {
-          if (!this.inventory.autoPlaceAnywhere(prev)) {
-            this.inventory.equipment[slot] = prev;
-            this.inventory._recomputeCapacity?.();
-            this.inventory.autoPlaceAnywhere(item);
+        // Route container-slot drops through equipBackpack so the
+        // bag/rig migration pre-flight runs and the user gets a
+        // proper "too small" toast instead of silent overflow loss.
+        if (slot === 'backpack' || slot === 'belt') {
+          const ok = this.inventory.equipBackpack(d.item);
+          if (!ok) {
+            const err = this.inventory.lastEquipError;
+            if (err === 'tooSmallForBag') {
+              window.__hudMsg?.('Too many items to swap bags — use the workspace to make room.', 3.0);
+            } else if (err === 'tooSmallForRig') {
+              window.__hudMsg?.('Too many items to swap rigs — use the workspace to make room.', 3.0);
+            }
+            this.setDragState(null);
+            this.render();
+            return;
           }
+        } else {
+          const item = d.item;
+          const srcGrid = this.inventory.gridOf(item);
+          if (!srcGrid) return;
+          const prev = this.inventory.equipment[slot];
+          srcGrid.remove(item);
+          this.inventory.equipment[slot] = item;
+          this.inventory._recomputeCapacity?.();
+          if (prev) {
+            if (!this.inventory.autoPlaceAnywhere(prev)) {
+              this.inventory.equipment[slot] = prev;
+              this.inventory._recomputeCapacity?.();
+              this.inventory.autoPlaceAnywhere(item);
+            }
+          }
+          this.inventory._bump();
         }
-        this.inventory._bump();
       } else if (d.from === 'equipment' && d.slot !== slot) {
         const src = this.inventory.equipment[d.slot];
         const dst = this.inventory.equipment[slot];
@@ -423,7 +441,17 @@ export class InventoryUI {
       if (gx < 0 || gy < 0 || gx >= grid.w || gy >= grid.h) return;
       const entry = grid.at(gx, gy);
       if (!entry) return;
-      if (this.inventory.equipBackpack(entry.item)) this.render();
+      const ok = this.inventory.equipBackpack(entry.item);
+      if (ok) {
+        this.render();
+      } else {
+        const err = this.inventory.lastEquipError;
+        if (err === 'tooSmallForBag') {
+          window.__hudMsg?.('Too many items to swap bags — use the workspace to make room.', 3.0);
+        } else if (err === 'tooSmallForRig') {
+          window.__hudMsg?.('Too many items to swap rigs — use the workspace to make room.', 3.0);
+        }
+      }
     });
   }
 

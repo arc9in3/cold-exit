@@ -1469,7 +1469,16 @@ export class Inventory {
 
   // Equip an item currently in any grid. `ref` can be the item
   // itself OR (legacy) a flat-array index into this.backpack.
+  //
+  // Container-swap behaviour: when the slot is `belt` (rig) or
+  // `backpack` and a container is already equipped, the OLD
+  // container's live contents are migrated into the NEW container's
+  // grid. If the new grid can't hold them all, the swap is REFUSED
+  // (no mutation) and `lastEquipError` is set to 'tooSmallForRig' or
+  // 'tooSmallForBag'. UI consumers read that error to surface the
+  // "use the workspace to swap" hint.
   equipBackpack(ref) {
+    this.lastEquipError = null;
     const item = (typeof ref === 'number') ? this.backpack[ref] : ref;
     if (!item) return false;
     // Consumables and attachments stay loose (attachments go onto
@@ -1478,6 +1487,52 @@ export class Inventory {
     const slot = this.firstEmptyCompatibleSlot(item) || this.firstCompatibleSlot(item);
     if (!slot) return false;
     const prev = this.equipment[slot];
+    const isContainerSlot = (slot === 'backpack' || slot === 'belt');
+
+    // Container swap pre-flight. If we're replacing an equipped
+    // backpack/rig with a different one, sim-place every item that
+    // currently lives in the old container into the new container's
+    // grid (factoring in whatever was saved on the new bag's
+    // `_contents` from a previous wear). Refuse the swap if anything
+    // doesn't fit; nothing has mutated yet so the bail is clean.
+    let captureFromOld = null;
+    if (isContainerSlot && prev) {
+      const liveGrid = (slot === 'backpack') ? this.backpackGrid : this.rigGrid;
+      const newLayout = deriveGridLayout(item);
+      if (newLayout && liveGrid && liveGrid.entries().length > 0) {
+        const sim = new GridContainer(newLayout.w, newLayout.h);
+        // Pre-place anything the new bag remembers from a prior
+        // doff — those slots get reserved before old contents try.
+        if (item._contents) {
+          for (const c of item._contents) {
+            if (!c || !c.item) continue;
+            stampItemDims(c.item);
+            if (!sim.place(c.item, c.x | 0, c.y | 0, !!c.rotated)) {
+              if (!sim.autoPlace(c.item)) {
+                this.lastEquipError = (slot === 'backpack') ? 'tooSmallForBag' : 'tooSmallForRig';
+                return false;
+              }
+            }
+          }
+        }
+        for (const entry of liveGrid.entries()) {
+          stampItemDims(entry.item);
+          if (!sim.autoPlace(entry.item)) {
+            this.lastEquipError = (slot === 'backpack') ? 'tooSmallForBag' : 'tooSmallForRig';
+            return false;
+          }
+        }
+        // Pre-flight passed. Snapshot the old bag's contents so we
+        // can place them into the freshly-built new grid below, and
+        // clear them out of the live grid so _refreshContainerGrid
+        // doesn't mistakenly snapshot them onto the OLD item.
+        captureFromOld = liveGrid.entries().map((e) => ({
+          item: e.item, x: e.x, y: e.y, rotated: e.rotated,
+        }));
+        for (const e of captureFromOld) liveGrid.remove(e.item);
+      }
+    }
+
     const owningGrid = this.gridOf(item);
     if (owningGrid) owningGrid.remove(item);
     this.equipment[slot] = item;
@@ -1486,6 +1541,24 @@ export class Inventory {
     // displaced previous item).
     this._refreshContainerGrid('belt',     'rigGrid');
     this._refreshContainerGrid('backpack', 'backpackGrid');
+
+    // Migrate the captured old-bag contents into the freshly built
+    // new container grid. The pre-flight already proved every entry
+    // fits, so autoPlace is a guaranteed success — but place at the
+    // saved coordinates first to preserve layout when possible.
+    if (captureFromOld) {
+      const newGrid = (slot === 'backpack') ? this.backpackGrid : this.rigGrid;
+      if (newGrid) {
+        for (const e of captureFromOld) {
+          stampItemDims(e.item);
+          if (!newGrid.place(e.item, e.x, e.y, e.rotated)) newGrid.autoPlace(e.item);
+        }
+      }
+      // Old bag is going back into inventory empty — wipe any saved
+      // contents so re-equipping it doesn't dupe the migrated items.
+      if (prev) prev._contents = null;
+    }
+
     if (prev) {
       stampItemDims(prev);
       if (!this.autoPlaceAnywhere(prev)) {
@@ -1499,6 +1572,7 @@ export class Inventory {
         } else if (owningGrid) {
           this.autoPlaceAnywhere(item);
         }
+        this.lastEquipError = 'noRoomForOld';
         return false;
       }
     }

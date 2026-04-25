@@ -560,6 +560,7 @@ const masteryPickUI = new MasteryPickUI(skillTree);
 
 const detailsUI = new DetailsUI({ inventory });
 window.__showDetails = (item) => detailsUI.show(item);  // called from UI right-click
+window.__hudMsg = (msg, duration) => transientHudMsg(msg, duration);
 
 const gameMenuUI = new GameMenuUI({
   getVolume: getMasterVolume,
