@@ -56,6 +56,7 @@ import { thumbnailFor } from './item_thumbnails.js';
 import { RunStats, Leaderboard } from './leaderboard.js';
 import { fireHint, tickHints, resetHints } from './ui_hints.js';
 import { TutorialUI } from './ui_tutorial.js';
+import { setCursorForWeapon } from './cursor.js';
 window.__resetHints = resetHints;
 
 // Tutorial mode flag — when true, the level generator builds a tiny
@@ -927,7 +928,7 @@ function setWeaponIndex(i) {
   if (rotation.length === 0) return;
   currentWeaponIndex = ((i % rotation.length) + rotation.length) % rotation.length;
   const w = currentWeapon();
-  if (w) player.setWeapon(w);
+  if (w) { player.setWeapon(w); setCursorForWeapon(w); }
   player.cancelCombo();
   playerFireCooldown = 0;
   playerBurstRemaining = 0;
@@ -939,7 +940,7 @@ function onInventoryChanged() {
   if (rotation.length === 0) { currentWeaponIndex = 0; return; }
   if (currentWeaponIndex >= rotation.length) currentWeaponIndex = 0;
   const w = currentWeapon();
-  if (w) player.setWeapon(w);
+  if (w) { player.setWeapon(w); setCursorForWeapon(w); }
 }
 
 // Shared drag-state so both InventoryUI and CustomizeUI can see what's being
@@ -951,7 +952,12 @@ const setDragState = (s) => { uiDragState = s; };
 const customizeUI = new CustomizeUI({
   inventory,
   getDragState, setDragState,
-  onClose: () => inventoryUI.render(),
+  onClose: () => {
+    inventoryUI.render();
+    // Sight may have changed via the customize panel — refresh the
+    // body cursor so the player sees the new reticle immediately.
+    if (currentWeapon()) setCursorForWeapon(currentWeapon());
+  },
   // Backpack-full fallback for detach — drop the attachment on the
   // ground next to the player so the detach action always succeeds.
   onDrop: (item) => loot.spawnItem(player.mesh.position.clone(), item),
@@ -1209,7 +1215,7 @@ const debugGui = initDebugPanel({
   },
   onRegenerate: () => regenerateLevel(),
 });
-if (currentWeapon()) player.setWeapon(currentWeapon());
+if (currentWeapon()) { player.setWeapon(currentWeapon()); setCursorForWeapon(currentWeapon()); }
 
 function weaponHasPerk(weapon, id) {
   return !!(weapon && weapon.perks && weapon.perks.some(p => p.id === id));
@@ -2213,6 +2219,7 @@ let playerBurstTimer = 0;
 let playerMeleeCooldown = 0;
 let exitCooldown = 0;  // small grace after regen before re-triggering exit
 let lastAim = null;
+let lastAimZone = null;       // 'head' / 'torso' / 'leg' / 'arm' / null
 let paused = false;    // true while a modal (skill pick) is open
 let extractPending = false;
 
@@ -6213,7 +6220,12 @@ function tick() {
   if (tutorialMode) {
     const move = inputState.move;
     if (move && (move.x !== 0 || move.y !== 0)) tutorialUI.markStep('move');
-    if (inputState.adsHeld) tutorialUI.markStep('aim');
+    // Aim-heavy step — completes only when the player is BOTH holding
+    // RMB and has the cursor over an enemy body zone. Teaches the
+    // quadrant-based aim mechanic, not just "hold the button".
+    if (inputState.adsHeld && lastAimZone) {
+      tutorialUI.markStep('aimZone');
+    }
     if (inputState.attackPressed) tutorialUI.markStep('fire');
     if (inputState.reloadPressed) tutorialUI.markStep('reload');
     if (inputState.meleePressed) tutorialUI.markStep('melee');
@@ -6326,6 +6338,7 @@ function tick() {
     : tunables.move.standMuzzleY;
   const aimInfo = resolveAim(muzzleWorldTmp);
   lastAim = aimInfo.point;
+  lastAimZone = aimInfo.zone || null;
 
   // Kick off combo BEFORE update so the first step's `active` hit can fire
   // inside this same frame's player.update().

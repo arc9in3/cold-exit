@@ -195,8 +195,26 @@ function _lazyMC() {
   return _maybeApplyMastercraft;
 }
 
+// Roll a rarity for a freshly-spawned attachment. Distribution mirrors
+// loot rarity weights (most common, occasional rare+, very rare epic+).
+// Modifier values are intentionally NOT scaled per-rarity here — the
+// rarity is purely cosmetic (stronger sight reticle glow, distinct
+// outline) so the mechanical balance stays as authored.
+function _rollAttachmentRarity() {
+  const r = Math.random();
+  if (r < 0.65) return 'common';
+  if (r < 0.88) return 'uncommon';
+  if (r < 0.97) return 'rare';
+  if (r < 0.997) return 'epic';
+  return 'legendary';
+}
+
 export function randomAttachment() {
   const att = clone(ALL_ATTACHMENTS[Math.floor(Math.random() * ALL_ATTACHMENTS.length)]);
+  // Stamp a rolled rarity onto every freshly-spawned attachment so
+  // the inventory grid + cursor sight reticles can show distinct
+  // visual variants per attachment instance.
+  if (!att.rarity) att.rarity = _rollAttachmentRarity();
   // Apply universal mastercraft roll. Mastercraft attachments boost
   // every numeric modifier toward the player (multipliers >1 × 1.5,
   // <1 multipliers tightened by 1.5× toward zero) so the mod sheet

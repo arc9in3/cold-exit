@@ -18,8 +18,8 @@
 
 const STEPS = [
   { id: 'move',       label: 'Move (WASD)' },
-  { id: 'aim',        label: 'Aim (Hold RMB)' },
-  { id: 'fire',       label: 'Fire (LMB)' },
+  { id: 'aimZone',    label: 'AIM HEAVY: Hold RMB + put cursor on the dummy\'s body parts' },
+  { id: 'fire',       label: 'Fire (LMB) — landing on a body part is bonus accuracy' },
   { id: 'reload',     label: 'Reload (R)' },
   { id: 'melee',      label: 'Quick Melee (F)' },
   { id: 'crouch',     label: 'Crouch (C)' },
