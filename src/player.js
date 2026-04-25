@@ -452,11 +452,25 @@ export function createPlayer(scene) {
     a.firedActive = false;
   }
 
-  function consumeStamina(amount) {
-    if (state.stamina < amount) return false;
-    state.stamina -= amount;
+  function consumeStamina(amount, kind) {
+    // Battle Trance / mastery rebates lower the cost of melee attacks
+    // and parries. `kind` is an optional tag — 'melee' covers swings,
+    // combos, parry, deflect; other kinds bypass the multiplier so
+    // movement (dodge) stays full-cost.
+    let cost = amount;
+    if (kind === 'melee' && (state.meleeStaminaMult ?? 1) < 1) {
+      cost = Math.max(1, Math.round(amount * state.meleeStaminaMult));
+    }
+    if (state.stamina < cost) return false;
+    state.stamina -= cost;
     state.staminaRegenT = tunables.stamina.regenDelay;
     return true;
+  }
+  // Refund stamina on demand — used by the melee Battle Trance capstone
+  // when a kill is registered. Caps at maxStamina so we never overflow.
+  function refundStamina(amount) {
+    if (!(amount > 0)) return;
+    state.stamina = Math.min(state.maxStamina ?? state.stamina, state.stamina + amount);
   }
 
   function canAct() {
@@ -488,7 +502,7 @@ export function createPlayer(scene) {
     }
 
     const cost = tunables.stamina.comboCosts[nextStep] ?? 10;
-    if (!consumeStamina(cost)) return false;
+    if (!consumeStamina(cost, 'melee')) return false;
 
     const variantKey = cursorDistance >= (weapon.meleeThreshold ?? 3.0) ? 'far' : 'close';
     const step = weapon.combo[nextStep];
@@ -543,7 +557,7 @@ export function createPlayer(scene) {
     const profile = QUICK_MELEE_BY_CLASS[cls] || QUICK_MELEE_BY_CLASS.rifle;
     const baseDmg = (gunWeapon.damage || 20) * 0.25 * profile.dmgMult;
     const cost = profile.staminaCost;
-    if (!consumeStamina(cost)) return false;
+    if (!consumeStamina(cost, 'melee')) return false;
     const attack = {
       damage: baseDmg,
       range: profile.range,
@@ -583,7 +597,7 @@ export function createPlayer(scene) {
 
   function tryParry() {
     if (!state.blocking) return false;
-    if (!consumeStamina(tunables.stamina.parryCost)) return false;
+    if (!consumeStamina(tunables.stamina.parryCost, 'melee')) return false;
     state.parryT = tunables.block.parryWindow;
     return true;
   }
@@ -691,6 +705,9 @@ export function createPlayer(scene) {
     state.healthRegenDelayBonus = s.healthRegenDelayBonus || 0;
     state.staminaRegenMult = s.staminaRegenMult || 1;
     state.dmgReduction = s.dmgReduction || 0;
+    // Battle Trance — feeds consumeStamina('melee', ...) to halve the
+    // cost of swings, parries, and quick-melee.
+    state.meleeStaminaMult = s.meleeStaminaMult ?? 1;
     // Melee reads these at swing start to decide whether to roll the
     // special crit animation + damage bump.
     state.critChance = s.critChance || 0;
@@ -1334,7 +1351,7 @@ export function createPlayer(scene) {
     mesh: group, body, rig, update, setWeapon, takeDamage, heal, applyStatus,
     tryMeleeAttack, tryQuickMelee, cancelCombo,
     tryParry, isBlocking, isParryActive,
-    consumeStamina, applyDerivedStats, restoreFullHealth,
+    consumeStamina, refundStamina, applyDerivedStats, restoreFullHealth,
     kickRecoil, reactToHit, reactToDeath,
     swapHandedness,
     getHandedness: () => state.handedness,

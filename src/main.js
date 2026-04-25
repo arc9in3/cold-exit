@@ -1826,6 +1826,27 @@ let gameClockMs = 0;   // active-gameplay clock for wall-clock timers
 let playerMaxHealthCached = 100;
 let secondWindUsed = 0;
 let lastInventoryVersion = -1;
+// Rebalance — capstones whose data is wired but whose per-frame
+// gameplay logic still needs to land in the relevant systems:
+//   • penetration               → fire path: iterate raycaster hits up
+//                                 to `penetration + 1` instead of first.
+//   • rifleAutoChainPerHit/Cap  → track consecutive hits on same target
+//                                 with rifleAutoChainResetT timeout, add
+//                                 rifleAutoChainPerHit * stacks to crit dmg.
+//   • lmgSustainedSpreadDecay   → while trigger held, multiply current
+//                                 spread by max(0, 1 - decay * heldSec);
+//                                 reset after lmgSustainedResetT idle.
+//   • sniperAimRampPerTick/Cap  → on stationary aim with target, every
+//                                 sniperAimTickT add per-tick damage mult,
+//                                 cap at sniperAimRampCap. Reset on move.
+//   • exoticChainKillChance     → on exotic kill, mark corpse; on any kill
+//                                 within window+radius, roll chance to
+//                                 spawn small AoE.
+//   • shotgunShellsPerPump      → shotgun reload should refill 4 shells
+//                                 per animation step when this is 4.
+//   • adsSpeedMult / swayMult   → ADS easing + scope sway dampening.
+// All values default to 0 / 1 so the system is safe until the gameplay
+// hooks ship.
 function recomputeStats() {
   derivedStats = BASE_STATS();
   skills.applyTo(derivedStats);
@@ -1834,6 +1855,13 @@ function recomputeStats() {
   skillTree.applyTo(derivedStats, currentWeapon());
   artifacts.applyTo(derivedStats);
   buffs.applyTo(derivedStats);
+  // Soft caps applied AFTER all sources roll up — prevents stack-stack
+  // exploits flagged in the rebalance review (movespeed in particular
+  // could pile to ~1.7×+ with artifact + Swift + class perks).
+  if (derivedStats.moveSpeedMult > 1.7) derivedStats.moveSpeedMult = 1.7;
+  // Melee damage multiplier ceiling — Reaper / Berserker / class-tree
+  // stacks were producing ~2.8×. Cap at 2.5×.
+  if (derivedStats.meleeDmgMult > 2.5) derivedStats.meleeDmgMult = 2.5;
 }
 
 // XP / level. Crossing threshold queues a mid-run skill pick.
@@ -2384,9 +2412,17 @@ function fireOneShot(playerInfo, weapon, aimPoint, isADS) {
           dmg *= 1 + derivedStats.pointBlankBonus;
         }
       }
-      // Crit roll.
-      const crit = Math.random() < (derivedStats.critChance || 0);
-      if (crit) dmg *= (derivedStats.critDamageMult || 2);
+      // Crit roll. Rifle body-crit ladder adds chance/damage ONLY on
+      // non-headshots, keeping the headshot identity unique to snipers
+      // and pistols and giving rifles their own body-crit-chain niche.
+      let critChance = derivedStats.critChance || 0;
+      if (hit.zone !== 'head') critChance += (derivedStats.bodyCritChanceBonus || 0);
+      const crit = Math.random() < critChance;
+      if (crit) {
+        let critMult = derivedStats.critDamageMult || 2;
+        if (hit.zone !== 'head') critMult += (derivedStats.bodyCritDamageBonus || 0);
+        dmg *= critMult;
+      }
       if (playerInfo && playerInfo.health / playerInfo.maxHealth < 0.5
         && derivedStats.berserkBonus > 0) {
         dmg *= 1 + derivedStats.berserkBonus;
@@ -2858,6 +2894,36 @@ function onEnemyKilled(enemy, opts = {}) {
     playerKeys.add(enemy.keyDrop);
     transientHudMsg(`+${enemy.keyDrop.toUpperCase()} KEYCARD`, 2.4);
     sfx.pickup();
+  }
+  // Demolitions Master — tier 1 refunds a charge per kill, tier 2 fully
+  // resets cooldowns so a chain of throwable-kills snowballs. Caller
+  // tags `opts.byThrowable` for explosion / molotov / flash kills.
+  if (opts.byThrowable) {
+    if (derivedStats.throwableResetOnKill > 0) {
+      for (const it of inventory.allThrowables()) {
+        const max = throwableMaxCharges(it);
+        it.charges = max;
+        it.cooldownT = 0;
+      }
+      renderActionBar();
+    } else if ((derivedStats.throwableRefundOnKill | 0) > 0) {
+      const refund = derivedStats.throwableRefundOnKill | 0;
+      for (const it of inventory.allThrowables()) {
+        const max = throwableMaxCharges(it);
+        it.charges = Math.min(max, (it.charges | 0) + refund);
+        if (it.charges >= max) it.cooldownT = 0;
+      }
+      renderActionBar();
+    }
+  }
+  // Melee Battle Trance — refund stamina on melee kills. Inferred from
+  // the wielded weapon at kill time so all melee call sites benefit
+  // without threading explicit opts.byMelee through every path.
+  if (derivedStats.meleeStaminaRefundOnKill > 0) {
+    const w = currentWeapon();
+    if (w?.type === 'melee') {
+      player.refundStamina?.(derivedStats.meleeStaminaRefundOnKill);
+    }
   }
 }
 
@@ -3376,7 +3442,13 @@ function onProjectileExplode(pos, explosion, owner, p) {
       if (owner === 'player') runStats.addDamage(dmg);
       c.manager.applyHit(c, dmg, 'torso', _explodeDir, { weaponClass: 'explosive' });
       if (wasAlive && !c.alive && owner === 'player') {
-        onEnemyKilled(c);
+        // Tag throwable kills so Demolitions Master can refund / reset
+        // cooldowns. Bullet-projectile explosions (e.g. grenade
+        // launcher) come through this same path too — every kill on
+        // the explosion path counts as a throwable for that capstone,
+        // which matches the player's expectation of "explosions =
+        // demolitions".
+        onEnemyKilled(c, { byThrowable: true });
       }
     }
   };
@@ -5167,7 +5239,7 @@ function tick() {
     onMeleePlayer: (dmg) => damagePlayer(dmg, 'melee'),
     obstacles: losObstacles,
     onFireAt: aiFire,
-    onBurnKill: (e) => { onEnemyKilled(e); awardClassXp('flame', e.tier); },
+    onBurnKill: (e) => { onEnemyKilled(e); awardClassXp('exotic', e.tier); },
     onBurnDamage: (e, dmg) => trackBurnDamage(e, dmg),
     onAlert: (e) => propagateAggro(e),
     playerStealthMult: stealthMult,
@@ -5222,7 +5294,7 @@ function tick() {
       pulseHurtFlash(0.4);
       sfx.meleeImpact?.();
     },
-    onBurnKill: (e) => { onEnemyKilled(e); awardClassXp('flame', e.tier); },
+    onBurnKill: (e) => { onEnemyKilled(e); awardClassXp('exotic', e.tier); },
     onBurnDamage: (e, dmg) => trackBurnDamage(e, dmg),
     playerIFrames: playerInfo.iFrames,
     playerBlocking: playerInfo.blocking,

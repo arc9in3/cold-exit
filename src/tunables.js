@@ -364,7 +364,11 @@ export const tunables = {
     {
       name: 'flamethrower',
       type: 'ranged',
-      class: 'flame',
+      // Reclassed under the unified 'exotic' mastery family (flame, GL,
+      // RL, dart, flare). Gameplay-side flame behaviour (fire spread,
+      // burn ticks) gates on `fireMode === 'flame'` so re-tagging the
+      // class here is safe.
+      class: 'exotic',
       rarity: 'rare',
       attachmentSlots: ['underRail', 'sideRail', 'magazine'],
       fireMode: 'flame',
@@ -536,7 +540,7 @@ export const tunables = {
       magSize: 7, reloadTime: 0.95,
     },
     {
-      name: 'Flare Gun', type: 'ranged', class: 'pistol', rarity: 'uncommon',
+      name: 'Flare Gun', type: 'ranged', class: 'exotic', rarity: 'uncommon',
       attachmentSlots: ['sideRail', 'topRail', 'grip'],
       fireMode: 'semi', fireRate: 1.2, damage: 14, range: 26,
       hipSpread: 0.12, adsSpread: 0.03,
@@ -561,7 +565,7 @@ export const tunables = {
 
     // --- Marksman / bolt lineup (still class: rifle — rides the rifle mastery tree) ---
     {
-      name: 'Remington 700', type: 'ranged', class: 'rifle', rarity: 'common',
+      name: 'Remington 700', type: 'ranged', class: 'sniper', rarity: 'common',
       attachmentSlots: ['muzzle', 'barrel', 'sideRail', 'topRail', 'stock', 'grip', 'trigger', 'magazine'],
       fireMode: 'semi', fireRate: 3.2, damage: 52, range: 70,
       hipSpread: 0.12, adsSpread: 0.008,
@@ -571,7 +575,7 @@ export const tunables = {
       magSize: 5, reloadTime: 2.0,
     },
     {
-      name: 'Mosin', type: 'ranged', class: 'rifle', rarity: 'common',
+      name: 'Mosin', type: 'ranged', class: 'sniper', rarity: 'common',
       attachmentSlots: ['muzzle', 'topRail', 'stock', 'trigger'],
       fireMode: 'semi', fireRate: 1.2, damage: 85, range: 75,
       hipSpread: 0.14, adsSpread: 0.006,
@@ -581,7 +585,7 @@ export const tunables = {
       magSize: 5, reloadTime: 3.2,
     },
     {
-      name: 'SVD', type: 'ranged', class: 'rifle', rarity: 'rare',
+      name: 'SVD', type: 'ranged', class: 'sniper', rarity: 'rare',
       attachmentSlots: ['muzzle', 'barrel', 'sideRail', 'topRail', 'stock', 'grip', 'trigger', 'magazine'],
       fireMode: 'semi', fireRate: 3.8, damage: 72, range: 80,
       hipSpread: 0.1, adsSpread: 0.005,
@@ -591,7 +595,7 @@ export const tunables = {
       magSize: 10, reloadTime: 2.2,
     },
     {
-      name: 'Cheytac Intervention', type: 'ranged', class: 'rifle', rarity: 'epic',
+      name: 'Cheytac Intervention', type: 'ranged', class: 'sniper', rarity: 'epic',
       attachmentSlots: ['muzzle', 'topRail', 'stock', 'trigger', 'underRail'],
       fireMode: 'semi', fireRate: 0.9, damage: 200, range: 100,
       hipSpread: 0.18, adsSpread: 0.004,

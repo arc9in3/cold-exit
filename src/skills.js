@@ -59,7 +59,7 @@ export const SKILLS = {
   shrapnel: {
     id: 'shrapnel',
     name: 'Shrapnel',
-    icon: '✦',
+    icon: '⊕',
     maxLevel: 10,
     // Used to be a plain +dmg stat that overlapped with Sharpshooter.
     // Reworked to fragment shots: each hit has a chance to ricochet
@@ -200,6 +200,51 @@ export const BASE_STATS = () => ({
   creditDropMult: 1,    // credit payout multiplier on kills
   throwableCooldownMult: 1,  // Grenadier / perks: <1 speeds recharge
   throwableChargeBonus: 0,   // Grenadier: +N max charges on every throwable
+  throwableRefundOnKill: 0,  // grenadierMaster tier 1: +N charges per kill
+  throwableResetOnKill: 0,   // grenadierMaster tier 2: reset all cooldowns on kill (boolean)
+  // Rifle full-auto crit chain — main.js tracks consecutive hits on a
+  // single target while firing in auto and adds `rifleAutoChainPerHit`
+  // crit damage per stack (capped at `rifleAutoChainCap`). Resets when
+  // the target swaps OR `rifleAutoChainResetT` seconds pass without
+  // firing. Wired in main.js bullet-hit code.
+  rifleAutoChainPerHit: 0,
+  rifleAutoChainCap: 0,
+  rifleAutoChainResetT: 0,
+  // LMG sustained-fire spread bleed — while holding the trigger,
+  // current spread is multiplied by max(0, 1 - decay * heldSec).
+  // Resets after `lmgSustainedResetT` seconds of not firing.
+  lmgSustainedSpreadDecay: 0,
+  lmgSustainedResetT: 0,
+  // Sniper aim-and-hold ramp — once the cursor stops on a target,
+  // every `sniperAimTickT` seconds adds `sniperAimRampPerTick` to the
+  // damage multiplier, capped at `sniperAimRampCap`. Movement or
+  // target-swap resets the stack.
+  sniperAimRampPerTick: 0,
+  sniperAimTickT: 0,
+  sniperAimRampCap: 0,
+  // Sniper one-shot bonus — extra damage against full-HP targets.
+  fullHpDmgBonus: 0,
+  // Rifle body-shot crit identity — separate from generic crit so
+  // headshot multipliers don't double-dip with the rifle ladder.
+  bodyCritChanceBonus: 0,
+  bodyCritDamageBonus: 0,
+  // Penetration — bullets pierce N enemies before stopping.
+  penetration: 0,
+  // ADS speed / sway — sniper QoL.
+  adsSpeedMult: 1,
+  swayMult: 1,
+  // Shotgun reload depth — shells loaded per pump animation. Quad-load
+  // capstone bumps to 4. Default 1 (one shell per pump).
+  shotgunShellsPerPump: 1,
+  // Exotic / demolitions stat fields.
+  exoticRadiusMult: 1,
+  exoticChainKillChance: 0,
+  exoticChainKillRadius: 0,
+  exoticChainKillDmg: 0,
+  exoticChainKillWindow: 0,
+  // Melee stamina — Battle Trance halves attack costs and refunds on kill.
+  meleeStaminaMult: 1,
+  meleeStaminaRefundOnKill: 0,
   // Backpedal — when a player shoots in one direction and moves in the
   // opposite, ground movement collapses to a slow backpedal and dash
   // distance halves. Pistol-class skills raise `backpedalRelief` from

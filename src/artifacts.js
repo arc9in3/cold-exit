@@ -92,6 +92,38 @@ export const ARTIFACT_DEFS = {
       s.healthRegenMult *= 1.30;
     },
   },
+  // Three new artifacts patching gaps flagged in the rebalance review:
+  // stamina identity, throwable identity, reload identity.
+  pale_locket: {
+    id: 'pale_locket', name: 'Pale Locket',
+    lore: 'A faded tin locket. The hair inside isn\'t hers — but you keep it anyway.',
+    short: '+40 max stamina, +30% stamina regen',
+    tint: 0xc8d4e8,
+    price: 4000,
+    apply(s) { s.maxStaminaBonus += 40; s.staminaRegenMult *= 1.30; },
+  },
+  bandolier: {
+    id: 'bandolier', name: 'Saint\'s Bandolier',
+    lore: 'Twelve cells of leather and stitched faith. One charge per martyr.',
+    short: '+1 throwable charge, −25% throwable cooldown',
+    tint: 0x8a6a3c,
+    price: 4200,
+    apply(s) {
+      s.throwableChargeBonus += 1;
+      s.throwableCooldownMult *= 0.75;
+    },
+  },
+  speed_loader: {
+    id: 'speed_loader', name: 'Brass Speed-Loader',
+    lore: 'Polished brass cylinder. Worn smooth by every panicked reload.',
+    short: '−30% reload time, −10% spread',
+    tint: 0xd0a060,
+    price: 3800,
+    apply(s) {
+      s.reloadSpeedMult *= 1.43;
+      s.rangedSpreadMult *= 0.90;
+    },
+  },
 };
 
 export const ALL_ARTIFACTS = Object.values(ARTIFACT_DEFS);
