@@ -334,10 +334,55 @@ attachUnlock(renderer.domElement);
 // material/texture/buffer in-place is hairier than just starting
 // fresh, and the player's run is already saved per-level.
 let _ctxLost = false;
+let _ctxLostOverlayEl = null;
+function _showCtxLostOverlay() {
+  if (_ctxLostOverlayEl) return;
+  const el = document.createElement('div');
+  el.style.cssText = `
+    position: fixed; inset: 0; z-index: 99999;
+    background: rgba(5,6,7,0.92);
+    color: #00e6ff;
+    display: flex; flex-direction: column;
+    align-items: center; justify-content: center;
+    font: 14px ui-monospace, Menlo, Consolas, monospace;
+    letter-spacing: 0.6px; text-align: center; gap: 14px;
+    pointer-events: auto;
+  `;
+  el.innerHTML = `
+    <div style="font-size:18px; color:#ff3a3a; letter-spacing:2px;">GRAPHICS CONTEXT LOST</div>
+    <div style="color:#8a97a8;">Reloading in <b style="color:#00e6ff;" id="ctx-lost-secs">3</b>…</div>
+    <div style="color:#6f6754; font-size:11px; max-width:380px; line-height:1.5;">
+      Your browser ran out of WebGL contexts after a long session.
+      Reloading recovers the renderer; your run state is saved at the
+      last level start.
+    </div>
+  `;
+  document.body.appendChild(el);
+  _ctxLostOverlayEl = el;
+  let secs = 3;
+  const t = setInterval(() => {
+    secs -= 1;
+    const span = el.querySelector('#ctx-lost-secs');
+    if (span) span.textContent = String(Math.max(0, secs));
+    if (secs <= 0) { clearInterval(t); location.reload(); }
+  }, 1000);
+}
 renderer.domElement.addEventListener('webglcontextlost', (e) => {
   e.preventDefault();
   _ctxLost = true;
-  console.warn('[gfx] WebGL context lost — waiting for restore.');
+  console.warn('[gfx] WebGL context lost — attempting recovery.');
+  // Best-effort manual restore — works on Chromium when the loss was
+  // triggered by the WEBGL_lose_context extension itself, but won't
+  // help if the browser killed the context to free its global cap.
+  try {
+    const ext = renderer.getContext()?.getExtension?.('WEBGL_lose_context');
+    if (ext && typeof ext.restoreContext === 'function') {
+      ext.restoreContext();
+    }
+  } catch (_) {}
+  // If the restore handler doesn't fire within ~3s, the loss is
+  // permanent — show the overlay and hard-reload.
+  _showCtxLostOverlay();
 }, false);
 renderer.domElement.addEventListener('webglcontextrestored', () => {
   console.warn('[gfx] WebGL context restored — reloading.');
