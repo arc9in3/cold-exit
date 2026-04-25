@@ -166,22 +166,36 @@ export function pickContainerSize(type, rng = Math.random) {
   return 'l';
 }
 
-// Spawn the visual mesh for a container. Returns an Object3D with the
-// container metadata stamped onto userData so interact-prompt code can
-// pull it back out via the proxy on the obstacles list.
+// Spawn the visual mesh for a container. Each type gets a slightly
+// different silhouette + a small icon mesh on top so the player can
+// read what kind of container it is from across the room without
+// having to walk up and trigger the prompt.
 export function buildContainerMesh(container, x, y, z) {
   const { w, h, d } = container.geo;
   const c = container.colors;
   const group = new THREE.Group();
+  const type = container.containerType;
+
+  // Per-type silhouette tweaks layered on top of the base SIZE_PROFILES
+  // dimensions. Weapon cases are squat + wide; armor lockers are tall
+  // and thin; med kits are squarer; chests get a slight bulge to read
+  // as ornate; general boxes stay closest to the base shape.
+  let bw = w, bh = h, bd = d;
+  if (type === 'weapon')          { bw = w * 1.25; bh = h * 0.55; bd = d * 0.95; }
+  else if (type === 'armor')      { bw = w * 0.90; bh = h * 1.30; bd = d * 0.85; }
+  else if (type === 'medical')    { bw = w * 0.85; bh = h * 0.95; bd = d * 0.85; }
+  else if (type === 'masterwork') { bw = w * 1.10; bh = h * 0.90; bd = d * 1.10; }
+
   // Body — main coloured box.
   const bodyMat = new THREE.MeshStandardMaterial({
     color: c.body, roughness: 0.85, metalness: 0.05,
   });
-  const body = new THREE.Mesh(new THREE.BoxGeometry(w, h, d), bodyMat);
-  body.position.y = h / 2;
+  const body = new THREE.Mesh(new THREE.BoxGeometry(bw, bh, bd), bodyMat);
+  body.position.y = bh / 2;
   body.castShadow = false;
   body.receiveShadow = false;
   group.add(body);
+
   // Lid — thin coloured strip on top so the type reads at a glance.
   const lidH = 0.07;
   const lidMat = new THREE.MeshStandardMaterial({
@@ -189,11 +203,80 @@ export function buildContainerMesh(container, x, y, z) {
     emissive: c.lid, emissiveIntensity: 0.10,
   });
   const lid = new THREE.Mesh(
-    new THREE.BoxGeometry(w * 1.02, lidH, d * 1.02), lidMat);
-  lid.position.y = h + lidH / 2;
+    new THREE.BoxGeometry(bw * 1.02, lidH, bd * 1.02), lidMat);
+  lid.position.y = bh + lidH / 2;
   group.add(lid);
+
+  // Per-type icon — small primitive on top of the lid that telegraphs
+  // the container's contents. Cheap geometry, no shadow casting.
+  const iconY = bh + lidH + 0.04;
+  if (type === 'weapon') {
+    // Crossed-bars cylinder = barrel-like marker.
+    const iconMat = new THREE.MeshStandardMaterial({
+      color: 0x2a2a30, roughness: 0.45, metalness: 0.55,
+    });
+    const barrel = new THREE.Mesh(
+      new THREE.CylinderGeometry(0.06, 0.06, bw * 0.55, 8), iconMat);
+    barrel.rotation.z = Math.PI / 2;
+    barrel.position.y = iconY + 0.04;
+    group.add(barrel);
+  } else if (type === 'armor') {
+    // Plate-like flat slab on the lid.
+    const iconMat = new THREE.MeshStandardMaterial({
+      color: 0x4a5a6a, roughness: 0.6, metalness: 0.35,
+    });
+    const plate = new THREE.Mesh(
+      new THREE.BoxGeometry(bw * 0.5, 0.05, bd * 0.5), iconMat);
+    plate.position.y = iconY + 0.025;
+    group.add(plate);
+  } else if (type === 'medical') {
+    // Red-cross emblem out of two crossed boxes.
+    const crossMat = new THREE.MeshStandardMaterial({
+      color: 0xe04040, roughness: 0.5, metalness: 0.10,
+      emissive: 0xe04040, emissiveIntensity: 0.30,
+    });
+    const horiz = new THREE.Mesh(
+      new THREE.BoxGeometry(bw * 0.45, 0.04, bd * 0.12), crossMat);
+    horiz.position.y = iconY + 0.02;
+    group.add(horiz);
+    const vert = new THREE.Mesh(
+      new THREE.BoxGeometry(bw * 0.12, 0.04, bd * 0.45), crossMat);
+    vert.position.y = iconY + 0.02;
+    group.add(vert);
+  } else if (type === 'masterwork') {
+    // Pyramid emblem — pointier silhouette for "this is special".
+    const goldMat = new THREE.MeshStandardMaterial({
+      color: 0xe6b94a, roughness: 0.35, metalness: 0.85,
+      emissive: 0xe6b94a, emissiveIntensity: 0.55,
+    });
+    const gem = new THREE.Mesh(
+      new THREE.OctahedronGeometry(0.15, 0), goldMat);
+    gem.position.y = iconY + 0.18;
+    gem.rotation.y = Math.PI / 4;
+    group.add(gem);
+    // Plus a wider gold trim on the lid for ornate readability.
+    const trimMat = new THREE.MeshStandardMaterial({
+      color: 0xe6b94a, roughness: 0.45, metalness: 0.7,
+      emissive: 0xe6b94a, emissiveIntensity: 0.25,
+    });
+    const trim = new THREE.Mesh(
+      new THREE.BoxGeometry(bw * 1.05, 0.03, bd * 1.05), trimMat);
+    trim.position.y = bh + 0.005;
+    group.add(trim);
+  } else {
+    // General container — a small handle-like loop on top.
+    const handleMat = new THREE.MeshStandardMaterial({
+      color: 0x2a2018, roughness: 0.7, metalness: 0.30,
+    });
+    const handle = new THREE.Mesh(
+      new THREE.TorusGeometry(0.10, 0.025, 6, 12), handleMat);
+    handle.rotation.x = Math.PI / 2;
+    handle.position.y = iconY + 0.06;
+    group.add(handle);
+  }
+
   // Masterwork chest gets a subtle gold rim glow + slight scale-up.
-  if (container.containerType === 'masterwork') {
+  if (type === 'masterwork') {
     lidMat.emissiveIntensity = 0.45;
     group.scale.setScalar(1.1);
   }
