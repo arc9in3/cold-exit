@@ -6,6 +6,7 @@ import { GridContainer, stampItemDims } from './grid_container.js';
 import { thumbnailFor } from './item_thumbnails.js';
 import { buildRig, initAnim, updateAnim } from './actor_rig.js';
 import { KEEPER_PALETTE } from './level.js';
+import { snapshotToDataURL } from './snapshot_renderer.js';
 
 // Offscreen portrait renderer — one per shopkeeper kind, cached as a
 // data URL so opening the same shop twice doesn't re-render. Uses
@@ -16,10 +17,7 @@ const _portraitCache = new Map();
 function keeperPortrait(kind) {
   if (_portraitCache.has(kind)) return _portraitCache.get(kind);
   const palette = KEEPER_PALETTE[kind] || KEEPER_PALETTE.merchant;
-  const renderer = new THREE.WebGLRenderer({ antialias: true, alpha: true });
-  renderer.setPixelRatio(Math.min(window.devicePixelRatio, 2));
   const W = 180, H = 220;
-  renderer.setSize(W, H, false);
   const scene = new THREE.Scene();
   scene.add(new THREE.AmbientLight(0xffffff, 0.6));
   const key = new THREE.DirectionalLight(0xffffff, 1.1); key.position.set(2, 4, 3); scene.add(key);
@@ -45,12 +43,13 @@ function keeperPortrait(kind) {
   const camera = new THREE.PerspectiveCamera(32, W / H, 0.1, 20);
   camera.position.set(0.0, 1.55, 2.6);
   camera.lookAt(0.0, 1.35, 0.0);
-  renderer.render(scene, camera);
-  const url = renderer.domElement.toDataURL('image/png');
-  // Dispose renderer resources; the data URL is self-contained.
-  renderer.dispose();
-  _portraitCache.set(kind, url);
-  return url;
+  // Single shared offscreen renderer (snapshot_renderer.js) handles
+  // every kind. Previously this function spawned a fresh WebGLRenderer
+  // per keeper kind — eight kinds × dozens of shop visits accumulated
+  // dead contexts toward the browser's ~16-context cap.
+  const url = snapshotToDataURL(scene, camera, W, H);
+  if (url) _portraitCache.set(kind, url);
+  return url || '';
 }
 
 // Shop-side grid sizing. Tiles share the Tarkov-style footprint look

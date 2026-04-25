@@ -278,6 +278,12 @@ export class DetailsUI {
     const s = this._preview; if (!s) return;
     s.disposed = true;
     cancelAnimationFrame(s.rafId);
+    // Active context release. dispose() alone leaves the GL context
+    // alive in the browser's context cap until GC; forceContextLoss
+    // tells the GL layer to drop the slot immediately, so rapid
+    // open-close-open-close inspect loops over a long session don't
+    // pile dead contexts up to the cap.
+    try { s.renderer.forceContextLoss(); } catch (_) {}
     s.renderer.dispose();
     s.renderer.domElement.remove();
     this._preview = null;

@@ -12,11 +12,11 @@
 import * as THREE from 'three';
 import { loadModelClone } from './gltf_cache.js';
 import { modelForItem } from './model_manifest.js';
+import { snapshotToDataURL } from './snapshot_renderer.js';
 
 const SIZE = 96;                    // thumbnail resolution (px)
 const BG = 0x1a1e24;                // matches inventory card bg
 
-let _renderer = null;
 let _scene = null;
 let _camera = null;
 let _stage = null;                  // group we clear between renders
@@ -40,33 +40,11 @@ const NEUTRAL = {
   skin:      0x9a7050,   // unused but available for gloves-without-color
 };
 
-let _ctxLost = false;
 function _ensureRenderer() {
-  if (_renderer) return;
-  const canvas = document.createElement('canvas');
-  canvas.width = SIZE;
-  canvas.height = SIZE;
-  _renderer = new THREE.WebGLRenderer({
-    canvas, antialias: true, alpha: true, preserveDrawingBuffer: true,
-  });
-  _renderer.setClearColor(BG, 0);   // transparent so UI bg shows through
-  _renderer.setSize(SIZE, SIZE, false);
-  _renderer.outputColorSpace = THREE.SRGBColorSpace;
-  // Context-loss guard. Browsers cap the number of active WebGL
-  // contexts (~16); once we cross the limit, older contexts get
-  // silently killed. If this renderer's context dies we want to
-  // serve the cached fallback PNG instead of letting `_capture()`
-  // throw and abort the whole inventory render — that's what was
-  // turning the inventory into a black void.
-  canvas.addEventListener('webglcontextlost', (e) => {
-    e.preventDefault();
-    _ctxLost = true;
-  }, false);
-  canvas.addEventListener('webglcontextrestored', () => {
-    _ctxLost = false;
-    _cache.clear();   // re-render lazily as items are inspected
-  }, false);
-
+  if (_scene) return;
+  // Renderer is now shared via snapshot_renderer.js — we just keep
+  // the scene + camera + stage state here. The shared renderer
+  // resizes per call, so SIZE drives all thumbnails uniformly.
   _scene = new THREE.Scene();
   // Key + fill rig — warm key, cool fill. Rim light is *coloured by
   // the item tint each render* so each thumbnail picks up a subtle
@@ -112,13 +90,12 @@ const _BLANK_DATA_URL =
   'data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mNkAAIAAAoAAv/lxKUAAAAASUVORK5CYII=';
 
 function _capture() {
-  if (_ctxLost) return _BLANK_DATA_URL;
-  try {
-    _renderer.render(_scene, _camera);
-    return _renderer.domElement.toDataURL('image/png');
-  } catch (e) {
-    return _BLANK_DATA_URL;
-  }
+  // Routes through the shared offscreen renderer. Returns the blank
+  // PNG fallback if the snapshot renderer's context is currently lost
+  // (the inventory cell still renders its border + label so the
+  // layout stays legible).
+  return snapshotToDataURL(_scene, _camera, SIZE, SIZE, { clearColor: BG, clearAlpha: 0 })
+       || _BLANK_DATA_URL;
 }
 
 // ---------- material helpers ----------------------------------------
