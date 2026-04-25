@@ -314,6 +314,30 @@ renderer.outputColorSpace = THREE.SRGBColorSpace;
 appEl.appendChild(renderer.domElement);
 attachUnlock(renderer.domElement);
 
+// WebGL context-loss recovery. Without these handlers, an alt-tab,
+// GPU driver hiccup, browser tab-throttling, or another WebGL-heavy
+// page can drop the context and the canvas just renders black with
+// no recovery. Players opening inventory after a long alt-tab were
+// seeing the whole screen turn black even though gameplay continued
+// (audio + clock kept ticking) — that matches a lost context that
+// the browser never tried to restore.
+//
+// preventDefault() on the lost event tells the browser we want a
+// restore attempt. On restore we reload — re-uploading every
+// material/texture/buffer in-place is hairier than just starting
+// fresh, and the player's run is already saved per-level.
+let _ctxLost = false;
+renderer.domElement.addEventListener('webglcontextlost', (e) => {
+  e.preventDefault();
+  _ctxLost = true;
+  console.warn('[gfx] WebGL context lost — waiting for restore.');
+}, false);
+renderer.domElement.addEventListener('webglcontextrestored', () => {
+  console.warn('[gfx] WebGL context restored — reloading.');
+  // Tiny delay so the warn lands in the console before the reload.
+  setTimeout(() => location.reload(), 50);
+}, false);
+
 const { scene, camera, updateCamera, resize, groundPlane,
   hemiLight, keyLight, fillLight, rimLight, gridHelper } = createScene();
 applyQuality(initialQuality, { renderer, scene, keyLight, fillLight, rimLight, gridHelper });
@@ -4979,7 +5003,7 @@ function tick() {
   tickThrowableCooldowns(rawDt);
 
   if (paused || inventoryUI.visible || customizeUI.isOpen() || lootUI.isOpen() || shopUI.isOpen() || perkUI.isOpen() || gameMenuUI.isOpen() || playerDead) {
-    if (qualityFlags.postFx) postFx.render(rawDt); else renderer.render(scene, camera);
+    _safeRender(rawDt);
     requestAnimationFrame(tick);
     return;
   }
@@ -5326,8 +5350,25 @@ function tick() {
     if (toastFadeT <= 0) toastEl.style.opacity = '0';
   }
 
-  if (qualityFlags.postFx) postFx.render(rawDt); else renderer.render(scene, camera);
+  _safeRender(rawDt);
   requestAnimationFrame(tick);
+}
+
+// Single render entry point — skips entirely while the WebGL context
+// is lost (the restore handler reloads), and falls back to a direct
+// renderer.render() if the postFx composer throws. Without the
+// fallback, a single bad composer frame would leave the canvas black
+// until the next reload.
+function _safeRender(rawDt) {
+  if (_ctxLost) return;
+  try {
+    if (qualityFlags.postFx) postFx.render(rawDt);
+    else renderer.render(scene, camera);
+  } catch (err) {
+    console.warn('[gfx] postFx render threw — falling back to direct render', err);
+    qualityFlags.postFx = false;
+    try { renderer.render(scene, camera); } catch (_) {}
+  }
 }
 
 regenerateLevel();

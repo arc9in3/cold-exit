@@ -40,6 +40,7 @@ const NEUTRAL = {
   skin:      0x9a7050,   // unused but available for gloves-without-color
 };
 
+let _ctxLost = false;
 function _ensureRenderer() {
   if (_renderer) return;
   const canvas = document.createElement('canvas');
@@ -51,6 +52,20 @@ function _ensureRenderer() {
   _renderer.setClearColor(BG, 0);   // transparent so UI bg shows through
   _renderer.setSize(SIZE, SIZE, false);
   _renderer.outputColorSpace = THREE.SRGBColorSpace;
+  // Context-loss guard. Browsers cap the number of active WebGL
+  // contexts (~16); once we cross the limit, older contexts get
+  // silently killed. If this renderer's context dies we want to
+  // serve the cached fallback PNG instead of letting `_capture()`
+  // throw and abort the whole inventory render — that's what was
+  // turning the inventory into a black void.
+  canvas.addEventListener('webglcontextlost', (e) => {
+    e.preventDefault();
+    _ctxLost = true;
+  }, false);
+  canvas.addEventListener('webglcontextrestored', () => {
+    _ctxLost = false;
+    _cache.clear();   // re-render lazily as items are inspected
+  }, false);
 
   _scene = new THREE.Scene();
   // Key + fill rig — warm key, cool fill. Rim light is *coloured by
@@ -89,9 +104,21 @@ function _disposeStage() {
   }
 }
 
+// 1×1 transparent PNG — cheap fallback when the offscreen context is
+// lost. Inventory cells render their text + border around the image so
+// a transparent thumbnail keeps the cell legible instead of breaking
+// the layout.
+const _BLANK_DATA_URL =
+  'data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mNkAAIAAAoAAv/lxKUAAAAASUVORK5CYII=';
+
 function _capture() {
-  _renderer.render(_scene, _camera);
-  return _renderer.domElement.toDataURL('image/png');
+  if (_ctxLost) return _BLANK_DATA_URL;
+  try {
+    _renderer.render(_scene, _camera);
+    return _renderer.domElement.toDataURL('image/png');
+  } catch (e) {
+    return _BLANK_DATA_URL;
+  }
 }
 
 // ---------- material helpers ----------------------------------------
