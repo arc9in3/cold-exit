@@ -31,7 +31,7 @@ import {
   wrapWeapon, withAffixes, randomArmor, randomGear, randomConsumable, randomJunk, randomToy, setLootLevel,
   randomThrowable,
 } from './inventory.js';
-import { ALL_ATTACHMENTS, ATTACHMENT_DEFS, effectiveWeapon, randomAttachment } from './attachments.js';
+import { ALL_ATTACHMENTS, ATTACHMENT_DEFS, effectiveWeapon, randomAttachment, rollAttachmentRarity } from './attachments.js';
 import { CustomizeUI } from './ui_customize.js';
 import { LootUI } from './ui_loot.js';
 import { ShopUI, priceFor } from './ui_shop.js';
@@ -1080,7 +1080,7 @@ function makeMerchantStock() {
     ...tunables.weapons.filter(w => !w.artifact && !w.mythic && w.rarity !== 'mythic').map(w => wrapWeapon(w)),
     ...ALL_ARMOR.map(a => withAffixes(shopUpgradeRarity({ ...a, durability: { ...a.durability } }))),
     ...ALL_GEAR.map(g => withAffixes(shopUpgradeRarity({ ...g, durability: { ...(g.durability || { current: 100, max: 100, repairability: 0.9 }) } }))),
-    ...ALL_ATTACHMENTS.map(a => ({ ...a, modifier: { ...a.modifier } })),
+    ...ALL_ATTACHMENTS.map(a => rollAttachmentRarity({ ...a, modifier: { ...a.modifier } })),
     { ...CONSUMABLE_DEFS.bandage },
     { ...CONSUMABLE_DEFS.medkit },
   ];
@@ -1122,7 +1122,7 @@ function makeGunsmithStock() {
     tunables.weapons.filter(w => !w.artifact && !w.mythic && w.rarity !== 'mythic').map(w => wrapWeapon(w)),
     4,
   );
-  const atts = pickN(ALL_ATTACHMENTS.map(a => ({ ...a, modifier: { ...a.modifier } })), 3);
+  const atts = pickN(ALL_ATTACHMENTS.map(a => rollAttachmentRarity({ ...a, modifier: { ...a.modifier } })), 3);
   return [...weapons, ...atts].map((it) => {
     it.priceMult = (it.priceMult || 1) * 1.15;  // premium shop
     return fluxify(it);
@@ -1176,7 +1176,7 @@ function makeBlackMarketStock() {
   );
   const gear = pickN(ALL_GEAR.map(g => withAffixes({ ...g, durability: { ...(g.durability || { current: 100, max: 100, repairability: 0.9 }) } })), 2);
   const armor = pickN(ALL_ARMOR.map(a => withAffixes({ ...a, durability: { ...a.durability } })), 2);
-  const att = pickN(ALL_ATTACHMENTS.map(a => ({ ...a, modifier: { ...a.modifier } })), 2);
+  const att = pickN(ALL_ATTACHMENTS.map(a => rollAttachmentRarity({ ...a, modifier: { ...a.modifier } })), 2);
   return [...weapons, ...gear, ...armor, ...att].map((it) => {
     it.priceMult = (it.priceMult || 1) * 1.4;
     return fluxify(it);
@@ -1327,10 +1327,10 @@ function pickWeaponForAI(variant) {
     const candidates = ALL_ATTACHMENTS.filter(a => openSlots.includes(a.slot));
     if (!candidates.length) break;
     const chosenAtt = candidates[Math.floor(Math.random() * candidates.length)];
-    attachments[chosenAtt.slot] = {
+    attachments[chosenAtt.slot] = rollAttachmentRarity({
       ...chosenAtt,
       modifier: { ...(chosenAtt.modifier || {}) },
-    };
+    });
     const idx = openSlots.indexOf(chosenAtt.slot);
     if (idx >= 0) openSlots.splice(idx, 1);
   }

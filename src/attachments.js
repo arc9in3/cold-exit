@@ -239,16 +239,26 @@ function _scaleModifierByRarity(mod, rarity) {
   }
 }
 
+// Stamp a rolled rarity onto an attachment instance and scale its
+// modifier to match. No-op if rarity is already set so callers can
+// safely run this on attachments that came from other paths
+// (shop-stock generators, debug spawns, etc.) without double-scaling.
+// Exported so every attachment-spawn site in the game funnels through
+// the same rolling logic.
+export function rollAttachmentRarity(att) {
+  if (!att || att.rarity) return att;
+  att.rarity = _rollAttachmentRarity();
+  _scaleModifierByRarity(att.modifier, att.rarity);
+  return att;
+}
+
 export function randomAttachment() {
   const att = clone(ALL_ATTACHMENTS[Math.floor(Math.random() * ALL_ATTACHMENTS.length)]);
   // Stamp a rolled rarity and scale the modifier to match — common
   // sits at the authored balance, legendary roughly doubles the
   // mechanical effect. Sight reticles read uniformly clear at every
   // rarity (rarity is mechanical, not cosmetic, for attachments).
-  if (!att.rarity) {
-    att.rarity = _rollAttachmentRarity();
-    _scaleModifierByRarity(att.modifier, att.rarity);
-  }
+  rollAttachmentRarity(att);
   // Apply universal mastercraft roll. Mastercraft attachments boost
   // every numeric modifier toward the player (multipliers >1 × 1.5,
   // <1 multipliers tightened by 1.5× toward zero) so the mod sheet
