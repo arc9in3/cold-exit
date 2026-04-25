@@ -178,7 +178,7 @@ export class ShopUI {
             <div id="shop-bag"></div>
           </div>
         </div>
-        <div id="shop-footer">Click · drag to trade · right-click for details · <b>${Math.round(tunables.currency.sellMult * 100)}%</b> sell value · buyback refunds the sale</div>
+        <div id="shop-footer">Left-click to inspect · right-click or drag to trade · <b>${Math.round(tunables.currency.sellMult * 100)}%</b> sell value · buyback refunds the sale</div>
       </div>
     `;
     document.body.appendChild(this.root);
@@ -315,8 +315,9 @@ export class ShopUI {
     this._renderKeeper();
     this._renderTrade();
     // Stock — flat cell list. Shop is intentionally simpler than the
-    // inventory/loot grids: single click to buy, right-click to
-    // inspect. No drag-to-rearrange, no footprint layout.
+    // inventory/loot grids: left-click to inspect, right-click to buy.
+    // No drag-to-rearrange, no footprint layout. Convention matches
+    // inventory/loot so muscle memory carries between screens.
     this.stockEl.innerHTML = '';
     this.stockEl.classList.remove('shop-footprint-grid');
     this.stockEl.style.width = '';
@@ -331,10 +332,12 @@ export class ShopUI {
       stock.forEach((it, idx) => {
         if (!it) return;
         const cell = this._buildCell(it, priceFor(it, this.getShopMult()), 'buy');
-        cell.addEventListener('click', () => this._buy(idx));
+        cell.addEventListener('click', () => {
+          if (window.__showDetails) window.__showDetails(it);
+        });
         cell.addEventListener('contextmenu', (e) => {
           e.preventDefault();
-          if (window.__showDetails) window.__showDetails(it);
+          this._buy(idx);
         });
         // Drag from shop stock onto the backpack = buy (kept for power
         // users who want the drag target behaviour).
@@ -359,10 +362,12 @@ export class ShopUI {
     this.buyback.forEach((entry, i) => {
       const cell = this._buildCell(entry.item, entry.price, 'buy');
       cell.classList.add('buyback-cell');
-      cell.addEventListener('click', () => this._buybackAt(i));
+      cell.addEventListener('click', () => {
+        if (window.__showDetails) window.__showDetails(entry.item);
+      });
       cell.addEventListener('contextmenu', (e) => {
         e.preventDefault();
-        if (window.__showDetails) window.__showDetails(entry.item);
+        this._buybackAt(i);
       });
       const canAfford = this.getCredits() >= entry.price;
       if (!canAfford) cell.classList.add('unaffordable');
@@ -378,10 +383,12 @@ export class ShopUI {
       hasAny = true;
       const sellPrice = sellPriceFor(it);
       const cell = this._buildCell(it, sellPrice, 'sell');
-      cell.addEventListener('click', () => this._sell(i));
+      cell.addEventListener('click', () => {
+        if (window.__showDetails) window.__showDetails(it);
+      });
       cell.addEventListener('contextmenu', (e) => {
         e.preventDefault();
-        if (window.__showDetails) window.__showDetails(it);
+        this._sell(i);
       });
       cell.setAttribute('draggable', 'true');
       cell.addEventListener('dragstart', (e) => {

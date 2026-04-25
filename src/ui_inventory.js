@@ -7,8 +7,8 @@ import { thumbnailFor } from './item_thumbnails.js';
 //   • Every item occupies exactly 1 cell.
 //   • Drag = move between any container (pockets / rig / backpack) or
 //     onto an equipment slot.
-//   • Click = inspect (opens the details modal).
-//   • Right-click = equip / unequip.
+//   • Left-click = inspect (opens the details modal).
+//   • Right-click = equip / unequip (action).
 //   • Shift-click = drop to ground.
 //
 // The grid rendering is kept so pockets / rig / backpack still read as
@@ -50,7 +50,7 @@ export class InventoryUI {
             <div id="inv-grids-stack"></div>
           </div>
         </div>
-        <div id="inv-footer">Drag to move · Click to inspect · Right-click to equip/unequip · Shift-click to drop · Tab to close</div>
+        <div id="inv-footer">Drag to move · Left-click to inspect · Right-click to equip/unequip · Shift-click to drop · Tab to close</div>
       </div>
     `;
     document.body.appendChild(this.root);

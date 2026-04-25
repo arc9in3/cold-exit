@@ -701,11 +701,13 @@ export class LootUI {
   }
 
   _wireMiscCell(cell, lootIdx) {
-    cell.addEventListener('click', () => this._takeOne(lootIdx));
-    cell.addEventListener('contextmenu', (e) => {
-      e.preventDefault();
+    cell.addEventListener('click', () => {
       const it = this.target?.loot?.[lootIdx];
       if (it && window.__showDetails) window.__showDetails(it);
+    });
+    cell.addEventListener('contextmenu', (e) => {
+      e.preventDefault();
+      this._takeOne(lootIdx);
     });
     cell.addEventListener('dragstart', (e) => {
       const item = this.target?.loot?.[lootIdx];
@@ -793,11 +795,6 @@ export class LootUI {
   }
 
   _wirePlayerBagCell(cell, bagIdx) {
-    cell.addEventListener('contextmenu', (e) => {
-      e.preventDefault();
-      const it = this.inventory.backpack[bagIdx];
-      if (it && window.__showDetails) window.__showDetails(it);
-    });
     cell.addEventListener('click', (e) => {
       if (e.shiftKey) {
         // Shift-click: drop into body if body visible, else onto ground.
@@ -815,6 +812,13 @@ export class LootUI {
         this.render();
         return;
       }
+      // Plain left-click = inspect.
+      const it = this.inventory.backpack[bagIdx];
+      if (it && window.__showDetails) window.__showDetails(it);
+    });
+    cell.addEventListener('contextmenu', (e) => {
+      e.preventDefault();
+      // Right-click = equip.
       const item = this.inventory.backpack[bagIdx];
       if (item && this.inventory.equipBackpack) this.inventory.equipBackpack(bagIdx);
       this.render();
