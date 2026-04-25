@@ -145,7 +145,9 @@ export class LootManager {
     // common "colored box" drops (weapons / gear / consumables /
     // disarmed weapons).
     if (item.shape === 'bear' || item.shape === 'duck') {
-      return this._spawnToy(position, item, tint);
+      const e = this._spawnToy(position, item, tint);
+      this._maybeAttachBeacon(e, item);
+      return e;
     }
 
     const slot = this._acquire();
@@ -169,8 +171,49 @@ export class LootManager {
       age: Math.random() * Math.PI * 2,
       isToy: false,
     };
+    this._maybeAttachBeacon(entry, item);
     this.items.push(entry);
     return entry;
+  }
+
+  // Rare-tier ground beacon. Epic / legendary / mythic / mastercraft
+  // items get a colored vertical column of light planted at the drop
+  // so the player can spot them across a room. Uses a tall thin box
+  // with additive-blended translucent material for a minimal-cost
+  // visual; one per dropped rare item is fine even at 50+ drops.
+  _maybeAttachBeacon(entry, item) {
+    if (!entry || !item) return;
+    const rarity = item.rarity || 'common';
+    const isMaster = !!item.mastercraft;
+    if (!isMaster && rarity !== 'epic' && rarity !== 'legendary' && rarity !== 'mythic') return;
+    // Color/intensity profile per rarity. Mastercraft beats rarity
+    // for visual identity — gold/cyan rim regardless of base rarity.
+    const profile = isMaster
+      ? { color: 0xffd040, height: 6.5, opacity: 0.55 }
+      : rarity === 'mythic'    ? { color: 0xff3a55, height: 7.5, opacity: 0.65 }
+      : rarity === 'legendary' ? { color: 0xffc040, height: 5.5, opacity: 0.5 }
+      :                          { color: 0xb060ff, height: 4.5, opacity: 0.45 }; // epic
+    const beamGeom = new THREE.CylinderGeometry(0.18, 0.32, profile.height, 8, 1, true);
+    const beamMat = new THREE.MeshBasicMaterial({
+      color: profile.color,
+      transparent: true,
+      opacity: profile.opacity,
+      depthWrite: false,
+      side: THREE.DoubleSide,
+      blending: THREE.AdditiveBlending,
+    });
+    const beam = new THREE.Mesh(beamGeom, beamMat);
+    beam.position.y = profile.height / 2 - 0.45;
+    beam.userData.isProp = true;        // skip wall-occlusion fade tracking
+    beam.userData.beam = true;
+    entry.group.add(beam);
+    entry.beam = beam;
+    // Brighter pulse light at the base so the column also reads on
+    // dim floors. Reuse a small PointLight; cost is in the noise.
+    const pulse = new THREE.PointLight(profile.color, 1.6, 5.5);
+    pulse.position.y = 0.4;
+    entry.group.add(pulse);
+    entry.beamPulse = pulse;
   }
 
   // Toys still use the old one-off group path — small, fixed count,

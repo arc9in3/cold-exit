@@ -710,8 +710,11 @@ export class LootUI {
   }
 
   _applyRarity(el, item) {
-    el.classList.remove('rarity-common', 'rarity-uncommon', 'rarity-rare', 'rarity-epic', 'rarity-legendary');
-    if (item) el.classList.add(`rarity-${inferRarity(item)}`);
+    el.classList.remove('rarity-common', 'rarity-uncommon', 'rarity-rare', 'rarity-epic', 'rarity-legendary', 'rarity-mythic', 'mastercraft');
+    if (item) {
+      el.classList.add(`rarity-${inferRarity(item)}`);
+      if (item.mastercraft) el.classList.add('mastercraft');
+    }
     el.classList.toggle('filled', !!item);
   }
 
@@ -1210,7 +1213,7 @@ export class LootUI {
     tile.style.width  = `${entry.w * PL_CELL_PX + (entry.w - 1) * PL_CELL_GAP}px`;
     tile.style.height = `${entry.h * PL_CELL_PX + (entry.h - 1) * PL_CELL_GAP}px`;
     const rarity = inferRarity(entry.item);
-    tile.classList.add(`rarity-${rarity}`);
+    tile.classList.add(`rarity-${rarity}`); if (entry.item?.mastercraft || entry.mastercraft) tile.classList.add("mastercraft");
     if (entry.rotated) tile.classList.add('rotated');
     const thumb = thumbnailFor(entry.item);
     const label = (entry.item.name || '').toString();
@@ -1822,7 +1825,7 @@ export class LootUI {
     // Visual only — wrap owns pointerdown via `_wireBodyGridCustomDrag`.
     tile.style.pointerEvents = 'none';
     const rarity = inferRarity(entry.item);
-    tile.classList.add(`rarity-${rarity}`);
+    tile.classList.add(`rarity-${rarity}`); if (entry.item?.mastercraft || entry.mastercraft) tile.classList.add("mastercraft");
     tile.style.left   = `${entry.x * (BG_CELL_PX + BG_CELL_GAP)}px`;
     tile.style.top    = `${entry.y * (BG_CELL_PX + BG_CELL_GAP)}px`;
     tile.style.width  = `${BG_CELL_PX}px`;
@@ -2016,7 +2019,7 @@ export class LootUI {
     tile.className = 'ws-tile';
     tile.setAttribute('draggable', 'true');
     const rarity = inferRarity(entry.item);
-    tile.classList.add(`rarity-${rarity}`);
+    tile.classList.add(`rarity-${rarity}`); if (entry.item?.mastercraft || entry.mastercraft) tile.classList.add("mastercraft");
     tile.style.left   = `${entry.x * (WS_CELL_PX + WS_CELL_GAP)}px`;
     tile.style.top    = `${entry.y * (WS_CELL_PX + WS_CELL_GAP)}px`;
     tile.style.width  = `${WS_CELL_PX}px`;

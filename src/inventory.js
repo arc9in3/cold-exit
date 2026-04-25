@@ -344,6 +344,49 @@ function dur(max, repairability = 0.92) {
   return { current: max, max, repairability };
 }
 
+// --- Loot scaling context --------------------------------------------------
+// Centralised "what level are we on" used by every roll function so we
+// don't have to thread the level argument through 30 callers. main.js
+// calls setLootLevel(level.index) once per regeneration.
+let _lootLevel = 1;
+export function setLootLevel(lv) {
+  _lootLevel = Math.max(1, lv | 0);
+  // Mirror onto window so cross-module perks.js / future loot tables
+  // can read the current level without an explicit import dance.
+  if (typeof window !== 'undefined') window.__lootLevel = _lootLevel;
+}
+export function getLootLevel() { return _lootLevel; }
+
+// Affix-roll value scalar — early levels narrow rolls, late levels
+// widen the upper bound. Floor stays at 1.0 so common-tier roll
+// remains a meaningful baseline; ceiling grows linearly with level.
+function _affixLevelScale() {
+  const lv = _lootLevel;
+  return Math.min(2.2, 1 + 0.06 * Math.max(0, lv - 1));
+}
+// Mastercraft: 0.5% chance per loot roll. Tagged with mastercraft:true
+// so the cell renderer can render the rainbow-glow border, and every
+// affix value / numeric perk roll bumps by 1.5×.
+const MASTERCRAFT_CHANCE = 0.005;
+function _rollMastercraft() { return Math.random() < MASTERCRAFT_CHANCE; }
+
+// Slot-availability gate. Until the player reaches certain levels,
+// only the "core" body slots (head, chest, hands, boots, pants) drop
+// from the loot tables. Face / ears / belt / backpack come online as
+// the run progresses, so an early-game player isn't drowning in
+// glasses they can't tell apart from earrings. By L8+ everything is
+// in the pool — uniform distribution thereafter.
+const ALWAYS_DROP_SLOTS = ['head', 'chest', 'hands', 'boots', 'pants'];
+const SLOT_UNLOCK_LEVEL = {
+  belt: 3, face: 4, ears: 5, backpack: 6,
+};
+function _slotAllowedAtLevel(slot, lv) {
+  if (ALWAYS_DROP_SLOTS.includes(slot)) return true;
+  const need = SLOT_UNLOCK_LEVEL[slot];
+  if (need === undefined) return true;       // unknown slot — let it through
+  return lv >= need;
+}
+
 // Random affix pool. Each affix has a `kind`, a label template, and an
 // `apply` function that mutates the shared stats bag.
 const AFFIX_POOL = [
@@ -423,6 +466,60 @@ export const SET_DEFS = {
                    s.cornerReduction = (s.cornerReduction || 0) + 0.15; } },
     ],
   },
+  pyromaniac: {
+    id: 'pyromaniac', name: 'Pyromaniac',
+    tiers: [
+      { pieces: 2, desc: '2pc: +50% burn duration, +20% fire resist',
+        apply(s) { s.burnDurationBonus = (s.burnDurationBonus || 1) * 1.5;
+                   s.fireResist = Math.min(0.8, s.fireResist + 0.20); } },
+      { pieces: 4, desc: '4pc: +25% exotic damage, +25% explosion radius',
+        apply(s) { s.rangedDmgMult *= 1.25;
+                   s.exoticRadiusMult = (s.exoticRadiusMult || 1) * 1.25; } },
+    ],
+  },
+  juggernaut: {
+    id: 'juggernaut', name: 'Juggernaut',
+    tiers: [
+      { pieces: 2, desc: '2pc: +60 max HP, +20% knockback',
+        apply(s) { s.maxHealthBonus += 60; s.knockbackMult *= 1.2; } },
+      { pieces: 4, desc: '4pc: +20% dmg reduction, +20% melee dmg, −10% move speed',
+        apply(s) { s.dmgReduction = Math.min(0.7, s.dmgReduction + 0.20);
+                   s.meleeDmgMult *= 1.20;
+                   s.moveSpeedMult *= 0.90; } },
+    ],
+  },
+  ronin: {
+    id: 'ronin', name: 'Ronin',
+    tiers: [
+      { pieces: 2, desc: '2pc: +20% melee dmg, +10% move speed',
+        apply(s) { s.meleeDmgMult *= 1.20; s.moveSpeedMult *= 1.10; } },
+      { pieces: 4, desc: '4pc: melee kills refund 25 stamina, +30% melee crit dmg',
+        apply(s) {
+          s.meleeStaminaRefundOnKill = Math.max(s.meleeStaminaRefundOnKill || 0, 25);
+          s.bodyCritDamageBonus = (s.bodyCritDamageBonus || 0) + 0.30;
+        } },
+    ],
+  },
+  alchemist: {
+    id: 'alchemist', name: 'Alchemist',
+    tiers: [
+      { pieces: 2, desc: '2pc: +1 throwable charge, −20% throwable cooldown',
+        apply(s) { s.throwableChargeBonus += 1;
+                   s.throwableCooldownMult *= 0.80; } },
+      { pieces: 4, desc: '4pc: throwable kills refund a charge',
+        apply(s) { s.throwableRefundOnKill = Math.max(s.throwableRefundOnKill || 0, 1); } },
+    ],
+  },
+  oracle: {
+    id: 'oracle', name: 'Oracle',
+    tiers: [
+      { pieces: 2, desc: '2pc: +20m hearing range, +0.15 ghost alpha',
+        apply(s) { s.hearingRange += 20; s.hearingAlpha += 0.15; } },
+      { pieces: 4, desc: '4pc: +30% crit chance, crits dazzle for 1.5s',
+        apply(s) { s.critChance += 0.30;
+                   s.shockOnCrit = Math.max(s.shockOnCrit || 0, 1.5); } },
+    ],
+  },
 };
 const SET_IDS = Object.keys(SET_DEFS);
 
@@ -437,7 +534,7 @@ const SET_ROLL_CHANCE = {
   common: 0, uncommon: 0.10, rare: 0.20, epic: 0.35, legendary: 0.60,
 };
 
-export function rollAffixes(rarity) {
+export function rollAffixes(rarity, opts = {}) {
   const count = AFFIX_COUNT_BY_RARITY[rarity] ?? 0;
   if (count === 0) return [];
   const pool = [...AFFIX_POOL];
@@ -446,11 +543,22 @@ export function rollAffixes(rarity) {
   // one of its normal affixes.
   const setChance = SET_ROLL_CHANCE[rarity] || 0;
   const hasSetAffix = Math.random() < setChance;
+  // Per-level upper-bound widening — the FLOOR stays at the def's
+  // base roll, so early levels can still hit baseline values; the
+  // CEILING expands. Implementation: roll 0..1 of the base range,
+  // scale to (base..base*levelScale), so the spread between weakest
+  // and strongest legendary widens with progression.
+  const levelScale = _affixLevelScale();
+  const mcMult = opts.mastercraft ? 1.5 : 1.0;
   for (let i = 0; i < count && pool.length; i++) {
     if (i === 0 && hasSetAffix) { out.push(rollSetMark()); continue; }
     const idx = Math.floor(Math.random() * pool.length);
     const def = pool.splice(idx, 1)[0];
-    const value = def.roll();
+    let value = def.roll();
+    // Bias the upper end of the value: each affix roll gets multiplied
+    // by a random in [1, levelScale] so on average +0..1× of base.
+    const widen = 1 + (levelScale - 1) * Math.random();
+    value = value * widen * mcMult;
     out.push({ kind: def.kind, value, label: def.label(value) });
   }
   return out;
@@ -509,11 +617,44 @@ export function applySetBonuses(equipment, stats) {
 // rolls into the mythic pool.
 const RARITY_ORDER = ['common', 'uncommon', 'rare', 'epic', 'legendary', 'mythic'];
 export function rollWeaponRarity() {
+  // Level-driven weighting — early levels are dominated by common
+  // drops; rarer tiers come online slowly. By L8+ the distribution
+  // approaches uniform-ish across the lower 4 tiers and legendary
+  // becomes a real possibility on a normal pickup. Mythic remains
+  // boss-locked (rollMythicDrop in main.js).
+  const lv = _lootLevel;
   const r = Math.random();
-  if (r < 0.02) return 'legendary';
-  if (r < 0.09) return 'epic';
-  if (r < 0.26) return 'rare';
-  if (r < 0.56) return 'uncommon';
+  if (lv <= 1) {
+    // L1 — almost everything is common, the occasional uncommon.
+    if (r < 0.005) return 'rare';
+    if (r < 0.10)  return 'uncommon';
+    return 'common';
+  }
+  if (lv <= 3) {
+    if (r < 0.005) return 'epic';
+    if (r < 0.04)  return 'rare';
+    if (r < 0.30)  return 'uncommon';
+    return 'common';
+  }
+  if (lv <= 5) {
+    if (r < 0.005) return 'legendary';
+    if (r < 0.04)  return 'epic';
+    if (r < 0.16)  return 'rare';
+    if (r < 0.50)  return 'uncommon';
+    return 'common';
+  }
+  if (lv <= 8) {
+    if (r < 0.015) return 'legendary';
+    if (r < 0.07)  return 'epic';
+    if (r < 0.24)  return 'rare';
+    if (r < 0.58)  return 'uncommon';
+    return 'common';
+  }
+  // L9+: original-ish distribution as the late-game baseline.
+  if (r < 0.03) return 'legendary';
+  if (r < 0.11) return 'epic';
+  if (r < 0.30) return 'rare';
+  if (r < 0.62) return 'uncommon';
   return 'common';
 }
 
@@ -964,8 +1105,20 @@ function clone(def) {
 }
 export function withAffixes(item) {
   const rarity = inferRarity(item);
-  item.affixes = rollAffixes(rarity);
-  item.perks = rollPerks(rarity);
+  // Mastercraft is a one-in-200 roll that boosts every numeric affix
+  // by 1.5× and bumps perk count by 1. Tags `item.mastercraft = true`
+  // so the cell renderer can paint the special border.
+  const mastercraft = _rollMastercraft();
+  if (mastercraft) {
+    item.mastercraft = true;
+    // Stamp the yellow MASTERCRAFT tag at the front of the name once
+    // — re-running withAffixes would otherwise dupe the prefix.
+    if (typeof item.name === 'string' && !item.name.includes('mastercraft-tag')) {
+      item.name = `<span class="mastercraft-tag">MASTERCRAFT</span> ${item.name}`;
+    }
+  }
+  item.affixes = rollAffixes(rarity, { mastercraft });
+  item.perks = rollPerks(rarity, { mastercraft });
   stampItemDims(item);
   return item;
 }
@@ -983,8 +1136,26 @@ function rollActionSlotBonus(item) {
   }
   return item;
 }
-export function randomArmor() { return rollActionSlotBonus(withAffixes(clone(ALL_ARMOR[Math.floor(Math.random() * ALL_ARMOR.length)]))); }
-export function randomGear() { return rollActionSlotBonus(withAffixes(clone(ALL_GEAR[Math.floor(Math.random() * ALL_GEAR.length)]))); }
+// Level-aware random pickers — filter the source pool to slots that
+// have unlocked at the player's current loot level. With the gate, an
+// L1 random pull is guaranteed to be one of the core slots (head,
+// chest, hands, boots, pants); face/ears/etc. trickle in only at the
+// configured unlock levels.
+function _filterBySlotGate(list, lv) {
+  return list.filter(def => _slotAllowedAtLevel(def.slot, lv));
+}
+export function randomArmor() {
+  const lv = _lootLevel;
+  const pool = _filterBySlotGate(ALL_ARMOR, lv);
+  const src = pool.length ? pool : ALL_ARMOR;
+  return rollActionSlotBonus(withAffixes(clone(src[Math.floor(Math.random() * src.length)])));
+}
+export function randomGear() {
+  const lv = _lootLevel;
+  const pool = _filterBySlotGate(ALL_GEAR, lv);
+  const src = pool.length ? pool : ALL_GEAR;
+  return rollActionSlotBonus(withAffixes(clone(src[Math.floor(Math.random() * src.length)])));
+}
 export function randomConsumable() { return stampItemDims(clone(ALL_CONSUMABLES[Math.floor(Math.random() * ALL_CONSUMABLES.length)])); }
 
 // Wraps a weapon tunable into an inventory item with per-instance state
@@ -1008,11 +1179,21 @@ export function wrapWeapon(w, opts = {}) {
   const newDmg = typeof w.damage === 'number' ? +(w.damage * sc.dmg).toFixed(2) : w.damage;
   const newFireRate = typeof w.fireRate === 'number' ? +(w.fireRate * sc.fireRate).toFixed(3) : w.fireRate;
   const newRange = typeof w.range === 'number' ? +(w.range * sc.rangeMult).toFixed(2) : w.range;
+  // Mastercraft weapon — same 0.5% gate as armor/gear. Boosts every
+  // affix value 1.5×, bumps perk count by 1, and tags the item so the
+  // cell renderer paints the rainbow-glow border.
+  const mastercraft = !opts.skipMastercraft && _rollMastercraft();
+  // Mastercraft prefixes the visible name with a yellow tag so it
+  // jumps off the inventory grid even at thumbnail size. Other UI
+  // surfaces (details panel, loot drop) read item.mastercraft and
+  // paint additional glow themselves.
+  const mcPrefix = mastercraft ? '<span class="mastercraft-tag">MASTERCRAFT</span> ' : '';
   const out = {
     ...w,
     itemCategory: 'weapon',
     rarity: rolledRarity,
-    name: namePrefix ? `${namePrefix} ${w.name}` : w.name,
+    mastercraft: mastercraft || undefined,
+    name: mcPrefix + (namePrefix ? `${namePrefix} ${w.name}` : w.name),
     tint: w.tracerColor,
     damage: newDmg,
     fireRate: newFireRate,
@@ -1027,8 +1208,8 @@ export function wrapWeapon(w, opts = {}) {
     reloadingT: 0,
     durability: dur(200, 0.95),
     attachments,
-    perks: rollPerks(rolledRarity),
-    affixes: rollAffixes(rolledRarity),
+    perks: rollPerks(rolledRarity, { mastercraft }),
+    affixes: rollAffixes(rolledRarity, { mastercraft }),
   };
   // Stamp grid footprint so the item can be placed without further
   // resolution at insertion time.

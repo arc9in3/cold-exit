@@ -226,6 +226,58 @@
     .rarity-rare      { box-shadow: 0 0 0 1px #4a7ac9 inset, 0 0 10px rgba(74,122,201,0.35); border-color: #4a7ac9 !important; }
     .rarity-epic      { box-shadow: 0 0 0 1px #9a5ac9 inset, 0 0 12px rgba(154,90,201,0.45); border-color: #9a5ac9 !important; }
     .rarity-legendary { box-shadow: 0 0 0 1px #d0a038 inset, 0 0 14px rgba(208,160,56,0.55); border-color: #d0a038 !important; }
+    /* Mythic — animated red/violet outline so the item visibly glows
+       in the inventory grid. Pulses 1.6s; saturates the rarity hue
+       brighter than legendary's static gold. */
+    .rarity-mythic {
+      border-color: #ff3a55 !important;
+      animation: mythic-pulse 1.6s ease-in-out infinite;
+    }
+    @keyframes mythic-pulse {
+      0%, 100% {
+        box-shadow:
+          0 0 0 2px rgba(255,58,85,0.85) inset,
+          0 0 16px 2px rgba(255,58,85,0.55),
+          0 0 28px 6px rgba(180,40,200,0.35);
+      }
+      50% {
+        box-shadow:
+          0 0 0 2px rgba(255,120,160,1) inset,
+          0 0 24px 4px rgba(255,80,120,0.85),
+          0 0 44px 10px rgba(220,60,255,0.6);
+      }
+    }
+    /* Mastercraft — gold/cyan rotating outline. Stacks with rarity:
+       a Legendary Mastercraft glows gold from rarity AND has the
+       mastercraft cyan-gold rim animation on top. */
+    .mastercraft {
+      animation: mastercraft-glow 2.4s ease-in-out infinite;
+    }
+    @keyframes mastercraft-glow {
+      0%, 100% {
+        box-shadow:
+          0 0 0 2px rgba(255,210,80,1) inset,
+          0 0 18px 3px rgba(255,210,80,0.75),
+          0 0 36px 8px rgba(0,230,255,0.45);
+      }
+      50% {
+        box-shadow:
+          0 0 0 2px rgba(0,230,255,0.95) inset,
+          0 0 26px 5px rgba(0,230,255,0.75),
+          0 0 48px 10px rgba(255,210,80,0.6);
+      }
+    }
+    /* Yellow MASTERCRAFT prefix tag — inline span baked into the item
+       name. Bold, monospace, slightly larger than the rest of the
+       label so it pops in the cell-name overlay even at 8-9px. */
+    .mastercraft-tag {
+      color: #ffd040;
+      font-weight: 800;
+      letter-spacing: 0.8px;
+      font-family: var(--ce-font-tech);
+      text-shadow: 0 0 6px rgba(255,208,64,0.7), 0 1px 2px rgba(0,0,0,0.95);
+      margin-right: 4px;
+    }
 
     /* Inventory panel */
     /* Item details modal (right-click on any cell) */

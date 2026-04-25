@@ -538,6 +538,10 @@ export class GunmanManager {
   applyHit(g, damage, zone, hitDir, opts = {}) {
     const drops = [];
     if (!g.alive) return { drops, blocked: false };
+    // Damage from the player aggros the boss → enters hunt mode. Lets
+    // a stealth-execute opener take a boss out without ever
+    // triggering the cross-room pursuit.
+    if (g.huntsPlayer && !g.huntActive) g.huntActive = true;
 
     // Shield absorption — frontal hits + any bullet that lands on the
     // shield mesh itself get soaked until the shield breaks. Shotgun slugs
@@ -933,15 +937,17 @@ export class GunmanManager {
     } else if (g.suspicion >= 1.0) {
       canSee = true;
     }
-    // Boss hunt — bosses (huntsPlayer) treat the player as a known
-    // target whenever the player is alive, regardless of LoS, room
-    // boundaries, or stealth. They leave their arena to pursue.
-    if (g.huntsPlayer && ctx.playerPos) {
+    // Boss hunt — once a boss has aggro'd (taken damage, seen the
+    // player normally, or had their suspicion crest into ALERTED
+    // state), they switch into hunt mode and pursue the player
+    // through walls / rooms / stealth. Stealth approach + execute
+    // remains a viable opener until the player triggers them.
+    // `g.huntActive` flips on first aggro and stays true until death.
+    if (g.huntsPlayer && !g.huntActive && g.state !== STATE.IDLE) {
+      g.huntActive = true;
+    }
+    if (g.huntsPlayer && g.huntActive && ctx.playerPos) {
       canSee = true;
-      if (g.state === STATE.IDLE) {
-        g.state = STATE.ALERTED;
-        g.suspicion = 1.0;
-      }
     }
     // Chatter — idle enemies occasionally mutter to themselves. Uses
     // a per-enemy cooldown so squads don't all speak at once, and

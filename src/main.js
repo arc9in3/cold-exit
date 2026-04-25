@@ -28,7 +28,7 @@ import { tunables } from './tunables.js';
 import {
   Inventory, SLOT_IDS,
   ALL_GEAR, ALL_ARMOR, ALL_CONSUMABLES, CONSUMABLE_DEFS, ALL_JUNK, ALL_TOYS, ARMOR_DEFS,
-  wrapWeapon, withAffixes, randomArmor, randomGear, randomConsumable, randomJunk, randomToy,
+  wrapWeapon, withAffixes, randomArmor, randomGear, randomConsumable, randomJunk, randomToy, setLootLevel,
   randomThrowable,
 } from './inventory.js';
 import { ALL_ATTACHMENTS, ATTACHMENT_DEFS, effectiveWeapon, randomAttachment } from './attachments.js';
@@ -1249,6 +1249,10 @@ function regenerateLevel() {
   // the obstacle list.
   if (level.obstacles) for (let i = 0; i < level.obstacles.length; i++) disposeMesh(level.obstacles[i]);
   level.generate();
+  // Loot scaling context — every random armor/gear/weapon roll reads
+  // this to gate slot drops, scale affix ranges, and weight rarity
+  // probabilities. Set BEFORE buildBodyLoot etc. fire below.
+  setLootLevel(level.index);
   // Build BVHs over the new wall + obstacle set. Each tree is a
   // one-time cost (~0.1ms per BoxGeometry); subsequent raycasts pay
   // O(log N) instead of O(N).

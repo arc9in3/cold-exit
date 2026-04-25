@@ -324,6 +324,7 @@ export class InventoryUI {
     tile.style.height = `${CELL_PX}px`;
     const rarity = inferRarity(entry.item);
     tile.classList.add(`rarity-${rarity}`);
+    if (entry.item.mastercraft) tile.classList.add('mastercraft');
     const thumb = thumbnailFor(entry.item);
     const label = (entry.item.name || '').toString();
     const dur = entry.item.durability;
@@ -684,8 +685,12 @@ export class InventoryUI {
 
     const applyRarity = (el, item) => {
       el.classList.remove('rarity-common', 'rarity-uncommon', 'rarity-rare',
-                          'rarity-epic', 'rarity-legendary', 'rarity-mythic');
-      if (item) el.classList.add(`rarity-${inferRarity(item)}`);
+                          'rarity-epic', 'rarity-legendary', 'rarity-mythic',
+                          'mastercraft');
+      if (item) {
+        el.classList.add(`rarity-${inferRarity(item)}`);
+        if (item.mastercraft) el.classList.add('mastercraft');
+      }
     };
 
     for (const slot of SLOT_IDS) {
