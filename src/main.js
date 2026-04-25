@@ -1822,31 +1822,38 @@ let extractPending = false;
 
 let derivedStats = BASE_STATS();
 let lastHpRatio = 1;  // updated each tick for perks that need mid-callback HP
+
+// --- Class capstone runtime state ---------------------------------------
+// LMG Walking Fire — seconds the trigger has been held in the current
+// burst. Spread is multiplied by max(0, 1 - decay * heldT). Reset when
+// the player stops firing for `lmgSustainedResetT` seconds.
+let _lmgHeldT = 0;
+let _lmgIdleT = 0;
+// Sniper Marked Target — accumulates while ADS-stationary on the same
+// target. Resets on movement, ADS release, or target swap.
+let _sniperHoldT = 0;
+let _sniperHoldTarget = null;
+let _sniperAimX = 0;
+let _sniperAimZ = 0;
+// Rifle Burst Concentration — consecutive full-auto hits on the same
+// target stack crit-damage bonus.
+let _rifleChainTarget = null;
+let _rifleChainStacks = 0;
+let _rifleChainLastT = 0;
+// Exotic Cascade — corpse marks. Each entry is { x, z, untilMs }.
+const _exoticChainMarks = [];
 let gameClockMs = 0;   // active-gameplay clock for wall-clock timers
 let playerMaxHealthCached = 100;
 let secondWindUsed = 0;
 let lastInventoryVersion = -1;
-// Rebalance — capstones whose data is wired but whose per-frame
-// gameplay logic still needs to land in the relevant systems:
-//   • penetration               → fire path: iterate raycaster hits up
-//                                 to `penetration + 1` instead of first.
-//   • rifleAutoChainPerHit/Cap  → track consecutive hits on same target
-//                                 with rifleAutoChainResetT timeout, add
-//                                 rifleAutoChainPerHit * stacks to crit dmg.
-//   • lmgSustainedSpreadDecay   → while trigger held, multiply current
-//                                 spread by max(0, 1 - decay * heldSec);
-//                                 reset after lmgSustainedResetT idle.
-//   • sniperAimRampPerTick/Cap  → on stationary aim with target, every
-//                                 sniperAimTickT add per-tick damage mult,
-//                                 cap at sniperAimRampCap. Reset on move.
-//   • exoticChainKillChance     → on exotic kill, mark corpse; on any kill
-//                                 within window+radius, roll chance to
-//                                 spawn small AoE.
-//   • shotgunShellsPerPump      → shotgun reload should refill 4 shells
-//                                 per animation step when this is 4.
-//   • adsSpeedMult / swayMult   → ADS easing + scope sway dampening.
-// All values default to 0 / 1 so the system is safe until the gameplay
-// hooks ship.
+// All capstone effects are wired:
+//   penetration → bullet path raycastAll iterates additional enemy hits
+//   rifleAutoChain → consecutive-hit accumulator on rifle body crits
+//   lmgSustainedSpreadDecay → _lmgHeldT modulates spread each shot
+//   sniperAimRamp → _sniperHoldT × per-tick × cap added to sniper damage
+//   exoticChainKill → corpse marks + chance roll on subsequent kills
+//   shotgunShellsPerPump → divides reload duration in tryReload
+//   adsSpeedMult → multiplies adsRate in player.update
 function recomputeStats() {
   derivedStats = BASE_STATS();
   skills.applyTo(derivedStats);
@@ -2184,7 +2191,13 @@ function tryReload(weapon) {
   if (weapon.ammo >= eff.magSize) return;
   if (weapon.reloadingT > 0) return;
   const mult = derivedStats.reloadSpeedMult || 1;
-  const duration = (eff.reloadTime || 1.5) / mult;
+  // Shotgun Quad Load — reload time scales with shells-per-pump on top
+  // of the regular reload-speed mult. shellsPerPump=4 ⇒ extra 4× faster
+  // tube loading on top of the +50% mastery bonus, matching the
+  // "quad-load" silhouette where every pump shoves four shells in.
+  const sppBoost = (weapon.class === 'shotgun' && (derivedStats.shotgunShellsPerPump || 1) > 1)
+    ? derivedStats.shotgunShellsPerPump : 1;
+  const duration = (eff.reloadTime || 1.5) / (mult * sppBoost);
   weapon.reloadingT = duration;
   // Completion target is on the PAUSE-AWARE game clock so frame-rate
   // dips and the physics dt clamp can't stretch a 1.4s reload into 6s,
@@ -2209,7 +2222,9 @@ function tickWeaponReload(weapon) {
   // re-anchor from NOW.
   const eff = effectiveWeapon(weapon);
   const mult = derivedStats.reloadSpeedMult || 1;
-  const saneMs = ((eff.reloadTime || 1.5) / mult) * 1000 * 2;
+  const sppBoost = (weapon.class === 'shotgun' && (derivedStats.shotgunShellsPerPump || 1) > 1)
+    ? derivedStats.shotgunShellsPerPump : 1;
+  const saneMs = ((eff.reloadTime || 1.5) / (mult * sppBoost)) * 1000 * 2;
   const remainMsRaw = weapon.reloadEndsAt - gameClockMs;
   if (remainMsRaw > saneMs) {
     weapon.reloadEndsAt = gameClockMs + Math.max(0, weapon.reloadingT) * 1000;
@@ -2325,7 +2340,15 @@ function fireOneShot(playerInfo, weapon, aimPoint, isADS) {
     : eff.hipSpread * (derivedStats.hipSpreadOnlyMult || 1);
   const crouched = inputStateCrouchHeld();
   const crouchSpreadK = crouched ? (derivedStats.crouchSpreadMult ?? 1) : 1;
-  const spread = baseSpread * derivedStats.rangedSpreadMult * crouchSpreadK;
+  let spread = baseSpread * derivedStats.rangedSpreadMult * crouchSpreadK;
+  // LMG Walking Fire — sustained-fire spread bleed. While holding the
+  // trigger, multiply spread by max(0, 1 - decay * heldT). Decay tracked
+  // per-frame in the tick (see _lmgHeldT update). Capped at zero so the
+  // LMG locks onto a single point after enough sustained fire.
+  if (weapon.class === 'lmg' && (derivedStats.lmgSustainedSpreadDecay || 0) > 0) {
+    const k = Math.max(0, 1 - derivedStats.lmgSustainedSpreadDecay * _lmgHeldT);
+    spread *= k;
+  }
   const pellets = Math.max(1, (eff.pelletCount | 0) + (derivedStats.pelletCountBonus || 0));
   const effRange = eff.range * (derivedStats.rangeMult || 1);
   // Exclude unlocked doors — their flattened mesh still intersects
@@ -2412,6 +2435,26 @@ function fireOneShot(playerInfo, weapon, aimPoint, isADS) {
           dmg *= 1 + derivedStats.pointBlankBonus;
         }
       }
+      // Sniper Marked Target — every `sniperAimTickT` seconds of
+      // stationary aim adds `sniperAimRampPerTick` to the damage
+      // multiplier, capped at `sniperAimRampCap`. Tick state is
+      // updated each frame in the gameplay tick.
+      if (weapon.class === 'sniper' && (derivedStats.sniperAimRampPerTick || 0) > 0) {
+        const tickT = Math.max(0.05, derivedStats.sniperAimTickT || 0.25);
+        const stacks = Math.floor(_sniperHoldT / tickT);
+        if (stacks > 0) {
+          const ramp = Math.min(derivedStats.sniperAimRampCap || 0,
+                                stacks * derivedStats.sniperAimRampPerTick);
+          dmg *= 1 + ramp;
+        }
+      }
+      // Sniper One Shot — extra damage on full-HP targets.
+      if (weapon.class === 'sniper' && (derivedStats.fullHpDmgBonus || 0) > 0) {
+        const maxHp = hit.owner.maxHp ?? hit.owner.hp ?? 0;
+        if (hit.owner.hp >= maxHp - 0.5) {
+          dmg *= 1 + derivedStats.fullHpDmgBonus;
+        }
+      }
       // Crit roll. Rifle body-crit ladder adds chance/damage ONLY on
       // non-headshots, keeping the headshot identity unique to snipers
       // and pistols and giving rifles their own body-crit-chain niche.
@@ -2421,7 +2464,37 @@ function fireOneShot(playerInfo, weapon, aimPoint, isADS) {
       if (crit) {
         let critMult = derivedStats.critDamageMult || 2;
         if (hit.zone !== 'head') critMult += (derivedStats.bodyCritDamageBonus || 0);
+        // Rifle Burst Concentration — full-auto chain stack accumulates
+        // crit damage on the same target. Tracker advances on every
+        // hit (crit or not); the stack only multiplies crit damage.
+        if (weapon.class === 'rifle' && (derivedStats.rifleAutoChainPerHit || 0) > 0) {
+          const nowT = gameClockMs / 1000;
+          const resetT = Math.max(0.1, derivedStats.rifleAutoChainResetT || 1.5);
+          if (_rifleChainTarget === hit.owner && (nowT - _rifleChainLastT) <= resetT) {
+            _rifleChainStacks++;
+          } else {
+            _rifleChainTarget = hit.owner;
+            _rifleChainStacks = 1;
+          }
+          _rifleChainLastT = nowT;
+          const bonus = Math.min(derivedStats.rifleAutoChainCap || 0,
+                                 (_rifleChainStacks - 1) * derivedStats.rifleAutoChainPerHit);
+          critMult += bonus;
+        }
         dmg *= critMult;
+      } else if (weapon.class === 'rifle' && (derivedStats.rifleAutoChainPerHit || 0) > 0) {
+        // Non-crit hits still advance the rifle chain so a streak of
+        // body shots followed by a crit lands the full bonus. Same
+        // timer-window rules as above.
+        const nowT = gameClockMs / 1000;
+        const resetT = Math.max(0.1, derivedStats.rifleAutoChainResetT || 1.5);
+        if (_rifleChainTarget === hit.owner && (nowT - _rifleChainLastT) <= resetT) {
+          _rifleChainStacks++;
+        } else {
+          _rifleChainTarget = hit.owner;
+          _rifleChainStacks = 1;
+        }
+        _rifleChainLastT = nowT;
       }
       if (playerInfo && playerInfo.health / playerInfo.maxHealth < 0.5
         && derivedStats.berserkBonus > 0) {
@@ -2508,6 +2581,39 @@ function fireOneShot(playerInfo, weapon, aimPoint, isADS) {
       if ((derivedStats.ricochetCount || 0) > 0
           && Math.random() < (derivedStats.ricochetChance || 0)) {
         spawnRicochet(hit.point, hit.owner, dmg * 0.6, derivedStats.ricochetCount, weapon);
+      }
+      // Sniper Penetrator — bullet pierces N enemies before stopping.
+      // Re-resolves the same ray against every hittable, then deals
+      // damage to additional enemy intersections in order until either
+      // a wall is reached or the penetration budget runs out. Damage
+      // falls off per pierce so a 2-pierce shot doesn't 3x damage.
+      if (weapon.class === 'sniper' && (derivedStats.penetration || 0) > 0) {
+        const allHits = combat.raycastAll(fireFrom, dir, hitTargets, effRange);
+        const cap = derivedStats.penetration | 0;
+        let pierced = 0;
+        const baseDmg = eff.damage * derivedStats.rangedDmgMult;
+        for (const ph of allHits) {
+          if (pierced >= cap) break;
+          if (ph.owner === hit.owner) continue;        // already handled
+          if (!ph.owner || !ph.owner.manager) break;   // wall — bullet stops
+          const falloff = pierced === 0 ? 0.7 : 0.5;
+          const pdmg = baseDmg * falloff;
+          const wasAlivePh = ph.owner.alive;
+          runStats.addDamage(pdmg);
+          ph.owner.manager.applyHit(ph.owner, pdmg, ph.zone, dir, { weaponClass: weapon.class });
+          if (wasAlivePh && !ph.owner.alive) {
+            onEnemyKilled(ph.owner);
+            awardClassXp(weapon.class, ph.owner.tier);
+          }
+          // Visual feedback at the pierce point.
+          let pa = hitAgg.get(ph.owner);
+          if (!pa) {
+            pa = { totalDmg: 0, hadHead: false, point: ph.point.clone(), dir: dir.clone(), zone: ph.zone || 'torso' };
+            hitAgg.set(ph.owner, pa);
+          }
+          pa.totalDmg += pdmg;
+          pierced++;
+        }
       }
     } else if (hit) {
       combat.spawnImpact(hit.point);
@@ -2894,6 +3000,44 @@ function onEnemyKilled(enemy, opts = {}) {
     playerKeys.add(enemy.keyDrop);
     transientHudMsg(`+${enemy.keyDrop.toUpperCase()} KEYCARD`, 2.4);
     sfx.pickup();
+  }
+  // Exotic Cascade — capstone for the Demolitions class. Two paths:
+  //  1. Kill came from an exotic weapon → drop a chain mark on the
+  //     corpse for `exoticChainKillWindow` seconds.
+  //  2. Any kill while chain marks exist nearby → roll the chance to
+  //     trigger a small AoE at the corpse, chaining the explosion to
+  //     adjacent dead bodies and any nearby alive enemies.
+  if ((derivedStats.exoticChainKillChance || 0) > 0) {
+    const w = currentWeapon();
+    const fromExotic = opts.byThrowable || w?.class === 'exotic';
+    const px = enemy.group.position.x;
+    const pz = enemy.group.position.z;
+    const radius = derivedStats.exoticChainKillRadius || 4;
+    const rSq = radius * radius;
+    let chained = false;
+    for (let i = _exoticChainMarks.length - 1; i >= 0; i--) {
+      const m = _exoticChainMarks[i];
+      const dx = m.x - px, dz = m.z - pz;
+      if (dx * dx + dz * dz <= rSq && Math.random() < derivedStats.exoticChainKillChance) {
+        chained = true;
+        _exoticChainMarks.splice(i, 1);
+        break;
+      }
+    }
+    if (chained) {
+      // Spawn the chain explosion at this corpse — re-uses the kill
+      // blast helper (Final Blast). Visuals + small AoE damage to any
+      // nearby live enemy.
+      spawnKillBlast(enemy.group.position,
+                     radius,
+                     derivedStats.exoticChainKillDmg || 24);
+    }
+    if (fromExotic) {
+      _exoticChainMarks.push({
+        x: px, z: pz,
+        untilMs: gameClockMs + (derivedStats.exoticChainKillWindow || 3.0) * 1000,
+      });
+    }
   }
   // Demolitions Master — tier 1 refunds a charge per kill, tier 2 fully
   // resets cooldowns so a chain of throwable-kills snowballs. Caller
@@ -5160,6 +5304,63 @@ function tick() {
     _playerMeleeTrailPrev.copy(tip);
   } else {
     _playerMeleeTrailPrev = null;
+  }
+
+  // --- Class capstone runtime updates --------------------------------
+  // LMG Walking Fire — accumulate held-trigger time while the player
+  // is firing an LMG, reset after `lmgSustainedResetT` seconds idle.
+  {
+    const w = currentWeapon();
+    const isLmgFiring = w?.class === 'lmg' && inputState.attackHeld
+                       && (derivedStats.lmgSustainedSpreadDecay || 0) > 0;
+    if (isLmgFiring) {
+      _lmgHeldT += dt;
+      _lmgIdleT = 0;
+    } else {
+      _lmgIdleT += dt;
+      if (_lmgIdleT >= (derivedStats.lmgSustainedResetT || 1.0)) _lmgHeldT = 0;
+    }
+    // Sniper Marked Target — accumulate while ADS, stationary,
+    // and pointing at the same hittable. Reset on motion or ADS
+    // release.
+    const isSniperADS = w?.class === 'sniper' && inputState.adsHeld
+                       && (derivedStats.sniperAimRampPerTick || 0) > 0;
+    if (isSniperADS && playerInfo && aimInfo?.point) {
+      const px = playerInfo.position?.x ?? 0;
+      const pz = playerInfo.position?.z ?? 0;
+      const moved = Math.hypot(px - _sniperAimX, pz - _sniperAimZ);
+      _sniperAimX = px;
+      _sniperAimZ = pz;
+      // Resolve who the cursor is pointing at — used to detect target
+      // swaps (which reset the stack). Reuse the existing aim point.
+      const origin = playerInfo.fireOrigin || playerInfo.muzzleWorld;
+      const dirA = _tmpDir.copy(aimInfo.point).sub(origin);
+      let aimedAt = null;
+      if (dirA.lengthSq() > 0.0001) {
+        dirA.normalize();
+        const h = combat.raycast(origin, dirA, allHittables(), 80);
+        aimedAt = h?.owner || null;
+      }
+      if (moved > 0.05 || (_sniperHoldTarget && aimedAt && aimedAt !== _sniperHoldTarget)) {
+        _sniperHoldT = 0;
+      } else {
+        _sniperHoldT += dt;
+      }
+      if (aimedAt) _sniperHoldTarget = aimedAt;
+    } else {
+      _sniperHoldT = 0;
+      _sniperHoldTarget = null;
+    }
+    // Rifle chain timeout — clear stacks if no trigger pulls in window.
+    if (_rifleChainTarget && (gameClockMs / 1000 - _rifleChainLastT) > (derivedStats.rifleAutoChainResetT || 1.5)) {
+      _rifleChainTarget = null;
+      _rifleChainStacks = 0;
+    }
+    // Exotic chain — prune expired marks.
+    const nowMs = gameClockMs;
+    for (let i = _exoticChainMarks.length - 1; i >= 0; i--) {
+      if (_exoticChainMarks[i].untilMs < nowMs) _exoticChainMarks.splice(i, 1);
+    }
   }
 
   if (inputState.reloadPressed) { tryReload(currentWeapon()); sfx.reload(); }

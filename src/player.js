@@ -708,6 +708,12 @@ export function createPlayer(scene) {
     // Battle Trance — feeds consumeStamina('melee', ...) to halve the
     // cost of swings, parries, and quick-melee.
     state.meleeStaminaMult = s.meleeStaminaMult ?? 1;
+    // Sniper Lung Drag — speeds up ADS easing.
+    state.adsSpeedMult = s.adsSpeedMult ?? 1;
+    // Sway dampener (currently consumed by AI sway emulation when the
+    // player has the perk; sniper sway baseline is implicit in the
+    // existing aim-jitter pipeline).
+    state.swayMult = s.swayMult ?? 1;
     // Melee reads these at swing start to decide whether to roll the
     // special crit animation + damage bump.
     state.critChance = s.critChance || 0;
@@ -900,9 +906,12 @@ export function createPlayer(scene) {
       ? new THREE.Vector3()
       : wishDirFromInput(input.move);
 
-    // ADS amount eases in/out.
+    // ADS amount eases in/out. Sniper "Lung Drag" tree perk multiplies
+    // adsRate by `adsSpeedMult` so scoped weapons enter ADS faster
+    // when the player has invested in the sniper class tree.
     const targetAds = input.adsHeld ? 1 : 0;
-    const adsRate = 1 / Math.max(0.0001, tunables.ads.enterTime);
+    const adsRate = (1 / Math.max(0.0001, tunables.ads.enterTime))
+                  * (state.adsSpeedMult || 1);
     state.adsAmount += Math.sign(targetAds - state.adsAmount)
       * Math.min(Math.abs(targetAds - state.adsAmount), dt * adsRate);
 

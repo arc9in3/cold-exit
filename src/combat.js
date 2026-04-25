@@ -368,6 +368,22 @@ export class Combat {
       owner: h.object.userData?.owner || null,
     };
   }
+  // All hits along the ray, sorted near→far. Used by the sniper
+  // penetration path so a single shot can resolve damage on multiple
+  // bodies before being stopped by a wall. Each hit normalises the
+  // owner / zone like raycast() so callers can iterate uniformly.
+  raycastAll(origin, dir, targets, range) {
+    this.raycaster.set(origin, dir);
+    this.raycaster.far = range;
+    const hits = this.raycaster.intersectObjects(targets, false);
+    return hits.map((h) => ({
+      mesh: h.object,
+      point: h.point,
+      distance: h.distance,
+      zone: h.object.userData?.zone || 'body',
+      owner: h.object.userData?.owner || null,
+    }));
+  }
 
   // True if nothing in `blockers` lies between `from` and `to`.
   hasLineOfSight(from, to, blockers) {
