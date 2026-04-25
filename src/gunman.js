@@ -5,6 +5,7 @@ import { spawnSpeechBubble } from './hud.js';
 import { loadModelClone, fitToRadius } from './gltf_cache.js';
 import { modelForItem } from './model_manifest.js';
 import { buildMeleePrimitive } from './melee_primitives.js';
+import { swapInBakedCorpse } from './corpse_bake.js';
 
 // Strip the held weapon meshes off a dead enemy — detach the primitive
 // gun box, the FBX weaponModel group, and the muzzle anchor from the
@@ -828,6 +829,18 @@ export class GunmanManager {
               // chunk of GPU per frame in late-game rooms with 8+
               // bodies. Shadows on prone corpses read poorly anyway.
               g.group.traverse((obj) => { if (obj.isMesh) obj.castShadow = false; });
+              // Bake the now-frozen rig pose into a flat 1-mesh-per-
+              // material corpse. Cuts ~12 meshes/corpse to ~3 (body /
+              // head / leg materials, plus extras for any tier-specific
+              // gear which keeps its own material). Each corpse retains
+              // its individual tier colours and gear silhouette so
+              // bosses still read distinctly.
+              const baked = swapInBakedCorpse(g.group);
+              if (baked) {
+                g.group = baked;
+                g.rig = null;          // rig is gone — no more updateAnim calls
+                g._baked = true;
+              }
             }
           }
         }

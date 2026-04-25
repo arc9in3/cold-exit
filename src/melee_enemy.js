@@ -13,6 +13,8 @@ const STATE = { IDLE: 'idle', CHASE: 'chase', WINDUP: 'windup', SWING: 'swing', 
 // list.
 const _enemyTipTmp = new THREE.Vector3();
 
+import { swapInBakedCorpse } from './corpse_bake.js';
+
 // Strip the held melee weapon mesh (the blade primitive) off a dead
 // rusher — detach from the wrist anchor so it stops drawing. Reference
 // is left intact (e.blade still resolves) so any post-death code path
@@ -537,6 +539,16 @@ export class MeleeEnemyManager {
               // Drop from the shadow map pass — same rationale as
               // GunmanManager. Saves real GPU time in late-game rooms.
               e.group.traverse((obj) => { if (obj.isMesh) obj.castShadow = false; });
+              // Bake the now-frozen rig into 1-mesh-per-material so
+              // the renderer stops walking the joint hierarchy. Tier
+              // colours + helmet/plate gear primitives are preserved
+              // because each enemy keeps its own materials.
+              const baked = swapInBakedCorpse(e.group);
+              if (baked) {
+                e.group = baked;
+                e.rig = null;
+                e._baked = true;
+              }
             }
           }
         }
