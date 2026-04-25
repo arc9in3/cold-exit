@@ -2603,10 +2603,12 @@ function spawnSniperShot(g) {
   dir.normalize();
   const SPEED = 28;     // dodgeable but threatening — ~1m frame at 60fps
   const vel = dir.clone().multiplyScalar(SPEED);
-  // Reuse the grenade projectile path with a tiny AoE so the explosion
-  // tick lands the sniper damage directly on whoever is at impact.
-  // Radius 0.6m is wide enough to catch the player at the impact
-  // point without making it splash damage.
+  // Sniper bullet — direct-impact, NOT a full grenade explosion.
+  // The grenade detonation path allocates a fireball mesh + ring
+  // mesh + 14 spark spheres + a PointLight per hit, which produced
+  // a noticeable hitch at impact. Tagging `_sniperShot: true` lets
+  // onProjectileExplode short-circuit to a cheap path: one impact
+  // sphere + a player-distance damage check.
   const sniperDamage = Math.round(55 * (g.damageMult || 1));
   projectiles.spawn({
     pos: muzzle,
@@ -2615,10 +2617,11 @@ function spawnSniperShot(g) {
     lifetime: 3.0,
     radius: 0.10,
     color: 0xff3a3a,
-    explosion: { radius: 0.6, damage: sniperDamage, shake: 0.18 },
+    explosion: { radius: 0.6, damage: sniperDamage, shake: 0.10 },
     owner: 'enemy',
     gravity: 0,
     bounciness: 0,
+    _sniperShot: true,
   });
   if (sfx?.aiFire) sfx.aiFire('sniper');
   triggerShake(0.18, 0.12);
@@ -3869,6 +3872,21 @@ function _alertThrowableBlast(pos, radius, owner) {
 function onProjectileExplode(pos, explosion, owner, p) {
   const radius = explosion.radius;
   const rSq = radius * radius;
+  // Sniper bullet — direct hit, no AoE, no fireball. Cheap path:
+  // single impact spark + one distance check on the player. Skips
+  // spawnExplosionFx (which allocates 16+ meshes + a PointLight per
+  // call and causes the hitch).
+  if (p?._sniperShot) {
+    const dx = player.body.position.x - pos.x;
+    const dz = player.body.position.z - pos.z;
+    if (dx * dx + dz * dz < rSq) {
+      player.takeDamage(explosion.damage || 0);
+    }
+    if (combat.spawnImpact) combat.spawnImpact(pos);
+    if (sfx?.hit) sfx.hit();
+    triggerShake(explosion.shake || 0.1, 0.10);
+    return;
+  }
   // Alert radius is wider than the blast so nearby enemies still hear
   // the bang and react, even if the blast itself missed them. Flash /
   // stun / molotov do no direct damage so the alert pass is what makes
