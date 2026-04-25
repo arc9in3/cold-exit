@@ -188,6 +188,10 @@ export class ShopUI {
           </div>
           <div class="shop-col">
             <div class="inv-heading">Your Backpack</div>
+            <div id="shop-bag-actions" style="display:flex;gap:6px;margin-bottom:6px;">
+              <button id="shop-sell-junk" type="button" class="shop-bulk-btn" style="flex:1;padding:6px 10px;font-size:11px;letter-spacing:1.5px;text-transform:uppercase;background:rgba(143,191,112,0.18);color:#cfe5ad;border:1px solid rgba(143,191,112,0.55);border-radius:2px;cursor:pointer;font-family:inherit;font-weight:700;">Sell All Junk</button>
+              <button id="shop-repair-all" type="button" class="shop-bulk-btn" style="flex:1;padding:6px 10px;font-size:11px;letter-spacing:1.5px;text-transform:uppercase;background:rgba(255,80,80,0.18);color:#ffd0d0;border:1px solid rgba(255,80,80,0.55);border-radius:2px;cursor:pointer;font-family:inherit;font-weight:700;">Repair All</button>
+            </div>
             <div id="shop-bag"></div>
           </div>
         </div>
@@ -207,6 +211,12 @@ export class ShopUI {
     this.keeperFlavorEl = this.root.querySelector('#shop-keeper-flavor');
     this.root.querySelector('#shop-close').addEventListener('click', () => this.hide());
     this.root.addEventListener('mousedown', (e) => { if (e.target === this.root) this.hide(); });
+    // Bulk-action buttons — wired once at construct, gated per-merchant
+    // inside their handlers.
+    this.sellJunkBtn = this.root.querySelector('#shop-sell-junk');
+    this.repairAllBtn = this.root.querySelector('#shop-repair-all');
+    this.sellJunkBtn.addEventListener('click', () => this._sellAllJunk());
+    this.repairAllBtn.addEventListener('click', () => this._repairAll());
     // In-session sold items — cleared when the merchant is closed so each
     // visit is an independent buyback window.
     this.buyback = [];
@@ -300,20 +310,106 @@ export class ShopUI {
     this.render();
   }
 
+  // Per-merchant repair specialty. Gunsmiths repair weapons (ranged
+  // + melee); armorers handle armor + body gear (chest, head, hands,
+  // belt, pants, boots, ears, face, backpack). The general merchant
+  // and other shops can't repair anything — players have to seek out
+  // the right specialist.
+  _canRepair(item) {
+    if (!this.merchant || !item || !item.durability) return false;
+    const kind = this.merchant.kind;
+    const t = item.type;
+    if (kind === 'gunsmith') return t === 'ranged' || t === 'melee';
+    if (kind === 'armorer')  return t === 'armor'  || t === 'gear' || t === 'backpack' || item.slot === 'backpack';
+    return false;
+  }
+
   // Repair a broken item — restore durability to max in exchange for
-  // a fraction of the item's buy price. No-op if the item isn't
-  // actually broken or the player can't afford it. After repair we
-  // call back through `onClose`'s recompute path via `__recomputeStats`
-  // (exposed on window by main.js) so the freshly-restored stats land
-  // immediately rather than waiting for the next equipment change.
+  // a fraction of the item's buy price. Refuses if the current
+  // merchant doesn't repair this item type, the item isn't actually
+  // broken, or the player can't afford it.
   _repair(item) {
-    if (!item || !item.durability || item.durability.current > 0) return;
+    if (!this._canRepair(item)) return;
+    if (item.durability.current > 0) return;
     const cost = repairPriceFor(item, this.getShopMult());
     if (this.getCredits() < cost) return;
     if (!this.spendCredits(cost)) return;
     item.durability.current = item.durability.max;
     if (typeof window.__recomputeStats === 'function') window.__recomputeStats();
     this.render();
+  }
+
+  // Sell every junk item in the backpack in one click. Adds each
+  // sale to the buyback list so the player can undo if they regret
+  // it. Caps the buyback at its existing 12-entry window — older
+  // sales fall off as new ones are pushed.
+  _sellAllJunk() {
+    let sold = 0;
+    let totalCredits = 0;
+    // Snapshot the indexes first because takeFromBackpack shifts the
+    // flat-view array between calls. Walk top-down so removal doesn't
+    // invalidate the next index.
+    const junkIdxs = [];
+    for (let i = 0; i < this.inventory.backpack.length; i++) {
+      const it = this.inventory.backpack[i];
+      if (it && it.type === 'junk') junkIdxs.push(i);
+    }
+    for (let k = junkIdxs.length - 1; k >= 0; k--) {
+      const idx = junkIdxs[k];
+      const item = this.inventory.backpack[idx];
+      if (!item || item.type !== 'junk') continue;
+      const price = sellPriceFor(item);
+      this.inventory.takeFromBackpack(idx);
+      this.earnCredits(price);
+      this.buyback.unshift({ item, price });
+      if (this.buyback.length > 12) this.buyback.pop();
+      sold += 1; totalCredits += price;
+    }
+    if (sold > 0) this._flash(`Sold ${sold} junk · +${totalCredits}c`);
+    this.render();
+  }
+
+  // Repair every broken item in the backpack + every equipped slot
+  // that this merchant is authorised to repair, paying per-item from
+  // the player's credits. Stops cleanly when credits run out (skipped
+  // items remain broken). Reports a summary.
+  _repairAll() {
+    let repaired = 0;
+    let totalCost = 0;
+    const tryFix = (item) => {
+      if (!item || !this._canRepair(item)) return;
+      if (!item.durability || item.durability.current > 0) return;
+      const cost = repairPriceFor(item, this.getShopMult());
+      if (this.getCredits() < cost) return;
+      if (!this.spendCredits(cost)) return;
+      item.durability.current = item.durability.max;
+      repaired += 1; totalCost += cost;
+    };
+    for (const it of this.inventory.backpack) tryFix(it);
+    // Equipped slots — equipped armor/weapons can also be repaired
+    // in place without unequipping, so the player doesn't have to
+    // shuffle gear around just to get back to fighting shape.
+    for (const slot in this.inventory.equipment) tryFix(this.inventory.equipment[slot]);
+    if (repaired > 0) {
+      if (typeof window.__recomputeStats === 'function') window.__recomputeStats();
+      this._flash(`Repaired ${repaired} · −${totalCost}c`);
+    } else {
+      this._flash(this.merchant?.kind === 'gunsmith' ? 'No broken weapons to repair'
+                : this.merchant?.kind === 'armorer'  ? 'No broken armor to repair'
+                : 'This merchant doesn\'t repair gear');
+    }
+    this.render();
+  }
+
+  // Brief on-screen toast — surfaces bulk-action results without
+  // requiring the player to look at their credit total.
+  _flash(text) {
+    const el = document.createElement('div');
+    el.className = 'shop-flash';
+    el.textContent = text;
+    el.style.cssText = 'position:absolute;left:50%;top:36px;transform:translateX(-50%);background:rgba(20,24,32,0.92);color:#ffd27a;border:1px solid #c9a87a;padding:6px 14px;border-radius:3px;font-size:11px;letter-spacing:1.5px;z-index:5;text-transform:uppercase;font-weight:700;pointer-events:none;';
+    this.root.querySelector('#shop-card').appendChild(el);
+    setTimeout(() => el.remove(), 1800);
   }
 
   _buybackAt(i) {
@@ -330,6 +426,17 @@ export class ShopUI {
   render() {
     if (!this.merchant) return;
     this.creditsEl.textContent = `${this.getCredits()}c`;
+    // Bulk-action button visibility — Sell-All-Junk is universal,
+    // Repair-All only at the gunsmith / armorer who can actually do
+    // the work. Hidden buttons keep their layout slot via display:none
+    // so the row doesn't reflow when switching between merchants.
+    const kind = this.merchant.kind;
+    if (this.repairAllBtn) {
+      this.repairAllBtn.style.display = (kind === 'gunsmith' || kind === 'armorer') ? '' : 'none';
+      this.repairAllBtn.textContent = kind === 'gunsmith' ? 'Repair All Weapons'
+                                    : kind === 'armorer'  ? 'Repair All Armor'
+                                    : 'Repair All';
+    }
     const TITLES = {
       merchant: 'MERCHANT',
       healer: 'HEALER',
@@ -404,17 +511,23 @@ export class ShopUI {
     });
 
     // Backpack — drag to shop (or click) to sell; accepts drops from shop stock to buy.
-    // Broken items show a repair price + "REPAIR" badge instead of sell;
-    // right-click on a broken item repairs it instead of selling.
+    // Broken items show a repair price ONLY when this merchant can
+    // service the item type (gunsmith for weapons, armorer for
+    // armor + gear). Otherwise broken items just sell as-is.
     this.bagEl.innerHTML = '';
     let hasAny = false;
+    let anyJunk = false;
+    let anyRepairable = false;
     for (let i = 0; i < this.inventory.backpack.length; i++) {
       const it = this.inventory.backpack[i];
       if (!it) continue;
       hasAny = true;
+      if (it.type === 'junk') anyJunk = true;
       const isBroken = it.durability && it.durability.current <= 0;
-      const action = isBroken ? 'repair' : 'sell';
-      const price = isBroken ? repairPriceFor(it, this.getShopMult()) : sellPriceFor(it);
+      const canRepair = isBroken && this._canRepair(it);
+      if (canRepair) anyRepairable = true;
+      const action = canRepair ? 'repair' : 'sell';
+      const price = canRepair ? repairPriceFor(it, this.getShopMult()) : sellPriceFor(it);
       const cell = this._buildCell(it, price, action);
       if (isBroken) cell.classList.add('shop-cell-broken');
       cell.addEventListener('click', () => {
@@ -422,7 +535,7 @@ export class ShopUI {
       });
       cell.addEventListener('contextmenu', (e) => {
         e.preventDefault();
-        if (isBroken) this._repair(it);
+        if (canRepair) this._repair(it);
         else this._sell(i);
       });
       cell.setAttribute('draggable', 'true');
