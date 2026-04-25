@@ -2262,12 +2262,32 @@ function tickFlame(dt, playerInfo, weapon, inputState, aimInfo) {
     runStats.addDamage(baseDmg);
     c.manager.applyHit(c, baseDmg, 'torso', dir, { weaponClass: 'melee' });
     c.burnT = Math.max(c.burnT || 0, tunables.burn.duration * (derivedStats.burnDurationBonus || 1));
+    // Flame jet stun + push — heavier than a bullet hit. The applyHit
+    // call already used 'melee' weaponClass for stagger animation; we
+    // layer extra panic + a stronger directional shove so a face-full
+    // of fire reads as "thrown back into the wall, flailing."
+    const knock = (weapon.flameKnockback ?? 0.85) * (derivedStats.knockbackMult || 1);
+    c.group.position.x += dir.x * knock;
+    c.group.position.z += dir.z * knock;
+    c.staggerT = Math.max(c.staggerT || 0, weapon.flameStaggerT ?? 0.55);
+    if (c.tier === 'normal' || !c.tier) {
+      c.panicT = Math.max(c.panicT || 0, weapon.flamePanicT ?? 3.0);
+    } else {
+      // Bosses / sub-bosses don't panic but do get a brief stun pause.
+      c.panicT = Math.max(c.panicT || 0, 0.6);
+    }
     if (wasAlive && !c.alive) {
       onEnemyKilled(c);
-      awardClassXp('melee', c.tier);
+      awardClassXp('exotic', c.tier);
       if (skillTree.level('bloodlust') > 0) buffs.grant('bloodlust', { moveSpeedMult: 1.55 }, 4);
     }
   }
+
+  // Flame jet is LOUD — alerts every enemy within ~36m. Done once per
+  // tick (not per hit) so the noise pulse doesn't drown the bus when a
+  // wide cone catches a crowd. alertEnemiesFromShot reads
+  // `weapon.noiseRange` to widen the radius beyond the default 22m.
+  alertEnemiesFromShot(origin);
 
   combat.spawnFlameParticles(origin, dir, range, angleRad);
 }
@@ -5041,7 +5061,11 @@ function alertEnemiesFromShot(origin) {
   const weapon = currentWeapon();
   const eff = weapon ? effectiveWeapon(weapon) : null;
   const suppressed = eff?.lightAttachment === undefined && weapon?.attachments?.muzzle?.modifier?.suppressed;
-  const noiseRange = suppressed ? 10 : 22;
+  // Per-weapon override beats the suppressor — flamethrowers in
+  // particular set `noiseRange: 36` because the roar carries far
+  // further than any bullet report. Suppressor still narrows the
+  // radius if a weapon doesn't declare its own noise.
+  const noiseRange = weapon?.noiseRange ?? (suppressed ? 10 : 22);
   const rSq = noiseRange * noiseRange;
   const px = origin.x, pz = origin.z;
   const blockers = level.solidObstacles();

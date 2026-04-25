@@ -386,9 +386,18 @@ export const tunables = {
       burstCount: 1,
       burstInterval: 0,
       magSize: 100,
-      reloadTime: 2.5,
+      reloadTime: 5.0,            // long swap-tank reload — flamer is a commit
       flameAngleDeg: 36,
-      flameTickRate: 12,
+      flameTickRate: 20,          // 5s of held fire before dry; was 12 (~8s)
+      // Per-tick knockback magnitude on hit — gunman.applyHit reads this
+      // when present so flame pushes harder than a regular bullet shove.
+      flameKnockback: 0.85,
+      flameStaggerT: 0.55,        // duration of stun (rooted) on hit
+      flamePanicT: 3.0,           // panic flail duration on normal tier
+      // Loudness — `alertEnemiesFromShot` reads `weapon.noiseRange` when
+      // present. A roaring flame jet is plainly louder than a pistol;
+      // wakes the whole next room.
+      noiseRange: 36,
     },
     // --- Extended pistol lineup ---
     {
