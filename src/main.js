@@ -870,9 +870,26 @@ const mainMenuUI = new MainMenuUI({
   onOpenStore: () => { mainMenuUI.hide(); storeUpgradeUI.show(); },
   onTutorial: () => {
     // Tutorial mode — pistol-class run on a single fixed practice
-    // room. Resets the contextual hint registry too so the
-    // first-time hint flow plays for the tutorial player even if
-    // they already cleared it on a real run.
+    // room. Defensive shutdown of every other modal first because
+    // the menu button-click can leave a stale focused element or
+    // an open inventory/shop UI that would gate the gameplay tick
+    // (see the `paused || inventoryUI.visible || ...` early-return
+    // in tick()).
+    input.clearMouseState();
+    if (inventoryUI.visible) inventoryUI.hide();
+    if (lootUI.isOpen()) lootUI.hide();
+    if (shopUI.isOpen()) shopUI.hide();
+    if (customizeUI.isOpen()) customizeUI.hide();
+    if (perkUI.isOpen()) perkUI.toggle?.();
+    if (gameMenuUI.isOpen()) gameMenuUI.hide();
+    if (storeRollUI.isOpen?.()) storeRollUI.hide();
+    if (storeUpgradeUI.isOpen?.()) storeUpgradeUI.hide();
+    // Drop input focus from the codename text field so the
+    // typing-suppression branch in input.js _onKeyDown stops eating
+    // WASD presses.
+    if (document.activeElement && document.activeElement.blur) {
+      document.activeElement.blur();
+    }
     tutorialMode = true;
     tutorialUI.reset();
     tutorialUI.show();

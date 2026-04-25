@@ -1090,13 +1090,11 @@ export function updateAnim(rig, state, dt) {
   rig.head.rotation.x = -aimPitchV * (0.35 + a.aimBlend * 0.45)
                       - crouch * 0.22 - kneel * 0.14
                       - chestPitch * 0.6;
-  // Hip roll — combines slow idle weight-shift with a faster gait-driven
-  // sway. The gait component is amplified during crouching since
-  // sneaking shifts more visible weight onto the planted leg per step;
-  // standing walks get only a subtle roll. Sign matches the walk cycle
-  // (cos peaks at heel-strike) so the hip rolls onto whichever foot
-  // just landed.
-  const gaitHipRoll = Math.cos(a.cycle) * 0.05 * gaitT * (1 + crouch * 1.4);
+  // Hip roll — combines slow idle weight-shift with a small gait-
+  // driven sway. Standing walk gets a subtle roll; crouching adds a
+  // light bump (was ×2.4, now ×1.2) so sneaking still reads as
+  // weight-shifting onto the planted foot but doesn't waddle.
+  const gaitHipRoll = Math.cos(a.cycle) * 0.035 * gaitT * (1 + crouch * 0.20);
   rig.hips.rotation.z = idleHipRoll + gaitHipRoll;
 
   // --- pose: arms -----------------------------------------------------

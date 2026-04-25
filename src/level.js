@@ -835,6 +835,10 @@ export class Level {
       x: cx + 4, z: cz + 5, roomId: 0, tier: 'normal',
       tutorialDummy: true,
     }];
+    // Drop a ceiling lamp so the room is visibly lit — without this
+    // the tutorial reads as a dark void since the procedural lamp
+    // pass only runs for room.type !== 'start'.
+    this._addCeilingLamp(room);
     return;
   }
 
