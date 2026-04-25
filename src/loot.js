@@ -324,34 +324,49 @@ export class LootManager {
     const mat = new THREE.MeshBasicMaterial({ color });
     const bright = new THREE.MeshBasicMaterial({ color: 0xffffff });
     const nose = new THREE.MeshBasicMaterial({ color: 0x222222 });
-    // Body.
+    // Body — slightly squatter so the head can dominate the silhouette.
     const body = new THREE.Mesh(new THREE.SphereGeometry(0.32, 14, 10), mat);
-    body.position.y = 0.32;
+    body.position.y = 0.30;
     g.add(body);
-    // Head.
-    const head = new THREE.Mesh(new THREE.SphereGeometry(0.24, 14, 10), mat);
-    head.position.set(0, 0.78, 0.12);
+    // Head — bumped 0.24 → 0.36 so the silhouette reads as the
+    // chibi-mascot bear (head ~as wide as body). Sits low against
+    // the body, slight forward tilt.
+    const head = new THREE.Mesh(new THREE.SphereGeometry(0.36, 14, 10), mat);
+    head.position.set(0, 0.82, 0.12);
     g.add(head);
-    // Ears.
-    const earGeom = new THREE.SphereGeometry(0.08, 10, 8);
+    // Ears — wider apart and taller-set so they cap the round head.
+    const earGeom = new THREE.SphereGeometry(0.10, 10, 8);
     const earL = new THREE.Mesh(earGeom, mat);
-    earL.position.set(-0.17, 0.95, 0.08);
+    earL.position.set(-0.24, 1.08, 0.10);
     g.add(earL);
     const earR = new THREE.Mesh(earGeom, mat);
-    earR.position.set(0.17, 0.95, 0.08);
+    earR.position.set(0.24, 1.08, 0.10);
     g.add(earR);
-    // Snout.
-    const snout = new THREE.Mesh(new THREE.SphereGeometry(0.08, 10, 8), bright);
-    snout.position.set(0, 0.72, 0.3);
+    // Smaller snout pulled flat against the face for the rounder
+    // profile.
+    const snout = new THREE.Mesh(new THREE.SphereGeometry(0.075, 10, 8), bright);
+    snout.position.set(0, 0.74, 0.40);
     g.add(snout);
-    // Eyes.
-    const eyeGeom = new THREE.SphereGeometry(0.03, 8, 6);
+    const noseDot = new THREE.Mesh(new THREE.SphereGeometry(0.035, 10, 8), nose);
+    noseDot.position.set(0, 0.78, 0.46);
+    g.add(noseDot);
+    // Bigger eyes with white catchlights so the toy reads as a
+    // proper cartoon face at toy scale.
+    const eyeGeom = new THREE.SphereGeometry(0.06, 10, 8);
     const eyeL = new THREE.Mesh(eyeGeom, nose);
-    eyeL.position.set(-0.07, 0.82, 0.32);
+    eyeL.position.set(-0.13, 0.88, 0.32);
     g.add(eyeL);
     const eyeR = new THREE.Mesh(eyeGeom, nose);
-    eyeR.position.set(0.07, 0.82, 0.32);
+    eyeR.position.set(0.13, 0.88, 0.32);
     g.add(eyeR);
+    const catchMat = new THREE.MeshBasicMaterial({ color: 0xffffff });
+    const catchGeom = new THREE.SphereGeometry(0.018, 6, 4);
+    const catchL = new THREE.Mesh(catchGeom, catchMat);
+    catchL.position.set(-0.115, 0.90, 0.38);
+    g.add(catchL);
+    const catchR = new THREE.Mesh(catchGeom, catchMat);
+    catchR.position.set(0.145, 0.90, 0.38);
+    g.add(catchR);
     // Tiny emissive glow via inner core sphere.
     const glow = new THREE.Mesh(
       new THREE.SphereGeometry(0.28, 12, 10),

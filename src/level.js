@@ -1912,33 +1912,68 @@ export class Level {
     body.position.y = 1.6;
     group.add(body);
 
-    const head = new THREE.Mesh(new THREE.SphereGeometry(1.05, 22, 16), mat);
-    head.position.set(0, 3.3, 0.55);
+    // Larger, rounder head — sized roughly as wide as the body for
+    // the chibi-mascot silhouette. Sits low against the body.
+    const head = new THREE.Mesh(new THREE.SphereGeometry(1.5, 22, 16), mat);
+    head.position.set(0, 3.55, 0.55);
     group.add(head);
 
-    const earGeom = new THREE.SphereGeometry(0.38, 14, 10);
+    // Ears stay round + sit high on the dome of the head, spaced
+    // out enough that they read as ears not horns.
+    const earGeom = new THREE.SphereGeometry(0.45, 14, 10);
     const earL = new THREE.Mesh(earGeom, mat);
-    earL.position.set(-0.78, 4.05, 0.35);
+    earL.position.set(-1.05, 4.55, 0.45);
     group.add(earL);
     const earR = new THREE.Mesh(earGeom, mat);
-    earR.position.set(0.78, 4.05, 0.35);
+    earR.position.set(1.05, 4.55, 0.45);
     group.add(earR);
+    // Inner-ear detail — slightly darker accent inside each ear.
+    const earInnerL = new THREE.Mesh(new THREE.SphereGeometry(0.28, 12, 8), accent);
+    earInnerL.position.set(-1.0, 4.50, 0.78);
+    group.add(earInnerL);
+    const earInnerR = new THREE.Mesh(new THREE.SphereGeometry(0.28, 12, 8), accent);
+    earInnerR.position.set(1.0, 4.50, 0.78);
+    group.add(earInnerR);
 
-    const snout = new THREE.Mesh(new THREE.SphereGeometry(0.4, 14, 10), accent);
-    snout.position.set(0, 2.95, 1.35);
+    // Smaller snout pushed flat against the face — gives the head
+    // a flatter, rounder profile rather than the muzzle-forward look.
+    const snout = new THREE.Mesh(new THREE.SphereGeometry(0.32, 14, 10), accent);
+    snout.position.set(0, 3.20, 1.78);
     group.add(snout);
 
-    const nose = new THREE.Mesh(new THREE.SphereGeometry(0.12, 12, 10), dark);
-    nose.position.set(0, 3.12, 1.68);
+    const nose = new THREE.Mesh(new THREE.SphereGeometry(0.13, 12, 10), dark);
+    nose.position.set(0, 3.32, 1.96);
     group.add(nose);
 
-    const eyeGeom = new THREE.SphereGeometry(0.15, 12, 10);
+    // Eyes — bigger black ovals with a small white catchlight pupil
+    // so they read as alive cartoon eyes rather than flat dots. Set
+    // wide on the round face and slightly above midline for the
+    // friendly mascot look.
+    const eyeGeom = new THREE.SphereGeometry(0.20, 14, 10);
     const eyeL = new THREE.Mesh(eyeGeom, dark);
-    eyeL.position.set(-0.33, 3.55, 1.38);
+    eyeL.position.set(-0.55, 3.85, 1.55);
     group.add(eyeL);
     const eyeR = new THREE.Mesh(eyeGeom, dark);
-    eyeR.position.set(0.33, 3.55, 1.38);
+    eyeR.position.set(0.55, 3.85, 1.55);
     group.add(eyeR);
+    // Catchlights — small bright dots offset from the eye centre.
+    const catchMat = new THREE.MeshBasicMaterial({ color: 0xffffff });
+    const catchGeom = new THREE.SphereGeometry(0.06, 8, 6);
+    const catchL = new THREE.Mesh(catchGeom, catchMat);
+    catchL.position.set(-0.50, 3.93, 1.72);
+    group.add(catchL);
+    const catchR = new THREE.Mesh(catchGeom, catchMat);
+    catchR.position.set(0.60, 3.93, 1.72);
+    group.add(catchR);
+    // Cheek blush — small warm-tan circles for the mascot warmth.
+    const blushMat = new THREE.MeshBasicMaterial({ color: 0xd09080, transparent: true, opacity: 0.55 });
+    const blushGeom = new THREE.SphereGeometry(0.18, 10, 8);
+    const blushL = new THREE.Mesh(blushGeom, blushMat);
+    blushL.position.set(-0.72, 3.45, 1.45);
+    group.add(blushL);
+    const blushR = new THREE.Mesh(blushGeom, blushMat);
+    blushR.position.set(0.72, 3.45, 1.45);
+    group.add(blushR);
 
     // Front legs / arms stub.
     const legGeom = new THREE.SphereGeometry(0.55, 14, 10);
@@ -1966,7 +2001,7 @@ export class Level {
       new THREE.TorusGeometry(0.8, 0.06, 10, 24),
       new THREE.MeshBasicMaterial({ color: 0xd0b07a }),
     );
-    halo.position.y = 4.7;
+    halo.position.y = 5.4;
     halo.rotation.x = Math.PI / 2;
     group.add(halo);
 
