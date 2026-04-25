@@ -386,6 +386,10 @@ export class Combat {
   }
 
   // True if nothing in `blockers` lies between `from` and `to`.
+  // Filters out self-intersections at the ray origin (BVH-accelerated
+  // raycasts report a 0-distance hit when the origin point sits inside
+  // a wall's AABB, which would otherwise misclassify every enemy as
+  // occluded and render the whole field as ghosts).
   hasLineOfSight(from, to, blockers) {
     const dir = new THREE.Vector3().subVectors(to, from);
     const dist = dir.length();
@@ -393,7 +397,13 @@ export class Combat {
     dir.normalize();
     this.raycaster.set(from, dir);
     this.raycaster.far = dist;
-    return this.raycaster.intersectObjects(blockers, false).length === 0;
+    const hits = this.raycaster.intersectObjects(blockers, false);
+    if (hits.length === 0) return true;
+    // Treat near-zero hits as origin self-intersection.
+    for (let i = 0; i < hits.length; i++) {
+      if (hits[i].distance >= 0.15) return false;
+    }
+    return true;
   }
 
   // opts.light — whether to attach a dynamic PointLight to the flash.

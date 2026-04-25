@@ -69,6 +69,14 @@ export function createLosMask(renderer, sourceCamera) {
     arr[2] = playerPos.z;
     _origin.set(playerPos.x, 1.2, playerPos.z);
     const list = blockers || [];
+    // Minimum hit distance — anything closer than this is treated as
+    // a self-intersection (player standing on a wall edge / inside a
+    // door's bbox after walking through a frame) and ignored. Without
+    // this filter, BVH-accelerated raycasts return a 0-distance hit
+    // for a ray whose origin is inside a wall AABB, which collapses
+    // the visibility fan to a single point and renders the whole world
+    // black to the player.
+    const NEAR = 0.15;
     for (let i = 0; i < RAY_COUNT; i++) {
       const angle = (i / RAY_COUNT) * Math.PI * 2;
       const dx = Math.cos(angle);
@@ -77,7 +85,13 @@ export function createLosMask(renderer, sourceCamera) {
       _ray.set(_origin, _dir);
       _ray.far = RAY_RANGE;
       const hits = list.length ? _ray.intersectObjects(list, false) : [];
-      const dist = hits.length > 0 ? hits[0].distance : RAY_RANGE;
+      // Walk past degenerate near-zero hits to the first real wall
+      // intersection. If every hit is near-zero (player jammed inside
+      // a wall) fall back to max range so the fan doesn't collapse.
+      let dist = RAY_RANGE;
+      for (let h = 0; h < hits.length; h++) {
+        if (hits[h].distance >= NEAR) { dist = hits[h].distance; break; }
+      }
       const idx = (i + 1) * 3;
       arr[idx]     = playerPos.x + dx * dist;
       arr[idx + 1] = FAN_HEIGHT;
