@@ -187,11 +187,11 @@ function renderBossBar() {
   // always at most one; the sort handles level 6+ double-boss runs).
   let boss = null;
   for (const g of gunmen.gunmen) {
-    if (g.alive && g.majorBoss) { boss = g; break; }
+    if (g.alive && g.majorBoss && !g.hidden) { boss = g; break; }
   }
   if (!boss) {
     for (const m of melees.enemies) {
-      if (m.alive && m.majorBoss) { boss = m; break; }
+      if (m.alive && m.majorBoss && !m.hidden) { boss = m; break; }
     }
   }
   if (!boss) {
@@ -1557,6 +1557,24 @@ function regenerateLevel() {
     else if (npc.kind === 'blackMarket') npc.stock = makeBlackMarketStock();
   }
   player.mesh.position.set(level.playerSpawn.x, 0, level.playerSpawn.z);
+  // Hidden-boss ambush — ~35% of boss rooms hide every occupant
+  // (boss + minions) until the player crosses the threshold. Reads as
+  // an empty room from the doorway, then bursts to life on entry.
+  for (const r of level.rooms) {
+    if (r.type !== 'boss' || r.entered) continue;
+    if (Math.random() > 0.35) continue;
+    const hideOne = (c) => {
+      if (!c || !c.group) return;
+      c.group.visible = false;
+      c.hidden = true;
+      // Kill alertness while hidden so they don't shoot through walls.
+      if (c.state && c.state !== 'dead') c.state = 'idle';
+    };
+    let any = false;
+    for (const g of gunmen.gunmen) if (g.alive && g.roomId === r.id) { hideOne(g); any = true; }
+    for (const m of melees.enemies) if (m.alive && m.roomId === r.id) { hideOne(m); any = true; }
+    if (any) r._ambushHidden = true;
+  }
   saveLevelStart();
 }
 
@@ -6089,6 +6107,9 @@ function alertEnemiesFromShot(origin) {
   }
   const alert = (e) => {
     if (!e.alive) return;
+    // Hidden ambush bosses + minions stay completely deaf until the
+    // player crosses the threshold and revealHiddenAmbush flips them.
+    if (e.hidden) return;
     // Room gate — skip any enemy whose room isn't in the audible set.
     // Enemies with roomId -1 (unassigned) fall back to radius-only so
     // we don't regress to silence for anything the level didn't tag.
@@ -6122,23 +6143,29 @@ function propagateAggro(alerted) {
   const rid = alerted.roomId;
   if (rid === -1 || rid === undefined) return;
   for (const g of gunmen.gunmen) {
-    if (!g.alive || g === alerted || g.roomId !== rid) continue;
+    if (!g.alive || g === alerted || g.roomId !== rid || g.hidden) continue;
     if (g.state === 'idle') {
       g.state = 'alerted';
       g.reactionT = tunables.ai.reactionTime;
     }
   }
   for (const m of melees.enemies) {
-    if (!m.alive || m === alerted || m.roomId !== rid) continue;
+    if (!m.alive || m === alerted || m.roomId !== rid || m.hidden) continue;
     if (m.state === 'idle') m.state = 'chase';
   }
 }
 
 function onRoomFirstEntered(room) {
-  // Boss arenas no longer auto-seal on entry. Bosses can pursue out
-  // through doorways now, and locking the player in with a boss that
-  // has wandered into the corridor was creating "boss stranded
-  // outside" softlocks. Aggro just propagates normally.
+  // Boss-arena lock-in: walking into a live boss room slams every
+  // connected door shut — BUT only if the boss is actually inside the
+  // room. If the boss has already wandered out chasing the player,
+  // the seal is skipped (otherwise we lock the player in with a boss
+  // stranded in the corridor). The seal also auto-releases the moment
+  // the boss leaves the room — see `updateBossSealRelease`.
+  if (room.type === 'boss') {
+    tryBossEntrySeal(room);
+    if (room._ambushHidden) revealHiddenAmbush(room);
+  }
   if (room.type !== 'combat' && room.type !== 'subBoss' && room.type !== 'boss') return;
   // Crouched / crouch-sprint entries are stealth attempts — no surprise
   // rush. Only standing entries risk tripping an enemy's "heard that".
@@ -6170,12 +6197,128 @@ function inputStateCrouchHeld() {
   return !!(lastSampledInput && lastSampledInput.crouchHeld);
 }
 
+// True if every boss tagged to `room` is physically inside its bounds.
+function _bossInsideBossRoom(room) {
+  if (!room || room.type !== 'boss') return false;
+  const b = room.bounds;
+  let bossExists = false;
+  let allInside = true;
+  const insideRoom = (c) => {
+    const p = c.group.position;
+    return p.x >= b.minX && p.x <= b.maxX && p.z >= b.minZ && p.z <= b.maxZ;
+  };
+  for (const g of gunmen.gunmen) {
+    if (!g.alive || g.tier !== 'boss' || g.roomId !== room.id) continue;
+    bossExists = true;
+    if (!insideRoom(g)) allInside = false;
+  }
+  for (const m of melees.enemies) {
+    if (!m.alive || m.tier !== 'boss' || m.roomId !== room.id) continue;
+    bossExists = true;
+    if (!insideRoom(m)) allInside = false;
+  }
+  return bossExists && allInside;
+}
+
+// Re-lock doors for the boss room on player first entry — but only if
+// the boss hasn't already broken out into the hall.
+function tryBossEntrySeal(room) {
+  if (!room || room.type !== 'boss' || room._sealed || room._sealReleased) return;
+  if (!_bossInsideBossRoom(room)) return;
+  level.lockDoorsForRoom(room.id);
+  room._sealed = true;
+  _ejectPlayerFromSealedDoors(room);
+  transientHudMsg('DOORS SEALED — BOSS FIGHT', 2.2);
+}
+
+// Watch sealed boss rooms each frame: if the boss leaves its bounds
+// (chase, dash through a door, etc.) drop the seal so the player isn't
+// trapped inside while the boss is loose. Also drops if the boss dies.
+function updateBossSealRelease() {
+  for (const r of level.rooms) {
+    if (r.type !== 'boss' || !r._sealed || r._sealReleased) continue;
+    if (_bossInsideBossRoom(r)) continue;
+    level.unlockDoorsForRoom(r.id);
+    r._sealReleased = true;
+  }
+}
+
+function _ejectPlayerFromSealedDoors(room) {
+  const pr = tunables.player.collisionRadius;
+  const px = player.mesh.position.x;
+  const pz = player.mesh.position.z;
+  for (const mesh of level.obstacles) {
+    if (!mesh.userData.isDoor) continue;
+    if (!mesh.userData.connects?.includes(room.id)) continue;
+    const b = mesh.userData.collisionXZ;
+    if (!b) continue;
+    if (px < b.minX - pr || px > b.maxX + pr) continue;
+    if (pz < b.minZ - pr || pz > b.maxZ + pr) continue;
+    let toRoomX = room.cx - mesh.userData.cx;
+    let toRoomZ = room.cz - mesh.userData.cz;
+    const l = Math.hypot(toRoomX, toRoomZ) || 1;
+    toRoomX /= l; toRoomZ /= l;
+    const geo = mesh.geometry?.parameters;
+    const halfW = (geo?.width || 1.2) / 2;
+    const halfD = (geo?.depth || 1.2) / 2;
+    const halfExtent = halfW * Math.abs(toRoomX) + halfD * Math.abs(toRoomZ);
+    const push = halfExtent + pr + 0.2;
+    player.mesh.position.x = mesh.userData.cx + toRoomX * push;
+    player.mesh.position.z = mesh.userData.cz + toRoomZ * push;
+    return;
+  }
+}
+
+// Hidden-boss ambush: at level-gen we may flag a boss room as
+// `_ambushHidden`, which makes its bosses + minions invisible /
+// undetectable until the player crosses the threshold. On first entry
+// we restore visibility, drop them in from above as a "burst entry"
+// pose, then aggro the room. Looks like the boss broke through the
+// ceiling / wall.
+function revealHiddenAmbush(room) {
+  room._ambushHidden = false;
+  const occupants = [];
+  for (const g of gunmen.gunmen) if (g.alive && g.roomId === room.id) occupants.push(g);
+  for (const m of melees.enemies) if (m.alive && m.roomId === room.id) occupants.push(m);
+  if (occupants.length === 0) return;
+  for (const c of occupants) {
+    if (c.group) {
+      c.group.visible = true;
+      c.group.position.y = 5.0;
+      c._ambushDropT = 0.55;
+    }
+    c.hidden = false;
+    if (c.state === 'idle' || c.state === 'sleep') {
+      if (melees.enemies.includes(c)) c.state = 'chase';
+      else { c.state = 'alerted'; c.reactionT = 0.20; }
+    }
+  }
+  triggerShake(0.45, 0.30);
+  transientHudMsg('AMBUSH', 1.6);
+}
+
+// Tick the per-actor ambush-drop animation set up by revealHiddenAmbush.
+// Each entry has `_ambushDropT` ticking down; we ease its Y back to 0
+// over the timer so it lands with a thud rather than snapping in.
+function tickAmbushDrops(dt) {
+  const fall = (c) => {
+    if (!c._ambushDropT) return;
+    c._ambushDropT = Math.max(0, c._ambushDropT - dt);
+    const k = c._ambushDropT / 0.55;
+    c.group.position.y = 5.0 * k * k;
+    if (c._ambushDropT <= 0) c.group.position.y = 0;
+  };
+  for (const g of gunmen.gunmen) fall(g);
+  for (const m of melees.enemies) fall(m);
+}
+
 function updateRoomClearance(playerPos) {
   const here = level.roomAt(playerPos.x, playerPos.z);
   if (here && !here.entered) {
     here.entered = true;
     onRoomFirstEntered(here);
   }
+  updateBossSealRelease();
   for (const r of level.rooms) {
     if (r.cleared || !r.entered) continue;
     let alive = 0;
@@ -6558,6 +6701,7 @@ function tick() {
   _tickThrowableZones(dt);
   _tickCamping(dt);
   _tickBurnFlames(dt);
+  tickAmbushDrops(dt);
   // Player flash + stun decay. Flash drives a fullscreen white
   // overlay that fades from 1.0 → 0 over the duration; stun decays
   // separately, the camera waver reads it below.
