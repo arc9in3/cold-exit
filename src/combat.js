@@ -23,6 +23,61 @@ export class Combat {
     // Obstacle AABBs used by flame particles for wall collision.
     // Refreshed once per frame by main.js before Combat.update.
     this._flameBlockers = [];
+
+    // --- Particle pool ----------------------------------------------
+    // Pre-allocated mesh/material slots for blood + explosion sparks.
+    // Without this, every shotgun pellet hit + every grenade impact
+    // allocates 5-20 fresh SphereGeometries + MeshBasicMaterials. At
+    // 200 particles in flight this generates real GC pressure and
+    // visible jitter. The pool reuses the same geometry across all
+    // particles (sphere is identical visually); each slot keeps its
+    // own per-particle material so colour can vary per spawn.
+    this._particlePool = [];
+    this._sharedParticleGeom = new THREE.SphereGeometry(0.08, 6, 4);
+    const PARTICLE_POOL_SIZE = 256;
+    for (let i = 0; i < PARTICLE_POOL_SIZE; i++) {
+      const mat = new THREE.MeshBasicMaterial({
+        color: 0xa01818, transparent: true, opacity: 0, depthWrite: false,
+      });
+      const mesh = new THREE.Mesh(this._sharedParticleGeom, mat);
+      mesh.visible = false;
+      this.scene.add(mesh);
+      this._particlePool.push({ mesh, mat, inUse: false });
+    }
+
+    // --- Explosion light pool ---------------------------------------
+    // The explosion fireball used to allocate a fresh PointLight per
+    // detonation, push it into the scene, then dispose it on expiry.
+    // Adding/removing a light to the scene flips the lit-shader cache
+    // key and forces a full shader recompile EACH time. Two
+    // recompiles per explosion = visible hitch on every grenade or
+    // kill blast. Pool: pre-allocated PointLights parked at intensity 0,
+    // brought up on detonation, dimmed back to 0 on expiry. Scene
+    // light count stays constant.
+    this._explosionLightPool = [];
+    const EXPLOSION_LIGHT_POOL_SIZE = 6;
+    for (let i = 0; i < EXPLOSION_LIGHT_POOL_SIZE; i++) {
+      const light = new THREE.PointLight(0xffcf60, 0, 8);
+      light.position.set(0, -1000, 0);
+      this.scene.add(light);
+      this._explosionLightPool.push({ light, inUse: false });
+    }
+  }
+
+  _acquireExplosionLight() {
+    for (const s of this._explosionLightPool) if (!s.inUse) return s;
+    return this._explosionLightPool[0];   // saturated — reuse oldest
+  }
+
+  _acquireParticle() {
+    for (const s of this._particlePool) if (!s.inUse) return s;
+    // Pool saturated — steal the oldest live blood entry's slot.
+    const oldest = this.bloods[0];
+    if (oldest && oldest.slot) {
+      this.bloods.shift();
+      return oldest.slot;
+    }
+    return this._particlePool[0];
   }
 
   setFlameBlockers(list) { this._flameBlockers = list || []; }
@@ -53,29 +108,38 @@ export class Combat {
     this.scene.add(ring);
 
     // Hot white flash + light so the explosion actually lights
-    // surrounding geometry for one beat.
-    const light = new THREE.PointLight(0xffcf60, 6.0, radius * 2.2);
-    light.position.copy(point);
-    this.scene.add(light);
+    // surrounding geometry for one beat. Pool-backed (see ctor) so
+    // there's no add-light/remove-light cycle that would force a
+    // shader recompile per detonation.
+    const lightSlot = this._acquireExplosionLight();
+    lightSlot.inUse = true;
+    lightSlot.light.position.copy(point);
+    lightSlot.light.distance = radius * 2.2;
+    lightSlot.light.intensity = 6.0;
 
     this.explosions.push({
-      fireball, ring, light, t: 0, life: 0.55, radius,
+      fireball, ring, lightSlot, t: 0, life: 0.55, radius,
     });
-    // Sparks — reuse blood-burst physics with a warm tint, a few
-    // bigger particles so the debris reads at distance.
+    // Sparks — reuse the shared particle pool with a warm tint and
+    // bigger scale so the debris reads at distance.
     for (let i = 0; i < 14; i++) {
-      const m = new THREE.MeshBasicMaterial({
-        color: i % 2 ? 0xffa040 : 0xff6020, transparent: true, opacity: 0.95, depthWrite: false,
-      });
-      const mesh = new THREE.Mesh(new THREE.SphereGeometry(0.12 + Math.random() * 0.08, 6, 4), m);
-      mesh.position.copy(point);
-      this.scene.add(mesh);
-      const vel = new THREE.Vector3(
+      const slot = this._acquireParticle();
+      slot.inUse = true;
+      slot.mat.color.setHex(i % 2 ? 0xffa040 : 0xff6020);
+      slot.mat.opacity = 0.95;
+      slot.mesh.scale.setScalar(1.5 + Math.random() * 1.0);
+      slot.mesh.position.copy(point);
+      slot.mesh.visible = true;
+      if (!slot.vel) slot.vel = new THREE.Vector3();
+      slot.vel.set(
         (Math.random() - 0.5) * 8,
         3 + Math.random() * 4,
         (Math.random() - 0.5) * 8,
       );
-      this.bloods.push({ mesh, vel, t: 0, life: 0.6 + Math.random() * 0.35 });
+      this.bloods.push({
+        slot, mesh: slot.mesh, vel: slot.vel,
+        t: 0, life: 0.6 + Math.random() * 0.35,
+      });
     }
   }
 
@@ -83,19 +147,29 @@ export class Combat {
     if (this.bloods.length > this._bloodCap) amount = Math.max(1, (amount / 2) | 0);
     const d = (dir && dir.lengthSq && dir.lengthSq() > 0.0001) ? dir : new THREE.Vector3(0, 0, 0);
     for (let i = 0; i < amount; i++) {
-      const mat = new THREE.MeshBasicMaterial({
-        color: 0xa01818, transparent: true, opacity: 0.95, depthWrite: false,
-      });
-      const mesh = new THREE.Mesh(new THREE.SphereGeometry(0.06 + Math.random() * 0.05, 6, 4), mat);
-      mesh.position.copy(point);
-      this.scene.add(mesh);
+      const slot = this._acquireParticle();
+      slot.inUse = true;
+      slot.mat.color.setHex(0xa01818);
+      slot.mat.opacity = 0.95;
+      // Per-particle scale jitter — sphere geometry is shared so we
+      // vary perceived size via mesh.scale instead of a fresh geom.
+      const sc = 0.75 + Math.random() * 0.6;
+      slot.mesh.scale.setScalar(sc);
+      slot.mesh.position.copy(point);
+      slot.mesh.visible = true;
       const speed = 1.5 + Math.random() * 2.5;
-      const vel = new THREE.Vector3(
+      // Reuse the slot's persistent vel Vector3 instead of allocating
+      // a fresh one per particle.
+      if (!slot.vel) slot.vel = new THREE.Vector3();
+      slot.vel.set(
         d.x * speed + (Math.random() - 0.5) * 1.5,
         2.5 + Math.random() * 2.5,
         d.z * speed + (Math.random() - 0.5) * 1.5,
       );
-      this.bloods.push({ mesh, vel, t: 0, life: 0.55 + Math.random() * 0.3 });
+      this.bloods.push({
+        slot, mesh: slot.mesh, vel: slot.vel,
+        t: 0, life: 0.55 + Math.random() * 0.3,
+      });
     }
   }
 
@@ -453,13 +527,27 @@ export class Combat {
     dispose(this.pools);
     dispose(this.gore);
     dispose(this.impacts);
-    dispose(this.bloods);
     dispose(this.arcs);
-    // Explosions are { fireball, ring, light, ... } — dispose each.
+    // Bloods are pool-backed — hide + release each slot, no dispose.
+    for (const b of this.bloods) {
+      if (b.slot) { b.mesh.visible = false; b.slot.inUse = false; }
+      else if (b.mesh) {
+        this.scene.remove(b.mesh);
+        b.mesh.geometry?.dispose();
+        b.mesh.material?.dispose();
+      }
+    }
+    this.bloods.length = 0;
+    // Explosions are { fireball, ring, lightSlot, ... } — dispose
+    // the per-event meshes, release the pooled light back to idle.
     for (const e of this.explosions) {
       if (e.fireball) { this.scene.remove(e.fireball); e.fireball.geometry?.dispose(); e.fireball.material?.dispose(); }
       if (e.ring)     { this.scene.remove(e.ring);     e.ring.geometry?.dispose();     e.ring.material?.dispose(); }
-      if (e.light)    { this.scene.remove(e.light); }
+      if (e.lightSlot) {
+        e.lightSlot.light.intensity = 0;
+        e.lightSlot.light.position.set(0, -1000, 0);
+        e.lightSlot.inUse = false;
+      }
     }
     this.explosions.length = 0;
     // Pooled tracers / flashes — return to pool, no dispose.
@@ -527,7 +615,9 @@ export class Combat {
         this.impacts.splice(i, 1);
       }
     }
-    // Blood droplets — ballistic arc + fade.
+    // Blood droplets — ballistic arc + fade. Pool-backed: on expire
+    // we hide the slot's mesh and return it to the pool instead of
+    // disposing geometry/material per particle.
     for (let i = this.bloods.length - 1; i >= 0; i--) {
       const b = this.bloods[i];
       b.t += dt;
@@ -541,9 +631,17 @@ export class Combat {
       }
       b.mesh.material.opacity = Math.max(0, 0.95 * (1 - b.t / b.life));
       if (b.t >= b.life) {
-        this.scene.remove(b.mesh);
-        b.mesh.geometry.dispose();
-        b.mesh.material.dispose();
+        if (b.slot) {
+          // Pool path — hide + return.
+          b.mesh.visible = false;
+          b.slot.inUse = false;
+        } else {
+          // Legacy non-pooled (shouldn't happen post-pool, kept as
+          // defense in case clearAll injects a non-pool entry).
+          this.scene.remove(b.mesh);
+          b.mesh.geometry?.dispose();
+          b.mesh.material?.dispose();
+        }
         this.bloods.splice(i, 1);
       }
     }
@@ -677,15 +775,18 @@ export class Combat {
       const ringScale = ex.radius * (0.3 + k * 1.2);
       ex.ring.scale.setScalar(ringScale);
       ex.ring.material.opacity = Math.max(0, 0.85 * kInv * kInv);
-      ex.light.intensity = 6.0 * kInv * kInv;
+      ex.lightSlot.light.intensity = 6.0 * kInv * kInv;
       if (ex.t >= ex.life) {
         this.scene.remove(ex.fireball);
         this.scene.remove(ex.ring);
-        this.scene.remove(ex.light);
         ex.fireball.geometry.dispose();
         ex.fireball.material.dispose();
         ex.ring.geometry.dispose();
         ex.ring.material.dispose();
+        // Release the pooled light — park it dim and off-screen.
+        ex.lightSlot.light.intensity = 0;
+        ex.lightSlot.light.position.set(0, -1000, 0);
+        ex.lightSlot.inUse = false;
         this.explosions.splice(i, 1);
       }
     }

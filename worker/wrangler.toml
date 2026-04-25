@@ -8,7 +8,7 @@ compatibility_date = "2025-01-01"
 # it wants you to add — you can copy that verbatim.
 [[kv_namespaces]]
 binding = "LEADERBOARD"
-id = "REPLACE_ME"
+id = "c22f233f5d784fb4ba5ef29b93063df3"
 
 # CORS origin allowlist — empty means "allow any origin" (handy while
 # you're iterating locally + on preview deploys). Tighten to your

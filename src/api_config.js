@@ -11,7 +11,7 @@
 //
 // Runtime override wins so you can point a staging build at a
 // different deployment without editing the source.
-const COMPILED_API_BASE = '';
+const COMPILED_API_BASE = 'https://tacticalrogue-api.nguyenlandon83.workers.dev';
 
 export function apiBase() {
   if (typeof window !== 'undefined' && typeof window.__apiBase === 'string') {

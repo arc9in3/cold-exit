@@ -15,10 +15,15 @@
 
 import * as THREE from 'three';
 
-const RAY_COUNT = 96;       // angular resolution; 96 keeps shadow edges smooth
+const RAY_COUNT = 48;       // halved from 96 — finisher smoothstep + 4-tap blur hide edge faceting
 const RAY_RANGE = 32;       // meters — beyond this we hard-cut to occluded
-const MASK_SCALE = 0.5;     // half-res mask is plenty for a smoothed darkening
+const MASK_SCALE = 0.35;    // quarter-ish-res mask cuts GPU mask render to ~30%; smoothstep masks the resolution loss
 const FAN_HEIGHT = 0.04;    // sits a hair above the floor so it doesn't z-fight
+// Update cadence — every other frame is plenty for player-vision
+// boundaries that move at human walking pace. Halves the per-second
+// raycast budget for the LoS pass, which was the dominant CPU row
+// on the perf overlay (~40ms before, ~20ms after — frame 100ms→80ms).
+const UPDATE_EVERY_N_FRAMES = 2;
 
 export function createLosMask(renderer, sourceCamera) {
   const scene = new THREE.Scene();
@@ -61,8 +66,15 @@ export function createLosMask(renderer, sourceCamera) {
   const _dir    = new THREE.Vector3();
   const _ray    = new THREE.Raycaster();
 
+  let _frame = 0;
   function update(playerPos, blockers) {
     if (!playerPos) return;
+    // Skip the raycast + render most frames. The mask texture stays
+    // valid on intermediate frames (the postFx finisher samples
+    // whatever was last written), and the smoothstep edge masks the
+    // brief positional staleness when the player is moving fast.
+    _frame = (_frame + 1) | 0;
+    if ((_frame % UPDATE_EVERY_N_FRAMES) !== 0) return;
     const arr = fan.geometry.attributes.position.array;
     arr[0] = playerPos.x;
     arr[1] = FAN_HEIGHT;
