@@ -3075,21 +3075,29 @@ function fireOneShot(playerInfo, weapon, aimPoint, isADS) {
           hit.owner.panicT = Math.max(hit.owner.panicT || 0, 4.0);
         }
       }
-      // Sleep-dart weapon — silent knock-out on normal tier. Dart
-      // also DE-aggros: any current alertness, suspicion, or last-
-      // known-player breadcrumb is wiped, and the enemy can't be
-      // re-alerted (witness, gunfire, propagation) for the full
-      // sleep duration. Duration rolls 10s..5min so the player can
-      // either creep past a darted patrol or count on the room
-      // staying clear long enough to do something deliberate.
-      if (weapon.sleepOnHit && hit.owner.alive
-          && (hit.owner.tier === 'normal' || !hit.owner.tier)) {
-        hit.owner.forceSleep = true;
-        hit.owner.deepSleepT = 10 + Math.random() * 290;
-        hit.owner.suspicion = 0;
-        hit.owner.reactionT = 0;
-        hit.owner.lastKnownX = undefined;
-        hit.owner.lastKnownZ = undefined;
+      // Sleep-dart weapon — silent knock-out + de-aggro. Wipes
+      // suspicion + lastKnown breadcrumb, locks the target out of
+      // alert / propagation paths for the full timer (10s..5min).
+      // Tier gating:
+      //   normal       — always procs
+      //   sub-boss     — 12% chance per hit
+      //   major boss   —  4% chance per hit
+      // Bosses still get a real chance to be put down by a sustained
+      // dart user, but it's a lucky-break tactic, not a free win.
+      if (weapon.sleepOnHit && hit.owner.alive) {
+        const t = hit.owner.tier;
+        let chance = 0;
+        if (!t || t === 'normal') chance = 1;
+        else if (t === 'subBoss') chance = 0.12;
+        else if (t === 'boss')    chance = 0.04;
+        if (chance > 0 && Math.random() < chance) {
+          hit.owner.forceSleep = true;
+          hit.owner.deepSleepT = 10 + Math.random() * 290;
+          hit.owner.suspicion = 0;
+          hit.owner.reactionT = 0;
+          hit.owner.lastKnownX = undefined;
+          hit.owner.lastKnownZ = undefined;
+        }
       }
       // Shock on crit — briefly dazzle the target (blurs their aim via dazzleT).
       if (crit && (derivedStats.shockOnCrit || 0) > 0 && hit.owner.alive) {
