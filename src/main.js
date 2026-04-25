@@ -1169,13 +1169,27 @@ function berserkMult() {
 
 function difficultyScale() {
   // Level 1 = 1.0; each subsequent level raises HP/damage/rarity-weight.
+  // Reaction tightening + aim sharpening ramp with level so high-tier
+  // levels feel SHARPER, not just beefier. Caps prevent late-game
+  // robotic perfection.
   const lv = Math.max(0, level.index - 1);
   return {
     hpMult: 1 + 0.18 * lv,
     damageMult: 1 + 0.12 * lv,
-    rarityBias: Math.min(0.6, 0.08 * lv),  // upweight rarer weapons at higher levels
+    rarityBias: Math.min(0.6, 0.08 * lv),
+    // <1 means faster reaction. Cap at 0.45× so it never goes below
+    // a reasonable "trained operator" floor.
+    reactionMult: Math.max(0.45, 1 - 0.05 * lv),
+    // <1 means tighter spread (better aim). Cap at 0.55× so it doesn't
+    // go full aimbot at level 10.
+    aimSpreadMult: Math.max(0.55, 1 - 0.05 * lv),
+    // Aggression scalar — boss frequency/attack-rate multiplier.
+    // 1.0 → 2.0 by level 10. Boss controllers read this and shorten
+    // gaps between attacks, increase pursuit speed, etc.
+    aggression: Math.min(2.0, 1 + 0.10 * lv),
   };
 }
+window.__difficultyScale = difficultyScale;
 
 function pickWeaponForAI(variant) {
   // LMGs only drop on tank-variant grunts — their slow-moving, beefy
@@ -1284,6 +1298,9 @@ function regenerateLevel() {
     const opts = {
       tier: s.tier, roomId: s.roomId,
       hpMult: diff.hpMult, damageMult: diff.damageMult,
+      reactionMult: diff.reactionMult,
+      aimSpreadMult: diff.aimSpreadMult,
+      aggression: diff.aggression,
       variant: s.variant,
       gearLevel,
       archetype: s.archetype,
@@ -1294,7 +1311,21 @@ function regenerateLevel() {
       const colour = keyAssignments.get(s);
       if (colour && e) e.keyDrop = colour;
     } else {
-      const g = gunmen.spawn(s.x, s.z, pickWeaponForAI(s.variant), opts);
+      // Archetype-specific weapon override for the major-boss roster:
+      // a flamer must spawn with the flamethrower; a grenadier carries
+      // a tagged AI-only projectile launcher derived from the frag
+      // throwable. Other archetypes fall through to the random weapon.
+      let bossWeapon = pickWeaponForAI(s.variant);
+      if (s.archetype === 'flamer') {
+        const flame = tunables.weapons.find(w => w.fireMode === 'flame');
+        if (flame) bossWeapon = JSON.parse(JSON.stringify(flame));
+      } else if (s.archetype === 'grenadier') {
+        // Stamp a `bossGrenadier` flag the AI tick reads to layer
+        // periodic projectile throws onto a normal weapon. Cheap +
+        // doesn't require a new weapon entry in tunables.
+        bossWeapon = { ...bossWeapon, bossGrenadier: true };
+      }
+      const g = gunmen.spawn(s.x, s.z, bossWeapon, opts);
       const colour = keyAssignments.get(s);
       if (colour && g) g.keyDrop = colour;
     }
@@ -2508,6 +2539,87 @@ function tickWeaponReload(weapon) {
 //   projectileFuse:  seconds before auto-detonate (default 2.5)
 //   projectileBounce: 0..1 bounciness (grenades only)
 //   aoeRadius, aoeDamage, aoeShake
+// AI grenadier-boss throw — lobs a frag from the boss's chest toward
+// the player. Uses the same ballistic-apex curve as the player's
+// throwables so the visual reads identically. Damage scales off the
+// boss's damageMult so a level-10 grenadier hits proportionally hard.
+function spawnAiGrenade(g) {
+  if (!g || !g.alive || !player?.mesh) return;
+  const muzzle = new THREE.Vector3(
+    g.group.position.x,
+    1.2,
+    g.group.position.z,
+  );
+  const aim = new THREE.Vector3(
+    player.mesh.position.x,
+    0.1,
+    player.mesh.position.z,
+  );
+  const dx = aim.x - muzzle.x, dz = aim.z - muzzle.z;
+  const throwDist = Math.hypot(dx, dz);
+  const MIN_APEX = 0.4;
+  const MAX_APEX = 3.0;
+  const apex = MIN_APEX + (MAX_APEX - MIN_APEX) * Math.min(1, throwDist / 16);
+  const gravity = 18;
+  const vel = ProjectileManager.ballisticVelocityApex(muzzle, aim, apex, gravity);
+  projectiles.spawn({
+    pos: muzzle,
+    vel,
+    type: 'grenade',
+    lifetime: 1.8,
+    radius: 0.09,
+    color: 0xb04030,
+    explosion: {
+      radius: 3.6,
+      damage: Math.round(28 * (g.damageMult || 1)),
+      shake: 0.45,
+    },
+    owner: 'enemy',
+    gravity,
+    bounciness: 0.18,
+    throwKind: 'frag',
+  });
+  if (sfx?.aiFire) sfx.aiFire('lmg');
+}
+
+// Sniper enemy shot — non-hitscan, slow projectile so the player can
+// see it coming and dodge after the laser-paint window. Fires from
+// the sniper's gun toward the player's CURRENT position at fire time
+// (so dodging RIGHT as the paint timer runs out is what beats it).
+// Big damage on hit but defeatable with one well-timed roll.
+function spawnSniperShot(g) {
+  if (!g || !g.alive || !player?.mesh) return;
+  const muzzle = new THREE.Vector3();
+  g.muzzle.getWorldPosition(muzzle);
+  const target = new THREE.Vector3(
+    player.mesh.position.x, 1.0, player.mesh.position.z,
+  );
+  const dir = target.clone().sub(muzzle);
+  if (dir.lengthSq() < 0.0001) return;
+  dir.normalize();
+  const SPEED = 28;     // dodgeable but threatening — ~1m frame at 60fps
+  const vel = dir.clone().multiplyScalar(SPEED);
+  // Reuse the grenade projectile path with a tiny AoE so the explosion
+  // tick lands the sniper damage directly on whoever is at impact.
+  // Radius 0.6m is wide enough to catch the player at the impact
+  // point without making it splash damage.
+  const sniperDamage = Math.round(55 * (g.damageMult || 1));
+  projectiles.spawn({
+    pos: muzzle,
+    vel,
+    type: 'grenade',
+    lifetime: 3.0,
+    radius: 0.10,
+    color: 0xff3a3a,
+    explosion: { radius: 0.6, damage: sniperDamage, shake: 0.18 },
+    owner: 'enemy',
+    gravity: 0,
+    bounciness: 0,
+  });
+  if (sfx?.aiFire) sfx.aiFire('sniper');
+  triggerShake(0.18, 0.12);
+}
+
 function firePlayerProjectile(playerInfo, weapon, aimPoint) {
   if (typeof weapon.ammo === 'number' && !weapon.infiniteAmmo) weapon.ammo -= 1;
   sfx.fire(weapon.class || 'shotgun');
@@ -4328,6 +4440,16 @@ function updateEnemyVisibility() {
       e.group.visible = true;
       continue;
     }
+    // Cloaked assassin — invisible until materialized. The melee
+    // tick flips e.cloaked to false on first detection / room entry,
+    // at which point this branch stops short-circuiting and the
+    // normal LoS pipeline takes over (with a brief reveal flash via
+    // ghost mode for one frame so the appearance reads).
+    if (e.cloaked) {
+      _setEnemyGhost(e, false);
+      e.group.visible = false;
+      continue;
+    }
     _visTarget.set(e.group.position.x, 1.2, e.group.position.z);
     const los = combat.hasLineOfSight(_visFrom, _visTarget, visionBlockers);
     e._occluded = !los;
@@ -5795,10 +5917,13 @@ function tick() {
     findDoorToward: (roomId, enemyPos) =>
       level.findDoorToward(roomId, playerInfo.position, enemyPos),
     isRoomActive,
+    spawnAiGrenade: (g) => spawnAiGrenade(g),
+    spawnSniperShot: (g) => spawnSniperShot(g),
   });
   melees.update({
     dt,
     playerPos: playerInfo.position,
+    playerRoomId,                   // assassin uncloak trigger
     combat,
     camera,                         // for chatter bubble projection
     level,                          // for room-graph pathing

@@ -88,7 +88,14 @@ export class Level {
     this.index += 1;
 
     // --- Layout: random-walk chain so each level bends differently --------
-    const combatCount = 2 + Math.floor(Math.random() * 3); // 2..4 combat rooms
+    // Combat-room count grows with level — L1 picks 2-4, L5 picks 4-6,
+    // L10+ picks 6-8 (capped). Each combat room is ~30 walls + props
+    // post-build, so even L10 layouts come in under ~250 walls + ~80
+    // doors. Comfortable on integrated GPUs.
+    const lvIdx = Math.max(1, this.index || 1);
+    const minCombat = 2 + Math.min(4, Math.floor((lvIdx - 1) / 2));
+    const maxCombat = 4 + Math.min(4, Math.floor((lvIdx - 1) / 2));
+    const combatCount = minCombat + Math.floor(Math.random() * (maxCombat - minCombat + 1));
     const totalMain = 1 + combatCount + 1; // start + combats + boss
     const rooms = [];
     const pitch = ROOM_W + WALL_THICK;
@@ -1300,11 +1307,17 @@ export class Level {
       const coverSeekerCut = runnerCut + 0.03 + variantBoost * 0.12;
       const tankCut        = coverSeekerCut + 0.01 + variantBoost * 0.10;
       const shieldedCut    = tankCut + 0.01 + variantBoost * 0.14;
+      // Sniper — only appears from L3 onward and stays rare.
+      // Designed as a pressure pick that forces the player to close
+      // distance, so we don't double-stack them.
+      const sniperBaseChance = lv >= 3 ? 0.06 + Math.min(0.12, (lv - 3) * 0.02) : 0;
+      const sniperCut        = shieldedCut + sniperBaseChance;
       if (r < dasherCut)      return 'dasher';
       if (r < runnerCut)      return 'runner';
       if (r < coverSeekerCut) return 'coverSeeker';
       if (r < tankCut)        return 'tank';
       if (r < shieldedCut)    return 'shieldedPistol';
+      if (r < sniperCut)      return 'sniper';
       return 'standard';
     };
     const pickMeleeVariant = () => {
@@ -1316,17 +1329,23 @@ export class Level {
     };
 
     if (room.type === 'combat') {
-      // Enemy count ramps gently: level 1 rooms feel like a warm-up
-      // (1 melee + maybe 1 gunman), later levels pack in more bodies.
-      const meleeBase = lv <= 1 ? 1 : (lv <= 3 ? 2 : 2);
+      // Enemy count ramps continuously past L4 instead of flatlining.
+      // Past L4 we layer +1 melee per 3 levels and +1 gunman per 4
+      // levels, capped so a level-20 room doesn't pack 15 bodies that
+      // burn the AI tick budget. The cap keeps a tight max headcount
+      // (~6 melee + ~3 gunmen) which the active AI loop handles fine.
+      const meleeBase = lv <= 1 ? 1 : 2;
       const meleeBonus = lv <= 1 ? (Math.random() < 0.35 ? 1 : 0)
                         : lv <= 3 ? (Math.random() < 0.6 ? 1 : 0)
                         : 1 + (Math.random() < 0.4 ? 1 : 0);
-      const meleesN = meleeBase + meleeBonus;
+      const meleeLevelExtra = Math.min(3, Math.floor(Math.max(0, lv - 4) / 3));
+      const meleesN = meleeBase + meleeBonus + meleeLevelExtra;
       const gunmanChance = lv <= 1 ? 0.35 : lv <= 3 ? 0.65 : 0.85;
-      const gunmenN = Math.random() < gunmanChance
+      const baseGunmen = Math.random() < gunmanChance
         ? (lv >= 4 && Math.random() < 0.25 ? 2 : 1)
         : 0;
+      const gunmenLevelExtra = Math.min(2, Math.floor(Math.max(0, lv - 5) / 4));
+      const gunmenN = baseGunmen + gunmenLevelExtra;
       for (let i = 0; i < meleesN; i++) {
         const p = pickOpen();
         this.enemySpawns.push({
@@ -1366,22 +1385,25 @@ export class Level {
       // `bulletHell` fat-target volley thrower; `assassin` dash-melee
       // (spawns as a melee enemy below); `elite` constant fire + dash.
       const archRoll = Math.random();
-      const bossArchetype = archRoll < 0.30 ? 'evasive'
-                          : archRoll < 0.55 ? 'bulletHell'
-                          : archRoll < 0.80 ? 'elite'
-                          : 'assassin';
-      // Backing variant + physical pose. Assassin rides melee_enemy,
-      // everyone else is a gunman; the variant is a convenient
-      // kitchen-sink of stats the manager already understands.
+      // Six archetypes — the four originals (evasive, bulletHell,
+      // elite, assassin) plus two new pressure-bosses: flamer
+      // (relentless flamethrower rush) and grenadier (constant arc
+      // throws + dash). Distribution is even-ish so a run of 4-6
+      // boss rooms lands a varied roster.
+      const bossArchetype = archRoll < 0.18 ? 'evasive'
+                          : archRoll < 0.36 ? 'bulletHell'
+                          : archRoll < 0.54 ? 'elite'
+                          : archRoll < 0.70 ? 'assassin'
+                          : archRoll < 0.85 ? 'flamer'
+                          :                   'grenadier';
       const archVariant =
         bossArchetype === 'bulletHell' ? 'tank'
       : bossArchetype === 'assassin'   ? 'standard'    // melee variant slot
       : bossArchetype === 'elite'      ? 'dasher'
+      : bossArchetype === 'flamer'     ? 'tank'        // beefy rush
+      : bossArchetype === 'grenadier'  ? 'dasher'      // fast + dashy
       :                                  'coverSeeker';
       const bossVariant = archVariant;
-      // Major bosses live in a parallel kind ('gunman' for most, a
-      // melee record for the assassin). Both carry majorBoss: true so
-      // main.js can show the dedicated HP bar + tag the loot drop.
       const bossKind = bossArchetype === 'assassin' ? 'melee' : 'gunman';
       this.enemySpawns.push({
         x: p.x, z: p.z,

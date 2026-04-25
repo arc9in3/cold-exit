@@ -84,6 +84,19 @@ const VARIANT_PROFILES = {
     tint: 0x6a5a3a,
     shield: 'partial',
   },
+  sniper: {
+    // Long-distance laser-paint specialist. Sees the player at any
+    // range LoS allows, paints them with a tracking laser for
+    // ~1.6s, then fires a non-hitscan slow projectile that the
+    // player can dodge with a roll. Backs up if the player closes.
+    // Frail on purpose — the counter is "close the distance fast."
+    scale: 1.0, hp: 0.7, dmg: 1.0,
+    moveSpeedMult: 0.9, preferredRange: 22, rangeTolerance: 6,
+    reactionMult: 0.6, settlePause: true,
+    strafe: false, dash: false, coverSeek: true,
+    tint: 0x554020,
+    sniper: true,
+  },
 };
 
 export class GunmanManager {
@@ -138,6 +151,9 @@ export class GunmanManager {
     const roomId = opts.roomId ?? -1;
     const difficultyHp = opts.hpMult || 1;
     const baseDamageMult = opts.damageMult || 1;
+    const levelReactionMult = opts.reactionMult ?? 1;
+    const levelAimSpreadMult = opts.aimSpreadMult ?? 1;
+    const aggression = opts.aggression ?? 1;
     const variantId = opts.variant && VARIANT_PROFILES[opts.variant] ? opts.variant : 'standard';
     // Clone the variant profile so we can overlay boss-tier tactical
     // traits (strafe + coverSeek) without mutating the shared
@@ -156,6 +172,13 @@ export class GunmanManager {
     if (tier === 'subBoss') {
       profile.coverSeek = true;   // mini-bosses weave in and out of cover
     }
+    // Apply the per-level reaction tightening on top of variant /
+    // tier overrides. Bosses already had the 0.7 cap; we floor at
+    // 0.35 so even L20 enemies still have a perceptible reaction.
+    profile.reactionMult = Math.max(0.35, (profile.reactionMult ?? 1) * levelReactionMult);
+    // Per-enemy aim sharpening — read at fire time alongside the
+    // global ai.spreadMultiplier.
+    profile.aimSpreadMult = levelAimSpreadMult;
 
     const tierHp = (tier === 'boss' ? 3.2 : tier === 'subBoss' ? 1.8 : 1);
     const hpMult = tierHp * profile.hp * difficultyHp;
@@ -340,6 +363,20 @@ export class GunmanManager {
     alert.renderOrder = 2;
     group.add(alert);
 
+    // Sniper-only laser paint mesh — a long thin red box scaled down
+    // the aim ray each frame while charging the shot. Hidden until
+    // the sniper is in 'paint' phase.
+    let snipLaser = null;
+    if (profile.sniper) {
+      const laserMat = new THREE.MeshBasicMaterial({
+        color: 0xff2030, transparent: true, opacity: 0, depthWrite: false,
+      });
+      snipLaser = new THREE.Mesh(new THREE.BoxGeometry(0.04, 0.04, 1), laserMat);
+      snipLaser.visible = false;
+      snipLaser.renderOrder = 3;
+      this.scene.add(snipLaser);   // world-space, not parented to body
+    }
+
     this.scene.add(group);
 
     const role = Math.random() < tunables.ai.flankChance ? 'flanker' : 'rusher';
@@ -360,6 +397,14 @@ export class GunmanManager {
       damageMult,
       variant: variantId,
       profile,
+      // Bosses (tier === 'boss') roam — they leave their arena to
+      // hunt the player. Aggression scales fire frequency / pursuit
+      // speed; ramps with level via opts.aggression.
+      huntsPlayer: tier === 'boss',
+      aggression,
+      snipLaser,                  // null on non-snipers
+      snipPhase: 'idle',          // 'idle' | 'paint' | 'cool'
+      snipPhaseT: 0,
       hp: tunables.ai.maxHealth * hpMult,
       maxHp: tunables.ai.maxHealth * hpMult,
       alive: true,
@@ -441,6 +486,12 @@ export class GunmanManager {
         }
       });
       this.scene.remove(g.group);
+      // Sniper laser lives in world space, separate from the body group.
+      if (g.snipLaser) {
+        this.scene.remove(g.snipLaser);
+        g.snipLaser.geometry.dispose();
+        g.snipLaser.material.dispose();
+      }
     }
     this.gunmen = [];
   }
@@ -837,7 +888,11 @@ export class GunmanManager {
     // brief peek across the view cone doesn't instantly trigger
     // aggro — the player has a window to break LoS and decay it back.
     const stealthMult = ctx.playerStealthMult || 1;
-    const baseRange = tunables.ai.detectionRange * stealthMult;
+    // Snipers see the player at huge range — ~3× normal — so they can
+    // open fire from across rooms / off-screen and force the player
+    // to close. Sniper still respects LoS / stealth multipliers.
+    const sniperRangeMult = g.profile.sniper ? 3.2 : 1;
+    const baseRange = tunables.ai.detectionRange * stealthMult * sniperRangeMult;
     const cosHalfCone = Math.cos((tunables.ai.detectionAngleDeg * Math.PI / 180) * 0.5);
     // Point-blank presence: if the player is within arm's reach with a
     // clear sight line AND isn't directly behind, the enemy notices
@@ -873,9 +928,20 @@ export class GunmanManager {
     // rotate toward the player's last-seen direction (see below).
     let canSee = false;
     if (g.state !== STATE.IDLE) {
-      canSee = hasLos && !inRearBlindspot && dist <= tunables.ai.detectionRange * 2;
+      const seeRange = tunables.ai.detectionRange * 2 * sniperRangeMult;
+      canSee = hasLos && !inRearBlindspot && dist <= seeRange;
     } else if (g.suspicion >= 1.0) {
       canSee = true;
+    }
+    // Boss hunt — bosses (huntsPlayer) treat the player as a known
+    // target whenever the player is alive, regardless of LoS, room
+    // boundaries, or stealth. They leave their arena to pursue.
+    if (g.huntsPlayer && ctx.playerPos) {
+      canSee = true;
+      if (g.state === STATE.IDLE) {
+        g.state = STATE.ALERTED;
+        g.suspicion = 1.0;
+      }
     }
     // Chatter — idle enemies occasionally mutter to themselves. Uses
     // a per-enemy cooldown so squads don't all speak at once, and
@@ -1073,13 +1139,19 @@ export class GunmanManager {
     }
 
     // Boss aggression overlay — bosses react faster and push closer.
+    // `g.aggression` ramps with level so a level-10 boss reacts and
+    // pursues twice as hard as a level-1 boss without changing its
+    // base profile. Compresses reaction further on top of the tier
+    // bonus, and expands move speed.
     const bossAggro = g.tier === 'boss' ? 0.5 : (g.tier === 'subBoss' ? 0.75 : 1);
-    const reactionT = tunables.ai.reactionTime * g.profile.reactionMult * bossAggro;
+    const aggInv = 1 / Math.max(0.5, g.aggression || 1);
+    const reactionT = tunables.ai.reactionTime * g.profile.reactionMult * bossAggro * aggInv;
     const preferredRange = (g.profile.preferredRange ?? tunables.ai.preferredRange)
       * (g.tier === 'boss' ? 0.75 : 1);
     const rangeTolerance = g.profile.rangeTolerance ?? tunables.ai.rangeTolerance;
     const moveSpeed = tunables.ai.moveSpeed * g.profile.moveSpeedMult
-      * (g.tier === 'boss' ? 1.35 : g.tier === 'subBoss' ? 1.15 : 1);
+      * (g.tier === 'boss' ? 1.35 : g.tier === 'subBoss' ? 1.15 : 1)
+      * (g.tier === 'boss' ? Math.min(1.6, g.aggression || 1) : 1);
 
     if (canSee) {
       if (g.state === STATE.IDLE) {
@@ -1409,6 +1481,101 @@ export class GunmanManager {
         }
       }
 
+      // Grenadier boss — periodically lobs a frag at the player
+      // while still firing their main weapon. Cooldown shortens with
+      // aggression so a level-10 grenadier throws every ~1.4s, and
+      // they keep dashing on the elite cadence so they aren't easy
+      // to camp. Grenades route through ctx.spawnAiGrenade so
+      // projectile physics + explosion logic come from main.js.
+      if (g.archetype === 'grenadier') {
+        g.grenadeT = (g.grenadeT || 0) - dt;
+        if (g.grenadeT <= 0 && (g.canSeePlayer || canSee) && ctx.spawnAiGrenade) {
+          const baseCd = 2.4;
+          g.grenadeT = baseCd / Math.max(0.5, g.aggression || 1);
+          ctx.spawnAiGrenade(g);
+        }
+        // Borrow the elite dash cadence — grenadier should feel just
+        // as twitchy. Same code path so the visuals match.
+        if ((g.dashCdT || 0) <= 0 && (g.dashT || 0) <= 0
+            && g.state === STATE.FIRING) {
+          const side = Math.random() < 0.5 ? -1 : 1;
+          g.dashVx = -dir2d.z * side * moveSpeed * 2.2;
+          g.dashVz =  dir2d.x * side * moveSpeed * 2.2;
+          g.dashT = 0.22;
+          g.dashCdT = 1.0 + Math.random() * 0.5;
+        }
+      }
+      // Sniper — three-phase loop. Whenever the sniper has LoS to the
+      // player, paint a tracking laser for ~1.6s, then fire a slow
+      // non-hitscan projectile aimed at the player's CURRENT position
+      // (so reading the laser + dodging right before the shot wins).
+      // Cooldown after firing keeps them from chain-bursting. They
+      // also retreat if the player closes inside ~10m.
+      if (g.profile.sniper && ctx.spawnSniperShot) {
+        const dxs = ctx.playerPos.x - g.group.position.x;
+        const dzs = ctx.playerPos.z - g.group.position.z;
+        const distSn = Math.hypot(dxs, dzs);
+        const seesPlayer = canSee && hasLos && !inRearBlindspot;
+        // Backup behaviour — apply a small away-from-player nudge
+        // each frame when the player is too close. The normal
+        // movement logic still runs, but this overlay adds a tug.
+        if (seesPlayer && distSn < 10 && distSn > 0.01) {
+          const ux = -dxs / distSn, uz = -dzs / distSn;
+          g.group.position.x += ux * moveSpeed * 0.6 * dt;
+          g.group.position.z += uz * moveSpeed * 0.6 * dt;
+        }
+        // Phase machine — only advances while we have LoS. Lose LoS
+        // and we reset to idle so the laser doesn't paint through
+        // walls.
+        if (seesPlayer) {
+          if (g.snipPhase === 'idle') {
+            g.snipPhase = 'paint';
+            g.snipPhaseT = 1.6 / Math.max(0.5, g.aggression || 1);
+          }
+          if (g.snipPhase === 'paint') {
+            g.snipPhaseT -= dt;
+            // Update laser mesh: from the gun world position to the
+            // player's chest, every frame, so it tracks perfectly
+            // and reads as "I am aiming at you right now."
+            if (g.snipLaser) {
+              const from = new THREE.Vector3();
+              g.muzzle.getWorldPosition(from);
+              const to = new THREE.Vector3(ctx.playerPos.x, 1.0, ctx.playerPos.z);
+              const mid = from.clone().add(to).multiplyScalar(0.5);
+              const len = from.distanceTo(to);
+              g.snipLaser.position.copy(mid);
+              g.snipLaser.lookAt(to);
+              g.snipLaser.scale.set(1, 1, len);
+              g.snipLaser.material.opacity = 0.55 + Math.sin(performance.now() * 0.018) * 0.2;
+              g.snipLaser.visible = true;
+            }
+            if (g.snipPhaseT <= 0) {
+              ctx.spawnSniperShot(g);
+              g.snipPhase = 'cool';
+              g.snipPhaseT = 2.6 / Math.max(0.5, g.aggression || 1);
+              if (g.snipLaser) g.snipLaser.visible = false;
+            }
+          } else if (g.snipPhase === 'cool') {
+            g.snipPhaseT -= dt;
+            if (g.snipPhaseT <= 0) g.snipPhase = 'idle';
+          }
+        } else {
+          // No LoS — snap back to idle, hide laser.
+          g.snipPhase = 'idle';
+          if (g.snipLaser) g.snipLaser.visible = false;
+        }
+      }
+
+      // Flamer boss — short engagement range and zero settle pause so
+      // they keep walking forward through your fire. The flamethrower
+      // weapon already enforces the long reload window the player
+      // exploits to land hits. Push preferred range way down so they
+      // lock onto closing distance instead of camping.
+      if (g.archetype === 'flamer') {
+        // overwrite per-frame range goal
+        g.flamerOverrideRange = 4.0;
+      }
+
       // Elite Gunman — always strafing, always dashing on a short
       // cadence. Override dasher's passive cooldown with a faster one.
       if (g.archetype === 'elite' && g.state === STATE.FIRING) {
@@ -1556,7 +1723,8 @@ export class GunmanManager {
             // frequently so cover isn't a free 100% safe space.
             const suppMul = suppressing ? 2.2 : 1.0;
             let volleyCount = pellets;
-            let volleySpread = weapon.hipSpread * tunables.ai.spreadMultiplier * blindMul * crouchFocus * suppMul;
+            let volleySpread = weapon.hipSpread * tunables.ai.spreadMultiplier * blindMul * crouchFocus * suppMul
+                             * (g.profile.aimSpreadMult ?? 1);
             let evenSpacing = false;
             // Bullet Hell boss — fires a wide, evenly-spaced fan of
             // many shots instead of a single muzzle burst. Spacing

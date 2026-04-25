@@ -215,6 +215,11 @@ export class MeleeEnemyManager {
       assassinPhase: 'closing',
       assassinDmgTaken: 0,
       assassinRetreatT: 0,
+      // Assassin archetype lurks invisible until the player triggers
+      // their detection. The flag tells the per-frame visibility
+      // pass to render the body at zero opacity until materializing.
+      // Materialization happens in the suspicion ramp (see update).
+      cloaked: opts.archetype === 'assassin',
     };
     e.manager = this;
     if (rig) for (const m of rig.meshes) m.userData.owner = e;
@@ -667,6 +672,17 @@ export class MeleeEnemyManager {
     if (canSee && e.state === STATE.IDLE) {
       e.state = STATE.CHASE;
       ctx.onAlert?.(e);
+    }
+    // Cloaked assassin — uncloak the moment the player enters the
+    // assassin's room (or LoS is established). Once materialized the
+    // boss is just a dasher-melee with the assassinPhase machine.
+    if (e.cloaked) {
+      const playerInRoom = ctx.playerRoomId !== undefined && ctx.playerRoomId === e.roomId;
+      if (playerInRoom || canSee) {
+        e.cloaked = false;
+        e.state = STATE.CHASE;
+        ctx.onAlert?.(e);
+      }
     }
 
     const targetAlpha = e.state === STATE.IDLE ? 0 : (e.state === STATE.WINDUP ? 1 : 0.6);
