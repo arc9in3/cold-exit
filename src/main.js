@@ -2,6 +2,12 @@ import * as THREE from 'three';
 import { createScene } from './scene.js';
 import { createPostFx } from './postfx.js';
 import { createLosMask } from './los_mask.js';
+// BVH must be imported before any geometry / mesh creation so the
+// global Mesh.raycast patch is in place. The patched raycast defers
+// to vanilla behavior when a mesh has no bounds tree, so meshes
+// constructed before `accelerateAll` runs (props, decorations, etc.)
+// keep working — they just don't get the speedup.
+import { accelerateAll, disposeMesh } from './bvh.js';
 import { createPlayer } from './player.js';
 import { Input } from './input.js';
 import { Combat } from './combat.js';
@@ -1178,7 +1184,15 @@ function pickWeaponForAI(variant) {
 }
 
 function regenerateLevel() {
+  // Tear down old BVHs so the GC can reclaim them alongside the
+  // dropped geometries. Called BEFORE level.generate which replaces
+  // the obstacle list.
+  if (level.obstacles) for (let i = 0; i < level.obstacles.length; i++) disposeMesh(level.obstacles[i]);
   level.generate();
+  // Build BVHs over the new wall + obstacle set. Each tree is a
+  // one-time cost (~0.1ms per BoxGeometry); subsequent raycasts pay
+  // O(log N) instead of O(N).
+  accelerateAll(level.obstacles);
   // Track furthest level reached this run. Monotonic — doesn't regress
   // if a level is re-entered for any reason.
   runStats.setLevel(level.index | 0);
@@ -2262,20 +2276,6 @@ function tickFlame(dt, playerInfo, weapon, inputState, aimInfo) {
     runStats.addDamage(baseDmg);
     c.manager.applyHit(c, baseDmg, 'torso', dir, { weaponClass: 'melee' });
     c.burnT = Math.max(c.burnT || 0, tunables.burn.duration * (derivedStats.burnDurationBonus || 1));
-    // Flame jet stun + push — heavier than a bullet hit. The applyHit
-    // call already used 'melee' weaponClass for stagger animation; we
-    // layer extra panic + a stronger directional shove so a face-full
-    // of fire reads as "thrown back into the wall, flailing."
-    const knock = (weapon.flameKnockback ?? 0.85) * (derivedStats.knockbackMult || 1);
-    c.group.position.x += dir.x * knock;
-    c.group.position.z += dir.z * knock;
-    c.staggerT = Math.max(c.staggerT || 0, weapon.flameStaggerT ?? 0.55);
-    if (c.tier === 'normal' || !c.tier) {
-      c.panicT = Math.max(c.panicT || 0, weapon.flamePanicT ?? 3.0);
-    } else {
-      // Bosses / sub-bosses don't panic but do get a brief stun pause.
-      c.panicT = Math.max(c.panicT || 0, 0.6);
-    }
     if (wasAlive && !c.alive) {
       onEnemyKilled(c);
       awardClassXp('exotic', c.tier);
