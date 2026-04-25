@@ -3,6 +3,8 @@ import { SLOT_IDS, SLOT_POSITIONS, SLOT_ICONS, TYPE_ICONS, inferRarity,
 import { SKILLS } from './skills.js';
 import { renderItemCell } from './ui_item_cell.js';
 import { thumbnailFor } from './item_thumbnails.js';
+import { SPECIAL_PERKS } from './perks.js';
+import { SKILL_NODES } from './skill_tree.js';
 
 // Simple cell-based inventory.
 //   • Every item occupies exactly 1 cell.
@@ -19,7 +21,8 @@ const CELL_GAP = 3;
 
 export class InventoryUI {
   constructor({ inventory, skills, onDrop, getActiveWeapon, onOpenCustomize,
-                getDragState, setDragState }) {
+                getDragState, setDragState,
+                getSpecialPerks, getSkillTreeLevels }) {
     this.inventory = inventory;
     this.skills = skills;
     this.onDrop = onDrop;
@@ -27,6 +30,10 @@ export class InventoryUI {
     this.onOpenCustomize = onOpenCustomize || (() => {});
     this.getDragState = getDragState;
     this.setDragState = setDragState;
+    // Live readers for character-level progression. Default to empty
+    // so the UI degrades gracefully if main.js doesn't pass them.
+    this.getSpecialPerks    = getSpecialPerks    || (() => []);
+    this.getSkillTreeLevels = getSkillTreeLevels || (() => ({}));
     this.visible = false;
     this._lastVersion = -1;
     this._gridDrag = null;
@@ -727,21 +734,44 @@ export class InventoryUI {
       }).join('');
     }
 
-    // — Perks: dedupe by id (a perk granted by two pieces should
-    //   only render once). Show the source slot in parens so the
-    //   player remembers where it came from.
+    // — Perks: union of three sources, deduped by id —
+    //   (1) gear-attached perks rolled onto equipped items
+    //   (2) special perks the player picked at level-up
+    //   (3) skill-tree nodes the player has invested points into
+    //   Each row tags its source so the player can trace where a
+    //   given perk came from when planning swaps.
     const perkRows = [];
     const seenPerks = new Set();
+    const pushPerk = (key, name, desc, sourceTag) => {
+      if (!key || seenPerks.has(key)) return;
+      seenPerks.add(key);
+      perkRows.push(`<div class="inv-prog-perk">
+        <span class="inv-prog-perk-name">◆ ${name}</span>
+        ${desc ? `<span class="inv-prog-perk-desc"> — ${desc}</span>` : ''}
+        ${sourceTag ? `<span class="inv-prog-perk-src">${sourceTag}</span>` : ''}
+      </div>`);
+    };
     for (const slot of SLOT_IDS) {
       const it = eq[slot]; if (!it || !it.perks) continue;
       for (const p of it.perks) {
-        const key = p.id || p.name; if (!key || seenPerks.has(key)) continue;
-        seenPerks.add(key);
-        perkRows.push(`<div class="inv-prog-perk">
-          <span class="inv-prog-perk-name">◆ ${p.name}</span>
-          ${p.description ? `<span class="inv-prog-perk-desc"> — ${p.description}</span>` : ''}
-        </div>`);
+        pushPerk(p.id || p.name, p.name, p.description, 'GEAR');
       }
+    }
+    for (const id of (this.getSpecialPerks() || [])) {
+      const def = SPECIAL_PERKS[id]; if (!def) continue;
+      pushPerk('sp:' + id, def.name, def.description, 'PERK');
+    }
+    const stLevels = this.getSkillTreeLevels() || {};
+    for (const [id, lv] of Object.entries(stLevels)) {
+      if (!lv || lv <= 0) continue;
+      const def = SKILL_NODES[id]; if (!def) continue;
+      // Skill-tree nodes are tiered — show the highest reached tier's
+      // description (lv is 1-indexed into def.levels) so the player
+      // sees what the current investment buys.
+      const tierIdx = Math.max(0, Math.min((def.levels?.length || 1) - 1, lv - 1));
+      const tier = def.levels?.[tierIdx];
+      const desc = tier?.desc || def.desc || '';
+      pushPerk('st:' + id, `${def.name} L${lv}`, desc, 'SKILL');
     }
 
     // — Affixes: roll up every non-set affix on every equipped piece.

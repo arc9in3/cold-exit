@@ -1488,8 +1488,11 @@ export class Inventory {
     this.backpack = out;
   }
 
-  // Expose whether the bonus 4th quick-action slot is usable (i.e. any
-  // equipped belt/chest/gear carries actionSlotBonus).
+  // Legacy hook — gear can still flag actionSlotBonus, but we now
+  // surface all 4 quickslots unconditionally so the drag-to-bind UX
+  // stays consistent. Without this, players hit a silent rejection
+  // when dropping a grenade into slot 4 unless the right belt/chest
+  // was equipped, which felt like a bug rather than a mechanic.
   bonusActionSlotActive() {
     for (const slot of SLOT_IDS) {
       const it = this.equipment[slot];
@@ -1498,7 +1501,7 @@ export class Inventory {
     return false;
   }
   maxActionSlots() {
-    return BASE_ACTION_SLOT_COUNT + (this.bonusActionSlotActive() ? 1 : 0);
+    return ACTION_SLOT_COUNT;
   }
 
   _recomputeCapacity() {

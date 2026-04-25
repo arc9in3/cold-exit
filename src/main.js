@@ -1096,6 +1096,13 @@ function makeBlackMarketStock() {
 
 const inventoryUI = new InventoryUI({
   inventory, skills,
+  // Live progression sources for the paperdoll overlay — pulled fresh
+  // each render so unlocking a perk mid-run is reflected without
+  // having to rebuild the inventory UI. Returned as plain id arrays /
+  // {id: level} maps to keep the UI module decoupled from the
+  // perk/skill-tree class internals.
+  getSpecialPerks: () => Array.from(specialPerks.unlocked || []),
+  getSkillTreeLevels: () => ({ ...skillTree.levels }),
   onDrop: (item) => loot.spawnItem(player.mesh.position.clone(), item),
   getActiveWeapon: () => currentWeapon(),
   onOpenCustomize: (item) => {
