@@ -1563,7 +1563,9 @@ export class LootUI {
       this.miscEl.classList.add('body-empty');
       const empty = document.createElement('div');
       empty.className = 'body-empty-msg';
-      empty.textContent = 'Nothing on the body';
+      empty.textContent = this.target?.kind === 'container'
+        ? 'Nothing here'
+        : 'Nothing on the body';
       this.miscEl.appendChild(empty);
       this._wireBodyGridWrap();
       return;

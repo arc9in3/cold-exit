@@ -3463,6 +3463,7 @@ function onEnemyKilled(enemy, opts = {}) {
         it.cooldownT = 0;
       }
       renderActionBar();
+      renderWeaponBar();
     } else if ((derivedStats.throwableRefundOnKill | 0) > 0) {
       const refund = derivedStats.throwableRefundOnKill | 0;
       for (const it of inventory.allThrowables()) {
@@ -3471,6 +3472,7 @@ function onEnemyKilled(enemy, opts = {}) {
         if (it.charges >= max) it.cooldownT = 0;
       }
       renderActionBar();
+      renderWeaponBar();
     }
   }
   // Melee Battle Trance — refund stamina on melee kills. Inferred from
@@ -5281,12 +5283,18 @@ function useActionSlot(idx) {
     applyConsumable(item);
     inventoryUI.render();
     renderActionBar();
+    renderWeaponBar();
     return;
   }
   // Everything else (heal / buff consumables) is single-use: pull
   // it out and apply.
   const taken = inventory.consumeActionSlot(idx);
-  if (taken) { applyConsumable(taken); inventoryUI.render(); renderActionBar(); }
+  if (taken) {
+    applyConsumable(taken);
+    inventoryUI.render();
+    renderActionBar();
+    renderWeaponBar();
+  }
 }
 
 // Tick every throwable in the player's inventory. When cooldownT
@@ -5310,7 +5318,10 @@ function tickThrowableCooldowns(dt) {
     }
     anyActive = true;
   }
-  if (anyActive) renderActionBar();
+  if (anyActive) {
+    renderActionBar();
+    renderWeaponBar();
+  }
 }
 
 // Items that can live in a quickslot — consumables / throwables for

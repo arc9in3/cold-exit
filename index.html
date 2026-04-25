@@ -3628,32 +3628,56 @@
       height: 30px;
       filter: brightness(1.30) contrast(1.05) drop-shadow(0 1px 1px rgba(0,0,0,0.55));
     }
-    .action-slot .action-count {
+    /* Hotbar inner styling shared by both clusters (.weapon-slot for
+       keys 1-4, .action-slot for keys 5-8). When a consumable / throw-
+       able is bound to a weapon-slot via drag-to-bind, the inner
+       elements need the same scoped layout the action-slot uses, or
+       the count text and cooldown overlay flow inline and overrun
+       the slot edges. */
+    .weapon-slot.filled { padding: 0; }
+    .weapon-slot .weapon-label { display: none; }
+    .weapon-slot.filled img {
+      width: 30px;
+      height: 30px;
+      filter: brightness(1.30) contrast(1.05) drop-shadow(0 1px 1px rgba(0,0,0,0.55));
+    }
+    .action-slot .action-count,
+    .weapon-slot .action-count {
       position: absolute;
       bottom: 2px;
+      left: 4px;
       right: 4px;
-      font-size: 10px;
+      font-size: 9px;
       color: #fff;
       font-weight: 700;
+      text-align: center;
+      white-space: nowrap;
+      overflow: hidden;
+      text-overflow: ellipsis;
+      pointer-events: none;
+      text-shadow: 0 1px 2px rgba(0,0,0,0.95);
     }
     /* Throwable cooldown overlay — semi-transparent dark fill that
        drains from bottom → top as the cooldown elapses, plus a
        centred "Ns" countdown. The `empty-charges` class greys the
        slot when charges = 0 so the player knows the hotkey is idle. */
-    .action-slot .action-cd {
+    .action-slot .action-cd,
+    .weapon-slot .action-cd {
       position: absolute;
       inset: 0;
       pointer-events: none;
       overflow: hidden;
       border-radius: 4px;
     }
-    .action-slot .action-cd-fill {
+    .action-slot .action-cd-fill,
+    .weapon-slot .action-cd-fill {
       position: absolute;
       left: 0; right: 0; bottom: 0;
       background: rgba(0, 0, 0, 0.55);
       transition: height 0.2s linear;
     }
-    .action-slot .action-cd-text {
+    .action-slot .action-cd-text,
+    .weapon-slot .action-cd-text {
       position: absolute;
       inset: 0;
       display: flex;
@@ -3664,7 +3688,8 @@
       color: #f2e7c9;
       text-shadow: 0 1px 2px rgba(0,0,0,0.9);
     }
-    .action-slot.empty-charges { opacity: 0.55; border-color: #4a2a2a; }
+    .action-slot.empty-charges,
+    .weapon-slot.empty-charges { opacity: 0.55; border-color: #4a2a2a; }
     #prompt {
       position: fixed;
       left: 50%;
