@@ -215,7 +215,7 @@ export class GameMenuUI {
     const note = document.createElement('div');
     note.className = 'menu-row-hint';
     note.style.marginBottom = '6px';
-    note.textContent = 'Click a binding to rebind. Press Escape during capture to cancel. Mouse buttons (LMB / RMB) are not rebindable in this build.';
+    note.textContent = 'Click a binding to rebind, then press the new key, mouse button (LMB / RMB / MMB / Mouse 4 / Mouse 5), or scroll the wheel. Press Escape during capture to cancel.';
     this.bodyEl.appendChild(note);
 
     const wrap = document.createElement('div');
@@ -262,26 +262,43 @@ export class GameMenuUI {
   _captureKeyboard(action, cellEl) {
     if (this._capturing) return;
     this._capturing = true;
-    cellEl.textContent = '… press a key';
+    cellEl.textContent = '… press key / mouse / wheel';
     cellEl.classList.add('keybind-capturing');
+    // Capture races three input sources: keyboard keydown, mouse
+    // button (mousedown), and mouse wheel. Whichever fires first
+    // becomes the new binding. Escape cancels without changes.
+    const cleanup = () => {
+      window.removeEventListener('keydown', onKey, true);
+      window.removeEventListener('mousedown', onMouse, true);
+      window.removeEventListener('wheel', onWheel, true);
+      this._capturing = false;
+    };
+    const finish = (code) => {
+      cleanup();
+      if (code) setKeyboardBinding(action, code);
+      cellEl.classList.remove('keybind-capturing');
+      this.render();
+    };
     const onKey = (e) => {
       e.preventDefault();
       e.stopPropagation();
-      window.removeEventListener('keydown', onKey, true);
-      this._capturing = false;
-      if (e.code === 'Escape') {
-        // Cancel.
-        cellEl.classList.remove('keybind-capturing');
-        cellEl.textContent = displayKeyboard(getKeyboardBinding(action));
-        return;
-      }
-      setKeyboardBinding(action, e.code);
-      cellEl.classList.remove('keybind-capturing');
-      // Re-render the whole list since reassigning a code clears any
-      // duplicate elsewhere — neighbour rows need to refresh too.
-      this.render();
+      if (e.code === 'Escape') { finish(null); return; }
+      finish(e.code);
+    };
+    const onMouse = (e) => {
+      e.preventDefault();
+      e.stopPropagation();
+      finish(`mouse:${e.button}`);
+    };
+    const onWheel = (e) => {
+      if (Math.abs(e.deltaY) < 0.5) return;
+      e.preventDefault();
+      e.stopPropagation();
+      finish(e.deltaY > 0 ? 'wheel:down' : 'wheel:up');
     };
     window.addEventListener('keydown', onKey, true);
+    window.addEventListener('mousedown', onMouse, true);
+    window.addEventListener('wheel', onWheel, { capture: true, passive: false });
   }
 
   async _captureGamepad(action, cellEl) {

@@ -66,6 +66,10 @@ export class Input {
     window.addEventListener('blur', this._onBlur);
     domEl.addEventListener('mousemove', this._onMouseMove);
     domEl.addEventListener('mousedown', this._onMouseDown);
+    // Wheel binding lives on the canvas so menu / inventory scrolling
+    // still works inside their modal panels (events bubble there
+    // through the normal DOM, never hit this listener).
+    domEl.addEventListener('wheel', (e) => this._onWheel(e), { passive: false });
     window.addEventListener('mouseup', this._onMouseUp);
     window.addEventListener('contextmenu', this._onContextMenu);
   }
@@ -176,8 +180,35 @@ export class Input {
   _onMouseDown(e) {
     this.mouseButtons.add(e.button);
     if (e.button === 0) this.attackPressed = true;
+    // Route mouse buttons through the keybind layer so users can bind
+    // actions like Reload / Heal / Quickslot to extra mouse buttons.
+    // LMB / RMB stay hardcoded for attack / ADS via mouseButtons but
+    // ALSO fire any user-bound action — both can coexist.
+    const code = `mouse:${e.button}`;
+    const actions = actionsForKey(code);
+    for (const a of actions) {
+      const wasHeld = this._kbHeld.has(a) || this._gpadHeld.has(a);
+      this._kbHeld.add(a);
+      if (!wasHeld) this._fireAction(a);
+    }
   }
-  _onMouseUp(e) { this.mouseButtons.delete(e.button); }
+  _onMouseUp(e) {
+    this.mouseButtons.delete(e.button);
+    const code = `mouse:${e.button}`;
+    const actions = actionsForKey(code);
+    for (const a of actions) this._kbHeld.delete(a);
+  }
+  _onWheel(e) {
+    // Edge-fire only — wheel deltas are pulses, not held inputs.
+    // Throttle to ignore micro-deltas (touchpad noise).
+    if (Math.abs(e.deltaY) < 0.5) return;
+    const code = e.deltaY > 0 ? 'wheel:down' : 'wheel:up';
+    const actions = actionsForKey(code);
+    if (actions.length) {
+      e.preventDefault();
+      for (const a of actions) this._fireAction(a);
+    }
+  }
 
   computeAim(targetMeshes) {
     if (!this.hasAim) return { point: null, zone: null, owner: null };

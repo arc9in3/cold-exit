@@ -261,8 +261,21 @@ export function resetToDefaults() {
 
 // ── Display helpers for the rebind UI ──────────────────────────────
 
+// Mouse button labels — matches MouseEvent.button (0=LMB, 1=MMB, 2=RMB,
+// 3=back, 4=forward). Wheel inputs encoded as wheel:up / wheel:down.
+const MOUSE_LABELS = {
+  '0': 'LMB', '1': 'MMB', '2': 'RMB',
+  '3': 'Mouse 4', '4': 'Mouse 5',
+};
+
 export function displayKeyboard(code) {
   if (!code) return '—';
+  if (code.startsWith('mouse:')) {
+    const idx = code.slice(6);
+    return MOUSE_LABELS[idx] || `Mouse ${(parseInt(idx, 10) | 0) + 1}`;
+  }
+  if (code === 'wheel:up')   return 'Wheel ↑';
+  if (code === 'wheel:down') return 'Wheel ↓';
   if (code.startsWith('Key')) return code.slice(3);            // KeyW → W
   if (code.startsWith('Digit')) return code.slice(5);          // Digit1 → 1
   if (code.startsWith('Numpad')) return 'Num ' + code.slice(6);
