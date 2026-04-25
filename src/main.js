@@ -59,20 +59,12 @@ const appEl = document.getElementById('app');
 const hudStatsEl = document.getElementById('hud-stats');
 
 // --- keycard HUD + transient toast -----------------------------------
-// Created programmatically so we don't need to touch index.html for
-// the new UI. Rebuilt each frame to reflect playerKeys.
-const keyHudEl = (() => {
-  const el = document.createElement('div');
-  el.id = 'keycard-hud';
-  Object.assign(el.style, {
-    position: 'fixed', top: '14px', right: '14px', zIndex: 50,
-    display: 'flex', gap: '6px', pointerEvents: 'none',
-    fontFamily: 'ui-monospace, SFMono-Regular, Menlo, Consolas, monospace',
-    fontSize: '10px', color: '#fff',
-  });
-  document.body.appendChild(el);
-  return el;
-})();
+// The keycard row lives inside #hud-bl on the bottom-left stack so it
+// reads as part of the same status cluster as HP and currency. The
+// wrapper panel hides when no cards are held; renderKeycardHud below
+// toggles its display whenever the held set changes.
+const keyHudEl = document.getElementById('keycard-hud');
+const keyPanelEl = document.getElementById('keycard-panel');
 const toastEl = (() => {
   const el = document.createElement('div');
   el.id = 'hud-toast';
@@ -204,7 +196,13 @@ const KEY_COLOR_HEX = {
   red: '#d04040', blue: '#4a88e0', green: '#50c060', yellow: '#e0c040',
 };
 function renderKeycardHud() {
+  if (!keyHudEl || !keyPanelEl) return;
   while (keyHudEl.firstChild) keyHudEl.removeChild(keyHudEl.firstChild);
+  if (!playerKeys || playerKeys.size === 0) {
+    keyPanelEl.style.display = 'none';
+    return;
+  }
+  keyPanelEl.style.display = '';
   for (const color of playerKeys) {
     const card = document.createElement('div');
     Object.assign(card.style, {
@@ -4715,6 +4713,33 @@ function updateWallOcclusion() {
   for (const m of nextFaded) _occlFaded.add(m);
 }
 
+// Bottom-right weapon panel — current weapon name, class label, and a
+// big ammo readout. Reload bar lives in the same panel and is driven by
+// updateReloadHud below.
+const weaponInfoNameEl = document.getElementById('weapon-info-name');
+const weaponInfoClassEl = document.getElementById('weapon-info-class');
+const weaponInfoAmmoEl = document.getElementById('weapon-info-ammo');
+function updateWeaponInfoHud(weapon, effWeapon) {
+  if (!weaponInfoNameEl) return;
+  if (!weapon) {
+    weaponInfoNameEl.textContent = '—';
+    weaponInfoClassEl.textContent = 'no weapon';
+    weaponInfoAmmoEl.textContent = '—';
+    return;
+  }
+  weaponInfoNameEl.textContent = weapon.name || weapon.class || weapon.type || '—';
+  const cls = weapon.class || weapon.type || '';
+  weaponInfoClassEl.textContent = cls.toUpperCase();
+  if (weapon.type === 'ranged' && typeof weapon.ammo === 'number') {
+    const magSize = (effWeapon && effWeapon.magSize) || weapon.magSize || '—';
+    weaponInfoAmmoEl.textContent = weapon.infiniteAmmo ? '∞' : `${weapon.ammo} / ${magSize}`;
+  } else if (weapon.type === 'melee') {
+    weaponInfoAmmoEl.textContent = 'MELEE';
+  } else {
+    weaponInfoAmmoEl.textContent = '—';
+  }
+}
+
 function updateReloadHud(weapon, effWeapon) {
   if (!reloadFillEl) return;
   if (!weapon || weapon.type !== 'ranged' || typeof weapon.ammo !== 'number') {
@@ -5187,6 +5212,19 @@ function tryUseMedkit() {
 function useActionSlot(idx) {
   const item = inventory.actionSlotItem(idx);
   if (!item) return;
+  if (item.type === 'ranged' || item.type === 'melee') {
+    // Weapons in a quickslot act as a swap-to shortcut. If the bound
+    // weapon is currently in the active rotation (weapon1/2/melee),
+    // jump straight to it; otherwise nothing to swap to.
+    const rot = inventory.getWeaponRotation();
+    const rotIdx = rot.indexOf(item);
+    if (rotIdx >= 0) {
+      setWeaponIndex(rotIdx);
+      renderActionBar();
+      renderWeaponBar();
+    }
+    return;
+  }
   if (item.type === 'throwable') {
     // Throwables stay bound — applyConsumable spends a charge + starts
     // cooldown, but never removes the item from the inventory.
@@ -5224,6 +5262,16 @@ function tickThrowableCooldowns(dt) {
   }
   if (anyActive) renderActionBar();
 }
+
+// Items that can live in a quickslot — consumables / throwables for
+// single-press use, weapons for press-to-swap. Pure gear stays out so
+// the hotbar isn't a second equipment menu.
+function isQuickslotEligible(item) {
+  if (!item) return false;
+  const t = item.type;
+  return t === 'consumable' || t === 'throwable' || t === 'ranged' || t === 'melee';
+}
+window.__isQuickslotEligible = isQuickslotEligible;
 
 // Action-bar DOM rendering + drag-drop + click handlers.
 // Weapon-bar HUD (keys 1-4). Mirrors the rotation order: weapon1, weapon2,
@@ -5330,7 +5378,7 @@ function wireActionBar() {
       const d = getDragState();
       if (!d) return;
       if (d.from === 'actionBar') { e.preventDefault(); el.classList.add('drop-ok'); return; }
-      if (d.item && (d.item.type === 'consumable' || d.item.type === 'throwable')) {
+      if (d.item && isQuickslotEligible(d.item)) {
         e.preventDefault(); el.classList.add('drop-ok');
       }
     });
@@ -5342,7 +5390,7 @@ function wireActionBar() {
       if (!d) return;
       if (d.from === 'actionBar') {
         inventory.swapActionSlots(d.slot, i);
-      } else if (d.item && (d.item.type === 'consumable' || d.item.type === 'throwable')) {
+      } else if (d.item && isQuickslotEligible(d.item)) {
         inventory.assignActionSlot(i, d.item);
       } else {
         return;
@@ -6071,6 +6119,7 @@ function tick() {
 
   updateHealthHud(playerInfo);
   updateReloadHud(weapon, effWeapon);
+  updateWeaponInfoHud(weapon, effWeapon);
   updateOverhead(weapon, effWeapon, playerInfo, stealthMult);
   updateStealthStatus(playerInfo);
   // Run enemy visibility every frame by default; in low-quality mode

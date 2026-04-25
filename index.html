@@ -108,11 +108,22 @@
       z-index: 8;
     }
     #controls-hint b { color: var(--ce-ice); font-weight: 700; }
-    #hp {
+    /* Bottom-left HUD stack: currency on top, keycards in the middle
+       (shown only when held), HP/STA at the bottom. Each child sits
+       in normal flow — the wrapper handles screen-edge anchoring. */
+    #hud-bl {
       position: fixed;
       left: 8px;
       bottom: 8px;
+      display: flex;
+      flex-direction: column;
+      gap: 6px;
       width: 260px;
+      z-index: 5;
+      pointer-events: none;
+    }
+    #hp {
+      width: 100%;
       padding: 6px 8px;
       background: rgba(0, 0, 0, 0.6);
       border: 1px solid #222;
@@ -120,6 +131,7 @@
       font-size: 12px;
       user-select: none;
       pointer-events: none;
+      box-sizing: border-box;
     }
     #hp-bar {
       position: relative;
@@ -195,10 +207,7 @@
     #reload-fill.active { background: #e0a04a; }
 
     #resources {
-      position: fixed;
-      top: 8px;
-      right: 8px;
-      z-index: 2;
+      width: 100%;
       display: flex;
       flex-direction: column;
       gap: 4px;
@@ -212,12 +221,86 @@
       font-size: 13px;
       pointer-events: none;
       user-select: none;
+      box-sizing: border-box;
     }
-    .resource-row { display: flex; align-items: center; gap: 6px; }
+    .resource-row { display: flex; align-items: center; gap: 8px; }
     .resource-icon {
       width: 20px;
       height: 20px;
       filter: drop-shadow(0 1px 1px rgba(0,0,0,0.7));
+    }
+    .resource-label {
+      flex: 1;
+      font-size: 10px;
+      letter-spacing: 1.5px;
+      color: #9b8b6a;
+      font-weight: 700;
+    }
+    /* Keycard panel — only revealed once the player picks up at least
+       one card. The label sits above a row of coloured tokens so the
+       player isn't guessing what those tiny rectangles mean. */
+    #keycard-panel {
+      width: 100%;
+      padding: 6px 10px;
+      background: rgba(0, 0, 0, 0.55);
+      border: 1px solid #222;
+      border-radius: 4px;
+      pointer-events: none;
+      user-select: none;
+      box-sizing: border-box;
+    }
+    .keycard-label {
+      font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+      font-size: 10px;
+      letter-spacing: 1.5px;
+      color: #9b8b6a;
+      font-weight: 700;
+      margin-bottom: 4px;
+    }
+    #keycard-hud {
+      display: flex;
+      gap: 6px;
+    }
+    /* Bottom-right weapon info panel — current weapon name, class,
+       ammo readout, and reload progress bar. Hidden empty when no
+       weapon is equipped. */
+    #weapon-info {
+      position: fixed;
+      right: 8px;
+      bottom: 8px;
+      width: 240px;
+      padding: 8px 10px;
+      background: rgba(0, 0, 0, 0.6);
+      border: 1px solid #2c2c34;
+      border-radius: 4px;
+      font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+      color: #e8dfc8;
+      font-size: 12px;
+      pointer-events: none;
+      user-select: none;
+      z-index: 5;
+      box-sizing: border-box;
+    }
+    #weapon-info-name {
+      font-size: 14px;
+      font-weight: 700;
+      letter-spacing: 1px;
+      color: #f2e7c9;
+      text-transform: uppercase;
+    }
+    #weapon-info-class {
+      font-size: 10px;
+      letter-spacing: 1.5px;
+      color: #9b8b6a;
+      text-transform: uppercase;
+      margin-top: 1px;
+    }
+    #weapon-info-ammo {
+      margin-top: 6px;
+      font-size: 18px;
+      font-weight: 800;
+      color: #c9a87a;
+      letter-spacing: 1px;
     }
 
     /* Rarity outlines */
@@ -289,7 +372,7 @@
       font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
     }
     #details-card {
-      width: 460px; max-width: 92vw; max-height: 88vh;
+      max-width: 96vw; max-height: 88vh;
       overflow-y: auto;
       background: linear-gradient(180deg, #181b21 0%, #10121a 100%);
       border: 1px solid #c9a87a;
@@ -298,6 +381,45 @@
       color: #e8dfc8;
       box-shadow: 0 14px 50px rgba(0, 0, 0, 0.85);
     }
+    /* Single-pane (no equipped counterpart) keeps the original 460px feel. */
+    .details-pane-solo { width: 460px; max-width: 100%; }
+    /* Side-by-side comparison: equipped on left, replacement on right. */
+    .details-compare {
+      display: flex;
+      gap: 16px;
+      width: 880px; max-width: 100%;
+    }
+    .details-pane { flex: 1 1 0; min-width: 0; }
+    .details-pane-equipped {
+      opacity: 0.85;
+      border-right: 1px dashed rgba(201,168,122,0.25);
+      padding-right: 16px;
+    }
+    .details-equipped-badge,
+    .details-new-badge {
+      display: inline-block;
+      font-size: 10px; letter-spacing: 2.5px; font-weight: 800;
+      padding: 3px 8px; margin-bottom: 8px; border-radius: 2px;
+    }
+    .details-equipped-badge {
+      color: #c9a87a;
+      background: rgba(201,168,122,0.12);
+      border: 1px solid rgba(201,168,122,0.5);
+    }
+    .details-new-badge {
+      color: #6aaedc;
+      background: rgba(106,174,220,0.12);
+      border: 1px solid rgba(106,174,220,0.5);
+    }
+    /* "Stats you'll lose" — surfaced when the new item is missing
+       stats the equipped item has. Red-on-dark so the loss reads
+       at a glance without having to compare numbers manually. */
+    .details-loss-section {
+      background: rgba(120,30,30,0.10);
+      border-left: 2px solid #c94a3a;
+    }
+    .details-loss-row .k { color: #d28a7a; }
+    .details-loss-row .v { color: #e67a3a; font-weight: 800; }
     .details-header {
       display: flex; align-items: center; gap: 12px;
       padding-left: 10px;
@@ -1017,7 +1139,9 @@
     }
     /* Skills readout layered over the avatar silhouette. Each line shows
        the skill name + level so players can read their build without
-       switching panels. */
+       switching panels. Splits the avatar area with the Progression
+       overlay (top half) — skills sit on the bottom, progression on
+       top, both scrollable independently. */
     #inv-skills-overlay {
       grid-column: 2;
       grid-row: 1 / span 7;
@@ -1029,9 +1153,65 @@
       border: 1px solid rgba(201, 168, 122, 0.35);
       border-radius: 5px;
       z-index: 2;
-      max-height: 58%;
+      max-height: 38%;
       overflow-y: auto;
       pointer-events: auto;
+    }
+    /* Progression panel — set bonuses, perks, affixes from the
+       currently equipped loadout. Pinned to the top half of the
+       avatar slot so the player can see "everything my power
+       comes from" without inspecting individual gear. */
+    #inv-progression-overlay {
+      grid-column: 2;
+      grid-row: 1 / span 7;
+      align-self: start;
+      justify-self: stretch;
+      margin: 8px 8px 0;
+      padding: 8px 10px;
+      background: linear-gradient(180deg, rgba(14, 16, 22, 0.92), rgba(14, 16, 22, 0.98));
+      border: 1px solid rgba(201, 168, 122, 0.35);
+      border-radius: 5px;
+      z-index: 2;
+      max-height: 56%;
+      overflow-y: auto;
+      pointer-events: auto;
+    }
+    .inv-prog-heading {
+      font-size: 10px; color: #c9a87a; letter-spacing: 2px;
+      text-transform: uppercase; margin-bottom: 6px; text-align: center;
+    }
+    .inv-prog-section { margin-top: 6px; }
+    .inv-prog-section:first-child { margin-top: 0; }
+    .inv-prog-section-title {
+      font-size: 9px; color: #9b8b6a; letter-spacing: 1.5px;
+      text-transform: uppercase; margin-bottom: 3px;
+    }
+    .inv-prog-set { margin-bottom: 4px; }
+    .inv-prog-set-name {
+      font-size: 10px; color: #e8dfc8; font-weight: 700;
+    }
+    .inv-prog-set-count {
+      color: #c9a87a; font-weight: 400; margin-left: 4px;
+    }
+    .inv-prog-tier {
+      display: grid; grid-template-columns: 14px 28px 1fr;
+      gap: 4px; font-size: 9px; line-height: 1.3;
+    }
+    .inv-prog-tier.met { color: #6abe5a; }
+    .inv-prog-tier.missing { color: #6f6754; }
+    .inv-prog-tier-pcs { color: #c9a87a; }
+    .inv-prog-perk {
+      font-size: 9px; line-height: 1.35;
+      overflow: hidden; text-overflow: ellipsis;
+    }
+    .inv-prog-perk-name { color: #e6b94a; font-weight: 700; }
+    .inv-prog-perk-desc { color: #9b8b6a; }
+    .inv-prog-affix {
+      font-size: 9px; color: #8fbf70; line-height: 1.35;
+    }
+    .inv-prog-empty {
+      font-size: 9px; color: #6f6754; text-align: center;
+      font-style: italic; padding: 6px 0;
     }
     .inv-skills-heading {
       font-size: 10px;
@@ -3368,28 +3548,39 @@
     <div id="hud-controls-head">Controls &middot; press <b>?</b> to hide</div>
     <div class="hud-row"><span class="hud-group">Movement</span><b>WASD</b> move &middot; <b>Shift</b> sprint &middot; <b>C</b> crouch &middot; <b>Space</b> dash / dbl-tap roll &middot; <b>Q</b> swap shoulder</div>
     <div class="hud-row"><span class="hud-group">Combat</span><b>LMB</b> fire / melee combo &middot; <b>RMB</b> ADS / block &middot; <b>F</b> quick melee / execute &middot; <b>block + LMB</b> parry</div>
-    <div class="hud-row"><span class="hud-group">Gear</span><b>1-4</b> weapon slot &middot; <b>X</b> cycle weapons &middot; <b>R</b> reload &middot; <b>H</b> medkit &middot; <b>5-8</b> quickbar (throwables / consumables) &middot; <b>T</b> toggle lights</div>
+    <div class="hud-row"><span class="hud-group">Gear</span><b>1-4</b> weapon slot &middot; <b>X</b> cycle weapons &middot; <b>R</b> reload &middot; <b>H</b> medkit &middot; <b>5-8</b> quickbar (any usable: weapon swap / throwable / consumable) &middot; <b>T</b> toggle lights</div>
     <div class="hud-row"><span class="hud-group">Interact</span><b>E</b> pick up / interact / shop &middot; <b>Tab</b> inventory &middot; <b>K</b> perks &middot; <b>Esc</b> menu</div>
     <div id="hud-stats"></div>
   </div>
-  <div id="hp">
-    <div><b style="color:#c9a87a">HP</b> <span id="hp-text"></span></div>
-    <div id="hp-bar">
-      <div id="hp-regen"></div>
-      <div id="hp-fill"></div>
+  <div id="hud-bl">
+    <div id="resources">
+      <div class="resource-row" title="Credits — spent at shops"><img class="resource-icon" src="Assets/UI/Icons/ui_icon_currency_diamond.png" alt=""><span class="resource-label">CREDITS</span><span id="credit-text">0</span></div>
+      <div class="resource-row" title="XP — levels up your skills"><img class="resource-icon" src="Assets/UI/Icons/ui_icon_currency_xp.png" alt=""><span class="resource-label">XP</span><span id="xp-text">0</span></div>
+      <div class="resource-row" id="sp-row" style="display:none" title="Skill Points — spent in the perk tree"><img class="resource-icon" src="Assets/UI/Icons/ui_icon_currency_lightning.png" alt=""><span class="resource-label">SKILL PTS</span><span id="sp-text">0</span></div>
     </div>
-    <div id="hp-status-row"></div>
-    <div><b style="color:#6aaedc">STA</b> <span id="sta-text"></span></div>
-    <div id="sta-bar"><div id="sta-fill"></div></div>
+    <div id="keycard-panel" style="display:none">
+      <div class="keycard-label">KEYCARDS</div>
+      <div id="keycard-hud"></div>
+    </div>
+    <div id="hp">
+      <div><b style="color:#c9a87a">HP</b> <span id="hp-text"></span></div>
+      <div id="hp-bar">
+        <div id="hp-regen"></div>
+        <div id="hp-fill"></div>
+      </div>
+      <div id="hp-status-row"></div>
+      <div><b style="color:#6aaedc">STA</b> <span id="sta-text"></span></div>
+      <div id="sta-bar"><div id="sta-fill"></div></div>
+    </div>
+  </div>
+  <div id="weapon-info">
+    <div id="weapon-info-name">—</div>
+    <div id="weapon-info-class">no weapon</div>
+    <div id="weapon-info-ammo">—</div>
     <div id="reload-wrap">
       <div><b id="reload-label">READY</b> <span id="reload-text"></span></div>
       <div id="reload-bar"><div id="reload-fill"></div></div>
     </div>
-  </div>
-  <div id="resources">
-    <div class="resource-row"><img class="resource-icon" src="Assets/UI/Icons/ui_icon_currency_diamond.png" alt=""><span id="credit-text">0</span></div>
-    <div class="resource-row"><img class="resource-icon" src="Assets/UI/Icons/ui_icon_currency_xp.png" alt=""><span id="xp-text">0</span></div>
-    <div class="resource-row" id="sp-row" style="display:none"><img class="resource-icon" src="Assets/UI/Icons/ui_icon_currency_lightning.png" alt=""><span id="sp-text">0</span></div>
   </div>
   <div id="stealth-vignette"></div>
   <div id="stealth-status"></div>

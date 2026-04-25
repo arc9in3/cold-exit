@@ -1,4 +1,5 @@
-import { SLOT_IDS, SLOT_POSITIONS, SLOT_ICONS, TYPE_ICONS, inferRarity } from './inventory.js';
+import { SLOT_IDS, SLOT_POSITIONS, SLOT_ICONS, TYPE_ICONS, inferRarity,
+         SET_DEFS, countEquippedSetPieces } from './inventory.js';
 import { SKILLS } from './skills.js';
 import { renderItemCell } from './ui_item_cell.js';
 import { thumbnailFor } from './item_thumbnails.js';
@@ -40,6 +41,10 @@ export class InventoryUI {
           <div id="inv-equipment">
             <div class="inv-heading">Equipment</div>
             <div id="inv-grid">
+              <div id="inv-progression-overlay">
+                <div class="inv-prog-heading">Progression</div>
+                <div id="inv-prog-list"></div>
+              </div>
               <div id="inv-skills-overlay">
                 <div class="inv-skills-heading">Skills</div>
                 <div id="inv-skill-list"></div>
@@ -58,6 +63,7 @@ export class InventoryUI {
     this.gridEl = this.root.querySelector('#inv-grid');
     this.gridsStackEl = this.root.querySelector('#inv-grids-stack');
     this.skillListEl = this.root.querySelector('#inv-skill-list');
+    this.progListEl = this.root.querySelector('#inv-prog-list');
 
     this._buildSilhouette();
     this.render();
@@ -500,9 +506,10 @@ export class InventoryUI {
     const actionSlot = this._closest(target, '.action-slot');
     if (actionSlot) {
       const d = this.getDragState();
-      if (d && d.item && (d.item.type === 'consumable' || d.item.type === 'throwable')) {
-        actionSlot.classList.add('drop-ok');
-      }
+      const ok = d && d.item && (window.__isQuickslotEligible
+        ? window.__isQuickslotEligible(d.item)
+        : (d.item.type === 'consumable' || d.item.type === 'throwable'));
+      if (ok) actionSlot.classList.add('drop-ok');
     }
   }
 
@@ -552,9 +559,12 @@ export class InventoryUI {
       this.render();
       return;
     }
-    // Drop onto an action-bar slot (throwable / consumable bind).
+    // Drop onto an action-bar slot (consumable / throwable / weapon bind).
     const actionSlot = this._closest(target, '.action-slot');
-    if (actionSlot && (item.type === 'consumable' || item.type === 'throwable')) {
+    const ok = actionSlot && (window.__isQuickslotEligible
+      ? window.__isQuickslotEligible(item)
+      : (item.type === 'consumable' || item.type === 'throwable'));
+    if (ok) {
       const slotsEl = document.querySelectorAll('.action-slot');
       const idx = Array.from(slotsEl).indexOf(actionSlot);
       if (idx >= 0) {
@@ -677,6 +687,103 @@ export class InventoryUI {
     }
   }
 
+  // ——— progression overlay ————————————————————————————————————
+  // Aggregates set bonuses, perks, and affixes from the currently
+  // equipped loadout into a single readable panel pinned over the
+  // top half of the avatar silhouette. Players asked for an at-a-
+  // glance view of "everything my power comes from right now" so
+  // they can plan upgrades without inspecting each slot.
+  _renderProgression() {
+    if (!this.progListEl) return;
+    const inv = this.inventory;
+    const eq = inv.equipment;
+
+    // — Set bonuses: collapse all setMark affixes across equipped
+    //   gear, count pieces per set, and show every tier with met /
+    //   missing state so the player can see how close they are to
+    //   the next break.
+    const setCounts = countEquippedSetPieces(eq);
+    const setEntries = Object.entries(setCounts).filter(([, n]) => n > 0);
+    setEntries.sort((a, b) => b[1] - a[1]);
+
+    let setHtml = '';
+    if (setEntries.length) {
+      setHtml = setEntries.map(([setId, count]) => {
+        const def = SET_DEFS[setId]; if (!def) return '';
+        const tiers = def.tiers.map(t => {
+          const met = count >= t.pieces;
+          const text = t.desc.replace(/^\d+pc:\s*/, '');
+          return `<div class="inv-prog-tier ${met ? 'met' : 'missing'}">
+            <span class="inv-prog-tier-mark">${met ? '✓' : '○'}</span>
+            <span class="inv-prog-tier-pcs">${t.pieces}pc</span>
+            <span class="inv-prog-tier-desc">${text}</span>
+          </div>`;
+        }).join('');
+        const cap = def.tiers[def.tiers.length - 1].pieces;
+        return `<div class="inv-prog-set">
+          <div class="inv-prog-set-name">${def.name} <span class="inv-prog-set-count">${count} / ${cap}</span></div>
+          ${tiers}
+        </div>`;
+      }).join('');
+    }
+
+    // — Perks: dedupe by id (a perk granted by two pieces should
+    //   only render once). Show the source slot in parens so the
+    //   player remembers where it came from.
+    const perkRows = [];
+    const seenPerks = new Set();
+    for (const slot of SLOT_IDS) {
+      const it = eq[slot]; if (!it || !it.perks) continue;
+      for (const p of it.perks) {
+        const key = p.id || p.name; if (!key || seenPerks.has(key)) continue;
+        seenPerks.add(key);
+        perkRows.push(`<div class="inv-prog-perk">
+          <span class="inv-prog-perk-name">◆ ${p.name}</span>
+          ${p.description ? `<span class="inv-prog-perk-desc"> — ${p.description}</span>` : ''}
+        </div>`);
+      }
+    }
+
+    // — Affixes: roll up every non-set affix on every equipped piece.
+    //   Affix.label already carries the human-readable "+ X to Y"
+    //   so we just list them. Skip the setMark entries (those are
+    //   the set membership flags, surfaced in the Set Bonuses block
+    //   above).
+    const affixRows = [];
+    for (const slot of SLOT_IDS) {
+      const it = eq[slot]; if (!it || !it.affixes) continue;
+      for (const a of it.affixes) {
+        if (a.kind === 'setMark') continue;
+        affixRows.push(`<div class="inv-prog-affix">• ${a.label}</div>`);
+      }
+    }
+
+    const sections = [];
+    if (setHtml) {
+      sections.push(`<div class="inv-prog-section">
+        <div class="inv-prog-section-title">Set Bonuses</div>
+        ${setHtml}
+      </div>`);
+    }
+    if (perkRows.length) {
+      sections.push(`<div class="inv-prog-section">
+        <div class="inv-prog-section-title">Perks (${perkRows.length})</div>
+        ${perkRows.join('')}
+      </div>`);
+    }
+    if (affixRows.length) {
+      sections.push(`<div class="inv-prog-section">
+        <div class="inv-prog-section-title">Affixes (${affixRows.length})</div>
+        ${affixRows.join('')}
+      </div>`);
+    }
+    if (sections.length === 0) {
+      this.progListEl.innerHTML = `<div class="inv-prog-empty">No set bonuses, perks, or affixes yet — equip gear to grow your power.</div>`;
+    } else {
+      this.progListEl.innerHTML = sections.join('');
+    }
+  }
+
   // ——— render ———————————————————————————————————————————————
 
   render() {
@@ -705,6 +812,7 @@ export class InventoryUI {
     }
 
     this._buildGrids();
+    this._renderProgression();
 
     this.skillListEl.innerHTML = '';
     const entries = this.skills.entries();

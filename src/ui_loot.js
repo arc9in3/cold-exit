@@ -788,7 +788,9 @@ export class LootUI {
       if (d.from === 'quickbar') { e.preventDefault(); cell.classList.add('drop-ok'); return; }
       if (d.from === 'player-bag') {
         const item = this.inventory.backpack[d.idx];
-        if (item && item.type === 'consumable') {
+        if (item && (window.__isQuickslotEligible
+            ? window.__isQuickslotEligible(item)
+            : item.type === 'consumable')) {
           e.preventDefault(); cell.classList.add('drop-ok');
         }
       }
@@ -803,9 +805,10 @@ export class LootUI {
         this.inventory.swapActionSlots(d.slot, slotIdx);
       } else if (d.from === 'player-bag') {
         const item = this.inventory.backpack[d.idx];
-        if (item && item.type === 'consumable') {
-          this.inventory.assignActionSlot(slotIdx, item);
-        }
+        const ok = item && (window.__isQuickslotEligible
+          ? window.__isQuickslotEligible(item)
+          : item.type === 'consumable');
+        if (ok) this.inventory.assignActionSlot(slotIdx, item);
       }
       this._drag = null;
       this.render();

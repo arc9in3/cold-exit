@@ -1430,7 +1430,16 @@ export class Inventory {
 
   assignActionSlot(slotIdx, item) {
     if (slotIdx < 0 || slotIdx >= this.maxActionSlots()) return false;
-    if (item && item.type !== 'consumable' && item.type !== 'throwable') return false;
+    // Action slots accept anything the player would actively use:
+    // consumables and throwables (single-press use), weapons (press to
+    // swap-to). Pure gear / armour stays barred — equipping that
+    // happens through the paperdoll, not the hotbar.
+    if (item) {
+      const t = item.type;
+      const ok = t === 'consumable' || t === 'throwable'
+        || t === 'ranged' || t === 'melee';
+      if (!ok) return false;
+    }
     // Don't allow same item on two slots.
     for (let i = 0; i < this.actionBar.length; i++) {
       if (this.actionBar[i] === item) this.actionBar[i] = null;

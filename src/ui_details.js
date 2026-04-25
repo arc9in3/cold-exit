@@ -290,12 +290,47 @@ export class DetailsUI {
   }
 
   _render(item, equipped) {
+    // When the inspected item has a currently-equipped counterpart in
+    // the same slot/role, render two panes side-by-side: the left
+    // shows what's already worn (with a CURRENTLY EQUIPPED badge so
+    // the player understands which is which); the right is the new
+    // item with stat diffs in green/red and an explicit "Stats you'll
+    // lose" callout for any stat the equipped item carries that this
+    // one doesn't.
+    const showCompare = !!equipped && equipped !== item;
+    if (!showCompare) {
+      return `
+        <div class="details-pane details-pane-solo">
+          ${this._renderPane(item, { compareTo: null, isEquipped: false })}
+        </div>
+        <div class="details-footer">Right-click or click outside to close</div>
+      `;
+    }
+    return `
+      <div class="details-compare">
+        <div class="details-pane details-pane-equipped">
+          <div class="details-equipped-badge">CURRENTLY EQUIPPED</div>
+          ${this._renderPane(equipped, { compareTo: null, isEquipped: true })}
+        </div>
+        <div class="details-pane details-pane-new">
+          <div class="details-new-badge">REPLACING WITH</div>
+          ${this._renderPane(item, { compareTo: equipped, isEquipped: false })}
+        </div>
+      </div>
+      <div class="details-footer">Right-click or click outside to close</div>
+    `;
+  }
+
+  // Render a single item pane. `compareTo` enables stat diffs against
+  // the comparison item plus a "Stats you'll lose" section for any
+  // stat the comparison has that this item doesn't.
+  _renderPane(item, { compareTo, isEquipped }) {
     const rarity = inferRarity(item);
     const rColor = RARITY_COLORS[rarity] || '#b9b9b9';
     const icon = thumbnailFor(item);
     const lore = ITEM_LORE[item.name] || item.description || '';
     const rows = collectStats(item);
-    const diffs = diffStats(item, equipped);
+    const diffs = diffStats(item, compareTo);
     const tint = item.tint ?? 0x888888;
     const tintStr = `#${tint.toString(16).padStart(6, '0')}`;
     const slotLabel = item.slot ? (SLOT_LABEL[item.slot] || item.slot) : (item.type || '');
@@ -311,6 +346,31 @@ export class DetailsUI {
       }
       return `<div class="details-stat-row"><span class="k">${key}</span><span class="v">${val}${unit}</span>${diffStr}</div>`;
     }).join('');
+
+    // Stats only the equipped item carries — these would be lost on
+    // the swap and need to be surfaced explicitly. Without this, a
+    // helmet with +5 Move Speed silently downgrades to a plain helmet
+    // and the player only finds out by feel.
+    let lossRows = '';
+    if (compareTo) {
+      const myKeys = new Set(rows.map(r => r[0]));
+      const otherRows = collectStats(compareTo);
+      const losses = otherRows.filter(([key]) => !myKeys.has(key));
+      if (losses.length) {
+        lossRows = `
+          <div class="details-section details-loss-section">
+            <div class="details-section-title">Stats you'll lose</div>
+            ${losses.map(([key, val, , suffix]) => {
+              const unit = suffix || '';
+              return `<div class="details-stat-row details-loss-row">
+                <span class="k">${key}</span>
+                <span class="v">−${val}${unit}</span>
+              </div>`;
+            }).join('')}
+          </div>
+        `;
+      }
+    }
 
     const affixes = (item.affixes || []).filter(a => a.kind !== 'setMark');
     const setAffix = (item.affixes || []).find(a => a.kind === 'setMark');
@@ -364,13 +424,10 @@ export class DetailsUI {
       </div>
     ` : '';
 
-    const compareHint = equipped ? `
-      <div class="details-compare-hint">
-        Comparison vs equipped <b>${equipped.name}</b>. Green = better, red = worse.
-      </div>
-    ` : '';
-
-    const hasModel = !!modelForItem(item);
+    // Only the new (non-equipped) pane shows the live 3D preview —
+    // doubling it on the equipped pane wastes a GL context and
+    // visually duplicates what the player already knows.
+    const hasModel = !isEquipped && !!modelForItem(item);
     return `
       <div class="details-header" style="border-left: 4px solid ${rColor}">
         <div class="details-swatch" style="background:${tintStr}">
@@ -391,12 +448,11 @@ export class DetailsUI {
         <div class="details-section-title">Stats</div>
         ${statRows}
       </div>` : ''}
+      ${lossRows}
       ${affixBlock}
       ${perkBlock}
       ${setBlock}
       ${durBlock}
-      ${compareHint}
-      <div class="details-footer">Right-click or click outside to close</div>
     `;
   }
 }
