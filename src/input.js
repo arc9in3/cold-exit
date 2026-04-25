@@ -72,6 +72,16 @@ export class Input {
 
   _onKeyDown(e) {
     if (e.repeat) return;
+    // Don't eat keys while the player is typing in a form element
+    // (player-name input, leaderboard search, etc.). Without this,
+    // typing "WASD" in a text field moves the character and
+    // preventDefault swallows the letters before they reach the
+    // input. Tab/Escape still pass through — those are modal nav
+    // and the menu system already handles them correctly.
+    const ae = document.activeElement;
+    if (ae && (ae.tagName === 'INPUT' || ae.tagName === 'TEXTAREA' || ae.isContentEditable)) {
+      if (e.code !== 'Tab' && e.code !== 'Escape') return;
+    }
 
     if (['KeyW', 'KeyA', 'KeyS', 'KeyD', 'Space'].includes(e.code)) {
       e.preventDefault();

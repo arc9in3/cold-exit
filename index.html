@@ -21,20 +21,84 @@
       font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
     }
     #app { position: fixed; inset: 0; }
+    /* Controls overlay — hidden by default, toggled via `?` or `/`.
+       Cold-Exit styled: dark navy card, ice-blue corner brackets,
+       tech-mono labels. Each row has a group label on the left and
+       the binds laid out in a single line. */
     #hud {
       position: fixed;
-      top: 8px;
-      left: 8px;
-      padding: 6px 10px;
-      background: rgba(0, 0, 0, 0.55);
-      border: 1px solid #222;
-      border-radius: 4px;
-      font-size: 12px;
-      line-height: 1.4;
+      top: 44px;
+      left: 12px;
+      padding: 14px 18px 12px;
+      background: var(--ce-navy);
+      border: 1px solid var(--ce-ice-25);
+      border-radius: 2px;
+      font-size: 11px;
+      line-height: 1.75;
       pointer-events: none;
       user-select: none;
+      max-width: 760px;
+      color: var(--ce-soft);
+      font-family: var(--ce-font-tech);
+      letter-spacing: 0.5px;
+      box-shadow: 0 8px 30px rgba(0,0,0,0.75);
     }
-    #hud b { color: #c9a87a; }
+    #hud::before, #hud::after {
+      content: '';
+      position: absolute;
+      width: 12px; height: 12px;
+      border-color: var(--ce-ice);
+      border-style: solid;
+      pointer-events: none;
+    }
+    #hud::before { top: -1px; left: -1px; border-width: 1px 0 0 1px; }
+    #hud::after  { bottom: -1px; right: -1px; border-width: 0 1px 1px 0; }
+    #hud b { color: var(--ce-ice); font-weight: 700; }
+    #hud-controls-head {
+      font-size: 10px;
+      letter-spacing: 3px;
+      text-transform: uppercase;
+      color: var(--ce-white);
+      padding-bottom: 8px;
+      margin-bottom: 6px;
+      border-bottom: 1px solid var(--ce-soft-15);
+    }
+    #hud-controls-head b { color: var(--ce-ice); }
+    .hud-row {
+      display: flex;
+      gap: 10px;
+      align-items: baseline;
+    }
+    .hud-group {
+      display: inline-block;
+      min-width: 72px;
+      color: var(--ce-ice);
+      font-size: 9px;
+      letter-spacing: 2.5px;
+      text-transform: uppercase;
+      flex-shrink: 0;
+    }
+    /* Persistent top-left prompt — the permanent "press ? for
+       controls" reminder. Hides when the overlay is visible so it
+       doesn't stack on top of the controls card. */
+    #controls-hint {
+      position: fixed;
+      top: 10px;
+      left: 12px;
+      padding: 6px 10px;
+      background: var(--ce-navy);
+      border: 1px solid var(--ce-ice-25);
+      border-radius: 2px;
+      font-size: 10px;
+      letter-spacing: 2.5px;
+      text-transform: uppercase;
+      color: var(--ce-soft);
+      font-family: var(--ce-font-tech);
+      pointer-events: none;
+      user-select: none;
+      z-index: 8;
+    }
+    #controls-hint b { color: var(--ce-ice); font-weight: 700; }
     #hp {
       position: fixed;
       left: 8px;
@@ -265,113 +329,413 @@
       font-size: 10px; color: #6f6754; letter-spacing: 2px; text-transform: uppercase;
     }
 
-    /* Esc game menu */
+    /* ─────────────────────────────────────────────────────────────
+       Cold Exit design tokens — from Assets/coldexitui.png style
+       guide. Every UI surface should read from these; changing a
+       single variable here cascades everywhere. Kept on :root so
+       even elements that predate the token rollout inherit the
+       palette as they're migrated one-by-one.
+       ───────────────────────────────────────────────────────────── */
+    /* Corner-bracket decoration applied by adding class `.ce-panel`.
+       Used by every full-screen / centered modal so the Cold Exit
+       HUD-frame look is consistent across inventory, loot, shop,
+       customize, details, etc. */
+    .ce-panel { position: relative; }
+    .ce-panel::before, .ce-panel::after {
+      content: '';
+      position: absolute;
+      width: 14px; height: 14px;
+      border-color: var(--ce-ice);
+      border-style: solid;
+      pointer-events: none;
+      z-index: 1;
+    }
+    .ce-panel::before { top: -1px; left: -1px; border-width: 1px 0 0 1px; }
+    .ce-panel::after  { bottom: -1px; right: -1px; border-width: 0 1px 1px 0; }
+    :root {
+      /* Palette */
+      --ce-black:     #050607;
+      --ce-navy:      #141820;
+      --ce-steel:     #252b38;
+      --ce-soft:      #8a97a8;
+      --ce-white:     #ffffff;
+      --ce-ice:       #00e6ff;
+      --ce-blue:      #2a80bf;
+      --ce-red:       #ff3a3a;
+      /* Derived tints — translucent versions for borders / hovers /
+         faint fills. All three use the ice-blue accent; the number
+         at the end is the alpha. */
+      --ce-ice-10:    rgba(0, 230, 255, 0.10);
+      --ce-ice-25:    rgba(0, 230, 255, 0.25);
+      --ce-ice-60:    rgba(0, 230, 255, 0.60);
+      --ce-soft-50:   rgba(138, 151, 168, 0.50);
+      --ce-soft-15:   rgba(138, 151, 168, 0.15);
+      /* Backdrops */
+      --ce-backdrop:  rgba(5, 6, 7, 0.88);   /* full-screen dim behind modals */
+      /* Typography */
+      --ce-font-tech: ui-monospace, 'JetBrains Mono', SFMono-Regular, Menlo, Consolas, monospace;
+      --ce-font-disp: 'Segoe UI', 'Helvetica Neue', Arial, sans-serif;   /* display (title, big headings) */
+    }
+
+    /* Esc game menu — migrated to the Cold Exit palette. Ice-blue
+       accent border, tech-mono body, title in the display sans, no
+       rounded corners (the style guide panels are all square). */
     #menu-root {
       position: fixed; inset: 0;
-      background: radial-gradient(ellipse at center, rgba(0,0,0,0.78), rgba(0,0,0,0.94));
+      background: var(--ce-backdrop);
       display: flex; align-items: center; justify-content: center;
       z-index: 20;
-      font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+      font-family: var(--ce-font-tech);
     }
     #menu-card {
-      width: 360px; max-width: 92vw;
-      background: linear-gradient(180deg, #181b21 0%, #0e1018 100%);
-      border: 1px solid #c9a87a;
-      border-radius: 10px;
-      padding: 20px 22px;
-      box-shadow: 0 14px 50px rgba(0,0,0,0.85);
-      color: #e8dfc8;
+      width: 380px; max-width: 92vw;
+      background: var(--ce-navy);
+      border: 1px solid var(--ce-ice-25);
+      border-radius: 2px;
+      padding: 22px 24px;
+      box-shadow: 0 14px 50px rgba(0,0,0,0.85), inset 0 0 0 1px rgba(0,0,0,0.4);
+      color: var(--ce-soft);
+      position: relative;
+    }
+    /* Corner-bracket accents mimicking the style-guide panel frames.
+       Four little L-shapes in the corners — pure decoration via ::before
+       and ::after on the card plus two stacked box-shadows. */
+    #menu-card::before, #menu-card::after {
+      content: '';
+      position: absolute;
+      width: 14px; height: 14px;
+      border-color: var(--ce-ice);
+      border-style: solid;
+      pointer-events: none;
+    }
+    #menu-card::before {
+      top: -1px; left: -1px;
+      border-width: 1px 0 0 1px;
+    }
+    #menu-card::after {
+      bottom: -1px; right: -1px;
+      border-width: 0 1px 1px 0;
     }
     #menu-title {
-      font-size: 15px; font-weight: 700; letter-spacing: 3px;
-      color: #c9a87a; text-transform: uppercase; text-align: center;
+      font-size: 16px; font-weight: 700; letter-spacing: 3px;
+      color: var(--ce-white); text-transform: uppercase; text-align: center;
       margin-bottom: 16px;
+      font-family: var(--ce-font-tech);
     }
-    #menu-body { display: flex; flex-direction: column; gap: 8px; }
+    #menu-body { display: flex; flex-direction: column; gap: 6px; }
     #menu-footer {
       margin-top: 14px; text-align: center;
-      font-size: 10px; color: #6f6754; letter-spacing: 2px; text-transform: uppercase;
+      font-size: 10px; color: var(--ce-soft-50); letter-spacing: 2px; text-transform: uppercase;
     }
     .menu-btn {
       width: 100%;
-      padding: 10px 12px;
-      background: linear-gradient(180deg, #1d2028, #15181f);
-      color: #e8dfc8; font-family: inherit; font-size: 13px; letter-spacing: 2px;
+      padding: 10px 14px;
+      background: transparent;
+      color: var(--ce-soft); font-family: inherit; font-size: 12px; letter-spacing: 3px;
       text-transform: uppercase; text-align: left;
-      border: 1px solid #2c323c; border-radius: 5px;
+      border: 1px solid var(--ce-soft-15); border-radius: 2px;
       cursor: pointer;
-      transition: border-color 0.12s, transform 0.05s;
+      transition: border-color 0.12s, color 0.12s, background 0.12s, transform 0.05s;
     }
-    .menu-btn:hover { border-color: #c9a87a; transform: translateX(2px); }
-    .menu-btn.danger { border-color: #703a3a; color: #d49a9a; }
-    .menu-btn.danger:hover { border-color: #c94a3a; }
-    .menu-row label { font-size: 11px; color: #9b8b6a; letter-spacing: 1.5px; text-transform: uppercase; display: flex; justify-content: space-between; margin-bottom: 4px; }
-    .menu-row-val { color: #c9a87a; }
-    .menu-row input[type=range] { width: 100%; }
+    .menu-btn:hover {
+      border-color: var(--ce-ice);
+      color: var(--ce-white);
+      background: var(--ce-ice-10);
+      transform: translateX(2px);
+    }
+    .menu-btn.active {
+      border-color: var(--ce-ice);
+      color: var(--ce-white);
+      background: var(--ce-ice-25);
+    }
+    .menu-btn.danger { border-color: rgba(255, 58, 58, 0.35); color: #d07070; }
+    .menu-btn.danger:hover {
+      border-color: var(--ce-red);
+      color: #ffbaba;
+      background: rgba(255, 58, 58, 0.10);
+    }
+    /* Form rows inside menu/settings modals — restyled to the style
+       guide. Labels use soft-grey tech-mono, values pop in ice-blue,
+       sliders / selects / inputs all get the thin ice-blue border
+       idiom with square corners. */
+    .menu-row {
+      background: var(--ce-black);
+      border: 1px solid var(--ce-soft-15);
+      border-radius: 2px;
+      padding: 10px 12px;
+      margin-bottom: 6px;
+    }
+    .menu-row label {
+      font-size: 10px;
+      color: var(--ce-soft);
+      letter-spacing: 2.5px;
+      text-transform: uppercase;
+      display: flex; justify-content: space-between;
+      margin-bottom: 6px;
+      font-family: var(--ce-font-tech);
+    }
+    .menu-row-val { color: var(--ce-ice); font-weight: 700; }
+    .menu-row input[type=range] {
+      width: 100%;
+      accent-color: var(--ce-ice);
+      height: 4px;
+    }
     .menu-row .menu-select {
       width: 100%;
       padding: 6px 8px;
-      background: #15181f;
-      color: #e8dfc8;
-      border: 1px solid #2c323c;
-      border-radius: 4px;
-      font-family: inherit;
-      font-size: 12px;
-      letter-spacing: 1px;
+      background: var(--ce-black);
+      color: var(--ce-white);
+      border: 1px solid var(--ce-soft-15);
+      border-radius: 2px;
+      font-family: var(--ce-font-tech);
+      font-size: 11px;
+      letter-spacing: 2px;
+      text-transform: uppercase;
     }
-    .menu-row .menu-select:focus { outline: 1px solid #c9a87a; }
+    .menu-row .menu-select:focus { outline: 1px solid var(--ce-ice); border-color: var(--ce-ice); }
     .menu-row .menu-row-hint {
-      font-size: 10px;
-      color: #6a7280;
-      letter-spacing: 0.5px;
-      margin-top: 4px;
+      font-size: 9px;
+      color: var(--ce-soft-50);
+      letter-spacing: 1.5px;
+      margin-top: 6px;
+      text-transform: uppercase;
+      font-family: var(--ce-font-tech);
     }
     .menu-flash {
       margin-top: 6px; padding: 6px 10px;
-      font-size: 11px; letter-spacing: 1px; color: #8fbf70;
-      border: 1px solid #2a3a22; border-radius: 4px; text-align: center;
-      background: rgba(143,191,112,0.08);
+      font-size: 10px; letter-spacing: 2px; color: var(--ce-ice);
+      border: 1px solid var(--ce-ice-25); border-radius: 2px; text-align: center;
+      background: var(--ce-ice-10);
+      text-transform: uppercase;
+      font-family: var(--ce-font-tech);
     }
     .menu-input {
       width: 100%; padding: 6px 8px;
-      background: #15181f; color: #e8dfc8;
-      border: 1px solid #2c323c; border-radius: 4px;
-      font-family: inherit; font-size: 12px; letter-spacing: 1px;
+      background: var(--ce-black); color: var(--ce-white);
+      border: 1px solid var(--ce-soft-15); border-radius: 2px;
+      font-family: var(--ce-font-tech); font-size: 11px; letter-spacing: 2px;
     }
-    .menu-input:focus { outline: 1px solid #c9a87a; }
-    .menu-check { transform: scale(1.2); accent-color: #c9a87a; }
+    .menu-input:focus { outline: 1px solid var(--ce-ice); border-color: var(--ce-ice); }
+    .menu-check { transform: scale(1.15); accent-color: var(--ce-ice); }
     .menu-leaderboard { display: grid; grid-template-columns: 1fr 1fr; gap: 10px; margin-bottom: 10px; }
-    .menu-lb-col { border: 1px solid #2c323c; border-radius: 4px; padding: 8px; background: #15181f; }
-    .menu-lb-heading { font-size: 11px; color: #c9a87a; letter-spacing: 1.5px; text-transform: uppercase; margin-bottom: 6px; }
-    .menu-lb-row { font-size: 11px; color: #e8dfc8; padding: 2px 0; letter-spacing: 0.5px; }
+    .menu-lb-col {
+      border: 1px solid var(--ce-soft-15);
+      border-radius: 2px;
+      padding: 8px;
+      background: var(--ce-black);
+    }
+    .menu-lb-heading {
+      font-size: 10px;
+      color: var(--ce-ice);
+      letter-spacing: 2.5px;
+      text-transform: uppercase;
+      margin-bottom: 6px;
+      font-family: var(--ce-font-tech);
+    }
+    .menu-lb-row {
+      font-size: 11px;
+      color: var(--ce-white);
+      padding: 2px 0;
+      letter-spacing: 1px;
+      font-family: var(--ce-font-tech);
+    }
     .menu-lb-empty { font-size: 11px; color: #6a7280; text-align: center; padding: 6px 0; }
 
-    /* Main menu (landing screen) — reuses menu-card styling but wider */
+    /* Main menu — landing screen styled to the Cold Exit splash art.
+       Full-screen splash PNG as backdrop, menu content left-aligned
+       in a translucent rail. The image already has the atmosphere
+       baked in; the overlay just adds menu interactivity. */
     #main-menu-root {
       position: fixed; inset: 0;
-      background: radial-gradient(ellipse at center, rgba(0,0,0,0.82), rgba(0,0,0,0.97));
-      display: flex; align-items: center; justify-content: center;
+      background:
+        linear-gradient(90deg, rgba(5,6,7,0.75) 0%, rgba(5,6,7,0.35) 45%, rgba(5,6,7,0.10) 75%, rgba(5,6,7,0.0) 100%),
+        url('Assets/coldexitmain.png') center center / cover no-repeat var(--ce-black);
+      display: flex; align-items: stretch; justify-content: flex-start;
       z-index: 22;
       font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+      color: #e8eef6;
     }
     #main-menu-card {
-      width: 520px; max-width: 92vw;
-      background: linear-gradient(180deg, #181b21 0%, #0e1018 100%);
-      border: 1px solid #c9a87a; border-radius: 10px;
-      padding: 24px 26px;
-      box-shadow: 0 14px 50px rgba(0,0,0,0.85);
-      color: #e8dfc8;
+      width: 440px; max-width: 90vw;
+      padding: 8vh 0 6vh 8vw;
+      display: flex; flex-direction: column;
+      justify-content: center;
+      background: transparent;
+      border: none; border-radius: 0;
+      box-shadow: none;
     }
     #main-menu-title {
-      font-size: 22px; font-weight: 700; letter-spacing: 4px;
-      color: #c9a87a; text-transform: uppercase; text-align: center;
-      margin-bottom: 4px;
+      font-size: 72px;
+      font-weight: 800;
+      letter-spacing: 14px;
+      color: var(--ce-white);
+      text-transform: uppercase;
+      text-align: left;
+      margin: 0 0 10px;
+      line-height: 1;
+      text-shadow: 0 2px 24px rgba(0,0,0,0.85), 0 0 40px rgba(0, 230, 255, 0.10);
+      font-family: var(--ce-font-disp);
     }
     #main-menu-subtitle {
-      font-size: 11px; letter-spacing: 3px; text-transform: uppercase;
-      color: #6a7280; text-align: center; margin-bottom: 20px;
+      font-size: 11px;
+      letter-spacing: 5px;
+      text-transform: uppercase;
+      color: var(--ce-ice);
+      text-align: left;
+      margin-bottom: 48px;
+      padding-left: 3px;
+      font-family: var(--ce-font-tech);
     }
-    #main-menu-body { display: flex; flex-direction: column; gap: 8px; }
+    #main-menu-body {
+      display: flex; flex-direction: column; gap: 0;
+      border-left: 1px solid var(--ce-ice-25);
+      padding-left: 18px;
+    }
+    /* Codename field on the main-menu rail — matches the rail's
+       left-aligned look. Not a boxed form row like Options, just a
+       small label + bottom-bordered input in tech-mono. */
+    .main-menu-name {
+      margin-left: -19px;
+      padding: 8px 0 14px 16px;
+      border-left: 2px solid transparent;
+    }
+    .main-menu-name label {
+      display: block;
+      font-size: 10px;
+      letter-spacing: 3px;
+      color: var(--ce-soft);
+      text-transform: uppercase;
+      margin-bottom: 4px;
+      font-family: var(--ce-font-tech);
+    }
+    .main-menu-name .menu-input {
+      background: transparent;
+      border: 0;
+      border-bottom: 1px solid var(--ce-ice-25);
+      border-radius: 0;
+      padding: 6px 2px;
+      font-size: 14px;
+      letter-spacing: 3px;
+      text-transform: uppercase;
+      color: var(--ce-white);
+      font-family: var(--ce-font-tech);
+      width: 240px;
+    }
+    .main-menu-name .menu-input:focus {
+      outline: none;
+      border-bottom-color: var(--ce-ice);
+    }
+    /* Override the boxed menu-btn look inside the main menu — these
+       are left-aligned rail items, not outlined pills. Keep the
+       boxed style for settings + leaderboard sub-views via the
+       `.main-menu-nested` class on body when those render. */
+    #main-menu-body > .menu-btn {
+      background: transparent;
+      border: none;
+      border-left: 2px solid transparent;
+      border-radius: 0;
+      padding: 10px 0 10px 16px;
+      margin-left: -19px;
+      text-align: left;
+      font-size: 15px;
+      letter-spacing: 4px;
+      text-transform: uppercase;
+      color: #cbd6e2;
+      cursor: pointer;
+      transition: color 0.15s, border-color 0.15s, padding-left 0.15s;
+    }
+    #main-menu-body > .menu-btn:hover {
+      color: var(--ce-white);
+      border-left-color: var(--ce-ice);
+      background: transparent;
+      padding-left: 20px;
+      transform: none;
+    }
+    /* Bottom-left status line (build version / tagline) mirroring the
+       splash art's "monitor: ok" readout. Rendered absolutely so it
+       sits flush against the bottom of the viewport. */
+    #main-menu-status {
+      position: absolute;
+      left: 8vw; bottom: 5vh;
+      font-size: 10px;
+      letter-spacing: 3px;
+      color: var(--ce-soft);
+      text-transform: uppercase;
+      text-align: left;
+      line-height: 1.8;
+      pointer-events: none;
+      font-family: var(--ce-font-tech);
+    }
+    #main-menu-status::before {
+      content: '';
+      display: block;
+      width: 32px; height: 1px;
+      background: var(--ce-ice);
+      margin-bottom: 8px;
+    }
+    /* Sub-views (Settings / Leaderboard) — restore the boxed card so
+       forms / lists read clearly against the splash backdrop. */
+    /* Nested sub-view (Settings / Leaderboard) — dark navy card,
+       ice-blue outline, corner brackets matching the Esc menu. */
+    #main-menu-card.nested {
+      background: var(--ce-navy);
+      border: 1px solid var(--ce-ice-25);
+      border-radius: 2px;
+      margin: 8vh auto;
+      padding: 26px 28px;
+      width: 520px;
+      align-self: center;
+      position: relative;
+      box-shadow: 0 14px 50px rgba(0,0,0,0.85), inset 0 0 0 1px rgba(0,0,0,0.4);
+    }
+    #main-menu-card.nested::before,
+    #main-menu-card.nested::after {
+      content: '';
+      position: absolute;
+      width: 14px; height: 14px;
+      border-color: var(--ce-ice);
+      border-style: solid;
+      pointer-events: none;
+    }
+    #main-menu-card.nested::before {
+      top: -1px; left: -1px;
+      border-width: 1px 0 0 1px;
+    }
+    #main-menu-card.nested::after {
+      bottom: -1px; right: -1px;
+      border-width: 0 1px 1px 0;
+    }
+    #main-menu-card.nested #main-menu-title {
+      font-size: 20px;
+      letter-spacing: 4px;
+      color: var(--ce-white);
+      text-align: center;
+      font-family: var(--ce-font-tech);
+    }
+    #main-menu-card.nested #main-menu-subtitle { text-align: center; color: var(--ce-soft); }
+    #main-menu-card.nested #main-menu-body {
+      border: none;
+      padding: 0;
+      gap: 6px;
+    }
+    #main-menu-card.nested #main-menu-body > .menu-btn {
+      background: transparent;
+      border: 1px solid var(--ce-soft-15);
+      border-radius: 2px;
+      padding: 10px 14px;
+      margin-left: 0;
+      text-align: center;
+      letter-spacing: 3px;
+      font-size: 12px;
+      color: var(--ce-soft);
+      text-transform: uppercase;
+    }
+    #main-menu-card.nested #main-menu-body > .menu-btn:hover {
+      border-color: var(--ce-ice);
+      color: var(--ce-white);
+      background: var(--ce-ice-10);
+      transform: translateX(2px);
+    }
 
     /* Starting store upgrade panel */
     #store-upgrade-root {
@@ -513,14 +877,15 @@
       max-width: 100vw;
       max-height: 100vh;
       overflow: hidden;
-      background: linear-gradient(180deg, #181b21 0%, #10121a 100%);
+      background: var(--ce-black);
       border: 0;
       border-radius: 0;
-      color: #e8dfc8;
+      color: var(--ce-soft);
       padding: 14px 20px 10px;
       display: flex;
       flex-direction: column;
       box-shadow: none;
+      font-family: var(--ce-font-tech);
     }
     /* Inventory body fills the remaining card height so each column
        can scroll independently. */
@@ -1379,14 +1744,15 @@
       max-width: 100vw;
       max-height: 100vh;
       overflow: hidden;
-      background: linear-gradient(180deg, #181b21 0%, #10121a 100%);
+      background: var(--ce-black);
       border: 0;
       border-radius: 0;
-      color: #e8dfc8;
+      color: var(--ce-soft);
       padding: 14px 18px 10px;
       display: flex;
       flex-direction: column;
       box-shadow: none;
+      font-family: var(--ce-font-tech);
     }
     #loot-header {
       display: flex;
@@ -2892,11 +3258,13 @@
 </head>
 <body>
   <div id="app"></div>
-  <div id="hud">
-    <div><b>WASD</b> move &middot; <b>Shift</b> sprint &middot; <b>C</b> crouch toggle &middot; <b>Space</b> dash / dbl-tap roll</div>
-    <div><b>LMB</b> fire/combo &middot; <b>RMB</b> ADS / melee-block &middot; <b>Shift</b>+sprint+<b>C</b> slide</div>
-    <div><b>melee</b> LMB mid-combo branches to next hit &middot; <b>block+LMB</b> parry (redirect)</div>
-    <div><b>1..N</b> weapon &middot; <b>Q</b> cycle &middot; <b>E</b> pick/trade &middot; <b>F</b> swipe/execute &middot; <b>R</b> reload &middot; <b>H</b> medkit &middot; <b>Tab</b> inventory &middot; <b>K</b> perks</div>
+  <div id="controls-hint">press <b>?</b> for controls</div>
+  <div id="hud" style="display: none;">
+    <div id="hud-controls-head">Controls &middot; press <b>?</b> to hide</div>
+    <div class="hud-row"><span class="hud-group">Movement</span><b>WASD</b> move &middot; <b>Shift</b> sprint &middot; <b>C</b> crouch &middot; <b>Space</b> dash / dbl-tap roll &middot; <b>Q</b> swap shoulder</div>
+    <div class="hud-row"><span class="hud-group">Combat</span><b>LMB</b> fire / melee combo &middot; <b>RMB</b> ADS / block &middot; <b>F</b> quick melee / execute &middot; <b>block + LMB</b> parry</div>
+    <div class="hud-row"><span class="hud-group">Gear</span><b>1-4</b> weapon slot &middot; <b>X</b> cycle weapons &middot; <b>R</b> reload &middot; <b>H</b> medkit &middot; <b>5-8</b> quickbar (throwables / consumables) &middot; <b>T</b> toggle lights</div>
+    <div class="hud-row"><span class="hud-group">Interact</span><b>E</b> pick up / interact / shop &middot; <b>Tab</b> inventory &middot; <b>K</b> perks &middot; <b>Esc</b> menu</div>
     <div id="hud-stats"></div>
   </div>
   <div id="hp">

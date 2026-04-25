@@ -1,0 +1,13 @@
+ .git
+  .gitignore
+  .gitattributes
+  .cloudflareignore
+  Assets/*.zip
+  Assets/*.unitypackage
+  worker
+  README.md
+  BACKLOG.md
+  DESIGN.md
+  bugs
+  .claude
+  node_modules

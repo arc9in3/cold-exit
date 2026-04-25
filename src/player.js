@@ -331,6 +331,23 @@ export function createPlayer(scene) {
 
   scene.add(group);
 
+  // Warm ground-spill around the player — a PointLight planted AT
+  // floor level so it illuminates the floor + nearby wall bases
+  // without lighting the character (or the camera-facing air,
+  // which is what was blowing out in bloom). Keeps the "I have a
+  // presence" feel from the splash art without the glare.
+  const auraLight = new THREE.PointLight(
+    tunables.lighting?.playerAuraColor ?? 0xffb070,
+    tunables.lighting?.playerAuraIntensity ?? 0.7,
+    tunables.lighting?.playerAuraDistance ?? 4.0,
+    tunables.lighting?.playerAuraDecay ?? 1.8,
+  );
+  auraLight.position.set(0, 0.08, 0);   // ground level under the character
+  group.add(auraLight);
+  // Keep a handle on it so `syncLighting()` in main.js can update
+  // intensity / color / distance live from the tunables panel.
+  group.userData.auraLight = auraLight;
+
   const velocity = new THREE.Vector3();
   const facing = new THREE.Vector3(0, 0, 1);
 

@@ -884,15 +884,29 @@ export function updateAnim(rig, state, dt) {
 
   // Base (walk + crouch) leg rotations — kneel pose will overwrite
   // them below when kneelBlend > 0.
+  //
+  // Right leg gets EXTRA forward thigh + knee bend during crouch so
+  // the right knee sits noticeably in front of the left. The prior
+  // symmetric crouch looked unnatural — both knees parked equally
+  // back — whereas a real athletic crouch has the dominant leg
+  // leading forward (ready to push off / rise). Lefts still use the
+  // base `crouchThigh/crouchKnee` so the standing leg stays
+  // grounded.
+  const rightCrouchThigh = crouchThigh * 1.45;   // more forward lean on the front leg
+  const rightCrouchKnee  = crouchKnee  * 1.25;   // deeper bend to match
   let leftThighRot  = leftThighGait  + crouchThigh;
-  let rightThighRot = rightThighGait + crouchThigh;
+  let rightThighRot = rightThighGait + rightCrouchThigh;
   let leftKneeRot   = leftKneeGait   + crouchKnee;
-  let rightKneeRot  = rightKneeGait  + crouchKnee;
+  let rightKneeRot  = rightKneeGait  + rightCrouchKnee;
   // Ankle: partial compensation for knee bend (keeps the foot from
   // slapping into the ground too hard as the knee flexes) + heel-toe
   // roll + crouch offset.
+  // Right leg's ankle needs its OWN crouch compensation now that
+  // the right thigh / knee take bigger bends — without it the foot
+  // rotates out of flat contact with the ground.
+  const rightCrouchAnkle = -(rightCrouchThigh + rightCrouchKnee);
   let leftAnkleRot  = -leftKneeGait  * 0.35 + leftFootRoll  + crouchAnkle;
-  let rightAnkleRot = -rightKneeGait * 0.35 + rightFootRoll + crouchAnkle;
+  let rightAnkleRot = -rightKneeGait * 0.35 + rightFootRoll + rightCrouchAnkle;
 
   if (kneel > 0.01) {
     // Kneel pose targets — calibrated for the current leg proportions
@@ -1088,8 +1102,18 @@ export function updateAnim(rig, state, dt) {
   // Aim pitch: positive pitch = target above firing origin, so the
   // upper arm needs MORE negative rotation.x (more forward-up).
   // Subtract aimPitch — both chest and ADS poses track vertical aim.
-  const crouchBias = a.crouchBlend * 0.50 + a.kneelBlend * 0.05;
-  const tuckBias   = a.crouchBlend * 1.16 + a.kneelBlend * 0.17;
+  // Crouch pose used to add a +0.50 rad `crouchBias` to shoulder
+  // pitch (lifting the arm toward vertical) and a +1.16 rad
+  // `tuckBias` to elbow bend (folding the forearm up), producing a
+  // "muzzle raised, tight tuck" silhouette. That broke the
+  // always-parallel-to-ground rule for guns — the combined rotations
+  // ended up with the forearm pointing at the ceiling. Both biases
+  // are now zero so crouching keeps the arm in its standing
+  // forward-low pose; the chest/hips pitch still compresses the
+  // character down, but `armLeanComp` below cancels that out on the
+  // arm itself so the weapon stays level.
+  const crouchBias = 0;
+  const tuckBias   = 0;
   const chestShoulderPitch = -0.60 - aimPitchV * 0.55 + crouchBias;
   const chestElbow         = -0.97 - tuckBias;
   const headShoulderPitch  = -1.75 - aimPitchV * 0.80 + crouchBias * 0.40;

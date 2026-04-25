@@ -13,7 +13,11 @@ export function createScene() {
   // whole map rendering at once. Density = 0.035 gives the "visible
   // haze" read around light pools without making close objects
   // foggy.
-  scene.fog = new THREE.FogExp2(0x06080f, 0.015);
+  // Fog + global lights are driven by `tunables.lighting` so the F3
+  // export + console tweaks can retune the whole look without a
+  // reload. Initial values come from the tunable defaults.
+  const L = tunables.lighting;
+  scene.fog = new THREE.FogExp2(L.fogColor, L.fogDensity);
 
   const halfH = tunables.camera.viewHeight / 2;
   const aspect = window.innerWidth / window.innerHeight;
@@ -95,13 +99,10 @@ export function createScene() {
   // Previous values had a 0.70-intensity key directional that was
   // effectively an outdoor sun, which washed the whole map evenly
   // and killed contrast.
-  scene.add(new THREE.HemisphereLight(0x1e2a3a, 0x04060a, 0.10));
+  const hemi = new THREE.HemisphereLight(L.hemiSky, L.hemiGround, L.hemiIntensity);
+  scene.add(hemi);
 
-  // Cool-tinted key — dimmer than the old "outdoor sun" (0.70) so
-  // SpotLight pools can dominate, but bright enough that unlit areas
-  // are navigable instead of pitch black. Sits between the old
-  // value and the first over-dark pass.
-  const key = new THREE.DirectionalLight(0x9ab0c8, 0.45);
+  const key = new THREE.DirectionalLight(L.keyColor, L.keyIntensity);
   key.position.set(30, 40, 20);
   key.castShadow = true;
   key.shadow.mapSize.set(1024, 1024);
@@ -118,13 +119,13 @@ export function createScene() {
   // Fill keeps shadow side from blocking into the fog as an
   // indistinct blob, but stays cool so it doesn't fight the warm
   // SpotLights visually.
-  const fill = new THREE.DirectionalLight(0x1a2840, 0.10);
+  const fill = new THREE.DirectionalLight(L.fillColor, L.fillIntensity);
   fill.position.set(-20, 15, -25);
   scene.add(fill);
 
   // Rim stays — it's THE thing that carves characters out against the
   // dark ground in the reference image.
-  const rim = new THREE.DirectionalLight(0x6a88bf, 0.22);
+  const rim = new THREE.DirectionalLight(L.rimColor, L.rimIntensity);
   rim.position.set(-10, 22, 35);
   scene.add(rim);
 
@@ -150,5 +151,6 @@ export function createScene() {
 
   const groundPlane = new THREE.Plane(new THREE.Vector3(0, 1, 0), 0);
   return { scene, camera, updateCamera, resize, groundPlane,
-    keyLight: key, fillLight: fill, rimLight: rim, gridHelper: grid };
+    hemiLight: hemi, keyLight: key, fillLight: fill, rimLight: rim,
+    gridHelper: grid };
 }

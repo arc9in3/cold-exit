@@ -315,7 +315,7 @@ appEl.appendChild(renderer.domElement);
 attachUnlock(renderer.domElement);
 
 const { scene, camera, updateCamera, resize, groundPlane,
-  keyLight, fillLight, rimLight, gridHelper } = createScene();
+  hemiLight, keyLight, fillLight, rimLight, gridHelper } = createScene();
 applyQuality(initialQuality, { renderer, scene, keyLight, fillLight, rimLight, gridHelper });
 
 // Post-FX composer — bloom + vignette/grain. Only rendered through
@@ -1582,6 +1582,92 @@ window.addEventListener('keydown', (ev) => {
     console.warn('level dump failed:', e);
   }
 });
+
+// Controls overlay toggle — `?` or `/` flips the visibility of the
+// `#hud` block. The accompanying `#controls-hint` prompt is auto-
+// hidden while the overlay is up. Window-level listener so the
+// toggle works even with modals open; form-input focus is checked
+// so typing a `/` in a text field doesn't pop the overlay.
+(function wireControlsOverlay() {
+  const hud  = document.getElementById('hud');
+  const hint = document.getElementById('controls-hint');
+  if (!hud) return;
+  const setVisible = (v) => {
+    hud.style.display  = v ? 'block' : 'none';
+    if (hint) hint.style.display = v ? 'none' : 'block';
+  };
+  window.addEventListener('keydown', (ev) => {
+    const ae = document.activeElement;
+    if (ae && (ae.tagName === 'INPUT' || ae.tagName === 'TEXTAREA' || ae.isContentEditable)) return;
+    // Slash key fires `Slash` unshifted and also `?` shifted; match
+    // on both so either works without the user having to hold Shift.
+    if (ev.code !== 'Slash') return;
+    ev.preventDefault();
+    setVisible(hud.style.display === 'none');
+  });
+})();
+
+// Dev key — F3 dumps the current `tunables.lighting` block to the
+// console in copy-paste-ready form so you can iterate on values in
+// real time (e.g. `tunables.lighting.keyIntensity = 0.8` in the
+// console → see effect immediately → hit F3 to snapshot the
+// winning values for checking in).
+window.addEventListener('keydown', (ev) => {
+  if (ev.code !== 'F3') return;
+  ev.preventDefault();
+  const L = tunables.lighting;
+  const hex = (n) => '0x' + n.toString(16).padStart(6, '0');
+  const text =
+`lighting: {
+  hemiSky:             ${hex(L.hemiSky)},
+  hemiGround:          ${hex(L.hemiGround)},
+  hemiIntensity:       ${L.hemiIntensity.toFixed(3)},
+  keyColor:            ${hex(L.keyColor)},
+  keyIntensity:        ${L.keyIntensity.toFixed(3)},
+  fillColor:           ${hex(L.fillColor)},
+  fillIntensity:       ${L.fillIntensity.toFixed(3)},
+  rimColor:            ${hex(L.rimColor)},
+  rimIntensity:        ${L.rimIntensity.toFixed(3)},
+  fogColor:            ${hex(L.fogColor)},
+  fogDensity:          ${L.fogDensity.toFixed(4)},
+  playerAuraColor:     ${hex(L.playerAuraColor)},
+  playerAuraIntensity: ${L.playerAuraIntensity.toFixed(3)},
+  playerAuraDistance:  ${L.playerAuraDistance.toFixed(2)},
+  playerAuraDecay:     ${L.playerAuraDecay.toFixed(2)},
+},`;
+  console.log('=== LIGHTING TUNABLES (F3) ===');
+  console.log(text);
+  console.log('=== END ===');
+  transientHudMsg?.('lighting dump → console', 1.2);
+});
+
+// Apply `tunables.lighting` to the live light objects every frame so
+// console edits take effect immediately. Colors are reassigned via
+// `.setHex`; scalars go straight across. Player aura is looked up
+// through `player.mesh.userData.auraLight`.
+function syncLighting() {
+  const L = tunables.lighting;
+  if (hemiLight) {
+    hemiLight.color.setHex(L.hemiSky);
+    hemiLight.groundColor.setHex(L.hemiGround);
+    hemiLight.intensity = L.hemiIntensity;
+  }
+  if (keyLight)  { keyLight.color.setHex(L.keyColor);   keyLight.intensity  = L.keyIntensity; }
+  if (fillLight) { fillLight.color.setHex(L.fillColor); fillLight.intensity = L.fillIntensity; }
+  if (rimLight)  { rimLight.color.setHex(L.rimColor);   rimLight.intensity  = L.rimIntensity; }
+  if (scene.fog) {
+    scene.fog.color.setHex(L.fogColor);
+    scene.fog.density = L.fogDensity;
+  }
+  scene.background.setHex(L.fogColor);
+  const aura = player?.mesh?.userData?.auraLight;
+  if (aura) {
+    aura.color.setHex(L.playerAuraColor);
+    aura.intensity = L.playerAuraIntensity;
+    aura.distance  = L.playerAuraDistance;
+    aura.decay     = L.playerAuraDecay;
+  }
+}
 const _yUp = new THREE.Vector3(0, 1, 0);
 const _tmpDir2 = new THREE.Vector3();
 const _tmpMid = new THREE.Vector3();
@@ -1661,7 +1747,7 @@ function updateBeamAndCone(playerInfo, aimInfo, inputState) {
     const tier = light.lightTier;
     let opacity = 0.18;
     let color = 0xffe0a0;
-    let intensity = 8.0;
+    let intensity = 16.0;   // 2× bump across tiers per user request
     // Only basic / tactical draw the cone mesh — it reads as a soft
     // dust haze in the light. Strobe is pure rapid flash: the cone
     // primitive popping in and out at 10-22 Hz reads as a solid
@@ -1669,16 +1755,16 @@ function updateBeamAndCone(playerInfo, aimInfo, inputState) {
     // let the SpotLight alone sell the strobe effect.
     let showCone = true;
     if (tier === 'tactical') {
-      opacity = 0.22; color = 0xffe060; intensity = 11.0;
+      opacity = 0.22; color = 0xffe060; intensity = 22.0;
     } else if (tier === 'strobe') {
       color = 0xffffff;
       const t = performance.now() * 0.001;
       const freq = inputState.adsHeld ? 22 : 10;
       const pulse = Math.abs(Math.sin(t * freq));
-      intensity = 3.0 + pulse * 14.0;
+      intensity = 6.0 + pulse * 28.0;
       showCone = false;
     } else if (tier === 'basic') {
-      opacity = 0.18; intensity = 7.5;
+      opacity = 0.18; intensity = 15.0;
     }
     flashConeMesh.material.color.setHex(color);
     flashConeMesh.material.opacity = opacity;
@@ -3728,33 +3814,38 @@ function _fadeWall(m) {
   if (m.userData?.isProp) return;
   if (m.material && m.material.opacity === 0 && m.userData?._origOpacity === undefined) return;
   const ud = m.userData;
+  // First fade for this wall — stash original state AND flip
+  // `transparent` to true ONCE. We leave `transparent` true forever
+  // after; subsequent fade/restore cycles only change opacity, which
+  // doesn't trigger a Three.js shader recompile. Prior version
+  // toggled `transparent` on/off every cycle and called
+  // `needsUpdate`, which caused intermittent frames where the wall
+  // rendered with the cached opaque shader despite being marked
+  // transparent — the symptom was "walls don't fade even though
+  // raycaster is hitting them".
   if (ud._origOpacity === undefined) {
     ud._origOpacity = m.material.opacity;
-    ud._origTransparent = !!m.material.transparent;
     ud._origDepthWrite = m.material.depthWrite !== false;
     ud._origCastShadow = !!m.castShadow;
+    if (!m.material.transparent) {
+      m.material.transparent = true;
+      m.material.needsUpdate = true;   // one-time program rebuild
+    }
   }
-  m.material.transparent = true;
-  // Faded-but-still-clearly-a-wall opacity. Earlier 0.22 made walls
-  // nearly invisible, and the player couldn't parse whether a gap was
-  // a real opening or a faded section of wall. 0.5 keeps the silhouette
-  // readable while still letting the player see through to enemies.
-  m.material.opacity = 0.5;
+  m.material.opacity = 0.3;
   m.material.depthWrite = false;
   m.castShadow = false;
 }
 function _restoreWall(m) {
-  // Invisible collision proxies (props, elevator internals) are
-  // skipped by `_fadeWall` via the `isProp` guard AND never get
-  // `_origOpacity` stashed on them. Without this matching guard,
-  // the restore path below would default `opacity = 1` and make
-  // them fully visible — which is exactly the "prop lit up bright
-  // when I walked past" bug. Skip them here too.
   if (m.userData?.isProp) return;
   if (m.userData?._origOpacity === undefined) return;
   const ud = m.userData;
+  // Leave `material.transparent` true permanently — flipping it back
+  // pairs with _fadeWall flipping it forward and forces a Three.js
+  // shader recompile each cycle, which was leaving frames where the
+  // wall rendered with the cached opaque program. Opacity 1.0 + the
+  // transparent flag is visually identical to a fully opaque mesh.
   m.material.opacity = ud._origOpacity ?? 1;
-  m.material.transparent = !!ud._origTransparent;
   m.material.depthWrite = ud._origDepthWrite !== false;
   m.castShadow = ud._origCastShadow !== false;
 }
@@ -3763,7 +3854,7 @@ function _restoreWall(m) {
 // go transparent automatically, not just walls between camera and
 // player. Without this, small characters frequently got lost behind
 // room edges and the player had to reposition to see them.
-const OCCL_ENEMY_RANGE = 16;
+const OCCL_ENEMY_RANGE = 24;   // extended from 16 — covers typical rifle engagement arcs
 
 function _addOcclusionHits(from, target, blockers, outSet) {
   _occlDir.copy(target).sub(from);
@@ -3798,21 +3889,55 @@ function updateWallOcclusion() {
     _occlTargetPt.set(px, 1.0, pz);
     _addOcclusionHits(camera.position, _occlTargetPt, level.obstacles, nextFaded);
 
-    // 2. Walls between camera and any nearby LIVING enemy — so the
-    //    player can see (and shoot at) targets that would otherwise be
-    //    hidden behind thick walls from the isometric view.
-    //    Skipped in low-quality mode (expensive per-frame raycasts).
+    // 2. Walls between camera and each relevant LIVING enemy. Every
+    //    enemy casts a 4-ray silhouette fan (head, chest, both
+    //    shoulders) so walls that clip part of their body still
+    //    fade. The range rule is split by threat state:
+    //      * ACTIVE enemies (alerted / chasing / firing / winding
+    //        up / recovering — anything that isn't idle or asleep)
+    //        get NO RANGE CAP. If they're a threat, the player
+    //        needs to see them regardless of distance.
+    //      * IDLE / SLEEPING enemies keep the `OCCL_ENEMY_RANGE`
+    //        cap (24m) so the system doesn't burn budget revealing
+    //        patrol-state gunmen across the whole map.
+    //    All of this is still gated behind the quality flag.
     if (qualityFlags.wallOcclusionForEnemies) {
-      const rangeSq = OCCL_ENEMY_RANGE * OCCL_ENEMY_RANGE;
+      const idleRangeSq = OCCL_ENEMY_RANGE * OCCL_ENEMY_RANGE;
+      const enemyFan = [
+        { dx:  0.00, y: 1.75, dz:  0.00 },   // head
+        { dx:  0.00, y: 1.10, dz:  0.00 },   // chest
+        { dx:  0.40, y: 1.20, dz:  0.00 },   // right shoulder
+        { dx: -0.40, y: 1.20, dz:  0.00 },   // left shoulder
+      ];
       const allEnemies = [...gunmen.gunmen, ...melees.enemies];
       for (const e of allEnemies) {
         if (!e.alive) continue;
         const ex = e.group.position.x, ez = e.group.position.z;
-        const d2 = (ex - px) * (ex - px) + (ez - pz) * (ez - pz);
-        if (d2 > rangeSq) continue;
-        _occlTargetPt.set(ex, 1.0, ez);
-        _addOcclusionHits(camera.position, _occlTargetPt, level.obstacles, nextFaded);
+        // Active-state detection. Gunman state machine uses strings
+        // (see gunman.js STATE table); melee rushers use the same
+        // pattern. Any state other than "idle" / "sleep" / "dead"
+        // counts as a threat worth revealing.
+        const s = e.state;
+        const active = !!s && s !== 'idle' && s !== 'sleep' && s !== 'dead';
+        if (!active) {
+          const d2 = (ex - px) * (ex - px) + (ez - pz) * (ez - pz);
+          if (d2 > idleRangeSq) continue;
+        }
+        for (const off of enemyFan) {
+          _occlTargetPt.set(ex + off.dx, off.y, ez + off.dz);
+          _addOcclusionHits(camera.position, _occlTargetPt, level.obstacles, nextFaded);
+        }
       }
+    }
+
+    // 2b. Walls between camera and the CURRENT AIM POINT — if the
+    //     player is pointing their cursor at a spot across a wall,
+    //     reveal the obstruction so they understand why the shot
+    //     won't land. Independent of enemy visibility, so it also
+    //     works for pre-engagement "peek the corner" intent.
+    if (qualityFlags.wallOcclusionForEnemies && lastAim) {
+      _occlTargetPt.set(lastAim.x, 1.0, lastAim.z);
+      _addOcclusionHits(camera.position, _occlTargetPt, level.obstacles, nextFaded);
     }
 
     // 3. Cast a fan of rays spanning the player's silhouette — chest
@@ -4970,6 +5095,7 @@ function tick() {
   _tickFireOrbs(dt);
   _tickBurnReadouts(dt);
   _tickBuffAuras(dt);
+  syncLighting();
   dummies.update(dt);
   level.animateNPCs(dt);
   const extraCrouch = derivedStats.stealthExtraCrouchMult || 1;
@@ -5093,7 +5219,7 @@ function tick() {
     (x, z, r) => level.unstickFrom(x, z, r),
   );
 
-  loot.update(dt);
+  loot.update(dt, player.mesh.position);
 
   const prompt = updateLootPrompt();
   if (inputState.interactPressed) tryInteract(prompt);

@@ -693,6 +693,7 @@ export class Level {
     mesh.userData.connects = [a.id, b.id];
     mesh.userData.cx = cx;
     mesh.userData.cz = cz;
+
   }
 
   _scatterCover(room) {

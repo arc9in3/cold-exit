@@ -37,7 +37,7 @@ export const MODEL_BY_WEAPON_NAME = {
   // Army_SMG=ump45, Civilian_SMG=roni(pcc), Police_SMG=p90, Tactical_SMG=vector.
   'AKS-74U':         'weapons/SM_Army_Submachine_Gun.fbx',   // no AK-74U model; UMP silhouette stands in
   'PDW':             'weapons/SM_Civilian_Submachine_Gun.fbx', // Roni PCC
-  'MP7':             'weapons/SM_Special_Submachine_Gun.fbx', // unannotated slot; compact visual
+  'MP7':             'weapons/SM_Civilian_Submachine_Gun.fbx', // both Special_Submachine_Gun variants render invisible — reuse the generic SMG mesh (shared with PDW) as a stand-in until a working MP7 FBX lands
   'P90':             'weapons/SM_Police_Submachine_Gun.fbx',  // user-confirmed P90
 
   // Rifles.
@@ -133,11 +133,20 @@ export const MODEL_GRIP_OFFSET = {
   // grip instead of the buttstock. Values are in inHandModel-local
   // units; use `__debug.tuneWeapon` to dial any of these in live
   // and copy the numbers back here.
-  'weapons/SM_Civilian_Submachine_Gun.fbx': { x: 0, y: 0, z: -0.18 },   // PDW / generic SMG
-  'weapons/SM_Army_Submachine_Gun.fbx':     { x: 0, y: 0, z: -0.16 },   // AKS-74U (UMP stand-in)
-  'weapons/SM_Police_Submachine_Gun.fbx':   { x: 0, y: 0, z: -0.20 },   // P90 (bullpup — grip closer to centre)
-  'weapons/SM_Special_Submachine_Gun.fbx':  { x: 0, y: 0, z: -0.14 },   // MP7 (compact)
-  'weapons/SM_Tactical_Submachine_Gun.fbx': { x: 0, y: 0, z: -0.16 },   // Vector
+  // Convention established empirically: NEGATIVE Z pulls the mesh
+  // forward along the weapon's long axis (moving the muzzle past
+  // the hand), which lands the grip (behind the bbox center for
+  // every SMG in this set) at the hand. Positive flipped the
+  // whole gun backward and the flip read as "muzzle pointing at
+  // the shooter" on the MP7. Earlier negative values (−0.14 to
+  // −0.20) weren't aggressive enough — bumping to around −0.32
+  // to clearly seat the grip.
+  'weapons/SM_Civilian_Submachine_Gun.fbx': { x: 0, y: 0, z: -0.32 },   // PDW / generic SMG (shared w/ MP7)
+  'weapons/SM_Army_Submachine_Gun.fbx':     { x: 0, y: 0, z: -0.30 },   // AKS-74U
+  'weapons/SM_Police_Submachine_Gun.fbx':   { x: 0, y: 0, z: -0.38 },   // P90 (bullpup — need deeper push)
+  'weapons/SM_Special_Submachine_Gun.fbx':       { x: 0, y: 0, z: -0.28 },   // MP7 fallback
+  'weapons/SM_Special_Submachine_Gun_Clean.fbx': { x: 0, y: 0, z: -0.28 },   // MP7 active mesh
+  'weapons/SM_Tactical_Submachine_Gun.fbx': { x: 0, y: 0, z: -0.30 },   // Vector
   // Melee — handle is at one end of the mesh, but fitToRadius
   // centres the bbox at the hand, so the handle ends up ~half the
   // mesh length away. Negative Z shifts the model back so the grip

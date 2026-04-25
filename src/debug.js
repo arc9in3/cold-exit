@@ -16,6 +16,33 @@ export function initDebugPanel(actions = {}) {
   // the prototype clean for friends without requiring code surgery.
   setDebugPanelVisible(gui, getDevToolsEnabled());
 
+  // Lighting — opened by default since it's the actively-tuned block.
+  // Hex color fields round-trip through a `colorProxy` so lil-gui's
+  // picker can read/write our integer `tunables.lighting` values.
+  // `syncLighting()` in main.js pushes edits to the live scene each
+  // frame; F3 dumps the current block to the console.
+  const lighting = gui.addFolder('lighting');
+  const L = tunables.lighting;
+  const colorProxy = (obj, key) => ({
+    get v() { return '#' + obj[key].toString(16).padStart(6, '0'); },
+    set v(s) { obj[key] = parseInt(s.replace('#', ''), 16); },
+  });
+  lighting.addColor(colorProxy(L, 'hemiSky'), 'v').name('hemiSky');
+  lighting.addColor(colorProxy(L, 'hemiGround'), 'v').name('hemiGround');
+  lighting.add(L, 'hemiIntensity', 0, 2, 0.01);
+  lighting.addColor(colorProxy(L, 'keyColor'), 'v').name('keyColor');
+  lighting.add(L, 'keyIntensity', 0, 3, 0.01);
+  lighting.addColor(colorProxy(L, 'fillColor'), 'v').name('fillColor');
+  lighting.add(L, 'fillIntensity', 0, 2, 0.01);
+  lighting.addColor(colorProxy(L, 'rimColor'), 'v').name('rimColor');
+  lighting.add(L, 'rimIntensity', 0, 2, 0.01);
+  lighting.addColor(colorProxy(L, 'fogColor'), 'v').name('fogColor');
+  lighting.add(L, 'fogDensity', 0, 0.05, 0.0005);
+  lighting.addColor(colorProxy(L, 'playerAuraColor'), 'v').name('playerAuraColor');
+  lighting.add(L, 'playerAuraIntensity', 0, 5, 0.01);
+  lighting.add(L, 'playerAuraDistance', 0, 15, 0.1);
+  lighting.add(L, 'playerAuraDecay', 0, 4, 0.05);
+
   const move = gui.addFolder('move');
   move.add(tunables.move, 'walkSpeed', 1, 20, 0.1);
   move.add(tunables.move, 'sprintSpeed', 1, 25, 0.1);
@@ -24,6 +51,7 @@ export function initDebugPanel(actions = {}) {
   move.add(tunables.move, 'friction', 0, 60, 0.5);
   move.add(tunables.move, 'standMuzzleY', 0.3, 2.0, 0.05);
   move.add(tunables.move, 'crouchMuzzleY', 0.1, 1.2, 0.05);
+  move.close();   // collapsed by default — movement isn't the active tuning surface
 
   const dash = gui.addFolder('dash');
   dash.add(tunables.dash, 'speed', 5, 60, 0.5);
@@ -200,5 +228,48 @@ export function initDebugPanel(actions = {}) {
 
   [dash, roll, slide, jump, crouch, ads, fx, weaponsFolder, zones, en, pf, ai, me, swipe, st, blk, procgen, lootF, cam]
     .forEach(f => f.close());
+
+  // Persist folder open/close across reloads so the panel remembers
+  // what the user was editing. Applies after the default-close block
+  // above so the saved state overrides the defaults — e.g. if you
+  // had `move` expanded last session it stays expanded on reload.
+  const GUI_STATE_KEY = 'tacticalrogue_gui_state_v1';
+  const allFolders = [
+    lighting, move, dash, roll, slide, jump, crouch, ads, fx,
+    weaponsFolder, zones, en, pf, ai, me, swipe, st, blk, procgen,
+    lootF, cam,
+  ];
+  // Restore.
+  try {
+    const raw = localStorage.getItem(GUI_STATE_KEY);
+    if (raw) {
+      const saved = JSON.parse(raw);
+      for (const f of allFolders) {
+        const key = f._title;
+        if (saved[key] === 'open')   f.open();
+        else if (saved[key] === 'closed') f.close();
+      }
+    }
+  } catch (_) { /* ignore */ }
+  // Persist on any folder open/close. lil-gui 0.18+ exposes
+  // `onOpenClose`; the click-based fallback catches older builds.
+  const persist = () => {
+    try {
+      const state = {};
+      for (const f of allFolders) state[f._title] = f._closed ? 'closed' : 'open';
+      localStorage.setItem(GUI_STATE_KEY, JSON.stringify(state));
+    } catch (_) { /* quota / private mode — fail silently */ }
+  };
+  for (const f of allFolders) {
+    if (typeof f.onOpenClose === 'function') {
+      f.onOpenClose(persist);
+    } else {
+      const title = f.$title || f.domElement?.querySelector('.title');
+      if (title) {
+        title.addEventListener('click', () => setTimeout(persist, 0));
+      }
+    }
+  }
+
   return gui;
 }

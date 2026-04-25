@@ -25,74 +25,228 @@ export class LootManager {
   constructor(scene) {
     this.scene = scene;
     this.items = [];
+    // --- Loot pool -------------------------------------------------
+    // Pre-allocate N "slots" for standard (non-toy) ground loot.
+    // Each slot owns its own Group, Mesh (cube), PointLight, and
+    // Sprite nametag with a dedicated Canvas. The cube's geometry is
+    // shared across every slot (one BufferGeometry for the whole
+    // pool). Spawning recolors the material emissive + the light
+    // color, redraws the canvas with the new item name, and flips
+    // visibility on. Nothing is added to or removed from the scene
+    // after constructor runs, so Three.js's shader cache stays
+    // stable (no recompile spikes on disarm / kill-drop).
+    this._pool = [];
+    this._sharedBoxGeom = new THREE.BoxGeometry(0.35, 0.35, 0.35);
+    const POOL_SIZE = 24;
+    for (let i = 0; i < POOL_SIZE; i++) {
+      const group = new THREE.Group();
+      const mat = new THREE.MeshStandardMaterial({
+        color: 0x151515,
+        roughness: 0.35,
+        metalness: 0.55,
+        emissive: new THREE.Color(0x222222),
+      });
+      const mesh = new THREE.Mesh(this._sharedBoxGeom, mat);
+      mesh.castShadow = true;
+      group.add(mesh);
+
+      // Nametag — pre-built Canvas + CanvasTexture. On spawn we
+      // redraw the canvas (cheap, CPU-only) and flip
+      // `texture.needsUpdate = true` so the GPU re-uploads. No new
+      // allocations per drop.
+      const canvas = document.createElement('canvas');
+      canvas.width = 320; canvas.height = 64;
+      const tex = new THREE.CanvasTexture(canvas);
+      const spriteMat = new THREE.SpriteMaterial({
+        map: tex, transparent: true, depthTest: false, depthWrite: false,
+      });
+      const sprite = new THREE.Sprite(spriteMat);
+      sprite.renderOrder = 999;
+      sprite.position.y = 0.6;
+      sprite.visible = false;
+      group.add(sprite);
+
+      // PointLight stays parented to the group at intensity 0 when
+      // the slot is idle. Scene is part of a fixed-count shader
+      // key set; no recompile when a slot activates.
+      const light = new THREE.PointLight(0xffffff, 0, 2.2);
+      light.position.y = 0.2;
+      group.add(light);
+
+      group.visible = false;
+      group.position.set(0, -1000, 0);
+      this.scene.add(group);
+      this._pool.push({
+        group, mesh, mat, light,
+        sprite, canvas, ctx: canvas.getContext('2d'), tex,
+        inUse: false,
+      });
+    }
+  }
+
+  // Grab an idle pool slot; if all are in use, steal the oldest.
+  _acquire() {
+    for (const s of this._pool) if (!s.inUse) return s;
+    // Pool exhausted — evict the oldest live entry (matches how the
+    // tracer / flash pools handle saturation in combat.js).
+    const oldest = this.items[0];
+    if (oldest && oldest.slot) {
+      this.remove(oldest);
+      return oldest.slot;
+    }
+    return this._pool[0];
+  }
+
+  // Redraw the pre-allocated canvas with the item name. Much cheaper
+  // than creating a new canvas + CanvasTexture each drop.
+  _paintNameTag(slot, name) {
+    const w = slot.canvas.width, h = slot.canvas.height;
+    const ctx = slot.ctx;
+    ctx.clearRect(0, 0, w, h);
+    const padX = 18, padY = 8;
+    const fontSize = 26;
+    ctx.font = `600 ${fontSize}px ui-monospace, SFMono-Regular, Menlo, Consolas, monospace`;
+    const text = (name || 'item').toUpperCase();
+    const textW = Math.ceil(ctx.measureText(text).width);
+    const pillW = textW + padX * 2;
+    const pillH = fontSize + padY * 2;
+    const x0 = (w - pillW) / 2;
+    const y0 = (h - pillH) / 2;
+    ctx.fillStyle = 'rgba(20, 24, 32, 0.92)';
+    ctx.strokeStyle = 'rgba(0, 230, 255, 0.6)';
+    ctx.lineWidth = 2;
+    const r = 4;
+    ctx.beginPath();
+    ctx.moveTo(x0 + r, y0);
+    ctx.arcTo(x0 + pillW, y0, x0 + pillW, y0 + pillH, r);
+    ctx.arcTo(x0 + pillW, y0 + pillH, x0, y0 + pillH, r);
+    ctx.arcTo(x0, y0 + pillH, x0, y0, r);
+    ctx.arcTo(x0, y0, x0 + pillW, y0, r);
+    ctx.closePath();
+    ctx.fill();
+    ctx.stroke();
+    ctx.fillStyle = '#ffffff';
+    ctx.textAlign = 'center';
+    ctx.textBaseline = 'middle';
+    ctx.fillText(text, w / 2, h / 2 + 2);
+    slot.tex.needsUpdate = true;
+    // Scale sprite so the label is ~0.22m tall regardless of
+    // canvas aspect. Width follows the painted pill, not the full
+    // canvas, so short labels don't get a huge empty frame.
+    const worldH = 0.22;
+    slot.sprite.scale.set(worldH * (pillW / pillH), worldH, 1);
   }
 
   spawnItem(position, item) {
-    const group = new THREE.Group();
     const tint = item.tint ?? 0xaaaaaa;
 
-    // Special-case bear/duck toys: stacked-primitive glowing sculpture.
-    let primaryMesh = null;
-    if (item.shape === 'bear') {
-      primaryMesh = this._buildBearGroup(tint);
-    } else if (item.shape === 'duck') {
-      primaryMesh = this._buildDuckGroup(tint);
-    } else {
-      primaryMesh = new THREE.Mesh(
-        new THREE.BoxGeometry(0.6, 0.14, 0.3),
-        new THREE.MeshStandardMaterial({
-          color: 0x151515, roughness: 0.5, metalness: 0.4,
-          emissive: new THREE.Color(tint).multiplyScalar(0.35),
-        }),
-      );
-      primaryMesh.castShadow = true;
-    }
-    group.add(primaryMesh);
-
-    // If the item has a registered glTF model, load it async and swap out
-    // the primitive when ready. Toys keep their hand-sculpted look.
-    if (!item.shape) {
-      const modelUrl = modelForItem(item);
-      if (modelUrl) {
-        loadModelClone(modelUrl).then((clone) => {
-          if (!clone) return;  // load failed; primitive stays
-          if (!this.items.find(it => it.group === group)) return;  // already removed
-          fitToRadius(clone, groundScaleForItem(item));
-          addOutlines(clone);           // ground loot reads better with outlines
-          applyEmissiveTint(clone, tint, 0.28);
-          group.remove(primaryMesh);
-          primaryMesh.geometry?.dispose();
-          if (primaryMesh.material) {
-            if (Array.isArray(primaryMesh.material)) primaryMesh.material.forEach(m => m.dispose());
-            else primaryMesh.material.dispose();
-          }
-          group.add(clone);
-          // Update the entry so dispose in remove() still traverses correctly.
-          const entry = this.items.find(it => it.group === group);
-          if (entry) entry.box = clone;
-        });
-      }
+    // Bear / duck toys keep the hand-built primitive path — they're
+    // rare, decorative, not a hitch concern. Pool is only for the
+    // common "colored box" drops (weapons / gear / consumables /
+    // disarmed weapons).
+    if (item.shape === 'bear' || item.shape === 'duck') {
+      return this._spawnToy(position, item, tint);
     }
 
-    // Toys get a much brighter light so they glow as advertised.
-    const lightIntensity = item.shape ? 1.8 : 0.6;
-    const lightRadius = item.shape ? 6 : 3.5;
-    const light = new THREE.PointLight(tint, lightIntensity, lightRadius);
-    light.position.y = item.shape ? 0.6 : 0.2;
-    group.add(light);
-
-    group.position.copy(position);
-    group.position.y = item.shape ? 0.3 : 0.45;
-    this.scene.add(group);
+    const slot = this._acquire();
+    slot.inUse = true;
+    // Reuse the slot's MeshStandardMaterial — only the emissive
+    // color changes. Three.js treats this as an in-place uniform
+    // update, no shader recompile.
+    slot.mat.emissive.setHex(tint).multiplyScalar(0.75);
+    slot.light.color.setHex(tint);
+    slot.light.intensity = 0.9;
+    this._paintNameTag(slot, item.name || 'item');
+    slot.sprite.visible = false;   // proximity-gated in update()
+    slot.group.position.set(position.x, 0.45, position.z);
+    slot.group.visible = true;
 
     const entry = {
-      group, box: primaryMesh, light,
+      slot,
+      group: slot.group, box: slot.mesh, light: slot.light,
+      nameTag: slot.sprite,
       item,
       age: Math.random() * Math.PI * 2,
-      isToy: !!item.shape,
+      isToy: false,
     };
     this.items.push(entry);
     return entry;
+  }
+
+  // Toys still use the old one-off group path — small, fixed count,
+  // no shader-recompile concern since they're pure MeshBasicMaterial
+  // which doesn't live in the lit shader cache.
+  _spawnToy(position, item, tint) {
+    const group = new THREE.Group();
+    const primaryMesh = item.shape === 'bear'
+      ? this._buildBearGroup(tint)
+      : this._buildDuckGroup(tint);
+    group.add(primaryMesh);
+    const light = new THREE.PointLight(tint, 1.8, 6);
+    light.position.y = 0.6;
+    group.add(light);
+    group.position.copy(position);
+    group.position.y = 0.3;
+    this.scene.add(group);
+    const entry = {
+      group, box: primaryMesh, light, nameTag: null,
+      item,
+      age: Math.random() * Math.PI * 2,
+      isToy: true,
+    };
+    this.items.push(entry);
+    return entry;
+  }
+
+  // Floating nametag sprite — rendered once from a 2D canvas so the
+  // label reads crisply from any distance. Sprites always face the
+  // camera, so this gives a clean "hover label" above each cube
+  // without per-item camera-align math. Only created for non-toy
+  // items (toys are already self-identifying as the bear / duck).
+  _buildNameTag(name) {
+    const padX = 18, padY = 8;
+    const canvas = document.createElement('canvas');
+    const ctx = canvas.getContext('2d');
+    const fontSize = 26;
+    ctx.font = `600 ${fontSize}px ui-monospace, SFMono-Regular, Menlo, Consolas, monospace`;
+    const text = (name || 'item').toUpperCase();
+    const metrics = ctx.measureText(text);
+    const w = Math.ceil(metrics.width) + padX * 2;
+    const h = fontSize + padY * 2;
+    canvas.width = w;
+    canvas.height = h;
+    // Dark navy pill with ice-blue border — matches the style guide.
+    ctx.clearRect(0, 0, w, h);
+    ctx.fillStyle = 'rgba(20, 24, 32, 0.92)';
+    ctx.strokeStyle = 'rgba(0, 230, 255, 0.6)';
+    ctx.lineWidth = 2;
+    const r = 4;
+    ctx.beginPath();
+    ctx.moveTo(r, 0);
+    ctx.arcTo(w, 0, w, h, r);
+    ctx.arcTo(w, h, 0, h, r);
+    ctx.arcTo(0, h, 0, 0, r);
+    ctx.arcTo(0, 0, w, 0, r);
+    ctx.closePath();
+    ctx.fill();
+    ctx.stroke();
+    // Text on top, centered, tech-mono uppercase.
+    ctx.font = `600 ${fontSize}px ui-monospace, SFMono-Regular, Menlo, Consolas, monospace`;
+    ctx.fillStyle = '#ffffff';
+    ctx.textAlign = 'center';
+    ctx.textBaseline = 'middle';
+    ctx.fillText(text, w / 2, h / 2 + 2);
+    const tex = new THREE.CanvasTexture(canvas);
+    tex.needsUpdate = true;
+    const mat = new THREE.SpriteMaterial({
+      map: tex, transparent: true, depthTest: false, depthWrite: false,
+    });
+    const sprite = new THREE.Sprite(mat);
+    // World units — ~0.7m wide per label, proportional to canvas.
+    const worldH = 0.22;
+    sprite.scale.set(worldH * (w / h), worldH, 1);
+    sprite.renderOrder = 999;   // draw over fog / walls
+    return sprite;
   }
 
   _buildBearGroup(color) {
@@ -208,8 +362,19 @@ export class LootManager {
     const idx = this.items.indexOf(entry);
     if (idx < 0) return;
     this.items.splice(idx, 1);
+    // Pooled slot — hide + zero light + return to pool. No dispose,
+    // no scene removal. This is the common case for weapon /
+    // gear / consumable drops.
+    if (entry.slot) {
+      entry.slot.group.visible = false;
+      entry.slot.group.position.set(0, -1000, 0);
+      entry.slot.sprite.visible = false;
+      entry.slot.light.intensity = 0;
+      entry.slot.inUse = false;
+      return;
+    }
+    // Legacy (toy) path — disposed inline since toys aren't pooled.
     this.scene.remove(entry.group);
-    // Depth-first dispose: for toy groups, entry.box is itself a Group.
     entry.group.traverse((obj) => {
       if (obj.geometry) obj.geometry.dispose();
       if (obj.material) {
@@ -223,13 +388,23 @@ export class LootManager {
     for (const it of [...this.items]) this.remove(it);
   }
 
-  update(dt) {
+  update(dt, playerPos) {
+    const tagRadius = (tunables.loot.pickupRadius ?? 2.0) + 0.6;
+    const tagR2 = tagRadius * tagRadius;
     for (const it of this.items) {
       it.age += dt;
       const baseY = it.isToy ? 0.3 : 0.45;
       const bob = Math.sin(it.age * 2.2) * tunables.loot.bobAmplitude;
       it.group.position.y = baseY + bob;
       it.group.rotation.y = it.age * 0.7;
+      // Nametag visibility — show when the player is within pickup
+      // radius + a small buffer. Sprites face the camera
+      // automatically so we just toggle .visible.
+      if (it.nameTag && playerPos) {
+        const dx = it.group.position.x - playerPos.x;
+        const dz = it.group.position.z - playerPos.z;
+        it.nameTag.visible = (dx * dx + dz * dz) <= tagR2;
+      }
     }
   }
 }

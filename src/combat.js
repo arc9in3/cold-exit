@@ -407,14 +407,16 @@ export class Combat {
   }
 
   update(dt) {
+    // Tracers — pool-backed. On expire, hide + return the entry
+    // instead of disposing its resources.
     for (let i = this.tracers.length - 1; i >= 0; i--) {
       const tr = this.tracers[i];
       tr.t += dt;
-      tr.line.material.opacity = Math.max(0, 1 - tr.t / tr.life);
+      const entry = tr.entry;
+      entry.line.material.opacity = Math.max(0, 1 - tr.t / tr.life);
       if (tr.t >= tr.life) {
-        this.scene.remove(tr.line);
-        tr.line.geometry.dispose();
-        tr.line.material.dispose();
+        entry.line.visible = false;
+        entry.inUse = false;
         this.tracers.splice(i, 1);
       }
     }
@@ -422,17 +424,18 @@ export class Combat {
       const fl = this.flashes[i];
       fl.t += dt;
       const k = 1 - fl.t / fl.life;
-      // Pop-in: starts big, shrinks as it fades. Light intensity
-      // trails the mesh opacity with an extra-sharp fall-off so the
-      // flash illumination reads as "instant blink" not "long glow".
-      fl.mesh.scale.setScalar(1.6 * (0.5 + k * 0.5));
-      fl.mesh.material.opacity = Math.max(0, k);
-      if (fl.light) fl.light.intensity = 3.2 * k * k;
+      const flash = fl.flash;
+      flash.mesh.scale.setScalar(1.6 * (0.5 + k * 0.5));
+      flash.mesh.material.opacity = Math.max(0, k);
+      if (fl.lightEntry) fl.lightEntry.light.intensity = 3.2 * k * k;
       if (fl.t >= fl.life) {
-        this.scene.remove(fl.mesh);
-        fl.mesh.geometry.dispose();
-        fl.mesh.material.dispose();
-        if (fl.light) this.scene.remove(fl.light);
+        flash.mesh.visible = false;
+        flash.inUse = false;
+        if (fl.lightEntry) {
+          fl.lightEntry.light.intensity = 0;
+          fl.lightEntry.light.position.set(0, -1000, 0);
+          fl.lightEntry.inUse = false;
+        }
         this.flashes.splice(i, 1);
       }
     }
@@ -613,51 +616,112 @@ export class Combat {
     }
   }
 
+  // --- Pooled spawn paths --------------------------------------------
+  // Pre-allocated tracer Lines, flash meshes, and PointLights. Pool
+  // members are created once at module init, parked in the scene with
+  // `visible=false` (and `intensity=0` for lights), and recycled on
+  // each spawn instead of freshly allocating Three.js resources.
+  //
+  // Why this matters:
+  //   * Line allocation per bullet was creating a BufferGeometry +
+  //     LineBasicMaterial + WebGL upload per shot. 9-pellet shotgun =
+  //     27 fresh objects per fire.
+  //   * Adding a PointLight to the scene increments the light count
+  //     in the shader cache key — Three.js recompiles every shader
+  //     that uses lights on next render. THAT is the "shotgun fires
+  //     and the frame freezes" spike. Lights never leave the pool,
+  //     so the count is fixed and shaders are stable.
+  _ensurePools() {
+    if (this._poolsReady) return;
+    this._poolsReady = true;
+    const TRACER_POOL = 48;
+    const FLASH_POOL  = 24;
+    const LIGHT_POOL  = 8;      // max concurrent flash lights
+    // Tracers — two-vertex Line with a shared-per-entry material so
+    // each can fade its own opacity independently.
+    this._tracerPool = [];
+    for (let i = 0; i < TRACER_POOL; i++) {
+      const geom = new THREE.BufferGeometry();
+      const pts = new Float32Array(6);
+      geom.setAttribute('position', new THREE.BufferAttribute(pts, 3));
+      geom.setDrawRange(0, 2);
+      const mat = new THREE.LineBasicMaterial({
+        color: 0xffd27a, transparent: true, opacity: 0, depthWrite: false,
+      });
+      const line = new THREE.Line(geom, mat);
+      line.frustumCulled = false;
+      line.visible = false;
+      this.scene.add(line);
+      this._tracerPool.push({ line, pts, inUse: false });
+    }
+    // Flash meshes — additive sphere with per-entry material so the
+    // shrink / fade animation is local to each flash.
+    this._flashPool = [];
+    const flashGeom = new THREE.SphereGeometry(0.28, 10, 8);
+    for (let i = 0; i < FLASH_POOL; i++) {
+      const mat = new THREE.MeshBasicMaterial({
+        color: 0xffe0a0, transparent: true, opacity: 0,
+        depthWrite: false, blending: THREE.AdditiveBlending,
+      });
+      const m = new THREE.Mesh(flashGeom, mat);
+      m.visible = false;
+      m.frustumCulled = false;
+      this.scene.add(m);
+      this._flashPool.push({ mesh: m, inUse: false });
+    }
+    // PointLight pool — lives in the scene FOREVER at intensity 0.
+    // We never add/remove them mid-game; only mutate intensity.
+    // Three.js caches shaders keyed on light count; keeping the
+    // count fixed at `LIGHT_POOL` means zero recompile spikes during
+    // combat.
+    this._lightPool = [];
+    for (let i = 0; i < LIGHT_POOL; i++) {
+      const L = new THREE.PointLight(0xffcf80, 0, 4.5, 1.8);
+      L.position.set(0, -1000, 0); // parked below floor to be safe
+      this.scene.add(L);
+      this._lightPool.push({ light: L, inUse: false });
+    }
+  }
+
   _spawnTracer(a, b, color) {
-    const geom = new THREE.BufferGeometry().setFromPoints([a, b]);
-    const mat = new THREE.LineBasicMaterial({
-      color: color ?? 0xffd27a, transparent: true, opacity: 1, depthWrite: false,
-    });
-    const line = new THREE.Line(geom, mat);
-    this.scene.add(line);
-    this.tracers.push({ line, t: 0, life: tunables.attack.tracerLife });
+    this._ensurePools();
+    // Pick an idle tracer, or recycle the oldest in-use one.
+    let entry = this._tracerPool.find(e => !e.inUse);
+    if (!entry) entry = this._tracerPool[0];   // starved → overwrite oldest
+    entry.inUse = true;
+    entry.pts[0] = a.x; entry.pts[1] = a.y; entry.pts[2] = a.z;
+    entry.pts[3] = b.x; entry.pts[4] = b.y; entry.pts[5] = b.z;
+    entry.line.geometry.attributes.position.needsUpdate = true;
+    entry.line.material.color.setHex(color ?? 0xffd27a);
+    entry.line.material.opacity = 1;
+    entry.line.visible = true;
+    this.tracers.push({ entry, t: 0, life: tunables.attack.tracerLife });
   }
 
   _spawnFlash(origin, color, withLight = true) {
-    // Hard cap on live flashes — a bullet-hell volley that hammers
-    // this hundreds of times would otherwise churn a lot of allocation
-    // and overdraw. Oldest flash gets retired early when the cap trips.
-    const FLASH_CAP = 24;
-    while (this.flashes.length >= FLASH_CAP) {
-      const old = this.flashes.shift();
-      this.scene.remove(old.mesh);
-      old.mesh.geometry.dispose();
-      old.mesh.material.dispose();
-      if (old.light) this.scene.remove(old.light);
-    }
-    // Additive-blended sphere for the bright core. PointLight only
-    // attached when `withLight` is set — AI fires skip it to avoid
-    // N-light shader blowup on dense volleys.
-    const mat = new THREE.MeshBasicMaterial({
-      color: color ?? 0xffe0a0,
-      transparent: true, opacity: 1,
-      depthWrite: false,
-      blending: THREE.AdditiveBlending,
-    });
-    const flash = new THREE.Mesh(new THREE.SphereGeometry(0.28, 10, 8), mat);
-    flash.position.copy(origin);
-    flash.scale.setScalar(1.6);
-    this.scene.add(flash);
-
-    let light = null;
+    this._ensurePools();
+    // Pick an idle flash mesh or recycle oldest.
+    let flash = this._flashPool.find(e => !e.inUse);
+    if (!flash) flash = this._flashPool[0];
+    flash.inUse = true;
+    flash.mesh.position.copy(origin);
+    flash.mesh.scale.setScalar(1.6);
+    flash.mesh.material.color.setHex(color ?? 0xffe0a0);
+    flash.mesh.material.opacity = 1;
+    flash.mesh.visible = true;
+    // Flash light (only if requested) — grab one from the pool and
+    // set its intensity. Never added/removed, so no shader recompile.
+    let lightEntry = null;
     if (withLight) {
-      light = new THREE.PointLight(color ?? 0xffcf80, 3.2, 4.5, 1.8);
-      light.position.copy(origin);
-      this.scene.add(light);
+      lightEntry = this._lightPool.find(e => !e.inUse);
+      if (!lightEntry) lightEntry = this._lightPool[0];
+      lightEntry.inUse = true;
+      lightEntry.light.color.setHex(color ?? 0xffcf80);
+      lightEntry.light.position.copy(origin);
+      lightEntry.light.intensity = 3.2;
     }
-
     this.flashes.push({
-      mesh: flash, light,
+      flash, lightEntry,
       t: 0, life: tunables.attack.muzzleFlashLife,
     });
   }

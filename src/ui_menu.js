@@ -63,25 +63,32 @@ export class GameMenuUI {
     this.bodyEl.appendChild(this._btn('Resume', () => this.toggle()));
     this.bodyEl.appendChild(this._btn('Settings', () => { this.view = 'settings'; this.render(); }));
     this.bodyEl.appendChild(this._btn('Leaderboard', () => { this.view = 'leaderboard'; this.render(); }));
-    this.bodyEl.appendChild(this._btn('Save', () => {
-      try {
-        const s = this.onSave?.();
-        if (s) localStorage.setItem(SAVE_KEY, JSON.stringify(s));
-        this._flash('Saved.');
-      } catch (e) {
-        this._flash('Save failed.');
-      }
-    }));
-    this.bodyEl.appendChild(this._btn('Load', () => {
-      try {
-        const raw = localStorage.getItem(SAVE_KEY);
-        if (!raw) { this._flash('No save found.'); return; }
-        this.onLoad?.(JSON.parse(raw));
-        this._flash('Loaded.');
-      } catch (e) {
-        this._flash('Load failed.');
-      }
-    }));
+    // Save / Load are gated behind the dev-tools toggle (Options →
+    // Dev Tools Panel). They taint the run's leaderboard eligibility
+    // anyway, so hiding them from default players keeps the run loop
+    // honest; devs with the toggle on keep the buttons for
+    // debugging.
+    if (this.getDevTools && this.getDevTools()) {
+      this.bodyEl.appendChild(this._btn('Save (dev)', () => {
+        try {
+          const s = this.onSave?.();
+          if (s) localStorage.setItem(SAVE_KEY, JSON.stringify(s));
+          this._flash('Saved.');
+        } catch (e) {
+          this._flash('Save failed.');
+        }
+      }));
+      this.bodyEl.appendChild(this._btn('Load (dev)', () => {
+        try {
+          const raw = localStorage.getItem(SAVE_KEY);
+          if (!raw) { this._flash('No save found.'); return; }
+          this.onLoad?.(JSON.parse(raw));
+          this._flash('Loaded.');
+        } catch (e) {
+          this._flash('Load failed.');
+        }
+      }));
+    }
     this.bodyEl.appendChild(this._btn('Quit to Title', () => {
       if (this.onQuit) this.onQuit();
     }, ' danger'));

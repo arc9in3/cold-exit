@@ -1,9 +1,66 @@
-# tacticalrogue — backlog
+# Cold Exit — backlog
 
 A snapshot of known gaps, deferred work, and candidate next steps. Not
 exhaustive; living document.
 
-Last updated: 2026-04-24.
+Last updated: 2026-04-24 (post first Cloudflare Pages deploy).
+
+## Web deploy shipping notes
+
+- **Live URL:** `cold-exit.pages.dev` (Cloudflare Pages, direct upload
+  via `npx wrangler pages deploy .`).
+- **Assets ignored from deploy:** source-archive `.zip`s in `Assets/`
+  (`poly_*`, `style_*`) — listed in `.assetsignore`. Extracted runtime
+  FBX + textures ship fine.
+- **Git repo:** `github.com/arc9in3/cold-exit` — public, public Pages
+  project. Leaderboard Worker is scaffolded in `worker/` but not yet
+  deployed; the game's local-first leaderboard works standalone until
+  the Worker's URL is pasted into `src/api_config.js:COMPILED_API_BASE`.
+
+## Style / art pass (in-flight)
+
+- [x] Main menu restyled to the `Assets/coldexitmain.png` splash art
+      (tech-mono tokens, ice-blue rail divider).
+- [x] CSS design tokens (`--ce-*` palette + fonts + `.ce-panel`
+      corner-bracket helper) rolled into Esc menu, main menu, settings
+      form rows, leaderboard cards, modal bases.
+- [ ] Per-screen rollout remaining: shop grid cells, customize body,
+      inventory cells, details panel, HUD bars, damage numbers,
+      crosshair.
+- [ ] Custom domain — register via Cloudflare Registrar once decided
+      on a name variant.
+
+## Recent perf + gameplay fixes
+
+- [x] **Bullet / flash pool** (`src/combat.js`) — pre-allocated
+      tracers, flash spheres, and PointLights. Zero per-spawn alloc,
+      no shader recompile spikes on shotgun volleys.
+- [x] **Loot pool** (`src/loot.js`) — 24 pre-allocated cube slots
+      sharing one BoxGeometry. Spawn tints the emissive + redraws a
+      pre-allocated nametag canvas. FBX load path removed for common
+      drops; ducks/bears keep hand-built primitives. Killed the
+      disarm hitch.
+- [x] **Wall occlusion hardening** (`src/main.js:updateWallOcclusion`)
+      — 7-ray fan for player silhouette, 4-ray fan per enemy. Active
+      enemies (any non-idle state) have NO range cap for wall fades;
+      idle enemies keep the 24m limit to stay cheap.
+- [x] **Cursor-to-wall ray** — aim-point is added to the occlusion
+      set so "peek around the corner" reveals the obstacle.
+- [x] **Crouched gun parallel-to-ground** — zeroed `crouchBias` and
+      `tuckBias` on the upper-arm pose so SMGs/rifles stay level in
+      crouch instead of tipping muzzle-up.
+- [x] **SMG grip offsets** — negative-Z magnitudes (−0.28 to −0.38)
+      seat the pistol grip in the hand instead of the buttstock.
+- [x] **Ground loot = colored glowing boxes** with proximity-gated
+      nametag sprites. Ducks / bears retain custom silhouettes.
+
+## Live lighting tuning
+
+- [x] `tunables.lighting` block + lil-gui folder (open by default).
+- [x] F3 → console dump of current lighting values as a copy-paste
+      block. Supports color pickers for every hex field.
+- [ ] Same treatment for post-FX (bloom threshold, vignette strength,
+      chromatic).
 
 ---
 

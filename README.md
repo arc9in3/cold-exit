@@ -1,7 +1,9 @@
-# tacticalrogue
+# Cold Exit
+
+> Extract. Survive. Disappear.
 
 Browser-based isometric extraction shooter. Three.js, plain ES modules, no
-build step. Target platform is itch.io.
+build step. Deployed to Cloudflare Pages; ships to itch.io.
 
 **Start here:**
 - [`DESIGN.md`](./DESIGN.md) — vision, core loop, combat, inventory,
@@ -10,19 +12,55 @@ build step. Target platform is itch.io.
   rough edges (check this first — it's the freshest state)
 - [`tools/README.md`](./tools/README.md) — asset extraction + model viewer
 
-## Current state (prototype-ship push)
+## Current state
 
-The game boots into a main menu → starting-store picker → run loop.
-Runs are endless (extraction regenerates the next level) and end on
-death, which submits a leaderboard entry and offers Restart Level or
-Back to Main Menu. Save/load and restart taint the run so they don't
-pollute leaderboard scores. Audio has synth SFX plus an ambient room
-tone + footsteps + reverb; the rendering pipeline runs bloom +
-vignette + subtle chromatic aberration through an EffectComposer
-stack (gated on `qualityFlags.postFx`). The character rig is fully
-procedural (cylinders + joint spheres) — no skinned art yet.
+Boots into a Cold-Exit splash-art main menu → starting-store picker →
+run loop. Runs are endless (extraction regenerates the next level) and
+end on death, which submits a leaderboard entry and offers Restart
+Level or Back to Main Menu. Save/load and restart taint the run so
+they don't pollute leaderboard scores.
+
+Visual layer: Cold-Exit palette tokens (`--ce-ice`, `--ce-navy`,
+etc.) applied across menus / settings / form rows; splash-art main
+menu backed by `Assets/coldexitmain.png`; HUD-frame corner brackets
+on modal cards; tech-mono + display-sans font stacks. In-game
+lighting is driven by live tunables (hemisphere, directional key /
+fill / rim, fog exp2, player aura) with an F3 console export so
+dialed values can be pasted straight into `tunables.js`.
+
+Performance: bullet tracers, muzzle flashes, and ground-loot cubes
+are all pool-backed — no per-spawn `BufferGeometry` / `PointLight` /
+`CanvasTexture` allocations during combat, which killed the hitches
+on shotgun volleys, AI fire clusters, and disarm drops. Wall
+occlusion uses a 7-ray camera-to-player fan plus a 4-ray fan for
+every *active* enemy (uncapped range — any alerted / firing / chasing
+enemy triggers wall fade regardless of distance).
+
+Audio: synth SFX plus an ambient room tone + footsteps + reverb.
+Rendering: bloom + vignette + subtle chromatic through an
+EffectComposer stack, gated on `qualityFlags.postFx`. Character rig
+is fully procedural (cylinders + joint spheres) — no skinned art yet.
 
 See `BACKLOG.md` for the full delta.
+
+## Deploying
+
+Cloudflare Pages, direct-upload. The Assets folder has some huge
+source-archive zips that are **ignored from git AND from Pages
+uploads** (see `.gitignore` and `.assetsignore`); the extracted
+runtime files ship fine. One-time flow:
+
+```sh
+# 1. Git — source of truth
+git add .
+git commit -m "..."
+git push
+
+# 2. Cloudflare — direct upload (no CI, no Wrangler workers config)
+npx wrangler pages deploy . --project-name=cold-exit --commit-dirty=true
+```
+
+Lives at `cold-exit.pages.dev`. Custom domain planned.
 
 ## Running locally
 

@@ -34,15 +34,21 @@ export class MainMenuUI {
     this.root.style.display = 'none';
     this.root.innerHTML = `
       <div id="main-menu-card">
-        <div id="main-menu-title">tactical rogue</div>
-        <div id="main-menu-subtitle">prototype build</div>
+        <div id="main-menu-title">Cold Exit</div>
+        <div id="main-menu-subtitle">Extract. Survive. Disappear.</div>
         <div id="main-menu-body"></div>
+      </div>
+      <div id="main-menu-status">
+        prototype build v0.1<br>
+        status · nominal
       </div>
     `;
     document.body.appendChild(this.root);
+    this.cardEl = this.root.querySelector('#main-menu-card');
     this.bodyEl = this.root.querySelector('#main-menu-body');
     this.titleEl = this.root.querySelector('#main-menu-title');
     this.subEl = this.root.querySelector('#main-menu-subtitle');
+    this.statusEl = this.root.querySelector('#main-menu-status');
   }
 
   show() { this.visible = true; this.view = 'root'; this.root.style.display = 'flex'; this.render(); }
@@ -59,23 +65,53 @@ export class MainMenuUI {
   }
 
   _renderRoot() {
-    this.titleEl.textContent = 'tactical rogue';
-    this.subEl.textContent = 'prototype build';
-    this.subEl.style.display = '';
+    // Root view — splash-art styled rail. The splash image already
+    // has "COLD EXIT · EXTRACT. SURVIVE. DISAPPEAR." baked in, so
+    // hide the DOM title/subtitle here to avoid duplication. Sub-
+    // views (Options / Leaderboard) re-show them as page headers.
+    this.titleEl.style.display = 'none';
+    this.subEl.style.display = 'none';
+    this.cardEl?.classList.remove('nested');
+    if (this.statusEl) this.statusEl.style.display = '';
     this.bodyEl.innerHTML = '';
-    this.bodyEl.appendChild(this._btn('Play', () => {
+
+    // Player-name field — lives on the main menu above New Game so
+    // it reads like "enter name → start run". Moved from Options
+    // because the settings modal was too deep in the UI tree and
+    // players were skipping it entirely.
+    const nameWrap = document.createElement('div');
+    nameWrap.className = 'main-menu-name';
+    nameWrap.innerHTML = `
+      <label>Codename</label>
+      <input type="text" class="menu-input" maxlength="16" placeholder="anonymous" value="${(this.getPlayerName() || '').replace(/"/g, '&quot;')}">
+    `;
+    const nameInput = nameWrap.querySelector('input');
+    nameInput.addEventListener('input', () => this.setPlayerName(nameInput.value));
+    this.bodyEl.appendChild(nameWrap);
+
+    // Button names match the splash-art mock. Keep the same
+    // callbacks so nothing in the flow changes.
+    this.bodyEl.appendChild(this._btn('New Game', () => {
       this.hide();
       this.onPlay?.();
     }));
-    this.bodyEl.appendChild(this._btn('Starting Store', () => {
+    this.bodyEl.appendChild(this._btn('Store', () => {
       this.onOpenStore?.();
     }));
     this.bodyEl.appendChild(this._btn('Leaderboard', () => { this.view = 'leaderboard'; this.render(); }));
-    this.bodyEl.appendChild(this._btn('Settings',    () => { this.view = 'settings';    this.render(); }));
+    this.bodyEl.appendChild(this._btn('Options',    () => { this.view = 'settings';    this.render(); }));
   }
 
   _renderSettings() {
-    this.titleEl.textContent = 'Settings';
+    // Nested sub-view — switch to the centred boxed card so form
+    // rows read against the splash backdrop, and hide the status
+    // line so the overlay reads as "deep into a menu". Title shows
+    // again here as a page header; root view hides it (splash image
+    // carries the branding).
+    this.cardEl?.classList.add('nested');
+    if (this.statusEl) this.statusEl.style.display = 'none';
+    this.titleEl.style.display = '';
+    this.titleEl.textContent = 'Options';
     this.subEl.style.display = 'none';
     this.bodyEl.innerHTML = '';
 
@@ -140,15 +176,8 @@ export class MainMenuUI {
     });
     this.bodyEl.appendChild(qRow);
 
-    const nameRow = document.createElement('div');
-    nameRow.className = 'menu-row';
-    nameRow.innerHTML = `
-      <label>Player Name</label>
-      <input type="text" class="menu-input" maxlength="16" value="${(this.getPlayerName() || '').replace(/"/g, '&quot;')}">
-    `;
-    const nameInput = nameRow.querySelector('input');
-    nameInput.addEventListener('input', () => this.setPlayerName(nameInput.value));
-    this.bodyEl.appendChild(nameRow);
+    // Player name lives on the main-menu root now — removed from
+    // Options so the naming flow reads as "enter codename → start".
 
     const devRow = document.createElement('div');
     devRow.className = 'menu-row';
@@ -190,6 +219,9 @@ export class MainMenuUI {
   }
 
   _renderLeaderboard() {
+    this.cardEl?.classList.add('nested');
+    if (this.statusEl) this.statusEl.style.display = 'none';
+    this.titleEl.style.display = '';
     this.titleEl.textContent = 'Leaderboard';
     this.subEl.style.display = 'none';
     this.bodyEl.innerHTML = '';

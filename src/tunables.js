@@ -1,6 +1,27 @@
 // Central store of live-tunable values. Modules read from this object each
 // frame so the debug panel can mutate values without re-wiring anything.
 export const tunables = {
+  // Live lighting tunables — scene.js reads these when building the
+  // scene, main.js's syncLighting() updates the live light refs each
+  // frame so console edits take effect without a reload. Press F3
+  // in-game to dump the current values to the browser console.
+  lighting: {
+    hemiSky:             0x4a1575,
+    hemiGround:          0x1e1f25,
+    hemiIntensity:       0.000,
+    keyColor:            0xaec4d8,
+    keyIntensity:        3.000,
+    fillColor:           0x191a48,
+    fillIntensity:       2.000,
+    rimColor:            0xf358df,
+    rimIntensity:        2.000,
+    fogColor:            0x22252a,
+    fogDensity:          0.0000,
+    playerAuraColor:     0xffffff,
+    playerAuraIntensity: 0.000,
+    playerAuraDistance:  15.00,
+    playerAuraDecay:     3.35,
+  },
   move: {
     walkSpeed: 5,
     sprintSpeed: 10,
