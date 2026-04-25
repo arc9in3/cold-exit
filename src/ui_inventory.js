@@ -75,7 +75,7 @@ export class InventoryUI {
     const prog = document.createElement('div');
     prog.id = 'inv-progression-overlay';
     prog.innerHTML = `
-      <div class="inv-prog-heading">Progression</div>
+      <div class="inv-prog-heading">Gear Bonuses</div>
       <div id="inv-prog-list"></div>
     `;
     this.gridEl.appendChild(prog);
