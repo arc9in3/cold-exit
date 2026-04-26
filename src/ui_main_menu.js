@@ -96,10 +96,12 @@ export class MainMenuUI {
       this.hide();
       this.onPlay?.();
     }));
-    this.bodyEl.appendChild(this._btn('Tutorial', () => {
-      this.hide();
-      this.onTutorial?.();
-    }));
+    // Tutorial button temporarily disabled — flow is broken; re-enable
+    // once the tutorial-mode regressions are fixed.
+    // this.bodyEl.appendChild(this._btn('Tutorial', () => {
+    //   this.hide();
+    //   this.onTutorial?.();
+    // }));
     this.bodyEl.appendChild(this._btn('Store', () => {
       this.onOpenStore?.();
     }));
