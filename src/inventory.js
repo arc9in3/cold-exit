@@ -528,6 +528,20 @@ const AFFIX_POOL = [
 // bonus stat on top of the intrinsic slot buff baked into ARMOR_DEFS /
 // GEAR_DEFS. Without this, common-rarity gear often felt empty — the
 // higher tiers keep their existing counts so the power curve stays put.
+// Rarity → hex color. Drives item-cell backgrounds + details-panel
+// borders. Single source of truth so the palette stays consistent.
+export const RARITY_HEX = {
+  common:    '#b9b9b9',
+  uncommon:  '#6abe5a',
+  rare:      '#6aaedc',
+  epic:      '#c97a5a',
+  legendary: '#e6b94a',
+  mythic:    '#d040ff',
+};
+export function rarityColor(item) {
+  return RARITY_HEX[inferRarity(item)] || RARITY_HEX.common;
+}
+
 const AFFIX_COUNT_BY_RARITY = {
   common: 1, uncommon: 1, rare: 2, epic: 3, legendary: 4,
 };

@@ -452,6 +452,30 @@ function fitAndStage(t) {
   t.obj.scale.setScalar(scale);
   scene.add(t.obj);
 
+  // Enforce muzzle-LEFT for side-view exports (in-game weapon tiles
+  // only). Heuristic: the muzzle is on the side with the longest
+  // protrusion from the bbox center. After centering, sum vertex
+  // counts on each X side; the side with FEWER mass = muzzle (the
+  // grip / stock has more bulk, the barrel is thin). If the
+  // detected muzzle side is +X (right), mirror the model along X
+  // so the muzzle ends up on the left.
+  if (t.sideView) {
+    let leftCount = 0, rightCount = 0;
+    t.obj.traverse(o => {
+      if (!o.isMesh || !o.geometry?.attributes?.position) return;
+      const p = o.geometry.attributes.position;
+      for (let i = 0; i < p.count; i++) {
+        if (p.getX(i) < 0) leftCount++;
+        else rightCount++;
+      }
+    });
+    // Muzzle = side with fewer verts (thinner end). If that's +X,
+    // mirror along X so muzzle ends up on the LEFT in the side view.
+    if (rightCount < leftCount) {
+      t.obj.scale.x *= -1;
+    }
+  }
+
   // In-game weapon tiles get a strict side-view (orthographic, looking
   // straight down +Z at the weapon long-axis) so the preview reads as a
   // gun silhouette suitable for export → inventory icon. FBX library

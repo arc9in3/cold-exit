@@ -87,18 +87,18 @@ const OUTLINE_DEFAULT = 1.025;
 let _useCelShading = true;
 export function setCelShading(enabled) { _useCelShading = !!enabled; }
 
-function _makeToonMaterial(atlas, hasUV, hasVC) {
+function _makeToonMaterial(atlas, hasUV, hasVC, color = 0xffffff) {
   return new THREE.MeshToonMaterial({
-    color: 0xffffff,
+    color,
     map: (atlas && hasUV) ? atlas : null,
     vertexColors: !hasUV && hasVC,
     gradientMap: _toonGradient,
   });
 }
 
-function _makeStandardMaterial(atlas, hasUV, hasVC) {
+function _makeStandardMaterial(atlas, hasUV, hasVC, color = 0xffffff) {
   return new THREE.MeshStandardMaterial({
-    color: 0xffffff,
+    color,
     map: (atlas && hasUV) ? atlas : null,
     vertexColors: !hasUV && hasVC,
     roughness: 0.55,
@@ -106,10 +106,30 @@ function _makeStandardMaterial(atlas, hasUV, hasVC) {
   });
 }
 
+// Pull the diffuse color off whatever material the FBXLoader gave us.
+// Falls back to white if the material doesn't carry one. Used when no
+// atlas is available so lowpolyguns / similar packs (which embed
+// per-material diffuse colors directly in the FBX) keep their
+// authored Black / DarkMetal / DarkWood / Metal palette instead of
+// rendering as white blocks.
+function _diffuseOf(mat) {
+  if (!mat) return 0xffffff;
+  if (mat.color && typeof mat.color.getHex === 'function') {
+    return mat.color.getHex();
+  }
+  return 0xffffff;
+}
+
 // Rebuild every mesh's material. Outlines are NOT added here — they
 // are opt-in at call time via `addOutlines(clone)` so small / close /
 // numerous instances (in-hand weapons, character meshes) can skip the
 // doubled draw-call cost.
+//
+// Atlas-aware: when an atlas is present (animpic POLY packs), every
+// mesh samples it via UV. When absent (lowpolyguns FBXes that
+// embed per-material colors), the source material's diffuse color
+// is preserved per mesh — pulling Black / DarkMetal / DarkWood /
+// Metal from the authored palette instead of forcing white.
 function _retintWithAtlas(root, atlas) {
   const meshes = [];
   root.traverse(obj => { if (obj.isMesh) meshes.push(obj); });
@@ -120,12 +140,20 @@ function _retintWithAtlas(root, atlas) {
     const hasUV = !!mesh.geometry?.attributes?.uv;
     const hasVC = !!mesh.geometry?.attributes?.color;
     const oldMat = mesh.material;
-    mesh.material = _useCelShading
-      ? _makeToonMaterial(atlas, hasUV, hasVC)
-      : _makeStandardMaterial(atlas, hasUV, hasVC);
-    if (oldMat) {
-      if (Array.isArray(oldMat)) oldMat.forEach(m => m.dispose?.());
-      else oldMat.dispose?.();
+    const replaceOne = (src) => {
+      // No atlas → preserve the source material's diffuse color so
+      // the FBX's authored per-material palette still drives the look.
+      const color = atlas ? 0xffffff : _diffuseOf(src);
+      return _useCelShading
+        ? _makeToonMaterial(atlas, hasUV, hasVC, color)
+        : _makeStandardMaterial(atlas, hasUV, hasVC, color);
+    };
+    if (Array.isArray(oldMat)) {
+      mesh.material = oldMat.map(replaceOne);
+      oldMat.forEach(m => m.dispose?.());
+    } else {
+      mesh.material = replaceOne(oldMat);
+      oldMat?.dispose?.();
     }
   }
 }

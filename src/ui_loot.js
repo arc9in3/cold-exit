@@ -1,4 +1,4 @@
-import { inferRarity, iconForItem, TYPE_ICONS, SLOT_IDS, SLOT_POSITIONS, SLOT_ICONS, SLOT_LABEL } from './inventory.js';
+import { inferRarity, iconForItem, rarityColor, TYPE_ICONS, SLOT_IDS, SLOT_POSITIONS, SLOT_ICONS, SLOT_LABEL } from './inventory.js';
 import { renderItemCell } from './ui_item_cell.js';
 import { GridContainer, stampItemDims } from './grid_container.js';
 import { thumbnailFor } from './item_thumbnails.js';
@@ -697,8 +697,13 @@ export class LootUI {
       const lbl = slotLabel ? `<div class="cell-label">${slotLabel}</div>` : '';
       return `${lbl}<div class="cell-empty-ico">${icon}</div>`;
     }
-    const tint = item.tint ?? 0x888888;
-    const tintStr = `#${tint.toString(16).padStart(6, '0')}`;
+    // Cell background = RARITY color, not item.tint. The previous
+    // tint-driven swatch was confusing because item.tint also drove
+    // the weapon-render PNG accent (orange AK on orange swatch). Now
+    // the swatch communicates loot tier — common gray, uncommon
+    // green, rare blue, epic orange, legendary gold, mythic purple
+    // — and the item image sits cleanly on top.
+    const tintStr = rarityColor(item);
     // Resolution rule: weapons (ranged + melee) use the curated
     // side-view PNG returned by iconForItem (driven by
     // WEAPON_RENDER_BY_NAME). Everything else — armor, gear,
