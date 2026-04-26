@@ -903,6 +903,17 @@ export class GunmanManager {
           if (dx * dx + dz * dz > farSq && odd) continue;
         }
       }
+      // Animation LOD — skip updateAnim entirely for entities that
+      // either (a) finished their death fall (settled corpse) or
+      // (b) are far from the player and we're on the odd frame. Per-
+      // bone animation math is one of the heaviest per-enemy costs;
+      // dropping it for off-screen and corpse cases recovers most of
+      // the savings the user noticed when AI is fully disabled.
+      const _gdx = g.group.position.x - px;
+      const _gdz = g.group.position.z - pz;
+      const _gCamD2 = _gdx * _gdx + _gdz * _gdz;
+      g._animSkip = (!g.alive && (g.deathT || 0) > 2.5)
+        || (_gCamD2 > 35 * 35 && odd);
       if (g.flashT > 0) {
         g.flashT = Math.max(0, g.flashT - dt);
         const k = g.flashT / tunables.enemy.hitFlashTime;
@@ -1006,7 +1017,7 @@ export class GunmanManager {
         }
         // The rig's death-fall overrides body rotation based on the
         // directional impulse poked in applyHit. No manual tipping here.
-        if (g.rig) updateAnim(g.rig, { dying: true }, dt);
+        if (g.rig && !g._animSkip) updateAnim(g.rig, { dying: true }, dt);
         // No respawn — bodies persist for looting.
         continue;
       }
@@ -1014,7 +1025,7 @@ export class GunmanManager {
       if (!tunables.ai.active) {
         g.state = STATE.IDLE;
         g.alertMat.opacity = THREE.MathUtils.lerp(g.alertMat.opacity, 0, Math.min(1, dt * 10));
-        if (g.rig) updateAnim(g.rig, { speed: 0 }, dt);
+        if (g.rig && !g._animSkip) updateAnim(g.rig, { speed: 0 }, dt);
         continue;
       }
 
@@ -1022,7 +1033,7 @@ export class GunmanManager {
       // hit-flinch plays out.
       if ((g.staggerT || 0) > 0) {
         g.staggerT = Math.max(0, g.staggerT - dt);
-        if (g.rig) {
+        if (g.rig && !g._animSkip) {
           updateAnim(g.rig, { speed: 0, aiming: false, aimYaw: 0, aimPitch: 0 }, dt);
         }
         continue;
@@ -1033,7 +1044,7 @@ export class GunmanManager {
       // Procedural animation layer — pose the limbs on top of whatever
       // position/yaw _updateRanged just resolved. Speed is derived from
       // the frame delta so we don't need the AI to explicitly report it.
-      if (g.rig) {
+      if (g.rig && !g._animSkip) {
         const lastX = g._animLastX ?? g.group.position.x;
         const lastZ = g._animLastZ ?? g.group.position.z;
         const dx = g.group.position.x - lastX;

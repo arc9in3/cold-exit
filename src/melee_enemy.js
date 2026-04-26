@@ -470,6 +470,17 @@ export class MeleeEnemyManager {
         const dz = e.group.position.z - pz;
         if (dx * dx + dz * dz > farSq && odd) continue;
       }
+      // Animation LOD — skip updateAnim entirely for entities that
+      // either (a) finished their death fall (settled corpse) or
+      // (b) are very far from the player and we're on the odd frame.
+      // Cuts the per-frame bone-pose math for enemies the player
+      // can't read in detail anyway. Death-fall completes inside
+      // ~1.8 dt seconds, so 2.5s buffer is generous.
+      const _ddx = e.group.position.x - px;
+      const _ddz = e.group.position.z - pz;
+      const _camD2 = _ddx * _ddx + _ddz * _ddz;
+      e._animSkip = (!e.alive && (e.deathT || 0) > 2.5)
+        || (_camD2 > 35 * 35 && odd);
       if (e.flashT > 0) {
         e.flashT = Math.max(0, e.flashT - dt);
         const k = e.flashT / tunables.enemy.hitFlashTime;
@@ -562,7 +573,7 @@ export class MeleeEnemyManager {
             }
           }
         }
-        if (e.rig) updateAnim(e.rig, { dying: true }, dt);
+        if (e.rig && !e._animSkip) updateAnim(e.rig, { dying: true }, dt);
         continue;
       }
 
@@ -570,7 +581,7 @@ export class MeleeEnemyManager {
         e.state = STATE.IDLE;
         e.alertMat.opacity = THREE.MathUtils.lerp(e.alertMat.opacity, 0, Math.min(1, dt * 10));
         e.telMat.opacity = THREE.MathUtils.lerp(e.telMat.opacity, 0, Math.min(1, dt * 10));
-        if (e.rig) updateAnim(e.rig, { speed: 0, meleeStance: true }, dt);
+        if (e.rig && !e._animSkip) updateAnim(e.rig, { speed: 0, meleeStance: true }, dt);
         continue;
       }
 
@@ -581,7 +592,7 @@ export class MeleeEnemyManager {
       if ((e.staggerT || 0) > 0) {
         e.staggerT = Math.max(0, e.staggerT - dt);
         e.telMat.opacity = THREE.MathUtils.lerp(e.telMat.opacity, 0, Math.min(1, dt * 12));
-        if (e.rig) updateAnim(e.rig, { speed: 0, meleeStance: true }, dt);
+        if (e.rig && !e._animSkip) updateAnim(e.rig, { speed: 0, meleeStance: true }, dt);
         continue;
       }
 
@@ -634,7 +645,7 @@ export class MeleeEnemyManager {
           const t = Math.max(0, e.recoveryT / total);
           swingProgress = Math.max(0, t);   // +t decays to 0
         }
-        updateAnim(e.rig, {
+        if (!e._animSkip) updateAnim(e.rig, {
           speed,
           meleeStance: true,  // one-handed blade hold, not rifle pose
           aiming: e.state !== STATE.IDLE,
@@ -700,7 +711,7 @@ export class MeleeEnemyManager {
       if (e.alertMat) {
         e.alertMat.opacity = THREE.MathUtils.lerp(e.alertMat.opacity, 0, Math.min(1, dt * 10));
       }
-      if (e.rig) updateAnim(e.rig, { speed: 0, meleeStance: true }, dt);
+      if (e.rig && !e._animSkip) updateAnim(e.rig, { speed: 0, meleeStance: true }, dt);
       return;
     }
     if (e.forceSleep) {
@@ -708,7 +719,7 @@ export class MeleeEnemyManager {
       e.state = STATE.IDLE;
       e.suspicion = 0;
       if (e.alertMat) e.alertMat.opacity = 0;
-      if (e.rig) updateAnim(e.rig, { speed: 0, meleeStance: true }, dt);
+      if (e.rig && !e._animSkip) updateAnim(e.rig, { speed: 0, meleeStance: true }, dt);
       return;
     }
     e.cooldownT = Math.max(0, e.cooldownT - dt);

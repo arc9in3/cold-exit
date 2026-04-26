@@ -98,39 +98,39 @@ function _makeLabelSprite(text, color = '#e8dfc8') {
 // a single static pose (no animation needed).
 function _buildSimpleNpc({ bodyColor = 0x4a5060, headColor = 0xd8c8a8,
                           accentColor = 0xc9a87a, height = 1.8 } = {}) {
+  // Three meshes total — single tapered body (torso + legs combined),
+  // head sphere, optional thin accent ring at chest height. Cuts from
+  // 5 meshes → 3 and drops separate leg geometries entirely. Encounter
+  // NPCs aren't rigged; they're stationary props that just need to
+  // read as "person" at iso distance.
   const group = new THREE.Group();
   const bodyMat = new THREE.MeshStandardMaterial({ color: bodyColor, roughness: 0.85 });
   const headMat = new THREE.MeshStandardMaterial({ color: headColor, roughness: 0.7 });
   const accentMat = new THREE.MeshStandardMaterial({
     color: accentColor, roughness: 0.5, metalness: 0.3,
-    emissive: accentColor, emissiveIntensity: 0.2,
+    emissive: accentColor, emissiveIntensity: 0.18,
   });
-  // Legs.
-  const leg = (sx) => {
-    const m = new THREE.Mesh(new THREE.CylinderGeometry(0.10, 0.12, height * 0.45, 8), bodyMat);
-    m.position.set(sx, height * 0.225, 0);
-    m.castShadow = true;
-    return m;
-  };
-  group.add(leg(-0.10), leg(0.10));
-  // Torso.
-  const torso = new THREE.Mesh(new THREE.CylinderGeometry(0.22, 0.18, height * 0.40, 10), bodyMat);
-  torso.position.y = height * 0.45 + height * 0.20;
-  torso.castShadow = true;
-  group.add(torso);
-  // Head.
-  const head = new THREE.Mesh(new THREE.SphereGeometry(0.18, 12, 10), headMat);
-  head.position.y = height * 0.85 + 0.18;
+  // Body — tapered cylinder from boots up to shoulders.
+  const bodyHeight = height * 0.85;
+  const body = new THREE.Mesh(
+    new THREE.CylinderGeometry(0.18, 0.22, bodyHeight, 8),
+    bodyMat,
+  );
+  body.position.y = bodyHeight / 2;
+  body.castShadow = true;
+  group.add(body);
+  // Head — single sphere on top.
+  const head = new THREE.Mesh(new THREE.SphereGeometry(0.16, 8, 6), headMat);
+  head.position.y = bodyHeight + 0.16;
   head.castShadow = true;
   group.add(head);
-  // Accent: shoulder cape / sash that clearly identifies the role.
-  const sash = new THREE.Mesh(
-    new THREE.BoxGeometry(0.50, 0.08, 0.18),
+  // Accent ring — thin band that picks up the role colour.
+  const accent = new THREE.Mesh(
+    new THREE.CylinderGeometry(0.21, 0.21, 0.05, 8),
     accentMat,
   );
-  sash.position.set(0, height * 0.78, 0);
-  sash.rotation.z = 0.05;
-  group.add(sash);
+  accent.position.y = bodyHeight * 0.78;
+  group.add(accent);
   return group;
 }
 
