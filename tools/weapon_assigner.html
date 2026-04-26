@@ -86,6 +86,55 @@
   .ftile.tagged { border-color: #5a8a4a; }
   .ftile.tagged .label b { color: #f1d9a8; }
   .ftile.tagged .tag { background: #1a2218; color: #d8efb8; }
+
+  /* ===== Fullscreen pose-tuning modal ===== */
+  .pose-modal { position: fixed; inset: 0; background: rgba(0,0,0,0.92);
+                z-index: 100; display: none; flex-direction: column; }
+  .pose-modal.open { display: flex; }
+  .pose-modal .pose-header {
+    flex: 0 0 auto; padding: 10px 16px;
+    background: #1b1d22; border-bottom: 1px solid #2a2d34;
+    display: flex; gap: 12px; align-items: center; flex-wrap: wrap;
+  }
+  .pose-modal .pose-header h2 { margin: 0; color: #c9a87a; font-size: 14px; }
+  .pose-modal .pose-header .crumb { color: #888; font-size: 11px; }
+  .pose-modal .pose-header .legend { display: flex; gap: 12px; align-items: center;
+                                     margin-left: auto; font-size: 11px; }
+  .pose-modal .pose-header .legend span { display: inline-flex; align-items: center; gap: 4px; }
+  .pose-modal .pose-header .swatch { width: 12px; height: 12px; border-radius: 50%;
+                                     border: 1px solid #000; }
+  .pose-modal .pose-stage {
+    flex: 1 1 auto; position: relative; overflow: hidden;
+    background:
+      linear-gradient(45deg, #0c0d10 25%, transparent 25%) -10px 0 / 20px 20px,
+      linear-gradient(-45deg, #0c0d10 25%, transparent 25%) -10px 0 / 20px 20px,
+      linear-gradient(45deg, transparent 75%, #0c0d10 75%) -10px 0 / 20px 20px,
+      linear-gradient(-45deg, transparent 75%, #0c0d10 75%) -10px 0 / 20px 20px,
+      #16181c;
+  }
+  .pose-modal canvas.pose-canvas { display: block; position: absolute;
+                                   top: 50%; left: 50%; transform: translate(-50%,-50%);
+                                   background: transparent; }
+  .pose-modal .overlay { position: absolute;
+                         top: 50%; left: 50%; transform: translate(-50%,-50%);
+                         pointer-events: none; }
+  .pose-modal .overlay svg { display: block; pointer-events: auto; }
+  .pose-modal .pose-footer {
+    flex: 0 0 auto; padding: 10px 16px;
+    background: #1b1d22; border-top: 1px solid #2a2d34;
+    display: flex; gap: 12px; align-items: center; flex-wrap: wrap;
+    font-size: 11px; color: #aaa;
+  }
+  .pose-modal button {
+    background: #2a2d34; color: #ddd; border: 1px solid #3a3d44;
+    padding: 4px 10px; border-radius: 3px; font: inherit; cursor: pointer;
+  }
+  .pose-modal button:hover { background: #3a3d44; }
+  .pose-modal .close-btn { background: #4a2a2a; border-color: #6a3a3a; }
+  .pose-modal .close-btn:hover { background: #6a3a3a; }
+
+  /* Click-to-open hint on canvases */
+  .ftile canvas, .wtile canvas { cursor: zoom-in; }
 </style>
 </head>
 <body>
@@ -123,6 +172,31 @@
   }
 </script>
 
+<div id="pose-modal" class="pose-modal">
+  <div class="pose-header">
+    <h2 id="pose-title">—</h2>
+    <span class="crumb" id="pose-crumb"></span>
+    <div class="legend">
+      <span><span class="swatch" style="background:#ff5050"></span>main hand (trigger)</span>
+      <span><span class="swatch" style="background:#50c8ff"></span>support hand (foregrip)</span>
+      <span><span class="swatch" style="background:#ffd450"></span>shoulder mount (buttstock)</span>
+      <span><span class="swatch" style="background:#a0ff70;border:1px solid #000"></span>grip point (manifest)</span>
+      <span><span class="swatch" style="background:transparent;border:1px dashed #c9a87a;border-radius:0"></span>attachment slot</span>
+    </div>
+    <button class="close-btn" id="pose-close">close (esc)</button>
+  </div>
+  <div class="pose-stage" id="pose-stage">
+    <canvas class="pose-canvas" id="pose-canvas" width="1024" height="576"></canvas>
+    <div class="overlay" id="pose-overlay"></div>
+  </div>
+  <div class="pose-footer">
+    <span>Drag the colored discs to position. Drag attachment-slot squares to reposition them too. Click a disc to reset to default. Right-click → reset all.</span>
+    <button id="pose-export">Export pose JSON (this weapon)</button>
+    <button id="pose-export-all">Export all poses</button>
+    <button id="pose-reset">Reset this weapon</button>
+  </div>
+</div>
+
 <h2 class="section" id="hdr-weapons">In-game weapons (from tunables)</h2>
 <div class="grid" id="weapon-grid"></div>
 
@@ -147,12 +221,13 @@ import { FBXLoader } from 'three/addons/loaders/FBXLoader.js';
 
 // Pull the live manifest + the live weapon list so the tool always
 // matches what the game actually loads.
-let MODEL_BY_WEAPON_NAME = {}, MODEL_BY_ITEM_ID = {};
+let MODEL_BY_WEAPON_NAME = {}, MODEL_BY_ITEM_ID = {}, MODEL_GRIP_OFFSET = {};
 let TUNABLES = null;
 try {
   const m = await import('../src/model_manifest.js');
   MODEL_BY_WEAPON_NAME = m.MODEL_BY_WEAPON_NAME || {};
   MODEL_BY_ITEM_ID    = m.MODEL_BY_ITEM_ID    || {};
+  MODEL_GRIP_OFFSET   = m.MODEL_GRIP_OFFSET   || {};
 } catch (e) {
   console.warn('manifest import failed', e);
 }
@@ -451,12 +526,15 @@ for (const w of inGameWeapons) {
   const wTag = document.createElement('input');
   wTag.type = 'text';
   wTag.className = 'tag';
-  wTag.placeholder = w.name === w.class ? `e.g. Mossberg 500 (replace generic ${w.class})` :
-    `e.g. retag ${w.name}`;
+  wTag.placeholder = w.name === w.class ? `e.g. Mossberg 500 (or #remove)` :
+    `e.g. retag ${w.name} (or #remove)`;
+  wTag.title = "Type a real-world weapon name to flag for revisit. Type '#remove' to clear.";
   wTag.value = weaponTags[w.name] || '';
   if (wTag.value) tile.classList.add('tagged');
   wTag.addEventListener('blur', () => {
-    const v = wTag.value.trim();
+    let v = wTag.value.trim();
+    // Sentinel: typing '#remove' clears the tag.
+    if (v.toLowerCase() === '#remove') { v = ''; wTag.value = ''; }
     if (v) weaponTags[w.name] = v; else delete weaponTags[w.name];
     saveWeaponTags();
     tile.classList.toggle('tagged', !!v);
@@ -543,11 +621,14 @@ for (const cat of cats) {
     const tagEl = document.createElement('input');
     tagEl.type = 'text';
     tagEl.className = 'tag';
-    tagEl.placeholder = 'e.g. Glock 17, M4A1, Mossberg 500';
+    tagEl.placeholder = 'e.g. Glock 17, M4A1 (or #remove)';
+    tagEl.title = "Type a real-world weapon name to map this FBX to. Type '#remove' to clear.";
     tagEl.value = tags[path] || '';
     tagEl.dataset.tagged = tagEl.value ? '1' : '0';
     tagEl.addEventListener('blur', () => {
-      const v = tagEl.value.trim();
+      let v = tagEl.value.trim();
+      // Sentinel: typing '#remove' clears the tag.
+      if (v.toLowerCase() === '#remove') { v = ''; tagEl.value = ''; }
       if (v) tags[path] = v; else delete tags[path];
       saveTags();
       tagEl.dataset.tagged = v ? '1' : '0';
@@ -733,6 +814,332 @@ function animate(now) {
   requestAnimationFrame(animate);
 }
 requestAnimationFrame(animate);
+
+// ============================================================
+// Fullscreen pose-tuning modal — click any tile canvas to open.
+// Shows a 1024x576 side-view of the model overlaid with three
+// drag-to-place markers (main hand, support hand, shoulder mount)
+// and, for in-game weapons, attachment-slot squares pulled from
+// WEAPON_LAYOUTS. All positions persist in localStorage so values
+// can be tuned and exported back into the game's pose tables.
+// ============================================================
+
+// Inline copy of WEAPON_LAYOUTS slot positions (just the slots
+// dict, not the SVG art). Class-keyed; mirrors src/weapon_layouts.js
+// so the modal can render slot rectangles where attachments will go
+// in-game. Slot positions are in a 600x260 viewBox; we map to the
+// modal canvas linearly.
+const SLOT_POSITIONS = {
+  pistol: {
+    topRail:   { x: 215, y: 36 }, sideRail: { x: 305, y: 36 }, muzzle: { x: 430, y: 36 },
+    trigger:   { x: 170, y: 228 }, magazine: { x: 260, y: 228 }, grip: { x: 350, y: 228 },
+  },
+  smg: {
+    stock:     { x:  95, y: 36 }, topRail: { x: 195, y: 36 }, sideRail: { x: 290, y: 36 }, muzzle: { x: 410, y: 36 },
+    trigger:   { x: 170, y: 228 }, magazine: { x: 252, y: 228 }, grip: { x: 332, y: 228 }, underRail: { x: 412, y: 228 },
+  },
+  rifle: {
+    stock:     { x:  80, y: 36 }, topRail: { x: 180, y: 36 }, sideRail: { x: 282, y: 36 }, barrel: { x: 390, y: 36 }, muzzle: { x: 510, y: 36 },
+    trigger:   { x: 155, y: 228 }, magazine: { x: 248, y: 228 }, grip: { x: 338, y: 228 }, underRail: { x: 430, y: 228 },
+  },
+  shotgun: {
+    stock:     { x:  85, y: 36 }, topRail: { x: 210, y: 36 }, muzzle: { x: 540, y: 36 },
+    magazine:  { x: 245, y: 228 }, underRail: { x: 380, y: 228 },
+  },
+  lmg: {
+    stock:     { x:  80, y: 36 }, topRail: { x: 180, y: 36 }, sideRail: { x: 282, y: 36 }, barrel: { x: 390, y: 36 }, muzzle: { x: 510, y: 36 },
+    magazine:  { x: 218, y: 228 }, grip: { x: 320, y: 228 }, underRail: { x: 420, y: 228 },
+  },
+  flame: {
+    sideRail:  { x: 250, y: 36 }, muzzle: { x: 540, y: 36 },
+    magazine:  { x: 245, y: 228 }, underRail: { x: 380, y: 228 },
+  },
+};
+function slotsForClass(weaponClass) {
+  return SLOT_POSITIONS[weaponClass] || null;
+}
+
+// Pose persistence — keyed by FBX path. Stored as fractions of the
+// canvas dimensions (0..1) so re-rendering at any size keeps the
+// markers in the right spot. Slot overrides are also fractional.
+const POSE_KEY = 'tacticalrogue.weapon_poses';
+let poses = {};
+try { poses = JSON.parse(localStorage.getItem(POSE_KEY) || '{}'); } catch { poses = {}; }
+function savePoses() { localStorage.setItem(POSE_KEY, JSON.stringify(poses)); }
+
+// Default pose marker positions (fractional). Tweaked to land roughly
+// where these grips usually sit on a side-on rifle silhouette.
+const DEFAULT_POSE = {
+  mainHand:   { x: 0.50, y: 0.62 },  // around the trigger / pistol grip
+  supportHand:{ x: 0.62, y: 0.62 },  // forward — under the barrel / foregrip
+  shoulder:   { x: 0.30, y: 0.55 },  // back end of the buttstock
+};
+
+const POSE_MODAL = {
+  el: document.getElementById('pose-modal'),
+  canvas: document.getElementById('pose-canvas'),
+  overlay: document.getElementById('pose-overlay'),
+  title: document.getElementById('pose-title'),
+  crumb: document.getElementById('pose-crumb'),
+  scene: null, camera: null, obj: null, fbxPath: null, weaponName: null, weaponClass: null,
+  W: 1024, H: 576,
+};
+
+function _resolveCurrentManifestGrip(fbxPath) {
+  // Read the live MODEL_GRIP_OFFSET — we don't import it dynamically
+  // (would force scoping changes); instead duck-check via fetch. Cheap
+  // and the modal opens infrequently.
+  return null;  // Drawn separately from the manifest source code; the
+                // user can compare the green grip square against the
+                // colored markers visually. (Avoids a second import.)
+}
+
+function _ensureModalRenderer() {
+  if (POSE_MODAL._renderer) return POSE_MODAL._renderer;
+  const r = new THREE.WebGLRenderer({ antialias: true, alpha: true });
+  r.setPixelRatio(window.devicePixelRatio);
+  r.setSize(POSE_MODAL.W, POSE_MODAL.H, false);
+  POSE_MODAL._renderer = r;
+  return r;
+}
+
+async function openPoseModal(t) {
+  if (!t) return;
+  POSE_MODAL.fbxPath = t.path;
+  POSE_MODAL.weaponName = t.weaponName || null;
+  POSE_MODAL.weaponClass = null;
+  if (t.weaponName) {
+    const w = inGameWeapons.find(x => x.name === t.weaponName);
+    if (w) POSE_MODAL.weaponClass = w.class;
+  } else {
+    // FBX-grid open: try to find any in-game weapon currently using
+    // this FBX so we can show its slot rectangles too.
+    for (const w of inGameWeapons) {
+      if (MODEL_BY_WEAPON_NAME[w.name] === t.path) {
+        POSE_MODAL.weaponName = w.name;
+        POSE_MODAL.weaponClass = w.class;
+        break;
+      }
+    }
+  }
+  POSE_MODAL.title.textContent = POSE_MODAL.weaponName || t.file.replace(/\.fbx$/i, '');
+  POSE_MODAL.crumb.textContent =
+    `${t.path}` + (POSE_MODAL.weaponClass ? ` · ${POSE_MODAL.weaponClass}` : '');
+
+  // Build / load the staged scene at modal resolution. Reuse t.scene
+  // if it's already laid out; we'll just re-render at higher res.
+  if (!t.obj) {
+    await new Promise((resolve) => {
+      const url = MODEL_BASE + t.cat + '/' + t.file;
+      loader.load(url,
+        (obj) => { t.obj = obj; fitAndStage({ ...t, sideView: true,
+          scene: null, camera: null,
+          // Stage into the existing tile struct so it caches.
+          el: t.el, canvas: t.canvas,
+        }); resolve(); },
+        undefined,
+        () => resolve(),
+      );
+    });
+  }
+  // Always re-stage at side-view + high res for the modal so the
+  // perspective FBX-tile camera doesn't leak in.
+  POSE_MODAL.scene = new THREE.Scene();
+  POSE_MODAL.scene.add(new THREE.AmbientLight(0xffffff, 0.55));
+  const k = new THREE.DirectionalLight(0xffffff, 1.1); k.position.set(3, 5, 2); POSE_MODAL.scene.add(k);
+  const fl = new THREE.DirectionalLight(0x8fbaff, 0.35); fl.position.set(-3, 2, -1); POSE_MODAL.scene.add(fl);
+  POSE_MODAL.scene.add(t.obj);
+  POSE_MODAL.obj = t.obj;
+  // Orthographic side view to match the export render aspect.
+  const aspect = POSE_MODAL.W / POSE_MODAL.H;
+  const halfH = 1.1;
+  POSE_MODAL.camera = new THREE.OrthographicCamera(
+    -halfH * aspect, halfH * aspect, halfH, -halfH, 0.1, 50);
+  POSE_MODAL.camera.position.set(0, 0, 5);
+  POSE_MODAL.camera.lookAt(0, 0, 0);
+
+  const r = _ensureModalRenderer();
+  r.render(POSE_MODAL.scene, POSE_MODAL.camera);
+  const ctx = POSE_MODAL.canvas.getContext('2d');
+  ctx.clearRect(0, 0, POSE_MODAL.W, POSE_MODAL.H);
+  ctx.drawImage(r.domElement, 0, 0, POSE_MODAL.W, POSE_MODAL.H);
+
+  drawOverlay();
+  POSE_MODAL.el.classList.add('open');
+}
+
+function closePoseModal() {
+  POSE_MODAL.el.classList.remove('open');
+  // Don't dispose obj — tiles share it.
+}
+
+function drawOverlay() {
+  const W = POSE_MODAL.W, H = POSE_MODAL.H;
+  const path = POSE_MODAL.fbxPath;
+  if (!poses[path]) {
+    poses[path] = {
+      pose: { ...DEFAULT_POSE.mainHand && {} },  // placeholder, fill below
+      slots: {},
+    };
+  }
+  if (!poses[path].pose || !poses[path].pose.mainHand) {
+    poses[path].pose = JSON.parse(JSON.stringify(DEFAULT_POSE));
+  }
+  const p = poses[path].pose;
+  const slotOverrides = poses[path].slots || (poses[path].slots = {});
+
+  // Build SVG. Slot squares (if class known) + 3 colored markers.
+  let svg = `<svg width="${W}" height="${H}" viewBox="0 0 ${W} ${H}" xmlns="http://www.w3.org/2000/svg">`;
+
+  // Attachment slots — map from 600x260 viewBox to canvas.
+  const slots = POSE_MODAL.weaponClass ? slotsForClass(POSE_MODAL.weaponClass) : null;
+  if (slots && POSE_MODAL.weaponName) {
+    const w = inGameWeapons.find(x => x.name === POSE_MODAL.weaponName);
+    const wantedSlots = w?.attachmentSlots || [];
+    for (const slotId of wantedSlots) {
+      const def = slots[slotId];
+      if (!def) continue;
+      const ovr = slotOverrides[slotId];
+      // Default mapping: 600x260 viewBox -> canvas with same aspect
+      // (the layout viewBox is 600x260, the canvas is wider; we
+      // letterbox horizontally so y maps cleanly).
+      const scale = H / 260;
+      const offsetX = (W - 600 * scale) / 2;
+      const sx = ovr ? ovr.fx * W : (def.x * scale + offsetX);
+      const sy = ovr ? ovr.fy * H : def.y * scale;
+      const sz = 60;
+      svg += `<g class="slot" data-slot="${slotId}">`;
+      svg += `  <rect x="${sx - sz/2}" y="${sy - sz/2}" width="${sz}" height="${sz}"
+                       fill="rgba(201,168,122,0.08)" stroke="#c9a87a" stroke-width="1.5"
+                       stroke-dasharray="6 4" style="cursor:move"/>`;
+      svg += `  <text x="${sx}" y="${sy + 4}" text-anchor="middle"
+                       font-family="ui-monospace,Menlo,Consolas,monospace" font-size="11"
+                       fill="#c9a87a" pointer-events="none">${slotId}</text>`;
+      svg += `</g>`;
+    }
+  }
+
+  // Manifest grip-offset square (informational). The model sits
+  // post-fitToRadius (max-dim normalized to 2 world units), centered
+  // on origin in the side view. The grip on the model is at
+  // -gripOffset (the offset shifts the MODEL away from the hand, so
+  // the hand-equivalent point on the original model is the negation).
+  const grip = MODEL_GRIP_OFFSET[POSE_MODAL.fbxPath];
+  if (grip) {
+    const ppu = H / 2.2;
+    const gx = W / 2 + (-grip.x) * ppu;
+    const gy = H / 2 + (grip.y) * ppu;  // y inverted: world+Y → screen up
+    const sz = 24;
+    svg += `<g pointer-events="none">`;
+    svg += `  <rect x="${gx - sz/2}" y="${gy - sz/2}" width="${sz}" height="${sz}"
+                     fill="rgba(160,255,112,0.20)" stroke="#a0ff70" stroke-width="2"/>`;
+    svg += `  <text x="${gx + sz/2 + 4}" y="${gy + 3}"
+                     font-family="ui-monospace,Menlo,Consolas,monospace" font-size="10"
+                     fill="#a0ff70">grip (z=${grip.z?.toFixed(2) ?? 0})</text>`;
+    svg += `</g>`;
+  }
+
+  // Hand pose markers.
+  const M = [
+    { id: 'mainHand',    color: '#ff5050', label: 'M' },
+    { id: 'supportHand', color: '#50c8ff', label: 'S' },
+    { id: 'shoulder',    color: '#ffd450', label: 'B' },
+  ];
+  for (const m of M) {
+    const f = p[m.id];
+    const cx = f.x * W, cy = f.y * H;
+    svg += `<g class="marker" data-marker="${m.id}" style="cursor:grab">`;
+    svg += `  <circle cx="${cx}" cy="${cy}" r="14" fill="${m.color}"
+                       stroke="#000" stroke-width="2"/>`;
+    svg += `  <text x="${cx}" y="${cy + 4}" text-anchor="middle"
+                     font-family="ui-monospace,Menlo,Consolas,monospace" font-size="11"
+                     font-weight="bold" fill="#000" pointer-events="none">${m.label}</text>`;
+    svg += `</g>`;
+  }
+  svg += `</svg>`;
+
+  POSE_MODAL.overlay.style.width = W + 'px';
+  POSE_MODAL.overlay.style.height = H + 'px';
+  POSE_MODAL.overlay.innerHTML = svg;
+
+  // Wire dragging.
+  const svgEl = POSE_MODAL.overlay.querySelector('svg');
+  for (const g of svgEl.querySelectorAll('g.marker')) {
+    bindDrag(g, (fx, fy) => {
+      p[g.dataset.marker] = { x: fx, y: fy };
+      savePoses();
+      drawOverlay();
+    });
+    g.addEventListener('contextmenu', (e) => {
+      e.preventDefault();
+      p[g.dataset.marker] = { ...DEFAULT_POSE[g.dataset.marker] };
+      savePoses();
+      drawOverlay();
+    });
+  }
+  for (const g of svgEl.querySelectorAll('g.slot')) {
+    bindDrag(g, (fx, fy) => {
+      slotOverrides[g.dataset.slot] = { fx, fy };
+      savePoses();
+      drawOverlay();
+    });
+    g.addEventListener('contextmenu', (e) => {
+      e.preventDefault();
+      delete slotOverrides[g.dataset.slot];
+      savePoses();
+      drawOverlay();
+    });
+  }
+}
+
+function bindDrag(group, onMove) {
+  let dragging = false;
+  group.addEventListener('mousedown', (e) => {
+    if (e.button !== 0) return;
+    dragging = true; e.preventDefault();
+  });
+  function up() { dragging = false; }
+  function move(e) {
+    if (!dragging) return;
+    const svg = POSE_MODAL.overlay.querySelector('svg');
+    const r = svg.getBoundingClientRect();
+    const fx = Math.max(0, Math.min(1, (e.clientX - r.left) / r.width));
+    const fy = Math.max(0, Math.min(1, (e.clientY - r.top) / r.height));
+    onMove(fx, fy);
+  }
+  window.addEventListener('mouseup', up);
+  window.addEventListener('mousemove', move);
+}
+
+document.getElementById('pose-close').addEventListener('click', closePoseModal);
+document.addEventListener('keydown', (e) => {
+  if (e.key === 'Escape' && POSE_MODAL.el.classList.contains('open')) closePoseModal();
+});
+document.getElementById('pose-reset').addEventListener('click', () => {
+  delete poses[POSE_MODAL.fbxPath];
+  savePoses();
+  drawOverlay();
+});
+document.getElementById('pose-export').addEventListener('click', () => {
+  const out = { [POSE_MODAL.fbxPath]: poses[POSE_MODAL.fbxPath] };
+  const blob = new Blob([JSON.stringify(out, null, 2)], { type: 'application/json' });
+  const a = document.createElement('a');
+  a.href = URL.createObjectURL(blob);
+  a.download = `pose_${POSE_MODAL.fbxPath.replace(/[^A-Za-z0-9]+/g, '_')}.json`;
+  a.click();
+});
+document.getElementById('pose-export-all').addEventListener('click', () => {
+  const blob = new Blob([JSON.stringify(poses, null, 2)], { type: 'application/json' });
+  const a = document.createElement('a');
+  a.href = URL.createObjectURL(blob);
+  a.download = 'all_weapon_poses.json';
+  a.click();
+});
+
+// Click-to-open: bind on every tile that has a model.
+for (const t of allTiles) {
+  t.canvas.addEventListener('click', () => openPoseModal(t));
+}
 </script>
 </body>
 </html>
