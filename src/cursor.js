@@ -141,6 +141,7 @@ function _cursorFor(sightId) {
       case 'sight_reflex': return svgReflex();
       case 'sight_holo':   return svgHolo();
       case 'sight_scope':  return svgScope();
+      case 'sight_long_scope': return svgScope();
       default: return svgDefault();
     }
   })();

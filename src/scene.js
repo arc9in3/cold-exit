@@ -52,15 +52,18 @@ export function createScene() {
   function updateCamera(dt, opts = {}) {
     const adsAmt = opts.adsAmount ?? 0;
     const weaponPeek = opts.adsPeekDistance ?? 5;
-    // ADS no longer shrinks the camera frustum (no actual "zoom").
-    // The frustum stays at its baseline size; "zoom" is now expressed
-    // entirely as how far the camera anchor can DRIFT toward the
-    // cursor. weaponPeek is the meters of reach budget the weapon's
-    // sight grants. Sniper scope = 35m (2.5 rooms); rifle = 21m;
-    // pistol/shotgun = 6m; etc. Adjust at the call site, not here.
+    // ADS frustum push-in driven by the equipped sight. sightZoom is
+    // the multiplier on apparent size (iron 1.05, red dot 1.10, holo
+    // 1.15, mid scope 1.20, long scope 1.30). Frustum shrinks to
+    // 1/sightZoom so 1.20× zoom = 0.833× frustum height. Drag
+    // distance (weaponPeek) is decoupled — better sights also bump
+    // the peek budget so you can pan further.
+    const sightZoom = opts.sightZoom ?? 1.05;
+    const adsFrustumShrink = 1 / sightZoom;
     const adsEased = adsAmt * adsAmt * (3 - 2 * adsAmt);
     const base = opts.target || new THREE.Vector3();
-    const halfH = tunables.camera.viewHeight / 2;
+    const zoomK = THREE.MathUtils.lerp(1, adsFrustumShrink, adsEased);
+    const halfH = (tunables.camera.viewHeight * zoomK) / 2;
     const aspect = window.innerWidth / window.innerHeight;
     camera.left = -halfH * aspect;
     camera.right = halfH * aspect;
@@ -68,36 +71,34 @@ export function createScene() {
     camera.bottom = -halfH;
     camera.updateProjectionMatrix();
 
-    // ADS peek — fixed-direction shift snapshotted at ADS press in
-    // main.js (`opts.adsPeekDir`). Camera anchors at player + dir ×
-    // weaponPeek for the entire ADS hold. NO continuous cursor chase
-    // — that's the whole point. Tracking an enemy with the mouse
-    // doesn't slide the world around anymore.
+    // ADS peek — direction snapshotted at press in main.js
+    // (`opts.adsPeekDir`); the magnitude pushed on press is the
+    // CURSOR distance at press, capped by the weapon's drag budget.
+    // Edge-pan within ADS hold extends the offset further but stays
+    // capped by the same budget so the camera never drifts beyond
+    // what the weapon allows.
     const desired = _desiredScratch.copy(base);
     if (adsEased > 0.05 && opts.adsPeekDir) {
-      // "Scope factor" — blends from 0 at iron-sight peek (≤6m) to 1
-      // at long-scope peek (≥21m, rifle range). Mid-to-long sights
-      // get a wider edge-pan budget so the scoped weapon's full
-      // declared peek distance is reachable via cursor input.
-      const scopeFactor = Math.max(0, Math.min(1, (weaponPeek - 6) / 15));
-      const sightBonus = 1 + 0.35 * scopeFactor;
-      // Peek strength is now the FULL declared peek distance at full
-      // ADS (was capped at 0.55× before). The user-facing model is
-      // "ADS pulls the camera up to weaponPeek meters toward the
-      // cursor"; a sniper at full scope = 35m of reach.
-      const peekStrength = adsEased * weaponPeek;
+      // Initial press magnitude — min(distAtPress, budget). If the
+      // cursor was 4m away on press and the budget is 35m (sniper),
+      // camera moves 4m toward cursor, not 35m. Edge-pan can pull
+      // the rest of the budget out via cursor drag.
+      const distAtPress = opts.adsPeekDir._distAtPress ?? weaponPeek;
+      const initialReach = Math.min(distAtPress, weaponPeek);
+      const peekStrength = adsEased * initialReach;
       desired.x += opts.adsPeekDir.x * peekStrength;
       desired.z += opts.adsPeekDir.z * peekStrength;
-      // Edge-of-screen pan — once the cursor reaches the outer 30%
-      // of the viewport, slide the anchor in that direction so the
-      // player can scan further off-frame. Smoothstep ramp from
-      // EDGE_THRESHOLD → 1.0 so the transition reads as "lean" not
-      // "snap". Pan budget capped at MAX_EDGE_OFFSET metres (scaled
-      // by sightBonus so scopes pan further).
+      // Edge-of-screen pan — outer 35% (deadzone is the inner 65%)
+      // of the cursor NDC slides the anchor in that direction.
+      // Total camera offset (initial reach + edge pan) is clamped
+      // to weaponPeek below so better sights = bigger drag budget.
       const ndc = opts.cursorNDC;
       if (ndc) {
         const EDGE_THRESHOLD = 0.65;
-        const MAX_EDGE_OFFSET = 4.5 * sightBonus;
+        // Edge-pan can use whatever budget the initial reach left,
+        // up to the full weaponPeek. Sniper with cursor right at the
+        // player on press has the full 35m left to drag.
+        const MAX_EDGE_OFFSET = Math.max(0, weaponPeek - initialReach);
         const computeAxis = (v) => {
           const a = Math.abs(v);
           if (a <= EDGE_THRESHOLD) return 0;

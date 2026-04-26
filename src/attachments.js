@@ -116,29 +116,43 @@ export const ATTACHMENT_DEFS = {
   },
 
   // --- Top rail (sights) ---
+  // sightZoom = ADS frustum push-in factor. Iron sights (no top-rail
+  // attachment) default to 1.05 in effectiveWeapon. Higher = camera
+  // pushes in further on ADS, making the world appear closer.
   sight_reddot: {
     id: 'att_reddot', name: 'Red Dot', type: 'attachment',
     slot: 'topRail', tint: 0xff4040,
-    description: '−15% ADS spread',
+    description: '−15% ADS spread, 1.1× ADS zoom',
     modifier: { adsSpreadMult: 0.85 },
+    sightZoom: 1.10,
   },
   sight_reflex: {
     id: 'att_reflex', name: 'Reflex Sight', type: 'attachment',
     slot: 'topRail', tint: 0xff6060,
-    description: '−12% hip spread, −18% ADS spread',
+    description: '−12% hip spread, −18% ADS spread, 1.1× ADS zoom',
     modifier: { hipSpreadMult: 0.88, adsSpreadMult: 0.82 },
+    sightZoom: 1.10,
   },
   sight_holo: {
     id: 'att_holo', name: 'Holographic', type: 'attachment',
     slot: 'topRail', tint: 0x60a0ff,
-    description: '−20% ADS spread, +10% ADS zoom',
+    description: '−20% ADS spread, 1.15× ADS zoom',
     modifier: { adsSpreadMult: 0.8, adsZoomMult: 0.9 },
+    sightZoom: 1.15,
   },
   sight_scope: {
     id: 'att_scope', name: 'Mid Scope', type: 'attachment',
     slot: 'topRail', tint: 0x404a60,
-    description: '−30% ADS spread, +35% ADS zoom',
+    description: '−30% ADS spread, 1.2× ADS zoom, +3m drag',
     modifier: { adsSpreadMult: 0.7, adsZoomMult: 0.65, adsPeekBonus: 3 },
+    sightZoom: 1.20,
+  },
+  sight_long_scope: {
+    id: 'att_long_scope', name: 'Long Scope', type: 'attachment',
+    slot: 'topRail', tint: 0x2a3140,
+    description: '−40% ADS spread, 1.3× ADS zoom, +6m drag',
+    modifier: { adsSpreadMult: 0.6, adsZoomMult: 0.5, adsPeekBonus: 6 },
+    sightZoom: 1.30,
   },
 
   // --- Stock ---
@@ -303,10 +317,15 @@ export function effectiveWeapon(w) {
   const eff = { ...w };
   const atts = w.attachments || {};
   let lightAtt = null;
+  // Iron-sight default; overridden by any topRail sight that carries a
+  // sightZoom value. Drives the ADS frustum shrink in scene.js so the
+  // push-in matches the equipped optic.
+  eff.sightZoom = 1.05;
   for (const slot in atts) {
     const a = atts[slot];
     if (!a) continue;
     if (a.lightTier) lightAtt = a;
+    if (typeof a.sightZoom === 'number') eff.sightZoom = a.sightZoom;
     const m = a.modifier || {};
     if (m.damageMult) eff.damage *= m.damageMult;
     if (m.hipSpreadMult) eff.hipSpread *= m.hipSpreadMult;

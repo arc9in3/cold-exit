@@ -8998,6 +8998,11 @@ function tick() {
     const dz = aimInfo.point.z - playerInfo.position.z;
     const len = Math.hypot(dx, dz) || 1;
     _adsPeekDir.set(dx / len, 0, dz / len);
+    // Snapshot how far the cursor was at press time. Camera reach on
+    // press matches the cursor distance — capped at the class budget
+    // — so ADS pushes the camera TOWARD where you were aiming, not
+    // a fixed distance ahead of you.
+    _adsPeekDir._distAtPress = len;
     _adsPeekActive = true;
   }
   if (playerInfo.adsAmount <= 0.01) _adsPeekActive = false;
@@ -9025,6 +9030,10 @@ function tick() {
     adsPeekDistance: _adsPeekByClass,
     adsPeekDir: _adsPeekActive ? _adsPeekDir : null,
     cursorNDC: input.hasAim ? input.mouseNDC : null,
+    // Per-sight ADS frustum push-in: iron 1.05, red dot/reflex 1.10,
+    // holo 1.15, mid scope 1.20, long scope 1.30. Falls back to 1.05
+    // when no weapon is equipped.
+    sightZoom: effWeapon?.sightZoom ?? 1.05,
   });
   // Camera shake overlay — applied AFTER the follow solve so the
   // base transform isn't permanently nudged. Decays over shakeT.
