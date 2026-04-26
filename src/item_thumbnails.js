@@ -1149,8 +1149,11 @@ function buildFor(item) {
 function cacheKey(item) {
   if (!item) return '__empty';
   const tint = (item.tint ?? 0).toString(16);
-  if (item.type === 'ranged')  return `ranged:${item.class || 'p'}:${item.name || item.id || ''}:${tint}`;
-  if (item.type === 'melee')   return `melee:${item.name || item.id || ''}:${tint}`;
+  // baseName drops rarity / mastercraft prefixes so 'Refined Benelli
+  // M4' and 'Benelli M4' share a cache slot — same render PNG.
+  const wname = item.baseName || item.name || item.id || '';
+  if (item.type === 'ranged')  return `ranged:${item.class || 'p'}:${wname}:${tint}`;
+  if (item.type === 'melee')   return `melee:${wname}:${tint}`;
   if (item.type === 'attachment') return `att:${item.slot || ''}:${item.id || item.name}:${tint}`;
   if (item.type === 'consumable') return `con:${item.id || item.name}:${tint}`;
   if (item.type === 'junk')       return `junk:${item.id || item.name}:${tint}`;
@@ -1206,7 +1209,7 @@ export function thumbnailFor(item) {
   // the inventory grid via iconForItem and by the attachment-screen
   // via layoutForWeapon). No procedural primitive, no FBX overwrite.
   if (item.type === 'ranged' || item.type === 'melee') {
-    const render = renderForWeaponName(item.name);
+    const render = renderForWeaponName(item.baseName || item.name);
     if (render) {
       _cache.set(key, render);
       return render;

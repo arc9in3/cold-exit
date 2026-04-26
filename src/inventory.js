@@ -314,15 +314,17 @@ export function iconForItem(item) {
 
   // Weapons — when a side-view render PNG is registered for this
   // weapon, it wins over the curated stock icon so the inventory
-  // and attachment screen show the same silhouette.
+  // and attachment screen show the same silhouette. Lookup uses
+  // baseName so the rarity / mastercraft prefixed display name
+  // doesn't miss the entry.
   if (item.type === 'ranged' || item.type === 'melee') {
-    const render = _renderForWeaponName(item.name);
+    const render = _renderForWeaponName(item.baseName || item.name);
     if (render) return render;
   }
 
   // Weapons — try a per-name icon first, then class, then category.
   if (item.type === 'ranged') {
-    const byName = WEAPON_ICON_BY_NAME[item.name];
+    const byName = WEAPON_ICON_BY_NAME[item.baseName || item.name];
     if (byName) return MIL_BASE + byName;
     switch (item.class) {
       case 'smg':     return MIL_BASE + 'ICON_SM_Wep_Preset_A_SMG_01_Military_Underlay.png';
@@ -335,7 +337,7 @@ export function iconForItem(item) {
     }
   }
   if (item.type === 'melee') {
-    const byName = WEAPON_ICON_BY_NAME[item.name];
+    const byName = WEAPON_ICON_BY_NAME[item.baseName || item.name];
     return MIL_BASE + (byName || 'ICON_SM_Wep_Knife_Kukri_01_Military_Underlay.png');
   }
   if (item.type === 'consumable') {
@@ -1422,6 +1424,11 @@ export function wrapWeapon(w, opts = {}) {
     rarity: rolledRarity,
     mastercraft: mastercraft || undefined,
     name: mcPrefix + (namePrefix ? `${namePrefix} ${w.name}` : w.name),
+    // Original tunable name without the rarity / mastercraft prefix.
+    // Lookups against WEAPON_RENDER_BY_NAME / MODEL_BY_WEAPON_NAME
+    // use this so 'Refined Benelli M4' still resolves the Benelli M4
+    // render PNG + FBX.
+    baseName: w.name,
     tint: w.tracerColor,
     damage: newDmg,
     fireRate: newFireRate,

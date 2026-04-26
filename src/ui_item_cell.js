@@ -7,7 +7,7 @@
 // offscreen WebGL canvas and cached by a stable item key. This
 // replaces the old Military icon-pack PNG stack which was too dense
 // and too similar to tell items apart at a glance.
-import { inferRarity, TYPE_ICONS, SLOT_LABEL, SLOT_ICONS } from './inventory.js';
+import { inferRarity, rarityColor, TYPE_ICONS, SLOT_LABEL, SLOT_ICONS } from './inventory.js';
 import { thumbnailFor } from './item_thumbnails.js';
 
 export function renderItemCell(item, slotId = null, opts = {}) {
@@ -17,8 +17,10 @@ export function renderItemCell(item, slotId = null, opts = {}) {
     const lbl = slotLabel ? `<div class="cell-label">${slotLabel}</div>` : '';
     return `${lbl}<div class="cell-empty-ico">${icon}</div>`;
   }
-  const tint = item.tint ?? 0x888888;
-  const tintStr = `#${tint.toString(16).padStart(6, '0')}`;
+  // Cell background = RARITY color, not item.tint. Was producing the
+  // orange-on-orange-background read for items whose tint matches
+  // the rendered weapon's accent (Benelli M4 shotgun, AK47, etc.).
+  const tintStr = rarityColor(item);
   const thumbUrl = thumbnailFor(item);
 
   // Primary item art — 3D-rendered thumbnail of the item's category

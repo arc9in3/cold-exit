@@ -360,6 +360,14 @@ export function renderForWeaponName(name) {
   const f = WEAPON_RENDER_BY_NAME[name];
   return f ? RENDER_BASE + f : null;
 }
+// Wrapper that prefers item.baseName (the original tunable name)
+// over item.name (which carries the rarity / mastercraft prefixes
+// like 'Refined Benelli M4'). Use this for any lookup keyed by a
+// canonical weapon identity instead of touching the raw map.
+export function renderForWeapon(item) {
+  if (!item) return null;
+  return renderForWeaponName(item.baseName || item.name);
+}
 
 // All in-game weapons currently have side-view PNG renders — see
 // WEAPON_RENDER_BY_NAME above. To add a new weapon:
@@ -407,9 +415,15 @@ export function modelForItem(item) {
   if (!item) return null;
   if (item.model) return item.model;  // callers can override inline
 
-  if ((item.type === 'ranged' || item.type === 'melee') && item.name) {
-    const byName = MODEL_BY_WEAPON_NAME[item.name];
-    if (byName) return MODEL_BASE + byName;
+  if (item.type === 'ranged' || item.type === 'melee') {
+    // Prefer baseName (the original tunable name) so rarity / master-
+    // craft prefixes don't break the lookup ('Refined Benelli M4'
+    // still resolves the Benelli M4 FBX).
+    const lookupName = item.baseName || item.name;
+    if (lookupName) {
+      const byName = MODEL_BY_WEAPON_NAME[lookupName];
+      if (byName) return MODEL_BASE + byName;
+    }
   }
   if (item.id) {
     const byId = MODEL_BY_ITEM_ID[item.id];

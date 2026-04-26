@@ -169,8 +169,9 @@ export function layoutForWeapon(weapon) {
   // Side-view PNG render registered for this weapon name → swap the
   // procedural class silhouette for the actual rendered model. Same
   // image as the inventory icon = consistent identity for the player.
-  if (weapon?.name) {
-    const url = renderForWeaponName(weapon.name);
+  const lookupName = weapon?.baseName || weapon?.name;
+  if (lookupName) {
+    const url = renderForWeaponName(lookupName);
     if (url) {
       return {
         svg: `<image href="${url}" x="0" y="0" width="600" height="260" preserveAspectRatio="xMidYMid meet"/>`,

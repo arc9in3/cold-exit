@@ -1,7 +1,7 @@
 import * as THREE from 'three';
 import { inferRarity, SLOT_LABEL, SET_DEFS, countEquippedSetPieces } from './inventory.js';
 import { thumbnailFor } from './item_thumbnails.js';
-import { modelForItem } from './model_manifest.js';
+import { modelForItem, rotationOverrideForModelPath } from './model_manifest.js';
 import { loadModelClone, fitToRadius, applyEmissiveTint, addOutlines } from './gltf_cache.js';
 import { BASE_STATS } from './skills.js';
 
@@ -498,6 +498,19 @@ export class DetailsUI {
       fitToRadius(obj, 1.0);
       addOutlines(obj);
       applyEmissiveTint(obj, item.tint ?? 0xaaaaaa, 0.18);
+      // Without rotation the FBX often points along whatever axis it
+      // was authored on — for animpic shotguns / rifles that's roughly
+      // the camera's forward axis, so the preview shows just the
+      // muzzle end-on as a thin diagonal stick. Apply the same default
+      // rotation used in-hand so the preview reads as a side profile.
+      const rotOverride = rotationOverrideForModelPath(url);
+      if (rotOverride) {
+        obj.rotation.set(rotOverride.x || 0, rotOverride.y || 0, rotOverride.z || 0);
+      } else if (item.modelRotation) {
+        obj.rotation.set(item.modelRotation.x || 0, item.modelRotation.y || 0, item.modelRotation.z || 0);
+      } else {
+        obj.rotation.set(0, Math.PI / 2, 0);
+      }
       scene.add(obj);
       state.obj = obj;
     });
