@@ -597,15 +597,49 @@ export class Level {
     // if that sub-boss is the one holding the key you'd need.
     const shopTypes = new Set(['merchant', 'healer', 'gunsmith', 'armorer',
       'tailor', 'relicSeller', 'blackMarket', 'bearMerchant']);
+    // Candidate doors must have EXACTLY one shop side. Locking a
+    // shop-to-shop door used to risk isolating both sides — a chain
+    // of two shop rooms whose only connection was the locked door
+    // would be unreachable from spawn whether the player had the key
+    // or not. Requiring exactly one shop side guarantees the door's
+    // non-shop neighbour stays on the open graph.
     const keyable = this.obstacles.filter((o) => {
       if (!o.userData.isDoor) return false;
       const [aId, bId] = o.userData.connects;
       const a = rooms[aId], b = rooms[bId];
-      return (shopTypes.has(a.type) || shopTypes.has(b.type))
+      const aIsShop = shopTypes.has(a.type);
+      const bIsShop = shopTypes.has(b.type);
+      return (aIsShop !== bIsShop)
           && a.type !== 'boss' && b.type !== 'boss'
           && a.type !== 'subBoss' && b.type !== 'subBoss';
     });
     if (keyable.length === 0) return;
+
+    // Reachability check from spawn (rooms[0]) over only-currently-
+    // unlocked doors plus a candidate door treated as unlocked.
+    // Returns the set of room ids reachable. Used after each pick to
+    // validate that at least ONE side of the locked door is still
+    // reachable from spawn — i.e., the player can actually walk up
+    // to the door to use the key.
+    const _reachableFrom = (startId, blockedDoors) => {
+      const seen = new Set([startId]);
+      const stack = [startId];
+      while (stack.length) {
+        const cur = stack.pop();
+        const room = rooms[cur];
+        if (!room || !room.neighbors) continue;
+        for (const n of room.neighbors) {
+          if (seen.has(n.otherId)) continue;
+          // Skip doors we've locked. A door is "this side blocked"
+          // if it's in blockedDoors (set of door meshes).
+          const door = this._doorBetween ? this._doorBetween(cur, n.otherId) : null;
+          if (door && blockedDoors.has(door)) continue;
+          seen.add(n.otherId);
+          stack.push(n.otherId);
+        }
+      }
+      return seen;
+    };
 
     // Sub-boss list — these mobs drop the key tokens when they die.
     // Key holders are assigned in main.js buildBodyLoot; we just
@@ -615,9 +649,34 @@ export class Level {
     this.keycardDoors = {};            // color → door mesh
     this.keycardColors = [];           // ordered list for this level
     const picked = new Set();
+    // Tracks every door we've locked across this assignment pass.
+    // Each new candidate is validated against the cumulative blocked
+    // set — both adjacent rooms must remain reachable from spawn so
+    // the player can approach the door from at least one side.
+    const blockedDoors = new Set();
     for (let i = 0; i < nKeys && keyable.length; i++) {
-      const idx = Math.floor(Math.random() * keyable.length);
-      const door = keyable.splice(idx, 1)[0];
+      // Try candidates until one passes the reachability check, or
+      // we run out (in which case the level just gets fewer keys).
+      let door = null;
+      let chosenIdx = -1;
+      for (let attempt = 0; attempt < keyable.length; attempt++) {
+        const tryIdx = Math.floor(Math.random() * keyable.length);
+        const tryDoor = keyable[tryIdx];
+        const trial = new Set(blockedDoors);
+        trial.add(tryDoor);
+        const reachable = _reachableFrom(0, trial);
+        const [aId, bId] = tryDoor.userData.connects;
+        // Pass if the player can still walk up to AT LEAST one side
+        // of this door from spawn through unlocked-only doors.
+        if (reachable.has(aId) || reachable.has(bId)) {
+          door = tryDoor;
+          chosenIdx = tryIdx;
+          break;
+        }
+      }
+      if (!door) break;     // every remaining candidate would softlock — stop
+      keyable.splice(chosenIdx, 1);
+      blockedDoors.add(door);
       const color = poolColors[i];
       door.userData.keyRequired = color;
       door.userData.unlocked = false;
