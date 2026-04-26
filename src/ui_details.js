@@ -497,7 +497,10 @@ export class DetailsUI {
       if (state.disposed || !obj) return;
       fitToRadius(obj, 1.0);
       addOutlines(obj);
-      applyEmissiveTint(obj, item.tint ?? 0xaaaaaa, 0.18);
+      // No emissive tint — was washing weapon previews with the
+      // tracerColor (orange on Benelli, etc.) instead of letting the
+      // model's own materials show through. Same look as the
+      // inventory side-view render now.
       // Without rotation the FBX often points along whatever axis it
       // was authored on — for animpic shotguns / rifles that's roughly
       // the camera's forward axis, so the preview shows just the

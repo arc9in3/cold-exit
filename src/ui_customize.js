@@ -7,7 +7,10 @@ import { thumbnailFor } from './item_thumbnails.js';
 // always read the same way across weapon classes — muzzle first, then
 // barrel, sights, rails, magazine. Weapons only show the slots they
 // actually expose via `attachmentSlots`.
-const CUST_SLOT_ORDER = ['muzzle', 'barrel', 'topRail', 'sideRail', 'underRail', 'magazine'];
+// Canonical presentation order — matches the radial layout in
+// CANONICAL_POS so the cells appear left-to-right, top-to-bottom in
+// roughly clockwise order around the gun silhouette.
+const CUST_SLOT_ORDER = ['muzzle', 'barrel', 'sideRail', 'topRail', 'stock', 'underRail', 'magazine', 'trigger', 'grip'];
 const CUST_SLOT_LABEL = {
   muzzle:    'Muzzle',
   barrel:    'Barrel',
@@ -145,13 +148,28 @@ export class CustomizeUI {
     // users build muscle memory for where to drop which attachment.
     // The schematic behind varies per weapon class but the slot
     // cells themselves are stable.
+    // Canonical slot layout — muzzle-LEFT orientation. Gun silhouette
+    // image (the side-view PNG) sits centered in the window; slots
+    // ring the edges with breathing room between them.
+    //   muzzle      ─ left center                    (front of barrel)
+    //   barrel      ─ inboard of muzzle              (mid-front, low)
+    //   sideRail    ─ above the receiver, mid-front  (laser / light)
+    //   topRail     ─ top center                     (sight)
+    //   underRail   ─ below the receiver, mid-front  (foregrip / bipod)
+    //   magazine    ─ bottom center                  (mag well)
+    //   trigger    ─ bottom right of magazine       (trigger group)
+    //   grip       ─ further right, bottom          (pistol grip)
+    //   stock      ─ center right                   (buttstock)
     const CANONICAL_POS = {
-      topRail:   { x: 300, y:  55 },
-      muzzle:    { x: 545, y: 135 },
-      barrel:    { x: 430, y: 135 },
-      sideRail:  { x: 215, y: 135 },
-      underRail: { x: 345, y: 215 },
-      magazine:  { x: 235, y: 215 },
+      muzzle:    { x:  55, y: 130 },
+      barrel:    { x: 130, y: 165 },
+      sideRail:  { x: 205, y:  65 },
+      topRail:   { x: 305, y:  35 },
+      underRail: { x: 215, y: 215 },
+      magazine:  { x: 305, y: 230 },
+      trigger:   { x: 395, y: 230 },
+      grip:      { x: 480, y: 230 },
+      stock:     { x: 555, y: 130 },
     };
     for (const slot of slots) {
       const cell = document.createElement('div');
