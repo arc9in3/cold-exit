@@ -114,7 +114,7 @@ function _ensureBubblePool() {
     _bubblePool.push({ el, inUse: false, hideT: 0, removeT: 0 });
   }
 }
-export function spawnSpeechBubble(worldPos, camera, text, life = 2.5) {
+export function spawnSpeechBubble(worldPos, camera, text, life = 7.0) {
   _ensureBubblePool();
   const p = worldPos.clone().project(camera);
   const x = (p.x * 0.5 + 0.5) * window.innerWidth;

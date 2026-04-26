@@ -1209,7 +1209,7 @@ const shopUI = new ShopUI({
       if (bear?.group) {
         const pos = bear.group.position.clone().setY(2.2);
         spawnSpeechBubble(pos, camera,
-          'A heavily armed duck left these here, I guess you can have them.', 5.5);
+          'A heavily armed duck left these here, I guess you can have them.', 7.0);
       }
       recomputeStats();
       sfx.uiAccept?.();
@@ -1853,7 +1853,10 @@ function regenerateLevel() {
       // keeps the peaceful path open.
       playerSpeed: lastPlayerInfo ? (lastPlayerInfo.speed || 0) : 0,
       scene, level, room: r,
-      spawnSpeech: (worldPos, text, life) => spawnSpeechBubble(worldPos, camera, text, life),
+      // 7s minimum on every encounter speech so the player has time
+      // to read the line, even if the encounter passed a shorter
+      // explicit life value.
+      spawnSpeech: (worldPos, text, life) => spawnSpeechBubble(worldPos, camera, text, Math.max(life || 0, 7.0)),
       spawnMasterworkChest: (x, z) => _spawnMasterworkChestAt(x, z),
       spawnLoot: (x, z, item) => loot.spawnItem({ x, y: 0.4, z }, item),
         // Reward-roll helpers — encounters call these to keep the
