@@ -612,7 +612,10 @@ export function rollAffixes(rarity, opts = {}) {
     // Bias the upper end of the value: each affix roll gets multiplied
     // by a random in [1, levelScale] so on average +0..1× of base.
     const widen = 1 + (levelScale - 1) * Math.random();
-    value = value * widen * mcMult;
+    // Clamp to 1 decimal max so labels read "+6.7% move speed" instead
+    // of "+6.7349281% move speed". Integer rolls stay as integers
+    // (Math.round(10*10)/10 === 10, JS prints "10" not "10.0").
+    value = Math.round(value * widen * mcMult * 10) / 10;
     out.push({ kind: def.kind, value, label: def.label(value) });
   }
   return out;
