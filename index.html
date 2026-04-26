@@ -1280,7 +1280,7 @@
       border: 1px solid rgba(201, 168, 122, 0.35);
       border-radius: 5px;
       z-index: 2;
-      max-height: 38%;
+      max-height: 30%;
       overflow-y: auto;
       pointer-events: auto;
     }
@@ -1299,9 +1299,51 @@
       border: 1px solid rgba(201, 168, 122, 0.35);
       border-radius: 5px;
       z-index: 2;
-      max-height: 56%;
+      max-height: 32%;
       overflow-y: auto;
       pointer-events: auto;
+    }
+    /* Relics — own panel between Gear Bonuses (top) and Skills
+       (bottom) so the player can see active artifact effects + lore
+       without scrolling past the gear-bonus stack. Slight purple
+       tint differentiates it from the gold gear-bonuses border. */
+    #inv-relics-overlay {
+      grid-column: 2;
+      grid-row: 1 / span 7;
+      align-self: center;
+      justify-self: stretch;
+      margin: 0 8px;
+      padding: 8px 10px;
+      background: linear-gradient(180deg, rgba(20, 14, 26, 0.92), rgba(14, 14, 22, 0.98));
+      border: 1px solid rgba(170, 130, 200, 0.45);
+      border-radius: 5px;
+      z-index: 2;
+      max-height: 28%;
+      overflow-y: auto;
+      pointer-events: auto;
+    }
+    .inv-relics-heading {
+      font-size: 10px; color: #c8a8e8; letter-spacing: 2px;
+      text-transform: uppercase; margin-bottom: 6px; text-align: center;
+    }
+    .inv-relics-empty {
+      font-size: 10px; color: #6f6754; letter-spacing: 1.2px;
+      text-align: center; padding: 6px 0;
+    }
+    .inv-relic-row {
+      padding: 5px 4px;
+      border-bottom: 1px solid rgba(170, 130, 200, 0.12);
+    }
+    .inv-relic-row:last-child { border-bottom: 0; }
+    .inv-relic-line {
+      font-size: 10px; line-height: 1.35;
+    }
+    .inv-relic-name { color: #c8a8e8; font-weight: 700; }
+    .inv-relic-desc { color: #9b8b6a; }
+    .inv-relic-lore {
+      font-size: 9px; color: #7a6e90; font-style: italic;
+      margin-top: 2px; line-height: 1.35;
+      padding-left: 12px;
     }
     .inv-prog-heading {
       font-size: 10px; color: #c9a87a; letter-spacing: 2px;

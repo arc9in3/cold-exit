@@ -82,6 +82,18 @@ export class InventoryUI {
     this.gridEl.appendChild(prog);
     this.progListEl = prog.querySelector('#inv-prog-list');
 
+    // Relics now live in their own overlay panel so the player can
+    // see active artifact effects + lore without scrolling past the
+    // gear-bonus stack.
+    const relics = document.createElement('div');
+    relics.id = 'inv-relics-overlay';
+    relics.innerHTML = `
+      <div class="inv-relics-heading">Relics</div>
+      <div id="inv-relics-list"></div>
+    `;
+    this.gridEl.appendChild(relics);
+    this.relicsListEl = relics.querySelector('#inv-relics-list');
+
     const skills = document.createElement('div');
     skills.id = 'inv-skills-overlay';
     skills.innerHTML = `
@@ -95,9 +107,26 @@ export class InventoryUI {
   toggle() {
     this.visible = !this.visible;
     this.root.style.display = this.visible ? 'flex' : 'none';
+    this._toggleBottomHotbars(!this.visible);
     if (this.visible) this.render();
   }
-  hide() { this.visible = false; this.root.style.display = 'none'; }
+  hide() {
+    this.visible = false;
+    this.root.style.display = 'none';
+    this._toggleBottomHotbars(true);
+  }
+
+  // Hide / show the bottom-of-screen hotbar bars (#weapon-bar +
+  // #action-bar) while the inventory modal is open. Players asked
+  // for the inventory view to drop the duplicate quickslot row that
+  // was floating in over the paperdoll; the hotbars stay live during
+  // gameplay (close the inventory and they're back).
+  _toggleBottomHotbars(show) {
+    const wb = document.getElementById('weapon-bar');
+    const ab = document.getElementById('action-bar');
+    if (wb) wb.style.display = show ? '' : 'none';
+    if (ab) ab.style.display = show ? '' : 'none';
+  }
 
   // ——— equipment paper doll ——————————————————————————————————
 
@@ -849,33 +878,15 @@ export class InventoryUI {
       }
     }
 
-    // — Relics: artifacts the player has acquired this run. Each row
-    //   shows the relic name + its short effect summary so the player
-    //   can see what's actively buffing them without rummaging through
-    //   the relic-seller stock.
-    const relicRows = [];
-    for (const a of (this.getArtifacts() || [])) {
-      const desc = a.short || a.description || '';
-      const lore = a.lore || '';
-      relicRows.push(`<div class="inv-prog-perk inv-prog-relic">
-        <span class="inv-prog-perk-name">⬢ ${a.name}</span>
-        ${desc ? `<span class="inv-prog-perk-desc"> — ${desc}</span>` : ''}
-        <span class="inv-prog-perk-src">RELIC</span>
-        ${lore ? `<div class="inv-prog-relic-lore">"${lore}"</div>` : ''}
-      </div>`);
-    }
+    // — Relics now live in a separate overlay panel (see
+    //   `_renderRelics` below). Kept the data-collection step out of
+    //   this method so the Gear Bonuses panel reads as gear-only.
 
     const sections = [];
     if (setHtml) {
       sections.push(`<div class="inv-prog-section">
         <div class="inv-prog-section-title">Set Bonuses</div>
         ${setHtml}
-      </div>`);
-    }
-    if (relicRows.length) {
-      sections.push(`<div class="inv-prog-section">
-        <div class="inv-prog-section-title">Relics (${relicRows.length})</div>
-        ${relicRows.join('')}
       </div>`);
     }
     if (perkRows.length) {
@@ -891,10 +902,37 @@ export class InventoryUI {
       </div>`);
     }
     if (sections.length === 0) {
-      this.progListEl.innerHTML = `<div class="inv-prog-empty">No set bonuses, perks, affixes, or relics yet — equip gear or buy a relic to grow your power.</div>`;
+      this.progListEl.innerHTML = `<div class="inv-prog-empty">No set bonuses, perks, or affixes yet — equip gear to grow your power.</div>`;
     } else {
       this.progListEl.innerHTML = sections.join('');
     }
+    this._renderRelics();
+  }
+
+  // Render the dedicated relics overlay. Each row shows the relic
+  // name, its short effect summary, the RELIC tag, and the lore line
+  // underneath so players can see what every artifact actually does
+  // (and read the world-building flavour) at a glance.
+  _renderRelics() {
+    if (!this.relicsListEl) return;
+    const list = this.getArtifacts() || [];
+    if (!list.length) {
+      this.relicsListEl.innerHTML = `<div class="inv-relics-empty">No relics yet — finish encounters or buy from the relic-seller.</div>`;
+      return;
+    }
+    const rows = [];
+    for (const a of list) {
+      const desc = a.short || a.description || '';
+      const lore = a.lore || '';
+      rows.push(`<div class="inv-relic-row">
+        <div class="inv-relic-line">
+          <span class="inv-relic-name">⬢ ${a.name}</span>
+          ${desc ? `<span class="inv-relic-desc"> — ${desc}</span>` : ''}
+        </div>
+        ${lore ? `<div class="inv-relic-lore">"${lore}"</div>` : ''}
+      </div>`);
+    }
+    this.relicsListEl.innerHTML = rows.join('');
   }
 
   // ——— render ———————————————————————————————————————————————
