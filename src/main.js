@@ -1810,22 +1810,23 @@ function regenerateLevel() {
       r.type = 'combat';   // demote — main UI stays consistent
       continue;
     }
-    const ctx = {
+    // Single ctx factory shared between the initial def.spawn() call
+    // and every later interact / tick / drop dispatch. Previously the
+    // initial spawn ctx only carried spawnSpeech + spawnLoot +
+    // spawnMasterworkChest, so encounters that needed
+    // spawnEncounterChest / spawnCnCPair / spawnRandomContainerAt /
+    // rollSubBossLootPile AT spawn time silently no-op'd. Sleeping
+    // Boss is the canonical victim — its corner chest never spawned.
+    const _ctxFactory = () => ({
+      playerPos: player.mesh.position,
+      // Live player horizontal speed — Sleeping Boss reads this so
+      // running near him wakes the encounter while sneak-walking
+      // keeps the peaceful path open.
+      playerSpeed: lastPlayerInfo ? (lastPlayerInfo.speed || 0) : 0,
       scene, level, room: r,
-      // Helpers the encounter can call without knowing main.js internals.
       spawnSpeech: (worldPos, text, life) => spawnSpeechBubble(worldPos, camera, text, life),
       spawnMasterworkChest: (x, z) => _spawnMasterworkChestAt(x, z),
       spawnLoot: (x, z, item) => loot.spawnItem({ x, y: 0.4, z }, item),
-    };
-    r._encounter = {
-      def,
-      state: def.spawn(scene, r, ctx) || {},
-      ctxFactory: () => ({
-        playerPos: player.mesh.position,
-        scene, level, room: r,
-        spawnSpeech: ctx.spawnSpeech,
-        spawnMasterworkChest: ctx.spawnMasterworkChest,
-        spawnLoot: ctx.spawnLoot,
         // Reward-roll helpers — encounters call these to keep the
         // module decoupled from inventory.js / attachments.js.
         rollRandomToy: () => randomToy(),
@@ -1975,7 +1976,11 @@ function regenerateLevel() {
           loot.spawnItem({ x, y: 0.4, z }, { ...def });
           return true;
         },
-      }),
+    });
+    r._encounter = {
+      def,
+      state: def.spawn(scene, r, _ctxFactory()) || {},
+      ctxFactory: _ctxFactory,
     };
   }
   saveLevelStart();

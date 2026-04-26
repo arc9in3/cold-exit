@@ -1383,7 +1383,10 @@ export const ENCOUNTER_DEFS = {
         if (s.progress) s.progress.userData.setText('The fountain accepts your offering.');
         // Spawn a single-item chest holding the King's Signet.
         if (ctx.spawnSignetChest) {
-          ctx.spawnSignetChest(s.disc.cx + 1.8, s.disc.cz);
+          // Push the chest further out (was 1.8m, fountain mesh
+          // bounds extend ~1.5m so the player couldn't get within
+          // 1.8m of the chest center without bumping the fountain).
+          ctx.spawnSignetChest(s.disc.cx + 3.6, s.disc.cz);
         }
         ctx.spawnSpeech(new THREE.Vector3(s.disc.cx, 2.4, s.disc.cz),
           'A glint stirs in the depths.', 4.0);
@@ -1549,12 +1552,37 @@ export const ENCOUNTER_DEFS = {
       const chestZ = cb.minZ + 2.4;
       const items = ctx.rollSubBossLootPile ? ctx.rollSubBossLootPile() : [];
       if (ctx.spawnEncounterChest) ctx.spawnEncounterChest(chestX, chestZ, items);
+      // Hittable target — bullets / melee that hit the NPC mesh route
+      // through this manager.applyHit, which flips the wake flag.
+      // The encounter tick reads the flag next frame and replaces the
+      // slumbering NPC with a real elite spawn.
+      const wakeTarget = {
+        alive: true, hp: 1, maxHp: 1, tier: 'subBoss',
+        group: { position: { x: disc.cx, y: 1.0, z: disc.cz } },
+        manager: {
+          applyHit: (_owner, _dmg) => {
+            wakeTarget._pendingWake = true;
+            return { drops: [], blocked: false };
+          },
+        },
+      };
+      // Walk every mesh in the NPC group and tag it as a hittable
+      // body. Zone tag stays 'torso' for the kill / hit FX pipeline.
+      const hitMeshes = [];
+      npc.traverse?.((obj) => {
+        if (obj.isMesh) {
+          obj.userData.zone = 'torso';
+          obj.userData.owner = wakeTarget;
+          hitMeshes.push(obj);
+        }
+      });
       return {
         npc, label, disc,
-        slept: false,
+        wakeTarget, hitMeshes,
         woke: false,
         complete: false,
         snoreT: 0,
+        wakeRadius: 2.5,    // running this close also wakes him
       };
     },
     tick(dt, ctx) {
@@ -1565,25 +1593,50 @@ export const ENCOUNTER_DEFS = {
         s.snoreT += dt;
         s.npc.position.y = 0.18 + Math.abs(Math.sin(s.snoreT * 1.4)) * 0.04;
       }
-      // First-frame logic: if the player ever leaves the room while
-      // peaceful, we lock the encounter complete (peaceful path).
       const px = ctx.playerPos.x, pz = ctx.playerPos.z;
       const inRoom = ctx.room && ctx.room.bounds
         && px >= ctx.room.bounds.minX && px <= ctx.room.bounds.maxX
         && pz >= ctx.room.bounds.minZ && pz <= ctx.room.bounds.maxZ;
       if (inRoom) s.everEntered = true;
+      // Wake conditions — bullet/melee hit on the NPC, OR running
+      // within the wake radius. Stealth-walking players keep the
+      // peaceful path open.
+      if (!s.woke) {
+        const dx = px - s.disc.cx, dz = pz - s.disc.cz;
+        const closeBy = (dx * dx + dz * dz) <= s.wakeRadius * s.wakeRadius;
+        const playerSpeed = ctx.playerSpeed || 0;
+        const isRunning = playerSpeed > 4.5;
+        if (s.wakeTarget._pendingWake || (closeBy && isRunning)) {
+          s.woke = true;
+          s.wakeTarget._pendingWake = false;
+          // Hide the slumbering NPC mesh + clear its hit-test owner
+          // so subsequent shots route to the real spawned enemy.
+          s.npc.visible = false;
+          for (const m of s.hitMeshes) {
+            m.userData.owner = null;
+            m.userData.zone = null;
+          }
+          // Spawn the actual fight — sub-boss-tier gunman armed by
+          // the standard pool, dropped at the slumber position.
+          if (ctx.spawnEliteAt) ctx.spawnEliteAt(s.disc.cx, s.disc.cz, ctx.room);
+          ctx.spawnSpeech(new THREE.Vector3(s.disc.cx, 2.4, s.disc.cz),
+            'WHO DARES?!', 4.0);
+          s.complete = true;
+          if (ctx.markEncounterComplete) ctx.markEncounterComplete('sleeping_boss');
+        }
+      }
+      // Peaceful exit — if the player leaves the room without ever
+      // waking him, lock the encounter as a sneak success.
       if (!s.complete && s.everEntered && !inRoom && !s.woke) {
-        // Player left without disturbing him. Peaceful path locked.
         s.complete = true;
         if (ctx.markEncounterComplete) ctx.markEncounterComplete('sleeping_boss');
-        if (s.hint) s.hint.userData.setText('You stepped softly. He never knew.');
       }
     },
-    // Sleeping Boss is purely environmental; player damages him by
-    // shooting/meleeing the NPC mesh, which we don't make hittable
-    // for this prototype. The "wake on damage" branch is left as a
-    // future hook — the peaceful path is what ships now.
-    onItemDropped(item, ctx) { return { consume: false }; },
+    onItemDropped(_item, _ctx) { return { consume: false }; },
+    hittables(state) {
+      if (!state || !state.hitMeshes || state.woke) return EMPTY_ARR;
+      return state.hitMeshes;
+    },
   },
 
   // -----------------------------------------------------------------
