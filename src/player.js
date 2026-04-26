@@ -1058,8 +1058,19 @@ export function createPlayer(scene) {
       velocity.x = state.dashDir.x * tunables.dash.speed * curve * dashMult * distMul;
       velocity.z = state.dashDir.z * tunables.dash.speed * curve * dashMult * distMul;
       if (state.modeT >= tunables.dash.duration) {
-        // Preserve a fraction of dash momentum so it blends into running.
+        // Preserve a fraction of dash momentum so it blends into running,
+        // then clamp to the player's max ground speed so a Rocket-Ticket
+        // dash (distMul=2) can't dump 12-24 m/s of carry-over into the
+        // ground tick — the lerp-to-walkSpeed decay was too slow to mask
+        // it and players read as "very fast" with no movespeed bonus.
         velocity.multiplyScalar(0.3);
+        const carryCap = tunables.move.sprintSpeed * (state.moveSpeedMult || 1);
+        const carrySpeed = Math.hypot(velocity.x, velocity.z);
+        if (carrySpeed > carryCap && carrySpeed > 0.0001) {
+          const k = carryCap / carrySpeed;
+          velocity.x *= k;
+          velocity.z *= k;
+        }
         endToGround();
       }
     } else if (state.mode === MODE.ROLL) {
@@ -1086,7 +1097,18 @@ export function createPlayer(scene) {
       const expired =
         state.modeT >= tunables.slide.maxDuration
         || (state.modeT >= tunables.slide.minDuration && speed < tunables.move.walkSpeed * 0.9);
-      if (expired) endToGround();
+      if (expired) {
+        // Clamp slide-exit velocity to sprint speed so the carry-over
+        // into ground walking can't sustain mega-momentum across
+        // chained slides.
+        const carryCap = tunables.move.sprintSpeed * (state.moveSpeedMult || 1);
+        if (speed > carryCap && speed > 0.0001) {
+          const k = carryCap / speed;
+          velocity.x *= k;
+          velocity.z *= k;
+        }
+        endToGround();
+      }
     } else {
       // GROUND movement.
       let maxSpeed = tunables.move.walkSpeed;
