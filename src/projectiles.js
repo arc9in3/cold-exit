@@ -99,6 +99,10 @@ export class ProjectileManager {
   // should apply AoE damage + visual effects; it's a callback so this
   // module stays decoupled from the damage pipeline.
   update(dt, level, onExplode) {
+    // Scratch vectors reused for detonation positions — was allocating
+    // a fresh Vector3 per ground / wall hit.
+    const _detPos = this._detPos || (this._detPos = new THREE.Vector3());
+    void _detPos;
     for (const p of this.projectiles) {
       if (p.dead) continue;
       p.age += dt;
@@ -114,18 +118,18 @@ export class ProjectileManager {
       if (p.lifetime > 0) {
         if (p.fuseAfterLand) {
           if (p.fuseStartT >= 0 && (p.age - p.fuseStartT) >= p.lifetime) {
-            this._detonate(p, p.pos.clone(), onExplode);
+            this._detPos.copy(p.pos); this._detonate(p, this._detPos, onExplode);
             continue;
           }
           // Safety cap — defuse anything that's spent 4× its fuse in
           // flight without ever touching ground (caught in geometry,
           // launched off the level edge, etc.).
           if (p.age >= p.lifetime * 4) {
-            this._detonate(p, p.pos.clone(), onExplode);
+            this._detPos.copy(p.pos); this._detonate(p, this._detPos, onExplode);
             continue;
           }
         } else if (p.age >= p.lifetime) {
-          this._detonate(p, p.pos.clone(), onExplode);
+          this._detPos.copy(p.pos); this._detonate(p, this._detPos, onExplode);
           continue;
         }
       }
@@ -145,7 +149,7 @@ export class ProjectileManager {
       if (armed && p.type === 'rocket' && p.owner === 'player') {
         const close = this._nearbyEnemy(p.pos, 0.8);
         if (close) {
-          this._detonate(p, p.pos.clone(), onExplode);
+          this._detPos.copy(p.pos); this._detonate(p, this._detPos, onExplode);
           continue;
         }
       }
@@ -155,7 +159,7 @@ export class ProjectileManager {
       if (armed && p.type === 'grenade' && p.owner === 'player') {
         const close = this._nearbyEnemy(p.pos, 0.7);
         if (close) {
-          this._detonate(p, p.pos.clone(), onExplode);
+          this._detPos.copy(p.pos); this._detonate(p, this._detPos, onExplode);
           continue;
         }
       }
@@ -163,7 +167,8 @@ export class ProjectileManager {
       // Ground contact — floor plane at y=0.
       if (ny <= 0.08) {
         if (p.type === 'rocket' || !(p.bounciness > 0)) {
-          this._detonate(p, new THREE.Vector3(nx, 0.08, nz), onExplode);
+          this._detPos.set(nx, 0.08, nz);
+          this._detonate(p, this._detPos, onExplode);
           continue;
         }
         // Bounce: reflect Y velocity, damp horizontal, increment count.
@@ -185,7 +190,8 @@ export class ProjectileManager {
       const hitWall = this._hitsObstacle(level, nx, ny, nz);
       if (hitWall) {
         if (p.type === 'rocket' || !(p.bounciness > 0)) {
-          this._detonate(p, new THREE.Vector3(nx, Math.max(0.08, ny), nz), onExplode);
+          this._detPos.set(nx, Math.max(0.08, ny), nz);
+          this._detonate(p, this._detPos, onExplode);
           continue;
         }
         // Bounce off wall — flip the dominant horizontal axis. Cheap

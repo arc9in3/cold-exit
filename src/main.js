@@ -2035,6 +2035,16 @@ function regenerateLevel() {
       ctxFactory: _ctxFactory,
     };
   }
+  // After encounter visuals (which add fresh material variants —
+  // braziers, fountains, dummies, tomes, etc.) land in scene, run
+  // a renderer.compile pass so the first frame the player sees the
+  // encounter room doesn't pay the shader-compile hitch on entry.
+  // Called only if at least one encounter spawned this regen.
+  try {
+    if (level.rooms?.some?.(r => r._encounter)) {
+      renderer.compile(scene, camera);
+    }
+  } catch (_) {}
   saveLevelStart();
 }
 
