@@ -18,7 +18,7 @@ import { separateEnemies } from './ai_separation.js';
 import { LootManager } from './loot.js';
 import { ENCOUNTER_DEFS, pickEncounterForLevel } from './encounters.js';
 import { spawnSpeechBubble } from './hud.js';
-import { makeContainer, buildContainerMesh } from './containers.js';
+import { makeContainer, buildContainerMesh, pickContainerType, pickContainerSize } from './containers.js';
 import { Level } from './level.js';
 import { ProjectileManager } from './projectiles.js';
 import { spawnDamageNumber } from './hud.js';
@@ -1911,6 +1911,10 @@ function regenerateLevel() {
         // Elite gunman spawn at world XZ tagged to the encounter
         // room. Uses the standard gunman manager.
         spawnEliteAt: (x, z, room) => _spawnEliteAtPos(x, z, room),
+        // The Button — spawn a real random-rolled container at XZ.
+        spawnRandomContainerAt: (x, z) => _spawnRandomContainerAt(x, z),
+        // The Button alarm — spawn one summoned minion at XZ.
+        spawnSummonedMinion: (x, z, room2) => _spawnSummonedMinionAt(x, z, room2),
       }),
     };
   }
@@ -1945,6 +1949,51 @@ function _spawnEncounterChestAt(x, z, items) {
   scene.add(proxy);
   level.obstacles.push(proxy);
   level.containers.push({ container, group, x, z, r: 1.8 });
+}
+
+// Random-rolled container at the world XZ — same machinery the level
+// scatter uses, but spawnable from encounters. Type and size both roll
+// per the standard pickContainerType/pickContainerSize tables.
+function _spawnRandomContainerAt(x, z) {
+  const type = pickContainerType();
+  const size = pickContainerSize(type);
+  const container = makeContainer(type, size, level?.index | 0);
+  const group = buildContainerMesh(container, x, 0, z);
+  scene.add(group);
+  const { w, d } = container.geo;
+  const proxy = new THREE.Mesh(
+    new THREE.BoxGeometry(w, container.geo.h, d),
+    new THREE.MeshBasicMaterial({ transparent: true, opacity: 0, depthWrite: false }),
+  );
+  proxy.position.set(x, container.geo.h / 2, z);
+  proxy.userData.collisionXZ = {
+    minX: x - w / 2, maxX: x + w / 2,
+    minZ: z - d / 2, maxZ: z + d / 2,
+  };
+  proxy.userData.isProp = true;
+  proxy.userData.containerRef = container;
+  scene.add(proxy);
+  level.obstacles.push(proxy);
+  level.containers.push({ container, group, x, z, r: 1.8 });
+}
+
+// The Button alarm — spawn one summoned melee minion at the world XZ
+// tagged so it pays no XP/loot/credits, mirroring the necromant adds.
+// Returns the minion record so the encounter tick can poll alive state.
+function _spawnSummonedMinionAt(x, z, room) {
+  const minion = melees.spawn(x, z, {
+    tier: 'normal',
+    roomId: room?.id,
+    hpMult: 0.5, damageMult: 0.7,
+    reactionMult: 1.0, aimSpreadMult: 1.0,
+    aggression: 1.2, gearLevel: 0,
+  });
+  if (minion) {
+    minion.summoned = true;
+    minion.noDrops = true;
+    minion.noXp = true;
+  }
+  return minion;
 }
 
 function _spawnMasterworkChestAt(x, z) {

@@ -1849,6 +1849,183 @@ export const ENCOUNTER_DEFS = {
       return { consume: false };
     },
   },
+
+  // -----------------------------------------------------------------
+  // The Button — small console with a single red button. Pressing it
+  // rolls a 1-in-3 outcome:
+  //   1) Nothing happens
+  //   2) Alarm — summons necromant-style minions from the room corners
+  //      every few seconds, capped at 10 alive at a time, until the
+  //      player extracts (encounter dies with the level on regen).
+  //   3) Spawns 3 random containers near the console.
+  // One-shot per save — the press is a commitment, can't re-roll later.
+  the_button: {
+    id: 'the_button',
+    name: 'The Button',
+    floorColor: 0x802020,                   // ominous red
+    oncePerSave: true,
+    condition: (state) => state.levelIndex >= 1,
+    spawn(scene, room, ctx) {
+      const disc = _spawnFloorDisc(scene, room, this.floorColor);
+      // Console — a low metal box with a sloped top so the button reads
+      // as "press me" from across the room.
+      const consoleMat = new THREE.MeshStandardMaterial({
+        color: 0x2a2e36, roughness: 0.7, metalness: 0.4,
+      });
+      const consoleGroup = new THREE.Group();
+      const base = new THREE.Mesh(new THREE.BoxGeometry(1.2, 0.8, 0.8), consoleMat);
+      base.position.y = 0.4;
+      base.castShadow = true;
+      consoleGroup.add(base);
+      const slope = new THREE.Mesh(
+        new THREE.BoxGeometry(1.2, 0.05, 0.8),
+        new THREE.MeshStandardMaterial({ color: 0x1a1d23, roughness: 0.6 }),
+      );
+      slope.position.y = 0.82;
+      slope.rotation.x = -0.18;
+      consoleGroup.add(slope);
+      // Big red dome button — emissive so it reads "powered on".
+      const button = new THREE.Mesh(
+        new THREE.SphereGeometry(0.20, 18, 12, 0, Math.PI * 2, 0, Math.PI / 2),
+        new THREE.MeshStandardMaterial({
+          color: 0xc62020, emissive: 0x802020, emissiveIntensity: 0.9,
+          roughness: 0.4, metalness: 0.2,
+        }),
+      );
+      button.position.set(0, 0.92, 0.04);
+      consoleGroup.add(button);
+      // Subtle pulsing red light over the button.
+      const light = new THREE.PointLight(0xff4040, 0.8, 4);
+      light.position.set(0, 1.4, 0);
+      consoleGroup.add(light);
+      consoleGroup.position.set(disc.cx, 0, disc.cz);
+      scene.add(consoleGroup);
+      const label = _makeLabelSprite('THE BUTTON', '#ff8080');
+      label.position.set(disc.cx, 2.4, disc.cz);
+      scene.add(label);
+      const hint = _makeLabelSprite('Press E to push the button', '#c98080');
+      hint.scale.set(4.2, 0.65, 1);
+      hint.position.set(disc.cx, 0.55, disc.cz + 1.6);
+      scene.add(hint);
+      return {
+        consoleGroup, button, light, label, hint, disc,
+        // Per-frame state.
+        wobbleT: 0,
+        outcome: null,             // null | 'nothing' | 'alarm' | 'chests'
+        complete: false,
+        // Alarm bookkeeping — cap at 10 alive minions, respawn every
+        // ~3.5s while alive count is below the cap. Indices stored so
+        // we can prune dead and refill.
+        alarmT: 0,
+        alarmInterval: 3.5,
+        alarmCap: 10,
+        alarmMinions: [],
+      };
+    },
+    tick(dt, ctx) {
+      const s = ctx.state;
+      if (!s.button) return;
+      s.wobbleT += dt;
+      // Idle pulse on the button so it reads as live.
+      const pulse = 0.7 + 0.3 * Math.sin(s.wobbleT * 3.5);
+      s.button.material.emissiveIntensity = 0.5 + 0.5 * pulse;
+      s.light.intensity = 0.4 + 0.6 * pulse;
+      // Alarm tick — runs forever once triggered. Encounter cleans up
+      // naturally on level regen (the room + its _encounter ref are
+      // discarded with the old level).
+      if (s.outcome !== 'alarm') return;
+      // Prune dead minions so the cap reflects live count.
+      s.alarmMinions = s.alarmMinions.filter(m => m && m.alive);
+      s.alarmT -= dt;
+      if (s.alarmT > 0) return;
+      s.alarmT = s.alarmInterval;
+      if (s.alarmMinions.length >= s.alarmCap) return;
+      if (!ctx.spawnSummonedMinion || !ctx.room) return;
+      // Pick a random room corner (insetted), retry until we find one
+      // not blocked by props/walls.
+      const b = ctx.room.bounds;
+      const corners = [
+        [b.minX + 1.5, b.minZ + 1.5],
+        [b.maxX - 1.5, b.minZ + 1.5],
+        [b.minX + 1.5, b.maxZ - 1.5],
+        [b.maxX - 1.5, b.maxZ - 1.5],
+      ];
+      // Shuffle so spawn doesn't always favour the same corner.
+      for (let i = corners.length - 1; i > 0; i--) {
+        const j = Math.floor(Math.random() * (i + 1));
+        [corners[i], corners[j]] = [corners[j], corners[i]];
+      }
+      for (const [cx, cz] of corners) {
+        if (ctx.level && ctx.level._collidesAt && ctx.level._collidesAt(cx, cz, 0.5)) continue;
+        const m = ctx.spawnSummonedMinion(cx, cz, ctx.room);
+        if (m) s.alarmMinions.push(m);
+        return;
+      }
+    },
+    interact(ctx) {
+      const s = ctx.state;
+      if (s.complete) return;
+      const opts = [
+        {
+          text: 'PUSH THE BUTTON',
+          enabled: true,
+          onPick: () => {
+            s.complete = true;
+            // 1-in-3 outcome.
+            const r = Math.random();
+            const outcome = r < 1 / 3 ? 'nothing'
+                          : r < 2 / 3 ? 'alarm'
+                          :             'chests';
+            s.outcome = outcome;
+            // Power down the hint label so the prompt doesn't re-arm.
+            if (s.hint) s.hint.visible = false;
+            if (ctx.markEncounterComplete) ctx.markEncounterComplete('the_button');
+            const speakAt = new THREE.Vector3(s.disc.cx, 1.6, s.disc.cz);
+            if (outcome === 'nothing') {
+              ctx.spawnSpeech(speakAt, 'A faint click. Nothing else.', 3.5);
+            } else if (outcome === 'alarm') {
+              // Visual: shift the disc + light to a deeper red and
+              // start the alarm pulse. Minions will spawn from the
+              // tick() block on the alarmInterval cadence.
+              s.disc.disc.material.color.setHex(0xff2020);
+              s.light.color.setHex(0xff2020);
+              ctx.spawnSpeech(speakAt, 'ALARM. INTRUDERS DETECTED.', 4.5);
+              s.alarmT = 0.5;     // first wave fast so the threat reads
+            } else {
+              // Three random containers in a small arc in front of
+              // the console. Step around slightly so they don't
+              // overlap each other.
+              const offsets = [
+                [-1.6,  1.6],
+                [ 0.0,  2.0],
+                [ 1.6,  1.6],
+              ];
+              let placed = 0;
+              for (const [dx, dz] of offsets) {
+                const cx = s.disc.cx + dx;
+                const cz = s.disc.cz + dz;
+                // Skip the spot if walls/props are in the way.
+                if (ctx.level && ctx.level._collidesAt && ctx.level._collidesAt(cx, cz, 0.6)) continue;
+                if (ctx.spawnRandomContainerAt) {
+                  ctx.spawnRandomContainerAt(cx, cz);
+                  placed += 1;
+                }
+              }
+              ctx.spawnSpeech(speakAt,
+                placed > 0 ? 'Compartments unsealed.' : 'A heavy clunk. Nothing visible.', 3.5);
+            }
+          },
+        },
+        { text: 'Walk away', onPick: () => {} },
+      ];
+      ctx.showPrompt({
+        title: 'The Button',
+        body: 'A single red button. No labels, no warnings.',
+        options: opts,
+      });
+    },
+    onItemDropped(_item, _ctx) { return { consume: false }; },
+  },
 };
 
 // Helper — pick one valid encounter for the given level state, or null.
