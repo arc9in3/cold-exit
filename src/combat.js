@@ -86,26 +86,22 @@ export class Combat {
   // `radius` is the AoE radius; the fireball peaks at 1.0× and the
   // ring reaches 1.4× before fading. Auto-fades in ~0.55s.
   spawnExplosion(point, radius = 5.0) {
-    const fireballMat = new THREE.MeshBasicMaterial({
-      color: 0xffb040, transparent: true, opacity: 0.95, depthWrite: false,
-    });
-    const fireball = new THREE.Mesh(
-      new THREE.SphereGeometry(1.0, 16, 12), fireballMat,
-    );
+    this._ensurePools();
+    // Pool-backed fireball + ring. Find an idle slot, or recycle the
+    // oldest in-use one (visually invisible — it's mid-fade).
+    let exEntry = this._explosionPool.find(e => !e.inUse);
+    if (!exEntry) exEntry = this._explosionPool[0];
+    exEntry.inUse = true;
+    const fireball = exEntry.fireball;
+    const ring = exEntry.ring;
     fireball.position.copy(point);
     fireball.scale.setScalar(0.2);
-    this.scene.add(fireball);
-
-    const ringMat = new THREE.MeshBasicMaterial({
-      color: 0xffe080, transparent: true, opacity: 0.85,
-      depthWrite: false, side: THREE.DoubleSide,
-    });
-    const ring = new THREE.Mesh(
-      new THREE.RingGeometry(0.6, 0.9, 32), ringMat,
-    );
-    ring.rotation.x = -Math.PI / 2;
+    fireball.material.opacity = 0.95;
+    fireball.visible = true;
     ring.position.set(point.x, 0.06, point.z);
-    this.scene.add(ring);
+    ring.scale.setScalar(1);
+    ring.material.opacity = 0.85;
+    ring.visible = true;
 
     // Hot white flash + light so the explosion actually lights
     // surrounding geometry for one beat. Pool-backed (see ctor) so
@@ -118,7 +114,7 @@ export class Combat {
     lightSlot.light.intensity = 6.0;
 
     this.explosions.push({
-      fireball, ring, lightSlot, t: 0, life: 0.55, radius,
+      exEntry, fireball, ring, lightSlot, t: 0, life: 0.55, radius,
     });
     // Sparks — reuse the shared particle pool with a warm tint and
     // bigger scale so the debris reads at distance.
@@ -552,11 +548,21 @@ export class Combat {
       }
     }
     this.bloods.length = 0;
-    // Explosions are { fireball, ring, lightSlot, ... } — dispose
-    // the per-event meshes, release the pooled light back to idle.
+    // Explosions — fireball + ring are now pool-backed (see
+    // _ensurePools), so release the entry instead of disposing.
+    // Direct-allocated explosions from older code paths still get
+    // disposed; both shapes coexist for safety.
     for (const e of this.explosions) {
-      if (e.fireball) { this.scene.remove(e.fireball); e.fireball.geometry?.dispose(); e.fireball.material?.dispose(); }
-      if (e.ring)     { this.scene.remove(e.ring);     e.ring.geometry?.dispose();     e.ring.material?.dispose(); }
+      if (e.exEntry) {
+        e.exEntry.fireball.visible = false;
+        e.exEntry.ring.visible = false;
+        e.exEntry.fireball.material.opacity = 0;
+        e.exEntry.ring.material.opacity = 0;
+        e.exEntry.inUse = false;
+      } else {
+        if (e.fireball) { this.scene.remove(e.fireball); e.fireball.geometry?.dispose(); e.fireball.material?.dispose(); }
+        if (e.ring)     { this.scene.remove(e.ring);     e.ring.geometry?.dispose();     e.ring.material?.dispose(); }
+      }
       if (e.lightSlot) {
         e.lightSlot.light.intensity = 0;
         e.lightSlot.light.position.set(0, -1000, 0);
@@ -801,12 +807,14 @@ export class Combat {
       ex.ring.material.opacity = Math.max(0, 0.85 * kInv * kInv);
       ex.lightSlot.light.intensity = 6.0 * kInv * kInv;
       if (ex.t >= ex.life) {
-        this.scene.remove(ex.fireball);
-        this.scene.remove(ex.ring);
-        ex.fireball.geometry.dispose();
-        ex.fireball.material.dispose();
-        ex.ring.geometry.dispose();
-        ex.ring.material.dispose();
+        // Pool-backed fireball + ring — hide + release, no dispose.
+        if (ex.exEntry) {
+          ex.exEntry.fireball.visible = false;
+          ex.exEntry.ring.visible = false;
+          ex.exEntry.fireball.material.opacity = 0;
+          ex.exEntry.ring.material.opacity = 0;
+          ex.exEntry.inUse = false;
+        }
         // Release the pooled light — park it dim and off-screen.
         ex.lightSlot.light.intensity = 0;
         ex.lightSlot.light.position.set(0, -1000, 0);
@@ -898,6 +906,36 @@ export class Combat {
       m.frustumCulled = false;
       this.scene.add(m);
       this._impactPool.push({ mesh: m, inUse: false });
+    }
+    // Explosion fireball + scorch-ring pool. spawnExplosion was
+    // creating a fresh SphereGeometry + RingGeometry + 2 materials
+    // per detonation, then disposing them ~0.55s later. With
+    // grenades / claymores / The Gift, this churned hard during a
+    // boss fight. Pool 12 (more than enough for simultaneous
+    // detonations); each entry holds the fireball + ring meshes
+    // reused per spawn.
+    const EXPLOSION_POOL = 12;
+    this._explosionPool = [];
+    const fireballGeom = new THREE.SphereGeometry(1.0, 16, 12);
+    const ringGeom = new THREE.RingGeometry(0.6, 0.9, 32);
+    for (let i = 0; i < EXPLOSION_POOL; i++) {
+      const fmat = new THREE.MeshBasicMaterial({
+        color: 0xffb040, transparent: true, opacity: 0, depthWrite: false,
+      });
+      const fireball = new THREE.Mesh(fireballGeom, fmat);
+      fireball.visible = false;
+      fireball.frustumCulled = false;
+      this.scene.add(fireball);
+      const rmat = new THREE.MeshBasicMaterial({
+        color: 0xffe080, transparent: true, opacity: 0,
+        depthWrite: false, side: THREE.DoubleSide,
+      });
+      const ring = new THREE.Mesh(ringGeom, rmat);
+      ring.rotation.x = -Math.PI / 2;
+      ring.visible = false;
+      ring.frustumCulled = false;
+      this.scene.add(ring);
+      this._explosionPool.push({ fireball, ring, inUse: false });
     }
   }
 

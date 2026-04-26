@@ -4756,35 +4756,55 @@ function spawnExplosionFx(pos, radius) {
 // White translucent expanding dome — used for flashbang / stun
 // detonations so they read as a concussive pulse, not a fireball.
 // Grows from a tight core to `radius` over ~0.4s while the opacity
-// fades; disposes on completion.
+// fades.
+//
+// Pool of 8 dome meshes sharing one SphereGeometry. Was creating a
+// fresh Sphere + Material per detonation. The dome material has a
+// per-call tint, so the pool slot's material color is reset each
+// spawn (cheap — Color.setHex is one number write).
 const _flashDomes = [];
+const _flashDomePool = [];
+const _FLASH_DOME_POOL = 8;
+let _flashDomeGeom = null;
+function _ensureFlashDomePool() {
+  if (_flashDomePool.length === _FLASH_DOME_POOL) return;
+  if (!_flashDomeGeom) _flashDomeGeom = new THREE.SphereGeometry(1, 20, 14);
+  for (let i = _flashDomePool.length; i < _FLASH_DOME_POOL; i++) {
+    const mat = new THREE.MeshBasicMaterial({
+      color: 0xffffff, transparent: true, opacity: 0,
+      depthWrite: false, blending: THREE.AdditiveBlending,
+    });
+    const mesh = new THREE.Mesh(_flashDomeGeom, mat);
+    mesh.visible = false;
+    mesh.frustumCulled = false;
+    scene.add(mesh);
+    _flashDomePool.push({ mesh, inUse: false });
+  }
+}
 function spawnFlashDome(pos, radius, tint = 0xffffff) {
-  const geom = new THREE.SphereGeometry(1, 20, 14);
-  const mat = new THREE.MeshBasicMaterial({
-    color: tint,
-    transparent: true,
-    opacity: 0.85,
-    depthWrite: false,
-    blending: THREE.AdditiveBlending,
-  });
-  const mesh = new THREE.Mesh(geom, mat);
-  mesh.position.copy(pos);
-  mesh.scale.setScalar(0.2);
-  scene.add(mesh);
-  _flashDomes.push({ mesh, t: 0, life: 0.4, radius });
+  _ensureFlashDomePool();
+  let entry = _flashDomePool.find(e => !e.inUse);
+  if (!entry) entry = _flashDomePool[0];
+  entry.inUse = true;
+  entry.mesh.position.copy(pos);
+  entry.mesh.scale.setScalar(0.2);
+  entry.mesh.material.color.setHex(tint);
+  entry.mesh.material.opacity = 0.85;
+  entry.mesh.visible = true;
+  _flashDomes.push({ entry, t: 0, life: 0.4, radius });
 }
 function _tickFlashDomes(dt) {
   for (let i = _flashDomes.length - 1; i >= 0; i--) {
     const d = _flashDomes[i];
     d.t += dt;
     const k = d.t / d.life;
+    const mesh = d.entry.mesh;
     // Scale 0.2 → radius, opacity 0.85 → 0.
-    d.mesh.scale.setScalar(0.2 + (d.radius - 0.2) * Math.min(1, k * 1.1));
-    d.mesh.material.opacity = Math.max(0, 0.85 * (1 - k));
+    mesh.scale.setScalar(0.2 + (d.radius - 0.2) * Math.min(1, k * 1.1));
+    mesh.material.opacity = Math.max(0, 0.85 * (1 - k));
     if (d.t >= d.life) {
-      scene.remove(d.mesh);
-      d.mesh.geometry.dispose();
-      d.mesh.material.dispose();
+      mesh.visible = false;
+      d.entry.inUse = false;
       _flashDomes.splice(i, 1);
     }
   }
