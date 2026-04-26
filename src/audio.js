@@ -58,6 +58,25 @@ function ensureCtx() {
     conv.connect(wet);
     wet.connect(master);
     wet._input = conv;         // nodes feeding reverb connect here
+    // Prime — fire one inaudible burst of each node type so the
+    // first real shot doesn't pay first-time JIT/buffer-source/biquad
+    // setup costs on the gameplay frame. Routed through a near-zero
+    // gain so the player doesn't hear the warmup pop.
+    try {
+      const primeGain = ctx.createGain();
+      primeGain.gain.value = 0.00001;
+      primeGain.connect(master);
+      const ps = ctx.createBufferSource();
+      ps.buffer = noiseBuffer;
+      const pf = ctx.createBiquadFilter();
+      pf.type = 'lowpass'; pf.frequency.value = 2400;
+      ps.connect(pf).connect(primeGain);
+      ps.start(); ps.stop(ctx.currentTime + 0.01);
+      const po = ctx.createOscillator();
+      po.type = 'square'; po.frequency.value = 320;
+      po.connect(primeGain);
+      po.start(); po.stop(ctx.currentTime + 0.01);
+    } catch (_) { /* prime is best-effort */ }
   } catch (_) { ctx = null; }
   return ctx;
 }
@@ -73,16 +92,26 @@ function connectToWet(src, send = 0.25) {
 }
 
 // Unlock on first user gesture so play() works for real after that.
+// Listens on `document` (not just the renderer canvas) so main-menu
+// button clicks warm the AudioContext + noise/IR buffers BEFORE the
+// first in-game shot. Previously the canvas-only listener meant the
+// first shot triggered ~95k samples of buffer init + convolver setup
+// mid-frame, which was the visible "first-shot hitch".
 export function attachUnlock(domEl) {
+  const targets = [document, domEl];
   const unlock = () => {
     unlocked = true;
     ensureCtx();
     if (ctx && ctx.state === 'suspended') ctx.resume();
-    domEl.removeEventListener('pointerdown', unlock);
-    domEl.removeEventListener('keydown', unlock);
+    for (const t of targets) {
+      t.removeEventListener('pointerdown', unlock);
+      t.removeEventListener('keydown', unlock);
+    }
   };
-  domEl.addEventListener('pointerdown', unlock);
-  domEl.addEventListener('keydown', unlock);
+  for (const t of targets) {
+    t.addEventListener('pointerdown', unlock);
+    t.addEventListener('keydown', unlock);
+  }
 }
 
 function burstNoise({ dur = 0.08, lp = 1800, gain = 0.6, lpDecay = false } = {}) {
