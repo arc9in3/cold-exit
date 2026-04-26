@@ -149,24 +149,147 @@ export class GunmanManager {
     return ws[Math.floor(Math.random() * ws.length)];
   }
 
-  // Attach a front shield. `opts.full` = true for the impenetrable melee
-  // variant; otherwise it's the partial pistol-rusher shield.
+  // Attach a front shield. `opts.full` = true for the impenetrable
+  // riot-shield melee variant; otherwise it's the partial pistol-
+  // rusher tactical shield.
+  //
+  // The single hit-target Mesh (`g.shield.mesh`) is a flat plate at
+  // the shield centre — `combat.raycast` is non-recursive, so only
+  // this mesh registers shield hits. All decorative bits (rim trim,
+  // viewport window, banding, rivets, rear handle) are siblings on
+  // the same group; they read visually but don't catch bullets,
+  // which keeps the hitbox honest (player still aims at the central
+  // plate area, not the trim).
   _attachShield(g, opts = {}) {
     const full = !!opts.full;
     const w = full ? 1.4 : 1.1;
     const h = full ? 2.0 : 1.3;
+    const z = 0.75;                 // forward offset from gunman center
+    const yMid = full ? 1.15 : 1.2;
+    const baseColor = full ? 0x33547a : 0x6a5a3a;
+    const trimColor = full ? 0x1a2a3a : 0x2a200f;
+    const accentColor = full ? 0xe8e8ee : 0x9a824a;
+
+    const root = new THREE.Group();
+    root.position.set(0, 0, 0);
+    g.group.add(root);
+
+    // 1) Main plate (the hit target). Slightly thicker than before so
+    //    the silhouette reads as a solid panel from any angle.
     const mat = new THREE.MeshStandardMaterial({
-      color: full ? 0x4a6a88 : 0x6a5a3a,
-      roughness: 0.55, metalness: 0.3,
+      color: baseColor, roughness: 0.55, metalness: 0.35,
       emissive: full ? 0x0a1420 : 0x14100a,
     });
-    const mesh = new THREE.Mesh(new THREE.BoxGeometry(w, h, 0.15), mat);
-    mesh.position.set(0, 1.2, 0.75);
-    mesh.castShadow = true;
-    mesh.userData = { zone: 'shield', owner: g };
-    g.group.add(mesh);
+    const plate = new THREE.Mesh(new THREE.BoxGeometry(w, h, 0.10), mat);
+    plate.position.set(0, yMid, z);
+    plate.castShadow = true;
+    plate.userData = { zone: 'shield', owner: g };
+    root.add(plate);
+
+    // 2) Edge trim — four thin strips around the plate perimeter.
+    //    Visually frames the shield as armour rather than a flat slab.
+    const trimMat = new THREE.MeshStandardMaterial({
+      color: trimColor, roughness: 0.45, metalness: 0.55,
+    });
+    const trimT = 0.04;
+    const trimZ = z + 0.055;
+    const top = new THREE.Mesh(new THREE.BoxGeometry(w + 0.04, trimT, 0.04), trimMat);
+    top.position.set(0, yMid + h / 2, trimZ);
+    const bot = top.clone();
+    bot.position.set(0, yMid - h / 2, trimZ);
+    const left = new THREE.Mesh(new THREE.BoxGeometry(trimT, h + 0.04, 0.04), trimMat);
+    left.position.set(-w / 2, yMid, trimZ);
+    const right = left.clone();
+    right.position.set(w / 2, yMid, trimZ);
+    root.add(top, bot, left, right);
+
+    // 3) Variant-specific surface details.
+    if (full) {
+      // Riot shield: tinted viewport window in the upper third + a
+      // single diagonal high-contrast stripe + rivets at the corners
+      // + a vertical centre rib.
+      const viewport = new THREE.Mesh(
+        new THREE.BoxGeometry(w * 0.55, h * 0.18, 0.02),
+        new THREE.MeshStandardMaterial({
+          color: 0x0a1018, roughness: 0.2, metalness: 0.6,
+          transparent: true, opacity: 0.55,
+          emissive: 0x102030, emissiveIntensity: 0.4,
+        }),
+      );
+      viewport.position.set(0, yMid + h * 0.28, trimZ + 0.005);
+      root.add(viewport);
+      // Diagonal stripe — single white slash for police readability.
+      const stripe = new THREE.Mesh(
+        new THREE.BoxGeometry(w * 1.05, 0.10, 0.025),
+        new THREE.MeshStandardMaterial({
+          color: accentColor, roughness: 0.7, metalness: 0.05,
+        }),
+      );
+      stripe.position.set(0, yMid - h * 0.10, trimZ + 0.01);
+      stripe.rotation.z = Math.PI * 0.10;
+      root.add(stripe);
+      // Vertical centre rib — adds a 3D-looking spine.
+      const rib = new THREE.Mesh(
+        new THREE.BoxGeometry(0.06, h * 0.96, 0.05),
+        trimMat,
+      );
+      rib.position.set(0, yMid, trimZ + 0.01);
+      root.add(rib);
+      // Corner rivets — small dark hemispheres.
+      const rivetGeom = new THREE.SphereGeometry(0.035, 6, 4);
+      const rivetMat = new THREE.MeshStandardMaterial({
+        color: 0x101418, roughness: 0.4, metalness: 0.7,
+      });
+      const corners = [
+        [-w / 2 + 0.08,  h / 2 - 0.08],
+        [ w / 2 - 0.08,  h / 2 - 0.08],
+        [-w / 2 + 0.08, -h / 2 + 0.08],
+        [ w / 2 - 0.08, -h / 2 + 0.08],
+      ];
+      for (const [cx, cy] of corners) {
+        const r = new THREE.Mesh(rivetGeom, rivetMat);
+        r.position.set(cx, yMid + cy, trimZ + 0.02);
+        root.add(r);
+      }
+    } else {
+      // Partial tactical shield: smaller, no viewport. A circular
+      // boss reinforcement at centre + two horizontal bands sell
+      // the "improvised plate carrier shield" look.
+      const boss = new THREE.Mesh(
+        new THREE.CylinderGeometry(0.18, 0.20, 0.06, 12),
+        new THREE.MeshStandardMaterial({
+          color: trimColor, roughness: 0.45, metalness: 0.55,
+        }),
+      );
+      boss.rotation.x = Math.PI / 2;
+      boss.position.set(0, yMid, trimZ + 0.02);
+      root.add(boss);
+      // Two horizontal bands (top + bottom thirds).
+      const bandGeom = new THREE.BoxGeometry(w * 0.95, 0.08, 0.04);
+      const bandMat = new THREE.MeshStandardMaterial({
+        color: trimColor, roughness: 0.55, metalness: 0.4,
+      });
+      const bandTop = new THREE.Mesh(bandGeom, bandMat);
+      bandTop.position.set(0, yMid + h * 0.27, trimZ);
+      const bandBot = new THREE.Mesh(bandGeom, bandMat);
+      bandBot.position.set(0, yMid - h * 0.27, trimZ);
+      root.add(bandTop, bandBot);
+    }
+
+    // 4) Rear handle — short horizontal grip behind the plate so the
+    //    shield reads as held, not floating. Positioned BEHIND the
+    //    plate (z slightly less than the plate's z).
+    const handle = new THREE.Mesh(
+      new THREE.CylinderGeometry(0.025, 0.025, 0.30, 6),
+      new THREE.MeshStandardMaterial({ color: 0x1a1a1a, roughness: 0.7 }),
+    );
+    handle.rotation.z = Math.PI / 2;
+    handle.position.set(0, yMid, z - 0.08);
+    root.add(handle);
+
     g.shield = {
-      mesh,
+      mesh: plate,
+      decorRoot: root,
       hp: full ? 220 : 80,
       maxHp: full ? 220 : 80,
       fullBlock: full,
@@ -174,7 +297,16 @@ export class GunmanManager {
   }
   _disableShield(g) {
     if (!g.shield) return;
-    if (g.shield.mesh) {
+    if (g.shield.decorRoot) {
+      g.group.remove(g.shield.decorRoot);
+      g.shield.decorRoot.traverse((obj) => {
+        if (obj.geometry) obj.geometry.dispose();
+        if (obj.material) {
+          if (Array.isArray(obj.material)) obj.material.forEach(m => m.dispose());
+          else obj.material.dispose();
+        }
+      });
+    } else if (g.shield.mesh) {
       g.group.remove(g.shield.mesh);
       g.shield.mesh.geometry.dispose();
       g.shield.mesh.material.dispose();
