@@ -591,7 +591,10 @@ export class Level {
     const eligible = this.rooms.filter(r =>
       r.type === 'combat' && !r.giant && r.bounds);
     if (!eligible.length) return;
-    if (Math.random() >= 0.35) return;
+    // Temporarily forced to 100% — encounter every level until the
+    // tuning settles. Drop back to a probability roll once the
+    // spawn flow is dialed in.
+    // if (Math.random() >= 0.35) return;
     // Shuffle so we don't always favour earlier rooms when the first
     // candidate's centroid is blocked.
     const order = eligible.slice().sort(() => Math.random() - 0.5);
