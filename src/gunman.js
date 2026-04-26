@@ -89,6 +89,20 @@ const STATE = { IDLE: 'idle', ALERTED: 'alerted', FIRING: 'firing', DEAD: 'dead'
 
 // Per-variant profile overlay. `standard` is baseline; others tweak stats and
 // enable/disable behaviors (burst settle, dash, cover reposition).
+// Variants that get the doorway-choke awareness — the smart / fast
+// archetypes that should know not to dance in the kill zone. Standard
+// grunts + tanks + shielded keep their existing chase behaviour.
+const TUCK_VARIANTS = new Set(['dasher', 'runner', 'coverSeeker', 'sniper']);
+const TUCK_BARKS = [
+  'I can wait all day!',
+  'You come to me!',
+  'Taking cover.',
+  "I'm not coming out there.",
+  'Hold this corner.',
+  'Try peeking again, hero.',
+  "I've got time.",
+];
+
 const VARIANT_PROFILES = {
   standard: {
     scale: 1.0, hp: 1.0, dmg: 1.0,
@@ -789,6 +803,15 @@ export class GunmanManager {
     g.flashT = tunables.enemy.hitFlashTime;
     if (g.state === STATE.IDLE || g.state === STATE.SLEEP) g.state = STATE.ALERTED;
     g.loseTargetT = tunables.ai.loseTargetTime;
+    // Doorway-choke awareness — track hits in a 4s rolling window.
+    // Two+ hits within the window from a player in a different room
+    // is the cue for the smarter variants to tuck behind cover.
+    const _now = (typeof performance !== 'undefined' ? performance.now() : Date.now()) / 1000;
+    if (!g._hitWinStart || _now - g._hitWinStart > 4.0) {
+      g._hitWinStart = _now;
+      g._hitsInWin = 0;
+    }
+    g._hitsInWin = (g._hitsInWin | 0) + 1;
     // Boss phase-2 transition — when a boss crosses 50% HP, rev
     // their tactical profile: faster movement, shorter settle, more
     // dashes. One-shot so it only fires once per boss.
@@ -1629,6 +1652,78 @@ export class GunmanManager {
       if (door) doorTarget = door;
     }
 
+    // Doorway-choke awareness — when a "smart" variant has been hit
+    // twice in 4s by a player who's in a DIFFERENT room (i.e. firing
+    // through a doorway choke), retreat to the room corner farthest
+    // from the connecting door and bark defiance. Stay tucked until
+    // (a) 12s timer expires OR (b) the player enters the gunman's
+    // room and we re-engage. Standard / tank / shielded grunts skip
+    // this — they're the dumb meat that keeps walking into the
+    // killbox.
+    let tuckTarget = null;
+    if (TUCK_VARIANTS.has(g.variant)
+        && g.state !== STATE.IDLE
+        && typeof ctx.playerRoomId === 'number'
+        && ctx.playerRoomId !== g.roomId) {
+      const _now = (typeof performance !== 'undefined' ? performance.now() : Date.now()) / 1000;
+      // Re-engage trigger — player walked into our room.
+      if (g._tuckedT && ctx.playerRoomId === g.roomId) g._tuckedT = 0;
+      const recentlyChoked = g._hitsInWin >= 2
+        && (_now - (g._hitWinStart || 0)) <= 4.0;
+      if (recentlyChoked && !g._tuckedT) {
+        // Pick the room corner farthest from the connecting door so
+        // bullets coming through the gap can't land. Cached so we
+        // don't recompute the corner choice each frame.
+        const room = ctx.level?.rooms?.[g.roomId];
+        if (room && room.bounds) {
+          const door = ctx.findDoorToward
+            ? ctx.findDoorToward(g.roomId, g.group.position)
+            : null;
+          const dx = door ? door.x : ctx.playerPos.x;
+          const dz = door ? door.z : ctx.playerPos.z;
+          const b = room.bounds;
+          const corners = [
+            { x: b.minX + 1.5, z: b.minZ + 1.5 },
+            { x: b.maxX - 1.5, z: b.minZ + 1.5 },
+            { x: b.minX + 1.5, z: b.maxZ - 1.5 },
+            { x: b.maxX - 1.5, z: b.maxZ - 1.5 },
+          ];
+          let best = corners[0], bestD2 = -1;
+          for (const c of corners) {
+            const cdx = c.x - dx, cdz = c.z - dz;
+            const d2 = cdx * cdx + cdz * cdz;
+            if (d2 > bestD2) { bestD2 = d2; best = c; }
+          }
+          g._tuckCorner = best;
+          g._tuckedT = 12.0;
+          g._tuckBarkT = 0;
+          // Reset hit window so we don't immediately re-trigger.
+          g._hitsInWin = 0;
+          // Initial bark.
+          if (ctx.camera) {
+            const head = g.group.position.clone(); head.y = 1.9;
+            const line = TUCK_BARKS[Math.floor(Math.random() * TUCK_BARKS.length)];
+            spawnSpeechBubble(head, ctx.camera, line, 5.0);
+          }
+        }
+      }
+    }
+    if (g._tuckedT > 0) {
+      g._tuckedT -= dt;
+      if (g._tuckedT > 0 && g._tuckCorner) {
+        tuckTarget = g._tuckCorner;
+        g._tuckBarkT = (g._tuckBarkT || 0) - dt;
+        if (g._tuckBarkT <= 0 && ctx.camera) {
+          g._tuckBarkT = 5.0 + Math.random() * 2.5;
+          const head = g.group.position.clone(); head.y = 1.9;
+          const line = TUCK_BARKS[Math.floor(Math.random() * TUCK_BARKS.length)];
+          spawnSpeechBubble(head, ctx.camera, line, 5.0);
+        }
+      } else {
+        g._tuckCorner = null;
+      }
+    }
+
     // Escort formation — standard / cover-seeker gunmen will nestle behind
     // a shield bearer in the same room so the shield protects them from
     // the player's fire. Dashers and tanks ignore the escort urge.
@@ -1745,6 +1840,19 @@ export class GunmanManager {
           } else {
             moveSign = 0;
           }
+        }
+      } else if (tuckTarget) {
+        // Tucked-in-corner override beats escort + range-keeping. Walk
+        // until we're within 0.5m of the corner, then hold position
+        // and let the bark cycle play.
+        const tdx = tuckTarget.x - g.group.position.x;
+        const tdz = tuckTarget.z - g.group.position.z;
+        const td = Math.hypot(tdx, tdz);
+        if (td > 0.5) {
+          approachDir.set(tdx / td, 0, tdz / td);
+          moveSign = 1;
+        } else {
+          moveSign = 0;
         }
       } else if (escortTarget) {
         const edx = escortTarget.x - g.group.position.x;
