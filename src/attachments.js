@@ -249,6 +249,20 @@ export function rollAttachmentRarity(att) {
   if (!att || att.rarity) return att;
   att.rarity = _rollAttachmentRarity();
   _scaleModifierByRarity(att.modifier, att.rarity);
+  // Light attachments — blind / dazzle durations live OUTSIDE the
+  // modifier block (the cone-sweep code reads them directly off the
+  // instance), so the modifier scaler doesn't touch them. Scale them
+  // here so a legendary strobe / tactical light reads as visibly
+  // longer-lasting than a common roll.
+  const k = RARITY_BOOST[att.rarity] || 1.0;
+  if (k !== 1.0) {
+    if (typeof att.blindDuration === 'number') {
+      att.blindDuration = +(att.blindDuration * k).toFixed(2);
+    }
+    if (typeof att.dazzleDuration === 'number') {
+      att.dazzleDuration = +(att.dazzleDuration * k).toFixed(2);
+    }
+  }
   return att;
 }
 

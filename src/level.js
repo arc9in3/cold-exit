@@ -977,18 +977,22 @@ export class Level {
 
   _scatterCover(room) {
     const b = room.bounds;
-    // Reduced spawn count (was 2-4). Themed props already provide
-    // most of the cover a room needs; piling low-cover blocks on top
-    // made rooms feel cluttered and overlapped with furniture.
     const count = 1 + Math.floor(Math.random() * 2);
     for (let i = 0; i < count; i++) {
       for (let attempt = 0; attempt < 30; attempt++) {
-        const x = b.minX + 3 + Math.random() * (b.maxX - b.minX - 6);
-        const z = b.minZ + 3 + Math.random() * (b.maxZ - b.minZ - 6);
         const w = 1 + Math.random() * 1.5;
         const d = 0.8 + Math.random() * 1.2;
-        // Larger collision radius during placement rejects overlap
-        // with any nearby prop/cover by ~2m margin, not 1.2.
+        // Clamp the placement window so the prop's full footprint can
+        // never drift outside the room. Without the inset/Math.max
+        // guard, small rooms (< 6m in either dim) collapsed the
+        // `(size - 6)` range to negative and let centers slide below
+        // bounds.minX/Z, with the visible mesh poking through the wall.
+        const inset = 0.5 + Math.max(w, d) / 2;
+        const usableW = (b.maxX - b.minX) - inset * 2;
+        const usableD = (b.maxZ - b.minZ) - inset * 2;
+        if (usableW <= 0 || usableD <= 0) break;
+        const x = b.minX + inset + Math.random() * usableW;
+        const z = b.minZ + inset + Math.random() * usableD;
         if (this._collidesAt(x, z, 2.0)) continue;
         this._addObstacle(x, 0.4, z, w, 0.8, d, LOW_COVER_COLOR);
         break;
@@ -1017,16 +1021,21 @@ export class Level {
     if ((room.type === 'boss' || room.type === 'subBoss') && Math.random() < 0.20) count += 1;
     for (let i = 0; i < count; i++) {
       for (let attempt = 0; attempt < 30; attempt++) {
-        const x = b.minX + 3 + Math.random() * (b.maxX - b.minX - 6);
-        const z = b.minZ + 3 + Math.random() * (b.maxZ - b.minZ - 6);
-        // Use the same proxy-radius logic as low cover so containers
-        // don't pile onto each other or onto a piece of themed
-        // furniture. Slightly tighter radius than cover since a box
-        // is smaller than a couch.
-        if (this._collidesAt(x, z, 1.6)) continue;
         const type = pickContainerType();
         const size = pickContainerSize(type);
         const container = makeContainer(type, size, this.index);
+        // Same in-bounds clamp as _scatterCover — container.geo gives
+        // the actual width/depth of the lid AABB, so we know exactly
+        // how much margin to require from the room walls.
+        const cw = container.geo.w;
+        const cd = container.geo.d;
+        const inset = 0.5 + Math.max(cw, cd) / 2;
+        const usableW = (b.maxX - b.minX) - inset * 2;
+        const usableD = (b.maxZ - b.minZ) - inset * 2;
+        if (usableW <= 0 || usableD <= 0) break;
+        const x = b.minX + inset + Math.random() * usableW;
+        const z = b.minZ + inset + Math.random() * usableD;
+        if (this._collidesAt(x, z, 1.6)) continue;
         const group = buildContainerMesh(container, x, 0, z);
         this.scene.add(group);
         // Collision proxy — invisible AABB matching the lid footprint
