@@ -93,6 +93,19 @@ export class Input {
     // Auxclick (middle/right click) — also intercepted so any handler
     // looking at the click rather than contextmenu can't slip through.
     domEl.addEventListener('auxclick', this._onContextMenu, { capture: true });
+    // Capture-phase document-level mousedown swallow on right-click.
+    // Brave/Chromium sometimes routes Shift+right-click through the
+    // mousedown's default behavior — preventDefault here before any
+    // bubble-phase handler runs is the strongest JS hammer left.
+    this._onDocMouseRight = (e) => {
+      if (e.button === 2) {
+        e.preventDefault();
+        e.stopPropagation();
+      }
+    };
+    document.addEventListener('mousedown', this._onDocMouseRight, { capture: true });
+    document.addEventListener('mouseup',   this._onDocMouseRight, { capture: true });
+    document.addEventListener('auxclick',  this._onContextMenu,    { capture: true });
   }
 
   clearMouseState() {
@@ -200,6 +213,15 @@ export class Input {
   }
 
   _onMouseDown(e) {
+    // Right-click (button 2) gets preventDefault on the mousedown
+    // itself — Brave/Chromium check the mousedown's default before
+    // showing the native context menu on Shift+right-click. Without
+    // this the contextmenu listener can't catch it because Brave
+    // routes the Shift modifier as a "force native menu" override.
+    if (e.button === 2) {
+      e.preventDefault();
+      e.stopPropagation();
+    }
     this.mouseButtons.add(e.button);
     if (e.button === 0) this.attackPressed = true;
     // Route mouse buttons through the keybind layer so users can bind
@@ -215,6 +237,13 @@ export class Input {
     }
   }
   _onMouseUp(e) {
+    // Same right-button suppression as mousedown — covers any
+    // browser path that fires contextmenu on the up edge instead
+    // of the down edge.
+    if (e.button === 2) {
+      e.preventDefault();
+      e.stopPropagation();
+    }
     this.mouseButtons.delete(e.button);
     const code = `mouse:${e.button}`;
     const actions = actionsForKey(code);
