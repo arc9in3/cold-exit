@@ -7742,10 +7742,16 @@ function _scalePlayerThrowableEffect(baseDur, blastPos, radius, facingMatters) {
   return baseDur * distMul * faceMul;
 }
 // ADS camera-peek snapshot — captured at the rising edge of ADS so
-// ADS press-snapshot vars (`_adsPeekDir` etc.) removed — the camera
-// now continuously tracks `clamp(cursor - player, weaponPeek)` with a
-// smooth lerp in scene.js, so the press blends in instead of jumping
-// to a fixed offset.
+// ADS press snapshot — capture the cursor's offset from the player
+// at the moment the player presses ADS. The camera blends from the
+// player pivot toward that snapshotted point and STOPS; only the
+// outer-edge cursor pan can extend it further. Continuous-track
+// chase-the-cursor mode was rejected ("ads still feels wrong and
+// too extreme"); the snapshot model with a smaller push-in is the
+// shipped behaviour.
+const _adsPeekDir = new THREE.Vector3();
+let _adsPeekActive = false;
+let _adsPrevAmount = 0;
 const _flashOverlayEl = (() => {
   const el = document.createElement('div');
   el.id = 'flash-overlay';
@@ -9162,12 +9168,25 @@ function tick() {
 
   const weapon = currentWeapon();
   const effWeapon = weapon ? effectiveWeapon(weapon) : null;
-  // Class-derived ADS peek distance — drag budget the camera can
-  // reach away from the player while ADS is held. Sniper at 2.5
-  // rooms (~35m), rifle at the edge of effective range (~21m), etc.
-  // The camera lives at `player + clamp(cursorDelta, peekDistance)`
-  // — pivot is the player; the offset blends toward the cursor's
-  // world position. See updateCamera in scene.js.
+  // ADS press snapshot — on the rising edge of adsAmount, capture
+  // the cursor's direction + distance from the player. The camera
+  // blends partway toward that point (controlled by scene.js) and
+  // stops; only outer-edge cursor pan extends it further.
+  const adsRising = playerInfo.adsAmount > 0.05 && (_adsPrevAmount || 0) <= 0.05;
+  if (adsRising && aimInfo.point && playerInfo.position) {
+    const dx = aimInfo.point.x - playerInfo.position.x;
+    const dz = aimInfo.point.z - playerInfo.position.z;
+    const len = Math.hypot(dx, dz) || 1;
+    _adsPeekDir.set(dx / len, 0, dz / len);
+    _adsPeekDir._distAtPress = len;
+    _adsPeekActive = true;
+  }
+  if (playerInfo.adsAmount <= 0.01) _adsPeekActive = false;
+  _adsPrevAmount = playerInfo.adsAmount;
+  // Class-derived ADS peek distance — total drag budget the camera
+  // can reach away from the player while ADS is held. The PRESS push
+  // only consumes a fraction of this (see scene.js initialReach
+  // factor); the rest is reserved for outer-edge cursor pan.
   const _wcls = effWeapon?.class;
   const _adsPeekByClass = _wcls === 'sniper'  ? 35.0
                         : _wcls === 'rifle'   ? 21.0
@@ -9183,6 +9202,8 @@ function tick() {
     adsAmount: playerInfo.adsAmount,
     adsZoom: effWeapon?.adsZoom,
     adsPeekDistance: _adsPeekByClass,
+    adsPeekDir: _adsPeekActive ? _adsPeekDir : null,
+    cursorNDC: input.hasAim ? input.mouseNDC : null,
     // Per-sight ADS frustum push-in: iron 1.05, red dot/reflex 1.10,
     // holo 1.15, mid scope 1.20, long scope 1.30. Falls back to 1.05
     // when no weapon is equipped.
