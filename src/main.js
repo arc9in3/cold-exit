@@ -7265,10 +7265,12 @@ function spawnerTeleportAndSummon(boss) {
   }
   boss.group.position.x = tx;
   boss.group.position.z = tz;
-  // Spawn 2-3 melee adds in a small ring around the boss. Reuses
-  // melees.spawn so the adds get the standard rig + AI; tier set to
-  // 'normal' so they go down quickly.
-  const addCount = 2 + Math.floor(Math.random() * 2);
+  // Spawn 4-6 melee adds in a small ring around the boss. Bumped
+  // back up from 2-3 — the previous count made the spawner boss
+  // feel underwhelming compared to its earlier "swarm of adds"
+  // identity. Reuses melees.spawn so the adds get the standard rig
+  // + AI; tier set to 'normal' so they go down quickly.
+  const addCount = 4 + Math.floor(Math.random() * 3);
   for (let i = 0; i < addCount; i++) {
     // Pick an open spot near the boss that ALSO has a clear walkable
     // segment to the player. Without this last check minions

@@ -67,8 +67,13 @@ export class MeleeEnemyManager {
     const difficultyHp = opts.hpMult || 1;
     const damageMult = opts.damageMult || 1;
     const variant = opts.variant || 'standard';
+    // Shield-bearer chassis is 0.5× normal HP (dies in a few rear
+     // shots — base maxHealth 100 × 0.5 = ~50 chassis HP). The
+    // shield itself takes the front-facing punishment via its own
+    // shield.hp pool. Scale bumped to 1.40 so the silhouette reads
+    // as a bigger / thicker tank than a regular rusher.
     const shieldProfile = variant === 'shieldBearer'
-      ? { hp: 3.5, scale: 1.25 } : null;
+      ? { hp: 0.5, scale: 1.40 } : null;
     const hpMult = (tier === 'boss' ? 2.8 : tier === 'subBoss' ? 1.6 : 1)
       * (shieldProfile ? shieldProfile.hp : 1) * difficultyHp;
     // Tier×variant compounds; clamp so a shieldBearer boss doesn't
@@ -291,7 +296,11 @@ export class MeleeEnemyManager {
       );
       visor.position.set(0, 1.45, -0.45);
       group.add(visor);
-      e.shield = { mesh: shieldMesh, visor, hp: 260, maxHp: 260, fullBlock: true };
+      // Shield HP is meaningful to MELEE attacks specifically — bullets
+      // don't subtract from this pool because ranged hits to the shield
+      // are absorbed entirely (fullBlock). Set low enough that 3-5
+      // melee swings shatter the shield and expose the 50-HP chassis.
+      e.shield = { mesh: shieldMesh, visor, hp: 60, maxHp: 60, fullBlock: true };
     }
 
     this.enemies.push(e);
@@ -799,9 +808,20 @@ export class MeleeEnemyManager {
     const targetAlpha = e.state === STATE.IDLE ? 0 : (e.state === STATE.WINDUP ? 1 : 0.6);
     e.alertMat.opacity = THREE.MathUtils.lerp(e.alertMat.opacity, targetAlpha, Math.min(1, dt * 10));
 
-    // Face the player when engaged.
+    // Face the player when engaged. Smoothly lerp toward the target
+    // yaw instead of snapping — looks far more grounded and lets
+    // shield-bearers feel heavy. ShieldBearer turn rate is a third
+    // of normal, so the player can flank around the shield.
     if (e.state !== STATE.IDLE && dir2d.lengthSq() > 0) {
-      e.group.rotation.y = Math.atan2(dir2d.x, dir2d.z);
+      const targetYaw = Math.atan2(dir2d.x, dir2d.z);
+      const cur = e.group.rotation.y;
+      // Shortest signed angular delta to the target.
+      let delta = targetYaw - cur;
+      while (delta > Math.PI)  delta -= Math.PI * 2;
+      while (delta < -Math.PI) delta += Math.PI * 2;
+      const turnRate = e.variant === 'shieldBearer' ? 1.6 : 5.0; // rad/s
+      const step = Math.sign(delta) * Math.min(Math.abs(delta), turnRate * dt);
+      e.group.rotation.y = cur + step;
     }
 
     if (e.state === STATE.CHASE) {
@@ -883,6 +903,10 @@ export class MeleeEnemyManager {
       const bossSpeed = e.tier === 'boss' ? 1.35 : (e.tier === 'subBoss' ? 1.15 : 1);
       let moveSpeed = tunables.meleeEnemy.moveSpeed * bossSpeed;
       if (e.dashT > 0) moveSpeed = tunables.meleeEnemy.dashSpeed * bossSpeed;
+      // Shield-bearer is the slow-but-tanky archetype. Halves walk
+      // and dash speed so the player has a real chance to flank
+      // around the shield's narrow arc.
+      if (e.variant === 'shieldBearer') moveSpeed *= 0.55;
       else if (e.dashCdT <= 0 && dist <= tunables.meleeEnemy.dashRange
         && dist > tunables.meleeEnemy.swingRange) {
         e.dashT = tunables.meleeEnemy.dashDuration;

@@ -196,14 +196,25 @@ export class GunmanManager {
     root.position.set(0, 0, 0);
     g.group.add(root);
 
-    // 1) Main plate (the hit target). Slightly thicker than before so
-    //    the silhouette reads as a solid panel from any angle.
+    // 1) Main plate — curved cylinder wedge so the riot shield reads
+    //    as a real ballistic panel instead of a "massive square". The
+    //    arc covers ~0.7 rad (~40°) which matches the melee
+    //    shield-bearer's curve. Forward face sits at z + arcRadius *
+    //    sin(arcSpan/2). Hit target stays this single mesh.
     const mat = new THREE.MeshStandardMaterial({
       color: baseColor, roughness: 0.55, metalness: 0.35,
       emissive: full ? 0x0a1420 : 0x14100a,
+      side: THREE.DoubleSide,
     });
-    const plate = new THREE.Mesh(new THREE.BoxGeometry(w, h, 0.10), mat);
-    plate.position.set(0, yMid, z);
+    const arcRadius = full ? 0.95 : 0.85;
+    const arcSpan = full ? 0.75 : 0.65;
+    const plate = new THREE.Mesh(
+      new THREE.CylinderGeometry(arcRadius, arcRadius, h, 22, 1, true,
+        -arcSpan / 2, arcSpan),
+      mat,
+    );
+    // Push the cylinder back so its forward arc face sits at +z.
+    plate.position.set(0, yMid, z - arcRadius);
     plate.castShadow = true;
     plate.userData = { zone: 'shield', owner: g };
     root.add(plate);
@@ -1554,13 +1565,25 @@ export class GunmanManager {
     // the last-known direction (or pose idle) so the AI's gun doesn't
     // clip through walls pointing at a target they can't see.
     if (g.state !== STATE.IDLE) {
+      // Smooth-turn toward the target yaw instead of snapping. Same
+      // signed-shortest-arc lerp as the melee version. Default 5 rad/s
+      // — gunmen track quickly but not instantly so the player has a
+      // moment to break LoS or strafe past their barrel.
+      const _smoothFace = (targetYaw) => {
+        const cur = g.group.rotation.y;
+        let delta = targetYaw - cur;
+        while (delta > Math.PI)  delta -= Math.PI * 2;
+        while (delta < -Math.PI) delta += Math.PI * 2;
+        const step = Math.sign(delta) * Math.min(Math.abs(delta), 5.0 * dt);
+        g.group.rotation.y = cur + step;
+      };
       if (canSee && dir2d.lengthSq() > 0) {
-        g.group.rotation.y = Math.atan2(dir2d.x, dir2d.z);
+        _smoothFace(Math.atan2(dir2d.x, dir2d.z));
       } else if (typeof g.lastKnownX === 'number') {
         const lx = g.lastKnownX - g.group.position.x;
         const lz = g.lastKnownZ - g.group.position.z;
         const ll = Math.hypot(lx, lz);
-        if (ll > 0.0001) g.group.rotation.y = Math.atan2(lx / ll, lz / ll);
+        if (ll > 0.0001) _smoothFace(Math.atan2(lx / ll, lz / ll));
       }
     }
 
