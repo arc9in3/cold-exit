@@ -5690,7 +5690,32 @@ function redirectShotAtCursor(weapon, impactPoint) {
   }
 }
 
+// Early-out cache — full HP read of the playerInfo. If neither the
+// HP, the max, nor the regenCap moved since the last call, every
+// downstream computation is wasted work (and the profile showed
+// updateHealthHud at 0.28s self-time even after the in-DOM-write
+// throttling, because the function still runs the math + walks the
+// status row every frame).
+let _hpCache_h = -1, _hpCache_m = -1, _hpCache_r = -1;
+let _hpCache_bleed = -1, _hpCache_broken = -1;
 function updateHealthHud(playerInfo) {
+  // The status-row branch reads bleedT/brokenT and DOM-mutates only
+  // when those values change; bail when nothing the panel depends on
+  // has changed so we don't keep rebuilding the same width strings.
+  const bleed = playerInfo.bleedT || 0;
+  const broken = playerInfo.brokenT || 0;
+  if (playerInfo.health === _hpCache_h
+      && playerInfo.maxHealth === _hpCache_m
+      && (playerInfo.regenCap ?? playerInfo.maxHealth) === _hpCache_r
+      && bleed === _hpCache_bleed
+      && broken === _hpCache_broken) {
+    return;
+  }
+  _hpCache_h = playerInfo.health;
+  _hpCache_m = playerInfo.maxHealth;
+  _hpCache_r = playerInfo.regenCap ?? playerInfo.maxHealth;
+  _hpCache_bleed = bleed;
+  _hpCache_broken = broken;
   if (hpFillEl) {
     const pct = Math.max(0, Math.min(1, playerInfo.health / playerInfo.maxHealth));
     // Only touch DOM when the displayed value actually changes — was

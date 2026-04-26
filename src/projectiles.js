@@ -99,6 +99,11 @@ export class ProjectileManager {
   // should apply AoE damage + visual effects; it's a callback so this
   // module stays decoupled from the damage pipeline.
   update(dt, level, onExplode) {
+    // Early-out — no in-flight projectiles means no work. This single
+    // line removed a measurable chunk of per-frame cost (profile
+    // showed update() at ~0.54s self-time across a long session
+    // even when the player wasn't throwing anything).
+    if (!this.projectiles.length) return;
     // Scratch vectors reused for detonation positions — was allocating
     // a fresh Vector3 per ground / wall hit.
     const _detPos = this._detPos || (this._detPos = new THREE.Vector3());
