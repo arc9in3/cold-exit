@@ -889,6 +889,229 @@ export const ENCOUNTER_DEFS = {
       return state.built.glassRefs;
     },
   },
+
+  // -----------------------------------------------------------------
+  // Fortune Teller — pay 500c for a single random buff that lasts
+  // 15 minutes. One-shot per save (one purchase total across runs).
+  fortune_teller: {
+    id: 'fortune_teller',
+    name: 'Fortune Teller',
+    floorColor: 0xb050a8,             // deep magenta
+    oncePerSave: true,
+    condition: (state) => state.levelIndex >= 1,
+    BUFF_OPTIONS: [
+      { id: 'fortune_dmg',   text: '+25% damage',
+        mods: { damageMult: 1.25 } },
+      { id: 'fortune_speed', text: '+50% move speed',
+        mods: { moveSpeedMult: 1.50 } },
+      { id: 'fortune_loot',  text: '+30% loot drops (credits)',
+        mods: { creditDropMult: 1.30 } },
+      { id: 'fortune_reroll', text: '+1 free shop reroll (next visit)',
+        special: 'reroll' },
+    ],
+    spawn(scene, room, ctx) {
+      const disc = _spawnFloorDisc(scene, room, this.floorColor);
+      // Robed figure NPC.
+      const npc = _buildSimpleNpc({
+        bodyColor: 0x6a2a8a, headColor: 0xc8a890,
+        accentColor: 0xe0a850, height: 1.7,
+      });
+      npc.position.set(disc.cx, 0, disc.cz);
+      scene.add(npc);
+      // Small table prop in front of her.
+      const tableMat = new THREE.MeshStandardMaterial({ color: 0x5a3a20, roughness: 0.85 });
+      const tableTop = new THREE.Mesh(new THREE.CylinderGeometry(0.55, 0.55, 0.06, 14), tableMat);
+      tableTop.position.set(disc.cx, 0.7, disc.cz - 0.7);
+      tableTop.castShadow = true;
+      scene.add(tableTop);
+      const orb = new THREE.Mesh(
+        new THREE.SphereGeometry(0.18, 14, 12),
+        new THREE.MeshStandardMaterial({
+          color: 0xc880ff, emissive: 0x8040c0, emissiveIntensity: 0.5,
+          roughness: 0.2,
+        }),
+      );
+      orb.position.set(disc.cx, 0.92, disc.cz - 0.7);
+      scene.add(orb);
+      const label = _makeLabelSprite('FORTUNE TELLER', '#e8a8e8');
+      label.position.set(disc.cx, 2.4, disc.cz);
+      scene.add(label);
+      const hint = _makeLabelSprite('Press E to consult', '#c9a87a');
+      hint.scale.set(3.6, 0.65, 1);
+      hint.position.set(disc.cx, 0.55, disc.cz + 1.6);
+      scene.add(hint);
+      return { npc, label, hint, orb, disc, complete: false, wobbleT: 0 };
+    },
+    tick(dt, ctx) {
+      const s = ctx.state;
+      if (!s.orb) return;
+      s.wobbleT += dt;
+      s.orb.position.y = 0.92 + Math.sin(s.wobbleT * 1.4) * 0.04;
+      s.orb.rotation.y = s.wobbleT * 0.7;
+    },
+    interact(ctx) {
+      const s = ctx.state;
+      if (s.complete) {
+        ctx.spawnSpeech(s.npc.position.clone().setY(2.0),
+          'I have read your fate already.', 3.0);
+        return;
+      }
+      const def = ENCOUNTER_DEFS.fortune_teller;
+      const PRICE = 500;
+      const credits = ctx.getPlayerCredits ? ctx.getPlayerCredits() : 0;
+      const opts = def.BUFF_OPTIONS.map((b) => ({
+        text: b.text,
+        enabled: credits >= PRICE,
+        onPick: () => {
+          if (!ctx.spendPlayerCredits || !ctx.spendPlayerCredits(PRICE)) return;
+          if (b.special === 'reroll') {
+            if (ctx.grantPendingShopReroll) ctx.grantPendingShopReroll();
+          } else {
+            // 15 minutes = 900 seconds.
+            ctx.grantBuff(b.id, b.mods, 900);
+          }
+          s.complete = true;
+          if (ctx.markEncounterComplete) ctx.markEncounterComplete('fortune_teller');
+          if (s.hint) s.hint.visible = false;
+          ctx.spawnSpeech(s.npc.position.clone().setY(2.0),
+            'It is done. Walk in fortune.', 3.5);
+        },
+      }));
+      opts.push({ text: 'Leave', onPick: () => {} });
+      ctx.showPrompt({
+        title: 'Fortune Teller',
+        body: credits < PRICE
+          ? `Cost: 500c · You have ${credits}c.`
+          : `Cost: 500c · Lasts 15 minutes.`,
+        options: opts,
+      });
+    },
+    onItemDropped(item, ctx) { return { consume: false }; },
+  },
+
+  // -----------------------------------------------------------------
+  // The Shrine — three independent tier purchases, each one-shot
+  // per save. The room re-appears until ALL three tiers have been
+  // claimed across runs.
+  shrine: {
+    id: 'shrine',
+    name: 'The Shrine',
+    floorColor: 0xf0e6c0,             // warm temple cream
+    // Custom oncePerSave handling: complete only when all 3 tiers claimed.
+    oncePerSave: false,
+    condition: (state) => {
+      if (state.levelIndex < 1) return false;
+      // Only show if at least one tier remains. main.js wires
+      // ctx.getShrineTiers as a Set of purchased tier numbers.
+      // Without ctx in condition, fall back to true and let interact
+      // handle the "all sold out" case.
+      return true;
+    },
+    spawn(scene, room, ctx) {
+      const disc = _spawnFloorDisc(scene, room, this.floorColor);
+      // Stone altar — small pedestal with a low brazier on top.
+      const stoneMat = new THREE.MeshStandardMaterial({ color: 0x9a8a78, roughness: 0.85 });
+      const trim = new THREE.MeshStandardMaterial({
+        color: 0xe0c060, roughness: 0.4, metalness: 0.6,
+        emissive: 0x6a4a10, emissiveIntensity: 0.3,
+      });
+      const altar = new THREE.Mesh(new THREE.BoxGeometry(1.2, 0.9, 0.9), stoneMat);
+      altar.position.set(disc.cx, 0.45, disc.cz);
+      altar.castShadow = true;
+      scene.add(altar);
+      const brazier = new THREE.Mesh(
+        new THREE.CylinderGeometry(0.35, 0.45, 0.18, 14),
+        trim,
+      );
+      brazier.position.set(disc.cx, 0.99, disc.cz);
+      scene.add(brazier);
+      const flame = new THREE.Mesh(
+        new THREE.ConeGeometry(0.20, 0.55, 8),
+        new THREE.MeshBasicMaterial({
+          color: 0xffc060, transparent: true, opacity: 0.85,
+          depthWrite: false, blending: THREE.AdditiveBlending,
+        }),
+      );
+      flame.position.set(disc.cx, 1.45, disc.cz);
+      scene.add(flame);
+      const label = _makeLabelSprite('THE SHRINE', '#f0d480');
+      label.position.set(disc.cx, 2.4, disc.cz);
+      scene.add(label);
+      const hint = _makeLabelSprite('Press E to make an offering', '#c9a87a');
+      hint.scale.set(4.2, 0.65, 1);
+      hint.position.set(disc.cx, 0.55, disc.cz + 1.6);
+      scene.add(hint);
+      return { altar, brazier, flame, label, hint, disc, wobbleT: 0 };
+    },
+    tick(dt, ctx) {
+      const s = ctx.state;
+      if (!s.flame) return;
+      s.wobbleT += dt;
+      s.flame.scale.y = 1 + Math.sin(s.wobbleT * 5) * 0.10;
+      s.flame.material.opacity = 0.78 + Math.sin(s.wobbleT * 7) * 0.12;
+    },
+    interact(ctx) {
+      const s = ctx.state;
+      const tiers = ctx.getShrineTiers ? ctx.getShrineTiers() : new Set();
+      const credits = ctx.getPlayerCredits ? ctx.getPlayerCredits() : 0;
+      const tierDefs = [
+        { tier: 1, price: 500,    text: '+5 max HP (rest of run)' },
+        { tier: 2, price: 5000,   text: 'Random unowned artifact' },
+        { tier: 3, price: 50000,  text: 'Guaranteed mythic weapon' },
+      ];
+      const opts = tierDefs.map((t) => {
+        const owned = tiers.has(t.tier);
+        return {
+          text: owned ? `${t.text} — claimed`
+                      : `${t.price}c · ${t.text}`,
+          enabled: !owned && credits >= t.price,
+          onPick: () => {
+            if (owned) return;
+            if (!ctx.spendPlayerCredits(t.price)) return;
+            if (ctx.setShrineTier) ctx.setShrineTier(t.tier);
+            if (t.tier === 1) {
+              ctx.addShrineMaxHpBonus(5);
+              ctx.spawnSpeech(s.altar.position.clone().setY(2.0),
+                'Your vessel grows.', 3.5);
+            } else if (t.tier === 2) {
+              const scroll = ctx.rollUnownedArtifactScroll && ctx.rollUnownedArtifactScroll();
+              if (scroll) {
+                ctx.spawnLoot(s.disc.cx, s.disc.cz + 1.2, scroll);
+                ctx.spawnSpeech(s.altar.position.clone().setY(2.0),
+                  'A boon for the bold.', 3.5);
+              } else {
+                ctx.spawnSpeech(s.altar.position.clone().setY(2.0),
+                  'You hold them all already.', 3.5);
+              }
+            } else if (t.tier === 3) {
+              const mythic = ctx.rollMythicWeapon && ctx.rollMythicWeapon();
+              if (mythic) {
+                ctx.spawnLoot(s.disc.cx, s.disc.cz + 1.2, mythic);
+                ctx.spawnSpeech(s.altar.position.clone().setY(2.0),
+                  'A blade fit for legend.', 3.5);
+              }
+            }
+            // Re-open the prompt to show updated state, unless every
+            // tier is now claimed.
+            const next = ctx.getShrineTiers ? ctx.getShrineTiers() : new Set();
+            if (next.size >= 3) {
+              if (ctx.markEncounterComplete) ctx.markEncounterComplete('shrine');
+              if (s.hint) s.hint.visible = false;
+            } else {
+              ENCOUNTER_DEFS.shrine.interact(ctx);
+            }
+          },
+        };
+      });
+      opts.push({ text: 'Leave', onPick: () => {} });
+      ctx.showPrompt({
+        title: 'The Shrine',
+        body: `Three offerings remain. You have ${credits}c.`,
+        options: opts,
+      });
+    },
+    onItemDropped(item, ctx) { return { consume: false }; },
+  },
 };
 
 // Helper — pick one valid encounter for the given level state, or null.

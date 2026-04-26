@@ -31,7 +31,8 @@ import { getDevToolsEnabled, setDevToolsEnabled, getPlayerName, setPlayerName,
          getMerchantStockBonus,
          getRerollUnlocked, setRerollUnlocked,
          MERCHANT_KINDS, MERCHANT_UPGRADE_MAX, REROLL_UNLOCK_COST,
-         getCompletedEncounters, markEncounterDone } from './prefs.js';
+         getCompletedEncounters, markEncounterDone,
+         getShrineTiers, setShrineTierPurchased } from './prefs.js';
 import { tunables } from './tunables.js';
 import {
   Inventory, SLOT_IDS,
@@ -332,6 +333,8 @@ if (deathMenuBtnEl) {
     currentWeaponIndex = 0;
     level.index = 0;
     runStats.reset();
+    shrineHpBonus = 0;
+    pendingShopRerolls = 0;
     sfx.ambientStop();
     mainMenuUI.show();
   });
@@ -776,6 +779,8 @@ const gameMenuUI = new GameMenuUI({
     // Manually-quit runs aren't submitted to the leaderboard — only
     // natural deaths count. Wipe stats so the next run starts clean.
     runStats.reset();
+    shrineHpBonus = 0;
+    pendingShopRerolls = 0;
     sfx.ambientStop();
     gameMenuUI.hide();
     mainMenuUI.show();
@@ -788,6 +793,8 @@ const startUI = new StartUI({
     currentWeaponIndex = 0;
     level.index = 0;
     runStats.reset();
+    shrineHpBonus = 0;
+    pendingShopRerolls = 0;
     playerDead = false;
     if (deathRootEl) deathRootEl.style.display = 'none';
     // Full HP reset — otherwise state.health from the previous death
@@ -822,6 +829,8 @@ function startRunWithWeaponDef(def) {
   currentWeaponIndex = 0;
   level.index = 0;
   runStats.reset();
+  shrineHpBonus = 0;
+  pendingShopRerolls = 0;
   playerDead = false;
   if (deathRootEl) deathRootEl.style.display = 'none';
   // Recompute derived stats first so state.maxHealth reflects the
@@ -926,6 +935,8 @@ const mainMenuUI = new MainMenuUI({
     currentWeaponIndex = 0;
     level.index = 0;
     runStats.reset();
+    shrineHpBonus = 0;
+    pendingShopRerolls = 0;
     playerDead = false;
     if (deathRootEl) deathRootEl.style.display = 'none';
     recomputeStats();
@@ -1059,15 +1070,19 @@ const shopUI = new ShopUI({
     }
     return ok;
   },
-  // Reroll: regenerate the open NPC's stock once per visit. Gated on
-  // the persistent Upgrades unlock; FREE for now (one shot per shop
-  // per visit). A real cost will land later — the limiter today is
-  // the once-per-visit window.
-  getRerollUnlocked: () => getRerollUnlocked(),
+  // Reroll: regenerate the open NPC's stock once per visit. Two paths:
+  //   * Persistent Upgrades unlock — once per shop per visit, free.
+  //   * Pending free reroll (Fortune Teller boon) — bypasses both
+  //     the unlock and the per-visit gate; consumes one credit
+  //     from pendingShopRerolls.
+  getRerollUnlocked: () => getRerollUnlocked() || pendingShopRerolls > 0,
   onReroll: (npc) => {
     if (!npc) return false;
-    if (!getRerollUnlocked()) return false;
-    if (npc._rerollUsed) return false;
+    const hasPending = pendingShopRerolls > 0;
+    if (!hasPending) {
+      if (!getRerollUnlocked()) return false;
+      if (npc._rerollUsed) return false;
+    }
     if      (npc.kind === 'merchant')     npc.stock = makeMerchantStock();
     else if (npc.kind === 'healer')       npc.stock = makeHealerStock();
     else if (npc.kind === 'gunsmith')     npc.stock = makeGunsmithStock();
@@ -1076,7 +1091,11 @@ const shopUI = new ShopUI({
     else if (npc.kind === 'relicSeller')  npc.stock = makeRelicSellerStock();
     else if (npc.kind === 'blackMarket')  npc.stock = makeBlackMarketStock();
     else if (npc.kind === 'bearMerchant') npc.stock = makeMerchantStock('bearMerchant');
-    npc._rerollUsed = true;
+    if (pendingShopRerolls > 0) {
+      pendingShopRerolls--;
+    } else {
+      npc._rerollUsed = true;
+    }
     sfx.uiAccept();
     return true;
   },
@@ -1754,6 +1773,30 @@ function regenerateLevel() {
         // already owns.
         artifactScrollFor: (id) => artifactScrollFor(id),
         filterUnownedArtifactIds: (ids) => ids.filter(id => !artifacts.has(id)),
+        // Currency + buff hooks for shrine / fortune teller.
+        getPlayerCredits: () => playerCredits,
+        spendPlayerCredits: (n) => {
+          if (playerCredits < n) return false;
+          playerCredits -= n;
+          return true;
+        },
+        grantBuff: (id, mods, life) => buffs.grant(id, mods, life || 60),
+        rollMythicWeapon: () => rollMythicDrop(),
+        // Shrine tier persistence — encounters call these to gate
+        // already-purchased options.
+        getShrineTiers: () => getShrineTiers(),
+        setShrineTier: (tier) => setShrineTierPurchased(tier),
+        // Permanent run bonus (cleared on death) — applied to
+        // derivedStats.maxHealthBonus via a session-scoped pool. The
+        // shrine bonus is the only writer today.
+        addShrineMaxHpBonus: (amount) => {
+          shrineHpBonus += (amount | 0);
+          recomputeStats();
+        },
+        // Fortune Teller "free reroll" reward — increments the
+        // counter the ShopUI checks. Stacks if granted multiple
+        // times (theoretically; today it's one-shot per save).
+        grantPendingShopReroll: () => { pendingShopRerolls++; },
         getKillCount: () => runStats.kills | 0,
         markEncounterComplete: (id) => markEncounterDone(id),
         // Smoke puff at world XZ — used by Glass Case telegraph.
@@ -1790,6 +1833,82 @@ function _spawnMasterworkChestAt(x, z) {
   scene.add(proxy);
   level.obstacles.push(proxy);
   level.containers.push({ container, group, x, z, r: 1.8 });
+}
+
+// --- Encounter prompt panel ---------------------------------------
+// Generic centered modal that any encounter can show via ctx.showPrompt.
+// One panel reused for every prompt; closing it reactivates input.
+const _encounterPromptEl = (() => {
+  const el = document.createElement('div');
+  el.id = 'encounter-prompt';
+  Object.assign(el.style, {
+    position: 'fixed', top: '50%', left: '50%',
+    transform: 'translate(-50%, -50%)',
+    minWidth: '360px', maxWidth: '520px',
+    background: 'linear-gradient(180deg, #181b21 0%, #0e1018 100%)',
+    border: '1px solid #c9a87a', borderRadius: '4px',
+    padding: '22px 26px', zIndex: '60',
+    color: '#e8dfc8', display: 'none',
+    fontFamily: 'ui-monospace, SFMono-Regular, Menlo, Consolas, monospace',
+    boxShadow: '0 14px 50px rgba(0,0,0,0.85)',
+  });
+  el.innerHTML = `
+    <div id="enc-prompt-title" style="font-size:18px;font-weight:700;letter-spacing:4px;color:#c9a87a;text-transform:uppercase;margin-bottom:10px;text-align:center;"></div>
+    <div id="enc-prompt-body" style="font-size:13px;color:#bcb8a8;line-height:1.5;margin-bottom:18px;text-align:center;"></div>
+    <div id="enc-prompt-options" style="display:flex;flex-direction:column;gap:6px;"></div>
+  `;
+  document.body.appendChild(el);
+  return el;
+})();
+let _activePrompt = null;     // { onClose }
+function showEncounterPrompt({ title, body, options }) {
+  _encounterPromptEl.querySelector('#enc-prompt-title').textContent = title || '';
+  _encounterPromptEl.querySelector('#enc-prompt-body').textContent = body || '';
+  const optsEl = _encounterPromptEl.querySelector('#enc-prompt-options');
+  optsEl.innerHTML = '';
+  for (const o of options || []) {
+    const btn = document.createElement('button');
+    btn.type = 'button';
+    btn.textContent = o.text;
+    btn.disabled = o.enabled === false;
+    Object.assign(btn.style, {
+      padding: '10px 16px', fontSize: '12px',
+      letterSpacing: '2px', textTransform: 'uppercase',
+      background: btn.disabled ? 'rgba(80,80,80,0.18)' : 'rgba(125,167,200,0.15)',
+      color: btn.disabled ? '#6a7280' : '#cbd6e2',
+      border: '1px solid ' + (btn.disabled ? 'rgba(80,80,80,0.3)' : 'rgba(125,167,200,0.55)'),
+      borderRadius: '3px',
+      cursor: btn.disabled ? 'default' : 'pointer',
+      fontFamily: 'inherit', fontWeight: '700',
+    });
+    if (!btn.disabled) {
+      btn.addEventListener('click', () => {
+        closeEncounterPrompt();
+        if (o.onPick) o.onPick();
+      });
+    }
+    optsEl.appendChild(btn);
+  }
+  _encounterPromptEl.style.display = 'block';
+  _activePrompt = { };
+  if (input?.clearMouseState) input.clearMouseState();
+}
+function closeEncounterPrompt() {
+  _encounterPromptEl.style.display = 'none';
+  _activePrompt = null;
+  if (input?.clearMouseState) input.clearMouseState();
+}
+function isEncounterPromptOpen() { return !!_activePrompt; }
+
+// Find the nearest encounter with an `interact()` method whose room
+// the player is standing in. Returns the encounter or null.
+function nearestInteractableEncounter() {
+  if (!level || !level.rooms || !player) return null;
+  const room = level.roomAt(player.mesh.position.x, player.mesh.position.z);
+  if (!room || !room._encounter) return null;
+  const ent = room._encounter;
+  if (!ent.def.interact) return null;
+  return ent;
 }
 
 // Per-frame encounter tick — drives any animations / barks. Runs after
@@ -2522,6 +2641,14 @@ let extractPending = false;
 
 let derivedStats = BASE_STATS();
 let lastHpRatio = 1;  // updated each tick for perks that need mid-callback HP
+// Per-run shrine HP bonus (cleared on death). The first shrine tier
+// adds +5 max HP for the rest of the run; this folds into the
+// derivedStats.maxHealthBonus during recomputeStats.
+let shrineHpBonus = 0;
+// Stockpiled "next shop reroll" tokens — Fortune Teller can grant
+// these. ShopUI consumes one when the player hits Reroll, bypassing
+// the once-per-visit gate (and the unlock requirement).
+let pendingShopRerolls = 0;
 
 // --- Class capstone runtime state ---------------------------------------
 // LMG Walking Fire — seconds the trigger has been held in the current
@@ -2562,6 +2689,9 @@ function recomputeStats() {
   skillTree.applyTo(derivedStats, currentWeapon());
   artifacts.applyTo(derivedStats);
   buffs.applyTo(derivedStats);
+  // Shrine bonus folds in at the end so it survives later sources
+  // overwriting maxHealthBonus.
+  derivedStats.maxHealthBonus = (derivedStats.maxHealthBonus || 0) + shrineHpBonus;
   // Soft caps applied AFTER all sources roll up — prevents stack-stack
   // exploits flagged in the rebalance review (movespeed in particular
   // could pile to ~1.7×+ with artifact + Swift + class perks).
@@ -5557,6 +5687,18 @@ function updateLootPrompt() {
 }
 
 function tryInteract({ nearItem, body, npc, container }) {
+  // Encounter interact — takes priority when the player is standing
+  // in an encounter room with an interactable NPC. Encounters use
+  // showPrompt to surface their menu.
+  const enc = nearestInteractableEncounter();
+  if (enc) {
+    const ctx = enc.ctxFactory();
+    ctx.state = enc.state;
+    ctx.showPrompt = showEncounterPrompt;
+    ctx.closePrompt = closeEncounterPrompt;
+    enc.def.interact(ctx);
+    return;
+  }
   if (nearItem) {
     // Two or more items in the pickup radius — open the ground-loot modal
     // instead of auto-picking one. Otherwise fast single-item pickup.

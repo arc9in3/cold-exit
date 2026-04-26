@@ -162,3 +162,22 @@ export function resetEncounterCompletion(id) {
   set.delete(id);
   _write(COMPLETED_ENCOUNTERS_KEY, [...set].sort());
 }
+
+// Shrine tiers — three independent purchases, each one-shot per save:
+//   tier 1 (500c)   → +5 max HP for the rest of the run
+//   tier 2 (5000c)  → unowned artifact scroll
+//   tier 3 (50000c) → guaranteed mythic weapon
+// Tracked separately from getCompletedEncounters so the room itself
+// can re-appear (until ALL tiers are claimed) while individual tiers
+// stay locked.
+const SHRINE_TIERS_KEY = 'tacticalrogue_shrine_tiers_v1';
+export function getShrineTiers() {
+  const arr = _read(SHRINE_TIERS_KEY, []);
+  return new Set(Array.isArray(arr) ? arr : []);
+}
+export function setShrineTierPurchased(tier) {
+  const set = getShrineTiers();
+  if (set.has(tier)) return;
+  set.add(tier);
+  _write(SHRINE_TIERS_KEY, [...set].sort());
+}
