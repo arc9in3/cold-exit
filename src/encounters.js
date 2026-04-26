@@ -541,7 +541,7 @@ export const ENCOUNTER_DEFS = {
       s.complete = true;
       ctx.spawnSpeech(s.duck.position.clone().setY(1.4),
         'DID SOMEONE SAY PEAS?!', 7.0);
-      // Reward: 50/50 between the Innocent Heart relic-scroll (auto-
+      // Reward: 50/50 between the Innocent Heart relic (auto-
       // grants on pickup) and the Unused Rocket Ticket — which is now
       // a piece of junk. Selling the ticket to the Bear Merchant
       // converts it into the Rocket Shoes relic. Innocent Heart is
@@ -553,8 +553,8 @@ export const ENCOUNTER_DEFS = {
       if (dropTicket && ctx.spawnRocketTicketJunk) {
         ctx.spawnRocketTicketJunk(s.disc.cx + 0.8, s.disc.cz);
       } else {
-        const scroll = ctx.artifactScrollFor && ctx.artifactScrollFor('innocent_heart');
-        if (scroll) ctx.spawnLoot(s.disc.cx + 0.8, s.disc.cz, scroll);
+        const relic = ctx.relicFor && ctx.relicFor('innocent_heart');
+        if (relic) ctx.spawnLoot(s.disc.cx + 0.8, s.disc.cz, relic);
       }
       // Bump the per-run completion counter. Only mark the encounter
       // run-complete after the SECOND successful peas-drop so the
@@ -719,7 +719,7 @@ export const ENCOUNTER_DEFS = {
   // -----------------------------------------------------------------
   // Confession Booth — drop ANY weapon (ranged or melee, equipped
   // OR backpack) and the booth absorbs it; a random unowned
-  // artifact scroll appears in its place. One-shot per save.
+  // relic appears in its place. One-shot per save.
   confession_booth: {
     id: 'confession_booth',
     name: 'Confession Booth',
@@ -750,12 +750,12 @@ export const ENCOUNTER_DEFS = {
         '...your offering is heard.', 4.0);
       // Roll an unowned artifact; if everything's owned bail without
       // marking complete so the player gets their weapon back.
-      const scroll = ctx.rollUnownedArtifactScroll && ctx.rollUnownedArtifactScroll();
-      if (!scroll) {
+      const relic = ctx.rollUnownedRelic && ctx.rollUnownedRelic();
+      if (!relic) {
         s.complete = false;
         return { consume: false };
       }
-      ctx.spawnLoot(s.disc.cx, s.disc.cz + 1.0, scroll);
+      ctx.spawnLoot(s.disc.cx, s.disc.cz + 1.0, relic);
       // Hide the hint sprite — completed.
       if (s.hint) s.hint.visible = false;
       return { consume: true, complete: true };
@@ -1164,9 +1164,9 @@ export const ENCOUNTER_DEFS = {
               ctx.spawnSpeech(s.altar.position.clone().setY(2.0),
                 'Your vessel grows.', 3.5);
             } else if (t.tier === 2) {
-              const scroll = ctx.rollUnownedArtifactScroll && ctx.rollUnownedArtifactScroll();
-              if (scroll) {
-                ctx.spawnLoot(s.disc.cx, s.disc.cz + 1.2, scroll);
+              const relic = ctx.rollUnownedRelic && ctx.rollUnownedRelic();
+              if (relic) {
+                ctx.spawnLoot(s.disc.cx, s.disc.cz + 1.2, relic);
                 ctx.spawnSpeech(s.altar.position.clone().setY(2.0),
                   'A boon for the bold.', 3.5);
               } else {
@@ -1774,8 +1774,8 @@ export const ENCOUNTER_DEFS = {
           if (s.hint) s.hint.visible = false;
           ctx.spawnSpeech(new THREE.Vector3(s.disc.cx, 2.2, s.disc.cz),
             'Indecision lies between them.', 4.0);
-          const scroll = ctx.artifactScrollFor && ctx.artifactScrollFor('indecision');
-          if (scroll) ctx.spawnLoot(s.disc.cx, s.disc.cz, scroll);
+          const relic = ctx.relicFor && ctx.relicFor('indecision');
+          if (relic) ctx.spawnLoot(s.disc.cx, s.disc.cz, relic);
           s.phase = 'returned';
           s.complete = true;
           // Terminal phase — framework early-out skips ticking from

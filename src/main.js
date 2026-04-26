@@ -53,8 +53,9 @@ import { SkillPickUI } from './ui_skills.js';
 import { SpecialPerkLoadout, BuffState, SPECIAL_PERKS, GEAR_PERKS } from './perks.js';
 import { ClassMastery, CLASS_DEFS, CLASS_THRESHOLDS } from './classes.js';
 import { SkillTreeLoadout, makeMasteryOffers, SKILL_NODES } from './skill_tree.js';
-import { ArtifactCollection, ARTIFACT_DEFS, ALL_ARTIFACTS, artifactScrollFor } from './artifacts.js';
+import { ArtifactCollection, ARTIFACT_DEFS, ALL_ARTIFACTS, relicFor } from './artifacts.js';
 import { MasteryPickUI } from './ui_mastery.js';
+import { RelicsUI } from './ui_relics.js';
 import { sfx, attachUnlock, getMasterVolume, setMasterVolume } from './audio.js';
 import { GameMenuUI } from './ui_menu.js';
 import { StartUI } from './ui_start.js';
@@ -682,6 +683,20 @@ const artifacts = new ArtifactCollection();
 const masteryPickUI = new MasteryPickUI(skillTree);
 
 const detailsUI = new DetailsUI({ inventory });
+const relicsUI = new RelicsUI({ getRelics: () => artifacts.list() });
+window.__toggleRelics = () => relicsUI.toggle();
+// V hotkey — open / close the standalone Relics panel. Capture-phase
+// + bypasses the input.js layer so it works even while inventory or
+// other modals are open. Skips while focus is in a text input so
+// player-name typing keeps working.
+window.addEventListener('keydown', (e) => {
+  if (e.repeat) return;
+  if (e.code !== 'KeyV') return;
+  const ae = document.activeElement;
+  if (ae && (ae.tagName === 'INPUT' || ae.tagName === 'TEXTAREA' || ae.isContentEditable)) return;
+  e.preventDefault();
+  relicsUI.toggle();
+}, { capture: true });
 window.__showDetails = (item) => detailsUI.show(item);  // called from UI right-click
 // Exposed so shop / inventory paths can re-derive stats after side
 // effects like repair without an explicit import dance.
@@ -1076,13 +1091,13 @@ const customizeUI = new CustomizeUI({
   },
 });
 
-// Auto-grant artifact-scroll pickups. Encounter rewards (and any
-// scroll the player walks over) are consumed on contact: the artifact
+// Auto-grant relic pickups. Encounter rewards (and any
+// relic the player walks over) are consumed on contact: the artifact
 // joins their owned set and never enters the bag. This avoids the
 // "what is this rock in my inventory" UX and gives encounter relics
 // the immediate, permanent run-modifier reading the design calls for.
-function _tryAcquireArtifactScroll(item) {
-  if (!item || item.type !== 'artifact-scroll' || !item.artifactId) return false;
+function _tryAcquireRelic(item) {
+  if (!item || item.type !== 'relic' || !item.artifactId) return false;
   const ok = artifacts.acquire(item.artifactId);
   if (!ok) return false;
   recomputeStats();
@@ -1105,7 +1120,7 @@ const lootUI = new LootUI({
     if (tryEncounterItemDrop(item, p.x, p.z)) return;
     loot.spawnItem(p.clone(), item);
   },
-  onAcquireArtifact: _tryAcquireArtifactScroll,
+  onAcquireArtifact: _tryAcquireRelic,
 });
 
 const perkUI = new PerkUI({
@@ -1367,7 +1382,7 @@ function makeTailorStock() {
   });
 }
 function makeRelicSellerStock() {
-  // Relic sellers now deal exclusively in artifact scrolls — permanent
+  // Relic sellers deal exclusively in relics — permanent
   // run-altering buffs. Each visit offers 2-3 unowned artifacts plus a
   // couple of expensive high-rarity junk pieces as flavour stock.
   // Upgrade level adds extra unowned-artifact slots.
@@ -1382,13 +1397,13 @@ function makeRelicSellerStock() {
     const idx = Math.floor(Math.random() * pool.length);
     picks.push(pool.splice(idx, 1)[0]);
   }
-  const scrolls = picks.map(def => {
-    const scroll = artifactScrollFor(def.id);
-    scroll.priceMult = 1;
-    return scroll;
+  const relics = picks.map(def => {
+    const relic = relicFor(def.id);
+    relic.priceMult = 1;
+    return relic;
   });
   const junks = pickN(ALL_JUNK.slice().map(j => ({ ...j })), 2);
-  return [...scrolls, ...junks.map((it) => {
+  return [...relics, ...junks.map((it) => {
     it.priceMult = (it.priceMult || 1) * 1.6;
     return fluxify(it);
   })];
@@ -1881,19 +1896,19 @@ function regenerateLevel() {
           if (!src.length) return null;
           return wrapWeapon(src[Math.floor(Math.random() * src.length)]);
         },
-        rollUnownedArtifactScroll: () => {
+        rollUnownedRelic: () => {
           // Skip encounter-only artifacts; they have their own
           // dedicated encounter as the acquisition path.
           const unowned = ALL_ARTIFACTS.filter(a => !artifacts.has(a.id) && !a.encounterOnly);
           if (!unowned.length) return null;
           const def = unowned[Math.floor(Math.random() * unowned.length)];
-          return artifactScrollFor(def.id);
+          return relicFor(def.id);
         },
         // Encounter-side artifact helpers — encounters can build a
         // scroll from a specific id (e.g. Duck → innocent_heart) or
         // filter their candidate pool to drop ones the player
         // already owns.
-        artifactScrollFor: (id) => artifactScrollFor(id),
+        relicFor: (id) => relicFor(id),
         filterUnownedArtifactIds: (ids) => ids.filter(id => !artifacts.has(id)),
         // Currency + buff hooks for shrine / fortune teller.
         getPlayerCredits: () => playerCredits,
@@ -6329,7 +6344,7 @@ function updateLootPrompt() {
 function tryInteract({ nearItem, body, npc, container }) {
   // Loot pickup / body loot / encounter-spawned containers all beat
   // the encounter interact when the player is standing on / next to
-  // them — encounter rewards (Shrine scroll, Fountain signet chest,
+  // them — encounter rewards (Shrine relic, Fountain signet chest,
   // Sleeping Boss chest, Royal Emissary masterwork, The Button
   // container scatter) were unreachable because pressing E re-opened
   // the encounter prompt instead. The encounter prompt is still
@@ -6361,11 +6376,11 @@ function tryInteract({ nearItem, body, npc, container }) {
       lootUI.open(target);
       return;
     }
-    // Artifact scrolls auto-consume on pickup — the artifact joins the
+    // Relics auto-consume on pickup — the artifact joins the
     // run's owned set and never takes a bag slot. recomputeStats fires
-    // inside _tryAcquireArtifactScroll so the modifier is live before
+    // inside _tryAcquireRelic so the modifier is live before
     // the next frame.
-    if (_tryAcquireArtifactScroll(nearItem.item)) {
+    if (_tryAcquireRelic(nearItem.item)) {
       loot.remove(nearItem);
       sfx.pickup();
       inventoryUI.render();

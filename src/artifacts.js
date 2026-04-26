@@ -185,17 +185,21 @@ export class ArtifactCollection {
   }
 }
 
-// Build an artifact-scroll item (merchant-facing). The shop buy flow
-// recognizes items with `type === 'artifact-scroll'` and grants the
-// artifact instead of putting it in the backpack.
-export function artifactScrollFor(id) {
+// Build a relic pickup item. A relic is a permanent run modifier —
+// the shop buy flow + the floor pickup path both recognise items
+// with `type === 'relic'` and grant the artifact directly to the
+// player's owned set rather than putting it in the inventory grid.
+// `relicFor` is the canonical builder; `artifactScrollFor` is kept
+// as a backwards-compat alias for any caller that still uses the
+// old name.
+export function relicFor(id) {
   const def = ARTIFACT_DEFS[id];
   if (!def) return null;
   return {
-    id: `scroll_${id}`,
+    id: `relic_${id}`,
     artifactId: id,
     name: def.name,
-    type: 'artifact-scroll',
+    type: 'relic',
     tint: def.tint,
     rarity: 'legendary',
     description: def.short,
@@ -203,3 +207,4 @@ export function artifactScrollFor(id) {
     basePrice: def.price,
   };
 }
+export const artifactScrollFor = relicFor;

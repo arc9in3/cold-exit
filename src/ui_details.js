@@ -384,7 +384,7 @@ export class DetailsUI {
       if (this.root.style.display === 'none') return;
       if (!this._item) return;
       const it = this._item;
-      if (it.type === 'artifact-scroll' || !this._isOwnedItem(it)) return;
+      if (it.type === 'relic' || !this._isOwnedItem(it)) return;
       if (e.key === 'j' || e.key === 'J') {
         it.markedJunk = !it.markedJunk;
         if (it.markedJunk) it.markedKeep = false;
@@ -545,7 +545,7 @@ export class DetailsUI {
   // items that aren't usefully markable (artifact-scrolls auto-consume,
   // shop-side items don't belong to the player).
   _renderMarkBar(item) {
-    if (!item || item.type === 'artifact-scroll') return '';
+    if (!item || item.type === 'relic') return '';
     // Skip if the item isn't actually in the player's inventory (so
     // shop browsing doesn't show controls that wouldn't apply). Treat
     // anything reachable via the inventory's owned-items flat view as
@@ -592,7 +592,7 @@ export class DetailsUI {
     // heuristic was wiping the only thing that explained what the
     // relic actually does. Special-case both lookups so a left-click on
     // a relic in the shop shows "what does this give me".
-    const isArtifact = item.type === 'artifact-scroll';
+    const isArtifact = item.type === 'relic';
     const lore = isArtifact
       ? (item.lore || '')
       : (ITEM_LORE[item.name] || '');

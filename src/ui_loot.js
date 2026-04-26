@@ -534,7 +534,7 @@ export class LootUI {
   _smartPlace(item, _allowEqualEquip) {
     if (!item) return { placed: false };
     // Artifact scrolls auto-consume — never enter the bag.
-    if (item.type === 'artifact-scroll' && this.onAcquireArtifact(item)) {
+    if (item.type === 'relic' && this.onAcquireArtifact(item)) {
       return { placed: true, slot: 'artifact' };
     }
     // Consumables / attachments have no equip target.
@@ -587,7 +587,7 @@ export class LootUI {
     delete item._lootForcedPile;   // reset cross-session flag
     // Artifact scrolls auto-consume — never enter the bag.
     let r;
-    if (item.type === 'artifact-scroll' && this.onAcquireArtifact(item)) {
+    if (item.type === 'relic' && this.onAcquireArtifact(item)) {
       r = { placed: true, slot: 'artifact' };
     } else {
       r = this.inventory.add(item);

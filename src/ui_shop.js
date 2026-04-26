@@ -107,7 +107,7 @@ function _affixPerkPremium(item) {
 // `priceMult` fluctuations rolled at stock time, plus a premium for
 // affixes + perks that reflects how strong the roll is.
 export function priceFor(item, shopMult = 1) {
-  if (item.type === 'artifact-scroll') {
+  if (item.type === 'relic') {
     // Artifact prices are fixed premium amounts on the ARTIFACT_DEFS entry.
     const def = item.artifactPrice ?? item.basePrice;
     const base = def ?? 4000;
@@ -304,7 +304,7 @@ export class ShopUI {
     if (!this.spendCredits(price)) return;
     // Artifact scrolls aren't inventory items — they grant a permanent
     // run-long buff via the passed-in hook instead of sitting in a bag.
-    if (item.type === 'artifact-scroll' && this.onAcquireArtifact) {
+    if (item.type === 'relic' && this.onAcquireArtifact) {
       const ok = this.onAcquireArtifact(item.artifactId);
       if (!ok) { this.earnCredits(price); return; }
       m.stock[idx] = null;
