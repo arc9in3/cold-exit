@@ -188,7 +188,14 @@ export class LootManager {
     slot.mat.emissive.setHex(tint).multiplyScalar(0.75);
     slot.light.color.setHex(tint);
     slot.light.intensity = 0.9;
-    this._paintNameTag(slot, item.name || 'item');
+    // Defer the nametag canvas paint + texture upload until the
+    // sprite actually becomes visible (proximity-gated in update()).
+    // Painting + uploading per drop was a real ~1-3ms cost on a
+    // texture the player can't see yet — disarm/loot bursts piled
+    // a paint per drop. Stash the pending name; update() paints when
+    // the sprite first toggles visible.
+    slot.pendingName = item.name || 'item';
+    slot.paintedName = null;
     slot.sprite.visible = false;   // proximity-gated in update()
     slot.group.position.set(position.x, 0.45, position.z);
     slot.group.visible = true;
@@ -493,7 +500,16 @@ export class LootManager {
       if (it.nameTag && playerPos) {
         const dx = it.group.position.x - playerPos.x;
         const dz = it.group.position.z - playerPos.z;
-        it.nameTag.visible = (dx * dx + dz * dz) <= tagR2;
+        const visible = (dx * dx + dz * dz) <= tagR2;
+        it.nameTag.visible = visible;
+        // Lazy-paint the canvas only when the sprite first becomes
+        // visible AND the name has changed since last paint. Saves a
+        // texture upload per drop the player can't see yet.
+        if (visible && it.slot && it.slot.pendingName
+            && it.slot.pendingName !== it.slot.paintedName) {
+          this._paintNameTag(it.slot, it.slot.pendingName);
+          it.slot.paintedName = it.slot.pendingName;
+        }
       }
     }
   }
