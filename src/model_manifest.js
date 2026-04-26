@@ -267,6 +267,21 @@ export function renderForWeaponName(name) {
   return f ? RENDER_BASE + f : null;
 }
 
+// Weapons added in the lowpolyguns pass that need side-view PNG
+// renders generated. Re-run tools/weapon_assigner.html → 'Export
+// side-view PNGs' to produce the zip; drop the listed filenames into
+// Assets/UI/weapon_renders/ then add an entry to WEAPON_RENDER_BY_NAME
+// above. Sanitized name == filename without extension (replaces non
+// [A-Za-z0-9_-] with '_'), e.g. 'Mossberg 500' -> 'Mossberg_500.png'.
+export const RENDER_PENDING = [
+  'CAR-15', 'AKS-74', 'AK104', 'JARD J67',
+  'Spectre', 'Spectre CQB', 'SPC9',
+  'Mossberg 500', 'Remington 870', 'Sawed-Off Shotgun', 'KSG-12',
+  'AWP', '.338 Lapua', 'Hunting Rifle',
+  'Colt Python', 'Colt 357', '.38 Special', 'Colt Six Shooter',
+  'Scimitar',
+];
+
 // ---------------------------------------------------------------
 // Hand-pose defaults per weapon class. Fractions of the side-view
 // render canvas (0..1, origin top-left). Authored from typical
