@@ -3503,9 +3503,11 @@ function buildBodyLoot(enemy) {
     }
     if (Math.random() < 0.20) items.push(randomAttachment());
     if (Math.random() < 0.30) items.push(randomJunk());
+    if (Math.random() < 0.10) items.push(randomThrowable());
   } else if (!isEmptyBody) {
     if (Math.random() < 0.05) items.push(randomAttachment());
     if (Math.random() < 0.12) items.push(randomJunk());
+    if (Math.random() < 0.03) items.push(randomThrowable());
   }
   return items;
 }
@@ -3987,54 +3989,174 @@ function _tickFlashDomes(dt) {
   }
 }
 
-// Burst of small fiery orbs rising upward from a molotov impact.
-// Each orb has a short random lifetime, floats up, fades, and self-
-// disposes. Used on the initial shatter AND topped up periodically
-// from `_tickFireZones` while the burn patch is active.
+// Fire VFX — three layered particle types make a molotov burn read as
+// real fire instead of a cluster of orange dots:
+//   tongue : vertically stretched flame, hot white-yellow at the base
+//            shifting to orange→red→deep red as it rises and ages.
+//            Most of the visible "flame".
+//   ember  : small bright dots that hover near the ground and flicker
+//            briefly. Sells the hot, churning base of the fire.
+//   smoke  : gray translucent puffs that drift up slowly above the
+//            flames and grow as they fade. Only spawned in the second
+//            half of a tongue's life so it reads as smoke trailing
+//            the flame, not stacked underneath.
+// All three share the `_fireOrbs` pool / tick loop so cleanup paths
+// don't multiply.
 const _fireOrbs = [];
+const _FIRE_HOT      = new THREE.Color(0xfff0c0);   // base — almost white
+const _FIRE_MID      = new THREE.Color(0xff9030);   // mid — orange
+const _FIRE_TIP      = new THREE.Color(0xc02810);   // tip — deep red
+const _FIRE_TMP_COL  = new THREE.Color();
+function _flameTongueGeom() {
+  // Stretched 4-sided cone reads as a flame tip. Cached.
+  if (!_flameTongueGeom._g) {
+    _flameTongueGeom._g = new THREE.ConeGeometry(0.08, 0.55, 5, 1, true);
+  }
+  return _flameTongueGeom._g;
+}
+function _spawnFlameTongue(x, y, z) {
+  const mesh = new THREE.Mesh(
+    _flameTongueGeom(),
+    new THREE.MeshBasicMaterial({
+      color: _FIRE_HOT.getHex(),
+      transparent: true, opacity: 0.95,
+      depthWrite: false, blending: THREE.AdditiveBlending,
+    }),
+  );
+  mesh.position.set(x, y, z);
+  // Random initial yaw + slight tilt so a cluster doesn't read as
+  // identical copies of one cone.
+  mesh.rotation.y = Math.random() * Math.PI * 2;
+  mesh.rotation.z = (Math.random() - 0.5) * 0.18;
+  scene.add(mesh);
+  _fireOrbs.push({
+    kind: 'tongue',
+    mesh,
+    vy: 1.6 + Math.random() * 1.4,
+    drift: {
+      x: (Math.random() - 0.5) * 0.20,
+      z: (Math.random() - 0.5) * 0.20,
+    },
+    life: 0.55 + Math.random() * 0.35,
+    t: 0,
+    flicker: Math.random() * Math.PI * 2,
+    smokeSpawned: false,
+  });
+}
+function _spawnEmber(x, z) {
+  const sz = 0.04 + Math.random() * 0.04;
+  const mesh = new THREE.Mesh(
+    new THREE.SphereGeometry(sz, 4, 3),
+    new THREE.MeshBasicMaterial({
+      color: 0xffe89a, transparent: true, opacity: 1,
+      depthWrite: false, blending: THREE.AdditiveBlending,
+    }),
+  );
+  mesh.position.set(x, 0.04 + Math.random() * 0.10, z);
+  scene.add(mesh);
+  _fireOrbs.push({
+    kind: 'ember',
+    mesh,
+    vy: 0.05 + Math.random() * 0.15,
+    drift: { x: (Math.random() - 0.5) * 0.12, z: (Math.random() - 0.5) * 0.12 },
+    life: 0.30 + Math.random() * 0.25,
+    t: 0,
+    flicker: Math.random() * Math.PI * 2,
+  });
+}
+function _spawnSmoke(x, y, z) {
+  const sz = 0.18 + Math.random() * 0.18;
+  const mesh = new THREE.Mesh(
+    new THREE.SphereGeometry(sz, 5, 4),
+    new THREE.MeshBasicMaterial({
+      color: 0x202020, transparent: true, opacity: 0.35,
+      depthWrite: false,   // standard blending — smoke darkens, not adds
+    }),
+  );
+  mesh.position.set(x, y, z);
+  scene.add(mesh);
+  _fireOrbs.push({
+    kind: 'smoke',
+    mesh,
+    vy: 0.55 + Math.random() * 0.4,
+    drift: {
+      x: (Math.random() - 0.5) * 0.35,
+      z: (Math.random() - 0.5) * 0.35,
+    },
+    life: 1.4 + Math.random() * 0.9,
+    t: 0,
+  });
+}
+// Initial molotov shatter — denser tongue cluster + ember bed.
 function spawnFireOrbBurst(pos, radius, count = 18) {
-  for (let i = 0; i < count; i++) {
+  const tongues = Math.max(4, Math.floor(count * 0.45));
+  const embers  = Math.max(4, Math.floor(count * 0.55));
+  for (let i = 0; i < tongues; i++) {
     const a = Math.random() * Math.PI * 2;
-    const r = Math.random() * radius * 0.9;
-    const x = pos.x + Math.cos(a) * r;
-    const z = pos.z + Math.sin(a) * r;
-    const sz = 0.06 + Math.random() * 0.07;
-    const color = Math.random() < 0.5 ? 0xff8030 : 0xffc060;
-    const mesh = new THREE.Mesh(
-      new THREE.SphereGeometry(sz, 5, 4),
-      new THREE.MeshBasicMaterial({
-        color, transparent: true, opacity: 0.9,
-        depthWrite: false, blending: THREE.AdditiveBlending,
-      }),
+    const r = Math.random() * radius * 0.85;
+    _spawnFlameTongue(
+      pos.x + Math.cos(a) * r,
+      0.10 + Math.random() * 0.30,
+      pos.z + Math.sin(a) * r,
     );
-    mesh.position.set(x, 0.10 + Math.random() * 0.25, z);
-    scene.add(mesh);
-    _fireOrbs.push({
-      mesh,
-      vy: 0.8 + Math.random() * 1.2,
-      drift: {
-        x: (Math.random() - 0.5) * 0.25,
-        z: (Math.random() - 0.5) * 0.25,
-      },
-      life: 0.8 + Math.random() * 0.7,
-      t: 0,
-    });
+  }
+  for (let i = 0; i < embers; i++) {
+    const a = Math.random() * Math.PI * 2;
+    const r = Math.random() * radius * 0.95;
+    _spawnEmber(pos.x + Math.cos(a) * r, pos.z + Math.sin(a) * r);
   }
 }
 function _tickFireOrbs(dt) {
   for (let i = _fireOrbs.length - 1; i >= 0; i--) {
     const o = _fireOrbs[i];
     o.t += dt;
+    const k = o.t / o.life;     // 0 → 1
     o.mesh.position.x += o.drift.x * dt;
     o.mesh.position.z += o.drift.z * dt;
     o.mesh.position.y += o.vy * dt;
-    o.vy *= 1 - dt * 0.8;   // decelerate slightly — wisp effect
-    const k = o.t / o.life;
-    o.mesh.material.opacity = 0.9 * Math.max(0, 1 - k);
-    o.mesh.scale.setScalar(1 + k * 0.5);   // grow as they fade
+    if (o.kind === 'tongue') {
+      // Color shift over life: hot → mid → tip.
+      const t = k;
+      if (t < 0.5) {
+        _FIRE_TMP_COL.copy(_FIRE_HOT).lerp(_FIRE_MID, t * 2);
+      } else {
+        _FIRE_TMP_COL.copy(_FIRE_MID).lerp(_FIRE_TIP, (t - 0.5) * 2);
+      }
+      o.mesh.material.color.copy(_FIRE_TMP_COL);
+      // Slight flicker on Y-scale + opacity for life reads.
+      const flick = 0.85 + 0.15 * Math.sin(o.flicker + o.t * 22);
+      // Tongue stretches as it rises (taller, thinner) then shrinks
+      // toward the top of its life. Width pinches in toward the tip.
+      const stretch = 1 + k * 1.4;
+      const widthSquish = 1 - k * 0.5;
+      o.mesh.scale.set(widthSquish * flick, stretch, widthSquish * flick);
+      o.mesh.material.opacity = 0.95 * Math.max(0, 1 - k * k);
+      // Decelerate slightly so tongues don't all shoot off into the
+      // ceiling — natural "flame settling" feel.
+      o.vy *= 1 - dt * 0.8;
+      // Halfway through life, drop a smoke puff just above the tongue.
+      if (!o.smokeSpawned && k > 0.55 && _fireOrbs.length < 260) {
+        o.smokeSpawned = true;
+        _spawnSmoke(
+          o.mesh.position.x + (Math.random() - 0.5) * 0.15,
+          o.mesh.position.y + 0.55,
+          o.mesh.position.z + (Math.random() - 0.5) * 0.15,
+        );
+      }
+    } else if (o.kind === 'ember') {
+      const flick = 0.7 + 0.3 * Math.sin(o.flicker + o.t * 35);
+      o.mesh.material.opacity = flick * Math.max(0, 1 - k);
+      o.mesh.scale.setScalar(1 - k * 0.4);
+      o.vy *= 1 - dt * 1.2;
+    } else if (o.kind === 'smoke') {
+      o.mesh.material.opacity = 0.35 * Math.max(0, 1 - k);
+      o.mesh.scale.setScalar(1 + k * 1.6);
+      o.vy *= 1 - dt * 0.4;
+    }
     if (o.t >= o.life) {
       scene.remove(o.mesh);
-      o.mesh.geometry.dispose();
+      // Tongue geometry is shared/cached — don't dispose it.
+      if (o.kind !== 'tongue') o.mesh.geometry.dispose();
       o.mesh.material.dispose();
       _fireOrbs.splice(i, 1);
     }
@@ -5732,13 +5854,18 @@ function _tickFireZones(dt) {
     // Cap total active orbs to keep the late-game / multi-zone case
     // from runaway-spawning into a frame stall.
     z.emitT -= dt;
-    if (z.emitT <= 0 && _fireOrbs.length < 220) {
+    if (z.emitT <= 0 && _fireOrbs.length < 260) {
+      // Sustain emits keep the flame alive while the zone burns. Tongue
+      // count tapers near the end of the zone life so the patch dies
+      // out instead of disappearing in one frame. spawnFireOrbBurst
+      // produces ~45% tongues / 55% embers; keep this dense enough to
+      // feel like a wall of flame.
       const lifeLeft = Math.max(0, 1 - z.t / z.life);
-      const emitCount = Math.max(0, Math.round(8 * lifeLeft));
+      const emitCount = Math.max(0, Math.round(10 * lifeLeft));
       if (emitCount > 0) {
         spawnFireOrbBurst({ x: z.x, z: z.z }, z.radius, emitCount);
       }
-      z.emitT = 0.10 + Math.random() * 0.06;
+      z.emitT = 0.06 + Math.random() * 0.05;
     }
     // DoT — burn every alive enemy within the disc.
     const rSq = z.radius * z.radius;
