@@ -38,13 +38,12 @@ export function createScene() {
     camera.updateProjectionMatrix();
   }
 
-  // Edge-of-screen pan budget for ADS. While ADS-anchored, when the
-  // cursor leaves the deadzone (NDC magnitude > EDGE_THRESHOLD) we
-  // nudge the look-at target outward in that direction so the player
-  // can still see further. Capped at MAX_EDGE_OFFSET metres of
-  // additional displacement so the camera can't run away. Lives at
-  // module scope so it persists smoothly across frames.
-  const _adsEdgePan = new THREE.Vector3();
+  // ADS camera offset. Pivot is ALWAYS the player position; the offset
+  // is the *blended* delta between the player and the cursor's world
+  // position, capped at the equipped weapon's drag budget. Lives at
+  // module scope so the smoothing carries across frames — the press
+  // blends in, cursor drag while ADS-held smoothly tracks the cursor.
+  const _adsOffset = new THREE.Vector3();
   // Scratch reused for the per-frame `desired` target — was a
   // `base.clone()` allocation every camera tick.
   const _desiredScratch = new THREE.Vector3();
@@ -71,65 +70,50 @@ export function createScene() {
     camera.bottom = -halfH;
     camera.updateProjectionMatrix();
 
-    // ADS peek — direction snapshotted at press in main.js
-    // (`opts.adsPeekDir`); the magnitude pushed on press is the
-    // CURSOR distance at press, capped by the weapon's drag budget.
-    // Edge-pan within ADS hold extends the offset further but stays
-    // capped by the same budget so the camera never drifts beyond
-    // what the weapon allows.
+    // ADS camera offset model:
+    //   1. Pivot is ALWAYS the player position (`base`). The camera
+    //      follows the player; ADS just adds a target offset on top.
+    //   2. Target offset = (cursor_world - player_world) capped at
+    //      `weaponPeek` metres (the weapon's drag budget — sniper
+    //      ~35m, rifle ~21m, etc.). Continuously read each frame, so
+    //      the press isn't a fixed jump and dragging the cursor
+    //      around smoothly pulls the camera in that direction.
+    //   3. Edge-pan falls out for free: the cursor's world position
+    //      naturally extends toward the screen edge as the user
+    //      drags it there, so the offset (and thus the camera) pans
+    //      that way until it hits the budget cap.
+    //   4. Smoothing is two-stage — `_adsOffset` lerps toward the
+    //      target offset (the press blend + cursor follow) at a
+    //      moderate rate; the look-at then lerps toward `base + offset`
+    //      via the existing followLerp. ADS amount (`adsEased`) scales
+    //      the whole offset so half-pressed ADS = half-pulled camera.
     const desired = _desiredScratch.copy(base);
-    if (adsEased > 0.05 && opts.adsPeekDir) {
-      // Initial press magnitude — min(distAtPress, budget). If the
-      // cursor was 4m away on press and the budget is 35m (sniper),
-      // camera moves 4m toward cursor, not 35m. Edge-pan can pull
-      // the rest of the budget out via cursor drag.
-      const distAtPress = opts.adsPeekDir._distAtPress ?? weaponPeek;
-      const initialReach = Math.min(distAtPress, weaponPeek);
-      const peekStrength = adsEased * initialReach;
-      desired.x += opts.adsPeekDir.x * peekStrength;
-      desired.z += opts.adsPeekDir.z * peekStrength;
-      // Edge-of-screen pan — outer 35% (deadzone is the inner 65%)
-      // of the cursor NDC slides the anchor in that direction.
-      // Total camera offset (initial reach + edge pan) is clamped
-      // to weaponPeek below so better sights = bigger drag budget.
-      const ndc = opts.cursorNDC;
-      if (ndc) {
-        const EDGE_THRESHOLD = 0.65;
-        // Edge-pan can use whatever budget the initial reach left,
-        // up to the full weaponPeek. Sniper with cursor right at the
-        // player on press has the full 35m left to drag.
-        const MAX_EDGE_OFFSET = Math.max(0, weaponPeek - initialReach);
-        const computeAxis = (v) => {
-          const a = Math.abs(v);
-          if (a <= EDGE_THRESHOLD) return 0;
-          const t = Math.min(1, (a - EDGE_THRESHOLD) / (1 - EDGE_THRESHOLD));
-          return Math.sign(v) * t * t * (3 - 2 * t);
-        };
-        const ex = computeAxis(ndc.x);
-        const ey = computeAxis(ndc.y);
-        // NDC y points UP; iso forward is roughly -Z, so a positive
-        // ndc.y nudges the anchor toward -Z. NDC x maps to +X
-        // directly (camera's right axis is roughly world +X under
-        // iso framing).
-        const targetEdgeX = ex * MAX_EDGE_OFFSET * adsEased;
-        const targetEdgeZ = -ey * MAX_EDGE_OFFSET * adsEased;
-        // Smoothly chase the target edge offset so the lean eases in
-        // / out instead of snapping when the cursor crosses the
-        // deadzone boundary.
-        const ek = 1 - Math.exp(-6 * dt);
-        _adsEdgePan.x += (targetEdgeX - _adsEdgePan.x) * ek;
-        _adsEdgePan.z += (targetEdgeZ - _adsEdgePan.z) * ek;
-        desired.x += _adsEdgePan.x;
-        desired.z += _adsEdgePan.z;
-      } else {
-        // No cursor data — decay the edge pan to zero.
-        _adsEdgePan.multiplyScalar(0.85);
+    let targetOffsetX = 0;
+    let targetOffsetZ = 0;
+    if (adsEased > 0.01 && opts.aim) {
+      const cdx = opts.aim.x - base.x;
+      const cdz = opts.aim.z - base.z;
+      const cdist = Math.sqrt(cdx * cdx + cdz * cdz);
+      if (cdist > 0.0001) {
+        // Cap the cursor delta at the weapon's drag budget. Cursor
+        // beyond the budget radius parks the camera at the edge of
+        // its reach in that direction.
+        const reach = Math.min(cdist, weaponPeek);
+        const k = (reach / cdist) * adsEased;
+        targetOffsetX = cdx * k;
+        targetOffsetZ = cdz * k;
       }
-    } else {
-      // ADS released — bleed the edge-pan offset back to zero so the
-      // next press starts cleanly.
-      _adsEdgePan.multiplyScalar(0.85);
     }
+    // Smooth chase toward the target offset — gives the press blend
+    // (target jumps from 0 → cursor delta as ADS engages) and the
+    // tracking follow when dragging the cursor while ADS-held. Bleeds
+    // back to 0 on release the same way (target becomes 0 once
+    // adsEased ≤ 0.01).
+    const ek = 1 - Math.exp(-6 * dt);
+    _adsOffset.x += (targetOffsetX - _adsOffset.x) * ek;
+    _adsOffset.z += (targetOffsetZ - _adsOffset.z) * ek;
+    desired.x += _adsOffset.x;
+    desired.z += _adsOffset.z;
 
     const k = 1 - Math.exp(-tunables.camera.followLerp * dt);
     lookAt.lerp(desired, k);
