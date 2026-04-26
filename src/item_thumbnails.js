@@ -11,7 +11,7 @@
 // so the same item id / weapon class only renders once per run.
 import * as THREE from 'three';
 import { loadModelClone } from './gltf_cache.js';
-import { modelForItem } from './model_manifest.js';
+import { modelForItem, renderForWeaponName } from './model_manifest.js';
 import { snapshotToDataURL } from './snapshot_renderer.js';
 
 const SIZE = 96;                    // thumbnail resolution (px)
@@ -1201,6 +1201,18 @@ export function thumbnailFor(item) {
   const key = cacheKey(item);
   if (_cache.has(key)) return _cache.get(key);
 
+  // Weapons with a registered side-view render PNG short-circuit
+  // entirely — that PNG IS the canonical icon (same image used by
+  // the inventory grid via iconForItem and by the attachment-screen
+  // via layoutForWeapon). No procedural primitive, no FBX overwrite.
+  if (item.type === 'ranged' || item.type === 'melee') {
+    const render = renderForWeaponName(item.name);
+    if (render) {
+      _cache.set(key, render);
+      return render;
+    }
+  }
+
   let url = null;
   try {
     _ensureRenderer();
@@ -1212,23 +1224,37 @@ export function thumbnailFor(item) {
     console.warn('[thumbnails] primitive render failed', err);
   }
 
-  // Kick off an FBX-based upgrade in the background. When it lands,
-  // the next read from the cache returns the higher-fidelity render.
-  const modelUrl = modelForItem(item);
-  if (modelUrl && !_modelPending.has(key)) {
-    _modelPending.add(key);
-    loadModelClone(modelUrl).then((obj) => {
-      if (!obj) return;
-      try {
-        _ensureRenderer();
-        _disposeStage();
-        _stage.add(obj);
-        const hiUrl = _fitAndRender(item.tint);
-        _cache.set(key, hiUrl);
-      } catch (err) {
-        console.warn('[thumbnails] model render failed', err);
-      }
-    }).finally(() => _modelPending.delete(key));
+  // FBX async upgrade — only for item types where the FBX render is
+  // genuinely richer than the procedural primitive. Armor, gear, and
+  // junk all have purpose-built procedural builders (capsule pants,
+  // MOLLE chest rigs, rounded gloves, ring-with-gem / skull / vase /
+  // walkie / etc.) — overwriting those with an FBX render of a
+  // generic prop FBX was the regression that made inventory icons
+  // "look like an old primitive". Restrict the upgrade to types
+  // that don't have a custom builder.
+  const FBX_UPGRADE_TYPES = new Set([
+    'ranged', 'melee',         // weapons without a render PNG (rare)
+    'consumable',              // medical kit FBXes are good
+    'attachment',              // the new attachment FBX mappings
+    'throwable',               // grenade / molotov / etc.
+  ]);
+  if (FBX_UPGRADE_TYPES.has(item.type)) {
+    const modelUrl = modelForItem(item);
+    if (modelUrl && !_modelPending.has(key)) {
+      _modelPending.add(key);
+      loadModelClone(modelUrl).then((obj) => {
+        if (!obj) return;
+        try {
+          _ensureRenderer();
+          _disposeStage();
+          _stage.add(obj);
+          const hiUrl = _fitAndRender(item.tint);
+          _cache.set(key, hiUrl);
+        } catch (err) {
+          console.warn('[thumbnails] model render failed', err);
+        }
+      }).finally(() => _modelPending.delete(key));
+    }
   }
 
   return url;

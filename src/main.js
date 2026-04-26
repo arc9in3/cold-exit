@@ -9204,6 +9204,7 @@ function tick() {
     adsPeekDistance: _adsPeekByClass,
     adsPeekDir: _adsPeekActive ? _adsPeekDir : null,
     cursorNDC: input.hasAim ? input.mouseNDC : null,
+    adsRising,
     // Per-sight ADS frustum push-in: iron 1.05, red dot/reflex 1.10,
     // holo 1.15, mid scope 1.20, long scope 1.30. Falls back to 1.05
     // when no weapon is equipped.

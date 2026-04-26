@@ -457,7 +457,21 @@ export class DetailsUI {
   // a dedicated mini renderer per panel open; teardown on hide/replace.
   _setupPreview(host, item) {
     const url = modelForItem(item);
-    if (!url) { host.remove(); return; }
+    // No FBX model — fall back to a static large version of the
+    // inventory thumbnail (the procedural pants/chest/glove/junk
+    // builders, or the side-view weapon PNG). Better than a blank
+    // gap for armor / gear / junk items that don't carry a model.
+    if (!url) {
+      const thumb = thumbnailFor(item);
+      if (thumb) {
+        host.innerHTML = `<img src="${thumb}" alt=""
+          style="display:block; width:100%; height:100%; object-fit:contain;
+                 image-rendering:pixelated;">`;
+        return;
+      }
+      host.remove();
+      return;
+    }
 
     const width  = host.clientWidth  || 380;
     const height = host.clientHeight || 160;
@@ -713,10 +727,19 @@ export class DetailsUI {
       </div>
     ` : '';
 
-    // Only the new (non-equipped) pane shows the live 3D preview —
-    // doubling it on the equipped pane wastes a GL context and
-    // visually duplicates what the player already knows.
-    const hasModel = !isEquipped && !!modelForItem(item);
+    // The non-equipped pane gets a preview block. If an FBX model is
+    // registered for the item, it renders live and rotating. If not
+    // (armor, gear, junk-with-no-FBX), it renders a larger version
+    // of the inventory thumbnail so the player still sees a clear
+    // preview instead of a blank gap. Weapons with side-view PNG
+    // renders just show the PNG.
+    const hasModel = !isEquipped && (
+      !!modelForItem(item) ||
+      item.type === 'ranged' || item.type === 'melee' ||
+      item.type === 'armor' || item.type === 'gear' ||
+      item.type === 'junk' || item.type === 'consumable' ||
+      item.type === 'throwable' || item.type === 'attachment'
+    );
     return `
       <div class="details-header" style="border-left: 4px solid ${rColor}">
         <div class="details-swatch" style="background:${tintStr}">
