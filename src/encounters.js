@@ -453,9 +453,18 @@ export const ENCOUNTER_DEFS = {
       s.complete = true;
       ctx.spawnSpeech(s.duck.position.clone().setY(1.4),
         'DID SOMEONE SAY PEAS?!', 4.0);
-      // Spawn a random toy nearby.
-      const toy = ctx.rollRandomToy && ctx.rollRandomToy();
-      if (toy) ctx.spawnLoot(s.disc.cx + 0.8, s.disc.cz, toy);
+      // Reward: one of two encounter-only relics. Skips any the
+      // player already owns so re-running the trick still rewards
+      // (in the rare case both are unowned, randomly pick one).
+      const ids = ['innocent_heart', 'unused_rocket_ticket'];
+      const available = ctx.filterUnownedArtifactIds
+        ? ctx.filterUnownedArtifactIds(ids)
+        : ids;
+      const pickId = available.length
+        ? available[Math.floor(Math.random() * available.length)]
+        : ids[Math.floor(Math.random() * ids.length)];
+      const scroll = ctx.artifactScrollFor && ctx.artifactScrollFor(pickId);
+      if (scroll) ctx.spawnLoot(s.disc.cx + 0.8, s.disc.cz, scroll);
       return { consume: true, complete: true };
     },
   },

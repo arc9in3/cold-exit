@@ -1241,7 +1241,9 @@ function makeRelicSellerStock() {
   // run-altering buffs. Each visit offers 2-3 unowned artifacts plus a
   // couple of expensive high-rarity junk pieces as flavour stock.
   // Upgrade level adds extra unowned-artifact slots.
-  const unowned = ALL_ARTIFACTS.filter(a => !artifacts.has(a.id));
+  // Encounter-only artifacts are filtered out — they're earned via
+  // their dedicated encounter, not bought from the shop.
+  const unowned = ALL_ARTIFACTS.filter(a => !artifacts.has(a.id) && !a.encounterOnly);
   const bonus = getMerchantStockBonus('relicSeller');
   const offerCount = Math.min(3 + bonus, unowned.length);
   const picks = [];
@@ -1739,11 +1741,19 @@ function regenerateLevel() {
           return wrapWeapon(src[Math.floor(Math.random() * src.length)]);
         },
         rollUnownedArtifactScroll: () => {
-          const unowned = ALL_ARTIFACTS.filter(a => !artifacts.has(a.id));
+          // Skip encounter-only artifacts; they have their own
+          // dedicated encounter as the acquisition path.
+          const unowned = ALL_ARTIFACTS.filter(a => !artifacts.has(a.id) && !a.encounterOnly);
           if (!unowned.length) return null;
           const def = unowned[Math.floor(Math.random() * unowned.length)];
           return artifactScrollFor(def.id);
         },
+        // Encounter-side artifact helpers — encounters can build a
+        // scroll from a specific id (e.g. Duck → innocent_heart) or
+        // filter their candidate pool to drop ones the player
+        // already owns.
+        artifactScrollFor: (id) => artifactScrollFor(id),
+        filterUnownedArtifactIds: (ids) => ids.filter(id => !artifacts.has(id)),
         getKillCount: () => runStats.kills | 0,
         markEncounterComplete: (id) => markEncounterDone(id),
         // Smoke puff at world XZ — used by Glass Case telegraph.

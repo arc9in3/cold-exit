@@ -650,9 +650,13 @@ export function createPlayer(scene) {
     const dealt = Math.min(state.health, reduced);
     state.health -= dealt;
     // A fraction of each hit locks out of natural regen — only healing
-    // items raise regenCap back toward the hard max.
-    const lossFactor = tunables.player.regenLossFactor ?? 0.5;
-    state.regenCap = Math.max(state.health, state.regenCap - reduced * lossFactor);
+    // items raise regenCap back toward the hard max. Innocent Heart
+    // (artifact) suspends this entirely so the player can always
+    // regen back to full.
+    if (!state.regenCapImmune) {
+      const lossFactor = tunables.player.regenLossFactor ?? 0.5;
+      state.regenCap = Math.max(state.health, state.regenCap - reduced * lossFactor);
+    }
     state.regenT = Math.max(0.1, tunables.player.regenDelay + (state.healthRegenDelayBonus || 0));
     state.hitFlashT = tunables.player.hitFlashTime;
     if (state.health <= 0) {
@@ -744,6 +748,11 @@ export function createPlayer(scene) {
     state.healthRegenDelayBonus = s.healthRegenDelayBonus || 0;
     state.staminaRegenMult = s.staminaRegenMult || 1;
     state.dmgReduction = s.dmgReduction || 0;
+    // Encounter-artifact flags. Innocent Heart suspends the
+    // damage-shrinks-regen-cap rule; Unused Rocket Ticket scales
+    // dash velocity (and so distance) by the multiplier.
+    state.regenCapImmune  = !!s.regenCapImmune;
+    state.dashDistanceMult = s.dashDistanceMult || 1;
     // Battle Trance — feeds consumeStamina('melee', ...) to halve the
     // cost of swings, parries, and quick-melee.
     state.meleeStaminaMult = s.meleeStaminaMult ?? 1;
@@ -1035,8 +1044,11 @@ export function createPlayer(scene) {
           }
         }
       }
-      velocity.x = state.dashDir.x * tunables.dash.speed * curve * dashMult;
-      velocity.z = state.dashDir.z * tunables.dash.speed * curve * dashMult;
+      // Unused Rocket Ticket scales dash speed (and so distance over
+      // the fixed dash duration) by the artifact's multiplier.
+      const distMul = state.dashDistanceMult || 1;
+      velocity.x = state.dashDir.x * tunables.dash.speed * curve * dashMult * distMul;
+      velocity.z = state.dashDir.z * tunables.dash.speed * curve * dashMult * distMul;
       if (state.modeT >= tunables.dash.duration) {
         // Preserve a fraction of dash momentum so it blends into running.
         velocity.multiplyScalar(0.3);

@@ -124,6 +124,29 @@ export const ARTIFACT_DEFS = {
       s.rangedSpreadMult *= 0.90;
     },
   },
+  // -----------------------------------------------------------------
+  // Encounter rewards — Duck encounter rolls one of these two.
+  // (Not normally available from the relic-seller stock; the
+  // encounter is the only path. They appear in the standard Set + UI
+  // surfaces once owned, just not in the shop pool.)
+  innocent_heart: {
+    id: 'innocent_heart', name: 'Innocent Heart',
+    lore: 'Just doing my best.',
+    short: 'Damage no longer lowers your regen cap',
+    tint: 0xffb0c8,
+    price: 4500,
+    encounterOnly: true,
+    apply(s) { s.regenCapImmune = true; },
+  },
+  unused_rocket_ticket: {
+    id: 'unused_rocket_ticket', name: 'Unused Rocket Ticket',
+    lore: 'An unpunched ticket to space.',
+    short: 'Double dash distance',
+    tint: 0x80c0ff,
+    price: 4500,
+    encounterOnly: true,
+    apply(s) { s.dashDistanceMult = (s.dashDistanceMult || 1) * 2; },
+  },
 };
 
 export const ALL_ARTIFACTS = Object.values(ARTIFACT_DEFS);
