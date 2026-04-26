@@ -6,6 +6,13 @@ manifest accurate.
 
 **Index**
 - [`unity_to_gltf.py`](#unity_to_gltfpy) — extract .fbx + atlas from POLY packs
+- [`weapon_assigner.html`](#weapon_assignerhtml) — tag every weapon FBX,
+  render side-view PNGs, drag-place hand pose markers and attachment slots
+- [`model_viewer.html`](#model_viewerhtml) — generic per-model annotation grid
+- [`_apply_weapon_assignments.py`](#one-shot-scripts) — one-shot: applies a
+  tag-export JSON (deletions + renames + new entries) to `tunables.js`
+- [`_restat_weapons.py`](#one-shot-scripts) — one-shot: real-world stat
+  overrides (caliber → damage, RPM → fireRate, etc.)
 - [`retarget_character.md`](retarget_character.md) — Blender recipe to
   rebind character rigs into the hanging-arms pose the proc rig expects,
   then export as `.glb` for `src/character_model.js`
@@ -90,15 +97,21 @@ while the FBX loads, then swaps in the real mesh.
 
 Packs extracted into the repo today:
 
-| pack | output dir | meshes |
-|------|-----------|-------:|
-| `poly_survivalmeleeweapons.zip` | `Assets/models/melee/`   | 57 |
-| `poly_megaweaponskit.zip`       | `Assets/models/weapons/` | 335 |
-| `poly_megasurvivalmedicalkit_V2.zip` | `Assets/models/medical/` | 190 |
-| `poly_megasurvivaltools.zip`    | `Assets/models/tools/`   | 219 |
+| pack | output dir | meshes | atlas? |
+|------|-----------|-------:|:------:|
+| `poly_survivalmeleeweapons.zip`      | `Assets/models/melee/`   | 57  | yes |
+| `poly_megaweaponskit.zip`            | `Assets/models/weapons/` | 335 | yes |
+| `poly_megasurvivalmedicalkit_V2.zip` | `Assets/models/medical/` | 190 | yes |
+| `poly_megasurvivaltools.zip`         | `Assets/models/tools/`   | 219 | yes |
+| `style_charactercustomizationkit_V2.zip` | `Assets/models/characters/` | partial | yes |
+| `lowpolyguns.zip` (FBX subtree)      | `Assets/models/lowpolyguns/`             | 40 | no — embedded mtl colors |
+| `lowpolyguns.zip` (FBX/Accessories)  | `Assets/models/lowpolyguns_accessories/` | 15 | no |
 
-Each category folder also contains an `_atlas.png` — the shared color
-atlas every mesh in that pack samples.
+Pack distinction: animpic POLY meshes UV into a shared `_atlas.png`
+(palette-style colors). The lowpoly pack instead embeds per-material
+diffuse colors in the FBX itself — runtime renderers (and the
+`weapon_assigner` tool) detect the missing atlas and preserve those
+colors instead of replacing materials.
 
 ---
 
@@ -142,9 +155,94 @@ out = {c: sorted(f for f in os.listdir(root/c) if f.lower().endswith('.fbx'))
 
 ---
 
+---
+
+## weapon_assigner.html
+
+Purpose-built tool for the weapon polish loop. Two-panel layout:
+
+**Top panel** — every in-game weapon (`tunables.weapons[*]`) with its
+inventory icon, class / rarity / damage / RoF / mag, currently
+assigned model preview as a side-view orthographic render (16:9, no
+spin), and a tag input ("redo as real-world weapon"). Filling a tag
+flags the weapon for revisit; the export JSON includes a
+`weapons_to_revisit` array.
+
+**Bottom panel** — every weapon FBX in the project. Tag input for
+real-world weapon name. Badges for NEW (lowpoly imports) / USED
+(manifest-assigned). Filter dropdowns (category / status / regex
+search).
+
+**Sentinels:**
+- `remove` (or `#remove`) — clears the tag only.
+- `delete` (or `#delete`) — clears the tag AND marks the entity for
+  removal in the export JSON. Tile turns red with a strike-through
+  + `DELETE` badge.
+
+**Newest-wins dedupe** — saving a tag value that another entry
+already holds drops the older entries and clears their UI.
+
+**Click a model preview** — opens a fullscreen pose-tuning modal:
+- Three drag-to-place markers gated by weapon class:
+  - red **M** main hand (trigger wrist),
+  - blue **S** support hand (foregrip wrist),
+  - yellow **B** shoulder mount (buttstock — the firing-arm shoulder).
+  Pistols get M+S only (two-handed grip, no shoulder); knives get M
+  only; rifles/SMGs/shotguns/snipers/lmgs get all three.
+- Attachment-slot squares overlay for in-game weapons, drawn at
+  their `layoutForWeapon` positions. Drag-to-reposition for per-
+  weapon overrides; right-click resets.
+- Green outline shows the manifest grip-offset for the FBX.
+- Right-click any marker / slot resets it. Esc closes.
+
+**Export buttons:**
+- **Export tags** — JSON of all FBX + in-game weapon tags, plus
+  deletions and revisit list.
+- **Export side-view PNGs** — bulk-renders 512×288 PNG of every
+  in-game weapon's model into a zip, named by sanitized weapon name.
+  Drop into `Assets/UI/weapon_renders/` and add a matching entry to
+  `WEAPON_RENDER_BY_NAME` in `src/model_manifest.js`.
+- **Export pose JSON** (inside the modal) — dumps per-weapon hand
+  + slot positions for one weapon or all weapons.
+
+Persistence is per-localStorage-key:
+- `tacticalrogue.weapon_tags` (FBX tags)
+- `tacticalrogue.ingame_weapon_tags` (in-game weapon revisit tags)
+- `tacticalrogue.fbx_deletions` (delete-flagged FBXes)
+- `tacticalrogue.weapon_deletions` (delete-flagged in-game weapons)
+- `tacticalrogue.weapon_poses` (per-FBX pose data)
+
+Run via HTTP just like the model viewer:
+```
+python -m http.server 8000
+# open: http://localhost:8000/tools/weapon_assigner.html
+```
+
+---
+
+## One-shot scripts
+
+`_apply_weapon_assignments.py` and `_restat_weapons.py` are
+imperative, idempotent-ish, single-shot transforms run against
+`src/tunables.js` from a `weapon_assignments.json` (the export JSON
+the user produces from `weapon_assigner.html`). Re-runnable; finds
+already-renamed entries as no-ops.
+
+```
+python tools/_apply_weapon_assignments.py   # delete + rename + insert
+python tools/_restat_weapons.py             # real-world stat overrides
+```
+
+Adjust the `DELETIONS` / `RENAMES` / `NEW_WEAPONS` / `OVERRIDES`
+dicts in the script before re-running for a different batch. Both
+scripts edit the file in-place; commit the diff before running for
+sanity.
+
+---
+
 ## Shipping note
 
-Neither `unity_to_gltf.py` nor `model_viewer.html` should be included in
-the itch.io build. Only the extraction *outputs* (`Assets/models/**/*.fbx`
-+ `_atlas.png` + the `.js` / icons under `Assets/UI/`) need to be
-bundled.
+Neither `unity_to_gltf.py`, the HTML viewers, nor the one-shot
+scripts ship in the itch.io build. Only the extraction *outputs*
+(`Assets/models/**/*.fbx` + `_atlas.png` + `Assets/UI/**/*.png`,
+including the `weapon_renders/` PNGs) need to be bundled.

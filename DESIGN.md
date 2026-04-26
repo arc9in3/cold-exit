@@ -138,22 +138,40 @@ class; tier 5 is the capstone.
 ## Attachments
 
 Per-weapon attachment points declared in the weapon tunable
-(`attachmentSlots: [...]`). Slot → attachment type:
+(`attachmentSlots: [...]`). 50 attachments across 8 slots, type-rooted
+by category — each slot exists for one design reason.
 
-- `muzzle`     — compensator, suppressor
-- `barrel`     — long / short barrel
-- `sideRail`   — laser, flashlight, tactical light, strobe
-- `underRail`  — vertical foregrip, bipod
-- `topRail`    — red dot, reflex, holographic, scope
-- `stock`      — heavy stock
-- `grip`       — match grip
-- `trigger`    — match trigger
-- `magazine`   — extended mag, drum mag
+| slot | role | variants |
+|------|------|----------|
+| `muzzle` (brakes) | spread + recoil control | Compensator, A2 Birdcage, AK Brake, Sniper Brake, Linear Comp, Flash Hider (short / long) |
+| `muzzle` (suppressors) | noise reduction (`noiseRangeMult`) trading damage / spread | Short, Standard, Long, QD, Fluted, Osprey, Tactical |
+| `barrel` | range / RoF / accuracy | Long, Short, Match |
+| `sideRail` (lasers) | hipfire spread reduction | Red (10m), Green (18m), Blue (28m), Pistol Laser |
+| `sideRail` (lights) | blind/dazzle enemies (rarity scales BOTH duration AND magnitude) | Flashlight (utility), Tactical Light, Strobe |
+| `underRail` | spread + bracing | Vertical / Angled / Stubby foregrip, Canted grip, Bipod |
+| `topRail` (sights) | ADS frustum push-in (`sightZoom`) + drag distance (`adsPeekBonus`) | Iron (1.05× default), Red Dot / Reflex (1.10×), Holo (1.15×), Mid Scope (1.20×, +3m drag), Long Scope (1.30×, +6m drag) |
+| `stock` | ADS spread vs mobility | Heavy, Skeleton, CQB, Folding, Crane |
+| `grip` (pistol grip) | spread / reload / recovery | Match, Stippled, Skeleton, Rubberized |
+| `trigger` | fire rate | Match, Adjustable |
+| `magazine` | capacity vs reload | Extended, Drum, Banana, Fast |
 
 Attachments carry a `modifier` dict merged into the weapon's effective
-stats every fire (`effectiveWeapon(w)` in `src/attachments.js`). Light
-attachments (`lightTier: 'basic' | 'tactical' | 'strobe'`) also project a
-cone that blinds/dazzles enemies caught inside it.
+stats by `effectiveWeapon(w)` in `src/attachments.js`. New modifier
+fields beyond the original spread/damage/rate set:
+
+- `noiseRangeMult` — multiplies AI hearing radius. Suppressed shots
+  use 0.20–0.50 of the baseline 22m alert.
+- `blindSpreadMul` / `dazzleSpreadMul` — when a light cone hits an
+  enemy, these stash on the enemy and the shoot path inflates spread
+  by that factor. Strobe (dazzle) reads worse than tac light (blind).
+
+**Rarity rolls** (`_scaleModifierByRarity`) use a per-field
+`GOOD_WHEN` policy: benefits amplify away from 1.0 (e.g. legendary
+suppressor noise drops further); tradeoffs *soften toward* 1.0 (e.g.
+a legendary suppressor's damage penalty is smaller than a common
+one's). Reductions floor at 0.1. Light durations + magnitudes scale
+proportionally so a legendary tac light blinds longer AND wrecks
+enemy aim harder.
 
 ## Skills (active abilities)
 
@@ -178,10 +196,17 @@ reduce it).
 ## Customize UI
 
 `ui_customize.js` + `weapon_layouts.js` — the per-weapon attachment
-customization modal. Weapon class picks an SVG silhouette with
-viewBox-coord slot anchors where the attachment cells overlay. A
-future pass replaces the SVG silhouette with the pack's `_Side.png`
-weapon art (see BACKLOG).
+customization modal. When a weapon has a side-view PNG render
+registered in `WEAPON_RENDER_BY_NAME` (every weapon today does), the
+layout's procedural class SVG is replaced with an `<image>` tag
+pointing at the same PNG used by the inventory icon. Slot positions
+remain class-based (canonical positions on the 600×260 viewBox) so
+muscle memory stays stable while the silhouette changes per weapon.
+
+Per-weapon slot overrides are exportable from
+`tools/weapon_assigner.html` (drag the dashed slot squares in the
+fullscreen pose modal); a future pass wires
+`WEAPON_SLOT_OVERRIDES_BY_NAME` into `layoutForWeapon`.
 
 ## Art direction — "The Continental"
 
@@ -279,17 +304,42 @@ environment-pack FBX pieces is the next major art pass (see
 
 ### Art sourcing
 
-**3D art:** animpic studio POLY packs (https://www.animpic.studio/).
-Low-poly flat-shaded atlas-textured meshes. Cel shading in-engine moves
-them toward the Continental style without requiring custom art.
+**3D art:**
+- animpic studio POLY packs (https://www.animpic.studio/) — low-poly
+  flat-shaded atlas-textured meshes for medical / consumables /
+  characters / props / many weapons + accessories.
+- lowpolyguns pack — 40 weapon FBXes + 15 accessory FBXes with
+  embedded per-material diffuse colors (no shared atlas). Used for
+  the AK-pattern rifles, bullpups, revolvers, shotguns, snipers,
+  Spectre SMGs, and many silencers / scopes / grips.
 
-**Icons:** animpic POLY UI pack tri-layer `_Clean` / `_Stroke` /
-`_Underlay` PNGs. The cell renderer prefers `_Clean` (color) with
-`onerror` fallback to `_Underlay` (silhouette). See `src/ui_item_cell.js`.
+Cel shading in-engine (`src/gltf_cache.js`, toon material + inverted-
+hull outline) brings both families into the same Continental style.
+
+**Weapon icons + attachment-screen art:** every in-game weapon has a
+side-view 512×288 PNG render in `Assets/UI/weapon_renders/` (generated
+by `tools/weapon_assigner.html`). `iconForItem` returns the render
+path for ranged + melee weapons; `layoutForWeapon` embeds the same
+PNG as an `<image>` in the customize modal. Same silhouette
+everywhere = consistent identity for the player.
+
+**Equipment / consumable / junk thumbnails:** procedural Three.js
+scenes in `src/item_thumbnails.js`, snapshotted to data URLs and
+cached. Pants / chest rigs / gloves / boots / backpack use capsules
++ tapered cylinders + spheres + tori (no boxy stand-ins). Generic
+junk shares a tinted canvas-pouch silhouette; distinctive items get
+per-id custom builders (rings, skulls, vases, walkie-talkies, field
+radios, batteries, scrap piles, bag of peas, rocket tickets, fancy
+alcohol bottles, biscuit stacks).
+
+**Stock icons:** animpic POLY UI pack tri-layer `_Clean` / `_Stroke`
+/ `_Underlay` PNGs. The cell renderer prefers `_Clean` with
+`onerror` fallback to `_Underlay`. Used as a fallback when no render
+PNG is registered. See `src/ui_item_cell.js`.
 
 **Future custom art:** the concept art is the target the prototype
-drives toward. Replacing animpic bodies with bespoke suit-assassin
-characters is a M3 polish item.
+drives toward. Replacing animpic / lowpolyguns bodies with bespoke
+suit-assassin characters is a M3 polish item.
 
 ## Tone checkpoints
 
@@ -308,9 +358,13 @@ characters is a M3 polish item.
 | M3 | Beta on itch.io: polish, tutorial, audio, balance, itch.io page assets |
 
 Current state is "prototype ready to hand to friends" — heavy M1 with
-most of M2 already landed: attachments, armor tiers, class mastery,
-artifacts, meta skill tree, main menu + starting store + leaderboard,
-post-FX + ambient audio + reverb, procedural rig, ragdoll-lite death
-bodies, variant enemies (dasher / runner / coverSeeker / tank /
-shieldedPistol) with boss-scaled attack frequency. See `BACKLOG.md`
-for the full current-state delta and what's in flight.
+most of M2 already landed: 53-weapon roster with real-world
+identities and side-view PNG renders driving icon + attachment
+screen, 50-attachment system with type-rooted bonuses + rarity-scaled
+magnitude, armor tiers, class mastery, artifacts, meta skill tree,
+main menu + starting store + leaderboard (Worker live), post-FX +
+ambient audio + reverb, procedural rig, ragdoll-lite death bodies,
+variant enemies (dasher / runner / coverSeeker / tank / shieldedPistol
+/ shield-bearer melee) with boss-scaled attack frequency, hidden
+ambush rooms, doorway-choke AI awareness with 50-line bark pool. See
+`BACKLOG.md` for the full current-state delta and what's in flight.
