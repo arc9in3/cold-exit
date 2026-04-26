@@ -22,7 +22,7 @@ const CELL_GAP = 3;
 export class InventoryUI {
   constructor({ inventory, skills, onDrop, getActiveWeapon, onOpenCustomize,
                 getDragState, setDragState,
-                getSpecialPerks, getSkillTreeLevels }) {
+                getSpecialPerks, getSkillTreeLevels, getArtifacts }) {
     this.inventory = inventory;
     this.skills = skills;
     this.onDrop = onDrop;
@@ -34,7 +34,7 @@ export class InventoryUI {
     // so the UI degrades gracefully if main.js doesn't pass them.
     this.getSpecialPerks    = getSpecialPerks    || (() => []);
     this.getSkillTreeLevels = getSkillTreeLevels || (() => ({}));
-    this.getArtifacts       = arguments[0]?.getArtifacts || (() => []);
+    this.getArtifacts       = getArtifacts       || (() => []);
     this.visible = false;
     this._lastVersion = -1;
     this._gridDrag = null;
@@ -856,10 +856,12 @@ export class InventoryUI {
     const relicRows = [];
     for (const a of (this.getArtifacts() || [])) {
       const desc = a.short || a.description || '';
-      relicRows.push(`<div class="inv-prog-perk">
+      const lore = a.lore || '';
+      relicRows.push(`<div class="inv-prog-perk inv-prog-relic">
         <span class="inv-prog-perk-name">⬢ ${a.name}</span>
         ${desc ? `<span class="inv-prog-perk-desc"> — ${desc}</span>` : ''}
         <span class="inv-prog-perk-src">RELIC</span>
+        ${lore ? `<div class="inv-prog-relic-lore">"${lore}"</div>` : ''}
       </div>`);
     }
 

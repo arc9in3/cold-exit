@@ -1169,6 +1169,15 @@ const shopUI = new ShopUI({
         transientHudMsg('You already wear them.', 3.0);
         return false;
       }
+      // Bear's flavour line, then the standard relic-acquired toast.
+      // Speech bubble spawns above whichever bear NPC is in the level
+      // (looked up live so the encounter chain doesn't need a ref).
+      const bear = level?.npcs?.find?.(n => n.kind === 'bearMerchant');
+      if (bear?.group) {
+        const pos = bear.group.position.clone().setY(2.2);
+        spawnSpeechBubble(pos, camera,
+          'A heavily armed duck left these here, I guess you can have them.', 5.5);
+      }
       recomputeStats();
       sfx.uiAccept?.();
       transientHudMsg('RELIC ACQUIRED: Rocket Shoes — Double dash distance', 5.0);
