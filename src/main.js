@@ -16,6 +16,9 @@ import { GunmanManager } from './gunman.js';
 import { MeleeEnemyManager } from './melee_enemy.js';
 import { separateEnemies } from './ai_separation.js';
 import { LootManager } from './loot.js';
+import { ENCOUNTER_DEFS, pickEncounterForLevel } from './encounters.js';
+import { spawnSpeechBubble } from './hud.js';
+import { makeContainer, buildContainerMesh } from './containers.js';
 import { Level } from './level.js';
 import { ProjectileManager } from './projectiles.js';
 import { spawnDamageNumber } from './hud.js';
@@ -27,7 +30,8 @@ import { getDevToolsEnabled, setDevToolsEnabled, getPlayerName, setPlayerName,
          getMerchantUpgrades, setMerchantUpgrade, merchantUpgradeNextCost,
          getMerchantStockBonus,
          getRerollUnlocked, setRerollUnlocked,
-         MERCHANT_KINDS, MERCHANT_UPGRADE_MAX, REROLL_UNLOCK_COST } from './prefs.js';
+         MERCHANT_KINDS, MERCHANT_UPGRADE_MAX, REROLL_UNLOCK_COST,
+         getCompletedEncounters, markEncounterDone } from './prefs.js';
 import { tunables } from './tunables.js';
 import {
   Inventory, SLOT_IDS,
@@ -1002,7 +1006,11 @@ const customizeUI = new CustomizeUI({
   },
   // Backpack-full fallback for detach — drop the attachment on the
   // ground next to the player so the detach action always succeeds.
-  onDrop: (item) => loot.spawnItem(player.mesh.position.clone(), item),
+  onDrop: (item) => {
+    const p = player.mesh.position;
+    if (tryEncounterItemDrop(item, p.x, p.z)) return;
+    loot.spawnItem(p.clone(), item);
+  },
 });
 
 const lootUI = new LootUI({
@@ -1012,7 +1020,11 @@ const lootUI = new LootUI({
     if (!item) return;
     if (item.type === 'ranged' || item.type === 'melee') customizeUI.open(item);
   },
-  onDrop: (item) => loot.spawnItem(player.mesh.position.clone(), item),
+  onDrop: (item) => {
+    const p = player.mesh.position;
+    if (tryEncounterItemDrop(item, p.x, p.z)) return;
+    loot.spawnItem(p.clone(), item);
+  },
 });
 
 const perkUI = new PerkUI({
@@ -1280,7 +1292,11 @@ const inventoryUI = new InventoryUI({
   getSpecialPerks: () => Array.from(specialPerks.unlocked || []),
   getSkillTreeLevels: () => ({ ...skillTree.levels }),
   getArtifacts: () => artifacts.list(),
-  onDrop: (item) => loot.spawnItem(player.mesh.position.clone(), item),
+  onDrop: (item) => {
+    const p = player.mesh.position;
+    if (tryEncounterItemDrop(item, p.x, p.z)) return;
+    loot.spawnItem(p.clone(), item);
+  },
   getActiveWeapon: () => currentWeapon(),
   onOpenCustomize: (item) => {
     if (!item) return;
@@ -1653,7 +1669,99 @@ function regenerateLevel() {
     for (const m of melees.enemies) if (m.alive && m.roomId === r.id) { hideOne(m); any = true; }
     if (any) r._ambushHidden = true;
   }
+  // Random encounter — if level-gen flagged a room as type 'encounter',
+  // pick one from ENCOUNTER_DEFS that hasn't been completed yet, build
+  // its visuals, and stash the per-encounter runtime state on the room.
+  // Skip if the player has cleared every available encounter — the room
+  // just stays empty.
+  for (const r of level.rooms) {
+    if (r.type !== 'encounter' || !r._encounterPlaceholder) continue;
+    r._encounterPlaceholder = false;
+    const def = pickEncounterForLevel(level.index | 0, getCompletedEncounters());
+    if (!def) {
+      r.type = 'combat';   // demote — main UI stays consistent
+      continue;
+    }
+    const ctx = {
+      scene, level, room: r,
+      // Helpers the encounter can call without knowing main.js internals.
+      spawnSpeech: (worldPos, text, life) => spawnSpeechBubble(worldPos, camera, text, life),
+      spawnMasterworkChest: (x, z) => _spawnMasterworkChestAt(x, z),
+      spawnLoot: (x, z, item) => loot.spawnItem({ x, y: 0.4, z }, item),
+    };
+    r._encounter = {
+      def,
+      state: def.spawn(scene, r, ctx) || {},
+      ctxFactory: () => ({
+        playerPos: player.mesh.position,
+        scene, level, room: r,
+        spawnSpeech: ctx.spawnSpeech,
+        spawnMasterworkChest: ctx.spawnMasterworkChest,
+        spawnLoot: ctx.spawnLoot,
+      }),
+    };
+  }
   saveLevelStart();
+}
+
+// Drop a single masterwork-chest at the world position. Same machinery
+// the level uses for its container scatter, but a guaranteed
+// masterwork roll. Used by encounter rewards (Royal Emissary, etc.).
+function _spawnMasterworkChestAt(x, z) {
+  const container = makeContainer('masterwork', 's', level?.index | 0);
+  const group = buildContainerMesh(container, x, 0, z);
+  scene.add(group);
+  const { w, d } = container.geo;
+  const proxy = new THREE.Mesh(
+    new THREE.BoxGeometry(w, container.geo.h, d),
+    new THREE.MeshBasicMaterial({ transparent: true, opacity: 0, depthWrite: false }),
+  );
+  proxy.position.set(x, container.geo.h / 2, z);
+  proxy.userData.collisionXZ = {
+    minX: x - w / 2, maxX: x + w / 2,
+    minZ: z - d / 2, maxZ: z + d / 2,
+  };
+  proxy.userData.isProp = true;
+  proxy.userData.containerRef = container;
+  scene.add(proxy);
+  level.obstacles.push(proxy);
+  level.containers.push({ container, group, x, z, r: 1.8 });
+}
+
+// Per-frame encounter tick — drives any animations / barks. Runs after
+// the player + AI ticks so encounter state reads the current frame's
+// player position.
+function tickEncounters(dt) {
+  if (!level || !level.rooms) return;
+  for (const r of level.rooms) {
+    if (!r._encounter) continue;
+    const ent = r._encounter;
+    if (ent.def.tick) {
+      const ctx = ent.ctxFactory();
+      ctx.state = ent.state;
+      ent.def.tick(dt, ctx);
+    }
+  }
+}
+
+// Item-drop hook — called by the loot/inventory drop pipeline. If the
+// drop position lies inside an encounter room and the encounter wants
+// the item, it's consumed (not actually spawned) and the encounter's
+// state advances. Returns true if consumed.
+function tryEncounterItemDrop(item, x, z) {
+  if (!level || !level.rooms || !item) return false;
+  const room = level.roomAt(x, z);
+  if (!room || !room._encounter) return false;
+  const ent = room._encounter;
+  if (!ent.def.onItemDropped) return false;
+  const ctx = ent.ctxFactory();
+  ctx.state = ent.state;
+  const result = ent.def.onItemDropped(item, ctx);
+  if (!result) return false;
+  if (result.complete && ent.def.oncePerSave) {
+    markEncounterDone(ent.def.id);
+  }
+  return !!result.consume;
 }
 
 window.addEventListener('resize', () => {
@@ -7276,6 +7384,7 @@ function tick() {
   _tickBurnFlames(dt);
   tickAmbushDrops(dt);
   tickCorpseDespawn(dt);
+  tickEncounters(dt);
   // Player flash + stun decay. Flash drives a fullscreen white
   // overlay that fades from 1.0 → 0 over the duration; stun decays
   // separately, the camera waver reads it below.

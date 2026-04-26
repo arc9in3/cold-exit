@@ -138,3 +138,27 @@ export function getRerollUnlocked() {
 export function setRerollUnlocked(v) {
   _write(REROLL_UNLOCK_KEY, !!v);
 }
+
+// Random-encounter completion tracker. Each encounter id (e.g.
+// 'royal_emissary', 'duck', 'fountain', 'circle') gets its `oncePerSave`
+// flag flipped after the player triggers the rewarding interaction.
+// Stored as a Set serialised to a sorted string array.
+const COMPLETED_ENCOUNTERS_KEY = 'tacticalrogue_completed_encounters_v1';
+export function getCompletedEncounters() {
+  const arr = _read(COMPLETED_ENCOUNTERS_KEY, []);
+  return Array.isArray(arr) ? new Set(arr) : new Set();
+}
+export function markEncounterDone(id) {
+  if (!id) return;
+  const set = getCompletedEncounters();
+  if (set.has(id)) return;
+  set.add(id);
+  _write(COMPLETED_ENCOUNTERS_KEY, [...set].sort());
+}
+export function resetEncounterCompletion(id) {
+  if (!id) return;
+  const set = getCompletedEncounters();
+  if (!set.has(id)) return;
+  set.delete(id);
+  _write(COMPLETED_ENCOUNTERS_KEY, [...set].sort());
+}

@@ -367,6 +367,19 @@ export class Level {
     this.rooms = rooms;
     this.bossRoomId = rooms.find(r => r.type === 'boss').id;
 
+    // Random encounter conversion — main.js drives the actual pick
+    // (it owns the persistence + completed-set state). Here we just
+    // mark eligibility: 10% chance per non-essential combat room
+    // becomes type='encounter' so spawn logic skips enemies and the
+    // runtime knows to populate it. Sub-boss / boss / start / shop
+    // rooms are never converted.
+    const combatRooms = rooms.filter(r => r.type === 'combat');
+    if (combatRooms.length > 0 && Math.random() < 0.10) {
+      const pick = combatRooms[Math.floor(Math.random() * combatRooms.length)];
+      pick.type = 'encounter';
+      pick._encounterPlaceholder = true;
+    }
+
     // --- Build walls + doors ----------------------------------------------
     const builtPairs = new Set();
     for (const room of rooms) this._buildRoomPerimeter(room);
@@ -1730,6 +1743,9 @@ export class Level {
   _populateRoom(room) {
     const b = room.bounds;
     if (room.type === 'start') return;
+    // Encounter rooms are intentionally enemy-free — main.js builds the
+    // NPC + props from the chosen ENCOUNTER_DEFS entry after generation.
+    if (room.type === 'encounter') return;
     if (['merchant', 'healer', 'gunsmith', 'armorer', 'tailor',
          'relicSeller', 'blackMarket'].includes(room.type)) {
       this._spawnNPC(room);
