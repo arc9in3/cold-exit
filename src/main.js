@@ -354,6 +354,15 @@ const initialQuality = getQualityPref();
 const renderer = new THREE.WebGLRenderer({ antialias: initialQuality !== 'low' });
 renderer.setSize(window.innerWidth, window.innerHeight);
 renderer.shadowMap.type = THREE.PCFSoftShadowMap;
+// Skip Three.js's per-shader-compile getProgramInfoLog read after the
+// warmup pass. Profile (Trace-20260426) showed getProgramInfoLog at
+// 1.69s self-time during a single play session — Three calls it after
+// every shader compile to surface error strings, and on Chromium that
+// readback is a synchronous GPU stall. We set it false AFTER the
+// boot-time warmup pre-compile so the warmup still surfaces real
+// errors; runtime compiles silently succeed (cached shaders never
+// error in practice).
+renderer.debug.checkShaderErrors = true;
 renderer.outputColorSpace = THREE.SRGBColorSpace;
 appEl.appendChild(renderer.domElement);
 attachUnlock(renderer.domElement);
@@ -9195,6 +9204,11 @@ function _warmShaders() {
   }
 }
 _warmShaders();
+// Warmup is over — every shader the game routinely needs has been
+// compiled + checked once. Disable getProgramInfoLog readback for
+// any subsequent compiles so the synchronous GPU stall doesn't
+// land mid-gameplay.
+try { renderer.debug.checkShaderErrors = false; } catch (_) {}
 
 // Background-preload every weapon's FBX model. First-time spawns of a
 // new weapon class were paying the FBX parse + GPU upload cost on the

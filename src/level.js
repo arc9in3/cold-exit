@@ -860,8 +860,8 @@ export class Level {
         };
       }
       // Reset visual to locked state, re-tint by key colour.
-      door.scale.y = 1.0;
-      door.position.y = WALL_HEIGHT / 2;
+      door.scale.y = 1.0; door.position.y = WALL_HEIGHT / 2; door.updateMatrix();
+
       door.material.opacity = 1.0;
       door.material.transparent = false;
       const tintHex = color === 'red'    ? 0xd04040
@@ -893,8 +893,8 @@ export class Level {
     mesh.material.color.setHex(DOOR_OPEN_COLOR);
     mesh.material.opacity = 0.3;
     mesh.material.transparent = true;
-    mesh.scale.y = 0.08;
-    mesh.position.y = 0.04;
+    mesh.scale.y = 0.08; mesh.position.y = 0.04; mesh.updateMatrix();
+
   }
 
   // Unlock a keycard-gated door given the held key colour. Returns
@@ -2511,6 +2511,14 @@ export class Level {
       minX: x - w / 2, maxX: x + w / 2,
       minZ: z - d / 2, maxZ: z + d / 2,
     };
+    // Walls + doors + columns don't move during gameplay. Disable
+    // matrixAutoUpdate so Three.js skips the per-frame matrix
+    // recompute cascade for hundreds of obstacles per level. We
+    // call updateMatrix() once here so the world matrix is correct
+    // for the lifetime of the mesh; door open/lock paths that move
+    // the mesh re-set position then call updateMatrix manually.
+    mesh.matrixAutoUpdate = false;
+    mesh.updateMatrix();
     this.scene.add(mesh);
     this.obstacles.push(mesh);
     this._dirtySolid();
@@ -2596,6 +2604,7 @@ export class Level {
       const d = geom?.depth || 1.2;
       mesh.scale.y = 1.0;
       mesh.position.y = WALL_HEIGHT / 2;
+      mesh.updateMatrix();
       mesh.material.color.setHex(DOOR_COLOR);
       mesh.material.opacity = 1.0;
       mesh.material.transparent = false;
@@ -2622,6 +2631,7 @@ export class Level {
       mesh.material.transparent = true;
       mesh.scale.y = 0.08;                    // flatten into the floor
       mesh.position.y = 0.04;
+      mesh.updateMatrix();
     }
     this._dirtySolid();
   }
@@ -2638,6 +2648,7 @@ export class Level {
       mesh.material.transparent = true;
       mesh.scale.y = 0.08;
       mesh.position.y = 0.04;
+      mesh.updateMatrix();
       opened = true;
     }
     if (opened) this._dirtySolid();

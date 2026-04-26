@@ -1248,8 +1248,20 @@ export class GunmanManager {
     const playerInSmoke = ctx.isInsideSmoke
       ? ctx.isInsideSmoke(ctx.playerPos.x, ctx.playerPos.z)
       : false;
-    const hasLos = roomActive && !playerInSmoke
-      && ctx.combat.hasLineOfSight(eye, target, ctx.obstacles);
+    // Throttle hasLineOfSight to 20Hz per enemy. The LOS raycast was
+    // the largest contributor to the trace's raycast cost (sum of
+    // bvh raycast + intersectTriangle ≈ 3.7s self-time over the
+    // recorded session) — most frames the answer doesn't change
+    // between successive 16ms ticks. Cache per-enemy + refresh at a
+    // 0.05s interval. The cached value still gates suspicion / fire
+    // decisions correctly because a 50ms staleness is well below
+    // human reaction time.
+    g._losT = (g._losT || 0) - ctx.dt;
+    if (g._losT <= 0 || g._losCached === undefined) {
+      g._losT = 0.05;
+      g._losCached = ctx.combat.hasLineOfSight(eye, target, ctx.obstacles);
+    }
+    const hasLos = roomActive && !playerInSmoke && g._losCached;
     const fwd = _g_fwd.set(Math.sin(g.group.rotation.y), 0, Math.cos(g.group.rotation.y));
     const facingDot = fwd.dot(dir2d);
     // Player is in the rear ~90° cone (45° each side of directly-behind).

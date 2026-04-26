@@ -748,11 +748,20 @@ export class MeleeEnemyManager {
     const playerInSmoke = ctx.isInsideSmoke
       ? ctx.isInsideSmoke(ctx.playerPos.x, ctx.playerPos.z)
       : false;
-    const hasLos = roomActive && !playerInSmoke && ctx.combat.hasLineOfSight(
-      e.torso.getWorldPosition(_m_eye),
-      _m_aimAt.copy(ctx.playerPos).setY(1.0),
-      ctx.obstacles,
-    );
+    // 20Hz LOS throttle — same idea as the gunman version. See
+    // src/gunman.js for the rationale; bvh raycast + intersectTriangle
+    // dominated the profile and the LOS answer rarely changes inside
+    // a single 16ms frame.
+    e._losT = (e._losT || 0) - ctx.dt;
+    if (e._losT <= 0 || e._losCached === undefined) {
+      e._losT = 0.05;
+      e._losCached = ctx.combat.hasLineOfSight(
+        e.torso.getWorldPosition(_m_eye),
+        _m_aimAt.copy(ctx.playerPos).setY(1.0),
+        ctx.obstacles,
+      );
+    }
+    const hasLos = roomActive && !playerInSmoke && e._losCached;
     const detRangeIdle = tunables.meleeEnemy.detectionRange * (ctx.playerStealthMult || 1);
     const detRangeAlert = tunables.meleeEnemy.detectionRange * 2;
 
