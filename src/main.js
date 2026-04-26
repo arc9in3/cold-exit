@@ -37,6 +37,7 @@ import { tunables } from './tunables.js';
 import {
   Inventory, SLOT_IDS,
   ALL_GEAR, ALL_ARMOR, ALL_CONSUMABLES, CONSUMABLE_DEFS, ALL_JUNK, ALL_TOYS, ARMOR_DEFS,
+  JUNK_DEFS,
   wrapWeapon, withAffixes, randomArmor, randomGear, randomConsumable, randomJunk, randomToy, setLootLevel,
   randomThrowable,
 } from './inventory.js';
@@ -262,6 +263,7 @@ const overheadLayerEl = document.getElementById('overhead-layer');
 const stealthVignetteEl = document.getElementById('stealth-vignette');
 const stealthStatusEl = document.getElementById('stealth-status');
 const creditTextEl = document.getElementById('credit-text');
+const levelTextEl = document.getElementById('level-text');
 const xpTextEl = document.getElementById('xp-text');
 const spTextEl = document.getElementById('sp-text');
 const spRowEl = document.getElementById('sp-row');
@@ -1797,6 +1799,24 @@ function regenerateLevel() {
         // counter the ShopUI checks. Stacks if granted multiple
         // times (theoretically; today it's one-shot per save).
         grantPendingShopReroll: () => { pendingShopRerolls++; },
+        // Whispering Door — bump level.index by N and re-extract.
+        // The +N actually applies during regenerateLevel since it
+        // increments index by 1; we pre-add N-1 here so the result
+        // lands at current+N. Then trigger the standard extract
+        // pipeline.
+        advanceLevels: (n) => {
+          const skip = Math.max(1, n | 0);
+          // regenerateLevel increments level.index by 1, so we want
+          // to add (skip - 1) here for the net to be `skip`.
+          if (level && skip > 1) level.index += (skip - 1);
+          extractPending = true;
+        },
+        // Fountain — spawn a single-item chest containing a King's
+        // Signet at the given world XZ. Reuses the masterwork-chest
+        // visual (the chest itself looks ornate) but stocks just
+        // the signet. Skips the standard makeContainer roll.
+        spawnSignetChest: (x, z) => _spawnEncounterChestAt(x, z,
+          [{ ...JUNK_DEFS.kingsRing, durability: undefined }]),
         getKillCount: () => runStats.kills | 0,
         markEncounterComplete: (id) => markEncounterDone(id),
         // Smoke puff at world XZ — used by Glass Case telegraph.
@@ -1814,6 +1834,33 @@ function regenerateLevel() {
 // Drop a single masterwork-chest at the world position. Same machinery
 // the level uses for its container scatter, but a guaranteed
 // masterwork roll. Used by encounter rewards (Royal Emissary, etc.).
+// Generic single-item encounter chest at world XZ. Mesh is built via
+// the standard general-container pipeline so it visually reads as a
+// chest, but the loot list is overridden with the caller's items
+// (encounter rewards skip the random roll).
+function _spawnEncounterChestAt(x, z, items) {
+  const container = makeContainer('general', 's', level?.index | 0);
+  container.loot = items.map(it => ({ ...it }));
+  container.looted = false;
+  const group = buildContainerMesh(container, x, 0, z);
+  scene.add(group);
+  const { w, d } = container.geo;
+  const proxy = new THREE.Mesh(
+    new THREE.BoxGeometry(w, container.geo.h, d),
+    new THREE.MeshBasicMaterial({ transparent: true, opacity: 0, depthWrite: false }),
+  );
+  proxy.position.set(x, container.geo.h / 2, z);
+  proxy.userData.collisionXZ = {
+    minX: x - w / 2, maxX: x + w / 2,
+    minZ: z - d / 2, maxZ: z + d / 2,
+  };
+  proxy.userData.isProp = true;
+  proxy.userData.containerRef = container;
+  scene.add(proxy);
+  level.obstacles.push(proxy);
+  level.containers.push({ container, group, x, z, r: 1.8 });
+}
+
 function _spawnMasterworkChestAt(x, z) {
   const container = makeContainer('masterwork', 's', level?.index | 0);
   const group = buildContainerMesh(container, x, 0, z);
@@ -7931,6 +7978,7 @@ function tick() {
       ? `${playerCredits}c · ${persistentChips}◆`
       : String(playerCredits);
   }
+  if (levelTextEl) levelTextEl.textContent = String((level?.index | 0) || 1);
   if (xpTextEl) xpTextEl.textContent = `${playerXp}/${xpToNextLevel()}`;
   if (spRowEl) spRowEl.style.display = playerSkillPoints > 0 ? 'flex' : 'none';
   if (spTextEl) spTextEl.textContent = String(playerSkillPoints);

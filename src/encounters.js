@@ -294,6 +294,76 @@ function _buildGlassCase(itemTint = 0xffffff) {
   return { group, glassRefs, innerItem, glassMat, light };
 }
 
+// Build a free-standing whispering door — heavy stone arch with the
+// door slab inside it. Decorative; no walls behind it.
+function _buildWhisperingDoor() {
+  const group = new THREE.Group();
+  const stoneMat = new THREE.MeshStandardMaterial({ color: 0x6a7080, roughness: 0.85 });
+  const doorMat = new THREE.MeshStandardMaterial({
+    color: 0x2a2226, roughness: 0.55, metalness: 0.4,
+    emissive: 0x101020, emissiveIntensity: 0.25,
+  });
+  // Side jambs.
+  const jL = new THREE.Mesh(new THREE.BoxGeometry(0.30, 2.6, 0.50), stoneMat);
+  jL.position.set(-0.65, 1.30, 0);
+  jL.castShadow = true;
+  group.add(jL);
+  const jR = jL.clone();
+  jR.position.set(0.65, 1.30, 0);
+  group.add(jR);
+  // Lintel + cap.
+  const lintel = new THREE.Mesh(new THREE.BoxGeometry(1.7, 0.28, 0.55), stoneMat);
+  lintel.position.set(0, 2.74, 0);
+  group.add(lintel);
+  // Door slab.
+  const slab = new THREE.Mesh(new THREE.BoxGeometry(1.0, 2.30, 0.10), doorMat);
+  slab.position.set(0, 1.15, 0.05);
+  group.add(slab);
+  // Brass handle.
+  const handleMat = new THREE.MeshStandardMaterial({
+    color: 0xc8a060, roughness: 0.4, metalness: 0.7,
+    emissive: 0x402a10, emissiveIntensity: 0.3,
+  });
+  const handle = new THREE.Mesh(new THREE.SphereGeometry(0.07, 10, 8), handleMat);
+  handle.position.set(0.32, 1.10, 0.16);
+  group.add(handle);
+  return group;
+}
+
+// Build a small fountain — circular stone basin + central spout +
+// a faint upward-shimmer cone. Read as inviting from any angle.
+function _buildFountain() {
+  const group = new THREE.Group();
+  const stoneMat = new THREE.MeshStandardMaterial({ color: 0xa0a8b0, roughness: 0.85 });
+  const waterMat = new THREE.MeshStandardMaterial({
+    color: 0x5090c0, roughness: 0.15, metalness: 0.0,
+    transparent: true, opacity: 0.78,
+    emissive: 0x103060, emissiveIntensity: 0.4,
+  });
+  const basin = new THREE.Mesh(new THREE.CylinderGeometry(1.2, 1.3, 0.55, 24), stoneMat);
+  basin.position.y = 0.275;
+  basin.castShadow = true;
+  group.add(basin);
+  const water = new THREE.Mesh(new THREE.CylinderGeometry(1.05, 1.05, 0.06, 22), waterMat);
+  water.position.y = 0.55;
+  group.add(water);
+  // Central pillar with spout.
+  const pillar = new THREE.Mesh(new THREE.CylinderGeometry(0.18, 0.22, 0.95, 12), stoneMat);
+  pillar.position.y = 1.02;
+  group.add(pillar);
+  const spoutCap = new THREE.Mesh(new THREE.SphereGeometry(0.18, 12, 10), stoneMat);
+  spoutCap.position.y = 1.55;
+  group.add(spoutCap);
+  // Shimmer cone of water rising from spout.
+  const stream = new THREE.Mesh(
+    new THREE.ConeGeometry(0.08, 0.40, 8),
+    waterMat,
+  );
+  stream.position.y = 1.78;
+  group.add(stream);
+  return { group, water, stream };
+}
+
 // Build a smashed cart for the broken-vendor encounter — a couple of
 // tilted plank rectangles + a fallen wheel. Reads as wreckage from a
 // few metres away.
@@ -1109,6 +1179,210 @@ export const ENCOUNTER_DEFS = {
         body: `Three offerings remain. You have ${credits}c.`,
         options: opts,
       });
+    },
+    onItemDropped(item, ctx) { return { consume: false }; },
+  },
+
+  // -----------------------------------------------------------------
+  // Whispering Door — afk-listen for 25 seconds (no movement) and
+  // the door whispers a way forward. Modal offers 3 skip tiers
+  // (Small +1, Medium +3, Large +5). Picking one auto-extracts to
+  // the new floor. Movement during the listen resets the timer
+  // entirely. One-shot per save.
+  whispering_door: {
+    id: 'whispering_door',
+    name: 'Whispering Door',
+    floorColor: 0xb0d4e0,             // pale ghost-blue
+    oncePerSave: true,
+    condition: (state) => state.levelIndex >= 2,
+    LISTEN_TIME: 25,
+    MOVE_THRESHOLD: 0.20,             // metres of drift considered "movement"
+    spawn(scene, room, ctx) {
+      const disc = _spawnFloorDisc(scene, room, this.floorColor);
+      const door = _buildWhisperingDoor();
+      door.position.set(disc.cx, 0, disc.cz);
+      scene.add(door);
+      const label = _makeLabelSprite('WHISPERING DOOR', '#c8e0f0');
+      label.position.set(disc.cx, 3.2, disc.cz);
+      scene.add(label);
+      const hint = _makeLabelSprite('Stand still and listen', '#c9a87a');
+      hint.scale.set(3.6, 0.65, 1);
+      hint.position.set(disc.cx, 0.55, disc.cz + 1.6);
+      scene.add(hint);
+      // Progress sprite — text fills in when listening.
+      const progress = _makeLabelSprite('', '#c8e0f0');
+      progress.scale.set(3.6, 0.65, 1);
+      progress.position.set(disc.cx, 1.0, disc.cz + 1.6);
+      progress.visible = false;
+      scene.add(progress);
+      return {
+        door, label, hint, progress, disc,
+        listenT: 0,
+        lastX: null, lastZ: null,
+        complete: false,
+        prompted: false,
+      };
+    },
+    tick(dt, ctx) {
+      const s = ctx.state;
+      if (!s.door || s.complete) return;
+      const px = ctx.playerPos.x, pz = ctx.playerPos.z;
+      const inRoom = ctx.room && ctx.room.bounds
+        && px >= ctx.room.bounds.minX && px <= ctx.room.bounds.maxX
+        && pz >= ctx.room.bounds.minZ && pz <= ctx.room.bounds.maxZ;
+      if (!inRoom) {
+        // Player left the room — reset progress.
+        s.listenT = 0;
+        s.lastX = null;
+        s.lastZ = null;
+        if (s.progress) s.progress.visible = false;
+        return;
+      }
+      // First in-room frame this visit — calibrate baseline position.
+      if (s.lastX === null) {
+        s.lastX = px;
+        s.lastZ = pz;
+      }
+      const dx = px - s.lastX, dz = pz - s.lastZ;
+      const drift = Math.hypot(dx, dz);
+      const def = ENCOUNTER_DEFS.whispering_door;
+      if (drift > def.MOVE_THRESHOLD) {
+        // Movement detected — full reset.
+        s.listenT = 0;
+        s.lastX = px;
+        s.lastZ = pz;
+      } else {
+        s.listenT += dt;
+      }
+      // Update progress sprite + final prompt.
+      if (s.progress) {
+        s.progress.visible = true;
+        const pct = Math.min(1, s.listenT / def.LISTEN_TIME);
+        const sec = Math.max(0, Math.ceil(def.LISTEN_TIME - s.listenT));
+        s.progress.userData.setText(
+          pct >= 1 ? 'PRESS E TO CHOOSE A PATH'
+                   : `Listening... ${sec}s`,
+        );
+      }
+      if (s.listenT >= def.LISTEN_TIME && !s.prompted) {
+        // Auto-prompt only the first frame past the threshold; the
+        // player can re-trigger the prompt by pressing E afterward.
+        s.prompted = true;
+      }
+    },
+    interact(ctx) {
+      const s = ctx.state;
+      if (s.complete) return;
+      const def = ENCOUNTER_DEFS.whispering_door;
+      if (s.listenT < def.LISTEN_TIME) {
+        ctx.spawnSpeech(s.door.position.clone().setY(2.6),
+          'You hear nothing. Yet.', 3.0);
+        return;
+      }
+      const tiers = [
+        { skip: 1, text: 'Small Skip · +1 floor' },
+        { skip: 3, text: 'Medium Skip · +3 floors' },
+        { skip: 5, text: 'Large Skip · +5 floors' },
+      ];
+      const opts = tiers.map((t) => ({
+        text: t.text,
+        enabled: true,
+        onPick: () => {
+          s.complete = true;
+          if (ctx.markEncounterComplete) ctx.markEncounterComplete('whispering_door');
+          if (ctx.advanceLevels) ctx.advanceLevels(t.skip);
+        },
+      }));
+      opts.push({ text: 'Step away', onPick: () => {} });
+      ctx.showPrompt({
+        title: 'Whispering Door',
+        body: 'The door whispers a way forward. Choose your skip.',
+        options: opts,
+      });
+    },
+    onItemDropped(item, ctx) { return { consume: false }; },
+  },
+
+  // -----------------------------------------------------------------
+  // Fountain — press E next to it to throw 100c. Once cumulative
+  // throws hit 1000c, a chest containing a King's Signet pops out
+  // beside the basin. One-shot per save.
+  fountain: {
+    id: 'fountain',
+    name: 'Fountain',
+    floorColor: 0x60c0d0,             // cool aqua
+    oncePerSave: true,
+    condition: (state) => state.levelIndex >= 2,
+    THRESHOLD: 1000,
+    PER_THROW: 100,
+    spawn(scene, room, ctx) {
+      const disc = _spawnFloorDisc(scene, room, this.floorColor);
+      const built = _buildFountain();
+      built.group.position.set(disc.cx, 0, disc.cz);
+      scene.add(built.group);
+      const label = _makeLabelSprite('FOUNTAIN', '#a0e0f0');
+      label.position.set(disc.cx, 2.6, disc.cz);
+      scene.add(label);
+      const hint = _makeLabelSprite('Press E to throw 100c', '#c9a87a');
+      hint.scale.set(3.6, 0.65, 1);
+      hint.position.set(disc.cx, 0.55, disc.cz + 1.8);
+      scene.add(hint);
+      const progress = _makeLabelSprite('', '#a0e0f0');
+      progress.scale.set(3.6, 0.65, 1);
+      progress.position.set(disc.cx, 1.0, disc.cz + 1.8);
+      progress.visible = false;
+      scene.add(progress);
+      return {
+        built, label, hint, progress, disc,
+        thrown: 0,
+        complete: false,
+        wobbleT: 0,
+      };
+    },
+    tick(dt, ctx) {
+      const s = ctx.state;
+      if (!s.built) return;
+      s.wobbleT += dt;
+      if (s.built.stream) {
+        s.built.stream.scale.y = 1 + Math.sin(s.wobbleT * 6) * 0.15;
+      }
+    },
+    interact(ctx) {
+      const s = ctx.state;
+      if (s.complete) {
+        ctx.spawnSpeech(new THREE.Vector3(s.disc.cx, 1.8, s.disc.cz),
+          'The fountain has given what it will.', 3.0);
+        return;
+      }
+      const def = ENCOUNTER_DEFS.fountain;
+      const credits = ctx.getPlayerCredits ? ctx.getPlayerCredits() : 0;
+      if (credits < def.PER_THROW) {
+        ctx.spawnSpeech(new THREE.Vector3(s.disc.cx, 1.8, s.disc.cz),
+          `Not enough coin. Need ${def.PER_THROW}c.`, 3.0);
+        return;
+      }
+      if (!ctx.spendPlayerCredits(def.PER_THROW)) return;
+      s.thrown += def.PER_THROW;
+      if (s.progress) {
+        s.progress.visible = true;
+        s.progress.userData.setText(`${s.thrown} / ${def.THRESHOLD}c offered`);
+      }
+      // Tiny audio + visual: spawn a coin-splash speech bubble.
+      ctx.spawnSpeech(new THREE.Vector3(s.disc.cx, 1.8, s.disc.cz),
+        '*splash*', 1.4);
+      // Threshold reached — spawn the chest immediately.
+      if (s.thrown >= def.THRESHOLD) {
+        s.complete = true;
+        if (ctx.markEncounterComplete) ctx.markEncounterComplete('fountain');
+        if (s.hint) s.hint.visible = false;
+        if (s.progress) s.progress.userData.setText('The fountain accepts your offering.');
+        // Spawn a single-item chest holding the King's Signet.
+        if (ctx.spawnSignetChest) {
+          ctx.spawnSignetChest(s.disc.cx + 1.8, s.disc.cz);
+        }
+        ctx.spawnSpeech(new THREE.Vector3(s.disc.cx, 2.4, s.disc.cz),
+          'A glint stirs in the depths.', 4.0);
+      }
     },
     onItemDropped(item, ctx) { return { consume: false }; },
   },
