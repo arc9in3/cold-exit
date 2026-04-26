@@ -13,6 +13,29 @@ export class ProjectileManager {
     this.projectiles = [];
   }
 
+  // Remove every in-flight + settled projectile + their meshes.
+  // Called on level regen so claymores and unexploded grenades from
+  // the previous floor don't persist into the new one.
+  removeAll() {
+    for (const p of this.projectiles) {
+      if (p.dead) continue;
+      if (p.body) {
+        this.scene.remove(p.body);
+        p.body.geometry?.dispose?.();
+        if (p.body.material) {
+          if (Array.isArray(p.body.material)) p.body.material.forEach(m => m.dispose());
+          else p.body.material.dispose();
+        }
+      }
+      if (p.trail) {
+        this.scene.remove(p.trail);
+        p.trail.geometry?.dispose?.();
+        p.trail.material?.dispose?.();
+      }
+    }
+    this.projectiles = [];
+  }
+
   // spec: {
   //   pos: Vector3, vel: Vector3,
   //   type: 'grenade' | 'rocket' | 'throwable',

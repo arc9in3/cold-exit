@@ -40,8 +40,12 @@ const EMPTY_ARR = Object.freeze([]);
 // the doorway. Returns the mesh so callers can add additional props
 // on top.
 function _spawnFloorDisc(scene, room, color) {
-  const cx = (room.bounds.minX + room.bounds.maxX) / 2;
-  const cz = (room.bounds.minZ + room.bounds.maxZ) / 2;
+  // Prefer the validated walkable spawn point stamped at level-gen
+  // time (level._pickAndMarkEncounterRoom). Falls back to the
+  // bounds-centre for any code path that constructs an encounter
+  // outside the normal pipeline.
+  const cx = room._encounterSpawn?.x ?? (room.bounds.minX + room.bounds.maxX) / 2;
+  const cz = room._encounterSpawn?.z ?? (room.bounds.minZ + room.bounds.maxZ) / 2;
   const geom = new THREE.CircleGeometry(3.6, 36);
   const mat = new THREE.MeshBasicMaterial({
     color, transparent: true, opacity: 0.55,

@@ -63,6 +63,19 @@ export class Level {
   }
 
   clear() {
+    // Encounter visuals — every def.spawn() returns a state object
+    // whose properties point to Three.js objects (npc, label, disc,
+    // light, brazier, flame, hint, etc.) added directly to scene.
+    // Walk every room's encounter state and remove anything that's
+    // an Object3D so encounter props don't accumulate across regens.
+    for (const r of this.rooms || []) {
+      const enc = r && r._encounter;
+      if (!enc || !enc.state) continue;
+      this._teardownEncounterState(enc.state);
+      r._encounter = null;
+      r._encounterPlaceholder = false;
+      r._encounterSpawn = null;
+    }
     for (const m of this.obstacles) {
       this.scene.remove(m);
       m.geometry.dispose();
@@ -367,30 +380,11 @@ export class Level {
     this.rooms = rooms;
     this.bossRoomId = rooms.find(r => r.type === 'boss').id;
 
-    // Random encounter conversion — main.js drives the actual pick
-    // (it owns the persistence + completed-set state). Here we just
-    // mark eligibility: a non-essential combat room becomes
-    // type='encounter' so spawn logic skips enemies and the runtime
-    // knows to populate it. Sub-boss / boss / start / shop rooms are
-    // never converted.
-    //
-    // Layout filter: only the truly bounds-hostile layouts are
-    // excluded — giant rooms (encounter visuals get lost in the
-    // open) and corridor + bunker (interior walls cordon off the
-    // bounds-centre where the disc + reward spawn). The previous
-    // banlist excluded so many layouts that encounters felt rare to
-    // the point of "did the system break".
-    const ENCOUNTER_BANNED_LAYOUTS = new Set([
-      'corridor', 'bunker',
-    ]);
-    const eligibleRooms = rooms.filter(r =>
-      r.type === 'combat' && !r.giant
-      && !ENCOUNTER_BANNED_LAYOUTS.has(r.layout));
-    if (eligibleRooms.length > 0 && Math.random() < 0.35) {
-      const pick = eligibleRooms[Math.floor(Math.random() * eligibleRooms.length)];
-      pick.type = 'encounter';
-      pick._encounterPlaceholder = true;
-    }
+    // Encounter conversion is deferred until AFTER interior walls + cover
+    // are built (see `_pickAndMarkEncounterRoom` below). Without that
+    // delay we couldn't validate that the room's encounter spawn point
+    // is walkable, and lshape / partition / pillars-grid / center-pit
+    // layouts placed the floor disc inside an interior wall.
 
     // --- Build walls + doors ----------------------------------------------
     const builtPairs = new Set();
@@ -486,6 +480,13 @@ export class Level {
     // only flank, but a misaligned one was still sitting in the gap.
     this._repairDoorOverlaps();
 
+    // Deferred encounter conversion — picks one combat room and tags
+    // it as an encounter ROOM. Runs HERE (after walls + interior +
+    // cover) so we can validate the encounter spawn point is actually
+    // walkable instead of landing inside an interior wall, an outer
+    // wall, or off the playable map.
+    this._pickAndMarkEncounterRoom();
+
     // Outer bounding wall — a ring of tall outer-colour walls just
     // past the aggregate room bounds so the player can't escape to
     // the void when a boss room (or any edge room) fails to seal
@@ -550,6 +551,92 @@ export class Level {
       if (mesh.userData.isDoor) this._openDoor(mesh);
     }
     this._assignKeycards();
+  }
+
+  // Walk an encounter state object and remove any Three.js
+  // Object3D values from the scene + dispose their GPU resources.
+  // Used by clear() so encounter visuals don't persist across level
+  // regens. Skips non-Object3D fields (numbers, strings, arrays of
+  // gunmen / spawned entity refs that are already managed by their
+  // own managers, etc.). Recurses one level into nested objects so
+  // grouped fields like `disc: { disc, light, cx, cz }` are reached.
+  _teardownEncounterState(state, depth = 0) {
+    if (!state || typeof state !== 'object') return;
+    for (const key of Object.keys(state)) {
+      const v = state[key];
+      if (!v) continue;
+      if (typeof v === 'object' && v.isObject3D) {
+        try {
+          if (v.parent) v.parent.remove(v);
+          v.traverse?.((obj) => {
+            if (obj.geometry?.dispose) obj.geometry.dispose();
+            if (obj.material) {
+              if (Array.isArray(obj.material)) obj.material.forEach(m => m?.dispose?.());
+              else obj.material.dispose?.();
+            }
+          });
+        } catch (_) { /* defensive — keep tearing down siblings */ }
+      } else if (depth < 1 && typeof v === 'object' && !Array.isArray(v)) {
+        this._teardownEncounterState(v, depth + 1);
+      }
+    }
+  }
+
+  // Encounter conversion + spawn-point validation. Runs after all
+  // walls / interior / cover are placed so `_collidesAt` reflects
+  // the final geometry. Picks ONE eligible combat room and stamps a
+  // verified walkable centroid on it via `_encounterSpawn` for the
+  // encounter visuals to anchor to.
+  _pickAndMarkEncounterRoom() {
+    const eligible = this.rooms.filter(r =>
+      r.type === 'combat' && !r.giant && r.bounds);
+    if (!eligible.length) return;
+    if (Math.random() >= 0.35) return;
+    // Shuffle so we don't always favour earlier rooms when the first
+    // candidate's centroid is blocked.
+    const order = eligible.slice().sort(() => Math.random() - 0.5);
+    for (const r of order) {
+      const spawn = this._findEncounterSpawn(r);
+      if (!spawn) continue;
+      r.type = 'encounter';
+      r._encounterPlaceholder = true;
+      r._encounterSpawn = spawn;
+      return;
+    }
+    // Every candidate's centre was blocked — leave the level without
+    // an encounter rather than spawn one on top of an interior wall.
+  }
+
+  // Search for a walkable point inside a room's bounds, biased toward
+  // the bounds-centre. Returns { x, z } or null. The encounter floor
+  // disc is ~3.6m radius; we test a 1.6m clearance to leave room for
+  // the disc + the prop in the middle without intersecting walls.
+  _findEncounterSpawn(room) {
+    const b = room.bounds;
+    const baseX = (b.minX + b.maxX) / 2;
+    const baseZ = (b.minZ + b.maxZ) / 2;
+    const insetX = Math.max(2.0, (b.maxX - b.minX) * 0.18);
+    const insetZ = Math.max(2.0, (b.maxZ - b.minZ) * 0.18);
+    const minX = b.minX + insetX, maxX = b.maxX - insetX;
+    const minZ = b.minZ + insetZ, maxZ = b.maxZ - insetZ;
+    const inBounds = (x, z) => x >= minX && x <= maxX && z >= minZ && z <= maxZ;
+    const CLEAR = 2.0;
+    if (inBounds(baseX, baseZ) && !this._collidesAt(baseX, baseZ, CLEAR)) {
+      return { x: baseX, z: baseZ };
+    }
+    // Spiral outward in 1m steps + 8 angular samples. ~6m radius is
+    // enough for any room we'd convert.
+    for (let r = 1; r <= 6; r++) {
+      for (let i = 0; i < 8; i++) {
+        const ang = (i / 8) * Math.PI * 2 + Math.random() * 0.3;
+        const x = baseX + Math.cos(ang) * r;
+        const z = baseZ + Math.sin(ang) * r;
+        if (!inBounds(x, z)) continue;
+        if (this._collidesAt(x, z, CLEAR)) continue;
+        return { x, z };
+      }
+    }
+    return null;
   }
 
   // Flag specific branch doors as key-gated. Pick rooms the player

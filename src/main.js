@@ -1589,6 +1589,10 @@ function regenerateLevel() {
   melees.removeAll();
   drones.removeAll();
   loot.removeAll();
+  // In-flight + settled projectiles (claymores especially) used to
+  // persist into the next floor — they were spawned via
+  // projectiles.spawn but level.clear didn't know about them.
+  if (projectiles.removeAll) projectiles.removeAll();
   playerKeys.clear();
   // Pre-warm the FBX clone for every weapon currently in the player's
   // rotation. The clone+fit+rotate pass takes a few frames per
