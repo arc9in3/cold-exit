@@ -1561,8 +1561,21 @@ function regenerateLevel() {
   // Hidden-boss ambush — ~35% of boss rooms hide every occupant
   // (boss + minions) until the player crosses the threshold. Reads as
   // an empty room from the doorway, then bursts to life on entry.
+  // Two gates so ambush can never strand a boss in a tiny / wall-
+  // heavy enclosure (the bunker layout has a 4-wall middle quad
+  // that the boss could drop into and become unreachable):
+  //   * room area must be at least 80 m²
+  //   * room layout must NOT be in the wall-heavy small-cells set.
+  const AMBUSH_BANNED_LAYOUTS = new Set([
+    'bunker', 'pillars-grid', 'closet', 'corridor', 'partition',
+    'columns-cross', 'center-pit',
+  ]);
   for (const r of level.rooms) {
     if (r.type !== 'boss' || r.entered) continue;
+    const b = r.bounds;
+    const area = (b.maxX - b.minX) * (b.maxZ - b.minZ);
+    if (area < 80) continue;
+    if (AMBUSH_BANNED_LAYOUTS.has(r.layout)) continue;
     if (Math.random() > 0.35) continue;
     const hideOne = (c) => {
       if (!c || !c.group) return;
@@ -6669,16 +6682,64 @@ function revealHiddenAmbush(room) {
   for (const g of gunmen.gunmen) if (g.alive && g.roomId === room.id) occupants.push(g);
   for (const m of melees.enemies) if (m.alive && m.roomId === room.id) occupants.push(m);
   if (occupants.length === 0) return;
-  for (const c of occupants) {
-    if (c.group) {
-      c.group.visible = true;
-      c.group.position.y = 5.0;
-      c._ambushDropT = 0.55;
+
+  // If an occupant's hidden XZ overlaps a wall (or sits inside an
+  // unreachable mini-cell that the layout interior built), nudge them
+  // to a safe spot before the drop. We try a ring of probes around
+  // the original position; if every probe fails we fall back to the
+  // room centre.
+  const playerPos = player.mesh.position;
+  const findSafeXZ = (origX, origZ, radius = 0.5) => {
+    const tryAt = (x, z) => {
+      if (level._collidesAt && level._collidesAt(x, z, radius)) return false;
+      if (level._segmentClear && !level._segmentClear(x, z, playerPos.x, playerPos.z, 0.5)) return false;
+      return true;
+    };
+    if (tryAt(origX, origZ)) return { x: origX, z: origZ };
+    // Spiral-out probes — 16 angles × 5 radii = 80 candidate spots.
+    for (let r = 1.2; r <= 6.0; r += 1.2) {
+      for (let a = 0; a < 16; a++) {
+        const ang = (a / 16) * Math.PI * 2;
+        const x = origX + Math.cos(ang) * r;
+        const z = origZ + Math.sin(ang) * r;
+        if (tryAt(x, z)) return { x, z };
+      }
     }
+    // Last resort — room centre. Caller can confirm walkability.
+    const b = room.bounds;
+    return { x: (b.minX + b.maxX) / 2, z: (b.minZ + b.maxZ) / 2 };
+  };
+
+  for (const c of occupants) {
+    if (!c.group) continue;
+    const safe = findSafeXZ(c.group.position.x, c.group.position.z);
+    c.group.position.x = safe.x;
+    c.group.position.z = safe.z;
+    c.group.visible = true;
+    // Longer drop so the player visibly sees them coming + has a
+    // reaction window. Was 0.55s — bumped to 1.4s.
+    c.group.position.y = 6.5;
+    c._ambushDropT = 1.4;
     c.hidden = false;
-    if (c.state === 'idle' || c.state === 'sleep') {
-      if (melees.enemies.includes(c)) c.state = 'chase';
-      else { c.state = 'alerted'; c.reactionT = 0.20; }
+    // Boss + minions can't shoot or swing during the drop OR for a
+    // brief recovery window after landing. Gunmen honour `surpriseT`
+    // (clamps fire / movement); melees honour `staggerT` (skips
+    // windup and AI tick advances). Stamp ~2.2s on bosses (drop +
+    // ~0.8s recovery), ~1.6s on minions.
+    const isBoss = c.tier === 'boss' || c.majorBoss;
+    const dur = isBoss ? 2.2 : 1.6;
+    if (gunmen.gunmen.includes(c)) {
+      c.surpriseT = Math.max(c.surpriseT || 0, dur);
+      c.fireT = Math.max(c.fireT || 0, dur);
+      // Hold them in ALERTED until the drop + recovery completes.
+      c.state = 'alerted';
+      c.reactionT = dur;
+    } else {
+      c.staggerT = Math.max(c.staggerT || 0, dur);
+      c.cooldownT = Math.max(c.cooldownT || 0, dur);
+      // Leave them in chase but staggered — staggerT skips the AI
+      // tick on the melee side so they can't queue a swing.
+      c.state = 'chase';
     }
   }
   triggerShake(0.45, 0.30);
@@ -6748,8 +6809,10 @@ function tickAmbushDrops(dt) {
   const fall = (c) => {
     if (!c._ambushDropT) return;
     c._ambushDropT = Math.max(0, c._ambushDropT - dt);
-    const k = c._ambushDropT / 0.55;
-    c.group.position.y = 5.0 * k * k;
+    // Drop runs for 1.4s now; ease the Y back to 0 so the boss
+    // visibly falls instead of teleporting to the floor.
+    const k = c._ambushDropT / 1.4;
+    c.group.position.y = 6.5 * k * k;
     if (c._ambushDropT <= 0) c.group.position.y = 0;
   };
   for (const g of gunmen.gunmen) fall(g);
