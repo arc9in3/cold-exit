@@ -1,5 +1,6 @@
 import * as THREE from 'three';
 import { createScene } from './scene.js';
+import { initBloomReticle, setBloomLevel, setBloomVisible } from './bloom_reticle.js';
 import { createPostFx } from './postfx.js';
 import { createLosMask } from './los_mask.js';
 // BVH must be imported before any geometry / mesh creation so the
@@ -3049,6 +3050,37 @@ let _sniperAimZ = 0;
 let _rifleChainTarget = null;
 let _rifleChainStacks = 0;
 let _rifleChainLastT = 0;
+// --- Per-shot bloom (recoil-spread accumulator) -------------------------
+// 0..1 inflation factor pumped on every fire, decayed every tick. Spread
+// = baseSpread * (1 + _shotBloom * BLOOM_MAX_MULT). At full bloom the
+// shot is 3.5× the weapon's base spread — sustained mag-dump becomes
+// genuinely inaccurate. Recovery is fast enough that a disciplined 2-3
+// shot burst followed by a beat barely pays any tax.
+//
+// First-shot tighten: when bloom is below FIRST_SHOT_THRESHOLD, the
+// shot is multiplied by FIRST_SHOT_TIGHTEN — the very first round from
+// a cold trigger lands tighter than the per-weapon baseline.
+let _shotBloom = 0;
+const BLOOM_MAX_MULT = 2.5;            // bloom of 1.0 → spread × 3.5
+const BLOOM_DECAY_PER_SEC = 1.2;       // full recovery in ~0.83s of pause
+const FIRST_SHOT_THRESHOLD = 0.05;
+const FIRST_SHOT_TIGHTEN = 0.75;       // 25% tighter on a cold trigger
+// Per-class accumulator. Tuned so a 3-round pistol burst lands at ~0.48
+// bloom (clears in <0.5s pause); SMG 5-round burst lands at ~0.50;
+// shotgun double-tap lands at ~0.6; sniper single shot at ~0.45 (and
+// the slow RoF means full recovery before the next round). LMGs add
+// little here because the existing _lmgHeldT system already governs
+// their sustained-fire spread.
+const BLOOM_PER_SHOT_BY_CLASS = {
+  pistol:  0.16,
+  smg:     0.10,
+  rifle:   0.13,
+  shotgun: 0.30,
+  sniper:  0.45,
+  lmg:     0.07,
+  exotic:  0.10,
+  flame:   0.04,
+};
 // Exotic Cascade — corpse marks. Each entry is { x, z, untilMs }.
 const _exoticChainMarks = [];
 let gameClockMs = 0;   // active-gameplay clock for wall-clock timers
@@ -3954,6 +3986,16 @@ function fireOneShot(playerInfo, weapon, aimPoint, isADS) {
   const crouched = inputStateCrouchHeld();
   const crouchSpreadK = crouched ? (derivedStats.crouchSpreadMult ?? 1) : 1;
   let spread = baseSpread * derivedStats.rangedSpreadMult * crouchSpreadK;
+  // Per-shot bloom — sustained fire inflates spread; disciplined
+  // bursts let it decay. First shot from a cold trigger gets a small
+  // tighten. Shotguns / sniper are heavy-cost-per-shot; SMG / LMG
+  // accumulate little per-round because their RoF would punish twice
+  // otherwise.
+  if (_shotBloom < FIRST_SHOT_THRESHOLD) {
+    spread *= FIRST_SHOT_TIGHTEN;
+  } else {
+    spread *= (1 + _shotBloom * BLOOM_MAX_MULT);
+  }
   // LMG Walking Fire — sustained-fire spread bleed. While holding the
   // trigger, multiply spread by max(0, 1 - decay * heldT). Decay tracked
   // per-frame in the tick (see _lmgHeldT update). Capped at zero so the
@@ -4061,6 +4103,12 @@ function fireOneShot(playerInfo, weapon, aimPoint, isADS) {
   // which dropped frames hard. The tracer per pellet is fine — they
   // diverge, so the visual still reads as multiple shots.
   combat.spawnFlash(tracerFrom, eff.tracerColor, qualityFlags.muzzleLights);
+
+  // Bump per-shot bloom — once per trigger pull, not per pellet.
+  // Class-rooted: shotgun / sniper add a lot per shot (heavy round,
+  // low RoF), SMG / LMG add little (high RoF would otherwise compound).
+  const _bloomAdd = BLOOM_PER_SHOT_BY_CLASS[weapon.class] ?? 0.15;
+  _shotBloom = Math.min(1, _shotBloom + _bloomAdd);
 
   for (let i = 0; i < pellets; i++) {
     // Re-jitter the SAME _tmpDir each iteration; raycast + spawnShot
@@ -8705,6 +8753,18 @@ function tick() {
       _lmgIdleT += dt;
       if (_lmgIdleT >= (derivedStats.lmgSustainedResetT || 1.0)) _lmgHeldT = 0;
     }
+    // Bloom decay — runs every frame regardless of weapon class. The
+    // per-shot bump in fireOneShot adds; this drains. Linear decay
+    // (constant per-second rate) so the math is predictable.
+    if (_shotBloom > 0) {
+      _shotBloom = Math.max(0, _shotBloom - BLOOM_DECAY_PER_SEC * dt);
+    }
+    // Push the bloom value to the cursor reticle. Hide entirely when
+    // the player has no ranged weapon equipped, is dead, or the game
+    // is paused — the ring is meaningless without an active gun.
+    const _haveRanged = w?.type === 'ranged';
+    setBloomVisible(_haveRanged && !playerDead && !paused);
+    if (_haveRanged) setBloomLevel(_shotBloom);
     // Sniper Marked Target — accumulate while ADS, stationary,
     // and pointing at the same hittable. Reset on motion or ADS
     // release.
@@ -9329,4 +9389,8 @@ try { renderer.debug.checkShaderErrors = false; } catch (_) {}
 if (inventory.pocketsGrid.isEmpty() && !inventory.equipment.backpack) {
   mainMenuUI.show();
 }
+// Cursor-tracking bloom reticle. Hidden until a ranged weapon is
+// equipped (toggled per-frame in tick).
+initBloomReticle();
+setBloomVisible(false);
 requestAnimationFrame(tick);
