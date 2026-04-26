@@ -175,6 +175,10 @@ export class InventoryUI {
         // Shift-click on equipped item → drop to ground.
         const item = this.inventory.equipment[slot];
         if (!item) return;
+        if (item.markedKeep) {
+          window.__hudMsg?.(`${item.name} is marked KEEP — drop blocked.`, 2.0);
+          return;
+        }
         this.inventory.equipment[slot] = null;
         this.inventory._recomputeCapacity?.();
         this.inventory._bump();
@@ -452,6 +456,11 @@ export class InventoryUI {
           // synthesised click event, so route inspect / shift-drop
           // manually here.
           if (ev.shiftKey) {
+            if (item && item.markedKeep) {
+              window.__hudMsg?.(`${item.name} is marked KEEP — drop blocked.`, 2.0);
+              this.render();
+              return;
+            }
             if (this.onDrop) {
               const g = this.inventory.gridOf(item);
               if (g) g.remove(item);

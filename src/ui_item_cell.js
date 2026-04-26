@@ -90,11 +90,21 @@ export function renderItemCell(item, slotId = null, opts = {}) {
   // the inventory grid without opening the details panel.
   const isBroken = !!(dur && dur.current <= 0);
   const brokenTag = isBroken ? `<div class="cell-broken-tag">BROKEN</div>` : '';
+  // Player-applied tags. Mark-as-Junk includes the item in Sell All
+  // Junk regardless of type. Mark-to-Keep refuses sells + drops in
+  // every UI so a high-value item can't slip through a sell-all click
+  // or a stray shift-click.
+  const markTag = item.markedJunk
+    ? `<div class="cell-mark-tag mark-junk" title="Marked as Junk — included in Sell All Junk">JUNK</div>`
+    : item.markedKeep
+      ? `<div class="cell-mark-tag mark-keep" title="Marked to Keep — locked from sell + drop">KEEP</div>`
+      : '';
 
   return `
     <div class="cell-art ${isBroken ? 'cell-art-broken' : ''}" style="background:${tintStr}">
       ${artInner}
       ${brokenTag}
+      ${markTag}
       <div class="cell-name-overlay">${item.name}</div>
     </div>
     <div class="cell-stats">

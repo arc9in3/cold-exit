@@ -377,6 +377,31 @@ export class DetailsUI {
       e.preventDefault();
       this.hide();
     });
+    // J / K hotkeys while the details panel is open — toggles the
+    // mark-as-junk / mark-to-keep flags on the inspected item without
+    // having to click the action-bar button.
+    this._onKeyDown = (e) => {
+      if (this.root.style.display === 'none') return;
+      if (!this._item) return;
+      const it = this._item;
+      if (it.type === 'artifact-scroll' || !this._isOwnedItem(it)) return;
+      if (e.key === 'j' || e.key === 'J') {
+        it.markedJunk = !it.markedJunk;
+        if (it.markedJunk) it.markedKeep = false;
+        this.inventory?._bump?.();
+        this.show(it);
+        window.__rerenderInventory?.();
+        e.preventDefault();
+      } else if (e.key === 'k' || e.key === 'K') {
+        it.markedKeep = !it.markedKeep;
+        if (it.markedKeep) it.markedJunk = false;
+        this.inventory?._bump?.();
+        this.show(it);
+        window.__rerenderInventory?.();
+        e.preventDefault();
+      }
+    };
+    window.addEventListener('keydown', this._onKeyDown);
   }
 
   hide() {
@@ -394,6 +419,29 @@ export class DetailsUI {
     this.root.style.display = 'flex';
     const previewHost = this.cardEl.querySelector('.details-preview');
     if (previewHost) this._setupPreview(previewHost, item);
+    this._wireMarkButtons(item);
+  }
+
+  // Mark-as-Junk / Mark-to-Keep — toggle one of two boolean flags on
+  // the item itself. Sell All Junk + drop/sell guards read these flags
+  // directly. Setting one clears the other so they read as opposites.
+  _wireMarkButtons(item) {
+    const junkBtn = this.cardEl.querySelector('[data-mark="junk"]');
+    const keepBtn = this.cardEl.querySelector('[data-mark="keep"]');
+    if (junkBtn) junkBtn.addEventListener('click', () => {
+      item.markedJunk = !item.markedJunk;
+      if (item.markedJunk) item.markedKeep = false;
+      this.inventory?._bump?.();
+      this.show(item);
+      window.__rerenderInventory?.();
+    });
+    if (keepBtn) keepBtn.addEventListener('click', () => {
+      item.markedKeep = !item.markedKeep;
+      if (item.markedKeep) item.markedJunk = false;
+      this.inventory?._bump?.();
+      this.show(item);
+      window.__rerenderInventory?.();
+    });
   }
 
   // Rotating 3D preview of the item's model, if one is registered. Creates
@@ -466,11 +514,13 @@ export class DetailsUI {
     // lose" callout for any stat the equipped item carries that this
     // one doesn't.
     const showCompare = !!equipped && equipped !== item;
+    const markBar = this._renderMarkBar(item);
     if (!showCompare) {
       return `
         <div class="details-pane details-pane-solo">
           ${this._renderPane(item, { compareTo: null, isEquipped: false })}
         </div>
+        ${markBar}
         <div class="details-footer">Right-click or click outside to close</div>
       `;
     }
@@ -485,8 +535,43 @@ export class DetailsUI {
           ${this._renderPane(item, { compareTo: equipped, isEquipped: false })}
         </div>
       </div>
+      ${markBar}
       <div class="details-footer">Right-click or click outside to close</div>
     `;
+  }
+
+  // Action bar at the bottom of the details panel — two toggleable
+  // buttons that stamp markedJunk / markedKeep on the item. Hidden for
+  // items that aren't usefully markable (artifact-scrolls auto-consume,
+  // shop-side items don't belong to the player).
+  _renderMarkBar(item) {
+    if (!item || item.type === 'artifact-scroll') return '';
+    // Skip if the item isn't actually in the player's inventory (so
+    // shop browsing doesn't show controls that wouldn't apply). Treat
+    // anything reachable via the inventory's owned-items flat view as
+    // ours; otherwise fall through to no bar.
+    const owned = this._isOwnedItem(item);
+    if (!owned) return '';
+    const junkActive = item.markedJunk ? ' active' : '';
+    const keepActive = item.markedKeep ? ' active' : '';
+    return `
+      <div class="details-mark-bar">
+        <button type="button" class="details-mark-btn mark-junk${junkActive}" data-mark="junk">
+          ${item.markedJunk ? '✓ Marked as Junk (J)' : 'Mark as Junk (J)'}
+        </button>
+        <button type="button" class="details-mark-btn mark-keep${keepActive}" data-mark="keep">
+          ${item.markedKeep ? '✓ Marked to Keep (K)' : 'Mark to Keep (K)'}
+        </button>
+      </div>
+    `;
+  }
+
+  _isOwnedItem(item) {
+    if (!this.inventory || !item) return false;
+    if (this.inventory.backpack && this.inventory.backpack.includes(item)) return true;
+    const eq = this.inventory.equipment || {};
+    for (const k in eq) if (eq[k] === item) return true;
+    return false;
   }
 
   // Render a single item pane. `compareTo` enables stat diffs against

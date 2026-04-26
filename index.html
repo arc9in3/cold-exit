@@ -526,6 +526,34 @@
       margin-top: 12px; text-align: center;
       font-size: 10px; color: #6f6754; letter-spacing: 2px; text-transform: uppercase;
     }
+    .details-mark-bar {
+      display: flex; gap: 10px; margin-top: 12px; justify-content: center;
+    }
+    .details-mark-btn {
+      flex: 0 0 auto; padding: 8px 18px; font-size: 11px;
+      letter-spacing: 1.5px; text-transform: uppercase; font-weight: 700;
+      cursor: pointer; border-radius: 2px;
+      font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+      transition: background 0.12s, border-color 0.12s, color 0.12s;
+    }
+    .details-mark-btn.mark-junk {
+      background: rgba(143, 191, 112, 0.10); color: #cfe5ad;
+      border: 1px solid rgba(143, 191, 112, 0.45);
+    }
+    .details-mark-btn.mark-junk:hover { background: rgba(143, 191, 112, 0.20); }
+    .details-mark-btn.mark-junk.active {
+      background: rgba(143, 191, 112, 0.35); color: #ffffff;
+      border-color: rgba(170, 220, 130, 0.85);
+    }
+    .details-mark-btn.mark-keep {
+      background: rgba(208, 160, 56, 0.10); color: #f0d480;
+      border: 1px solid rgba(208, 160, 56, 0.45);
+    }
+    .details-mark-btn.mark-keep:hover { background: rgba(208, 160, 56, 0.20); }
+    .details-mark-btn.mark-keep.active {
+      background: rgba(208, 160, 56, 0.40); color: #ffffff;
+      border-color: rgba(255, 200, 80, 0.85);
+    }
 
     /* ─────────────────────────────────────────────────────────────
        Cold Exit design tokens — from Assets/coldexitui.png style
@@ -1612,6 +1640,30 @@
     .cell-art-broken .cell-art-img,
     .cell-art-broken .cell-art-layer {
       filter: brightness(0.55) contrast(0.85) saturate(0.30) drop-shadow(0 1px 2px rgba(0, 0, 0, 0.7));
+    }
+    /* Player-applied JUNK / KEEP badges. Top-left corner so they don't
+       conflict with the centred BROKEN stamp; juxtaposable with broken. */
+    .cell-mark-tag {
+      position: absolute;
+      top: 4px; left: 4px;
+      font-family: var(--ce-font-tech, ui-monospace, Menlo, Consolas, monospace);
+      font-size: 9px; font-weight: 800; letter-spacing: 1.2px;
+      padding: 1px 5px; border-radius: 2px;
+      text-transform: uppercase;
+      text-shadow: 0 1px 2px rgba(0, 0, 0, 0.9);
+      pointer-events: none;
+      z-index: 4;
+    }
+    .cell-mark-tag.mark-junk {
+      color: #d0e8a0;
+      background: rgba(60, 80, 30, 0.85);
+      border: 1px solid rgba(160, 200, 100, 0.6);
+    }
+    .cell-mark-tag.mark-keep {
+      color: #ffe0a0;
+      background: rgba(120, 70, 20, 0.85);
+      border: 1px solid rgba(240, 180, 80, 0.7);
+      box-shadow: 0 0 6px rgba(240, 180, 60, 0.35);
     }
     .cell-broken-tag,
     .pkt-broken-tag {

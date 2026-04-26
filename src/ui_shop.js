@@ -324,6 +324,12 @@ export class ShopUI {
   _sell(idx) {
     const item = this.inventory.backpack[idx];
     if (!item) return;
+    // Mark to Keep — refuse the sale outright. Player toggles in the
+    // details panel (J/K hotkeys or the action-bar buttons) to clear.
+    if (item.markedKeep) {
+      this._flash(`${item.name} is marked KEEP — sale blocked.`);
+      return;
+    }
     // Special: selling The Gift to the Bear Merchant for 1c is the
     // mythic-run unlock path. Item consumed, no buyback.
     if (item.id === 'thr_the_gift' && this.merchant?.kind === 'bearMerchant') {
@@ -498,16 +504,21 @@ export class ShopUI {
     let totalCredits = 0;
     // Snapshot the indexes first because takeFromBackpack shifts the
     // flat-view array between calls. Walk top-down so removal doesn't
-    // invalidate the next index.
-    const junkIdxs = [];
+    // invalidate the next index. Includes both type==='junk' AND any
+    // item the player explicitly marked as junk (markedJunk: true).
+    // markedKeep wins over both — those are skipped no matter what.
+    const sellIdxs = [];
     for (let i = 0; i < this.inventory.backpack.length; i++) {
       const it = this.inventory.backpack[i];
-      if (it && it.type === 'junk') junkIdxs.push(i);
+      if (!it || it.markedKeep) continue;
+      if (it.type === 'junk' || it.markedJunk) sellIdxs.push(i);
     }
-    for (let k = junkIdxs.length - 1; k >= 0; k--) {
-      const idx = junkIdxs[k];
+    for (let k = sellIdxs.length - 1; k >= 0; k--) {
+      const idx = sellIdxs[k];
       const item = this.inventory.backpack[idx];
-      if (!item || item.type !== 'junk') continue;
+      if (!item) continue;
+      if (item.markedKeep) continue;
+      if (!(item.type === 'junk' || item.markedJunk)) continue;
       const price = sellPriceFor(item);
       this.inventory.takeFromBackpack(idx);
       this.earnCredits(price);
@@ -515,7 +526,7 @@ export class ShopUI {
       if (this.buyback.length > 12) this.buyback.pop();
       sold += 1; totalCredits += price;
     }
-    if (sold > 0) this._flash(`Sold ${sold} junk · +${totalCredits}c`);
+    if (sold > 0) this._flash(`Sold ${sold} item${sold === 1 ? '' : 's'} · +${totalCredits}c`);
     this.render();
   }
 

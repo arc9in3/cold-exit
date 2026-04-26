@@ -669,6 +669,12 @@ window.__showDetails = (item) => detailsUI.show(item);  // called from UI right-
 // effects like repair without an explicit import dance.
 window.__recomputeStats = () => { try { recomputeStats(); } catch (_) {} };
 window.__hudMsg = (msg, duration) => transientHudMsg(msg, duration);
+// Re-render the open inventory + any shop panel after a tag toggle in
+// the details modal — keeps the in-grid JUNK / KEEP badges in sync.
+window.__rerenderInventory = () => {
+  try { inventoryUI.render(); } catch (_) {}
+  try { if (shopUI?.isOpen?.()) shopUI.render?.(); } catch (_) {}
+};
 
 const gameMenuUI = new GameMenuUI({
   getVolume: getMasterVolume,
