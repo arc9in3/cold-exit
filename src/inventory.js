@@ -335,7 +335,11 @@ export const STATUS_ICONS = {
 };
 
 export function randomJunk() {
-  const pick = ALL_JUNK[Math.floor(Math.random() * ALL_JUNK.length)];
+  // Encounter-specific junk (bag of peas, unused rocket ticket) is
+  // tagged with `_encounter` and excluded from the random pool — these
+  // items are quest triggers, not generic loot.
+  const pool = ALL_JUNK.filter(j => !j._encounter);
+  const pick = pool[Math.floor(Math.random() * pool.length)];
   return maybeApplyMastercraft(stampItemDims(jitterJunkValue({ ...pick })));
 }
 
@@ -1010,7 +1014,11 @@ export const JUNK_DEFS = {
   // Encounter-trigger junk. Reads as a normal cheap pickup until
   // dropped inside the Duck encounter — then it triggers a toy
   // reward. Outside that room it's just sell-fodder.
-  bagOfPeas:    { id: 'junk_peas',     name: 'Bag of Peas',         type: 'junk', tint: 0x8ac46a, sellValue: 25,   rarity: 'common',    description: 'A small canvas bag of dried peas. Smells of grass.', stackMax: 5 },
+  bagOfPeas:    { id: 'junk_peas',     name: 'Bag of Peas',         type: 'junk', tint: 0x8ac46a, sellValue: 25,   rarity: 'common',    description: 'A small canvas bag of dried peas. Smells of grass.', stackMax: 5, _encounter: true },
+  // Duck encounter reward — used to be the Unused Rocket Ticket
+  // artifact-scroll. Now drops as plain junk; selling it to the
+  // Bear Merchant grants the Rocket Shoes relic instead.
+  unusedRocketTicket: { id: 'junk_rocket_ticket', name: 'Unused Rocket Ticket', type: 'junk', tint: 0x80c0ff, sellValue: 40, rarity: 'rare', description: 'An unpunched ticket to space. Worth something to the right buyer.', stackMax: 1, _encounter: true },
 };
 export const ALL_JUNK = Object.values(JUNK_DEFS);
 

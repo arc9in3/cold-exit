@@ -330,12 +330,18 @@ export class ShopUI {
       this._flash(`${item.name} is marked KEEP — sale blocked.`);
       return;
     }
-    // Special: selling The Gift to the Bear Merchant for 1c is the
-    // mythic-run unlock path. Item consumed, no buyback.
-    if (item.id === 'thr_the_gift' && this.merchant?.kind === 'bearMerchant') {
+    // Special bear-merchant trades. Each id is a one-off contract:
+    //   thr_the_gift       → mythic-run unlock (1c).
+    //   junk_rocket_ticket → grants the Rocket Shoes relic (no payout).
+    // Item consumed on success, no buyback. onSpecialBearTrade returns
+    // false if the trade can't fire (e.g. relic already owned), in
+    // which case we fall through to the normal sell path.
+    const isBearSpecial = this.merchant?.kind === 'bearMerchant'
+      && (item.id === 'thr_the_gift' || item.id === 'junk_rocket_ticket');
+    if (isBearSpecial) {
       if (this.onSpecialBearTrade(item)) {
         this.inventory.takeFromBackpack(idx);
-        this.earnCredits(1);
+        if (item.id === 'thr_the_gift') this.earnCredits(1);
         this.render();
         return;
       }

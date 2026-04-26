@@ -1151,14 +1151,30 @@ const shopUI = new ShopUI({
     sfx.uiAccept();
     return true;
   },
-  // Special bear-merchant trade: sell The Gift for 1c → flips the
-  // mythic-run unlock flag so the next New Game shows a bonus
-  // mythic offer in the starter store.
+  // Special bear-merchant trades. Each special-cased item id grants
+  // a unique reward instead of the normal sell flow:
+  //   thr_the_gift          → flips the mythic-run unlock flag
+  //   junk_rocket_ticket    → grants the Rocket Shoes relic
   onSpecialBearTrade: (item) => {
-    if (item.id !== 'thr_the_gift') return false;
-    setMythicRunUnlocked(true);
-    transientHudMsg('THE PACT IS MADE', 4.0);
-    return true;
+    if (item.id === 'thr_the_gift') {
+      setMythicRunUnlocked(true);
+      transientHudMsg('THE PACT IS MADE', 4.0);
+      return true;
+    }
+    if (item.id === 'junk_rocket_ticket') {
+      const ok = artifacts.acquire('rocket_shoes');
+      if (!ok) {
+        // Already owned — refuse the trade so the player keeps the
+        // ticket (which still has a normal sell value elsewhere).
+        transientHudMsg('You already wear them.', 3.0);
+        return false;
+      }
+      recomputeStats();
+      sfx.uiAccept?.();
+      transientHudMsg('RELIC ACQUIRED: Rocket Shoes — Double dash distance', 5.0);
+      return true;
+    }
+    return false;
   },
   onBearTrade: (toyIds) => {
     // Consume one of each toy id from anywhere in the inventory.
@@ -1921,6 +1937,14 @@ function regenerateLevel() {
         spawnRandomContainerAt: (x, z) => _spawnRandomContainerAt(x, z),
         // The Button alarm — spawn one summoned minion at XZ.
         spawnSummonedMinion: (x, z, room2) => _spawnSummonedMinionAt(x, z, room2),
+        // Duck — drops the Unused Rocket Ticket as a junk pickup
+        // (player trades it to the Bear Merchant for Rocket Shoes).
+        spawnRocketTicketJunk: (x, z) => {
+          const def = JUNK_DEFS && JUNK_DEFS.unusedRocketTicket;
+          if (!def) return false;
+          loot.spawnItem({ x, y: 0.4, z }, { ...def });
+          return true;
+        },
       }),
     };
   }

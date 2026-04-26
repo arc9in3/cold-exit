@@ -529,18 +529,21 @@ export const ENCOUNTER_DEFS = {
       s.complete = true;
       ctx.spawnSpeech(s.duck.position.clone().setY(1.4),
         'DID SOMEONE SAY PEAS?!', 7.0);
-      // Reward: one of two encounter-only relics. Skips any the
-      // player already owns so re-running the trick still rewards
-      // (in the rare case both are unowned, randomly pick one).
-      const ids = ['innocent_heart', 'unused_rocket_ticket'];
-      const available = ctx.filterUnownedArtifactIds
-        ? ctx.filterUnownedArtifactIds(ids)
-        : ids;
-      const pickId = available.length
-        ? available[Math.floor(Math.random() * available.length)]
-        : ids[Math.floor(Math.random() * ids.length)];
-      const scroll = ctx.artifactScrollFor && ctx.artifactScrollFor(pickId);
-      if (scroll) ctx.spawnLoot(s.disc.cx + 0.8, s.disc.cz, scroll);
+      // Reward: 50/50 between the Innocent Heart relic-scroll (auto-
+      // grants on pickup) and the Unused Rocket Ticket — which is now
+      // a piece of junk. Selling the ticket to the Bear Merchant
+      // converts it into the Rocket Shoes relic. Innocent Heart is
+      // skipped if the player already owns it (it's a one-shot
+      // artifact) so re-running the trick still rewards.
+      const dropTicket = !ctx.filterUnownedArtifactIds
+        || !ctx.filterUnownedArtifactIds(['innocent_heart']).length
+        || Math.random() < 0.5;
+      if (dropTicket && ctx.spawnRocketTicketJunk) {
+        ctx.spawnRocketTicketJunk(s.disc.cx + 0.8, s.disc.cz);
+      } else {
+        const scroll = ctx.artifactScrollFor && ctx.artifactScrollFor('innocent_heart');
+        if (scroll) ctx.spawnLoot(s.disc.cx + 0.8, s.disc.cz, scroll);
+      }
       return { consume: true, complete: true };
     },
   },

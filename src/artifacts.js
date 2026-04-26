@@ -138,9 +138,9 @@ export const ARTIFACT_DEFS = {
     encounterOnly: true,
     apply(s) { s.regenCapImmune = true; },
   },
-  unused_rocket_ticket: {
-    id: 'unused_rocket_ticket', name: 'Unused Rocket Ticket',
-    lore: 'An unpunched ticket to space.',
+  rocket_shoes: {
+    id: 'rocket_shoes', name: 'Rocket Shoes',
+    lore: 'Built from a ticket nobody ever used.',
     short: 'Double dash distance',
     tint: 0x80c0ff,
     price: 4500,
