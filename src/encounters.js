@@ -1248,6 +1248,7 @@ export const ENCOUNTER_DEFS = {
         s.lastX = null;
         s.lastZ = null;
         if (s.progress) s.progress.visible = false;
+        s._lastSec = -1;        // invalidate cached label so re-entry re-renders
         return;
       }
       // First in-room frame this visit — calibrate baseline position.
@@ -1266,15 +1267,22 @@ export const ENCOUNTER_DEFS = {
       } else {
         s.listenT += dt;
       }
-      // Update progress sprite + final prompt.
+      // Update progress sprite — only when the displayed second
+      // changes. Previously redrew the canvas + reuploaded the
+      // texture every frame the player was standing still (60×/sec
+      // for 25s straight = 1500 redundant uploads).
       if (s.progress) {
         s.progress.visible = true;
         const pct = Math.min(1, s.listenT / def.LISTEN_TIME);
         const sec = Math.max(0, Math.ceil(def.LISTEN_TIME - s.listenT));
-        s.progress.userData.setText(
-          pct >= 1 ? 'PRESS E TO CHOOSE A PATH'
-                   : `Listening... ${sec}s`,
-        );
+        const tag = pct >= 1 ? -1 : sec;     // -1 sentinel for the "PRESS E" state
+        if (tag !== s._lastSec) {
+          s._lastSec = tag;
+          s.progress.userData.setText(
+            pct >= 1 ? 'PRESS E TO CHOOSE A PATH'
+                     : `Listening... ${sec}s`,
+          );
+        }
       }
       if (s.listenT >= def.LISTEN_TIME && !s.prompted) {
         // Auto-prompt only the first frame past the threshold; the
@@ -1468,6 +1476,7 @@ export const ENCOUNTER_DEFS = {
           s.gazeT = 0;
           s.lastX = null; s.lastZ = null;
           if (s.progress) s.progress.visible = false;
+          s._lastSec = -1;     // invalidate cached label so re-entry re-renders
           return;
         }
         if (s.lastX === null) { s.lastX = px; s.lastZ = pz; }
@@ -1481,10 +1490,17 @@ export const ENCOUNTER_DEFS = {
         }
         if (s.progress) {
           s.progress.visible = true;
+          // Only redraw the canvas + reupload the texture when the
+          // displayed second actually changes. The setText path was
+          // re-rendering 60×/sec while standing still — visible cost
+          // on the GPU upload alone.
           const sec = Math.max(0, Math.ceil(def.GAZE_TIME - s.gazeT));
-          s.progress.userData.setText(s.gazeT >= def.GAZE_TIME
-            ? '...something stirs in the glass'
-            : `Gazing... ${sec}s`);
+          if (sec !== s._lastSec) {
+            s._lastSec = sec;
+            s.progress.userData.setText(s.gazeT >= def.GAZE_TIME
+              ? '...something stirs in the glass'
+              : `Gazing... ${sec}s`);
+          }
         }
         if (s.gazeT >= def.GAZE_TIME) {
           s.cloneSpawned = true;
@@ -1496,6 +1512,17 @@ export const ENCOUNTER_DEFS = {
             'Look upon yourself.', 4.0);
           if (s.hint) s.hint.visible = false;
           if (s.progress) s.progress.userData.setText('Defeat your reflection.');
+          // Defensive: if the clone failed to spawn (e.g. the player
+          // had no equipped weapon at the moment of the gaze trigger),
+          // mark the encounter complete instead of leaving it stuck
+          // waiting for a clone that will never die.
+          if (!s.clone) {
+            ctx.spawnSpeech(new THREE.Vector3(s.disc.cx, 2.2, s.disc.cz),
+              'Nothing answers. The glass is silent.', 4.0);
+            s.complete = true;
+            if (ctx.markEncounterComplete) ctx.markEncounterComplete('mirror');
+            if (s.progress) s.progress.visible = false;
+          }
         }
       } else {
         // Clone spawned — wait for its kill.
@@ -1629,7 +1656,9 @@ export const ENCOUNTER_DEFS = {
         && pz >= ctx.room.bounds.minZ && pz <= ctx.room.bounds.maxZ;
 
       if (s.phase === 'standoff') {
-        // Bark dialog when player is close.
+        // Bark dialog when player is close. Skip if the speaker is
+        // already dead (otherwise corpses keep arguing for a frame
+        // or two between the kill and the phase advance below).
         const dx = px - s.disc.cx, dz = pz - s.disc.cz;
         if (dx * dx + dz * dz < 36 && s.barkT <= 0) {
           s.barkT = 4.0 + Math.random() * 2;
@@ -1642,7 +1671,7 @@ export const ENCOUNTER_DEFS = {
           const line = lines[s.nextBark % lines.length];
           s.nextBark++;
           const target = (line.who === 'gunman') ? s.pair.gunman : s.pair.kneeler;
-          if (target && target.group) {
+          if (target && target.group && target.alive) {
             ctx.spawnSpeech(target.group.position.clone().setY(2.0), line.text, 3.5);
           }
         }
