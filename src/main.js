@@ -5438,6 +5438,13 @@ function onProjectileExplode(pos, explosion, owner, p) {
     if (sfx.explode) sfx.explode();
     return;
   }
+  if (kind === 'gas') {
+    // Poison cloud — drains player + enemy HP over time. Damage
+    // ticking handled in _tickThrowableZones below.
+    spawnGasZone(pos, radius, p.gasDuration || 6.0);
+    if (sfx.explode) sfx.explode();
+    return;
+  }
   if (kind === 'decoy') {
     spawnDecoyBeacon(pos, p.decoyDuration || 7.0);
     if (sfx.explode) sfx.explode();
@@ -6668,6 +6675,7 @@ function throwItem(item) {
     throwKind: item.throwKind || 'frag',
     fireDuration: item.fireDuration,
     fireTickDps: item.fireTickDps,
+    gasDuration: item.gasDuration,
     blindDuration: item.blindDuration,
     stunDuration: item.stunDuration,
     triggerRadius: item.triggerRadius,
@@ -6951,6 +6959,30 @@ const _fireZones = [];
 // list so the per-frame tick can update visuals + expire them.
 const _smokeZones = [];
 const _decoys = [];
+const _gasZones = [];
+
+// Gas grenade — green poison cloud lingering for `duration`s.
+// Anything inside (player + enemies) takes per-second drains: 5%
+// max HP / 10% stamina for the player, 5% HP for enemies. Visual
+// is a translucent green dome + ground ring matching smoke zones.
+function spawnGasZone(pos, radius, duration) {
+  const baseMat = new THREE.MeshBasicMaterial({
+    color: 0x60d040, transparent: true, opacity: 0.40,
+    depthWrite: false, side: THREE.DoubleSide,
+  });
+  const ring = new THREE.Mesh(new THREE.CircleGeometry(radius, 24), baseMat);
+  ring.rotation.x = -Math.PI / 2;
+  ring.position.set(pos.x, 0.05, pos.z);
+  scene.add(ring);
+  const domeMat = new THREE.MeshBasicMaterial({
+    color: 0x80e060, transparent: true, opacity: 0.32,
+    depthWrite: false,
+  });
+  const dome = new THREE.Mesh(new THREE.SphereGeometry(radius, 16, 8, 0, Math.PI * 2, 0, Math.PI / 2), domeMat);
+  dome.position.set(pos.x, 0, pos.z);
+  scene.add(dome);
+  _gasZones.push({ x: pos.x, z: pos.z, radius, life: duration, t: 0, ring, dome });
+}
 
 function spawnSmokeZone(pos, radius, duration) {
   // Cheap visual: one disc + one dome, both transparent. No particle
@@ -7020,6 +7052,54 @@ function _tickThrowableZones(dt) {
       scene.remove(d.rod); d.rod.geometry.dispose(); d.rod.material.dispose();
       scene.remove(d.ring); d.ring.geometry.dispose(); d.ring.material.dispose();
       _decoys.splice(i, 1);
+    }
+  }
+  // Gas zones — visual fade + per-second drain on player + enemies
+  // inside the radius. Drains: player 5%/s max HP + 10%/s max stamina;
+  // enemies 5%/s of their max HP.
+  for (let i = _gasZones.length - 1; i >= 0; i--) {
+    const z = _gasZones[i];
+    z.t += dt;
+    const fade = z.t > z.life * 0.7
+      ? Math.max(0, (z.life - z.t) / (z.life * 0.3))
+      : 1;
+    z.ring.material.opacity = 0.40 * fade;
+    z.dome.material.opacity = 0.32 * fade;
+    const r2 = z.radius * z.radius;
+    // Player drain.
+    if (player && lastPlayerInfo) {
+      const dx = player.mesh.position.x - z.x;
+      const dz = player.mesh.position.z - z.z;
+      if (dx * dx + dz * dz <= r2) {
+        const hpDrain = (lastPlayerInfo.maxHealth || 100) * 0.05 * dt;
+        const stamDrain = (lastPlayerInfo.maxStamina || 100) * 0.10 * dt;
+        damagePlayer(hpDrain, 'gas');
+        if (player.consumeStamina) player.consumeStamina('gas', stamDrain);
+      }
+    }
+    // Enemy drain.
+    const sweep = (list) => {
+      for (const c of list) {
+        if (!c.alive) continue;
+        const dx = c.group.position.x - z.x;
+        const dz = c.group.position.z - z.z;
+        if (dx * dx + dz * dz > r2) continue;
+        const maxHp = c.maxHp || c.hp || 30;
+        const tickDmg = maxHp * 0.05 * dt;
+        const wasAlive = c.alive;
+        c.hp -= tickDmg;
+        if (c.hp <= 0) {
+          c.alive = false; c.state = 'dead'; c.deathT = 0;
+          if (wasAlive) onEnemyKilled(c);
+        }
+      }
+    };
+    sweep(gunmen.gunmen);
+    sweep(melees.enemies);
+    if (z.t >= z.life) {
+      scene.remove(z.ring); z.ring.geometry.dispose(); z.ring.material.dispose();
+      scene.remove(z.dome); z.dome.geometry.dispose(); z.dome.material.dispose();
+      _gasZones.splice(i, 1);
     }
   }
 }
@@ -7331,8 +7411,16 @@ function spawnDronesAt(x, z) {
 // position. Uses the same projectile system the player throws into.
 const AI_THROWABLE_POOL = [
   { kind: 'frag',  fuse: 1.6, aoeRadius: 5.0, aoeDamage: 60, color: 0x60a040 },
-  { kind: 'flash', fuse: 1.0, aoeRadius: 4.5, blindDuration: 3.0, color: 0xfff0a0 },
-  { kind: 'stun',  fuse: 1.2, aoeRadius: 3.8, stunDuration: 2.2,  color: 0x80a0ff },
+  // Flash + stun bumped 25% on both range and effect duration. Frag
+  // stays the same — that one's already painful at the current
+  // damage. Gas added as a new option.
+  { kind: 'flash', fuse: 1.0, aoeRadius: 5.6, blindDuration: 3.75, color: 0xfff0a0 },
+  { kind: 'stun',  fuse: 1.2, aoeRadius: 4.75, stunDuration: 2.75, color: 0x80a0ff },
+  // Gas grenade — impact-detonate (fuse 0.4 just covers the toss
+  // arc), seeds a green poison cloud that lingers ~6s and ticks
+  // both player and enemies inside it.
+  { kind: 'gas',   fuse: 0.4, aoeRadius: 4.0, color: 0x60d040,
+    gasDuration: 6.0, fuseAfterLand: false, bounciness: 0.05 },
 ];
 function spawnAiThrowable(g, kindOverride) {
   if (!g || !g.alive || !player) return;
@@ -7362,11 +7450,12 @@ function spawnAiThrowable(g, kindOverride) {
     },
     owner: 'enemy',
     gravity,
-    bounciness: 0.40,
-    fuseAfterLand: true,
+    bounciness: def.bounciness ?? 0.40,
+    fuseAfterLand: def.fuseAfterLand ?? true,
     throwKind: def.kind,
     blindDuration: def.blindDuration,
     stunDuration: def.stunDuration,
+    gasDuration: def.gasDuration,
   });
 }
 

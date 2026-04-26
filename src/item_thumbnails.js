@@ -534,6 +534,46 @@ function buildGeneric(item) {
   return g;
 }
 
+// Throwable thumbnail — short metal cylinder (grenade body) with a
+// flat colored square decal on the front face that reads as the
+// throwable's tint at thumbnail size. Distinct from junk + consumable
+// silhouettes so the inventory grid clearly tells throwables apart.
+function buildThrowable(item) {
+  const tint = item.tint ?? 0x60a040;
+  const g = new THREE.Group();
+  // Body — short upright cylinder, neutral metal so the colored face
+  // pops against it.
+  const body = new THREE.Mesh(
+    new THREE.CylinderGeometry(0.34, 0.34, 0.78, 18),
+    new THREE.MeshStandardMaterial({
+      color: NEUTRAL.metalDark, roughness: 0.55, metalness: 0.55,
+    }),
+  );
+  body.position.y = 0;
+  g.add(body);
+  // Top cap (slight ridge so it reads as a grenade not a can).
+  const cap = new THREE.Mesh(
+    new THREE.CylinderGeometry(0.20, 0.20, 0.10, 14),
+    new THREE.MeshStandardMaterial({
+      color: NEUTRAL.metal, roughness: 0.4, metalness: 0.65,
+    }),
+  );
+  cap.position.y = 0.44;
+  g.add(cap);
+  // Camera-facing colored decal — flat box hugging the cylinder's
+  // front surface (camera looks roughly along +Z so we push toward +Z).
+  const decal = new THREE.Mesh(
+    new THREE.BoxGeometry(0.46, 0.46, 0.04),
+    new THREE.MeshStandardMaterial({
+      color: tint, roughness: 0.45, metalness: 0.10,
+      emissive: tint, emissiveIntensity: 0.30,
+    }),
+  );
+  decal.position.set(0, 0, 0.36);
+  g.add(decal);
+  return g;
+}
+
 // ---------- dispatch ------------------------------------------------
 
 function buildFor(item) {
@@ -559,6 +599,7 @@ function buildFor(item) {
   if (item.type === 'consumable') return buildConsumable(item);
   if (item.type === 'junk')       return buildJunk(item);
   if (item.type === 'attachment') return buildAttachment(item);
+  if (item.type === 'throwable')  return buildThrowable(item);
   return buildGeneric(item);
 }
 
@@ -572,6 +613,7 @@ function cacheKey(item) {
   if (item.type === 'attachment') return `att:${item.slot || ''}:${item.id || item.name}:${tint}`;
   if (item.type === 'consumable') return `con:${item.id || item.name}:${tint}`;
   if (item.type === 'junk')       return `junk:${item.id || item.name}:${tint}`;
+  if (item.type === 'throwable')  return `thr:${item.id || item.name}:${tint}`;
   return `${item.slot || item.type || 'x'}:${item.id || item.name}:${tint}`;
 }
 

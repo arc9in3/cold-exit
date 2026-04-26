@@ -1161,6 +1161,15 @@ export const THROWABLE_DEFS = {
     maxCharges: 1, cooldownSec: 30,
     description: 'Dazes enemies in radius for 2.5s · 30s cooldown',
   },
+  gasGrenade: {
+    id: 'thr_gas', name: 'Gas Grenade', type: 'throwable', rarity: 'uncommon',
+    tint: 0x60d040,
+    throwKind: 'gas',
+    aoeRadius: 4.0, fuse: 0.4,            // detonates on impact
+    gasDuration: 6.0,
+    maxCharges: 1, cooldownSec: 75,
+    description: 'Poison cloud lingers 6s · drains HP + stamina · 75s cooldown',
+  },
   smokeGrenade: {
     id: 'thr_smoke', name: 'Smoke Grenade', type: 'throwable', rarity: 'uncommon',
     tint: 0xa0a8b0,
