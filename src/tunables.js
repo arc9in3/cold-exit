@@ -264,6 +264,17 @@ export const tunables = {
     pixelMode: true,
     enemyTightenSingle: 0.20,
     enemyTightenPellet: 0.50,
+    // Head-aim assist. When the cursor is within `headAssistRadiusPx`
+    // pixels of an enemy head's screen-space center, snap the aim
+    // point onto that head (and stamp zone='head' for the damage
+    // multiplier). Stops "I was clearly hovering over the head but
+    // the system says I missed it" feedback. Asymmetric:
+    // headAssistTopBias > 1 makes the radius extend further ABOVE
+    // the head than to the sides — the top of the cranium is the
+    // pixel most often brushed past while trying to land headshots.
+    headAssistEnabled: true,
+    headAssistRadiusPx: 30,
+    headAssistTopBias: 1.8,
   },
   medkit: {
     smallHeal: 30,

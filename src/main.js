@@ -3584,6 +3584,53 @@ function resolveAim(muzzleWorld) {
   return _resolveAimRaycast(muzzleWorld);
 }
 
+// Reusable scratch — head aim assist projects each enemy head into NDC
+// every aim resolution call (60Hz at most), allocating these once.
+const _headWorldScratch = new THREE.Vector3();
+const _headNdcScratch = new THREE.Vector3();
+
+// Find the enemy head closest to the cursor in screen space, within an
+// asymmetric pixel radius. Bias is more generous ABOVE the head than
+// to the sides — the silhouette boundary at the top of the cranium is
+// the easiest pixel to brush past while trying to land a headshot.
+// Returns { enemy, headWorld, distPx } or null.
+function _findHeadAimAssist() {
+  if (!input.hasAim) return null;
+  const cfg = tunables.aim || {};
+  if (cfg.headAssistEnabled === false) return null;
+  const baseRadiusPx = cfg.headAssistRadiusPx ?? 28;
+  const topBias = cfg.headAssistTopBias ?? 1.6;
+  const cursor = input.mouseNDC;
+  const halfW = window.innerWidth / 2;
+  const halfH = window.innerHeight / 2;
+  let best = null;
+  let bestPxDist = Infinity;
+  const candidates = [];
+  for (const g of gunmen.gunmen) if (g.alive && g.rig?.head) candidates.push(g);
+  for (const e of melees.enemies) if (e.alive && e.rig?.head) candidates.push(e);
+  for (const c of candidates) {
+    c.rig.head.getWorldPosition(_headWorldScratch);
+    _headNdcScratch.copy(_headWorldScratch).project(camera);
+    if (_headNdcScratch.z < -1 || _headNdcScratch.z > 1) continue;
+    // Cursor → head delta in NDC, then converted to viewport pixels.
+    // dyNdc > 0 = head is BELOW cursor (cursor sits above the head),
+    // since NDC y points up.
+    const dxNdc = _headNdcScratch.x - cursor.x;
+    const dyNdc = _headNdcScratch.y - cursor.y;
+    const dxPx = dxNdc * halfW;
+    const dyPx = dyNdc * halfH;
+    // Asymmetric ellipse: when cursor is above the head (dyNdc > 0),
+    // shrink the effective dy so that side of the radius is bigger.
+    const dyAdjusted = dyPx > 0 ? dyPx / topBias : dyPx;
+    const distPx = Math.sqrt(dxPx * dxPx + dyAdjusted * dyAdjusted);
+    if (distPx <= baseRadiusPx && distPx < bestPxDist) {
+      bestPxDist = distPx;
+      best = { enemy: c, headWorld: _headWorldScratch.clone(), distPx };
+    }
+  }
+  return best;
+}
+
 function _resolveAimRaycast(muzzleWorld) {
   if (!input.hasAim) return { point: null, zone: null, owner: null };
   input.raycaster.setFromCamera(input.mouseNDC, camera);
@@ -3600,12 +3647,42 @@ function _resolveAimRaycast(muzzleWorld) {
   const enemyTargets = allHittables();
   const wallTargets = level.solidObstacles();
   const enemyHits = input.raycaster.intersectObjects(enemyTargets, false);
+  // Run the head-aim assist regardless — used to upgrade a body-shot
+  // raycast to a head-shot when the cursor is in the head's
+  // neighborhood (especially above), and to recover a missed primary
+  // raycast onto a head that the cursor is brushing past.
+  const headAssist = _findHeadAimAssist();
   if (enemyHits.length > 0) {
     const h = enemyHits[0];
+    const hitOwner = h.object.userData?.owner || null;
+    const hitZone = h.object.userData?.zone || null;
+    // Same-enemy upgrade: the cursor caught a body part but is also
+    // within head-assist range of the same enemy's head — promote to
+    // a head shot so deliberate aim at the cranium lands instead of
+    // grazing into the shoulder.
+    if (headAssist && hitZone !== 'head' && headAssist.enemy === hitOwner) {
+      return {
+        point: headAssist.headWorld.clone(),
+        zone: 'head',
+        owner: headAssist.enemy,
+      };
+    }
     return {
       point: h.point.clone(),
-      zone: h.object.userData?.zone || null,
-      owner: h.object.userData?.owner || null,
+      zone: hitZone,
+      owner: hitOwner,
+    };
+  }
+  // Primary raycast missed every body part. If the cursor is right
+  // next to a head silhouette (within the assist radius), treat it as
+  // an intended head shot and snap the aim point onto the head — keeps
+  // pixel-aim spread tightening + zone bonus alive when the cursor is
+  // clipping the very edge of the cranium.
+  if (headAssist) {
+    return {
+      point: headAssist.headWorld.clone(),
+      zone: 'head',
+      owner: headAssist.enemy,
     };
   }
   // Wall hits: keep the XZ direction (the wall the player meant to
