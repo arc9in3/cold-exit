@@ -60,7 +60,19 @@ export class Input {
     this._onMouseMove = this._onMouseMove.bind(this);
     this._onMouseDown = this._onMouseDown.bind(this);
     this._onMouseUp = this._onMouseUp.bind(this);
-    this._onContextMenu = (e) => e.preventDefault();
+    // Suppress the native context menu on right-click (incl. Shift+
+    // right-click, which Chrome/Firefox normally use as a "force
+    // native menu" escape hatch). Capture-phase + stopImmediate +
+    // returning false is the strongest a page can do — most browsers
+    // honour it as long as the listener isn't passive. Fires from
+    // both the canvas and document/window so a stray right-click
+    // landing on an overlay still gets eaten.
+    this._onContextMenu = (e) => {
+      e.preventDefault();
+      e.stopPropagation();
+      e.stopImmediatePropagation?.();
+      return false;
+    };
 
     window.addEventListener('keydown', this._onKeyDown);
     window.addEventListener('keyup', this._onKeyUp);
@@ -72,7 +84,15 @@ export class Input {
     // through the normal DOM, never hit this listener).
     domEl.addEventListener('wheel', (e) => this._onWheel(e), { passive: false });
     window.addEventListener('mouseup', this._onMouseUp);
-    window.addEventListener('contextmenu', this._onContextMenu);
+    // Contextmenu suppression — registered on document AND window in
+    // capture phase so Shift+right-click is intercepted before the UA
+    // routes it to its "force native menu" path.
+    document.addEventListener('contextmenu', this._onContextMenu, { capture: true });
+    window.addEventListener('contextmenu', this._onContextMenu, { capture: true });
+    domEl.addEventListener('contextmenu', this._onContextMenu, { capture: true });
+    // Auxclick (middle/right click) — also intercepted so any handler
+    // looking at the click rather than contextmenu can't slip through.
+    domEl.addEventListener('auxclick', this._onContextMenu, { capture: true });
   }
 
   clearMouseState() {
