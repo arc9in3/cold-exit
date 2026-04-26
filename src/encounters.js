@@ -124,6 +124,65 @@ function _buildSimpleNpc({ bodyColor = 0x4a5060, headColor = 0xd8c8a8,
   return group;
 }
 
+// Build a duck — yellow oblong body, smaller head sphere, tiny dark
+// eyes, orange beak. Sits centred at origin.
+function _buildDuck() {
+  const group = new THREE.Group();
+  const bodyMat = new THREE.MeshStandardMaterial({ color: 0xf0d840, roughness: 0.7 });
+  const accentMat = new THREE.MeshStandardMaterial({ color: 0xd87a20, roughness: 0.6 });
+  const eyeMat = new THREE.MeshStandardMaterial({ color: 0x101010, roughness: 0.4 });
+  const body = new THREE.Mesh(new THREE.SphereGeometry(0.35, 14, 10), bodyMat);
+  body.scale.set(1, 0.7, 1.4);
+  body.position.y = 0.30;
+  body.castShadow = true;
+  group.add(body);
+  const head = new THREE.Mesh(new THREE.SphereGeometry(0.20, 12, 10), bodyMat);
+  head.position.set(0, 0.55, -0.30);
+  head.castShadow = true;
+  group.add(head);
+  const beak = new THREE.Mesh(new THREE.ConeGeometry(0.08, 0.18, 8), accentMat);
+  beak.rotation.x = Math.PI / 2;
+  beak.position.set(0, 0.52, -0.50);
+  group.add(beak);
+  const eyeL = new THREE.Mesh(new THREE.SphereGeometry(0.035, 6, 6), eyeMat);
+  const eyeR = eyeL.clone();
+  eyeL.position.set(-0.10, 0.60, -0.36);
+  eyeR.position.set( 0.10, 0.60, -0.36);
+  group.add(eyeL, eyeR);
+  return group;
+}
+
+// Build a smashed cart for the broken-vendor encounter — a couple of
+// tilted plank rectangles + a fallen wheel. Reads as wreckage from a
+// few metres away.
+function _buildSmashedCart() {
+  const group = new THREE.Group();
+  const woodMat = new THREE.MeshStandardMaterial({ color: 0x6a4828, roughness: 0.85 });
+  const wood2 = new THREE.MeshStandardMaterial({ color: 0x9c7444, roughness: 0.85 });
+  const plank = (x, y, z, w, h, d, rotZ = 0, rotY = 0) => {
+    const m = new THREE.Mesh(new THREE.BoxGeometry(w, h, d), woodMat);
+    m.position.set(x, y, z);
+    m.rotation.z = rotZ;
+    m.rotation.y = rotY;
+    m.castShadow = true;
+    group.add(m);
+    return m;
+  };
+  plank(0, 0.10, 0, 1.6, 0.12, 0.9);
+  plank(-0.45, 0.30, 0.30, 1.0, 0.10, 0.20, 0.4, 0.3);
+  plank(0.50, 0.20, -0.25, 0.9, 0.10, 0.15, -0.2, -0.4);
+  // Fallen wheel.
+  const wheel = new THREE.Mesh(
+    new THREE.TorusGeometry(0.28, 0.06, 6, 16),
+    wood2,
+  );
+  wheel.position.set(0.85, 0.05, 0.40);
+  wheel.rotation.x = Math.PI / 2;
+  wheel.rotation.z = 0.3;
+  group.add(wheel);
+  return group;
+}
+
 export const ENCOUNTER_DEFS = {
   // -----------------------------------------------------------------
   // Royal Emissary — drop the King's Signet to receive a masterwork
@@ -194,6 +253,216 @@ export const ENCOUNTER_DEFS = {
       const ox = s.disc.cx + 1.6;
       const oz = s.disc.cz;
       ctx.spawnMasterworkChest(ox, oz);
+      return { consume: true, complete: true };
+    },
+  },
+
+  // -----------------------------------------------------------------
+  // The Duck — quacks until the player drops a Bag of Peas. Then
+  // shouts in caps and spawns a random toy. Pure comedic beat.
+  duck: {
+    id: 'duck',
+    name: 'The Duck',
+    floorColor: 0xfff080,             // sunny yellow
+    oncePerSave: true,
+    condition: (state) => state.levelIndex >= 1,
+    quacks: ['Quack.', 'Quack quack.', 'Quack?', 'QUACK.'],
+    spawn(scene, room, ctx) {
+      const disc = _spawnFloorDisc(scene, room, this.floorColor);
+      const duck = _buildDuck();
+      duck.position.set(disc.cx, 0, disc.cz);
+      scene.add(duck);
+      const label = _makeLabelSprite('A DUCK', '#ffe070');
+      label.position.set(disc.cx, 1.3, disc.cz);
+      scene.add(label);
+      return {
+        duck, label, disc,
+        barkT: 0,
+        nextBark: 0,
+        complete: false,
+        wobbleT: 0,
+      };
+    },
+    tick(dt, ctx) {
+      const s = ctx.state;
+      if (!s.duck) return;
+      s.wobbleT += dt;
+      // Subtle waddle — body bob plus head sway.
+      s.duck.position.y = Math.abs(Math.sin(s.wobbleT * 3)) * 0.04;
+      s.duck.rotation.y = Math.sin(s.wobbleT * 1.6) * 0.18;
+      if (s.complete) return;
+      const px = ctx.playerPos.x - s.disc.cx;
+      const pz = ctx.playerPos.z - s.disc.cz;
+      if (px * px + pz * pz < 36 && s.barkT <= 0) {
+        s.barkT = 3.5 + Math.random() * 2;
+        const def = ENCOUNTER_DEFS.duck;
+        const line = def.quacks[s.nextBark % def.quacks.length];
+        s.nextBark++;
+        ctx.spawnSpeech(s.duck.position.clone().setY(1.2), line, 2.8);
+      }
+      s.barkT = Math.max(0, s.barkT - dt);
+    },
+    onItemDropped(item, ctx) {
+      const s = ctx.state;
+      if (s.complete) return { consume: false };
+      const isPeas = item && (item.id === 'junk_peas'
+                           || item.name === 'Bag of Peas');
+      if (!isPeas) return { consume: false };
+      s.complete = true;
+      ctx.spawnSpeech(s.duck.position.clone().setY(1.4),
+        'DID SOMEONE SAY PEAS?!', 4.0);
+      // Spawn a random toy nearby.
+      const toy = ctx.rollRandomToy && ctx.rollRandomToy();
+      if (toy) ctx.spawnLoot(s.disc.cx + 0.8, s.disc.cz, toy);
+      return { consume: true, complete: true };
+    },
+  },
+
+  // -----------------------------------------------------------------
+  // Wounded Soldier — slumped against the wall, begs for medkits.
+  // Drop ANY heal-kind consumable → he gasps thanks, hands you a
+  // rare gear piece, then collapses dead.
+  wounded_soldier: {
+    id: 'wounded_soldier',
+    name: 'Wounded Soldier',
+    floorColor: 0x803030,             // blood red
+    oncePerSave: true,
+    condition: (state) => state.levelIndex >= 1,
+    pleas: [
+      'Help me... please...',
+      'I can\'t feel my legs.',
+      'A medkit. Anything. I\'m begging.',
+      'Don\'t leave me here.',
+    ],
+    spawn(scene, room, ctx) {
+      const disc = _spawnFloorDisc(scene, room, this.floorColor);
+      const npc = _buildSimpleNpc({
+        bodyColor: 0x445060, headColor: 0xc8b090,
+        accentColor: 0xa84030, height: 1.85,
+      });
+      // Slumped pose — leans back ~25°.
+      npc.rotation.x = -0.45;
+      npc.position.set(disc.cx, 0.10, disc.cz);
+      scene.add(npc);
+      const label = _makeLabelSprite('WOUNDED SOLDIER', '#e8a8a8');
+      label.position.set(disc.cx, 2.4, disc.cz);
+      scene.add(label);
+      return {
+        npc, label, disc,
+        barkT: 0,
+        nextBark: 0,
+        complete: false,
+        dead: false,
+      };
+    },
+    tick(dt, ctx) {
+      const s = ctx.state;
+      if (!s.npc) return;
+      if (s.dead) return;
+      // Shallow chest-rise idle while alive.
+      s.npc.position.y = 0.10 + Math.abs(Math.sin(performance.now() * 0.0015)) * 0.02;
+      if (s.complete) return;
+      const px = ctx.playerPos.x - s.disc.cx;
+      const pz = ctx.playerPos.z - s.disc.cz;
+      if (px * px + pz * pz < 36 && s.barkT <= 0) {
+        s.barkT = 4.0 + Math.random() * 2;
+        const def = ENCOUNTER_DEFS.wounded_soldier;
+        const line = def.pleas[s.nextBark % def.pleas.length];
+        s.nextBark++;
+        ctx.spawnSpeech(s.npc.position.clone().setY(2.2), line, 3.5);
+      }
+      s.barkT = Math.max(0, s.barkT - dt);
+    },
+    onItemDropped(item, ctx) {
+      const s = ctx.state;
+      if (s.complete) return { consume: false };
+      // Any heal-kind consumable counts (bandage, medkit, surgical kit).
+      const isHeal = item && item.useEffect && item.useEffect.kind === 'heal';
+      if (!isHeal) return { consume: false };
+      s.complete = true;
+      ctx.spawnSpeech(s.npc.position.clone().setY(2.2),
+        'You... saved me. Take this — it is yours.', 4.5);
+      // Spawn a rare-tier gear piece next to him.
+      const reward = ctx.rollRareGear && ctx.rollRareGear();
+      if (reward) ctx.spawnLoot(s.disc.cx + 1.2, s.disc.cz, reward);
+      // Collapse dead after a beat.
+      setTimeout(() => {
+        if (!s.npc) return;
+        s.dead = true;
+        s.npc.rotation.x = -1.45;
+        s.npc.position.y = 0.05;
+      }, 1500);
+      return { consume: true, complete: true };
+    },
+  },
+
+  // -----------------------------------------------------------------
+  // Broken Vendor — sitting next to a smashed cart. Re-enterable
+  // until the player drops a junk piece worth >100c, at which point
+  // he stands up and gifts a low-tier weapon.
+  broken_vendor: {
+    id: 'broken_vendor',
+    name: 'Broken Vendor',
+    floorColor: 0xa88a5a,             // dusty tan
+    oncePerSave: true,
+    condition: (state) => state.levelIndex >= 1,
+    woes: [
+      'Thieves. They took everything. Even my coin.',
+      'My cart... fifteen years on the road, gone.',
+      'I have nothing left to trade. Pity an old vendor.',
+      'A trinket. Anything of value. I beg you.',
+    ],
+    spawn(scene, room, ctx) {
+      const disc = _spawnFloorDisc(scene, room, this.floorColor);
+      const cart = _buildSmashedCart();
+      cart.position.set(disc.cx + 1.0, 0, disc.cz);
+      scene.add(cart);
+      const npc = _buildSimpleNpc({
+        bodyColor: 0x5a4a3a, headColor: 0xc8a880,
+        accentColor: 0x8a6a3c, height: 1.65,
+      });
+      // Sitting cross-legged — scaled down + lowered.
+      npc.scale.set(1, 0.55, 1);
+      npc.position.set(disc.cx - 0.6, 0, disc.cz);
+      scene.add(npc);
+      const label = _makeLabelSprite('BROKEN VENDOR', '#d8b88a');
+      label.position.set(disc.cx, 1.8, disc.cz);
+      scene.add(label);
+      return {
+        npc, label, disc, cart,
+        barkT: 0,
+        nextBark: 0,
+        complete: false,
+      };
+    },
+    tick(dt, ctx) {
+      const s = ctx.state;
+      if (!s.npc || s.complete) return;
+      const px = ctx.playerPos.x - s.disc.cx;
+      const pz = ctx.playerPos.z - s.disc.cz;
+      if (px * px + pz * pz < 36 && s.barkT <= 0) {
+        s.barkT = 4.5 + Math.random() * 2;
+        const def = ENCOUNTER_DEFS.broken_vendor;
+        const line = def.woes[s.nextBark % def.woes.length];
+        s.nextBark++;
+        ctx.spawnSpeech(s.npc.position.clone().setY(1.2), line, 3.5);
+      }
+      s.barkT = Math.max(0, s.barkT - dt);
+    },
+    onItemDropped(item, ctx) {
+      const s = ctx.state;
+      if (s.complete) return { consume: false };
+      const ok = item && item.type === 'junk'
+                 && typeof item.sellValue === 'number'
+                 && item.sellValue > 100;
+      if (!ok) return { consume: false };
+      s.complete = true;
+      // Stand him back up.
+      s.npc.scale.set(1, 1, 1);
+      ctx.spawnSpeech(s.npc.position.clone().setY(2.0),
+        'Bless you, traveler. Take this — it served me well.', 4.5);
+      const reward = ctx.rollLowTierWeapon && ctx.rollLowTierWeapon();
+      if (reward) ctx.spawnLoot(s.disc.cx - 1.4, s.disc.cz, reward);
       return { consume: true, complete: true };
     },
   },

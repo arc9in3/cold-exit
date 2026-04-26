@@ -1698,6 +1698,28 @@ function regenerateLevel() {
         spawnSpeech: ctx.spawnSpeech,
         spawnMasterworkChest: ctx.spawnMasterworkChest,
         spawnLoot: ctx.spawnLoot,
+        // Reward-roll helpers — encounters call these to keep the
+        // module decoupled from inventory.js / attachments.js.
+        rollRandomToy: () => randomToy(),
+        rollRareGear: () => {
+          const g = randomGear();
+          const rolled = withAffixes({
+            ...g,
+            durability: { ...(g.durability || { current: 100, max: 100, repairability: 0.9 }) },
+          });
+          // Force at least rare so the reward feels worth the trade.
+          const ladder = ['common', 'uncommon', 'rare', 'epic', 'legendary'];
+          const idx = ladder.indexOf(rolled.rarity || 'common');
+          if (idx < 2) rolled.rarity = 'rare';
+          return rolled;
+        },
+        rollLowTierWeapon: () => {
+          const pool = tunables.weapons.filter(w =>
+            !w.artifact && !w.mythic
+            && (w.rarity === 'common' || w.rarity === 'uncommon' || !w.rarity));
+          const pick = pool[Math.floor(Math.random() * pool.length)];
+          return wrapWeapon(pick);
+        },
       }),
     };
   }

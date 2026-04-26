@@ -1004,6 +1004,10 @@ export const JUNK_DEFS = {
   radio:        { id: 'junk_radio',    name: 'Field Radio',        type: 'junk', tint: 0x3a3a2a, sellValue: 340,  rarity: 'rare',      description: 'Encrypted military handset',   stackMax: 3 },
   carBattery:   { id: 'junk_carbatt',  name: 'Car Battery',        type: 'junk', tint: 0x6a6a70, sellValue: 420,  rarity: 'rare',      description: 'Lead-acid brick · heavy, valuable', stackMax: 3 },
   scrapMetal:   { id: 'junk_scrap',    name: 'Scrap Metal',        type: 'junk', tint: 0x8a8a8a, sellValue: 30,   rarity: 'common',    description: 'Mixed fragments · fence it', stackMax: 9 },
+  // Encounter-trigger junk. Reads as a normal cheap pickup until
+  // dropped inside the Duck encounter — then it triggers a toy
+  // reward. Outside that room it's just sell-fodder.
+  bagOfPeas:    { id: 'junk_peas',     name: 'Bag of Peas',         type: 'junk', tint: 0x8ac46a, sellValue: 25,   rarity: 'common',    description: 'A small canvas bag of dried peas. Smells of grass.', stackMax: 5 },
 };
 export const ALL_JUNK = Object.values(JUNK_DEFS);
 
