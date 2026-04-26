@@ -69,7 +69,50 @@ export class InventoryUI {
     // nodes that were never visible.
     this._buildSilhouette();
     this._mountOverlays();
+    this._wireQuickslotKeys();
     this.render();
+  }
+
+  // Quickslot binding via keyboard — while the inventory is open,
+  // hovering an item and pressing 1-8 binds it to that quickslot.
+  // Keys 1-4 → action-bar slots 0-3 (#weapon-bar). Keys 5-8 → slots
+  // 4-7 (#action-bar). Skips bind when the active element is a text
+  // input (player-name field, etc.) so the user can still type.
+  _wireQuickslotKeys() {
+    this._hoveredItem = null;
+    this._hoverSource = null;
+    window.addEventListener('keydown', (e) => {
+      if (!this.visible) return;
+      if (e.repeat) return;
+      const ae = document.activeElement;
+      if (ae && (ae.tagName === 'INPUT' || ae.tagName === 'TEXTAREA' || ae.isContentEditable)) return;
+      let slotIdx = -1;
+      switch (e.code) {
+        case 'Digit1': slotIdx = 0; break;
+        case 'Digit2': slotIdx = 1; break;
+        case 'Digit3': slotIdx = 2; break;
+        case 'Digit4': slotIdx = 3; break;
+        case 'Digit5': slotIdx = 4; break;
+        case 'Digit6': slotIdx = 5; break;
+        case 'Digit7': slotIdx = 6; break;
+        case 'Digit8': slotIdx = 7; break;
+        default: return;
+      }
+      if (!this._hoveredItem) return;
+      const ok = this.inventory.assignActionSlot(slotIdx, this._hoveredItem);
+      if (ok) {
+        e.preventDefault();
+        e.stopPropagation();
+        // Bump action-bar UI on the bottom of the screen so the new
+        // binding paints immediately (the inventory rerender below
+        // doesn't touch that element cluster).
+        window.__renderActionBar?.();
+        if (typeof window.__renderWeaponBar === 'function') window.__renderWeaponBar();
+        this.render();
+      } else {
+        window.__hudMsg?.(`Cannot bind ${this._hoveredItem.name} to that slot`, 1.8);
+      }
+    }, /* capture so we win against the gameplay handler */ true);
   }
 
   _mountOverlays() {
@@ -107,25 +150,11 @@ export class InventoryUI {
   toggle() {
     this.visible = !this.visible;
     this.root.style.display = this.visible ? 'flex' : 'none';
-    this._toggleBottomHotbars(!this.visible);
     if (this.visible) this.render();
   }
   hide() {
     this.visible = false;
     this.root.style.display = 'none';
-    this._toggleBottomHotbars(true);
-  }
-
-  // Hide / show the bottom-of-screen hotbar bars (#weapon-bar +
-  // #action-bar) while the inventory modal is open. Players asked
-  // for the inventory view to drop the duplicate quickslot row that
-  // was floating in over the paperdoll; the hotbars stay live during
-  // gameplay (close the inventory and they're back).
-  _toggleBottomHotbars(show) {
-    const wb = document.getElementById('weapon-bar');
-    const ab = document.getElementById('action-bar');
-    if (wb) wb.style.display = show ? '' : 'none';
-    if (ab) ab.style.display = show ? '' : 'none';
   }
 
   // ——— equipment paper doll ——————————————————————————————————
@@ -198,6 +227,21 @@ export class InventoryUI {
   }
 
   _wireSlotHandlers(cell, slot) {
+    // Hover tracking on paperdoll slots — same `_hoveredItem` channel
+    // the grid wraps populate, so 1-8 quickslot binding works on
+    // equipped weapons / consumables too.
+    cell.addEventListener('pointerenter', () => {
+      if (!this.visible) return;
+      const item = this.inventory.equipment[slot];
+      this._hoveredItem = item || null;
+      this._hoverSource = cell;
+    });
+    cell.addEventListener('pointerleave', () => {
+      if (this._hoverSource === cell) {
+        this._hoveredItem = null;
+        this._hoverSource = null;
+      }
+    });
     cell.addEventListener('click', (e) => {
       if (e.target.classList?.contains('cust-btn')) return;
       if (e.shiftKey) {
@@ -508,6 +552,28 @@ export class InventoryUI {
       window.addEventListener('pointermove', onMove);
       window.addEventListener('pointerup', onUp);
       window.addEventListener('pointercancel', onUp);
+    });
+    // Hover tracking — set/clear `_hoveredItem` so the global keydown
+    // handler can bind a backpack item to a quickslot when the player
+    // presses 1-8 while hovering it.
+    wrap.addEventListener('pointermove', (e) => {
+      if (!this.visible) return;
+      const rect = wrap.getBoundingClientRect();
+      const gx = Math.floor((e.clientX - rect.left) / (CELL_PX + CELL_GAP));
+      const gy = Math.floor((e.clientY - rect.top)  / (CELL_PX + CELL_GAP));
+      if (gx < 0 || gy < 0 || gx >= grid.w || gy >= grid.h) {
+        if (this._hoveredItem && this._hoverSource === wrap) this._hoveredItem = null;
+        return;
+      }
+      const entry = grid.at(gx, gy);
+      this._hoveredItem = entry ? entry.item : null;
+      this._hoverSource = wrap;
+    });
+    wrap.addEventListener('pointerleave', () => {
+      if (this._hoverSource === wrap) {
+        this._hoveredItem = null;
+        this._hoverSource = null;
+      }
     });
     // Right-click on a tile → equip (handled at wrap level now since
     // tiles are pointer-events: none).
