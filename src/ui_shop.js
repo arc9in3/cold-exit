@@ -201,9 +201,10 @@ export class ShopUI {
           </div>
           <div class="shop-col">
             <div class="inv-heading">Your Backpack</div>
-            <div id="shop-bag-actions" style="display:flex;gap:6px;margin-bottom:6px;">
-              <button id="shop-sell-junk" type="button" class="shop-bulk-btn" style="flex:1;padding:6px 10px;font-size:11px;letter-spacing:1.5px;text-transform:uppercase;background:rgba(143,191,112,0.18);color:#cfe5ad;border:1px solid rgba(143,191,112,0.55);border-radius:2px;cursor:pointer;font-family:inherit;font-weight:700;">Sell All Junk</button>
-              <button id="shop-repair-all" type="button" class="shop-bulk-btn" style="flex:1;padding:6px 10px;font-size:11px;letter-spacing:1.5px;text-transform:uppercase;background:rgba(255,80,80,0.18);color:#ffd0d0;border:1px solid rgba(255,80,80,0.55);border-radius:2px;cursor:pointer;font-family:inherit;font-weight:700;">Repair All</button>
+            <div id="shop-bag-actions" style="display:flex;gap:6px;margin-bottom:6px;flex-wrap:wrap;">
+              <button id="shop-sell-junk" type="button" class="shop-bulk-btn" style="flex:1;min-width:130px;padding:6px 10px;font-size:11px;letter-spacing:1.5px;text-transform:uppercase;background:rgba(143,191,112,0.18);color:#cfe5ad;border:1px solid rgba(143,191,112,0.55);border-radius:2px;cursor:pointer;font-family:inherit;font-weight:700;">Sell All Junk</button>
+              <button id="shop-repair-item" type="button" class="shop-bulk-btn" style="flex:1;min-width:130px;padding:6px 10px;font-size:11px;letter-spacing:1.5px;text-transform:uppercase;background:rgba(255,160,80,0.18);color:#ffd8a0;border:1px solid rgba(255,160,80,0.55);border-radius:2px;cursor:pointer;font-family:inherit;font-weight:700;">Repair Item</button>
+              <button id="shop-repair-all" type="button" class="shop-bulk-btn" style="flex:1;min-width:130px;padding:6px 10px;font-size:11px;letter-spacing:1.5px;text-transform:uppercase;background:rgba(255,80,80,0.18);color:#ffd0d0;border:1px solid rgba(255,80,80,0.55);border-radius:2px;cursor:pointer;font-family:inherit;font-weight:700;">Repair All</button>
             </div>
             <div id="shop-bag"></div>
           </div>
@@ -230,6 +231,8 @@ export class ShopUI {
     this.repairAllBtn = this.root.querySelector('#shop-repair-all');
     this.sellJunkBtn.addEventListener('click', () => this._sellAllJunk());
     this.repairAllBtn.addEventListener('click', () => this._repairAll());
+    this.repairItemBtn = this.root.querySelector('#shop-repair-item');
+    this.repairItemBtn.addEventListener('click', () => this._openRepairItemModal());
     this.rerollBtn = this.root.querySelector('#shop-reroll');
     this.rerollBtn.addEventListener('click', () => {
       if (!this.merchant) return;
@@ -252,6 +255,7 @@ export class ShopUI {
     this.root.style.display = 'none';
     this.merchant = null;
     this.buyback = [];
+    if (this._repairModal) this._repairModal.root.style.display = 'none';
     if (this.onClose) this.onClose();
   }
   isOpen() { return this.merchant !== null; }
@@ -359,13 +363,130 @@ export class ShopUI {
   // broken, or the player can't afford it.
   _repair(item) {
     if (!this._canRepair(item)) return;
-    if (item.durability.current > 0) return;
+    // Repair-any damaged item (not just fully broken). Skip full-
+    // durability ones so a misclick can't waste credits.
+    if (!item.durability || item.durability.current >= item.durability.max) return;
     const cost = repairPriceFor(item, this.getShopMult());
     if (this.getCredits() < cost) return;
     if (!this.spendCredits(cost)) return;
     item.durability.current = item.durability.max;
     if (typeof window.__recomputeStats === 'function') window.__recomputeStats();
     this.render();
+  }
+
+  // Per-item repair modal — lists every damaged item the current
+  // merchant can repair with individual prices + Repair buttons.
+  _openRepairItemModal() {
+    const list = this._damagedRepairables();
+    if (list.length === 0) return;
+    if (!this._repairModal) {
+      const root = document.createElement('div');
+      root.id = 'shop-repair-modal';
+      Object.assign(root.style, {
+        position: 'fixed', inset: '0',
+        display: 'none', alignItems: 'center', justifyContent: 'center',
+        background: 'rgba(0,0,0,0.65)', zIndex: '70',
+      });
+      const card = document.createElement('div');
+      Object.assign(card.style, {
+        background: 'linear-gradient(180deg, #181b21 0%, #0e1018 100%)',
+        border: '1px solid #c9a87a', borderRadius: '4px',
+        padding: '20px 22px', minWidth: '420px', maxWidth: '560px',
+        maxHeight: '78vh', overflowY: 'auto',
+        color: '#e8dfc8',
+        fontFamily: 'ui-monospace, SFMono-Regular, Menlo, Consolas, monospace',
+      });
+      card.innerHTML = `
+        <div style="font-size:16px;font-weight:700;letter-spacing:3px;color:#c9a87a;text-transform:uppercase;margin-bottom:14px;text-align:center;">Repair Item</div>
+        <div id="shop-repair-list" style="display:flex;flex-direction:column;gap:6px;"></div>
+        <button id="shop-repair-close" type="button" style="margin-top:14px;width:100%;padding:8px;background:rgba(125,167,200,0.15);color:#cbd6e2;border:1px solid rgba(125,167,200,0.55);border-radius:3px;cursor:pointer;font-family:inherit;font-weight:700;letter-spacing:2px;text-transform:uppercase;">Back</button>
+      `;
+      root.appendChild(card);
+      document.body.appendChild(root);
+      this._repairModal = { root, card, listEl: card.querySelector('#shop-repair-list') };
+      card.querySelector('#shop-repair-close').addEventListener('click', () => this._closeRepairItemModal());
+      root.addEventListener('mousedown', (e) => { if (e.target === root) this._closeRepairItemModal(); });
+    }
+    this._repairModal.root.style.display = 'flex';
+    this._renderRepairItemModal();
+  }
+  _renderRepairItemModal() {
+    if (!this._repairModal) return;
+    const list = this._damagedRepairables();
+    const credits = this.getCredits();
+    const listEl = this._repairModal.listEl;
+    listEl.innerHTML = '';
+    if (list.length === 0) {
+      const empty = document.createElement('div');
+      empty.style.cssText = 'text-align:center;color:#7a8290;padding:18px 0;font-size:12px;';
+      empty.textContent = 'No damaged items to repair.';
+      listEl.appendChild(empty);
+      return;
+    }
+    for (const entry of list) {
+      const { item, source, cost } = entry;
+      const dur = item.durability;
+      const pct = Math.max(0, Math.min(1, dur.current / dur.max));
+      const row = document.createElement('div');
+      row.style.cssText = 'display:flex;align-items:center;gap:10px;padding:8px 10px;border:1px solid #2c323c;border-radius:3px;background:#15181f;';
+      const left = document.createElement('div');
+      left.style.cssText = 'flex:1;min-width:0;';
+      const name = document.createElement('div');
+      name.style.cssText = 'font-size:12px;color:#e8dfc8;letter-spacing:1px;margin-bottom:4px;';
+      const cleanName = String(item.name || 'item').replace(/<[^>]+>/g, '');
+      const sourceLabel = source === 'backpack' ? '' : ` · equipped (${source})`;
+      name.textContent = cleanName + sourceLabel;
+      const bar = document.createElement('div');
+      bar.style.cssText = 'height:6px;background:#1a1d24;border-radius:1px;overflow:hidden;';
+      const fill = document.createElement('div');
+      const color = pct > 0.6 ? '#6abe8a' : pct > 0.3 ? '#e0c040' : '#d24040';
+      fill.style.cssText = `width:${Math.round(pct * 100)}%;height:100%;background:${color};`;
+      bar.appendChild(fill);
+      left.appendChild(name);
+      left.appendChild(bar);
+      row.appendChild(left);
+      const btn = document.createElement('button');
+      btn.type = 'button';
+      const canAfford = credits >= cost;
+      btn.textContent = `${cost}c`;
+      btn.disabled = !canAfford;
+      btn.style.cssText = `padding:8px 14px;font-size:11px;letter-spacing:1.5px;text-transform:uppercase;background:${canAfford ? 'rgba(255,160,80,0.18)' : 'rgba(80,80,80,0.18)'};color:${canAfford ? '#ffd8a0' : '#6a7280'};border:1px solid ${canAfford ? 'rgba(255,160,80,0.55)' : 'rgba(80,80,80,0.3)'};border-radius:3px;cursor:${canAfford ? 'pointer' : 'default'};font-family:inherit;font-weight:700;min-width:64px;`;
+      if (canAfford) {
+        btn.addEventListener('click', () => {
+          this._repair(item);
+          this._renderRepairItemModal();
+        });
+      }
+      row.appendChild(btn);
+      listEl.appendChild(row);
+    }
+  }
+  _closeRepairItemModal() {
+    if (this._repairModal) this._repairModal.root.style.display = 'none';
+    this.render();
+  }
+
+  // Build the full list of damaged items (backpack + equipped) the
+  // current merchant can repair. Used by the per-item modal AND the
+  // dynamic Repair All cost preview.
+  _damagedRepairables() {
+    if (!this.merchant || !this.inventory) return [];
+    const out = [];
+    const consider = (item, source) => {
+      if (!this._canRepair(item)) return;
+      if (!item.durability || item.durability.current >= item.durability.max) return;
+      out.push({
+        item, source,
+        cost: repairPriceFor(item, this.getShopMult()),
+      });
+    };
+    for (const it of (this.inventory.backpack || [])) consider(it, 'backpack');
+    if (this.inventory.equipment) {
+      for (const slot of Object.keys(this.inventory.equipment)) {
+        consider(this.inventory.equipment[slot], slot);
+      }
+    }
+    return out;
   }
 
   // Sell every junk item in the backpack in one click. Adds each
@@ -407,7 +528,9 @@ export class ShopUI {
     let totalCost = 0;
     const tryFix = (item) => {
       if (!item || !this._canRepair(item)) return;
-      if (!item.durability || item.durability.current > 0) return;
+      // Damage-any: was current > 0 (broken-only); now repairs every
+      // damaged item the merchant can touch.
+      if (!item.durability || item.durability.current >= item.durability.max) return;
       const cost = repairPriceFor(item, this.getShopMult());
       if (this.getCredits() < cost) return;
       if (!this.spendCredits(cost)) return;
@@ -461,10 +584,38 @@ export class ShopUI {
     // so the row doesn't reflow when switching between merchants.
     const kind = this.merchant.kind;
     if (this.repairAllBtn) {
-      this.repairAllBtn.style.display = (kind === 'gunsmith' || kind === 'armorer') ? '' : 'none';
-      this.repairAllBtn.textContent = kind === 'gunsmith' ? 'Repair All Weapons'
-                                    : kind === 'armorer'  ? 'Repair All Armor'
-                                    : 'Repair All';
+      const canShow = (kind === 'gunsmith' || kind === 'armorer');
+      this.repairAllBtn.style.display = canShow ? '' : 'none';
+      const baseLabel = kind === 'gunsmith' ? 'Repair All Weapons'
+                      : kind === 'armorer'  ? 'Repair All Armor'
+                      : 'Repair All';
+      // Live cost preview — sum of every damaged repairable item.
+      const damaged = canShow ? this._damagedRepairables() : [];
+      const total = damaged.reduce((s, e) => s + e.cost, 0);
+      this.repairAllBtn.textContent = damaged.length === 0
+        ? baseLabel
+        : `${baseLabel} · ${total}c`;
+      // Disabled-greyed when there's nothing to do or the player
+      // can't afford the full sweep.
+      const credits = this.getCredits();
+      const cantAfford = total > 0 && credits < total;
+      this.repairAllBtn.disabled = damaged.length === 0;
+      this.repairAllBtn.style.opacity = (damaged.length === 0 || cantAfford) ? '0.55' : '1';
+      this.repairAllBtn.style.cursor = damaged.length === 0 ? 'default' : 'pointer';
+      this.repairAllBtn.title = cantAfford
+        ? `Need ${total}c (you have ${credits}c). Items will be repaired in order until credits run out.`
+        : '';
+    }
+    if (this.repairItemBtn) {
+      const canShow = (kind === 'gunsmith' || kind === 'armorer');
+      this.repairItemBtn.style.display = canShow ? '' : 'none';
+      const damaged = canShow ? this._damagedRepairables() : [];
+      this.repairItemBtn.disabled = damaged.length === 0;
+      this.repairItemBtn.style.opacity = damaged.length === 0 ? '0.55' : '1';
+      this.repairItemBtn.style.cursor = damaged.length === 0 ? 'default' : 'pointer';
+      this.repairItemBtn.textContent = damaged.length === 0
+        ? 'Repair Item'
+        : `Repair Item (${damaged.length})`;
     }
     // Reroll: only when the unlock has been purchased AND this visit
     // hasn't burned its single use. Disabled-greyed if used so the

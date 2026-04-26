@@ -3660,7 +3660,20 @@ function fireOneShot(playerInfo, weapon, aimPoint, isADS) {
     const k = Math.max(0, 1 - derivedStats.lmgSustainedSpreadDecay * _lmgHeldT);
     spread *= k;
   }
-  const pellets = Math.max(1, (eff.pelletCount | 0) + (derivedStats.pelletCountBonus || 0));
+  // Twin Fangs — each stack rolls a fresh 5% chance to add one
+  // extra pellet to THIS shot. Independent rolls per stack so two
+  // copies of the perk can both fire on the same trigger pull.
+  let extraPellets = 0;
+  const epc = derivedStats.extraPelletChance || 0;
+  if (epc > 0) {
+    // Number of stacks = ceil(epc / 0.05); each rolls independently.
+    const stacks = Math.max(1, Math.round(epc / 0.05));
+    const perStack = epc / stacks;     // typically 0.05
+    for (let i = 0; i < stacks; i++) {
+      if (Math.random() < perStack) extraPellets++;
+    }
+  }
+  const pellets = Math.max(1, (eff.pelletCount | 0) + (derivedStats.pelletCountBonus || 0) + extraPellets);
   const effRange = eff.range * (derivedStats.rangeMult || 1);
   // Exclude unlocked doors — their flattened mesh still intersects
   // raycasts otherwise, so bullets would invisibly hit the doorway.

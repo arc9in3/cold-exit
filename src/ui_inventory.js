@@ -783,37 +783,47 @@ export class InventoryUI {
     //   Each row tags its source so the player can trace where a
     //   given perk came from when planning swaps.
     const perkRows = [];
-    const seenPerks = new Set();
-    const pushPerk = (key, name, desc, sourceTag) => {
-      if (!key || seenPerks.has(key)) return;
-      seenPerks.add(key);
-      perkRows.push(`<div class="inv-prog-perk">
-        <span class="inv-prog-perk-name">◆ ${name}</span>
-        ${desc ? `<span class="inv-prog-perk-desc"> — ${desc}</span>` : ''}
-        ${sourceTag ? `<span class="inv-prog-perk-src">${sourceTag}</span>` : ''}
-      </div>`);
+    // Two-pass build: first count occurrences of each perk by key,
+    // then emit a single row per key tagged with "× N" when stacked.
+    // Skill-tree + special-perk entries can't stack with themselves
+    // (they're identity-keyed), but a perk like Twin Fang rolling
+    // onto two pieces of gear should clearly show × 2.
+    const perkCounts = new Map();   // key → { name, desc, source, count }
+    const recordPerk = (key, name, desc, sourceTag) => {
+      if (!key) return;
+      const existing = perkCounts.get(key);
+      if (existing) {
+        existing.count += 1;
+      } else {
+        perkCounts.set(key, { name, desc, source: sourceTag, count: 1 });
+      }
     };
     for (const slot of SLOT_IDS) {
       const it = eq[slot]; if (!it || !it.perks) continue;
       for (const p of it.perks) {
-        pushPerk(p.id || p.name, p.name, p.description, 'GEAR');
+        recordPerk(p.id || p.name, p.name, p.description, 'GEAR');
       }
     }
     for (const id of (this.getSpecialPerks() || [])) {
       const def = SPECIAL_PERKS[id]; if (!def) continue;
-      pushPerk('sp:' + id, def.name, def.description, 'PERK');
+      recordPerk('sp:' + id, def.name, def.description, 'PERK');
     }
     const stLevels = this.getSkillTreeLevels() || {};
     for (const [id, lv] of Object.entries(stLevels)) {
       if (!lv || lv <= 0) continue;
       const def = SKILL_NODES[id]; if (!def) continue;
-      // Skill-tree nodes are tiered — show the highest reached tier's
-      // description (lv is 1-indexed into def.levels) so the player
-      // sees what the current investment buys.
       const tierIdx = Math.max(0, Math.min((def.levels?.length || 1) - 1, lv - 1));
       const tier = def.levels?.[tierIdx];
       const desc = tier?.desc || def.desc || '';
-      pushPerk('st:' + id, `${def.name} L${lv}`, desc, 'SKILL');
+      recordPerk('st:' + id, `${def.name} L${lv}`, desc, 'SKILL');
+    }
+    for (const { name, desc, source, count } of perkCounts.values()) {
+      const stackTag = count > 1 ? ` <span class="inv-prog-perk-stack">× ${count}</span>` : '';
+      perkRows.push(`<div class="inv-prog-perk">
+        <span class="inv-prog-perk-name">◆ ${name}${stackTag}</span>
+        ${desc ? `<span class="inv-prog-perk-desc"> — ${desc}</span>` : ''}
+        ${source ? `<span class="inv-prog-perk-src">${source}</span>` : ''}
+      </div>`);
     }
 
     // — Affixes: roll up every non-set affix on every equipped piece.

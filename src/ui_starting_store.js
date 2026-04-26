@@ -235,14 +235,19 @@ export class StoreUpgradeUI {
       },
     }));
 
-    // Close.
+    // Close — wrapped in a sticky bottom shelf so it's always reachable
+    // even when the merchant + perk sections push the body past the
+    // card's max-height and the inner area scrolls.
+    const closeWrap = document.createElement('div');
+    closeWrap.style.cssText = 'position:sticky;bottom:0;background:linear-gradient(180deg,rgba(14,16,24,0) 0%,rgba(14,16,24,0.95) 35%,rgba(14,16,24,1) 100%);padding:14px 0 4px;margin-top:14px;';
     const closeBtn = document.createElement('button');
     closeBtn.type = 'button';
     closeBtn.className = 'menu-btn';
-    closeBtn.style.marginTop = '14px';
     closeBtn.textContent = 'Back';
+    closeBtn.style.width = '100%';
     closeBtn.addEventListener('click', () => { this.hide(); this.onClose(); });
-    this.bodyEl.appendChild(closeBtn);
+    closeWrap.appendChild(closeBtn);
+    this.bodyEl.appendChild(closeWrap);
   }
 }
 

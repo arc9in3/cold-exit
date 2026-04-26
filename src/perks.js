@@ -117,10 +117,12 @@ export const GEAR_PERKS = {
   },
   twinFangs: {
     id: 'twinFangs', name: 'Twin Fangs', _lvl: 5,
-    description: '+1 pellet, −5% fire rate',
+    description: '5% chance per shot to fire one extra pellet',
     apply(s) {
-      s.pelletCountBonus = (s.pelletCountBonus || 0) + 1;
-      s.fireRateMult = (s.fireRateMult || 1) * 0.95;
+      // Stackable across multiple Twin Fangs sources — each instance
+      // adds another 5% roll. Consumed by the fire path in main.js
+      // (extra-pellet check before the pellet loop).
+      s.extraPelletChance = (s.extraPelletChance || 0) + 0.05;
     },
   },
   goldenChance: {

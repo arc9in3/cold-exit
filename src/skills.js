@@ -176,6 +176,7 @@ export const BASE_STATS = () => ({
   hipSpreadOnlyMult: 1,
   adsSpreadOnlyMult: 1,
   pelletCountBonus: 0,
+  extraPelletChance: 0,
   magSizeMult: 1,
   rangeMult: 1,
   headMultBonus: 0,
