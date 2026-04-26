@@ -4145,8 +4145,9 @@ function fireOneShot(playerInfo, weapon, aimPoint, isADS, aimOwner) {
   else if (_wclass === 'lmg')     { _baseRange = ROOM_M * 1.2;  _falloffShape = 'steady'; }
   else if (_wclass === 'sniper')  { _baseRange = 100;           _falloffShape = 'none';   }
   else                            { _baseRange = 100;           _falloffShape = 'steady'; }   // pistol default
-  // Honor any rangeMult perks/skills then jitter ±25% per shot.
-  const _classMaxRange = _baseRange * (derivedStats.rangeMult || 1);
+  // Universal +30% range bump on top of the per-class base. Stacks
+  // multiplicatively with rangeMult perks (long barrel, etc.).
+  const _classMaxRange = _baseRange * 1.30 * (derivedStats.rangeMult || 1);
   // Per-shot jitter — applied at the loop body so each pellet gets its
   // own random end-of-range. Helper to compute the falloff multiplier
   // given a hit distance.
@@ -4154,8 +4155,8 @@ function fireOneShot(playerInfo, weapon, aimPoint, isADS, aimOwner) {
     if (_falloffShape === 'none' || maxR <= 0) return 1.0;
     const t = Math.max(0, Math.min(1, dist / maxR));
     const k = _falloffShape === 'steep' ? t * t : t;
-    // Lerp 1.0 → 0.65 (35% reduction at the edge).
-    return 1.0 - 0.35 * k;
+    // Lerp 1.0 → 0.50 (50% reduction at the edge — was 35%, +15%).
+    return 1.0 - 0.50 * k;
   };
   // Backwards-compat with later code paths that still read `effRange`
   // (penetration, ricochet target search). Use the un-jittered class
