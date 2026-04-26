@@ -73,18 +73,25 @@ export function createScene() {
     // doesn't slide the world around anymore.
     const desired = base.clone();
     if (adsEased > 0.05 && opts.adsPeekDir) {
-      const peekStrength = adsEased * weaponPeek * 0.55;
+      // "Scope factor" — blends from 0 at iron-sight peek (≤3m) to 1
+      // at long-scope peek (≥7m). Mid-to-long sights get up to 35%
+      // more peek + edge-pan budget so scoped weapons can actually
+      // see the area they zoom into.
+      const scopeFactor = Math.max(0, Math.min(1, (weaponPeek - 3) / 4));
+      const sightBonus = 1 + 0.35 * scopeFactor;
+      const peekStrength = adsEased * weaponPeek * 0.55 * sightBonus;
       desired.x += opts.adsPeekDir.x * peekStrength;
       desired.z += opts.adsPeekDir.z * peekStrength;
       // Edge-of-screen pan — once the cursor reaches the outer 30%
       // of the viewport, slide the anchor in that direction so the
       // player can scan further off-frame. Smoothstep ramp from
       // EDGE_THRESHOLD → 1.0 so the transition reads as "lean" not
-      // "snap". Pan budget capped at MAX_EDGE_OFFSET metres.
+      // "snap". Pan budget capped at MAX_EDGE_OFFSET metres (scaled
+      // by sightBonus so scopes pan further).
       const ndc = opts.cursorNDC;
       if (ndc) {
         const EDGE_THRESHOLD = 0.65;
-        const MAX_EDGE_OFFSET = 4.5;
+        const MAX_EDGE_OFFSET = 4.5 * sightBonus;
         const computeAxis = (v) => {
           const a = Math.abs(v);
           if (a <= EDGE_THRESHOLD) return 0;

@@ -1159,6 +1159,18 @@ export const THROWABLE_DEFS = {
     maxCharges: 2, cooldownSec: 50,
     description: 'Audio + visual lure pulls enemies to a location for 7s',
   },
+  claymore: {
+    id: 'thr_claymore', name: 'Claymore', type: 'throwable', rarity: 'uncommon',
+    tint: 0x4a8030,
+    throwKind: 'claymore',
+    // Place-not-throw: short fuse just covers the toss arc. The mine
+    // is the persistent prop; arming happens on first ground contact.
+    aoeRadius: 4.5, aoeDamage: 110, aoeShake: 0.55, fuse: 0.4,
+    triggerRadius: 2.6,                    // proximity sphere
+    triggerConeDeg: 90,                    // detonates only for enemies in front
+    maxCharges: 2, cooldownSec: 60,
+    description: 'Place a directional mine · proximity-triggered cone blast · 2 charges, 60s each',
+  },
 };
 export const ALL_THROWABLES = Object.values(THROWABLE_DEFS);
 // Clone a throwable def into a live item instance — sets initial

@@ -4323,6 +4323,19 @@ function onProjectileExplode(pos, explosion, owner, p) {
     if (sfx.explode) sfx.explode();
     return;
   }
+  if (kind === 'claymore') {
+    // Place the mine — no explosion here. The claymore is a persistent
+    // prop that sits at `pos` and detonates on enemy proximity, see
+    // _claymores + _tickClaymores below.
+    placeClaymore(pos, p.throwDirX, p.throwDirZ, {
+      radius, damage: explosion.damage,
+      triggerRadius: p.triggerRadius || 2.6,
+      triggerConeDeg: p.triggerConeDeg || 90,
+      shake: explosion.shake || 0.55,
+    });
+    if (sfx.uiAccept) sfx.uiAccept();
+    return;
+  }
 
   // --- default (frag / rocket / grenade-launcher) path ---
   // Visual pop — expanding fireball + scorched-ring shock wave
@@ -5374,6 +5387,7 @@ function throwItem(item) {
     color: item.throwKind === 'molotov' ? 0xff8030
          : item.throwKind === 'flash'   ? 0xfff0a0
          : item.throwKind === 'stun'    ? 0x80a0ff
+         : item.throwKind === 'claymore'? 0x4a8030
          : 0x60a040,
     explosion: {
       radius: item.aoeRadius ?? 3.5,
@@ -5384,18 +5398,24 @@ function throwItem(item) {
     gravity,
     // Grenades visibly bounce now — bumped from 0.15 → 0.40 so the
     // throw reads as a hand-held device skipping off the floor before
-    // settling. Molotov still shatters on impact (bounciness 0).
-    bounciness: item.throwKind === 'molotov' ? 0.0 : 0.40,
+    // settling. Molotov + claymore stick on first contact (bounciness 0).
+    bounciness: (item.throwKind === 'molotov' || item.throwKind === 'claymore') ? 0.0 : 0.40,
     // Fuse-after-landing — frag/flash/stun all want to bounce and
-    // settle before going off. Molotov detonates on impact and
-    // bypasses this entirely (bounciness 0 → ground-contact branch
-    // detonates immediately, lifetime never matters).
-    fuseAfterLand: item.throwKind !== 'molotov',
+    // settle before going off. Molotov + claymore "detonate" on
+    // impact (the claymore's "detonate" means it places the mine,
+    // not blows up).
+    fuseAfterLand: item.throwKind !== 'molotov' && item.throwKind !== 'claymore',
     throwKind: item.throwKind || 'frag',
     fireDuration: item.fireDuration,
     fireTickDps: item.fireTickDps,
     blindDuration: item.blindDuration,
     stunDuration: item.stunDuration,
+    triggerRadius: item.triggerRadius,
+    triggerConeDeg: item.triggerConeDeg,
+    // Throw heading — claymore aims its detonation cone in the throw
+    // direction, so a player flicking left places a mine that fires left.
+    throwDirX: dx,
+    throwDirZ: dz,
   });
   sfx.uiAccept();
   return true;
@@ -5618,6 +5638,191 @@ function _tickThrowableZones(dt) {
       _decoys.splice(i, 1);
     }
   }
+}
+
+// --- Claymores ------------------------------------------------------
+// Placed mines: small green plate + two diagonal red lasers showing
+// the trigger cone. When an alive enemy enters the proximity sphere
+// AND lies within the front cone, the claymore detonates with a
+// directional cone explosion (damage falls off both with distance
+// and with how far off-axis the enemy is).
+//
+// Perf:
+//  * Geometries (plate, leg, laser segment) are CACHED once. Each
+//    placement allocates 5 small Mesh objects + their materials —
+//    not pooled (placements are rare relative to fire orbs) but
+//    cheap enough that placing both charges back-to-back is one
+//    frame of work.
+//  * Proximity check runs once per claymore per frame against alive
+//    enemies only (early-outs on tier === 'dead'). Squared-distance
+//    test, no allocations.
+//  * Detonation tears down BOTH lasers + plate + legs and dispatches
+//    the standard explosion path so the cleanup is the same handful
+//    of dispose() calls every other throwable already pays.
+const _claymores = [];
+const _claymoreCache = {};
+function _claymoreGeoms() {
+  if (_claymoreCache.plate) return _claymoreCache;
+  _claymoreCache.plate = new THREE.BoxGeometry(0.34, 0.18, 0.07);
+  _claymoreCache.leg   = new THREE.CylinderGeometry(0.012, 0.012, 0.18, 5);
+  _claymoreCache.laser = new THREE.CylinderGeometry(0.012, 0.012, 1, 4);
+  return _claymoreCache;
+}
+function placeClaymore(pos, dirX, dirZ, opts) {
+  const geo = _claymoreGeoms();
+  const dl = Math.hypot(dirX || 0, dirZ || 0) || 1;
+  const fx = (dirX || 0) / dl;
+  const fz = (dirZ || 0) / dl;
+  const yaw = Math.atan2(fx, fz);
+
+  const group = new THREE.Group();
+  group.position.set(pos.x, 0, pos.z);
+  group.rotation.y = yaw;
+
+  const plate = new THREE.Mesh(geo.plate, new THREE.MeshStandardMaterial({
+    color: 0x4a8030, roughness: 0.6, metalness: 0.2,
+    emissive: 0x183008, emissiveIntensity: 0.4,
+  }));
+  plate.position.y = 0.20;
+  group.add(plate);
+  const legL = new THREE.Mesh(geo.leg, new THREE.MeshStandardMaterial({ color: 0x222222 }));
+  const legR = legL.clone();
+  legL.position.set(-0.12, 0.09, -0.05);
+  legR.position.set( 0.12, 0.09, -0.05);
+  legL.rotation.x =  0.35; legR.rotation.x = 0.35;
+  group.add(legL); group.add(legR);
+
+  // Two diagonal red laser tripwires fanning forward from the plate.
+  // Each laser is a 1m cylinder oriented along its diagonal direction,
+  // so the trigger zone reads as a clear "X" in front of the mine.
+  const triggerR = opts.triggerRadius;
+  const halfCone = (opts.triggerConeDeg * Math.PI / 180) / 2;
+  const laserMat = new THREE.MeshBasicMaterial({
+    color: 0xff2030, transparent: true, opacity: 0.85,
+    depthWrite: false,
+  });
+  const mkLaser = (sign) => {
+    const len = triggerR;
+    const m = new THREE.Mesh(geo.laser, laserMat);
+    m.scale.y = len;                          // stretch unit cyl to len
+    // Orient: forward (local +Z) + rotated by ±halfCone around Y.
+    // Cylinder is along Y, so we tilt 90° around X first, then yaw.
+    m.rotation.order = 'YXZ';
+    m.rotation.x = Math.PI / 2;               // align cylinder with +Z
+    m.rotation.y = halfCone * sign;
+    // Position the segment so its near end is at the plate front,
+    // pointing outward.
+    const midOffset = len / 2;
+    m.position.set(
+      Math.sin(halfCone * sign) * midOffset,
+      0.18,
+      Math.cos(halfCone * sign) * midOffset + 0.05,
+    );
+    return m;
+  };
+  const laserA = mkLaser(+1);
+  const laserB = mkLaser(-1);
+  group.add(laserA); group.add(laserB);
+
+  scene.add(group);
+  _claymores.push({
+    x: pos.x, z: pos.z, fx, fz,
+    triggerR, triggerR2: triggerR * triggerR,
+    coneCos: Math.cos(halfCone),
+    radius: opts.radius,
+    damage: opts.damage,
+    shake: opts.shake,
+    armT: 1.2,                          // arming delay — laser starts yellow then turns red when live
+    group, plate, legL, legR, laserA, laserB, laserMat,
+    blink: Math.random() * Math.PI * 2,
+    alive: true,
+  });
+}
+function _tickClaymores(dt) {
+  for (let i = _claymores.length - 1; i >= 0; i--) {
+    const c = _claymores[i];
+    if (!c.alive) { _claymores.splice(i, 1); continue; }
+    if (c.armT > 0) {
+      c.armT = Math.max(0, c.armT - dt);
+      // Arming: lasers pulse yellow + faster blink to telegraph the
+      // mine isn't live yet.
+      c.blink += dt * 12;
+      c.laserMat.color.setHex(0xffd040);
+      c.laserMat.opacity = 0.55 + 0.35 * Math.sin(c.blink);
+      if (c.armT === 0) c.laserMat.color.setHex(0xff2030);
+      continue;
+    }
+    // Live state: red lasers, slower steady blink.
+    c.blink += dt * 6;
+    c.laserMat.opacity = 0.65 + 0.25 * Math.sin(c.blink);
+    // Proximity test against alive enemies only.
+    let trip = null;
+    const check = (list) => {
+      if (trip) return;
+      for (const e of list) {
+        if (!e.alive) continue;
+        const dx = e.group.position.x - c.x;
+        const dz = e.group.position.z - c.z;
+        const d2 = dx * dx + dz * dz;
+        if (d2 > c.triggerR2) continue;
+        const d = Math.sqrt(d2) || 1;
+        const dot = (dx / d) * c.fx + (dz / d) * c.fz;
+        if (dot < c.coneCos) continue;     // outside the front cone
+        trip = e;
+        return;
+      }
+    };
+    check(gunmen.gunmen);
+    check(melees.enemies);
+    if (trip) _detonateClaymore(c);
+  }
+}
+function _detonateClaymore(c) {
+  if (!c.alive) return;
+  c.alive = false;
+  const pos = new THREE.Vector3(c.x, 0.4, c.z);
+  // Tear down the prop + lasers BEFORE dispatching the explosion so
+  // there's no chance the visual lingers across the explosion frame.
+  if (c.group.parent) c.group.parent.remove(c.group);
+  // Plate uses MeshStandardMaterial which we built bespoke; legs use
+  // their own material instances; lasers share laserMat. Dispose all.
+  c.plate.material.dispose();
+  c.legL.material.dispose();
+  c.legR.material.dispose();
+  c.laserMat.dispose();
+  // Cone-shaped damage along the mine's facing. Re-uses the standard
+  // explosion VFX (fireball + shockwave) so the visual matches every
+  // other throwable. Damage falls off off-axis: enemies straight in
+  // front take full hit, edge of cone takes ~30%.
+  spawnExplosionFx(pos, c.radius);
+  if (sfx.explode) sfx.explode();
+  triggerShake(c.shake || 0.55, 0.35);
+  triggerHitStop?.(0.05);
+  const r2 = c.radius * c.radius;
+  const apply = (list) => {
+    for (const e of list) {
+      if (!e.alive) continue;
+      const dx = e.group.position.x - c.x;
+      const dz = e.group.position.z - c.z;
+      const d2 = dx * dx + dz * dz;
+      if (d2 > r2) continue;
+      const d = Math.sqrt(d2) || 1;
+      const dot = (dx / d) * c.fx + (dz / d) * c.fz;
+      if (dot < c.coneCos) continue;       // shielded by being behind
+      // Distance falloff (1.0 → 0.25) × cone falloff (1.0 → 0.4).
+      const distMul = Math.max(0.25, 1 - 0.75 * (d / c.radius));
+      const coneT = (dot - c.coneCos) / (1 - c.coneCos);
+      const coneMul = 0.4 + 0.6 * coneT;
+      const dmg = c.damage * distMul * coneMul;
+      const wasAlive = e.alive;
+      _explodeDir.set(dx / d, 0, dz / d);
+      runStats.addDamage(dmg);
+      e.manager.applyHit(e, dmg, 'torso', _explodeDir, { weaponClass: 'explosive' });
+      if (wasAlive && !e.alive) onEnemyKilled(e, { byThrowable: true });
+    }
+  };
+  apply(gunmen.gunmen);
+  apply(melees.enemies);
 }
 
 // Public predicates the AI tick uses to alter detection / target.
@@ -6938,6 +7143,7 @@ function tick() {
   _tickBurnReadouts(dt);
   _tickBuffAuras(dt);
   _tickThrowableZones(dt);
+  _tickClaymores(dt);
   _tickCamping(dt);
   _tickBurnFlames(dt);
   tickAmbushDrops(dt);
