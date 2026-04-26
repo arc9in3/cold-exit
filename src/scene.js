@@ -39,17 +39,20 @@ export function createScene() {
   }
 
   // ADS camera offset (world units, X+Z plane). Pivot is always the
-  // player; this offset rides on top. On press, snaps to the cursor's
-  // world delta from the player (camera "locks into" the click
-  // point, capped at the weapon's drag budget). While held, cursor
-  // SCREEN motion (NDC delta) accumulates onto the offset 1:1 in
-  // world units — drag the cursor and the camera pans with it. Hard-
-  // clamps at weaponPeek so the camera stops at the zoom edge. The
-  // final lookAt lerps toward player+offset with an exp ease that
-  // reads as a critically-damped spring.
+  // player; this offset rides on top. Two contributions:
+  //   1. Press-time zoom compensation — when the frustum shrinks,
+  //      the world point under the cursor would otherwise drift
+  //      toward the lookAt center. We add a small lateral shift in
+  //      the cursor's NDC direction so the world point under the
+  //      cursor stays put as the zoom engages. Captured ONCE on
+  //      press; doesn't change as the cursor moves afterward.
+  //   2. Edge-pan accumulator — only when the cursor is in the
+  //      OUTER band (NDC magnitude past EDGE_THRESHOLD) does the
+  //      offset grow per-frame. Cursor in the inner deadzone moves
+  //      freely without panning the camera. Hard-capped at
+  //      weaponPeek (the equipped optic's reach budget).
   const _adsOffset = new THREE.Vector3();
-  let _adsPrevNdcX = 0;
-  let _adsPrevNdcY = 0;
+  const _adsPressComp = new THREE.Vector3();
   let _adsHeld = false;
   // Scratch reused for the per-frame `desired` target — was a
   // `base.clone()` allocation every camera tick.
@@ -77,56 +80,81 @@ export function createScene() {
     camera.bottom = -halfH;
     camera.updateProjectionMatrix();
 
-    // ADS camera model — cursor leads, camera springs:
-    //   1. Pivot is ALWAYS the player (`base`); ADS just rides an
-    //      offset on top.
-    //   2. On press (rising edge of adsEased), the offset SNAPS to
-    //      the cursor's world delta from the player, hard-clamped to
-    //      `weaponPeek`. The camera "locks into" the click point.
-    //   3. While held, cursor SCREEN motion (NDC delta) accumulates
-    //      onto the offset 1:1 in world units. Drag right by N px →
-    //      offset gains N px worth of world →  camera pans right.
-    //      No drift when the mouse is still: NDC delta is zero, the
-    //      offset holds.
-    //   4. The offset is hard-clamped to weaponPeek every frame —
-    //      camera STOPS at the zoom edge. Pulling back unclamps.
-    //   5. lookAt lerps toward player+offset with an exp ease (rate
-    //      7.0) that reads as a critically-damped spring — moves
-    //      with the cursor, no overshoot, settles in ~0.4s.
-    //   6. Release bleeds the offset back to zero.
+    // ADS camera model — deadzone + edge pan:
+    //   1. Pivot is ALWAYS the player (`base`).
+    //   2. PRESS — engage the sight-driven frustum push-in (handled
+    //      above). Compute a small lateral offset that compensates
+    //      for the zoom-in so the world point under the cursor
+    //      doesn't drift toward screen center as the zoom engages.
+    //      Cursor's screen position doesn't move; cursor's world
+    //      point doesn't move; the camera shifts under both.
+    //   3. HOLD + cursor in the inner deadzone (|NDC| ≤ EDGE_THRESHOLD)
+    //      — no edge-pan growth. Cursor moves freely; camera holds
+    //      steady. The user can sweep the crosshair around the
+    //      target without yanking the view.
+    //   4. HOLD + cursor in the OUTER band (|NDC| > EDGE_THRESHOLD)
+    //      — accumulate offset velocity in that direction, scaled by
+    //      how far past the threshold (smoothstep). Pan at PAN_SPEED
+    //      m/sec at full edge; a sniper budget (35m) takes ~1s to
+    //      traverse.
+    //   5. Offset is hard-capped at weaponPeek. Camera stops at the
+    //      zoom limit; pulling cursor back into deadzone holds in
+    //      place.
+    //   6. RELEASE — bleed offset + compensation back to zero.
     const desired = _desiredScratch.copy(base);
     const ndc = opts.cursorNDC;
-    if (adsEased > 0.01 && opts.aim && ndc) {
+    if (adsEased > 0.01 && ndc) {
       if (!_adsHeld) {
-        // PRESS — lock onto the cursor's world position. Cap at the
-        // weapon's drag budget so a click at extreme distance still
-        // parks the camera at the budget edge in that direction.
-        _adsOffset.set(opts.aim.x - base.x, 0, opts.aim.z - base.z);
-        _clampAdsOffsetToWeaponPeek(weaponPeek);
-        _adsPrevNdcX = ndc.x;
-        _adsPrevNdcY = ndc.y;
+        // Press-time compensation. Zoom shrinks the half-extents
+        // from baseHalfH to baseHalfH/sightZoom. The cursor at
+        // NDC.x maps to lookAt + NDC.x * halfWidth in world. To
+        // keep that world point fixed across the zoom transition,
+        // the camera must shift by NDC * (oldHalf − newHalfAtFull).
+        const baseHalfH = tunables.camera.viewHeight / 2;
+        const baseHalfW = baseHalfH * aspect;
+        const fullHalfH = baseHalfH * adsFrustumShrink;
+        const fullHalfW = fullHalfH * aspect;
+        _adsPressComp.x =  ndc.x * (baseHalfW - fullHalfW);
+        _adsPressComp.z = -ndc.y * (baseHalfH - fullHalfH);
+        _adsOffset.copy(_adsPressComp);
         _adsHeld = true;
       } else {
-        // DRAG — convert NDC motion to world motion via the current
-        // ortho frustum half-extents. NDC y points UP; iso forward
-        // is roughly -Z, so +ndc.y → -Z world.
-        const dNdcX = ndc.x - _adsPrevNdcX;
-        const dNdcY = ndc.y - _adsPrevNdcY;
-        _adsPrevNdcX = ndc.x;
-        _adsPrevNdcY = ndc.y;
-        const halfW = halfH * aspect;
-        _adsOffset.x += dNdcX * halfW;
-        _adsOffset.z += -dNdcY * halfH;
-        _clampAdsOffsetToWeaponPeek(weaponPeek);
+        // Edge-pan accumulator. Inner EDGE_THRESHOLD is the
+        // deadzone — cursor moves freely there with no camera
+        // response. Past that, smoothstep ramps the pan velocity.
+        const EDGE_THRESHOLD = 0.6;
+        const computeAxis = (v) => {
+          const a = Math.abs(v);
+          if (a <= EDGE_THRESHOLD) return 0;
+          const t = Math.min(1, (a - EDGE_THRESHOLD) / (1 - EDGE_THRESHOLD));
+          // Quadratic in-curve so the band starts gently and ramps.
+          return Math.sign(v) * t * t;
+        };
+        const ex = computeAxis(ndc.x);
+        const ey = computeAxis(ndc.y);
+        // PAN_SPEED = m/sec at full edge. Scaled to weaponPeek so
+        // bigger optics traverse their bigger budget at roughly the
+        // same wall-clock pace (~1s edge-to-cap).
+        const PAN_SPEED = weaponPeek;
+        _adsOffset.x += ex * PAN_SPEED * dt;
+        _adsOffset.z += -ey * PAN_SPEED * dt;
+        // Hard cap on total offset magnitude — camera stops dead at
+        // the zoom edge. Pull cursor back in to drift back below.
+        const m = Math.sqrt(_adsOffset.x * _adsOffset.x + _adsOffset.z * _adsOffset.z);
+        if (m > weaponPeek) {
+          const k = weaponPeek / m;
+          _adsOffset.x *= k;
+          _adsOffset.z *= k;
+        }
       }
       desired.x += _adsOffset.x * adsEased;
       desired.z += _adsOffset.z * adsEased;
     } else {
-      // RELEASE — bleed offset back to zero so the next press starts
-      // cleanly at the new click point.
+      // RELEASE — bleed offset back to zero.
       _adsHeld = false;
       _adsOffset.x *= 0.85;
       _adsOffset.z *= 0.85;
+      _adsPressComp.set(0, 0, 0);
     }
 
     // Spring lerp toward player+offset. Higher rate = snappier
@@ -138,15 +166,6 @@ export function createScene() {
 
     camera.position.copy(lookAt).add(isoOffset);
     camera.lookAt(lookAt);
-  }
-
-  function _clampAdsOffsetToWeaponPeek(maxMag) {
-    const m = Math.sqrt(_adsOffset.x * _adsOffset.x + _adsOffset.z * _adsOffset.z);
-    if (m > maxMag) {
-      const k = maxMag / m;
-      _adsOffset.x *= k;
-      _adsOffset.z *= k;
-    }
   }
 
   // Cold-Exit palette: unlit surfaces fall to near-black. Global fill
