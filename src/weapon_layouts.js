@@ -157,9 +157,43 @@ export const WEAPON_LAYOUTS = {
   },
 };
 
+// Lazy resolution of the per-weapon render PNG so weapon_layouts can
+// stay free of model_manifest at module-eval time.
+let _renderLookup = null;
+async function _loadRenderLookup() {
+  if (_renderLookup !== null) return _renderLookup;
+  try {
+    const m = await import('./model_manifest.js');
+    _renderLookup = m.renderForWeaponName || (() => null);
+  } catch {
+    _renderLookup = () => null;
+  }
+  return _renderLookup;
+}
+// Eager-prime so the first layoutForWeapon call has the lookup ready.
+// model_manifest is small and already resident.
+_loadRenderLookup();
+
 export function layoutForWeapon(weapon) {
-  if (!weapon) return WEAPON_LAYOUTS.pistol;
-  if (weapon.class && WEAPON_LAYOUTS[weapon.class]) return WEAPON_LAYOUTS[weapon.class];
-  if (weapon.type === 'melee') return WEAPON_LAYOUTS.melee;
-  return WEAPON_LAYOUTS.pistol;
+  const baseLayout = (() => {
+    if (!weapon) return WEAPON_LAYOUTS.pistol;
+    if (weapon.class && WEAPON_LAYOUTS[weapon.class]) return WEAPON_LAYOUTS[weapon.class];
+    if (weapon.type === 'melee') return WEAPON_LAYOUTS.melee;
+    return WEAPON_LAYOUTS.pistol;
+  })();
+  // If a side-view render PNG is registered for this weapon name,
+  // swap the procedural class silhouette for the actual rendered
+  // model. Same image as the inventory icon = consistent identity
+  // for the player.
+  const lookup = _renderLookup;
+  if (lookup && weapon?.name) {
+    const url = lookup(weapon.name);
+    if (url) {
+      return {
+        svg: `<image href="${url}" x="0" y="0" width="600" height="260" preserveAspectRatio="xMidYMid meet"/>`,
+        slots: baseLayout.slots,
+      };
+    }
+  }
+  return baseLayout;
 }

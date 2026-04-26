@@ -1,6 +1,7 @@
 import { tunables } from './tunables.js';
 import { rollPerks, GEAR_PERKS } from './perks.js';
 import { GridContainer, stampItemDims, deriveGridLayout } from './grid_container.js';
+import { renderForWeaponName as _renderForWeaponName } from './model_manifest.js';
 
 // Slot-based inventory aligned to a body silhouette. Each item carries a
 // `slot` (for armor/gear) or a `type` (ranged/melee/consumable). Equipment
@@ -269,6 +270,14 @@ const JUNK_ICON_BY_ID = {
 export function iconForItem(item) {
   if (!item) return null;
   if (item.artifact) return ICON_BASE + 'ICON_MilitaryCombat_Status_Critical_01_Underlay.png';
+
+  // Weapons — when a side-view render PNG is registered for this
+  // weapon, it wins over the curated stock icon so the inventory
+  // and attachment screen show the same silhouette.
+  if (item.type === 'ranged' || item.type === 'melee') {
+    const render = _renderForWeaponName(item.name);
+    if (render) return render;
+  }
 
   // Weapons — try a per-name icon first, then class, then category.
   if (item.type === 'ranged') {
