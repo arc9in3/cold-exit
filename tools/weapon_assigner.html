@@ -1,0 +1,576 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<title>tacticalrogue — weapon assigner</title>
+<style>
+  html, body { margin: 0; padding: 0; background: #121316; color: #ddd;
+               font: 12px/1.4 ui-monospace, Menlo, Consolas, monospace; }
+  header { position: sticky; top: 0; z-index: 10;
+           background: #1b1d22; border-bottom: 1px solid #2a2d34;
+           padding: 10px 16px; display: flex; gap: 10px; align-items: center; flex-wrap: wrap; }
+  header h1 { margin: 0 16px 0 0; font-size: 14px; color: #c9a87a; font-weight: 600; }
+  header select, header input {
+    background: #0f1014; color: #ddd; border: 1px solid #2a2d34;
+    padding: 4px 8px; border-radius: 3px; font: inherit; min-width: 180px;
+  }
+  header button { background: #2a2d34; color: #ddd; border: 1px solid #3a3d44;
+                  padding: 4px 10px; border-radius: 3px; font: inherit; cursor: pointer; }
+  header button:hover { background: #3a3d44; }
+  header .count { margin-left: auto; color: #888; }
+  h2.section { margin: 18px 14px 8px; color: #c9a87a; font-size: 13px;
+               border-bottom: 1px solid #2a2d34; padding-bottom: 6px; }
+  .grid { display: grid; gap: 10px; padding: 0 14px;
+          grid-template-columns: repeat(auto-fill, minmax(220px, 1fr)); }
+
+  /* In-game weapon tile (top section) */
+  .wtile { background: #181a1e; border: 1px solid #2a2d34; border-radius: 4px;
+           overflow: hidden; position: relative; }
+  .wtile .row { display: flex; gap: 8px; padding: 8px; align-items: stretch; }
+  .wtile .icon { width: 64px; height: 64px; background: #0d0e11; border: 1px solid #2a2d34;
+                 border-radius: 3px; flex: 0 0 auto; image-rendering: pixelated;
+                 background-size: contain; background-repeat: no-repeat; background-position: center; }
+  .wtile canvas { width: 100%; height: 110px; background: #0d0e11; display: block; cursor: grab; }
+  .wtile .meta { flex: 1 1 auto; min-width: 0; }
+  .wtile .meta b { color: #c9a87a; font-size: 12px; }
+  .wtile .meta .sub { color: #889; font-size: 10px; margin-top: 2px; }
+  .wtile .modelpath { padding: 4px 8px; background: #12181a; color: #7a9a7a;
+                      font-size: 10px; border-top: 1px solid #23262c;
+                      white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+  .wtile .modelpath.none { color: #a85; }
+  .wtile.no-model { border-color: #4a3520; }
+
+  /* FBX tile (bottom section) */
+  .ftile { background: #181a1e; border: 1px solid #2a2d34; border-radius: 4px;
+           overflow: hidden; position: relative; }
+  .ftile canvas { display: block; width: 100%; height: 160px; background: #0d0e11; cursor: grab; }
+  .ftile .label { padding: 6px 8px; border-top: 1px solid #23262c;
+                  font-size: 11px; line-height: 1.3; word-break: break-all; }
+  .ftile .label b { color: #c9a87a; }
+  .ftile .cat { position: absolute; top: 4px; left: 4px; padding: 1px 6px;
+                background: rgba(0,0,0,0.6); border-radius: 2px;
+                font-size: 10px; color: #9aa; pointer-events: none; }
+  .ftile .badge-new { position: absolute; top: 4px; right: 4px; padding: 1px 6px;
+                      background: #3a5a30; border-radius: 2px;
+                      font-size: 10px; color: #cfe6c0; pointer-events: none; }
+  .ftile .badge-used { position: absolute; top: 4px; right: 4px; padding: 1px 6px;
+                       background: #2a4a6a; border-radius: 2px;
+                       font-size: 10px; color: #cfe0f0; pointer-events: none; }
+  .ftile.missing canvas { opacity: 0.25; }
+  .ftile .error { position: absolute; top: 70px; left: 0; right: 0; text-align: center;
+                  color: #a54; font-size: 10px; pointer-events: none; }
+  .ftile .assigned { padding: 4px 8px; font-size: 10px; color: #7a9a7a;
+                     border-top: 1px solid #23262c; background: #12181a;
+                     white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+  .ftile .assigned.none { color: #555; }
+  .ftile .tag { display: block; width: 100%; box-sizing: border-box;
+                background: #0f1014; color: #f1d9a8; border: 0; border-top: 1px solid #23262c;
+                padding: 6px 8px; font: inherit; }
+  .ftile .tag::placeholder { color: #555; }
+  .ftile .tag:focus { outline: 1px solid #c9a87a; }
+  .ftile .tag.saved { border-top-color: #2a6030; transition: border-top-color 1.5s; }
+  .ftile.tagged .label b { color: #f1d9a8; }
+</style>
+</head>
+<body>
+
+<header>
+  <h1>weapon assigner</h1>
+  <select id="cat-filter">
+    <option value="">all FBX categories</option>
+  </select>
+  <select id="status-filter">
+    <option value="all">all FBXes</option>
+    <option value="untagged">untagged only</option>
+    <option value="tagged">tagged only</option>
+    <option value="unassigned">no manifest entry</option>
+    <option value="assigned">manifest-assigned</option>
+  </select>
+  <input id="search" type="search" placeholder="filter by FBX name (regex ok)…" autocomplete="off">
+  <button id="export-btn" title="Download all tags + the in-game weapon list as JSON">Export tags</button>
+  <span class="count" id="count">loading…</span>
+</header>
+
+<div id="file-protocol-banner" style="
+  display: none; padding: 10px 16px; background: #3a1a1a; color: #ffcaca;
+  border-bottom: 1px solid #7a2a2a; font-size: 12px;
+">
+  Running over <code>file://</code>. Browsers block <code>fetch</code> of local FBX files.
+  Serve via HTTP instead: <code>python -m http.server 8000</code>, then open
+  <code>http://localhost:8000/tools/weapon_assigner.html</code>.
+</div>
+
+<script>
+  if (location.protocol === 'file:') {
+    document.getElementById('file-protocol-banner').style.display = 'block';
+  }
+</script>
+
+<h2 class="section" id="hdr-weapons">In-game weapons (from tunables)</h2>
+<div class="grid" id="weapon-grid"></div>
+
+<h2 class="section" id="hdr-fbx">All weapon FBX files in the project</h2>
+<div class="grid" id="fbx-grid"></div>
+
+<script type="importmap">
+{
+  "imports": {
+    "three": "https://unpkg.com/three@0.161.0/build/three.module.js",
+    "three/addons/": "https://unpkg.com/three@0.161.0/examples/jsm/"
+  }
+}
+</script>
+
+<script src="../Assets/models/_index.js"></script>
+
+<script type="module">
+import * as THREE from 'three';
+import { FBXLoader } from 'three/addons/loaders/FBXLoader.js';
+
+// Pull the live manifest + the live weapon list so the tool always
+// matches what the game actually loads.
+let MODEL_BY_WEAPON_NAME = {}, MODEL_BY_ITEM_ID = {};
+let TUNABLES = null;
+try {
+  const m = await import('../src/model_manifest.js');
+  MODEL_BY_WEAPON_NAME = m.MODEL_BY_WEAPON_NAME || {};
+  MODEL_BY_ITEM_ID    = m.MODEL_BY_ITEM_ID    || {};
+} catch (e) {
+  console.warn('manifest import failed', e);
+}
+try {
+  const t = await import('../src/tunables.js');
+  TUNABLES = t.tunables;
+} catch (e) {
+  console.warn('tunables import failed', e);
+}
+
+const INDEX = window.MODEL_INDEX;
+if (!INDEX) {
+  document.getElementById('count').textContent = 'failed: window.MODEL_INDEX not set';
+  throw new Error('_index.js did not populate MODEL_INDEX');
+}
+
+const MODEL_BASE = '../Assets/models/';
+const ICON_MIL = '../Assets/UI/Military/';
+
+// Categories that this tool is interested in for the FBX grid. The
+// existing `weapons/` folder + the new lowpolyguns categories.
+const WEAPON_CATEGORIES = new Set(['weapons', 'melee', 'lowpolyguns', 'lowpolyguns_accessories']);
+
+// Tag persistence — keyed by FBX path `cat/file.fbx`.
+const TAG_KEY = 'tacticalrogue.weapon_tags';
+let tags = {};
+try { tags = JSON.parse(localStorage.getItem(TAG_KEY) || '{}'); } catch { tags = {}; }
+function saveTags() { localStorage.setItem(TAG_KEY, JSON.stringify(tags)); }
+
+// Reverse lookup: which manifest keys point at each FBX path.
+const assignedByPath = {};
+for (const [name, path] of Object.entries(MODEL_BY_WEAPON_NAME)) {
+  (assignedByPath[path] = assignedByPath[path] || []).push({ kind: 'weapon', key: name });
+}
+for (const [id, path] of Object.entries(MODEL_BY_ITEM_ID)) {
+  (assignedByPath[path] = assignedByPath[path] || []).push({ kind: 'item', key: id });
+}
+
+// ============================================================
+// Renderer setup — single shared offscreen renderer, copied into
+// per-tile canvases so we don't blow past the WebGL context limit.
+// ============================================================
+const loader = new FBXLoader();
+const texLoader = new THREE.TextureLoader();
+const renderer = new THREE.WebGLRenderer({ antialias: true, alpha: true });
+renderer.setPixelRatio(window.devicePixelRatio);
+renderer.setSize(320, 320, false);
+
+const atlasCache = {};
+function getAtlas(cat) {
+  if (cat in atlasCache) return atlasCache[cat];
+  const tex = texLoader.load(`${MODEL_BASE}${cat}/_atlas.png`,
+    (t) => {
+      t.colorSpace = THREE.SRGBColorSpace;
+      t.magFilter = THREE.NearestFilter;
+      t.minFilter = THREE.LinearMipmapLinearFilter;
+      t.needsUpdate = true;
+    },
+    undefined,
+    () => { /* atlas missing for this category — falls back to flat color */ }
+  );
+  atlasCache[cat] = tex;
+  return tex;
+}
+
+const allTiles = [];   // every renderable tile in either grid
+
+function loadTile(t) {
+  const url = MODEL_BASE + t.cat + '/' + t.file;
+  loader.load(
+    url,
+    (obj) => { t.obj = obj; fitAndStage(t); },
+    undefined,
+    (err) => {
+      const msg = err?.message || String(err);
+      t.error = msg;
+      t.el.classList.add('missing');
+      const e = document.createElement('div'); e.className = 'error';
+      e.textContent = /fetch|network|CORS/i.test(msg) ? 'fetch blocked' : 'load failed';
+      e.title = msg;
+      t.el.appendChild(e);
+      console.warn(`[${t.file}]`, err);
+    },
+  );
+}
+
+function fitAndStage(t) {
+  const scene = new THREE.Scene();
+  scene.background = null;
+  scene.add(new THREE.AmbientLight(0xffffff, 0.55));
+  const key = new THREE.DirectionalLight(0xffffff, 1.1); key.position.set(3, 5, 2); scene.add(key);
+  const fill = new THREE.DirectionalLight(0x8fbaff, 0.35); fill.position.set(-3, 2, -1); scene.add(fill);
+
+  const atlas = getAtlas(t.cat);
+  t.obj.traverse(obj => {
+    if (!obj.isMesh) return;
+    const hasUV = !!obj.geometry?.attributes?.uv;
+    const hasVC = !!obj.geometry?.attributes?.color;
+    const oldMat = obj.material;
+    obj.material = new THREE.MeshStandardMaterial({
+      color: 0xffffff,
+      map: hasUV ? atlas : null,
+      vertexColors: !hasUV && hasVC,
+      roughness: 0.55, metalness: 0.1,
+    });
+    if (oldMat) {
+      if (Array.isArray(oldMat)) oldMat.forEach(m => m.dispose?.());
+      else oldMat.dispose?.();
+    }
+  });
+
+  t.obj.updateMatrixWorld(true);
+  const box = new THREE.Box3().setFromObject(t.obj);
+  if (box.isEmpty()) { t.el.classList.add('missing'); return; }
+  const size = new THREE.Vector3(); box.getSize(size);
+  const center = new THREE.Vector3(); box.getCenter(center);
+  const maxDim = Math.max(size.x, size.y, size.z) || 1;
+  const scale = 2 / maxDim;
+  const localCenter = t.obj.worldToLocal(center.clone());
+  for (const child of t.obj.children) child.position.sub(localCenter);
+  t.obj.scale.setScalar(scale);
+  scene.add(t.obj);
+
+  const camera = new THREE.PerspectiveCamera(40, 1, 0.1, 100);
+  camera.position.set(2.4, 1.8, 2.4);
+  camera.lookAt(0, 0, 0);
+
+  t.scene = scene; t.camera = camera;
+}
+
+// ============================================================
+// Section 1 — In-game weapons grid
+// ============================================================
+const weaponGrid = document.getElementById('weapon-grid');
+const inGameWeapons = TUNABLES?.weapons || [];
+
+function iconForWeapon(w) {
+  // Mirror the simplest path of inventory.iconForItem — name override
+  // first, then class fallback. The full map lives in inventory.js;
+  // we re-derive the class fallback here because pulling the whole
+  // map across module systems would force a deeper refactor.
+  if (!w) return null;
+  // Direct path: a lot of weapons in tunables don't carry an icon
+  // field. Use a small inline lookup that mirrors the curated list
+  // in inventory.js, plus class fallback. Tool only — kept simple.
+  const NAME = WEAPON_ICON_BY_NAME[w.name];
+  if (NAME) return ICON_MIL + NAME;
+  const klass = w.class || '';
+  const FALLBACK = {
+    pistol:  'ICON_SM_Wep_Pistol_01_Military_Underlay.png',
+    smg:     'ICON_SM_Wep_Preset_A_SMG_01_Military_Underlay.png',
+    rifle:   'ICON_SM_Wep_Rifle_Assault_01_BattleRoyale_Underlay.png',
+    shotgun: 'ICON_SM_Wep_Shotgun_01_Military_Underlay.png',
+    lmg:     'ICON_SM_Wep_MachineGun_USA_01_Military_Underlay.png',
+    sniper:  'ICON_SM_Wep_Sniper_01_Military_Underlay.png',
+    flame:   'ICON_SM_Wep_Preset_B_Heavy_01_Military_Underlay.png',
+  };
+  return ICON_MIL + (FALLBACK[klass] || FALLBACK.pistol);
+}
+
+// Inline copy of the WEAPON_ICON_BY_NAME table — kept in sync with
+// inventory.js by hand. Only used by the tool's icon lookup.
+const WEAPON_ICON_BY_NAME = {
+  'pistol': 'ICON_SM_Wep_Pistol_01_Military_Underlay.png',
+  'smg': 'ICON_SM_Wep_SubMGun_01_BattleRoyale_Underlay.png',
+  'shotgun': 'ICON_SM_Wep_Shotgun_01_Military_Underlay.png',
+  'rifle': 'ICON_SM_Wep_Rifle_01_Military_Underlay.png',
+  'lmg': 'ICON_SM_Wep_MachineGun_USA_01_Military_Underlay.png',
+  'flamethrower': 'ICON_SM_Wep_Preset_B_Heavy_01_Military_Underlay.png',
+  'Glock': 'ICON_SM_Wep_Pistol_Small_01_Military_Underlay.png',
+  'Sig P320': 'ICON_SM_Wep_Pistol_01_Military_Underlay.png',
+  'Beretta 92': 'ICON_SM_Wep_Pistol_Metal_01_Military_Underlay.png',
+  'M1911': 'ICON_SM_Wep_Pistol_01_Military_Underlay.png',
+  'Revolver': 'ICON_SM_Wep_Pistol_Revolver_01_BattleRoyale_Underlay.png',
+  'Snub Revolver': 'ICON_SM_Wep_Revolver_Snub_01_BattleRoyale_Underlay.png',
+  'Desert Eagle': 'ICON_SM_Wep_Pistol_Heavy_01_BattleRoyale_Underlay.png',
+  'Flare Gun': 'ICON_SM_Wep_Pistol_Flare_01_BattleRoyale_Underlay.png',
+  'AKS-74U': 'ICON_SM_Wep_Preset_B_SMG_01_Military_Underlay.png',
+  'PDW': 'ICON_SM_Wep_Preset_A_SMG_01_Military_Underlay.png',
+  'MP7': 'ICON_SM_Wep_SubMGun_Lite_01_BattleRoyale_Underlay.png',
+  'P90': 'ICON_SM_Wep_SubMGun_01_BattleRoyale_Underlay.png',
+  'M4': 'ICON_SM_Wep_Rifle_Assault_01_BattleRoyale_Underlay.png',
+  'AK47': 'ICON_SM_Wep_Rifle_Assault_02_BattleRoyale_Underlay.png',
+  'AS VAL': 'ICON_SM_Wep_Rifle_Assault_03_BattleRoyale_Underlay.png',
+  'VSS': 'ICON_SM_Wep_Rifle_Assault_03_BattleRoyale_Underlay.png',
+  'Remington 700': 'ICON_SM_Wep_Rifle_01_Military_Underlay.png',
+  'M4 Block II': 'ICON_SM_Wep_Preset_A_Complex_01_Military_Underlay.png',
+  'AK47 ACOG': 'ICON_SM_Wep_Preset_B_Rifle_01_Military_Underlay.png',
+  'Tavor': 'ICON_SM_Wep_Preset_B_Rifle_03_Military_Underlay.png',
+  'M16': 'ICON_SM_Wep_Rifle_Assault_05_BattleRoyale_Underlay.png',
+  'M16A4': 'ICON_SM_Wep_Rifle_Assault_04_BattleRoyale_Underlay.png',
+  'M240': 'ICON_SM_Wep_MachineGun_01_BattleRoyale_Underlay.png',
+  'PKM': 'ICON_SM_Wep_MachineGun_Bandit_01_Military_Underlay.png',
+  'RPK': 'ICON_SM_Wep_Preset_B_Heavy_01_Military_Underlay.png',
+  'Mosin': 'ICON_SM_Wep_Sniper_01_Military_Underlay.png',
+  'SVD': 'ICON_SM_Wep_Preset_B_Sniper_01_Military_Underlay.png',
+  'Cheytac Intervention': 'ICON_SM_Wep_Sniper_Heavy_01_BattleRoyale_Underlay.png',
+  'AA-12': 'ICON_SM_Wep_Shotgun_01_BattleRoyale_Underlay.png',
+  'Brass Knuckles': 'ICON_MilitaryCombat_Inventory_Melee_01_Underlay.png',
+  'Crowbar': 'ICON_SM_Wep_Crowbar_01_BattleRoyale_Underlay.png',
+  'Kukri': 'ICON_SM_Wep_Knife_Kukri_01_Military_Underlay.png',
+  'Tomahawk': 'ICON_SM_Wep_Fireaxe_01_BattleRoyale_Underlay.png',
+  'Fire Axe': 'ICON_SM_Wep_Fireaxe_01_BattleRoyale_Underlay.png',
+  'Sledgehammer': 'ICON_SM_Wep_Pickaxe_01_BattleRoyale_Underlay.png',
+  'Chainsaw': 'ICON_MilitaryCombat_Inventory_Melee_01_Underlay.png',
+  "Jessica's Rage": 'ICON_SM_Wep_Pistol_Heavy_01_BattleRoyale_Underlay.png',
+  'Knife': 'ICON_SM_Wep_Knife_01_Military_Underlay.png',
+  'Club': 'ICON_SM_Wep_Pan_01_BattleRoyale_Underlay.png',
+  'Baseball Bat': 'ICON_SM_Wep_Bat_01_BattleRoyale_Underlay.png',
+  'katana': 'ICON_SM_Wep_Sword_01_Military_Underlay.png',
+};
+
+const weaponTiles = [];
+for (const w of inGameWeapons) {
+  if (w.type !== 'ranged' && w.type !== 'melee') continue;
+  const modelRel = MODEL_BY_WEAPON_NAME[w.name] || null;
+
+  const tile = document.createElement('div');
+  tile.className = 'wtile' + (modelRel ? '' : ' no-model');
+
+  const row = document.createElement('div');
+  row.className = 'row';
+  const icon = document.createElement('div');
+  icon.className = 'icon';
+  const iconUrl = iconForWeapon(w);
+  if (iconUrl) icon.style.backgroundImage = `url("${iconUrl}")`;
+  const meta = document.createElement('div');
+  meta.className = 'meta';
+  meta.innerHTML = `<b>${w.name}</b>` +
+    `<div class="sub">${w.class || w.type} · ${w.rarity || 'common'}</div>` +
+    `<div class="sub">dmg ${w.damage ?? '?'} · rate ${w.fireRate ?? '?'} · mag ${w.magSize ?? '?'}</div>`;
+  row.append(icon, meta);
+
+  const canvas = document.createElement('canvas');
+  canvas.width = 320; canvas.height = 320;
+
+  const pathEl = document.createElement('div');
+  pathEl.className = 'modelpath' + (modelRel ? '' : ' none');
+  pathEl.textContent = modelRel ? `model: ${modelRel}` : 'NO MODEL — primitive box';
+
+  tile.append(row, canvas, pathEl);
+  weaponGrid.appendChild(tile);
+
+  if (modelRel) {
+    const slash = modelRel.indexOf('/');
+    const cat = modelRel.slice(0, slash);
+    const file = modelRel.slice(slash + 1);
+    const tileObj = { el: tile, canvas, file, cat, path: modelRel,
+                      obj: null, scene: null, camera: null, loaded: false, error: null };
+    weaponTiles.push(tileObj);
+    allTiles.push(tileObj);
+  }
+}
+
+// ============================================================
+// Section 2 — every weapon FBX in the project
+// ============================================================
+const fbxGrid = document.getElementById('fbx-grid');
+const catSel = document.getElementById('cat-filter');
+const search = document.getElementById('search');
+const statusSel = document.getElementById('status-filter');
+const exportBtn = document.getElementById('export-btn');
+const count = document.getElementById('count');
+
+const fbxTiles = [];
+
+const cats = Object.keys(INDEX).filter(c => WEAPON_CATEGORIES.has(c));
+for (const c of cats) {
+  const o = document.createElement('option'); o.value = c; o.textContent = c;
+  catSel.appendChild(o);
+}
+
+let totalFbx = 0;
+for (const cat of cats) {
+  for (const file of INDEX[cat]) {
+    totalFbx++;
+    const path = `${cat}/${file}`;
+    const assigned = assignedByPath[path];
+    const isNew = (cat === 'lowpolyguns' || cat === 'lowpolyguns_accessories');
+
+    const tile = document.createElement('div');
+    tile.className = 'ftile';
+    tile.dataset.category = cat;
+    tile.dataset.name = file;
+    tile.dataset.assigned = assigned ? '1' : '0';
+    if (tags[path]) tile.classList.add('tagged');
+
+    const canvas = document.createElement('canvas');
+    canvas.width = 320; canvas.height = 320;
+    const cat_el = document.createElement('div'); cat_el.className = 'cat'; cat_el.textContent = cat;
+    if (isNew) {
+      const newBadge = document.createElement('div'); newBadge.className = 'badge-new';
+      newBadge.textContent = 'NEW'; tile.appendChild(newBadge);
+    } else if (assigned) {
+      const usedBadge = document.createElement('div'); usedBadge.className = 'badge-used';
+      usedBadge.textContent = 'USED'; tile.appendChild(usedBadge);
+    }
+
+    const label = document.createElement('div'); label.className = 'label';
+    label.innerHTML = `<b>${file.replace(/\.fbx$/i, '')}</b><br>${cat}/`;
+
+    const assignedEl = document.createElement('div');
+    if (assigned) {
+      assignedEl.className = 'assigned';
+      assignedEl.innerHTML = 'used by: ' +
+        assigned.map(a => `<b style="color:#c9a87a">${a.key}</b>`).join(', ');
+    } else {
+      assignedEl.className = 'assigned none';
+      assignedEl.textContent = 'unassigned';
+    }
+
+    const tagEl = document.createElement('input');
+    tagEl.type = 'text';
+    tagEl.className = 'tag';
+    tagEl.placeholder = 'real-world weapon name (e.g. Glock 17, M4A1)';
+    tagEl.value = tags[path] || '';
+    tagEl.dataset.tagged = tagEl.value ? '1' : '0';
+    tagEl.addEventListener('blur', () => {
+      const v = tagEl.value.trim();
+      if (v) tags[path] = v; else delete tags[path];
+      saveTags();
+      tagEl.dataset.tagged = v ? '1' : '0';
+      tile.classList.toggle('tagged', !!v);
+      tagEl.classList.add('saved');
+      setTimeout(() => tagEl.classList.remove('saved'), 1500);
+      applyFilters();
+    });
+    tagEl.addEventListener('keydown', (e) => {
+      if (e.key === 'Enter') tagEl.blur();
+    });
+
+    tile.append(canvas, cat_el, label, assignedEl, tagEl);
+    fbxGrid.appendChild(tile);
+    const tileObj = { el: tile, canvas, file, cat, path, isFbxGrid: true,
+                      obj: null, scene: null, camera: null, loaded: false, error: null };
+    fbxTiles.push(tileObj);
+    allTiles.push(tileObj);
+  }
+}
+
+count.textContent = `${inGameWeapons.length} in-game weapons · ${totalFbx} FBX files · ${cats.length} categories`;
+
+function applyFilters() {
+  const cat = catSel.value;
+  const q = search.value.trim();
+  const status = statusSel.value;
+  let rx = null;
+  if (q) { try { rx = new RegExp(q, 'i'); } catch { rx = null; } }
+  let visible = 0;
+  for (const t of fbxTiles) {
+    const assigned = t.el.dataset.assigned === '1';
+    const tagged = !!tags[t.path];
+    let statusOk = true;
+    if (status === 'untagged')   statusOk = !tagged;
+    else if (status === 'tagged')      statusOk = tagged;
+    else if (status === 'unassigned')  statusOk = !assigned;
+    else if (status === 'assigned')    statusOk = assigned;
+    const ok = statusOk && (!cat || t.cat === cat) && (!rx || rx.test(t.file));
+    t.el.style.display = ok ? '' : 'none';
+    if (ok) visible++;
+  }
+  document.getElementById('hdr-fbx').textContent = `All weapon FBX files in the project (${visible} shown)`;
+  lazyLoadVisible();
+}
+
+catSel.addEventListener('change', applyFilters);
+search.addEventListener('input', applyFilters);
+statusSel.addEventListener('change', applyFilters);
+applyFilters();
+
+// ============================================================
+// Export — bundle tags + the in-game weapon list (with currently
+// assigned model) so the user can hand the file back for me to
+// look up real-world stats and apply to tunables/manifest.
+// ============================================================
+exportBtn.addEventListener('click', () => {
+  const taggedFbx = {};
+  for (const [path, name] of Object.entries(tags)) {
+    if (!name) continue;
+    taggedFbx[path] = {
+      tag: name,
+      currently_used_by: (assignedByPath[path] || []).map(a => `${a.kind}:${a.key}`),
+    };
+  }
+  const inGame = inGameWeapons
+    .filter(w => w.type === 'ranged' || w.type === 'melee')
+    .map(w => ({
+      name: w.name, class: w.class, type: w.type, rarity: w.rarity,
+      damage: w.damage, fireRate: w.fireRate, magSize: w.magSize,
+      currentModel: MODEL_BY_WEAPON_NAME[w.name] || null,
+    }));
+  const out = { tagged_fbx: taggedFbx, in_game_weapons: inGame };
+  const blob = new Blob([JSON.stringify(out, null, 2)], { type: 'application/json' });
+  const a = document.createElement('a');
+  a.href = URL.createObjectURL(blob);
+  a.download = 'weapon_assignments.json';
+  a.click();
+});
+
+// ============================================================
+// Lazy-load + animate visible tiles. Same shared-renderer trick as
+// the model viewer so we don't spawn 100 WebGL contexts.
+// ============================================================
+function lazyLoadVisible() {
+  const vpTop = window.scrollY;
+  const vpBot = vpTop + window.innerHeight + 400;
+  for (const t of allTiles) {
+    if (t.loaded) continue;
+    if (t.el.style.display === 'none') continue;
+    const r = t.el.getBoundingClientRect();
+    const top = r.top + window.scrollY;
+    if (top < vpBot && top + r.height > vpTop - 400) {
+      t.loaded = true;
+      loadTile(t);
+    }
+  }
+}
+window.addEventListener('scroll', lazyLoadVisible, { passive: true });
+lazyLoadVisible();
+
+let last = performance.now();
+function animate(now) {
+  const dt = Math.min(0.05, (now - last) / 1000); last = now;
+  for (const t of allTiles) {
+    if (!t.scene || t.el.style.display === 'none') continue;
+    const r = t.el.getBoundingClientRect();
+    if (r.bottom < 0 || r.top > window.innerHeight) continue;
+    t.obj.rotation.y += dt * 0.7;
+    renderer.render(t.scene, t.camera);
+    const ctx = t.canvas.getContext('2d');
+    ctx.clearRect(0, 0, t.canvas.width, t.canvas.height);
+    ctx.drawImage(renderer.domElement, 0, 0, t.canvas.width, t.canvas.height);
+  }
+  requestAnimationFrame(animate);
+}
+requestAnimationFrame(animate);
+</script>
+</body>
+</html>
