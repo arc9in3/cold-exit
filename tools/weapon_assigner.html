@@ -552,16 +552,17 @@ for (const w of inGameWeapons) {
   const wTag = document.createElement('input');
   wTag.type = 'text';
   wTag.className = 'tag';
-  wTag.placeholder = w.name === w.class ? `e.g. Mossberg 500 (or #remove)` :
-    `e.g. retag ${w.name} (or #remove)`;
-  wTag.title = "Type a real-world weapon name to flag for revisit. Type '#remove' to clear.";
+  wTag.placeholder = w.name === w.class ? `e.g. Mossberg 500 (or 'remove')` :
+    `e.g. retag ${w.name} (or 'remove')`;
+  wTag.title = "Type a real-world weapon name to flag for revisit. Type 'remove' (or '#remove' / 'delete') to clear.";
   wTag.value = weaponTags[w.name] || '';
   if (wTag.value) tile.classList.add('tagged');
   weaponInputByName[w.name] = { input: wTag, tile };
   wTag.addEventListener('blur', () => {
     let v = wTag.value.trim();
-    // Sentinel: typing '#remove' clears the tag.
-    if (v.toLowerCase() === '#remove') { v = ''; wTag.value = ''; }
+    // Sentinels: 'remove', '#remove', or 'delete' clear the tag.
+    const isRemove = /^#?(remove|delete)$/i.test(v);
+    if (isRemove) { v = ''; wTag.value = ''; }
     if (v) weaponTags[w.name] = v; else delete weaponTags[w.name];
     // Newest-wins dedupe: drop any other in-game weapon already
     // tagged with the same real-world name and clear its UI.
@@ -576,7 +577,9 @@ for (const w of inGameWeapons) {
     tile.classList.toggle('tagged', !!v);
     wTag.classList.add('saved');
     setTimeout(() => wTag.classList.remove('saved'), 1500);
-    if (dropped.length) {
+    if (isRemove) {
+      count.textContent = `removed tag for ${w.name}`;
+    } else if (dropped.length) {
       count.textContent = `dropped ${dropped.length} older tag(s): ${dropped.join(', ')}`;
     }
   });
@@ -660,15 +663,16 @@ for (const cat of cats) {
     const tagEl = document.createElement('input');
     tagEl.type = 'text';
     tagEl.className = 'tag';
-    tagEl.placeholder = 'e.g. Glock 17, M4A1 (or #remove)';
-    tagEl.title = "Type a real-world weapon name to map this FBX to. Type '#remove' to clear.";
+    tagEl.placeholder = "e.g. Glock 17, M4A1 (or 'remove')";
+    tagEl.title = "Type a real-world weapon name to map this FBX to. Type 'remove' (or '#remove' / 'delete') to clear.";
     tagEl.value = tags[path] || '';
     tagEl.dataset.tagged = tagEl.value ? '1' : '0';
     fbxInputByPath[path] = { input: tagEl, tile };
     tagEl.addEventListener('blur', () => {
       let v = tagEl.value.trim();
-      // Sentinel: typing '#remove' clears the tag.
-      if (v.toLowerCase() === '#remove') { v = ''; tagEl.value = ''; }
+      // Sentinels: 'remove', '#remove', or 'delete' clear the tag.
+      const isRemove = /^#?(remove|delete)$/i.test(v);
+      if (isRemove) { v = ''; tagEl.value = ''; }
       if (v) tags[path] = v; else delete tags[path];
       // Newest-wins dedupe: drop any other FBX already tagged with
       // the same real-world name and clear its UI / dataset flag.
@@ -685,7 +689,9 @@ for (const cat of cats) {
       tile.classList.toggle('tagged', !!v);
       tagEl.classList.add('saved');
       setTimeout(() => tagEl.classList.remove('saved'), 1500);
-      if (dropped.length) {
+      if (isRemove) {
+        count.textContent = `removed tag for ${path}`;
+      } else if (dropped.length) {
         count.textContent = `dropped ${dropped.length} older tag(s): ${dropped.join(', ')}`;
       }
       applyFilters();
