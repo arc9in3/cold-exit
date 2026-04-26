@@ -114,6 +114,25 @@ function _box(w, h, d, color, opts) {
 function _cyl(r, h, color, seg = 14) {
   return new THREE.Mesh(new THREE.CylinderGeometry(r, r, h, seg), _mat(color));
 }
+// Tapered cylinder (rTop != rBot). Useful for pants legs, vases,
+// boot shafts — anything that should narrow along its length.
+function _cylT(rTop, rBot, h, color, seg = 14, opts) {
+  return new THREE.Mesh(new THREE.CylinderGeometry(rTop, rBot, h, seg), _mat(color, opts));
+}
+// Capsule — hemisphere-capped cylinder. Reads as fabric / soft padding
+// instead of hard-edged box. Three.js's CapsuleGeometry takes radius
+// + length (cylindrical body length, caps add 2*radius to total).
+function _cap(r, len, color, segCap = 6, segCyl = 12, opts) {
+  return new THREE.Mesh(new THREE.CapsuleGeometry(r, len, segCap, segCyl), _mat(color, opts));
+}
+// Sphere helper.
+function _sph(r, color, opts, seg = 12) {
+  return new THREE.Mesh(new THREE.SphereGeometry(r, seg, Math.max(6, Math.floor(seg * 0.6))), _mat(color, opts));
+}
+// Torus helper.
+function _torus(r, tube, color, opts, segR = 16, segT = 8) {
+  return new THREE.Mesh(new THREE.TorusGeometry(r, tube, segT, segR), _mat(color, opts));
+}
 
 // ---------- builders per item category ------------------------------
 
@@ -310,25 +329,95 @@ function buildEars(item) {
 function buildChest(item) {
   const tint = item.tint ?? 0x4a5a6a;
   const g = new THREE.Group();
-  // Torso — neutral canvas/fabric.
-  const torso = _box(0.9, 1.0, 0.4, NEUTRAL.fabric);
+  // Per-id silhouette: ghillie suit reads as a draped cloak; plate
+  // armor reads as a hard rigid carrier; light vest is a soft shirt.
+  // Default chest is a tactical rig with visible pouches + straps.
+  const id = item.id || '';
+  const isGhillie = /ghillie/.test(id);
+  const isPlate = /heavy|plate|spetsnaz|jugger|thorn/.test(id);
+  const isLight = /light|holster/.test(id);
+
+  if (isGhillie) {
+    // Ghillie suit — irregular layered cloak shape suggested with
+    // a stack of stretched, slightly-rotated capsules and a hood
+    // bump. Tint colors the foliage strips.
+    for (let i = 0; i < 5; i++) {
+      const w = 1.0 + Math.random() * 0.2;
+      const layer = _cap(0.18, w * 0.6, tint, 4, 8,
+        { roughness: 0.95, metalness: 0.0 });
+      layer.rotation.z = Math.PI / 2;
+      layer.position.set((Math.random() - 0.5) * 0.1, 0.3 - i * 0.18, (Math.random() - 0.5) * 0.05);
+      g.add(layer);
+    }
+    const hood = _sph(0.32, NEUTRAL.fabric, { roughness: 0.9 });
+    hood.scale.set(1, 0.7, 1);
+    hood.position.set(0, 0.55, -0.1);
+    g.add(hood);
+    g.rotation.y = -0.35;
+    return g;
+  }
+
+  // Standard tactical rig / plate carrier:
+  // - Torso panel (rounded capsule reads as fabric, not a box)
+  // - Front plate (tinted, harder material on plate variants)
+  // - Two shoulder straps (visible webbing crossing over the top)
+  // - 3-4 MOLLE pouches stitched to the front
+  // - Side cummerbund panels suggesting fit
+  const torso = _cap(0.42, 0.55, NEUTRAL.fabric, 6, 14, { roughness: 0.85 });
+  torso.scale.set(1.0, 1.0, 0.55);   // squash the depth so it's a torso not a sausage
   torso.position.y = 0.1;
   g.add(torso);
-  // ACCENT — front chest plate carries the tint (the paint job).
-  const plate = _box(0.7, 0.7, 0.06, tint, { metalness: 0.3, roughness: 0.45 });
-  plate.position.set(0, 0.2, 0.22);
+
+  // Front armor plate — flat for plate variants, just a fabric panel
+  // for light vest (suggests stitched canvas).
+  const plateMetal = isPlate ? 0.5 : 0.05;
+  const plateRough = isPlate ? 0.35 : 0.7;
+  const plate = _box(0.62, 0.68, isPlate ? 0.08 : 0.04, tint,
+    { metalness: plateMetal, roughness: plateRough });
+  plate.position.set(0, 0.22, 0.27);
   g.add(plate);
-  // Strap diagonal — neutral black webbing.
-  const strap = _box(0.9, 0.08, 0.06, 0x1a1a1a);
-  strap.position.set(0, 0.15, 0.26);
-  strap.rotation.z = Math.PI / 8;
-  g.add(strap);
-  // Shoulder bumps — neutral.
-  for (const sx of [-0.45, 0.45]) {
-    const sh = _box(0.22, 0.18, 0.32, NEUTRAL.fabric);
-    sh.position.set(sx, 0.55, 0);
-    g.add(sh);
+
+  if (!isLight) {
+    // MOLLE pouches — three small cuboids stitched onto the front
+    // panel. Read as separate compartments rather than one flat slab.
+    const pouchMat = NEUTRAL.fabric;
+    for (let i = 0; i < 3; i++) {
+      const x = -0.2 + i * 0.20;
+      const pouch = _box(0.16, 0.18, 0.10, pouchMat, { roughness: 0.85 });
+      pouch.position.set(x, -0.05, 0.32);
+      g.add(pouch);
+      // Tiny buckle dot on each pouch flap.
+      const buckle = _box(0.04, 0.04, 0.02, NEUTRAL.metalDark,
+        { metalness: 0.7, roughness: 0.3 });
+      buckle.position.set(x, -0.10, 0.38);
+      g.add(buckle);
+    }
+    // Top-row admin pouch.
+    const admin = _box(0.36, 0.10, 0.08, pouchMat, { roughness: 0.85 });
+    admin.position.set(0, 0.45, 0.32);
+    g.add(admin);
   }
+
+  // Shoulder straps — two angled webbing bands going over each shoulder.
+  for (const sx of [-0.18, 0.18]) {
+    const strap = _box(0.10, 0.62, 0.05, 0x18181c, { roughness: 0.75 });
+    strap.position.set(sx, 0.32, 0.24);
+    strap.rotation.x = -0.18;
+    g.add(strap);
+    // Buckle on the strap front.
+    const sb = _box(0.10, 0.06, 0.03, NEUTRAL.metalDark,
+      { metalness: 0.7, roughness: 0.3 });
+    sb.position.set(sx, 0.05, 0.30);
+    g.add(sb);
+  }
+
+  // Cummerbund — short side panels suggesting fit at the waist.
+  for (const sx of [-0.40, 0.40]) {
+    const side = _box(0.08, 0.36, 0.42, NEUTRAL.fabric, { roughness: 0.85 });
+    side.position.set(sx, 0.0, 0);
+    g.add(side);
+  }
+
   g.rotation.y = -0.35;
   return g;
 }
@@ -336,20 +425,54 @@ function buildChest(item) {
 function buildHands(item) {
   const tint = item.tint ?? NEUTRAL.leather;
   const g = new THREE.Group();
-  for (const sx of [-0.3, 0.3]) {
-    // Palm — neutral dark leather.
-    const palm = _box(0.3, 0.45, 0.15, NEUTRAL.rubber);
-    palm.position.set(sx, 0, 0);
+  // Build one rounded glove at +x and mirror it. A glove silhouette =
+  // capsule palm + four cylindrical fingers + offset thumb + tinted
+  // cuff. Reads unmistakably as a hand instead of a pair of bricks.
+  const gloveMat = { roughness: 0.8, metalness: 0.05 };
+  for (const side of [-1, 1]) {
+    const sx = 0.32 * side;
+    // Palm — capsule lying flat (length goes "up", caps round the
+    // wrist + fingertip side). Slightly squashed in depth to read
+    // as a flat hand.
+    const palm = _cap(0.18, 0.20, NEUTRAL.rubber, 6, 12, gloveMat);
+    palm.scale.set(1.0, 1.0, 0.55);
+    palm.position.set(sx, 0.05, 0);
     g.add(palm);
-    const thumb = _box(0.1, 0.2, 0.1, NEUTRAL.rubber);
-    thumb.position.set(sx + (sx > 0 ? -0.18 : 0.18), 0.08, 0.05);
+    // Fingers — four short capsules splayed across the top of the
+    // palm. Subtle outward fan so they don't look like a rake.
+    for (let i = 0; i < 4; i++) {
+      const fOff = -0.12 + i * 0.08;        // across-palm spacing
+      const fan  = (i - 1.5) * 0.05 * side; // gentle outward fan
+      const finger = _cap(0.045, 0.16, NEUTRAL.rubber, 4, 8, gloveMat);
+      finger.scale.set(1.0, 1.0, 0.7);
+      finger.position.set(sx + fOff, 0.32, fan);
+      g.add(finger);
+      // Knuckle joint pip — adds organic shape to each finger.
+      const knuckle = _sph(0.05, NEUTRAL.rubber, gloveMat, 8);
+      knuckle.scale.set(1.0, 0.6, 0.6);
+      knuckle.position.set(sx + fOff, 0.20, 0);
+      g.add(knuckle);
+    }
+    // Thumb — splayed to the side, tilted inward.
+    const thumb = _cap(0.05, 0.13, NEUTRAL.rubber, 4, 8, gloveMat);
+    thumb.scale.set(1.0, 1.0, 0.7);
+    thumb.position.set(sx + 0.18 * side, 0.10, 0.06);
+    thumb.rotation.z = -0.5 * side;
     g.add(thumb);
-    // ACCENT — tinted cuff band at the wrist.
-    const cuff = _box(0.34, 0.12, 0.19, tint);
-    cuff.position.set(sx, -0.2, 0);
+    // Cuff — tinted wrist band, slightly flared. Tapered cylinder
+    // (wider at the wrist opening) reads as a turn-back.
+    const cuff = _cylT(0.21, 0.18, 0.16, tint, 14, { roughness: 0.7 });
+    cuff.scale.set(1.0, 1.0, 0.62);
+    cuff.position.set(sx, -0.18, 0);
     g.add(cuff);
+    // Knuckle reinforcement plate — small rectangle on the back of
+    // the hand. Tinted so it shows the glove's identity color.
+    const reinforce = _box(0.18, 0.10, 0.02, tint, { roughness: 0.6 });
+    reinforce.position.set(sx, 0.12, -0.10);
+    g.add(reinforce);
   }
   g.rotation.y = -0.3;
+  g.rotation.x = 0.1;
   return g;
 }
 
@@ -376,20 +499,53 @@ function buildBelt(item) {
 function buildPants(item) {
   const tint = item.tint ?? 0x6a5a4a;
   const g = new THREE.Group();
-  for (const sx of [-0.22, 0.22]) {
-    // Leg — neutral fabric.
-    const leg = _box(0.3, 1.0, 0.3, NEUTRAL.fabric);
-    leg.position.set(sx, 0, 0);
-    g.add(leg);
-    // ACCENT — tinted pocket patch on each thigh.
-    const pkt = _box(0.18, 0.22, 0.04, tint);
-    pkt.position.set(sx, 0.15, 0.17);
+  // Pants silhouette = tapered legs (wider hip → narrower ankle),
+  // a waistband, and a soft seat hint between the legs. Tapered
+  // cylinders give the cloth-falling-on-a-leg read instead of two
+  // upright bricks. Tint hits the cargo pockets stitched on each
+  // thigh so two pant variants stay visually distinct.
+  const fabricMat = { roughness: 0.85, metalness: 0.02 };
+
+  for (const sx of [-0.18, 0.18]) {
+    // Leg — wider at the hip (top) than the ankle (bottom). Slight
+    // bow forward at the knee suggested via two stacked segments.
+    const upper = _cylT(0.22, 0.18, 0.55, NEUTRAL.fabric, 12, fabricMat);
+    upper.position.set(sx, 0.18, 0);
+    g.add(upper);
+    const lower = _cylT(0.18, 0.15, 0.48, NEUTRAL.fabric, 12, fabricMat);
+    lower.position.set(sx, -0.30, 0.02);
+    g.add(lower);
+    // Cargo pocket — tinted patch on each outer thigh. Box at the
+    // tilt, rather than flush with the leg, so it reads as stitched
+    // on rather than baked in.
+    const pkt = _box(0.18, 0.22, 0.04, tint, { roughness: 0.85 });
+    pkt.position.set(sx + 0.12 * Math.sign(sx), 0.10, 0.04);
+    pkt.rotation.y = 0.18 * -Math.sign(sx);
     g.add(pkt);
+    // Knee patch — slightly darker reinforcement panel.
+    const knee = _box(0.18, 0.08, 0.04, NEUTRAL.metalDark,
+      { roughness: 0.9, metalness: 0.05 });
+    knee.position.set(sx, -0.10, 0.16);
+    g.add(knee);
   }
-  // Waistband — neutral.
-  const band = _box(0.8, 0.18, 0.35, NEUTRAL.fabric);
-  band.position.y = 0.55;
+  // Waistband — capsule reads as a soft belt of cloth, not a slab.
+  const band = _cap(0.18, 0.42, NEUTRAL.fabric, 4, 12, fabricMat);
+  band.scale.set(1.0, 1.0, 0.55);
+  band.rotation.z = Math.PI / 2;
+  band.position.set(0, 0.50, 0);
   g.add(band);
+  // Belt loops — thin strips suggesting webbing under the band.
+  for (const sx of [-0.20, 0.0, 0.20]) {
+    const loop = _box(0.04, 0.08, 0.20, NEUTRAL.leather);
+    loop.position.set(sx, 0.50, 0.16);
+    g.add(loop);
+  }
+  // Seat / crotch hint — small wedge between the upper leg tops so
+  // the silhouette reads as one garment, not two sausages.
+  const seat = _box(0.30, 0.20, 0.32, NEUTRAL.fabric, fabricMat);
+  seat.position.set(0, 0.32, -0.02);
+  g.add(seat);
+
   g.rotation.y = -0.35;
   return g;
 }
@@ -397,22 +553,44 @@ function buildPants(item) {
 function buildBoots(item) {
   const tint = item.tint ?? 0x3a2a18;
   const g = new THREE.Group();
+  // Boots = tapered shaft (calf) + curved foot (ball + heel + sole)
+  // + tinted lace band. Sphere caps round the ankle joint and the
+  // toe so the silhouette is unmistakably a boot.
+  const leatherMat = { roughness: 0.7, metalness: 0.10 };
+
   for (const sx of [-0.25, 0.25]) {
-    // Shaft + foot — neutral leather.
-    const shaft = _box(0.3, 0.5, 0.3, NEUTRAL.leather);
-    shaft.position.set(sx, 0.15, 0);
+    // Shaft — tapered cylinder, wider at the top opening.
+    const shaft = _cylT(0.21, 0.18, 0.50, NEUTRAL.leather, 14, leatherMat);
+    shaft.position.set(sx, 0.18, 0);
     g.add(shaft);
-    const foot = _box(0.32, 0.18, 0.55, NEUTRAL.leather);
-    foot.position.set(sx, -0.2, 0.1);
+    // Ankle joint — sphere where the shaft meets the foot.
+    const ankle = _sph(0.18, NEUTRAL.leather, leatherMat, 12);
+    ankle.position.set(sx, -0.07, 0.05);
+    g.add(ankle);
+    // Foot body — capsule lying on its side reads as the ball of the
+    // foot rounded up to a toe, with a heel bump trailing.
+    const foot = _cap(0.13, 0.32, NEUTRAL.leather, 6, 12, leatherMat);
+    foot.scale.set(1.0, 1.0, 1.0);
+    foot.rotation.x = Math.PI / 2;
+    foot.position.set(sx, -0.20, 0.18);
     g.add(foot);
-    // Sole — black rubber.
-    const sole = _box(0.34, 0.06, 0.57, NEUTRAL.rubber);
-    sole.position.set(sx, -0.32, 0.1);
+    // Heel — small cube at the back to suggest a stacked sole.
+    const heel = _box(0.20, 0.08, 0.16, NEUTRAL.rubber, { roughness: 0.6 });
+    heel.position.set(sx, -0.30, -0.02);
+    g.add(heel);
+    // Sole — flat slab under the foot.
+    const sole = _box(0.28, 0.05, 0.55, NEUTRAL.rubber, { roughness: 0.6 });
+    sole.position.set(sx, -0.33, 0.14);
     g.add(sole);
-    // ACCENT — tinted lace band across the top of the shaft.
-    const band = _box(0.32, 0.08, 0.32, tint);
-    band.position.set(sx, 0.38, 0);
-    g.add(band);
+    // Tinted lace cuff — ring around the top opening of the shaft.
+    const cuff = _torus(0.21, 0.035, tint, { roughness: 0.7 }, 12, 6);
+    cuff.rotation.x = Math.PI / 2;
+    cuff.position.set(sx, 0.44, 0);
+    g.add(cuff);
+    // Lace strip down the front of the shaft, suggesting eyelets.
+    const lace = _box(0.06, 0.42, 0.04, NEUTRAL.metalDark);
+    lace.position.set(sx, 0.18, 0.18);
+    g.add(lace);
   }
   g.rotation.y = -0.3;
   return g;
@@ -421,23 +599,41 @@ function buildBoots(item) {
 function buildBackpack(item) {
   const tint = item.tint ?? 0x6a5a3a;
   const g = new THREE.Group();
-  // Body — neutral canvas.
-  const body = _box(0.8, 1.0, 0.45, NEUTRAL.fabric);
+  // Backpack silhouette — capsule body for soft fabric read, side
+  // pocket as its own capsule, top flap with a buckle, two visible
+  // shoulder straps with grab handle. Tint colours the flap so two
+  // packs (combat / large) stay visually distinct.
+  const fabricMat = { roughness: 0.85, metalness: 0.05 };
+  const body = _cap(0.42, 0.7, NEUTRAL.fabric, 6, 14, fabricMat);
+  body.scale.set(1.0, 1.0, 0.55);
+  body.position.y = 0.0;
   g.add(body);
-  // Side pocket.
-  const pkt = _box(0.2, 0.6, 0.2, NEUTRAL.fabric);
-  pkt.position.set(0.5, -0.1, 0.15);
+  // Side pocket — a smaller capsule attached to one side, suggests
+  // a water-bottle compartment.
+  const pkt = _cap(0.18, 0.30, NEUTRAL.fabric, 4, 10, fabricMat);
+  pkt.scale.set(0.8, 1.0, 0.55);
+  pkt.position.set(0.50, -0.05, 0.10);
   g.add(pkt);
-  // ACCENT — tinted top flap (the outward-facing panel).
-  const flap = _box(0.82, 0.3, 0.44, tint, { roughness: 0.55 });
-  flap.position.y = 0.55;
+  // Top flap — tinted, slightly larger than the body so it overhangs.
+  const flap = _box(0.78, 0.18, 0.50, tint, { roughness: 0.7 });
+  flap.position.set(0, 0.50, 0);
   g.add(flap);
-  // Strap lines — black webbing.
-  for (const sx of [-0.25, 0.25]) {
-    const strap = _box(0.08, 0.9, 0.06, 0x1a1a1a);
-    strap.position.set(sx, 0.1, 0.25);
+  // Buckle on the flap.
+  const buckle = _box(0.12, 0.06, 0.04, NEUTRAL.metalDark,
+    { metalness: 0.7, roughness: 0.3 });
+  buckle.position.set(0, 0.42, 0.27);
+  g.add(buckle);
+  // Two shoulder straps + a grab handle.
+  for (const sx of [-0.22, 0.22]) {
+    const strap = _box(0.10, 0.95, 0.05, 0x18181c, { roughness: 0.75 });
+    strap.position.set(sx, 0.05, 0.28);
     g.add(strap);
   }
+  // Top grab handle — small loop at the top.
+  const handle = _torus(0.10, 0.025, NEUTRAL.fabric, fabricMat, 12, 6);
+  handle.rotation.x = Math.PI / 2;
+  handle.position.set(0, 0.65, 0);
+  g.add(handle);
   g.rotation.y = -0.35;
   return g;
 }
@@ -468,19 +664,364 @@ function buildConsumable(item) {
   return g;
 }
 
-function buildJunk(item) {
-  const tint = item.tint ?? 0x808080;
+// === Junk ===
+// Generic junk (silver coin, copper scrap, lighter, watch, drive,
+// monocle, cig case, doc, dog tags) all share the SAME silhouette: a
+// canvas pouch tied with a drawstring, tinted by item.tint so they
+// stay distinguishable in a stack. Special junk (rings, skulls,
+// vases, walkies, peas, tickets, etc.) gets its own builder.
+
+function _buildGenericPouch(tint) {
   const g = new THREE.Group();
-  // Chunk body — neutral scrap metal.
-  const chunk = _box(0.8, 0.5, 0.6, NEUTRAL.metalDark);
-  chunk.rotation.y = 0.3;
-  g.add(chunk);
-  // ACCENT — tinted stamp/marking box.
-  const accent = _box(0.22, 0.38, 0.22, tint, { metalness: 0.4 });
-  accent.position.set(0.3, 0.25, 0.2);
-  g.add(accent);
+  const fabricMat = { roughness: 0.85, metalness: 0.02 };
+  // Pouch body — capsule slightly squashed so it reads as a sack
+  // sitting on a surface, not a sausage.
+  const body = _cap(0.38, 0.18, NEUTRAL.leather, 6, 14, fabricMat);
+  body.scale.set(1.0, 0.85, 1.0);
+  body.position.y = 0.05;
+  g.add(body);
+  // Drawstring neck — narrow tinted band where the bag is cinched.
+  const neck = _cylT(0.08, 0.16, 0.10, tint, 12, fabricMat);
+  neck.position.y = 0.40;
+  g.add(neck);
+  // Two strands of cord trailing off the cinch.
+  for (const sx of [-0.10, 0.10]) {
+    const strand = _cylT(0.02, 0.02, 0.18, NEUTRAL.metalDark, 6, fabricMat);
+    strand.position.set(sx, 0.50, 0.05);
+    strand.rotation.z = -0.3 * Math.sign(sx);
+    g.add(strand);
+  }
+  // Tinted seal tag dangling on the front — gives the bag its
+  // identifying colour without painting the whole sack.
+  const tag = _box(0.10, 0.10, 0.02, tint, { roughness: 0.6 });
+  tag.position.set(0.05, 0.20, 0.30);
+  g.add(tag);
+  g.rotation.y = -0.35;
+  return g;
+}
+
+function _buildRing(tint, gemColor = tint) {
+  const g = new THREE.Group();
+  // Band — gold/silver torus.
+  const band = _torus(0.25, 0.06, tint, { metalness: 0.85, roughness: 0.25 }, 24, 10);
+  band.rotation.x = Math.PI / 2.2;
+  g.add(band);
+  // Gem on top — small octahedron-ish sphere with high spec.
+  const gem = _sph(0.10, gemColor, { metalness: 0.2, roughness: 0.1 }, 12);
+  gem.scale.set(1.0, 1.2, 1.0);
+  gem.position.set(0, 0.22, 0);
+  g.add(gem);
+  // Prongs holding the gem.
+  for (let i = 0; i < 4; i++) {
+    const a = (i / 4) * Math.PI * 2;
+    const prong = _box(0.025, 0.10, 0.025, tint, { metalness: 0.85, roughness: 0.3 });
+    prong.position.set(Math.cos(a) * 0.07, 0.18, Math.sin(a) * 0.07);
+    g.add(prong);
+  }
+  g.rotation.y = -0.3;
+  g.rotation.x = 0.2;
+  return g;
+}
+
+function _buildSkull(tint) {
+  const g = new THREE.Group();
+  // Cranium — sphere slightly tall.
+  const cranium = _sph(0.40, tint, { roughness: 0.55, metalness: 0.15 }, 14);
+  cranium.scale.set(1.0, 1.05, 0.95);
+  cranium.position.y = 0.10;
+  g.add(cranium);
+  // Jaw — short cylinder under the cranium.
+  const jaw = _box(0.55, 0.18, 0.50, tint, { roughness: 0.55 });
+  jaw.position.y = -0.20;
+  g.add(jaw);
+  // Eye sockets — two dark recessed spheres.
+  for (const sx of [-0.14, 0.14]) {
+    const eye = _sph(0.10, 0x0a0a0a, { roughness: 0.9 }, 10);
+    eye.scale.set(1.0, 0.85, 0.6);
+    eye.position.set(sx, 0.12, 0.32);
+    g.add(eye);
+  }
+  // Nasal cavity — small triangle hint.
+  const nose = _box(0.06, 0.10, 0.04, 0x0a0a0a);
+  nose.position.set(0, -0.05, 0.36);
+  g.add(nose);
+  g.rotation.y = -0.3;
+  return g;
+}
+
+function _buildVase(tint) {
+  const g = new THREE.Group();
+  // Vase profile — tall, narrow neck, wider body, narrow base.
+  // Use stacked tapered cylinders.
+  const base   = _cylT(0.18, 0.10, 0.10, tint, 16, { roughness: 0.55 });
+  const belly  = _cylT(0.30, 0.18, 0.30, tint, 16, { roughness: 0.55 });
+  const neck   = _cylT(0.13, 0.30, 0.30, tint, 16, { roughness: 0.55 });
+  const lip    = _cylT(0.18, 0.13, 0.06, tint, 16, { roughness: 0.55 });
+  base.position.y  = -0.55;
+  belly.position.y = -0.30;
+  neck.position.y  =  0.00;
+  lip.position.y   =  0.18;
+  g.add(base, belly, neck, lip);
+  // Decorative band around the belly — slightly darker.
+  const band = _torus(0.30, 0.025, NEUTRAL.metalDark, { metalness: 0.4 }, 18, 6);
+  band.rotation.x = Math.PI / 2;
+  band.position.y = -0.30;
+  g.add(band);
+  g.rotation.y = -0.3;
+  return g;
+}
+
+function _buildWalkie(tint) {
+  const g = new THREE.Group();
+  // Body — vertical rectangular block, dark plastic.
+  const body = _box(0.45, 0.95, 0.20, tint, { roughness: 0.7 });
+  g.add(body);
+  // Speaker grille — perforated panel near the top.
+  const grille = _box(0.34, 0.20, 0.04, NEUTRAL.metalDark, { roughness: 0.85 });
+  grille.position.set(0, 0.30, 0.12);
+  g.add(grille);
+  // PTT button — round button on the side.
+  const ptt = _cyl(0.05, 0.04, NEUTRAL.metalDark, 12);
+  ptt.rotation.z = Math.PI / 2;
+  ptt.position.set(-0.24, 0.05, 0);
+  g.add(ptt);
+  // Antenna — thin cylinder out the top.
+  const ant = _cylT(0.04, 0.025, 0.50, NEUTRAL.metalDark, 8);
+  ant.position.set(-0.13, 0.72, 0);
+  g.add(ant);
+  // Display square.
+  const screen = _box(0.30, 0.18, 0.02, 0x6a8a6a, { metalness: 0.4, roughness: 0.2 });
+  screen.position.set(0, -0.05, 0.12);
+  g.add(screen);
+  g.rotation.y = -0.3;
+  return g;
+}
+
+function _buildRadio(tint) {
+  const g = new THREE.Group();
+  // Larger field-radio body — landscape orientation.
+  const body = _box(1.0, 0.65, 0.40, tint, { roughness: 0.7 });
+  g.add(body);
+  // Tuning dial — round knob on top right.
+  const dial = _cyl(0.16, 0.10, NEUTRAL.metalDark, 14);
+  dial.position.set(0.30, 0.40, 0);
+  g.add(dial);
+  // Smaller volume dial.
+  const vol = _cyl(0.10, 0.06, NEUTRAL.metalDark, 12);
+  vol.position.set(-0.25, 0.36, 0);
+  g.add(vol);
+  // Frequency display — green LCD strip.
+  const lcd = _box(0.55, 0.14, 0.02, 0x80c060, { metalness: 0.4, roughness: 0.2 });
+  lcd.position.set(0.05, 0.05, 0.21);
+  g.add(lcd);
+  // Speaker grille — bottom front.
+  const grille = _box(0.85, 0.16, 0.02, NEUTRAL.metalDark);
+  grille.position.set(0, -0.20, 0.21);
+  g.add(grille);
+  // Telescoping antenna.
+  const ant = _cylT(0.025, 0.015, 0.60, NEUTRAL.metalDark, 8);
+  ant.position.set(0.45, 0.65, -0.10);
+  ant.rotation.z = -0.2;
+  g.add(ant);
+  // Carry handle.
+  const handle = _torus(0.20, 0.03, NEUTRAL.leather, { roughness: 0.85 }, 12, 6);
+  handle.rotation.x = Math.PI / 2;
+  handle.position.set(-0.05, 0.45, 0);
+  g.add(handle);
+  g.rotation.y = -0.3;
+  return g;
+}
+
+function _buildBattery(tint) {
+  const g = new THREE.Group();
+  // Body — rectangular block, scuffed casing.
+  const body = _box(0.95, 0.65, 0.55, tint, { roughness: 0.65 });
+  g.add(body);
+  // Two terminals on top — short metal posts.
+  for (const sx of [-0.25, 0.25]) {
+    const post = _cyl(0.07, 0.10, NEUTRAL.metal, 10);
+    post.position.set(sx, 0.38, 0);
+    g.add(post);
+    const cap = _cyl(0.09, 0.04, sx < 0 ? 0xc02020 : 0x202020, 10);
+    cap.position.set(sx, 0.45, 0);
+    g.add(cap);
+  }
+  // Embossed brand panel.
+  const panel = _box(0.55, 0.30, 0.02, NEUTRAL.metalDark, { roughness: 0.5 });
+  panel.position.set(0, 0.05, 0.28);
+  g.add(panel);
+  g.rotation.y = -0.3;
+  return g;
+}
+
+function _buildScrapMetal() {
+  const g = new THREE.Group();
+  // Three irregular chunks of metal — overlapping and rotated to
+  // suggest a pile, not a single block.
+  const mat = { roughness: 0.6, metalness: 0.7 };
+  const c1 = _box(0.55, 0.30, 0.45, NEUTRAL.metalDark, mat);
+  c1.position.set(-0.15, -0.15, 0);
+  c1.rotation.set(0.3, 0.4, 0.1);
+  g.add(c1);
+  const c2 = _box(0.35, 0.25, 0.35, NEUTRAL.metal, mat);
+  c2.position.set(0.20, -0.05, 0.15);
+  c2.rotation.set(-0.2, -0.3, 0.5);
+  g.add(c2);
+  const c3 = _box(0.30, 0.18, 0.28, NEUTRAL.metalDark, mat);
+  c3.position.set(0.05, 0.18, -0.15);
+  c3.rotation.set(0.5, 0.6, -0.2);
+  g.add(c3);
+  // Bent rebar/wire poking out — a thin twisted cylinder.
+  const wire = _cyl(0.025, 0.6, NEUTRAL.metal, 8);
+  wire.position.set(0.18, 0.10, 0.10);
+  wire.rotation.set(0.6, 0, 0.4);
+  g.add(wire);
   g.rotation.y = -0.4;
   return g;
+}
+
+function _buildBagOfPeas(tint) {
+  const g = new THREE.Group();
+  // Bulgy canvas sack with peas inside, pinched at the top.
+  const sack = _sph(0.45, NEUTRAL.fabric, { roughness: 0.95 }, 14);
+  sack.scale.set(1.0, 1.1, 0.9);
+  sack.position.y = -0.05;
+  g.add(sack);
+  // Pinched neck where the bag is tied.
+  const neck = _cylT(0.10, 0.20, 0.12, NEUTRAL.fabric, 12, { roughness: 0.95 });
+  neck.position.y = 0.36;
+  g.add(neck);
+  // Tie cord.
+  const tie = _torus(0.08, 0.02, 0x6a4a2a, { roughness: 0.85 }, 12, 6);
+  tie.position.y = 0.42;
+  tie.rotation.x = Math.PI / 2;
+  g.add(tie);
+  // Visible pea poking out of the cinch — gives it identity.
+  for (let i = 0; i < 3; i++) {
+    const pea = _sph(0.07, tint, { roughness: 0.55 }, 10);
+    pea.position.set((i - 1) * 0.10, 0.46 + i * 0.02, 0.05);
+    g.add(pea);
+  }
+  // Faded label patch sewn onto the front.
+  const patch = _box(0.20, 0.18, 0.02, 0xb89860, { roughness: 0.9 });
+  patch.position.set(0, -0.08, 0.40);
+  g.add(patch);
+  g.rotation.y = -0.3;
+  return g;
+}
+
+function _buildTicket(tint) {
+  const g = new THREE.Group();
+  // Ticket — flat rectangular paper with a tear-stub at one end.
+  const body = _box(1.10, 0.45, 0.02, tint, { roughness: 0.85, metalness: 0 });
+  g.add(body);
+  // Tear-stub band — perforated divider line, slightly recessed.
+  const tear = _box(0.04, 0.45, 0.025, NEUTRAL.metalDark);
+  tear.position.set(-0.30, 0, 0);
+  g.add(tear);
+  // Stub side.
+  const stub = _box(0.40, 0.42, 0.025, 0xe6e0d8, { roughness: 0.85 });
+  stub.position.set(-0.55, 0, 0.005);
+  g.add(stub);
+  // Big number printed on the main body.
+  const number = _box(0.18, 0.22, 0.005, NEUTRAL.metalDark);
+  number.position.set(0.20, 0.05, 0.015);
+  g.add(number);
+  // "BARCODE" strip on the right.
+  for (let i = 0; i < 7; i++) {
+    const bar = _box(0.015, 0.18, 0.004, 0x101010);
+    bar.position.set(0.40 + i * 0.025, -0.1, 0.015);
+    g.add(bar);
+  }
+  g.rotation.x = -0.4;
+  g.rotation.y = -0.3;
+  return g;
+}
+
+function _buildBottle(tint) {
+  const g = new THREE.Group();
+  // Bottle profile — wide base, neck, cap. Tinted "liquid" inside.
+  const glass = _cyl(0.18, 0.55, NEUTRAL.glass, 16);
+  glass.material.transparent = true;
+  glass.material.opacity = 0.55;
+  glass.material.roughness = 0.1;
+  glass.material.metalness = 0.0;
+  glass.position.y = -0.08;
+  g.add(glass);
+  // Liquid inside — slightly smaller cylinder, tinted.
+  const liquid = _cyl(0.16, 0.42, tint, 14);
+  liquid.position.y = -0.12;
+  g.add(liquid);
+  // Neck.
+  const neck = _cylT(0.07, 0.12, 0.15, NEUTRAL.glass, 12);
+  neck.material.transparent = true;
+  neck.material.opacity = 0.55;
+  neck.position.y = 0.30;
+  g.add(neck);
+  // Cap.
+  const cap = _cyl(0.08, 0.06, 0xb88820, 12);
+  cap.material.metalness = 0.7;
+  cap.material.roughness = 0.3;
+  cap.position.y = 0.42;
+  g.add(cap);
+  // Hand-painted label — small rectangle on the front.
+  const label = _box(0.30, 0.22, 0.005, 0xece2c0, { roughness: 0.9 });
+  label.position.set(0, -0.08, 0.19);
+  g.add(label);
+  g.rotation.y = -0.25;
+  return g;
+}
+
+function _buildBiscuits(tint) {
+  const g = new THREE.Group();
+  // A small stack of round biscuits, each a short cylinder.
+  for (let i = 0; i < 4; i++) {
+    const b = _cyl(0.32, 0.10, tint, 16);
+    b.position.y = -0.18 + i * 0.10;
+    b.material.roughness = 0.85;
+    g.add(b);
+    // Glaze cross-cuts on the top biscuit only.
+    if (i === 3) {
+      for (let j = 0; j < 2; j++) {
+        const slash = _box(0.50, 0.01, 0.04, 0xb88860);
+        slash.rotation.y = j * Math.PI / 2;
+        slash.position.y = b.position.y + 0.06;
+        g.add(slash);
+      }
+    }
+  }
+  // Crinkly wax paper underneath, suggested by an offset disk.
+  const paper = _cyl(0.42, 0.02, 0xe8d8b0, 18);
+  paper.position.y = -0.30;
+  paper.material.roughness = 0.95;
+  g.add(paper);
+  g.rotation.y = -0.3;
+  return g;
+}
+
+// Per-id dispatch table — items not listed here fall through to the
+// shared pouch silhouette tinted by item.tint. Keep this list short:
+// only items whose name evokes a shape that's worth the pixels.
+const _JUNK_BUILDERS = {
+  junk_ring:           (it) => _buildRing(0xe8d4a8, it.tint),
+  junk_kingring:       (it) => _buildRing(0xd4a040, 0xff5040),
+  junk_skull:          (it) => _buildSkull(it.tint),
+  junk_vase:           (it) => _buildVase(it.tint),
+  junk_walkie:         (it) => _buildWalkie(it.tint),
+  junk_radio:          (it) => _buildRadio(it.tint),
+  junk_carbatt:        (it) => _buildBattery(it.tint),
+  junk_scrap:          ()    => _buildScrapMetal(),
+  junk_peas:           (it) => _buildBagOfPeas(it.tint),
+  junk_rocket_ticket:  (it) => _buildTicket(it.tint),
+  junk_fancy_alcohol:  (it) => _buildBottle(it.tint),
+  junk_yummy_biscuits: (it) => _buildBiscuits(it.tint),
+};
+
+function buildJunk(item) {
+  const builder = _JUNK_BUILDERS[item.id];
+  if (builder) return builder(item);
+  // Default: tinted canvas pouch. Generic, signals "loot to fence".
+  return _buildGenericPouch(item.tint ?? 0x808080);
 }
 
 function buildAttachment(item) {
