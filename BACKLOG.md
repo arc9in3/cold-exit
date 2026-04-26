@@ -3,7 +3,53 @@
 A snapshot of known gaps, deferred work, and candidate next steps. Not
 exhaustive; living document.
 
-Last updated: 2026-04-25 (Pages git-connected for auto-deploy).
+Last updated: 2026-04-25 (late-Apr session: AI pathing, boss seal v2,
+hidden ambush rooms, whisper dart deep-sleep, prop collision audit,
+leaderboard wiped).
+
+## Most-recent shipped (this batch)
+
+- [x] **Boss seal v2** — entry seal restored but gated on the boss
+      being physically inside the room. Auto-releases the moment the
+      boss leaves the bounds (chase, dash, etc.) so the player can't
+      get sealed in with a stranded boss. Hidden ambush rooms (~35%)
+      keep boss + minions invisible/deaf until the player crosses the
+      threshold, then drop them in from above with a screen shake.
+- [x] **AI pathing** — `level.steerAround` whisker raycast (probes
+      ahead, deflects to closest open whisker at ±30/±60/±90°);
+      `level.findCoverNear` returns the safe-side spot behind a prop
+      (constant-time AABB test, no per-prop _segmentClear). Cover-
+      seeker gunmen now reposition to a real prop on reload. Whisker
+      steering runs every other frame per enemy with cached deflection.
+- [x] **Whisper dart deep sleep** — on hit: wipe suspicion, disable
+      alert/propagate paths, randomise sleep timer 10s..5min. Tier
+      proc: normal 100%, sub-boss 12%, boss 4%.
+- [x] **Necromant adds** — flagged `noDrops + noXp`; corpses fade and
+      dispose 4s+1.5s after death (also catches looted/empty bodies).
+      Spawn check requires a clear walkable segment to the player.
+- [x] **Whole-number item stats** — affix rolls + weapon
+      damage/fireRate/range + mastercraft scaling + UI readouts all
+      clamp to integers. Sub-1 multipliers stay fractional.
+- [x] **Enemy explosions actually damage the player** — old code
+      measured distance from `player.body.position` (rig-local space,
+      reads near-origin); switched to `player.mesh.position` (world).
+- [x] **Enemy flash/stun mitigation** — AOE shrunk (flash 7→4.5,
+      stun 5.5→3.8); player-side duration falls off with distance and,
+      for flash, with whether the player is facing the blast.
+- [x] **Prop collision audit** — placement uses proper rotated rect-
+      vs-rect AABB with a 0.45m gap (was a center-radius circle test
+      that missed long thin props). Column AABB tightened to full
+      radius.
+- [x] **Broken-item sell discount** — `durability.current === 0`
+      sells at 15% of normal sell price.
+- [x] **Ground piles render as containers** — `_groundRefs` targets
+      use the no-paperdoll layout same as `kind === 'container'`.
+- [x] **Leaderboard wiped** — top:credits/levels/damage/kills KV keys
+      cleared on the worker. Local localStorage cache will rewrite on
+      next run submission.
+- [x] **Melee unstick deflection** — sidestep is near-fully
+      perpendicular (was 0.4/0.9 blend), and the side flips on each
+      stuck-cycle so chunky props get cleared instead of bounced off.
 
 ## Web deploy shipping notes
 
