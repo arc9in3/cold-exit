@@ -1817,6 +1817,29 @@ function regenerateLevel() {
         // the signet. Skips the standard makeContainer roll.
         spawnSignetChest: (x, z) => _spawnEncounterChestAt(x, z,
           [{ ...JUNK_DEFS.kingsRing, durability: undefined }]),
+        // Generic chest with caller-supplied items. Used by Sleeping
+        // Boss for the sub-boss-tier corner pile.
+        spawnEncounterChest: (x, z, items) => _spawnEncounterChestAt(x, z, items),
+        // Mirror — spawn a clone enemy with the player's currently
+        // equipped weapon, same max HP, marked so the kill drop is a
+        // mastercraft of the same weapon. Returns the gunman/melee
+        // record so the encounter tick can poll alive state.
+        spawnMirrorClone: (x, z, room) => _spawnMirrorClone(x, z, room),
+        // Choices and Consequences — spawn the gunman + kneeling-man
+        // pair as non-AI hittable props (or attackable targets) and
+        // return references for the encounter tick.
+        spawnCnCPair: (cx, cz, room) => _spawnCnCPair(cx, cz, room),
+        // Roll a body's worth of sub-boss-tier loot for chest seeding.
+        rollSubBossLootPile: () => _rollSubBossLootPile(),
+        // Awarded to the player wallet directly (Choices and
+        // Consequences "kneeling man hands you 5000 gold" reward).
+        awardPlayerCredits: (n) => {
+          const amount = Math.max(0, n | 0);
+          if (amount <= 0) return;
+          playerCredits += amount;
+          runStats.addCredits(amount);
+          transientHudMsg(`+${amount}c`, 2.4);
+        },
         getKillCount: () => runStats.kills | 0,
         markEncounterComplete: (id) => markEncounterDone(id),
         // Smoke puff at world XZ — used by Glass Case telegraph.
@@ -1957,6 +1980,36 @@ function nearestInteractableEncounter() {
   if (!ent.def.interact) return null;
   return ent;
 }
+
+// Indecision relic — every 10 seconds while the artifact is owned,
+// grant one of the standard short-buff defs for 8 seconds. Slight
+// gap between buffs is intentional — the artifact reads as "you
+// rarely catch a quiet moment". Skips when the player is in a
+// modal / dead.
+const _INDECISION_BUFFS = [
+  { id: 'combatStim', mods: { damageMult: 1.25 } },
+  { id: 'adrenaline', mods: { moveSpeedMult: 1.45, staminaRegenMult: 1.4 } },
+  { id: 'energy',     mods: { staminaRegenMult: 1.5 } },
+  { id: 'morphine',   mods: { dmgReduction: 0.25 } },
+  { id: 'regen',      mods: { healthRegenMult: 2.5 } },
+];
+let _indecisionT = 0;
+function _tickIndecisionRelic(dt) {
+  if (!artifacts.has('indecision')) return;
+  if (paused || playerDead) return;
+  _indecisionT += dt;
+  if (_indecisionT >= 10) {
+    _indecisionT = 0;
+    const pick = _INDECISION_BUFFS[Math.floor(Math.random() * _INDECISION_BUFFS.length)];
+    buffs.grant(pick.id, pick.mods, 8);
+  }
+}
+
+// Choices and Consequences — leave-and-return state machine driven by
+// per-room flags. We track which encounter rooms have ever been
+// entered so the encounter's tick() can detect "first time leaving"
+// vs "returning". Stored on room directly via room._encounter.state.
+// No global runtime state needed; the encounter handles its own.
 
 // Per-frame encounter tick — drives any animations / barks. Runs after
 // the player + AI ticks so encounter state reads the current frame's
@@ -2931,6 +2984,97 @@ function _tickSmokePuffs(dt) {
       _smokePuffs.splice(i, 1);
     }
   }
+}
+
+// Mirror clone — spawn a gunman or melee carrying the player's
+// currently equipped weapon. Uses player.maxHealth as the clone's
+// HP so it reads as fighting yourself. On death the clone drops a
+// MASTERCRAFT version of one of the player's equipped weapons.
+function _spawnMirrorClone(x, z, room) {
+  const weapon = currentWeapon();
+  if (!weapon) return null;
+  // Mirror loadout: clone the equipped weapon exactly (preserve
+  // attachments + rarity). The AI doesn't honour every player perk
+  // but it'll still fire the same gun with the same dmg/spread.
+  const cloneWeapon = JSON.parse(JSON.stringify(weapon));
+  const opts = {
+    tier: 'subBoss', roomId: room.id,
+    hpMult: 1.0, damageMult: 1.0,
+    reactionMult: 0.85, aimSpreadMult: 0.85,
+    aggression: 1.0,
+    variant: 'standard',
+    gearLevel: (level?.index || 0),
+  };
+  let actor = null;
+  if (weapon.type === 'melee') {
+    actor = melees.spawn(x, z, opts);
+  } else {
+    actor = gunmen.spawn(x, z, cloneWeapon, opts);
+  }
+  if (actor) {
+    // Pin the clone HP to the player's current max so this is a
+    // mirror match in stamina too.
+    const playerMax = playerMaxHealthCached || 100;
+    actor.hp = playerMax;
+    actor.maxHp = playerMax;
+    // Aggressive on spawn — same drop-in feel as the ambush bosses.
+    if (actor.state) {
+      actor.state = (weapon.type === 'melee') ? 'chase' : 'alerted';
+      actor.reactionT = 0.20;
+    }
+    // Stamp a callback hook for the encounter tick — when the
+    // clone dies, the encounter spawns a mastercraft drop.
+    actor.mirrorClone = true;
+  }
+  return actor;
+}
+
+// Build a sub-boss-tier loot pile. Used by Sleeping Boss's corner
+// chest. Same shape as a sub-boss body's roll without the weapon
+// (the boss in the room is the implied source of the weapon).
+function _rollSubBossLootPile() {
+  const items = [];
+  // Always: one rare/epic weapon (sub-boss carry).
+  const wpnPool = tunables.weapons.filter(w =>
+    !w.artifact && !w.mythic && (w.rarity === 'rare' || w.rarity === 'epic'));
+  if (wpnPool.length) {
+    items.push(wrapWeapon(wpnPool[Math.floor(Math.random() * wpnPool.length)]));
+  }
+  // Gear: 1 rolled gear piece.
+  const g = randomGear();
+  items.push(withAffixes({
+    ...g, rarity: 'rare',
+    durability: { ...(g.durability || { current: 100, max: 100, repairability: 0.9 }) },
+  }));
+  // Junk: 1 high-value rare junk.
+  const rareJunk = ALL_JUNK.filter(j => j.rarity === 'rare' || j.rarity === 'epic');
+  if (rareJunk.length) {
+    items.push({ ...rareJunk[Math.floor(Math.random() * rareJunk.length)] });
+  }
+  // Maybe attachment.
+  if (Math.random() < 0.45) items.push(rollAttachmentRarity({ ...ALL_ATTACHMENTS[Math.floor(Math.random() * ALL_ATTACHMENTS.length)] }));
+  return items;
+}
+
+// Choices and Consequences — spawn the standoff pair. Both are
+// hittable but completely passive (no AI tick, no firing). The
+// encounter watches their HP each frame; whoever takes damage first
+// dies and the other becomes invulnerable.
+function _spawnCnCPair(cx, cz, room) {
+  // Use the existing dummies system for hittable passive targets.
+  // Both spawn with HP 1 so a single bullet from any weapon drops
+  // either; encounter tick reads .alive each frame to detect the
+  // first kill.
+  const gunman = dummies.spawn(cx - 0.6, cz);
+  gunman.hp = 1;
+  gunman.cncRole = 'gunman';
+  // Kneeler — visually compress the dummy by scaling its group down
+  // to ~60% height so it reads as kneeling.
+  const kneeler = dummies.spawn(cx + 0.6, cz);
+  kneeler.hp = 1;
+  kneeler.cncRole = 'kneeler';
+  if (kneeler.group) kneeler.group.scale.set(1, 0.6, 1);
+  return { gunman, kneeler };
 }
 
 // Spawn one elite gunman at world XZ for a given encounter room.
@@ -4028,6 +4172,23 @@ function rollCredits(tier) {
 }
 
 function onEnemyKilled(enemy, opts = {}) {
+  // Mirror Encounter — clone drops a guaranteed mastercraft version
+  // of the player's currently equipped weapon. We snapshot the
+  // weapon NOW (not at clone-spawn time) since the player may have
+  // swapped between rounds.
+  if (enemy && enemy.mirrorClone) {
+    const w = currentWeapon();
+    if (w) {
+      const drop = JSON.parse(JSON.stringify(w));
+      drop.mastercraft = true;
+      // Bump rarity ladder one tier to read as "this is special".
+      const ladder = ['common', 'uncommon', 'rare', 'epic', 'legendary'];
+      const idx = ladder.indexOf(drop.rarity || 'common');
+      if (idx < ladder.length - 1) drop.rarity = ladder[idx + 1];
+      // Spawn next to the corpse via loot system.
+      loot.spawnItem({ x: enemy.group.position.x + 0.6, y: 0.4, z: enemy.group.position.z }, drop);
+    }
+  }
   // opts.silent — skip witness alerts and the death sfx. Used by the
   // execute path so a back-stab doesn't give the player's position
   // away to the rest of the room.
@@ -7725,6 +7886,7 @@ function tick() {
   tickCorpseDespawn(dt);
   tickEncounters(dt);
   _tickSmokePuffs(dt);
+  _tickIndecisionRelic(dt);
   // Player flash + stun decay. Flash drives a fullscreen white
   // overlay that fades from 1.0 → 0 over the duration; stun decays
   // separately, the camera waver reads it below.

@@ -147,6 +147,19 @@ export const ARTIFACT_DEFS = {
     encounterOnly: true,
     apply(s) { s.dashDistanceMult = (s.dashDistanceMult || 1) * 2; },
   },
+  // Choices and Consequences — Indecision relic. Drives a 10s ticker
+  // in main.js that grants one of the standard short-buff defs. Pure
+  // marker artifact; no per-stat apply.
+  indecision: {
+    id: 'indecision', name: 'Indecision',
+    lore: 'Some choices echo. Some refuse to be made.',
+    short: 'Every 10s, gain a random short buff',
+    tint: 0x808a98,
+    price: 5000,
+    encounterOnly: true,
+    apply(_s) { /* trigger-based — see _tickIndecisionRelic in main.js */ },
+    trigger: 'indecision',
+  },
 };
 
 export const ALL_ARTIFACTS = Object.values(ARTIFACT_DEFS);

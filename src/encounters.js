@@ -1386,6 +1386,322 @@ export const ENCOUNTER_DEFS = {
     },
     onItemDropped(item, ctx) { return { consume: false }; },
   },
+
+  // -----------------------------------------------------------------
+  // The Mirror — standing in front of the mirror for 10 seconds
+  // spawns a clone of the player with their exact equipped loadout.
+  // Killing the clone drops a guaranteed mastercraft of the
+  // player's current weapon. One-shot per save.
+  mirror: {
+    id: 'mirror',
+    name: 'The Mirror',
+    floorColor: 0xc8d0d8,             // silver
+    oncePerSave: true,
+    condition: (state) => state.levelIndex >= 2,
+    GAZE_TIME: 10,
+    spawn(scene, room, ctx) {
+      const disc = _spawnFloorDisc(scene, room, this.floorColor);
+      // Mirror prop — tall ornate frame + reflective slab.
+      const group = new THREE.Group();
+      const frameMat = new THREE.MeshStandardMaterial({
+        color: 0xc8a868, roughness: 0.4, metalness: 0.7,
+        emissive: 0x402a10, emissiveIntensity: 0.25,
+      });
+      const glassMat = new THREE.MeshStandardMaterial({
+        color: 0xe8f0f8, roughness: 0.05, metalness: 1.0,
+        emissive: 0x405068, emissiveIntensity: 0.20,
+      });
+      const left = new THREE.Mesh(new THREE.BoxGeometry(0.10, 2.6, 0.18), frameMat);
+      left.position.set(-0.65, 1.30, 0); group.add(left);
+      const right = left.clone(); right.position.set(0.65, 1.30, 0); group.add(right);
+      const top = new THREE.Mesh(new THREE.BoxGeometry(1.50, 0.18, 0.18), frameMat);
+      top.position.set(0, 2.55, 0); group.add(top);
+      const bot = top.clone(); bot.position.set(0, 0.10, 0); group.add(bot);
+      const glass = new THREE.Mesh(new THREE.BoxGeometry(1.20, 2.30, 0.06), glassMat);
+      glass.position.set(0, 1.30, 0.02);
+      glass.castShadow = true;
+      group.add(glass);
+      group.position.set(disc.cx, 0, disc.cz);
+      scene.add(group);
+      const label = _makeLabelSprite('THE MIRROR', '#d8e0e8');
+      label.position.set(disc.cx, 3.2, disc.cz);
+      scene.add(label);
+      const hint = _makeLabelSprite('Stand still and look', '#c9a87a');
+      hint.scale.set(3.6, 0.65, 1);
+      hint.position.set(disc.cx, 0.55, disc.cz + 1.6);
+      scene.add(hint);
+      const progress = _makeLabelSprite('', '#d8e0e8');
+      progress.scale.set(3.6, 0.65, 1);
+      progress.position.set(disc.cx, 1.0, disc.cz + 1.6);
+      progress.visible = false;
+      scene.add(progress);
+      return {
+        group, glass, label, hint, progress, disc,
+        gazeT: 0,
+        cloneSpawned: false,
+        clone: null,
+        complete: false,
+        lastX: null, lastZ: null,
+      };
+    },
+    tick(dt, ctx) {
+      const s = ctx.state;
+      if (!s.group || s.complete) return;
+      const px = ctx.playerPos.x, pz = ctx.playerPos.z;
+      const inRoom = ctx.room && ctx.room.bounds
+        && px >= ctx.room.bounds.minX && px <= ctx.room.bounds.maxX
+        && pz >= ctx.room.bounds.minZ && pz <= ctx.room.bounds.maxZ;
+      if (!s.cloneSpawned) {
+        if (!inRoom) {
+          s.gazeT = 0;
+          s.lastX = null; s.lastZ = null;
+          if (s.progress) s.progress.visible = false;
+          return;
+        }
+        if (s.lastX === null) { s.lastX = px; s.lastZ = pz; }
+        const drift = Math.hypot(px - s.lastX, pz - s.lastZ);
+        const def = ENCOUNTER_DEFS.mirror;
+        if (drift > 0.20) {
+          s.gazeT = 0;
+          s.lastX = px; s.lastZ = pz;
+        } else {
+          s.gazeT += dt;
+        }
+        if (s.progress) {
+          s.progress.visible = true;
+          const sec = Math.max(0, Math.ceil(def.GAZE_TIME - s.gazeT));
+          s.progress.userData.setText(s.gazeT >= def.GAZE_TIME
+            ? '...something stirs in the glass'
+            : `Gazing... ${sec}s`);
+        }
+        if (s.gazeT >= def.GAZE_TIME) {
+          s.cloneSpawned = true;
+          // Spawn clone in front of the mirror.
+          const cloneX = s.disc.cx;
+          const cloneZ = s.disc.cz + 1.4;
+          s.clone = ctx.spawnMirrorClone && ctx.spawnMirrorClone(cloneX, cloneZ, ctx.room);
+          ctx.spawnSpeech(new THREE.Vector3(s.disc.cx, 2.2, s.disc.cz),
+            'Look upon yourself.', 4.0);
+          if (s.hint) s.hint.visible = false;
+          if (s.progress) s.progress.userData.setText('Defeat your reflection.');
+        }
+      } else {
+        // Clone spawned — wait for its kill.
+        if (s.clone && !s.clone.alive) {
+          s.complete = true;
+          if (ctx.markEncounterComplete) ctx.markEncounterComplete('mirror');
+          if (s.progress) s.progress.visible = false;
+        }
+      }
+    },
+    onItemDropped(item, ctx) { return { consume: false }; },
+  },
+
+  // -----------------------------------------------------------------
+  // Sleeping Boss — non-aggro boss snoring on the floor + a chest
+  // of sub-boss-tier loot in the corner. Walking past peacefully
+  // (don't attack) lets the player grab the chest and leave.
+  // Damaging the boss wakes him at 1.5× HP/dmg for a real fight.
+  // Either branch is one-shot per save.
+  sleeping_boss: {
+    id: 'sleeping_boss',
+    name: 'Sleeping Boss',
+    floorColor: 0x4a5260,             // deep slate
+    oncePerSave: true,
+    condition: (state) => state.levelIndex >= 3,
+    spawn(scene, room, ctx) {
+      const disc = _spawnFloorDisc(scene, room, this.floorColor);
+      // Big slumped figure in the centre.
+      const npc = _buildSimpleNpc({
+        bodyColor: 0x60404a, headColor: 0xc8a880,
+        accentColor: 0x806040, height: 2.2,
+      });
+      // Lay him on his side — rotate 90° around X.
+      npc.rotation.x = -Math.PI / 2;
+      npc.position.set(disc.cx, 0.18, disc.cz);
+      scene.add(npc);
+      const label = _makeLabelSprite('SLEEPING BOSS', '#a0a8b0');
+      label.position.set(disc.cx, 1.6, disc.cz);
+      scene.add(label);
+      const hint = _makeLabelSprite('Zzz... do not disturb', '#7a8290');
+      hint.scale.set(3.6, 0.65, 1);
+      hint.position.set(disc.cx, 0.55, disc.cz + 1.6);
+      scene.add(hint);
+      // Sub-boss loot pile in a corner.
+      const cb = ctx.room.bounds;
+      const chestX = cb.minX + 2.4;
+      const chestZ = cb.minZ + 2.4;
+      const items = ctx.rollSubBossLootPile ? ctx.rollSubBossLootPile() : [];
+      if (ctx.spawnEncounterChest) ctx.spawnEncounterChest(chestX, chestZ, items);
+      return {
+        npc, label, hint, disc,
+        slept: false,
+        woke: false,
+        complete: false,
+        snoreT: 0,
+      };
+    },
+    tick(dt, ctx) {
+      const s = ctx.state;
+      if (!s.npc) return;
+      // Snoring jitter while asleep.
+      if (!s.woke) {
+        s.snoreT += dt;
+        s.npc.position.y = 0.18 + Math.abs(Math.sin(s.snoreT * 1.4)) * 0.04;
+      }
+      // First-frame logic: if the player ever leaves the room while
+      // peaceful, we lock the encounter complete (peaceful path).
+      const px = ctx.playerPos.x, pz = ctx.playerPos.z;
+      const inRoom = ctx.room && ctx.room.bounds
+        && px >= ctx.room.bounds.minX && px <= ctx.room.bounds.maxX
+        && pz >= ctx.room.bounds.minZ && pz <= ctx.room.bounds.maxZ;
+      if (inRoom) s.everEntered = true;
+      if (!s.complete && s.everEntered && !inRoom && !s.woke) {
+        // Player left without disturbing him. Peaceful path locked.
+        s.complete = true;
+        if (ctx.markEncounterComplete) ctx.markEncounterComplete('sleeping_boss');
+        if (s.hint) s.hint.userData.setText('You stepped softly. He never knew.');
+      }
+    },
+    // Sleeping Boss is purely environmental; player damages him by
+    // shooting/meleeing the NPC mesh, which we don't make hittable
+    // for this prototype. The "wake on damage" branch is left as a
+    // future hook — the peaceful path is what ships now.
+    onItemDropped(item, ctx) { return { consume: false }; },
+  },
+
+  // -----------------------------------------------------------------
+  // Choices and Consequences — gunman + kneeling man standoff. Damage
+  // either to lock that choice; the other becomes invulnerable +
+  // delivers their line. Reward depends on who you killed:
+  //   gunman dies      → kneeler gives you 5000c
+  //   kneeler dies     → gunman drops a random legendary weapon
+  // Leave the room and return: both bodies on the ground + the
+  // Indecision relic spawns in the centre. Re-enterable until pickup
+  // (item-drop check on Indecision marks the encounter complete).
+  choices_and_consequences: {
+    id: 'choices_and_consequences',
+    name: 'Choices and Consequences',
+    floorColor: 0x707888,             // ambiguous grey-blue
+    oncePerSave: true,
+    condition: (state) => state.levelIndex >= 3,
+    spawn(scene, room, ctx) {
+      const disc = _spawnFloorDisc(scene, room, this.floorColor);
+      // Spawn the standoff pair via main.js helper (uses dummies).
+      const pair = ctx.spawnCnCPair && ctx.spawnCnCPair(disc.cx, disc.cz, ctx.room);
+      const label = _makeLabelSprite('CHOICES AND CONSEQUENCES', '#c0c8d8');
+      label.position.set(disc.cx, 2.8, disc.cz);
+      scene.add(label);
+      const hint = _makeLabelSprite('Talk · or shoot one', '#c9a87a');
+      hint.scale.set(3.6, 0.65, 1);
+      hint.position.set(disc.cx, 0.55, disc.cz + 1.8);
+      scene.add(hint);
+      return {
+        pair, label, hint, disc,
+        phase: 'standoff',          // 'standoff' → 'aftermath' → 'returned'
+        chosenDead: null,
+        chosenSurvivor: null,
+        leftRoomAfterChoice: false,
+        relicSpawned: false,
+        complete: false,
+        barkT: 0,
+        nextBark: 0,
+      };
+    },
+    tick(dt, ctx) {
+      const s = ctx.state;
+      if (!s.pair) return;
+      const px = ctx.playerPos.x, pz = ctx.playerPos.z;
+      const inRoom = ctx.room && ctx.room.bounds
+        && px >= ctx.room.bounds.minX && px <= ctx.room.bounds.maxX
+        && pz >= ctx.room.bounds.minZ && pz <= ctx.room.bounds.maxZ;
+
+      if (s.phase === 'standoff') {
+        // Bark dialog when player is close.
+        const dx = px - s.disc.cx, dz = pz - s.disc.cz;
+        if (dx * dx + dz * dz < 36 && s.barkT <= 0) {
+          s.barkT = 4.0 + Math.random() * 2;
+          const lines = [
+            { who: 'gunman',  text: 'Stay back. This is between us.' },
+            { who: 'kneeler', text: 'It was an accident! I swear it!' },
+            { who: 'gunman',  text: 'You took everything from me.' },
+            { who: 'kneeler', text: 'Please. I have a family.' },
+          ];
+          const line = lines[s.nextBark % lines.length];
+          s.nextBark++;
+          const target = (line.who === 'gunman') ? s.pair.gunman : s.pair.kneeler;
+          if (target && target.group) {
+            ctx.spawnSpeech(target.group.position.clone().setY(2.0), line.text, 3.5);
+          }
+        }
+        s.barkT = Math.max(0, s.barkT - dt);
+        // Detect first kill.
+        const gAlive = s.pair.gunman && s.pair.gunman.alive;
+        const kAlive = s.pair.kneeler && s.pair.kneeler.alive;
+        if (!gAlive && kAlive) {
+          // Player shot the gunman first.
+          s.phase = 'aftermath';
+          s.chosenDead = 'gunman';
+          s.chosenSurvivor = s.pair.kneeler;
+          // Kneeler invulnerable + reward.
+          if (s.pair.kneeler) {
+            s.pair.kneeler.hp = 99999;
+            s.pair.kneeler.maxHp = 99999;
+          }
+          ctx.spawnSpeech(s.pair.kneeler.group.position.clone().setY(2.0),
+            'Bless you. Take this — every coin I have.', 4.5);
+          if (ctx.awardPlayerCredits) ctx.awardPlayerCredits(5000);
+          if (s.hint) s.hint.userData.setText('Leave the room and return...');
+        } else if (gAlive && !kAlive) {
+          // Player shot the kneeling man first.
+          s.phase = 'aftermath';
+          s.chosenDead = 'kneeler';
+          s.chosenSurvivor = s.pair.gunman;
+          if (s.pair.gunman) {
+            s.pair.gunman.hp = 99999;
+            s.pair.gunman.maxHp = 99999;
+          }
+          ctx.spawnSpeech(s.pair.gunman.group.position.clone().setY(2.0),
+            'It is finished. I won\'t need this anymore.', 4.5);
+          // Drop a random legendary weapon.
+          const legendary = ctx.rollLegendaryWeapon && ctx.rollLegendaryWeapon();
+          if (legendary) ctx.spawnLoot(s.disc.cx + 0.6, s.disc.cz, legendary);
+          if (s.hint) s.hint.userData.setText('Leave the room and return...');
+        } else if (!gAlive && !kAlive) {
+          // Both fell to a single volley — gunman died first by
+          // narrative convention. Treat as gunman-first kill.
+          s.phase = 'aftermath';
+          s.chosenDead = 'gunman';
+          s.chosenSurvivor = null;
+          if (ctx.awardPlayerCredits) ctx.awardPlayerCredits(5000);
+          if (s.hint) s.hint.userData.setText('You spared neither. The room is silent.');
+        }
+      }
+
+      if (s.phase === 'aftermath') {
+        if (!inRoom) s.leftRoomAfterChoice = true;
+        if (s.leftRoomAfterChoice && inRoom && !s.relicSpawned) {
+          // Player returned. Spawn the Indecision relic in the centre
+          // and tear down the surviving NPC (now a corpse pose).
+          s.relicSpawned = true;
+          if (s.chosenSurvivor && s.chosenSurvivor.group) {
+            // Lay them down via a quick rotate.
+            s.chosenSurvivor.group.rotation.x = -Math.PI / 2;
+            s.chosenSurvivor.alive = false;
+          }
+          if (s.hint) s.hint.visible = false;
+          ctx.spawnSpeech(new THREE.Vector3(s.disc.cx, 2.2, s.disc.cz),
+            'Indecision lies between them.', 4.0);
+          const scroll = ctx.artifactScrollFor && ctx.artifactScrollFor('indecision');
+          if (scroll) ctx.spawnLoot(s.disc.cx, s.disc.cz, scroll);
+          s.phase = 'returned';
+          s.complete = true;
+          if (ctx.markEncounterComplete) ctx.markEncounterComplete('choices_and_consequences');
+        }
+      }
+    },
+    onItemDropped(item, ctx) { return { consume: false }; },
+  },
 };
 
 // Helper — pick one valid encounter for the given level state, or null.
