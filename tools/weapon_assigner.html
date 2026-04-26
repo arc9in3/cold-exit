@@ -30,7 +30,7 @@
   .wtile .icon { width: 64px; height: 64px; background: #0d0e11; border: 1px solid #2a2d34;
                  border-radius: 3px; flex: 0 0 auto; image-rendering: pixelated;
                  background-size: contain; background-repeat: no-repeat; background-position: center; }
-  .wtile canvas { width: 100%; height: 110px; background: #0d0e11; display: block; cursor: grab; }
+  .wtile canvas { width: 100%; height: 130px; background: #0d0e11; display: block; cursor: grab; }
   .wtile .meta { flex: 1 1 auto; min-width: 0; }
   .wtile .meta b { color: #c9a87a; font-size: 12px; }
   .wtile .meta .sub { color: #889; font-size: 10px; margin-top: 2px; }
@@ -39,6 +39,17 @@
                       white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
   .wtile .modelpath.none { color: #a85; }
   .wtile.no-model { border-color: #4a3520; }
+  .wtile .taglabel { display: block; padding: 6px 8px 0; font-size: 10px;
+                     color: #c9a87a; border-top: 1px solid #23262c; background: #0a0b0e; }
+  .wtile .tag { display: block; width: calc(100% - 16px); box-sizing: border-box;
+                margin: 4px 8px 8px; background: #1f2228; color: #ffe6b3;
+                border: 1px solid #4a4030; border-radius: 3px;
+                padding: 6px 8px; font: inherit; outline: none; }
+  .wtile .tag::placeholder { color: #6a6f78; font-style: italic; }
+  .wtile .tag:focus { border-color: #c9a87a; background: #2a2d34; }
+  .wtile .tag.saved { border-color: #5a8a4a; transition: border-color 1.5s; }
+  .wtile.tagged { border-color: #5a8a4a; }
+  .wtile.tagged .tag { background: #1a2218; color: #d8efb8; }
 
   /* FBX tile (bottom section) */
   .ftile { background: #181a1e; border: 1px solid #2a2d34; border-radius: 4px;
@@ -93,6 +104,7 @@
   </select>
   <input id="search" type="search" placeholder="filter by FBX name (regex ok)…" autocomplete="off">
   <button id="export-btn" title="Download all tags + the in-game weapon list as JSON">Export tags</button>
+  <button id="render-icons-btn" title="Render side-view PNGs of every in-game weapon's model and zip them. Drop into Assets/UI/weapon_renders/ to drive in-game inventory + attachment-screen icons.">Export side-view PNGs</button>
   <span class="count" id="count">loading…</span>
 </header>
 
@@ -127,6 +139,7 @@
 </script>
 
 <script src="../Assets/models/_index.js"></script>
+<script src="https://cdn.jsdelivr.net/npm/jszip@3.10.1/dist/jszip.min.js"></script>
 
 <script type="module">
 import * as THREE from 'three';
@@ -168,6 +181,15 @@ const TAG_KEY = 'tacticalrogue.weapon_tags';
 let tags = {};
 try { tags = JSON.parse(localStorage.getItem(TAG_KEY) || '{}'); } catch { tags = {}; }
 function saveTags() { localStorage.setItem(TAG_KEY, JSON.stringify(tags)); }
+
+// In-game weapon revisit tags — keyed by current in-game weapon name.
+// Filling this means "redo this weapon as <real-world name>" — could be
+// a rename, icon swap, model swap, or stat retune (whichever fits the
+// real weapon).
+const WEAPON_TAG_KEY = 'tacticalrogue.ingame_weapon_tags';
+let weaponTags = {};
+try { weaponTags = JSON.parse(localStorage.getItem(WEAPON_TAG_KEY) || '{}'); } catch { weaponTags = {}; }
+function saveWeaponTags() { localStorage.setItem(WEAPON_TAG_KEY, JSON.stringify(weaponTags)); }
 
 // Reverse lookup: which manifest keys point at each FBX path.
 const assignedByPath = {};
@@ -289,9 +311,22 @@ function fitAndStage(t) {
   t.obj.scale.setScalar(scale);
   scene.add(t.obj);
 
-  const camera = new THREE.PerspectiveCamera(40, 1, 0.1, 100);
-  camera.position.set(2.4, 1.8, 2.4);
-  camera.lookAt(0, 0, 0);
+  // In-game weapon tiles get a strict side-view (orthographic, looking
+  // straight down +Z at the weapon long-axis) so the preview reads as a
+  // gun silhouette suitable for export → inventory icon. FBX library
+  // tiles get a 3/4 perspective so users can judge mesh detail.
+  let camera;
+  if (t.sideView) {
+    const aspect = 16 / 9;
+    const halfH = 1.1;
+    camera = new THREE.OrthographicCamera(-halfH * aspect, halfH * aspect, halfH, -halfH, 0.1, 50);
+    camera.position.set(0, 0, 5);
+    camera.lookAt(0, 0, 0);
+  } else {
+    camera = new THREE.PerspectiveCamera(40, 1, 0.1, 100);
+    camera.position.set(2.4, 1.8, 2.4);
+    camera.lookAt(0, 0, 0);
+  }
 
   t.scene = scene; t.camera = camera;
 }
@@ -400,20 +435,45 @@ for (const w of inGameWeapons) {
   row.append(icon, meta);
 
   const canvas = document.createElement('canvas');
-  canvas.width = 320; canvas.height = 320;
+  // 16:9 internal buffer matches the side-view orthographic camera so
+  // the rendered preview reads as a clean weapon silhouette.
+  canvas.width = 512; canvas.height = 288;
 
   const pathEl = document.createElement('div');
   pathEl.className = 'modelpath' + (modelRel ? '' : ' none');
   pathEl.textContent = modelRel ? `model: ${modelRel}` : 'NO MODEL — primitive box';
 
-  tile.append(row, canvas, pathEl);
+  // Per-weapon tag — fill this to flag "redo this weapon as X". Picked
+  // up by the export so I can revisit creation, icon, and stats.
+  const wTagLabel = document.createElement('div');
+  wTagLabel.className = 'taglabel';
+  wTagLabel.textContent = 'TAG (rename / redo as real-world weapon)';
+  const wTag = document.createElement('input');
+  wTag.type = 'text';
+  wTag.className = 'tag';
+  wTag.placeholder = w.name === w.class ? `e.g. Mossberg 500 (replace generic ${w.class})` :
+    `e.g. retag ${w.name}`;
+  wTag.value = weaponTags[w.name] || '';
+  if (wTag.value) tile.classList.add('tagged');
+  wTag.addEventListener('blur', () => {
+    const v = wTag.value.trim();
+    if (v) weaponTags[w.name] = v; else delete weaponTags[w.name];
+    saveWeaponTags();
+    tile.classList.toggle('tagged', !!v);
+    wTag.classList.add('saved');
+    setTimeout(() => wTag.classList.remove('saved'), 1500);
+  });
+  wTag.addEventListener('keydown', (e) => { if (e.key === 'Enter') wTag.blur(); });
+
+  tile.append(row, canvas, pathEl, wTagLabel, wTag);
   weaponGrid.appendChild(tile);
 
   if (modelRel) {
     const slash = modelRel.indexOf('/');
     const cat = modelRel.slice(0, slash);
     const file = modelRel.slice(slash + 1);
-    const tileObj = { el: tile, canvas, file, cat, path: modelRel,
+    const tileObj = { el: tile, canvas, file, cat, path: modelRel, sideView: true,
+                      weaponName: w.name,
                       obj: null, scene: null, camera: null, loaded: false, error: null };
     weaponTiles.push(tileObj);
     allTiles.push(tileObj);
@@ -559,14 +619,74 @@ exportBtn.addEventListener('click', () => {
       name: w.name, class: w.class, type: w.type, rarity: w.rarity,
       damage: w.damage, fireRate: w.fireRate, magSize: w.magSize,
       currentModel: MODEL_BY_WEAPON_NAME[w.name] || null,
+      // If the user filled the per-weapon tag, this is the rename /
+      // redo target. I'll revisit creation + icon + stats for it.
+      revisitAs: weaponTags[w.name] || null,
     }));
-  const out = { tagged_fbx: taggedFbx, in_game_weapons: inGame };
+  const out = {
+    tagged_fbx: taggedFbx,
+    in_game_weapons: inGame,
+    weapons_to_revisit: Object.entries(weaponTags)
+      .filter(([, v]) => v)
+      .map(([k, v]) => ({ currentName: k, revisitAs: v })),
+  };
   const blob = new Blob([JSON.stringify(out, null, 2)], { type: 'application/json' });
   const a = document.createElement('a');
   a.href = URL.createObjectURL(blob);
   a.download = 'weapon_assignments.json';
   a.click();
 });
+
+// ============================================================
+// Bulk export — render a side-view PNG for every in-game weapon
+// that has a model assigned. Filename is sanitized weapon name so
+// the file drops directly into Assets/UI/weapon_renders/<name>.png
+// where iconForItem will be taught to look it up first.
+// ============================================================
+document.getElementById('render-icons-btn').addEventListener('click', renderAllIcons);
+
+async function renderAllIcons() {
+  const targets = weaponTiles;
+  if (!targets.length) { count.textContent = 'no weapon models to render'; return; }
+  if (typeof JSZip === 'undefined') { count.textContent = 'JSZip failed to load'; return; }
+
+  const zip = new JSZip();
+  const W = 512, H = 288;  // 16:9, matches the orthographic side-view aspect.
+
+  const prevSize = new THREE.Vector2();
+  renderer.getSize(prevSize);
+  renderer.setSize(W, H, false);
+
+  for (let i = 0; i < targets.length; i++) {
+    const t = targets[i];
+    count.textContent = `rendering ${i + 1} / ${targets.length} — ${t.weaponName}`;
+    if (!t.scene) {
+      t.loaded = true;
+      await new Promise((resolve) => {
+        const url = MODEL_BASE + t.cat + '/' + t.file;
+        loader.load(url,
+          (obj) => { t.obj = obj; fitAndStage(t); resolve(); },
+          undefined,
+          () => resolve(),
+        );
+      });
+    }
+    if (!t.scene) continue;
+    renderer.render(t.scene, t.camera);
+    const safeName = t.weaponName.replace(/[^A-Za-z0-9_\-]+/g, '_');
+    const blob = await new Promise(r => renderer.domElement.toBlob(r, 'image/png'));
+    if (blob) zip.file(`${safeName}.png`, blob);
+  }
+
+  renderer.setSize(prevSize.x, prevSize.y, false);
+  count.textContent = `zipping ${targets.length} side-view PNGs …`;
+  const zipBlob = await zip.generateAsync({ type: 'blob' });
+  const a = document.createElement('a');
+  a.href = URL.createObjectURL(zipBlob);
+  a.download = 'weapon_side_views.zip';
+  a.click();
+  count.textContent = `rendered ${targets.length} side-view PNGs — drop into Assets/UI/weapon_renders/`;
+}
 
 // ============================================================
 // Lazy-load + animate visible tiles. Same shared-renderer trick as
@@ -596,7 +716,15 @@ function animate(now) {
     if (!t.scene || t.el.style.display === 'none') continue;
     const r = t.el.getBoundingClientRect();
     if (r.bottom < 0 || r.top > window.innerHeight) continue;
-    t.obj.rotation.y += dt * 0.7;
+    // Side-view in-game weapon tiles render a static side profile —
+    // no spin so the silhouette stays readable as a reference for
+    // what the exported icon will look like in the inventory grid.
+    if (!t.sideView) t.obj.rotation.y += dt * 0.7;
+    // Match the shared renderer to this tile's resolution so the
+    // 16:9 side-view tiles don't get squashed onto a square buffer.
+    if (renderer.domElement.width !== t.canvas.width || renderer.domElement.height !== t.canvas.height) {
+      renderer.setSize(t.canvas.width, t.canvas.height, false);
+    }
     renderer.render(t.scene, t.camera);
     const ctx = t.canvas.getContext('2d');
     ctx.clearRect(0, 0, t.canvas.width, t.canvas.height);
