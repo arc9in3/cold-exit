@@ -838,9 +838,14 @@
     }
     #main-menu-card {
       width: 440px; max-width: 90vw;
-      padding: 8vh 0 6vh 8vw;
+      /* Pull the menu rail to the BOTTOM of the screen so the options
+         sit just above the teal-lined "prototype build v0.1" status
+         block (which is bottom: 5vh). The splash background carries
+         the COLD EXIT title; the rail doesn't need to compete with
+         it from the top. */
+      padding: 8vh 0 11vh 8vw;
       display: flex; flex-direction: column;
-      justify-content: flex-start;
+      justify-content: flex-end;
       background: transparent;
       border: none; border-radius: 0;
       box-shadow: none;
@@ -969,6 +974,10 @@
       align-self: center;
       position: relative;
       box-shadow: 0 14px 50px rgba(0,0,0,0.85), inset 0 0 0 1px rgba(0,0,0,0.4);
+      /* Sub-views are a centered card — undo the bottom-anchor that
+         the root rail uses so Settings / Leaderboard read like a
+         framed modal. */
+      justify-content: flex-start;
     }
     #main-menu-card.nested::before,
     #main-menu-card.nested::after {
