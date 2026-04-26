@@ -369,25 +369,24 @@ export class Level {
 
     // Random encounter conversion — main.js drives the actual pick
     // (it owns the persistence + completed-set state). Here we just
-    // mark eligibility: 10% chance per non-essential combat room
-    // becomes type='encounter' so spawn logic skips enemies and the
-    // runtime knows to populate it. Sub-boss / boss / start / shop
-    // rooms are never converted.
+    // mark eligibility: a non-essential combat room becomes
+    // type='encounter' so spawn logic skips enemies and the runtime
+    // knows to populate it. Sub-boss / boss / start / shop rooms are
+    // never converted.
     //
-    // Layout filter: giant + corridor + lshape + bunker + center-pit +
-    // pillars-grid rooms have interior walls that cordon off the
-    // bounds-centre area where the encounter visuals + chest spawn.
-    // Skip those so the encounter NPC + reward chest never land
-    // inside an unreachable cell or "outside" a partition. Confirmed
-    // bug from a player session — encounter visible past the walls.
+    // Layout filter: only the truly bounds-hostile layouts are
+    // excluded — giant rooms (encounter visuals get lost in the
+    // open) and corridor + bunker (interior walls cordon off the
+    // bounds-centre where the disc + reward spawn). The previous
+    // banlist excluded so many layouts that encounters felt rare to
+    // the point of "did the system break".
     const ENCOUNTER_BANNED_LAYOUTS = new Set([
-      'corridor', 'lshape', 'bunker', 'center-pit',
-      'pillars-grid', 'partition',
+      'corridor', 'bunker',
     ]);
     const eligibleRooms = rooms.filter(r =>
       r.type === 'combat' && !r.giant
       && !ENCOUNTER_BANNED_LAYOUTS.has(r.layout));
-    if (eligibleRooms.length > 0 && Math.random() < 0.10) {
+    if (eligibleRooms.length > 0 && Math.random() < 0.35) {
       const pick = eligibleRooms[Math.floor(Math.random() * eligibleRooms.length)];
       pick.type = 'encounter';
       pick._encounterPlaceholder = true;
