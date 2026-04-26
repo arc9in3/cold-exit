@@ -5683,15 +5683,38 @@ function redirectShotAtCursor(weapon, impactPoint) {
 function updateHealthHud(playerInfo) {
   if (hpFillEl) {
     const pct = Math.max(0, Math.min(1, playerInfo.health / playerInfo.maxHealth));
-    hpFillEl.style.width = `${pct * 100}%`;
-    if (pct > 0.6) hpFillEl.style.background = '#6abe5a';
-    else if (pct > 0.3) hpFillEl.style.background = '#d0a030';
-    else hpFillEl.style.background = '#c94a3a';
+    // Only touch DOM when the displayed value actually changes — was
+    // writing style.width + textContent every frame even when the
+    // player was at full health and not regenerating, costing a paint
+    // dirty mark per frame for nothing. Cache last-rendered ints +
+    // colour bucket on the element itself.
+    const w = Math.round(pct * 1000);   // 0.1% resolution
+    if (hpFillEl._lastW !== w) {
+      hpFillEl.style.width = `${pct * 100}%`;
+      hpFillEl._lastW = w;
+    }
+    const bucket = pct > 0.6 ? 'g' : pct > 0.3 ? 'y' : 'r';
+    if (hpFillEl._lastBucket !== bucket) {
+      hpFillEl.style.background = bucket === 'g' ? '#6abe5a' : bucket === 'y' ? '#d0a030' : '#c94a3a';
+      hpFillEl._lastBucket = bucket;
+    }
     if (hpRegenEl) {
       const capPct = Math.max(0, Math.min(1, (playerInfo.regenCap ?? playerInfo.maxHealth) / playerInfo.maxHealth));
-      hpRegenEl.style.width = `${capPct * 100}%`;
+      const cw = Math.round(capPct * 1000);
+      if (hpRegenEl._lastW !== cw) {
+        hpRegenEl.style.width = `${capPct * 100}%`;
+        hpRegenEl._lastW = cw;
+      }
     }
-    if (hpTextEl) hpTextEl.textContent = `${Math.round(playerInfo.health)} / ${Math.round(playerInfo.maxHealth)}`;
+    if (hpTextEl) {
+      const hpInt = Math.round(playerInfo.health);
+      const maxInt = Math.round(playerInfo.maxHealth);
+      const sig = hpInt * 10000 + maxInt;
+      if (hpTextEl._lastSig !== sig) {
+        hpTextEl.textContent = `${hpInt} / ${maxInt}`;
+        hpTextEl._lastSig = sig;
+      }
+    }
   }
   if (hpStatusRowEl) {
     // Reuse two cached badge DOM nodes instead of rebuilding every frame.
