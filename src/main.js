@@ -1221,6 +1221,7 @@ const inventoryUI = new InventoryUI({
   // perk/skill-tree class internals.
   getSpecialPerks: () => Array.from(specialPerks.unlocked || []),
   getSkillTreeLevels: () => ({ ...skillTree.levels }),
+  getArtifacts: () => artifacts.list(),
   onDrop: (item) => loot.spawnItem(player.mesh.position.clone(), item),
   getActiveWeapon: () => currentWeapon(),
   onOpenCustomize: (item) => {

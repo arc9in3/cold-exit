@@ -501,15 +501,29 @@ export class DetailsUI {
     // (e.g. "−18% dmg, +5% stam regen") and now renders structurally
     // through collectStats, so showing it here too would duplicate
     // the same numbers the player already sees in the Stats section.
-    const lore = ITEM_LORE[item.name] || '';
-    // Description is suppressed when it looks stat-like (any %, ×, or
-    // signed-number token). Non-stat descriptions still render below
-    // the stats section as plain notes — useful for items like backpacks
-    // where the description is "5 pack slots" and that's already
-    // covered, vs. consumables with prose-only flavour.
+    // Artifacts (relics) carry their own lore + a stat-shaped description
+    // on the item itself. The ITEM_LORE map is keyed by gear name and
+    // doesn't have artifact entries, and the numeric-suppression
+    // heuristic was wiping the only thing that explained what the
+    // relic actually does. Special-case both lookups so a left-click on
+    // a relic in the shop shows "what does this give me".
+    const isArtifact = item.type === 'artifact-scroll';
+    const lore = isArtifact
+      ? (item.lore || '')
+      : (ITEM_LORE[item.name] || '');
     const descRaw = (item.description || '').trim();
-    const hasNumeric = /[+\-−]?\d/.test(descRaw) || /%/.test(descRaw);
-    const noteText = (descRaw && !hasNumeric && descRaw !== lore) ? descRaw : '';
+    let noteText = '';
+    if (isArtifact) {
+      noteText = descRaw;
+    } else {
+      // Description is suppressed when it looks stat-like (any %, ×, or
+      // signed-number token). Non-stat descriptions still render below
+      // the stats section as plain notes — useful for items like backpacks
+      // where the description is "5 pack slots" and that's already
+      // covered, vs. consumables with prose-only flavour.
+      const hasNumeric = /[+\-−]?\d/.test(descRaw) || /%/.test(descRaw);
+      noteText = (descRaw && !hasNumeric && descRaw !== lore) ? descRaw : '';
+    }
     const rows = collectStats(item);
     const diffs = diffStats(item, compareTo);
     const tint = item.tint ?? 0x888888;

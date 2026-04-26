@@ -34,6 +34,7 @@ export class InventoryUI {
     // so the UI degrades gracefully if main.js doesn't pass them.
     this.getSpecialPerks    = getSpecialPerks    || (() => []);
     this.getSkillTreeLevels = getSkillTreeLevels || (() => ({}));
+    this.getArtifacts       = arguments[0]?.getArtifacts || (() => []);
     this.visible = false;
     this._lastVersion = -1;
     this._gridDrag = null;
@@ -829,11 +830,31 @@ export class InventoryUI {
       }
     }
 
+    // — Relics: artifacts the player has acquired this run. Each row
+    //   shows the relic name + its short effect summary so the player
+    //   can see what's actively buffing them without rummaging through
+    //   the relic-seller stock.
+    const relicRows = [];
+    for (const a of (this.getArtifacts() || [])) {
+      const desc = a.short || a.description || '';
+      relicRows.push(`<div class="inv-prog-perk">
+        <span class="inv-prog-perk-name">⬢ ${a.name}</span>
+        ${desc ? `<span class="inv-prog-perk-desc"> — ${desc}</span>` : ''}
+        <span class="inv-prog-perk-src">RELIC</span>
+      </div>`);
+    }
+
     const sections = [];
     if (setHtml) {
       sections.push(`<div class="inv-prog-section">
         <div class="inv-prog-section-title">Set Bonuses</div>
         ${setHtml}
+      </div>`);
+    }
+    if (relicRows.length) {
+      sections.push(`<div class="inv-prog-section">
+        <div class="inv-prog-section-title">Relics (${relicRows.length})</div>
+        ${relicRows.join('')}
       </div>`);
     }
     if (perkRows.length) {
@@ -849,7 +870,7 @@ export class InventoryUI {
       </div>`);
     }
     if (sections.length === 0) {
-      this.progListEl.innerHTML = `<div class="inv-prog-empty">No set bonuses, perks, or affixes yet — equip gear to grow your power.</div>`;
+      this.progListEl.innerHTML = `<div class="inv-prog-empty">No set bonuses, perks, affixes, or relics yet — equip gear or buy a relic to grow your power.</div>`;
     } else {
       this.progListEl.innerHTML = sections.join('');
     }
