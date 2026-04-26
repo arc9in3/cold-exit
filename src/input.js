@@ -60,20 +60,10 @@ export class Input {
     this._onMouseMove = this._onMouseMove.bind(this);
     this._onMouseDown = this._onMouseDown.bind(this);
     this._onMouseUp = this._onMouseUp.bind(this);
-    // Suppress the native context menu on right-click (incl. Shift+
-    // right-click, which Chrome/Firefox normally use as a "force
-    // native menu" escape hatch). Capture-phase + stopImmediate +
-    // returning false is the strongest a page can do — most browsers
-    // honour it as long as the listener isn't passive. Fires from
-    // both the canvas and document/window so a stray right-click
-    // landing on an overlay still gets eaten.
-    this._onContextMenu = (e) => {
-      e.preventDefault();
-      e.stopPropagation();
-      e.stopImmediatePropagation?.();
-      return false;
-    };
-
+    // Bare-minimum contextmenu suppression so the game's own
+    // right-click handlers (inventory equip, paperdoll unequip, etc.)
+    // get the events instead of the browser's native menu.
+    this._onContextMenu = (e) => e.preventDefault();
     window.addEventListener('keydown', this._onKeyDown);
     window.addEventListener('keyup', this._onKeyUp);
     window.addEventListener('blur', this._onBlur);
@@ -84,28 +74,7 @@ export class Input {
     // through the normal DOM, never hit this listener).
     domEl.addEventListener('wheel', (e) => this._onWheel(e), { passive: false });
     window.addEventListener('mouseup', this._onMouseUp);
-    // Contextmenu suppression — registered on document AND window in
-    // capture phase so Shift+right-click is intercepted before the UA
-    // routes it to its "force native menu" path.
-    document.addEventListener('contextmenu', this._onContextMenu, { capture: true });
-    window.addEventListener('contextmenu', this._onContextMenu, { capture: true });
-    domEl.addEventListener('contextmenu', this._onContextMenu, { capture: true });
-    // Auxclick (middle/right click) — also intercepted so any handler
-    // looking at the click rather than contextmenu can't slip through.
-    domEl.addEventListener('auxclick', this._onContextMenu, { capture: true });
-    // Capture-phase document-level mousedown swallow on right-click.
-    // Brave/Chromium sometimes routes Shift+right-click through the
-    // mousedown's default behavior — preventDefault here before any
-    // bubble-phase handler runs is the strongest JS hammer left.
-    this._onDocMouseRight = (e) => {
-      if (e.button === 2) {
-        e.preventDefault();
-        e.stopPropagation();
-      }
-    };
-    document.addEventListener('mousedown', this._onDocMouseRight, { capture: true });
-    document.addEventListener('mouseup',   this._onDocMouseRight, { capture: true });
-    document.addEventListener('auxclick',  this._onContextMenu,    { capture: true });
+    window.addEventListener('contextmenu', this._onContextMenu);
   }
 
   clearMouseState() {
@@ -213,15 +182,6 @@ export class Input {
   }
 
   _onMouseDown(e) {
-    // Right-click (button 2) gets preventDefault on the mousedown
-    // itself — Brave/Chromium check the mousedown's default before
-    // showing the native context menu on Shift+right-click. Without
-    // this the contextmenu listener can't catch it because Brave
-    // routes the Shift modifier as a "force native menu" override.
-    if (e.button === 2) {
-      e.preventDefault();
-      e.stopPropagation();
-    }
     this.mouseButtons.add(e.button);
     if (e.button === 0) this.attackPressed = true;
     // Route mouse buttons through the keybind layer so users can bind
@@ -237,13 +197,6 @@ export class Input {
     }
   }
   _onMouseUp(e) {
-    // Same right-button suppression as mousedown — covers any
-    // browser path that fires contextmenu on the up edge instead
-    // of the down edge.
-    if (e.button === 2) {
-      e.preventDefault();
-      e.stopPropagation();
-    }
     this.mouseButtons.delete(e.button);
     const code = `mouse:${e.button}`;
     const actions = actionsForKey(code);

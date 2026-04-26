@@ -528,7 +528,7 @@ export const ENCOUNTER_DEFS = {
       if (!isPeas) return { consume: false };
       s.complete = true;
       ctx.spawnSpeech(s.duck.position.clone().setY(1.4),
-        'DID SOMEONE SAY PEAS?!', 4.0);
+        'DID SOMEONE SAY PEAS?!', 7.0);
       // Reward: one of two encounter-only relics. Skips any the
       // player already owns so re-running the trick still rewards
       // (in the rare case both are unowned, randomly pick one).

@@ -1052,6 +1052,23 @@ const customizeUI = new CustomizeUI({
   },
 });
 
+// Auto-grant artifact-scroll pickups. Encounter rewards (and any
+// scroll the player walks over) are consumed on contact: the artifact
+// joins their owned set and never enters the bag. This avoids the
+// "what is this rock in my inventory" UX and gives encounter relics
+// the immediate, permanent run-modifier reading the design calls for.
+function _tryAcquireArtifactScroll(item) {
+  if (!item || item.type !== 'artifact-scroll' || !item.artifactId) return false;
+  const ok = artifacts.acquire(item.artifactId);
+  if (!ok) return false;
+  recomputeStats();
+  sfx.uiAccept?.();
+  const def = ARTIFACT_DEFS[item.artifactId];
+  const tag = def?.short ? ` — ${def.short}` : '';
+  transientHudMsg(`RELIC ACQUIRED: ${item.name}${tag}`, 5.0);
+  return true;
+}
+
 const lootUI = new LootUI({
   inventory,
   onClose: () => inventoryUI.render(),
@@ -1064,6 +1081,7 @@ const lootUI = new LootUI({
     if (tryEncounterItemDrop(item, p.x, p.z)) return;
     loot.spawnItem(p.clone(), item);
   },
+  onAcquireArtifact: _tryAcquireArtifactScroll,
 });
 
 const perkUI = new PerkUI({
@@ -6155,6 +6173,17 @@ function tryInteract({ nearItem, body, npc, container }) {
         looted: false,
       };
       lootUI.open(target);
+      return;
+    }
+    // Artifact scrolls auto-consume on pickup — the artifact joins the
+    // run's owned set and never takes a bag slot. recomputeStats fires
+    // inside _tryAcquireArtifactScroll so the modifier is live before
+    // the next frame.
+    if (_tryAcquireArtifactScroll(nearItem.item)) {
+      loot.remove(nearItem);
+      sfx.pickup();
+      inventoryUI.render();
+      if (tutorialMode) tutorialUI.markStep('pickup');
       return;
     }
     const result = inventory.add(nearItem.item);

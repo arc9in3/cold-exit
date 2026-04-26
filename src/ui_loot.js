@@ -95,11 +95,15 @@ function bodySilhouetteSvg() {
 }
 
 export class LootUI {
-  constructor({ inventory, onClose, onDrop, onOpenCustomize }) {
+  constructor({ inventory, onClose, onDrop, onOpenCustomize, onAcquireArtifact }) {
     this.inventory = inventory;
     this.onClose = onClose;
     this.onDrop = onDrop;
     this.onOpenCustomize = onOpenCustomize || (() => {});
+    // Optional pre-add hook for artifact-scroll items. When present
+    // and it returns true, the item is treated as "placed" (acquired)
+    // and never enters the inventory grids.
+    this.onAcquireArtifact = onAcquireArtifact || (() => false);
     this.target = null;
     this.bodyHidden = false;
 
@@ -529,6 +533,10 @@ export class LootUI {
   // an upgrade through the `_takeAndEquip` path instead.
   _smartPlace(item, _allowEqualEquip) {
     if (!item) return { placed: false };
+    // Artifact scrolls auto-consume — never enter the bag.
+    if (item.type === 'artifact-scroll' && this.onAcquireArtifact(item)) {
+      return { placed: true, slot: 'artifact' };
+    }
     // Consumables / attachments have no equip target.
     if (item.type === 'consumable' || item.type === 'attachment') {
       return this.inventory.add(item);
@@ -577,7 +585,13 @@ export class LootUI {
     // backpack) without auto-equipping. Use shift+right-click if you
     // want to equip from the body pile.
     delete item._lootForcedPile;   // reset cross-session flag
-    const r = this.inventory.add(item);
+    // Artifact scrolls auto-consume — never enter the bag.
+    let r;
+    if (item.type === 'artifact-scroll' && this.onAcquireArtifact(item)) {
+      r = { placed: true, slot: 'artifact' };
+    } else {
+      r = this.inventory.add(item);
+    }
     if (r.placed) {
       const refs = this.target._groundRefs;
       if (refs && this.target._removeGround) this.target._removeGround(refs[idx]);
