@@ -604,10 +604,97 @@ export class Level {
       r.type = 'encounter';
       r._encounterPlaceholder = true;
       r._encounterSpawn = spawn;
+      // Strip props / cover / containers from the encounter room so
+      // the encounter visuals (disc, NPC, altar, etc.) don't have to
+      // compete with random scatter for the player's attention. Walls
+      // and doors stay — those define the room.
+      this._clearEncounterRoom(r);
       return;
     }
     // Every candidate's centre was blocked — leave the level without
     // an encounter rather than spawn one on top of an interior wall.
+  }
+
+  // Remove every prop / low-cover obstacle / container inside the
+  // encounter room's bounds, leaving walls and doors intact. Called
+  // right after the room is picked so the encounter visuals own the
+  // entire space.
+  _clearEncounterRoom(room) {
+    const b = room.bounds;
+    const inRoom = (x, z) =>
+      x >= b.minX && x <= b.maxX && z >= b.minZ && z <= b.maxZ;
+    // Obstacles: keep doors + tall walls (y >= 1.0). Drop everything
+    // else whose center sits inside the room — props (isProp), low
+    // cover (y < 1.0), container proxies (containerRef).
+    const keptObstacles = [];
+    for (const m of this.obstacles) {
+      const px = m.position.x, pz = m.position.z;
+      if (!inRoom(px, pz)) { keptObstacles.push(m); continue; }
+      const ud = m.userData || {};
+      if (ud.isDoor) { keptObstacles.push(m); continue; }
+      const isWall = !ud.isProp && !ud.containerRef && m.position.y >= 1.0;
+      if (isWall) { keptObstacles.push(m); continue; }
+      // Prop / cover / container — tear down.
+      this.scene.remove(m);
+      m.geometry?.dispose?.();
+      if (m.material) {
+        if (Array.isArray(m.material)) m.material.forEach(mat => mat?.dispose?.());
+        else m.material.dispose?.();
+      }
+      // Visible prop group lives separate from the proxy when it was
+      // registered via _registerProp.
+      const grp = ud.propGroup;
+      if (grp) {
+        this.scene.remove(grp);
+        grp.traverse?.((obj) => {
+          if (obj.geometry?.dispose) obj.geometry.dispose();
+          if (obj.material) {
+            if (Array.isArray(obj.material)) obj.material.forEach(mat => mat?.dispose?.());
+            else obj.material.dispose?.();
+          }
+        });
+      }
+    }
+    this.obstacles = keptObstacles;
+    this._dirtySolid();
+    // Containers list — drop any whose center sits inside the room.
+    if (this.containers && this.containers.length) {
+      const keptContainers = [];
+      for (const c of this.containers) {
+        if (inRoom(c.x, c.z)) {
+          this.scene.remove(c.group);
+          c.group?.traverse?.((obj) => {
+            if (obj.geometry?.dispose) obj.geometry.dispose();
+            if (obj.material) {
+              if (Array.isArray(obj.material)) obj.material.forEach(mat => mat?.dispose?.());
+              else obj.material.dispose?.();
+            }
+          });
+        } else {
+          keptContainers.push(c);
+        }
+      }
+      this.containers = keptContainers;
+    }
+    // Decorations (purely visual props w/ no collision) inside the
+    // room — drop those too so the floor reads clean.
+    if (this.decorations && this.decorations.length) {
+      const keptDecor = [];
+      for (const d of this.decorations) {
+        const px = d.position?.x, pz = d.position?.z;
+        if (typeof px === 'number' && inRoom(px, pz)) {
+          this.scene.remove(d);
+          d.geometry?.dispose?.();
+          if (d.material) {
+            if (Array.isArray(d.material)) d.material.forEach(mat => mat?.dispose?.());
+            else d.material.dispose?.();
+          }
+        } else {
+          keptDecor.push(d);
+        }
+      }
+      this.decorations = keptDecor;
+    }
   }
 
   // Search for a walkable point inside a room's bounds, biased toward
