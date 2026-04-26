@@ -51,17 +51,16 @@ export function createScene() {
 
   function updateCamera(dt, opts = {}) {
     const adsAmt = opts.adsAmount ?? 0;
-    const weaponZoom = opts.adsZoom ?? 0.7;
     const weaponPeek = opts.adsPeekDistance ?? 5;
-    // ADS zoom — eased and clamped. Stronger zoom on scopier weapons
-    // (sniper sight has a small adsZoom value, e.g. 0.4 = 60% closer
-    // crop). Stays modest enough that the world doesn't whiplash on
-    // press.
-    const ADS_ZOOM_STRENGTH = 0.40;
+    // ADS no longer shrinks the camera frustum (no actual "zoom").
+    // The frustum stays at its baseline size; "zoom" is now expressed
+    // entirely as how far the camera anchor can DRIFT toward the
+    // cursor. weaponPeek is the meters of reach budget the weapon's
+    // sight grants. Sniper scope = 35m (2.5 rooms); rifle = 21m;
+    // pistol/shotgun = 6m; etc. Adjust at the call site, not here.
     const adsEased = adsAmt * adsAmt * (3 - 2 * adsAmt);
     const base = opts.target || new THREE.Vector3();
-    const zoomK = THREE.MathUtils.lerp(1, weaponZoom, adsEased * ADS_ZOOM_STRENGTH);
-    const halfH = (tunables.camera.viewHeight * zoomK) / 2;
+    const halfH = tunables.camera.viewHeight / 2;
     const aspect = window.innerWidth / window.innerHeight;
     camera.left = -halfH * aspect;
     camera.right = halfH * aspect;
@@ -76,13 +75,17 @@ export function createScene() {
     // doesn't slide the world around anymore.
     const desired = _desiredScratch.copy(base);
     if (adsEased > 0.05 && opts.adsPeekDir) {
-      // "Scope factor" — blends from 0 at iron-sight peek (≤3m) to 1
-      // at long-scope peek (≥7m). Mid-to-long sights get up to 35%
-      // more peek + edge-pan budget so scoped weapons can actually
-      // see the area they zoom into.
-      const scopeFactor = Math.max(0, Math.min(1, (weaponPeek - 3) / 4));
+      // "Scope factor" — blends from 0 at iron-sight peek (≤6m) to 1
+      // at long-scope peek (≥21m, rifle range). Mid-to-long sights
+      // get a wider edge-pan budget so the scoped weapon's full
+      // declared peek distance is reachable via cursor input.
+      const scopeFactor = Math.max(0, Math.min(1, (weaponPeek - 6) / 15));
       const sightBonus = 1 + 0.35 * scopeFactor;
-      const peekStrength = adsEased * weaponPeek * 0.55 * sightBonus;
+      // Peek strength is now the FULL declared peek distance at full
+      // ADS (was capped at 0.55× before). The user-facing model is
+      // "ADS pulls the camera up to weaponPeek meters toward the
+      // cursor"; a sniper at full scope = 35m of reach.
+      const peekStrength = adsEased * weaponPeek;
       desired.x += opts.adsPeekDir.x * peekStrength;
       desired.z += opts.adsPeekDir.z * peekStrength;
       // Edge-of-screen pan — once the cursor reaches the outer 30%

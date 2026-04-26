@@ -9002,12 +9002,27 @@ function tick() {
   }
   if (playerInfo.adsAmount <= 0.01) _adsPeekActive = false;
   _adsPrevAmount = playerInfo.adsAmount;
+  // Class-derived ADS peek distance — overrides per-weapon
+  // adsPeekDistance values so the camera offset budget reads "I can
+  // look this far ahead through ADS", matching the new weapon-range
+  // tuning. Sniper at 2.5 rooms (~35m); rifle at the rifle's edge of
+  // effective range (~21m); etc. Falls back to whatever the weapon
+  // declared if class is unknown.
+  const _wcls = effWeapon?.class;
+  const _adsPeekByClass = _wcls === 'sniper'  ? 35.0
+                        : _wcls === 'rifle'   ? 21.0
+                        : _wcls === 'lmg'     ? 17.0
+                        : _wcls === 'smg'     ? 10.0
+                        : _wcls === 'shotgun' ?  6.0
+                        : _wcls === 'pistol'  ?  6.0
+                        : _wcls === 'flame'   ?  3.0
+                        : effWeapon?.adsPeekDistance ?? 5.0;
   updateCamera(dt, {
     target: playerInfo.position,
     aim: aimInfo.point,
     adsAmount: playerInfo.adsAmount,
     adsZoom: effWeapon?.adsZoom,
-    adsPeekDistance: effWeapon?.adsPeekDistance,
+    adsPeekDistance: _adsPeekByClass,
     adsPeekDir: _adsPeekActive ? _adsPeekDir : null,
     cursorNDC: input.hasAim ? input.mouseNDC : null,
   });
