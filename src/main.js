@@ -3108,8 +3108,35 @@ function syncInventoryIfChanged() {
     onInventoryChanged();
     if (typeof renderActionBar === 'function') renderActionBar();
     if (typeof renderWeaponBar === 'function') renderWeaponBar();
+    _statsDirty = true;
   }
 }
+
+// Lazy stat-recompute. Was running every gameplay frame and walking
+// every equipped item / perk / skill / artifact / buff in the apply
+// chain — measurable GC + CPU contributor at 60Hz on top of all the
+// gameplay work. Now gated behind `_statsDirty`: callers that mutate
+// state mark dirty (equip change, buff grant/expire, level up, HP
+// boundary cross, etc.) and the gameplay tick only recomputes when
+// the flag is set. Existing direct `recomputeStats()` callers stay
+// unchanged — they just clear the flag implicitly.
+let _statsDirty = false;
+function markStatsDirty() { _statsDirty = true; }
+function recomputeStatsIfDirty() {
+  if (_statsDirty) {
+    recomputeStats();
+    _statsDirty = false;
+  }
+}
+// Wrap buffs.grant so every call site (there are many — bloodlust,
+// indecision, red string, mastery procs, consumables…) marks the
+// stats dirty without each call having to. Same for the explicit
+// recomputeStats wrapper that runs the actual rebuild.
+const _origBuffsGrant = buffs.grant.bind(buffs);
+buffs.grant = function (id, mods, life) {
+  _origBuffsGrant(id, mods, life);
+  _statsDirty = true;
+};
 recomputeStats();
 
 function jitterDirY(dir, spread) {
@@ -8216,8 +8243,12 @@ function tick() {
   }
 
   syncInventoryIfChanged();
+  // Track buff list length so an expiry inside tick can mark dirty
+  // without us having to instrument BuffState itself.
+  const _buffCountBefore = buffs.buffs.length;
   buffs.tick(dt);
-  recomputeStats();
+  if (buffs.buffs.length !== _buffCountBefore) _statsDirty = true;
+  recomputeStatsIfDirty();
   player.applyDerivedStats(derivedStats);
   lastPlayerInfo = null; // will be set just after player.update
 
@@ -8248,7 +8279,7 @@ function tick() {
       const atFull = playerInfo.health >= playerInfo.maxHealth - 0.001;
       if (atFull !== _flawlessAtFull) {
         _flawlessAtFull = atFull;
-        recomputeStats();
+        _statsDirty = true;
       }
     }
   }
