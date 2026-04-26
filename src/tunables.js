@@ -1182,6 +1182,21 @@ export const tunables = {
       magSize: 6,
       reloadTime: 3.4,
     },
+    // --- Apr-26 EOD batch: Kriss Vector ----------------------------------
+    {
+      // Kriss USA's Super-V recoil-mitigation SMG. .45 ACP, ~1200 RPM
+      // cyclic (very high for a pistol caliber), 25-round stick. Even
+      // recoil from the in-line bolt makes it remarkably controllable
+      // for the rate of fire.
+      name: 'Kriss Vector', type: 'ranged', class: 'smg', rarity: 'rare',
+      attachmentSlots: ['muzzle', 'underRail', 'sideRail', 'topRail', 'stock', 'grip', 'trigger', 'magazine'],
+      fireMode: 'auto', fireRate: 20, damage: 22, range: 28,
+      hipSpread: 0.13, adsSpread: 0.025,
+      adsZoom: 0.74, adsPeekDistance: 4.5,
+      tracerColor: 0xc8d2e0, muzzleLength: 0.66, muzzleGirth: 0.13,
+      pelletCount: 1, burstCount: 1, burstInterval: 0,
+      magSize: 25, reloadTime: 1.4,
+    },
     {
       name: 'Remington 870',
       type: 'ranged',
@@ -1344,6 +1359,55 @@ export const tunables = {
                    startup: 0.13, active: 0.15, recovery: 0.40, window: 0.14, knockback: 5.0 },
           far:   { damage: 44, range: 3.5, angleDeg: 65, advance: 2.5,
                    startup: 0.15, active: 0.13, recovery: 0.42, window: 0.14, knockback: 5.4 } },
+      ],
+    },
+    // --- Apr-26 EOD batch: small/utility melees ---------------------------
+    {
+      // Folding switchblade. 3" blade. Light, fast, low damage —
+      // pocket knife rather than combat knife. Common drop tier.
+      name: 'Pocket Knife',
+      type: 'melee', class: 'melee', rarity: 'common',
+      meleeThreshold: 2.4,
+      tracerColor: 0xb0b0b8,
+      muzzleLength: 0.40, muzzleGirth: 0.04,
+      adsZoom: 0.85, adsPeekDistance: 2.0,
+      combo: [
+        { close: { damage: 8,  range: 1.5, angleDeg: 80, advance: 0.4,
+                   startup: 0.03, active: 0.06, recovery: 0.10, window: 0.28, knockback: 0.9 },
+          far:   { damage: 11, range: 2.0, angleDeg: 50, advance: 1.3,
+                   startup: 0.04, active: 0.06, recovery: 0.12, window: 0.30, knockback: 1.1 } },
+        { close: { damage: 11, range: 1.6, angleDeg: 85, advance: 0.45,
+                   startup: 0.04, active: 0.07, recovery: 0.12, window: 0.30, knockback: 1.1 },
+          far:   { damage: 14, range: 2.1, angleDeg: 55, advance: 1.4,
+                   startup: 0.05, active: 0.07, recovery: 0.14, window: 0.30, knockback: 1.4 } },
+        { close: { damage: 18, range: 1.8, angleDeg: 100, advance: 0.3,
+                   startup: 0.07, active: 0.10, recovery: 0.22, window: 0.12, knockback: 2.4 },
+          far:   { damage: 22, range: 2.3, angleDeg: 60, advance: 1.6,
+                   startup: 0.09, active: 0.10, recovery: 0.24, window: 0.12, knockback: 2.6 } },
+      ],
+    },
+    {
+      // Fixed-blade survival / utility knife. 6-8" blade. Heavier
+      // than a pocket knife, lighter than a combat knife. Uncommon.
+      name: 'Survival Knife',
+      type: 'melee', class: 'melee', rarity: 'uncommon',
+      meleeThreshold: 2.7,
+      tracerColor: 0xc0c4cc,
+      muzzleLength: 0.62, muzzleGirth: 0.05,
+      adsZoom: 0.82, adsPeekDistance: 2.4,
+      combo: [
+        { close: { damage: 12, range: 1.9, angleDeg: 90, advance: 0.5,
+                   startup: 0.04, active: 0.08, recovery: 0.14, window: 0.32, knockback: 1.3 },
+          far:   { damage: 16, range: 2.5, angleDeg: 55, advance: 1.6,
+                   startup: 0.06, active: 0.08, recovery: 0.16, window: 0.34, knockback: 1.6 } },
+        { close: { damage: 15, range: 2.0, angleDeg: 95, advance: 0.55,
+                   startup: 0.05, active: 0.08, recovery: 0.16, window: 0.32, knockback: 1.6 },
+          far:   { damage: 19, range: 2.6, angleDeg: 58, advance: 1.7,
+                   startup: 0.07, active: 0.09, recovery: 0.18, window: 0.34, knockback: 1.9 } },
+        { close: { damage: 24, range: 2.1, angleDeg: 120, advance: 0.4,
+                   startup: 0.10, active: 0.12, recovery: 0.30, window: 0.14, knockback: 3.4 },
+          far:   { damage: 30, range: 2.8, angleDeg: 65, advance: 2.0,
+                   startup: 0.12, active: 0.12, recovery: 0.32, window: 0.14, knockback: 3.8 } },
       ],
     },
   ],

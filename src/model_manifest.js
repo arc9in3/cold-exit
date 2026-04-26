@@ -73,8 +73,15 @@ export const MODEL_BY_WEAPON_NAME = {
   // Legendary artifact pistol.
   "Jessica's Rage":     'weapons/SM_Hunting_Pistol.fbx',
 
+  // SMGs (cont.)
+  'Kriss Vector':       'weapons/SM_Tactical_Submachine_Gun.fbx',
+
   // Melee.
-  'Combat Knife':       'melee/SM_Combat_Knife.fbx',
+  // Combat Knife: per the Apr-26 dupe rule, the Bayonet_2 FBX tagged
+  // "combat knife" supersedes the older SM_Combat_Knife model.
+  'Combat Knife':       'lowpolyguns_accessories/Bayonet_2.fbx',
+  'Survival Knife':     'lowpolyguns_accessories/Bayonet.fbx',
+  'Pocket Knife':       'weapons/SM_Flick_Knife.fbx',
   'Hammer':             'melee/SM_Hammer.fbx',
   'Baseball Bat':       'melee/SM_Baseball_bat_Nails_reinforced_.fbx',
   'katana':             'melee/SM_Katana.fbx',
@@ -160,6 +167,14 @@ export const MODEL_BY_ITEM_ID = {
   att_holo:               'weapons/SM_Optical_Sight_01.fbx',
   att_scope:              'lowpolyguns_accessories/Scope_2.fbx',
   att_long_scope:         'lowpolyguns_accessories/Scope_3.fbx',
+  // Apr-26 EOD batch — extra sight + side-rail variants. Names
+  // distinguish 'Amazon Special' (cheap), 'Prism' (etched-glass),
+  // 'UH-1' (premium holo), 'PSO' (Soviet 4×).
+  att_reddot_amazon:      'weapons/SM_Cylindrical_Collimator_Sight.fbx',
+  att_prism:              'weapons/SM_Optical_Sight_01.fbx',
+  att_holo_uh1:           'weapons/SM_Square_Dot_Sight.fbx',
+  att_scope_pso:          'weapons/SM_Scope_For_Police_Sniper_Rifle.fbx',
+  att_peq15:              'weapons/SM_Tactical_Block.fbx',
   // -- Stock
   att_stock_heavy:        'weapons/SM_Wooden_Butt_01.fbx',
   att_stock_skeleton:     'lowpolyguns_accessories/Stock.fbx',
@@ -176,6 +191,8 @@ export const MODEL_BY_ITEM_ID = {
   att_mag_drum:           'weapons/SM_Large_Magazine_For_Assault_Rifle_5_45.fbx',
   att_mag_banana:         'weapons/SM_Paired_For_Assault_Rifle_5_45.fbx',
   att_mag_fast:           'weapons/SM_Magazine__For_Bulpam_Assault_Rifle.fbx',
+  att_mag_lmg_box:        'weapons/SM_Cartridge_Box_For_Light_Machine_Gun.fbx',
+  att_mag_hmg_box:        'weapons/SM_Cartridge_Box_For_Heavy_Machine_Gun.fbx',
 };
 
 // Per-type fallback — coarse category model when no name/id override

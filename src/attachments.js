@@ -208,6 +208,14 @@ export const ATTACHMENT_DEFS = {
     dazzleDuration: 0.9,
     dazzleSpreadMul: 3.0,  // dazzle is supposed to feel WORSE than blind
   },
+  // Apr-26 EOD batch — PEQ-15 IR designator combo (visible + IR laser).
+  side_peq15: {
+    id: 'att_peq15', name: 'AN/PEQ-15', type: 'attachment',
+    slot: 'sideRail', tint: 0x4a4030,
+    description: 'AN/PEQ-15 designator. Visible laser + IR illuminator combo, milspec block. Best hip-fire reach in the slot. −20% hip spread, 22m visible beam.',
+    modifier: { hipSpreadMult: 0.80 },
+    kind: 'laser', laserColor: 0xff8060, laserRange: 22,
+  },
 
   // ============================================================
   // UNDER RAIL — Foregrips (spread control) + Bipod (sniper aid)
@@ -283,6 +291,35 @@ export const ATTACHMENT_DEFS = {
     description: 'High-power glass for sniper class. Best ADS group, longest drag. −40% ADS spread, 1.30× ADS zoom, +6m drag.',
     modifier: { adsSpreadMult: 0.6, adsZoomMult: 0.5, adsPeekBonus: 6 },
     sightZoom: 1.30,
+  },
+  // Apr-26 EOD batch — sights from the Apr 2026 weapon-assigner pass.
+  sight_amazon_reddot: {
+    id: 'att_reddot_amazon', name: 'Amazon Special Red Dot', type: 'attachment',
+    slot: 'topRail', tint: 0xa04040,
+    description: 'Mass-market parallax-free dot. Works fine. The stitching on the bag matches the budget.',
+    modifier: { adsSpreadMult: 0.92 },
+    sightZoom: 1.08,
+  },
+  sight_prism: {
+    id: 'att_prism', name: 'Prism Sight', type: 'attachment',
+    slot: 'topRail', tint: 0x4a5060,
+    description: 'Etched-glass prism sight. Always-on reticle, zero parallax, slight tube weight. −18% ADS spread, 1.12× ADS zoom.',
+    modifier: { adsSpreadMult: 0.82 },
+    sightZoom: 1.12,
+  },
+  sight_holo_uh1: {
+    id: 'att_holo_uh1', name: 'Vortex UH-1', type: 'attachment',
+    slot: 'topRail', tint: 0x40508a,
+    description: 'Vortex Razor UH-1 holographic. EBR-7C reticle, big window, no batteries-out worries. −25% ADS spread, 1.18× ADS zoom.',
+    modifier: { adsSpreadMult: 0.75, adsZoomMult: 0.88 },
+    sightZoom: 1.18,
+  },
+  sight_pso: {
+    id: 'att_scope_pso', name: 'PSO Scope', type: 'attachment',
+    slot: 'topRail', tint: 0x303a30,
+    description: 'Soviet 4× PSO sniper scope. Distinctive chevron-and-rangefinder reticle, illuminated tritium dots. −28% ADS spread, 1.22× ADS zoom, +3m drag.',
+    modifier: { adsSpreadMult: 0.72, adsZoomMult: 0.65, adsPeekBonus: 3 },
+    sightZoom: 1.22,
   },
 
   // ============================================================
@@ -383,6 +420,18 @@ export const ATTACHMENT_DEFS = {
     slot: 'magazine', tint: 0x3c3a32,
     description: 'Curved 40-round AK-pattern mag. Big capacity boost, tolerable reload. +60% mag size, +15% reload.',
     modifier: { magSizeMult: 1.6, reloadTimeMult: 1.15 },
+  },
+  mag_lmg_box: {
+    id: 'att_mag_lmg_box', name: 'LMG Box Mag', type: 'attachment',
+    slot: 'magazine', tint: 0x4a505a,
+    description: 'LMG box magazine. Holds two-and-a-half drums in a steel can — sustained fire without reloads. +150% mag size, +35% reload, −5% move speed.',
+    modifier: { magSizeMult: 2.5, reloadTimeMult: 1.35, moveSpeedMult: 0.95 },
+  },
+  mag_hmg_box: {
+    id: 'att_mag_hmg_box', name: 'HMG Box Mag', type: 'attachment',
+    slot: 'magazine', tint: 0x40464e,
+    description: 'Heavy-machine-gun box mag. 250-round count, lugged shoulder strap. Hauling it slows you down; running dry doesn\'t happen. +250% mag size, +60% reload, −12% move speed.',
+    modifier: { magSizeMult: 3.5, reloadTimeMult: 1.60, moveSpeedMult: 0.88 },
   },
   mag_fast: {
     id: 'att_mag_fast', name: 'Fast Mag', type: 'attachment',
