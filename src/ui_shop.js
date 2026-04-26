@@ -192,7 +192,7 @@ export class ShopUI {
           <div class="shop-col">
             <div class="inv-heading" style="display:flex;align-items:center;justify-content:space-between;gap:6px;">
               <span>For Sale</span>
-              <button id="shop-reroll" type="button" style="display:none;padding:4px 10px;font-size:10px;letter-spacing:1.5px;text-transform:uppercase;background:rgba(120,160,210,0.18);color:#bcd4ee;border:1px solid rgba(120,160,210,0.55);border-radius:2px;cursor:pointer;font-family:inherit;font-weight:700;">Reroll · 25 ◆</button>
+              <button id="shop-reroll" type="button" style="display:none;padding:4px 10px;font-size:10px;letter-spacing:1.5px;text-transform:uppercase;background:rgba(120,160,210,0.18);color:#bcd4ee;border:1px solid rgba(120,160,210,0.55);border-radius:2px;cursor:pointer;font-family:inherit;font-weight:700;">Reroll Stock</button>
             </div>
             <div id="shop-stock"></div>
             <div class="inv-heading" id="shop-buyback-heading" style="display:none">Buyback</div>
@@ -466,7 +466,7 @@ export class ShopUI {
       this.rerollBtn.style.cursor = this.merchant._rerollUsed ? 'default' : 'pointer';
       this.rerollBtn.textContent = this.merchant._rerollUsed
         ? 'Rerolled'
-        : 'Reroll · 25 ◆';
+        : 'Reroll Stock';
     }
     const TITLES = {
       merchant: 'MERCHANT',

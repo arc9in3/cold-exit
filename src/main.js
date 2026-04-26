@@ -1047,18 +1047,15 @@ const shopUI = new ShopUI({
     }
     return ok;
   },
-  // Reroll: regenerate the open NPC's stock once per visit, gated on
-  // the persistent unlock from the Upgrades menu. Cost is paid in
-  // CONTRACT CHIPS, not run credits — making it a meta-loop choice
-  // rather than something a flush merchant run can spam.
+  // Reroll: regenerate the open NPC's stock once per visit. Gated on
+  // the persistent Upgrades unlock; FREE for now (one shot per shop
+  // per visit). A real cost will land later — the limiter today is
+  // the once-per-visit window.
   getRerollUnlocked: () => getRerollUnlocked(),
   onReroll: (npc) => {
     if (!npc) return false;
     if (!getRerollUnlocked()) return false;
     if (npc._rerollUsed) return false;
-    if (persistentChips < 25) return false;        // small chip cost per use
-    persistentChips -= 25;
-    savePersistentChips();
     if      (npc.kind === 'merchant')     npc.stock = makeMerchantStock();
     else if (npc.kind === 'healer')       npc.stock = makeHealerStock();
     else if (npc.kind === 'gunsmith')     npc.stock = makeGunsmithStock();

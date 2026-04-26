@@ -224,7 +224,7 @@ export class StoreUpgradeUI {
     this.bodyEl.appendChild(this._row({
       label: 'Reroll Stock',
       value: rerollOwned ? 'OWNED' : 'LOCKED',
-      desc: 'Once unlocked, every shop visit gains a one-time stock reroll button (25 ◆ per use).',
+      desc: 'Once unlocked, every shop visit gains a one-time free reroll button. Future updates may add a per-use cost.',
       btnText: rerollOwned ? 'Owned' : `Unlock · ${this.rerollUnlockCost} ◆`,
       btnDisabled: rerollOwned || chips < this.rerollUnlockCost,
       onBuy: () => {
