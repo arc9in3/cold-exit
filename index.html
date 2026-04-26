@@ -1044,8 +1044,12 @@
     .store-row-label b { color: #c9a87a; font-weight: 700; letter-spacing: 1px; }
     .store-row-desc { font-size: 10px; color: #7a8290; line-height: 1.4; }
     .store-row-btn {
-      flex: 0 0 auto; min-width: 150px;
+      /* Override .menu-btn's `width: 100%` — without this the button
+         eats the row's full width via flex-basis, collapsing the label
+         column to 0 and forcing the label/desc text to wrap vertically. */
+      flex: 0 0 auto; width: auto; min-width: 150px;
       padding: 8px 14px; font-size: 11px; letter-spacing: 1.5px;
+      text-align: center;
     }
     .store-row-btn:disabled { opacity: 0.4; cursor: default; }
 

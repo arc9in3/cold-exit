@@ -2122,6 +2122,7 @@ const clock = new THREE.Clock();
 const _tmpDir = new THREE.Vector3();
 const _tmpEndPt = new THREE.Vector3();
 const _rotatedDir = new THREE.Vector3();
+const _muzzleWorldTmp = new THREE.Vector3();
 const _muzzlePlane = new THREE.Plane(new THREE.Vector3(0, 1, 0), 0);
 
 let playerDead = false;
@@ -6465,6 +6466,9 @@ function _tickBuffAuras(dt) {
     if (!active.has(id)) _disposeBuffAura(id);
   }
 }
+// Scratch reused for burn-tick world-space damage-number anchors —
+// spawnDamageNumber projects the vector synchronously then drops it.
+const _burnReadoutPt = new THREE.Vector3();
 function _tickBurnReadouts(dt) {
   const sweep = (list) => {
     for (const c of list) {
@@ -6475,11 +6479,11 @@ function _tickBurnReadouts(dt) {
       if (t >= interval || !c.alive) {
         const rounded = Math.round(accum);
         if (rounded > 0) {
-          const pt = new THREE.Vector3(c.group.position.x, 1.2, c.group.position.z);
+          _burnReadoutPt.set(c.group.position.x, 1.2, c.group.position.z);
           // Reuse the 'burn' zone tag so styling stays consistent with
           // other damage types — spawnDamageNumber picks a color per
           // zone / tag.
-          spawnDamageNumber(pt, camera, rounded, 'burn');
+          spawnDamageNumber(_burnReadoutPt, camera, rounded, 'burn');
         }
         _burnAccum.set(c, 0);
         _burnAccumT.set(c, 0);
@@ -7984,11 +7988,14 @@ function tick() {
   player.applyDerivedStats(derivedStats);
   lastPlayerInfo = null; // will be set just after player.update
 
-  const muzzleWorldTmp = player.mesh.position.clone();
-  muzzleWorldTmp.y = inputState.crouchHeld
+  // Muzzle scratch — reused every frame instead of clone()-ing
+  // player.mesh.position. resolveAim consumes the vector synchronously
+  // so it's safe to keep at module scope.
+  _muzzleWorldTmp.copy(player.mesh.position);
+  _muzzleWorldTmp.y = inputState.crouchHeld
     ? tunables.move.crouchMuzzleY
     : tunables.move.standMuzzleY;
-  const aimInfo = resolveAim(muzzleWorldTmp);
+  const aimInfo = resolveAim(_muzzleWorldTmp);
   lastAim = aimInfo.point;
   lastAimZone = aimInfo.zone || null;
 
