@@ -1862,18 +1862,17 @@ export class Level {
       // `bulletHell` fat-target volley thrower; `assassin` dash-melee
       // (spawns as a melee enemy below); `elite` constant fire + dash.
       const archRoll = Math.random();
-      // Nine archetypes now — the original six plus three new
-      // pressure-bosses: droneSummoner (suicide-drone wave control),
-      // spawner (teleport + add-spawn), berserker (HP-driven phase
-      // tank). Roughly equal-ish distribution.
-      const bossArchetype = archRoll < 0.12 ? 'evasive'
-                          : archRoll < 0.24 ? 'bulletHell'
-                          : archRoll < 0.36 ? 'elite'
-                          : archRoll < 0.48 ? 'assassin'
-                          : archRoll < 0.60 ? 'flamer'
-                          : archRoll < 0.72 ? 'grenadier'
-                          : archRoll < 0.82 ? 'droneSummoner'
-                          : archRoll < 0.91 ? 'spawner'
+      // Eight archetypes in rotation — droneSummoner ("THE HIVEMASTER")
+      // is temporarily disabled because the drone swarm tanks frame
+      // rate. Re-enable once drone perf is reworked. Other eight share
+      // roughly equal probability.
+      const bossArchetype = archRoll < 0.14 ? 'evasive'
+                          : archRoll < 0.28 ? 'bulletHell'
+                          : archRoll < 0.42 ? 'elite'
+                          : archRoll < 0.56 ? 'assassin'
+                          : archRoll < 0.70 ? 'flamer'
+                          : archRoll < 0.84 ? 'grenadier'
+                          : archRoll < 0.93 ? 'spawner'
                           :                   'berserker';
       const archVariant =
         bossArchetype === 'bulletHell'    ? 'tank'
