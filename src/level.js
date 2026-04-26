@@ -64,18 +64,6 @@ export class Level {
 
   clear() {
     for (const m of this.obstacles) {
-      // Keycard beacons are scene-level, not children of the door —
-      // dispose them explicitly so they don't leak across level regens.
-      if (m.userData?.keycardBeam) {
-        this.scene.remove(m.userData.keycardBeam);
-        m.userData.keycardBeam.geometry?.dispose?.();
-        m.userData.keycardBeam.material?.dispose?.();
-        m.userData.keycardBeam = null;
-      }
-      if (m.userData?.keycardHalo) {
-        this.scene.remove(m.userData.keycardHalo);
-        m.userData.keycardHalo = null;
-      }
       this.scene.remove(m);
       m.geometry.dispose();
       m.material.dispose();
@@ -704,31 +692,6 @@ export class Level {
                     : color === 'green'  ? 0x50c060
                     : 0xe0c040;          // yellow
       door.material.color.setHex(tintHex);
-      // Visibility beacon — players were getting keycards but never
-      // finding the doors that took them, especially on busy levels
-      // where a colour-tinted wall panel reads as "another wall". Add
-      // a tall additive light column + a floating tinted halo above
-      // each keycard door so it's spottable from across the level.
-      // Both are stored on the door so _openDoor can hide them when
-      // the door unlocks.
-      const beamHeight = 14;
-      const beamGeom = new THREE.CylinderGeometry(0.18, 0.42, beamHeight, 10, 1, true);
-      const beamMat = new THREE.MeshBasicMaterial({
-        color: tintHex, transparent: true, opacity: 0.55,
-        depthWrite: false, side: THREE.DoubleSide,
-        blending: THREE.AdditiveBlending,
-      });
-      const beam = new THREE.Mesh(beamGeom, beamMat);
-      beam.position.set(door.position.x, beamHeight / 2 + WALL_HEIGHT, door.position.z);
-      beam.userData.isProp = false;
-      beam.userData.keycardBeacon = true;
-      this.scene.add(beam);
-      const halo = new THREE.PointLight(tintHex, 1.6, 8);
-      halo.position.set(door.position.x, WALL_HEIGHT + 1.2, door.position.z);
-      this.scene.add(halo);
-      door.userData.keycardBeam = beam;
-      door.userData.keycardHalo = halo;
-      door.userData.keycardBeaconT = Math.random() * Math.PI * 2;
       this.keycardDoors[color] = door;
       this.keycardColors.push(color);
       picked.add(door);
@@ -755,17 +718,6 @@ export class Level {
     mesh.material.transparent = true;
     mesh.scale.y = 0.08;
     mesh.position.y = 0.04;
-    // Tear down the keycard beacon column + halo if this door had one.
-    if (mesh.userData.keycardBeam) {
-      this.scene.remove(mesh.userData.keycardBeam);
-      mesh.userData.keycardBeam.geometry.dispose();
-      mesh.userData.keycardBeam.material.dispose();
-      mesh.userData.keycardBeam = null;
-    }
-    if (mesh.userData.keycardHalo) {
-      this.scene.remove(mesh.userData.keycardHalo);
-      mesh.userData.keycardHalo = null;
-    }
   }
 
   // Unlock a keycard-gated door given the held key colour. Returns

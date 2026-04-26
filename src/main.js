@@ -8847,6 +8847,11 @@ function _warmShaders() {
   // happens at boot before the player can interact, so it reads as
   // part of the load rather than a stutter mid-fight.
   try { renderer.compile(scene, camera); } catch (_) {}
+  // Force a real render so the GPU pipeline commits the compiled
+  // shaders + uploads textures instead of waiting for the first
+  // visible frame. Even at -9999 the warmup entities walk through
+  // the full draw path. Single throw-away frame.
+  try { renderer.render(scene, camera); } catch (_) {}
   // Tear down the warmups. removeAll() disposes the rig geometry +
   // materials per entity; loot.remove() returns the pool slot to
   // the idle queue without disposing (geometry is shared, material
@@ -8858,6 +8863,37 @@ function _warmShaders() {
   }
 }
 _warmShaders();
+
+// Background-preload every weapon's FBX model. First-time spawns of a
+// new weapon class were paying the FBX parse + GPU upload cost on the
+// gameplay frame the gunman was added — visible as a hitch the moment
+// you walked into a sniper room. loadModel() caches by URL, so kicking
+// the loads off here means subsequent `loadModelClone` calls hit the
+// cache instantly. Uses dynamic import so the warmup doesn't add to
+// the synchronous bundle's hot path.
+(async () => {
+  try {
+    const mm = await import('./model_manifest.js');
+    const gltf = await import('./gltf_cache.js');
+    const seen = new Set();
+    const enqueue = (url) => {
+      if (!url || seen.has(url)) return;
+      seen.add(url);
+      // Fire-and-forget; loadModel caches the parsed template under
+      // the URL key so any later loadModelClone(url) is a synchronous
+      // template.clone(true) instead of a fresh parse.
+      gltf.loadModelClone(url).catch(() => {});
+    };
+    for (const w of (tunables.weapons || [])) enqueue(mm.modelForItem(w));
+    // Small idle pause before priming the heavier non-weapon URLs so
+    // the first frame the player sees can render before this finishes.
+    await new Promise((r) => setTimeout(r, 250));
+    for (const idTbl of [mm.MODEL_BY_ITEM_ID]) {
+      if (!idTbl) continue;
+      for (const id in idTbl) enqueue('Assets/models/' + idTbl[id]);
+    }
+  } catch (_) { /* preload best-effort */ }
+})();
 
 // Initial screen: the main menu. Play routes through the starting
 // store picker; classic class-picker is still accessible as a
