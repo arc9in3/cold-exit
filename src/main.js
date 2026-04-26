@@ -625,7 +625,18 @@ function _seedStarterKit() {
 
 // Wipe and re-equip the starter loadout: pants, top, small pack, and
 // a common-rarity weapon of the chosen class. Auto-equips the armor.
+// Per-run encounter completion set. Replaces the localStorage-backed
+// getCompletedEncounters() for spawn-pool filtering — that one
+// persisted forever and drained the encounter pool to nothing after
+// a few runs. Now we start each run with a fresh empty set so every
+// `oncePerSave` encounter is once-per-RUN rather than once-per-save.
+const _runCompletedEncounters = new Set();
+function _resetEncounterCompletionForRun() {
+  _runCompletedEncounters.clear();
+}
+
 function startNewRun(weaponClass) {
+  _resetEncounterCompletionForRun();
   // First-run welcome hint — only fires on the very first ever run
   // because fireHint persists per-player. Subsequent fresh runs see
   // nothing here.
@@ -1784,7 +1795,13 @@ function regenerateLevel() {
   for (const r of level.rooms) {
     if (r.type !== 'encounter' || !r._encounterPlaceholder) continue;
     r._encounterPlaceholder = false;
-    const def = pickEncounterForLevel(level.index | 0, getCompletedEncounters());
+    // Encounter completion is tracked PER RUN only. Persisting via
+    // localStorage drained the pool after a few runs and produced
+    // empty rooms (encounter conversion happened, but
+    // pickEncounterForLevel returned null because everything was
+    // already completed). _runCompletedEncounters resets in
+    // _resetEncounterCompletionForRun on every new run.
+    const def = pickEncounterForLevel(level.index | 0, _runCompletedEncounters);
     if (!def) {
       r.type = 'combat';   // demote — main UI stays consistent
       continue;
@@ -1935,7 +1952,7 @@ function regenerateLevel() {
           transientHudMsg(`+${amount}c`, 2.4);
         },
         getKillCount: () => runStats.kills | 0,
-        markEncounterComplete: (id) => markEncounterDone(id),
+        markEncounterComplete: (id) => { if (id) _runCompletedEncounters.add(id); },
         // Smoke puff at world XZ — used by Glass Case telegraph.
         // Cheap: a few additive grey spheres rising and fading.
         spawnPuffAt: (x, z) => _spawnSmokePuff(x, z),
@@ -2202,7 +2219,7 @@ function tryEncounterItemDrop(item, x, z) {
   const result = ent.def.onItemDropped(item, ctx);
   if (!result) return false;
   if (result.complete && ent.def.oncePerSave) {
-    markEncounterDone(ent.def.id);
+    _runCompletedEncounters.add(ent.def.id);
   }
   return !!result.consume;
 }
