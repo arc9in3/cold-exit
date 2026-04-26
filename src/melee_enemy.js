@@ -903,10 +903,11 @@ export class MeleeEnemyManager {
       const bossSpeed = e.tier === 'boss' ? 1.35 : (e.tier === 'subBoss' ? 1.15 : 1);
       let moveSpeed = tunables.meleeEnemy.moveSpeed * bossSpeed;
       if (e.dashT > 0) moveSpeed = tunables.meleeEnemy.dashSpeed * bossSpeed;
-      // Shield-bearer is the slow-but-tanky archetype. Halves walk
-      // and dash speed so the player has a real chance to flank
-      // around the shield's narrow arc.
-      if (e.variant === 'shieldBearer') moveSpeed *= 0.55;
+      // Shield-bearer is the slow-but-tanky archetype — quartered
+      // to a creeping advance so the player has plenty of time to
+      // reposition around the shield's narrow arc. Reads as a
+      // siege walk rather than a chase.
+      if (e.variant === 'shieldBearer') moveSpeed *= 0.25;
       else if (e.dashCdT <= 0 && dist <= tunables.meleeEnemy.dashRange
         && dist > tunables.meleeEnemy.swingRange) {
         e.dashT = tunables.meleeEnemy.dashDuration;
