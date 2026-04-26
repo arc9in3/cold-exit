@@ -2072,6 +2072,81 @@ export const ENCOUNTER_DEFS = {
     },
     onItemDropped(_item, _ctx) { return { consume: false }; },
   },
+
+  // -----------------------------------------------------------------
+  // They Do Exist — three tiny gabled houses on a soft mossy disc.
+  // Each house is roughly half a player tall. Drop "Fancy Alcohol"
+  // or "Yummy Biscuits" on the disc and the elves slide an Elven
+  // Knife (encounter-only legendary throwable) under the door. The
+  // hint label is the Iceland tip — the trade itself is discovery.
+  they_do_exist: {
+    id: 'they_do_exist',
+    name: 'They Do Exist',
+    floorColor: 0x6cb070,             // mossy green
+    oncePerSave: true,
+    condition: (state) => state.levelIndex >= 2,
+    spawn(scene, room, ctx) {
+      const disc = _spawnFloorDisc(scene, room, this.floorColor);
+      // Three small houses arranged in a shallow arc around the disc
+      // centre. Each house is a stack: low boxy body + steeply pitched
+      // gable roof + a tiny dark door. Half-player scale (~0.9m tall).
+      const houseGroup = new THREE.Group();
+      const wallMat = new THREE.MeshStandardMaterial({ color: 0xc8a070, roughness: 0.85 });
+      const roofMat = new THREE.MeshStandardMaterial({ color: 0x6a3020, roughness: 0.7 });
+      const doorMat = new THREE.MeshStandardMaterial({ color: 0x3a2010, roughness: 0.6 });
+      const winMat  = new THREE.MeshBasicMaterial({ color: 0xffe8a0, transparent: true, opacity: 0.9 });
+      const buildHouse = (offsetX, offsetZ, faceAng) => {
+        const h = new THREE.Group();
+        const body = new THREE.Mesh(new THREE.BoxGeometry(0.55, 0.45, 0.55), wallMat);
+        body.position.y = 0.225;
+        body.castShadow = true;
+        h.add(body);
+        const roof = new THREE.Mesh(new THREE.ConeGeometry(0.45, 0.40, 4), roofMat);
+        roof.position.y = 0.65;
+        roof.rotation.y = Math.PI / 4;       // square-base cone reads as gable
+        h.add(roof);
+        const door = new THREE.Mesh(new THREE.BoxGeometry(0.14, 0.22, 0.04), doorMat);
+        door.position.set(0, 0.13, 0.29);
+        h.add(door);
+        const win = new THREE.Mesh(new THREE.BoxGeometry(0.12, 0.10, 0.02), winMat);
+        win.position.set(0.16, 0.30, 0.28);
+        h.add(win);
+        h.position.set(offsetX, 0, offsetZ);
+        h.rotation.y = faceAng;
+        return h;
+      };
+      houseGroup.add(buildHouse(-0.85, 0.20,  0.35));
+      houseGroup.add(buildHouse( 0.00, 0.55,  0.00));
+      houseGroup.add(buildHouse( 0.85, 0.20, -0.35));
+      houseGroup.position.set(disc.cx, 0, disc.cz);
+      scene.add(houseGroup);
+      const label = _makeLabelSprite('SETTLEMENT', '#c8e8c0');
+      label.position.set(disc.cx, 1.8, disc.cz);
+      scene.add(label);
+      // Iceland hint — the user explicitly asked for this line.
+      const hint = _makeLabelSprite('these little houses look like they\'re from Iceland', '#a8c8a0');
+      hint.scale.set(4.6, 0.65, 1);
+      hint.position.set(disc.cx, 0.55, disc.cz + 1.8);
+      scene.add(hint);
+      return { houseGroup, label, hint, disc, complete: false };
+    },
+    tick(_dt, _ctx) { /* purely decorative; no per-frame state */ },
+    onItemDropped(item, ctx) {
+      const s = ctx.state;
+      if (s.complete) return { consume: false };
+      const isOffering = item && (
+        item.id === 'junk_fancy_alcohol' || item.name === 'Fancy Alcohol'
+        || item.id === 'junk_yummy_biscuits' || item.name === 'Yummy Biscuits'
+      );
+      if (!isOffering) return { consume: false };
+      s.complete = true;
+      ctx.spawnSpeech(new THREE.Vector3(s.disc.cx, 1.6, s.disc.cz),
+        'A small thank-you slides under a door.', 4.5);
+      if (ctx.spawnElvenKnife) ctx.spawnElvenKnife(s.disc.cx, s.disc.cz + 1.4);
+      if (ctx.markEncounterComplete) ctx.markEncounterComplete('they_do_exist');
+      return { consume: true, complete: true };
+    },
+  },
 };
 
 // Helper — pick one valid encounter for the given level state, or null.

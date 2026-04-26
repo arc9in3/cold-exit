@@ -1019,6 +1019,11 @@ export const JUNK_DEFS = {
   // artifact-scroll. Now drops as plain junk; selling it to the
   // Bear Merchant grants the Rocket Shoes relic instead.
   unusedRocketTicket: { id: 'junk_rocket_ticket', name: 'Unused Rocket Ticket', type: 'junk', tint: 0x80c0ff, sellValue: 40, rarity: 'rare', description: 'An unpunched ticket to space. Worth something to the right buyer.', stackMax: 1, _encounter: true },
+  // "They Do Exist" encounter triggers — drop one of these at the
+  // little Icelandic-looking houses. Stay in the random junk pool
+  // (no _encounter flag) so the player has a way to find them.
+  fancyAlcohol: { id: 'junk_fancy_alcohol', name: 'Fancy Alcohol', type: 'junk', tint: 0xa030c0, sellValue: 95, rarity: 'uncommon', description: 'A small bottle of something potent. Hand-painted label.', stackMax: 3 },
+  yummyBiscuits: { id: 'junk_yummy_biscuits', name: 'Yummy Biscuits', type: 'junk', tint: 0xd8b870, sellValue: 60, rarity: 'common', description: 'Honey-glazed shortbreads. Smell like a holiday morning.', stackMax: 5 },
 };
 export const ALL_JUNK = Object.values(JUNK_DEFS);
 
@@ -1201,10 +1206,23 @@ export const THROWABLE_DEFS = {
     maxCharges: 2, cooldownSec: 60,
     description: 'Place a directional mine · proximity-triggered cone blast · 2 charges, 60s each',
   },
+  // "They Do Exist" encounter reward — flat-trajectory chest-height
+  // dagger toss that instantly kills the enemy it touches. 1 charge,
+  // 60s cooldown. encounterOnly so it never appears in random pools.
+  elvenKnife: {
+    id: 'thr_elven_knife', name: 'Elven Knife', type: 'throwable', rarity: 'legendary',
+    tint: 0xe0f0d0, encounterOnly: true,
+    throwKind: 'elvenKnife',
+    flatThrow: true,                     // straight chest-height line, gravity 0
+    aoeRadius: 0.7, aoeDamage: 99999, aoeShake: 0.20, fuse: 1.5,
+    maxCharges: 1, cooldownSec: 60,
+    description: 'A blade so thin you can barely see it. Always finds its mark.',
+  },
 };
 // Throwables for normal drop pools — excludes mythic-tagged items
-// (The Gift) which only the Circle of Candles encounter can hand out.
-export const ALL_THROWABLES = Object.values(THROWABLE_DEFS).filter(t => !t.mythic);
+// (The Gift) and any encounter-only throwables (Elven Knife) so they
+// can only be obtained via their dedicated encounter path.
+export const ALL_THROWABLES = Object.values(THROWABLE_DEFS).filter(t => !t.mythic && !t.encounterOnly);
 // Clone a throwable def into a live item instance — sets initial
 // charges, zeroes the cooldown timer, and stamps the 1×1 grid dims.
 export function makeThrowable(def) {

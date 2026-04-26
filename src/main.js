@@ -1954,6 +1954,15 @@ function regenerateLevel() {
           loot.spawnItem({ x, y: 0.4, z }, item);
           return true;
         },
+        // "They Do Exist" reward — spawn an Elven Knife throwable on
+        // the floor at world XZ.
+        spawnElvenKnife: (x, z) => {
+          const def = THROWABLE_DEFS && THROWABLE_DEFS.elvenKnife;
+          if (!def) return false;
+          const item = makeThrowable(def);
+          loot.spawnItem({ x, y: 0.4, z }, item);
+          return true;
+        },
         // Awarded to the player wallet directly (Choices and
         // Consequences "kneeling man hands you 5000 gold" reward).
         awardPlayerCredits: (n) => {
@@ -6488,6 +6497,38 @@ function throwItem(item) {
   }
   const muzzle = lastPlayerInfo.muzzleWorld ? lastPlayerInfo.muzzleWorld.clone()
     : player.mesh.position.clone().setY(1.2);
+  // Flat-throw items (Elven Knife) take a special straight-line path
+  // at chest height with zero gravity. Spawn a horizontal velocity
+  // toward the cursor and skip the ballistic arc math entirely.
+  if (item && item.flatThrow) {
+    const aimY = 1.0;
+    muzzle.y = aimY;
+    const fdx = lastAim.x - muzzle.x;
+    const fdz = lastAim.z - muzzle.z;
+    const flen = Math.hypot(fdx, fdz) || 1;
+    const SPEED = 28;
+    const fvel = new THREE.Vector3((fdx / flen) * SPEED, 0, (fdz / flen) * SPEED);
+    projectiles.spawn({
+      pos: muzzle, vel: fvel,
+      type: 'grenade',
+      lifetime: item.fuse ?? 1.5,
+      radius: 0.06,
+      color: item.tint || 0xe0f0d0,
+      explosion: {
+        radius: item.aoeRadius ?? 0.7,
+        damage: item.aoeDamage ?? 99999,
+        shake: item.aoeShake ?? 0.2,
+      },
+      owner: 'player',
+      gravity: 0,
+      bounciness: 0,
+      fuseAfterLand: false,
+      throwKind: item.throwKind || 'elvenKnife',
+      throwDirX: fdx, throwDirZ: fdz,
+    });
+    sfx.uiAccept();
+    return true;
+  }
   // Target the GROUND at the cursor — clamp aim.y to 0 regardless of
   // what the cursor picked (enemy torso, mid-air, wall). Throwables
   // should land where the player can see the cursor disc, not arc up
