@@ -986,6 +986,8 @@ function drawOverlay() {
     poses[path].pose = JSON.parse(JSON.stringify(DEFAULT_POSE));
   }
   const p = poses[path].pose;
+  // Ensure every active marker has a default; nothing else.
+  // (Computed below after activeMarkerIds; we re-prune at the end.)
   const slotOverrides = poses[path].slots || (poses[path].slots = {});
 
   // Build SVG. Slot squares (if class known) + 3 colored markers.
@@ -1039,12 +1041,43 @@ function drawOverlay() {
     svg += `</g>`;
   }
 
-  // Hand pose markers.
-  const M = [
+  // Hand pose markers — gated by weapon kind. A pistol has no
+  // buttstock so the shoulder anchor is meaningless; a knife is
+  // one-handed so the support hand is dropped too. Rifles / SMGs /
+  // shotguns / snipers / LMGs get the full set. When the modal is
+  // opened from the FBX library (no in-game weapon resolved) we
+  // err on the side of showing all three markers so the user can
+  // still author a pose for any class the FBX may end up assigned to.
+  const klass = POSE_MODAL.weaponClass;
+  const isMelee = inGameWeapons.find(x => x.name === POSE_MODAL.weaponName)?.type === 'melee';
+  let activeMarkerIds;
+  if (isMelee) {
+    activeMarkerIds = ['mainHand'];
+  } else if (klass === 'pistol') {
+    activeMarkerIds = ['mainHand', 'supportHand'];   // two-handed pistol grip, no shoulder
+  } else if (klass === 'rifle' || klass === 'smg' || klass === 'shotgun' ||
+             klass === 'sniper' || klass === 'lmg' || klass === 'flame') {
+    activeMarkerIds = ['mainHand', 'supportHand', 'shoulder'];
+  } else {
+    activeMarkerIds = ['mainHand', 'supportHand', 'shoulder'];  // unknown FBX → show all
+  }
+  const ALL_MARKERS = [
     { id: 'mainHand',    color: '#ff5050', label: 'M' },
     { id: 'supportHand', color: '#50c8ff', label: 'S' },
     { id: 'shoulder',    color: '#ffd450', label: 'B' },
   ];
+  const M = ALL_MARKERS.filter(m => activeMarkerIds.includes(m.id));
+
+  // Drop any pose entry that no longer applies to this class so the
+  // export stays clean (e.g. a pistol shouldn't carry a stale
+  // shoulder anchor from when it was viewed as an FBX-unknown).
+  for (const k of Object.keys(p)) {
+    if (!activeMarkerIds.includes(k)) delete p[k];
+  }
+  // Backfill any missing active marker with its default position.
+  for (const id of activeMarkerIds) {
+    if (!p[id]) p[id] = { ...DEFAULT_POSE[id] };
+  }
   for (const m of M) {
     const f = p[m.id];
     const cx = f.x * W, cy = f.y * H;
