@@ -2364,7 +2364,13 @@ export class GunmanManager {
           if (shotDir.lengthSq() > 0.0001) {
             shotDir.normalize();
             const pellets = weapon.pelletCount || 1;
-            const blindMul = g.blindT > 0 ? 2.0 : 1.0;
+            // Blind / dazzle spread inflation. Stored on the gunman
+            // when the tac light cone hits — magnitude is rarity-
+            // scaled per attachment, replaces the old binary 2.0×.
+            // Dazzle (strobe) is harsher than blind (tac light).
+            const blindMul = g.dazzleT > 0 ? (g.dazzleSpreadMul || 3.0)
+                          : g.blindT > 0  ? (g.blindSpreadMul  || 2.0)
+                          : 1.0;
             // Crouched target = smaller silhouette; tighten spread so AI
             // actually threatens the stealthed player once spotted.
             const crouchFocus = ctx.playerCrouched ? 0.7 : 1.0;

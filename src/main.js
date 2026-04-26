@@ -3633,8 +3633,15 @@ function tickLight(playerInfo, aimInfo) {
     const nz = dz / Math.max(0.0001, d);
     if (nx * _lightDir.x + nz * _lightDir.z < halfCos) return;
     enemy.blindT = Math.max(enemy.blindT || 0, lightAtt.blindDuration || 1.2);
+    // Magnitude — how much the blind degrades the enemy's spread
+    // while it's active. Rarity-scaled by rollAttachmentRarity, so
+    // a legendary tac light pushes spread harder than a common one.
+    enemy.blindSpreadMul = Math.max(enemy.blindSpreadMul || 1.0,
+      lightAtt.blindSpreadMul || 2.0);
     if (lightAtt.lightTier === 'strobe') {
       enemy.dazzleT = Math.max(enemy.dazzleT || 0, lightAtt.dazzleDuration || 0.8);
+      enemy.dazzleSpreadMul = Math.max(enemy.dazzleSpreadMul || 1.0,
+        lightAtt.dazzleSpreadMul || 3.0);
     }
   };
   for (const g of gunmen.gunmen) if (g.alive) apply(g);
@@ -8018,12 +8025,14 @@ async function runExtract() {
 function alertEnemiesFromShot(origin) {
   const weapon = currentWeapon();
   const eff = weapon ? effectiveWeapon(weapon) : null;
-  const suppressed = eff?.lightAttachment === undefined && weapon?.attachments?.muzzle?.modifier?.suppressed;
-  // Per-weapon override beats the suppressor — flamethrowers in
-  // particular set `noiseRange: 36` because the roar carries far
-  // further than any bullet report. Suppressor still narrows the
-  // radius if a weapon doesn't declare its own noise.
-  const noiseRange = weapon?.noiseRange ?? (suppressed ? 10 : 22);
+  // noiseRangeMult is multiplied across all equipped attachments;
+  // suppressors can stack with anything that adds it (none today,
+  // but the path is open). Flamethrower-style overrides still win:
+  // weapon.noiseRange forces a flat radius before the multiplier.
+  const baseNoise = weapon?.noiseRange ?? 22;
+  const mult = eff?.noiseRangeMult ?? 1.0;
+  const noiseRange = baseNoise * mult;
+  const suppressed = !!eff?.suppressed;
   const rSq = noiseRange * noiseRange;
   const px = origin.x, pz = origin.z;
   const blockers = level.solidObstacles();

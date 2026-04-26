@@ -225,25 +225,66 @@ const CONSUMABLE_ICON_BY_ID = {
 // files (no Underlay/Clean/Stroke tri-layer), so the path ends directly
 // in `_Military.png` instead of `_Military_Underlay.png`.
 const ATTACHMENT_ICON_BY_ID = {
-  att_compensator:   'ICON_SM_Wep_Mod_B_Barrel_01_Military.png',
-  att_suppressor:    'ICON_SM_Wep_Mod_Silencer_01_Military.png',
-  att_barrel_long:   'ICON_SM_Wep_Mod_A_Barrel_03_Military.png',
-  att_barrel_short:  'ICON_SM_Wep_Mod_A_Barrel_01_Military.png',
-  att_laser:         'ICON_SM_Wep_Mod_Laser_01_Military.png',
-  att_flashlight:    'ICON_SM_Wep_Mod_Flashlight_01_Military.png',
-  att_tac_light:     'ICON_SM_Wep_Mod_Flashlight_02_Military.png',
-  att_strobe:        'ICON_SM_Wep_Mod_Laser_02_Military.png',
-  att_foregrip:      'ICON_SM_Wep_Mod_A_Grip_01_Military.png',
-  att_reddot:        'ICON_SM_Wep_Mod_Scope_10_Military.png',
-  att_reflex:        'ICON_SM_Wep_Mod_Reddot_04_Military.png',
-  att_holo:          'ICON_SM_Wep_Mod_Reddot_01_Military.png',
-  att_scope:         'ICON_SM_Wep_Mod_Scope_01_Military.png',
-  att_stock_heavy:   'ICON_SM_Wep_Mod_A_Stock_03_Military.png',
-  att_grip_match:    'ICON_SM_Wep_Mod_A_Handle_01_Military.png',
-  att_trigger_match: 'ICON_SM_Wep_Mod_A_Trigger_01_Military.png',
-  att_mag_extended:  'ICON_SM_Wep_Mod_A_Mag_03_Military.png',
-  att_mag_drum:      'ICON_SM_Wep_Mod_A_Mag_08_Military.png',
-  att_bipod:         'ICON_SM_Wep_Mod_Bipod_01_Military.png',
+  // Muzzle — compensators / brakes / flash hiders
+  att_compensator:        'ICON_SM_Wep_Mod_B_Barrel_01_Military.png',
+  att_brake_a2:           'ICON_SM_Wep_Mod_B_Barrel_01_Military.png',
+  att_brake_ak:           'ICON_SM_Wep_Mod_B_Barrel_01_Military.png',
+  att_brake_sniper:       'ICON_SM_Wep_Mod_B_Barrel_01_Military.png',
+  att_comp_linear:        'ICON_SM_Wep_Mod_B_Barrel_01_Military.png',
+  att_flash_hider:        'ICON_SM_Wep_Mod_B_Barrel_01_Military.png',
+  att_flash_hider_long:   'ICON_SM_Wep_Mod_B_Barrel_01_Military.png',
+  // Muzzle — suppressors
+  att_suppressor:         'ICON_SM_Wep_Mod_Silencer_01_Military.png',
+  att_suppressor_short:   'ICON_SM_Wep_Mod_Silencer_01_Military.png',
+  att_suppressor_long:    'ICON_SM_Wep_Mod_Silencer_01_Military.png',
+  att_suppressor_qd:      'ICON_SM_Wep_Mod_Silencer_01_Military.png',
+  att_suppressor_fluted:  'ICON_SM_Wep_Mod_Silencer_01_Military.png',
+  att_suppressor_osprey:  'ICON_SM_Wep_Mod_Silencer_01_Military.png',
+  att_suppressor_tactical:'ICON_SM_Wep_Mod_Silencer_01_Military.png',
+  // Barrel
+  att_barrel_long:        'ICON_SM_Wep_Mod_A_Barrel_03_Military.png',
+  att_barrel_short:       'ICON_SM_Wep_Mod_A_Barrel_01_Military.png',
+  att_barrel_match:       'ICON_SM_Wep_Mod_A_Barrel_03_Military.png',
+  // Side rail
+  att_laser:              'ICON_SM_Wep_Mod_Laser_01_Military.png',
+  att_laser_red:          'ICON_SM_Wep_Mod_Laser_01_Military.png',
+  att_laser_green:        'ICON_SM_Wep_Mod_Laser_01_Military.png',
+  att_laser_blue:         'ICON_SM_Wep_Mod_Laser_01_Military.png',
+  att_laser_pistol:       'ICON_SM_Wep_Mod_Laser_01_Military.png',
+  att_flashlight:         'ICON_SM_Wep_Mod_Flashlight_01_Military.png',
+  att_tac_light:          'ICON_SM_Wep_Mod_Flashlight_02_Military.png',
+  att_strobe:             'ICON_SM_Wep_Mod_Laser_02_Military.png',
+  // Under rail
+  att_foregrip:           'ICON_SM_Wep_Mod_A_Grip_01_Military.png',
+  att_foregrip_angled:    'ICON_SM_Wep_Mod_A_Grip_01_Military.png',
+  att_foregrip_stubby:    'ICON_SM_Wep_Mod_A_Grip_01_Military.png',
+  att_grip_canted:        'ICON_SM_Wep_Mod_A_Grip_01_Military.png',
+  att_bipod:              'ICON_SM_Wep_Mod_Bipod_01_Military.png',
+  // Top rail (sights)
+  att_reddot:             'ICON_SM_Wep_Mod_Scope_10_Military.png',
+  att_reflex:             'ICON_SM_Wep_Mod_Reddot_04_Military.png',
+  att_holo:               'ICON_SM_Wep_Mod_Reddot_01_Military.png',
+  att_scope:              'ICON_SM_Wep_Mod_Scope_01_Military.png',
+  att_long_scope:         'ICON_SM_Wep_Mod_Scope_01_Military.png',
+  // Stock
+  att_stock_heavy:        'ICON_SM_Wep_Mod_A_Stock_03_Military.png',
+  att_stock_skeleton:     'ICON_SM_Wep_Mod_A_Stock_03_Military.png',
+  att_stock_cqb:          'ICON_SM_Wep_Mod_A_Stock_03_Military.png',
+  att_stock_folding:      'ICON_SM_Wep_Mod_A_Stock_03_Military.png',
+  att_stock_crane:        'ICON_SM_Wep_Mod_A_Stock_03_Military.png',
+  // Grip (pistol grip)
+  att_grip_match:         'ICON_SM_Wep_Mod_A_Handle_01_Military.png',
+  att_grip_stippled:      'ICON_SM_Wep_Mod_A_Handle_01_Military.png',
+  att_grip_skeleton:      'ICON_SM_Wep_Mod_A_Handle_01_Military.png',
+  att_grip_rubberized:    'ICON_SM_Wep_Mod_A_Handle_01_Military.png',
+  // Trigger
+  att_trigger_match:      'ICON_SM_Wep_Mod_A_Trigger_01_Military.png',
+  att_trigger_adjustable: 'ICON_SM_Wep_Mod_A_Trigger_01_Military.png',
+  // Magazine
+  att_mag_extended:       'ICON_SM_Wep_Mod_A_Mag_03_Military.png',
+  att_mag_drum:           'ICON_SM_Wep_Mod_A_Mag_08_Military.png',
+  att_mag_banana:         'ICON_SM_Wep_Mod_A_Mag_03_Military.png',
+  att_mag_fast:           'ICON_SM_Wep_Mod_A_Mag_03_Military.png',
 };
 
 // Junk variants — spread across trophy / notes / crafting / currency icons.

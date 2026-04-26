@@ -119,6 +119,63 @@ export const MODEL_BY_ITEM_ID = {
   thr_molotov:       'weapons/SM_Molotov_02.fbx',
   thr_claymore:      'weapons/SM_Infantry_Mine.fbx',
   thr_elven_knife:   'weapons/SM_Throwing_Knife.fbx',
+
+  // Attachments — user-tagged FBXes from the Apr 2026 pass. Mapping
+  // reads attachment.id to FBX path; the inventory grid + customize
+  // screen render the same model.
+  // -- Muzzle: comps / brakes / flash hiders
+  att_compensator:        'weapons/SM_Compensator_For_Large_Caliber_Sniper_Rifle.fbx',
+  att_brake_a2:           'weapons/SM_Muzzle_Brake_Compensator_01.fbx',
+  att_brake_ak:           'weapons/SM_Muzzle_Brake_Compensator_03.fbx',
+  att_brake_sniper:       'weapons/SM_Muzzle_Brake_Compensator_02.fbx',
+  att_comp_linear:        'weapons/SM_Muzzle_Brake_Compensator_05.fbx',
+  att_flash_hider:        'weapons/SM_Muzzle_Brake_Compensator_06.fbx',
+  att_flash_hider_long:   'weapons/SM_Muzzle_Brake_Compensator_07.fbx',
+  // -- Muzzle: suppressors (lowpoly + animpic)
+  att_suppressor:         'lowpolyguns_accessories/Silencer_1.fbx',
+  att_suppressor_short:   'lowpolyguns_accessories/Silencer_Short.fbx',
+  att_suppressor_long:    'lowpolyguns_accessories/Silencer_long.fbx',
+  att_suppressor_qd:      'lowpolyguns_accessories/Silencer_2.fbx',
+  att_suppressor_fluted:  'lowpolyguns_accessories/Silencer_3.fbx',
+  att_suppressor_osprey:  'weapons/SM_Muffler_04.fbx',
+  att_suppressor_tactical:'weapons/SM_Muffler_05.fbx',
+  // -- Side rail
+  att_laser:              'weapons/SM_Tactical_Laser_Designator.fbx',
+  att_laser_red:          'weapons/SM_Tactical_Laser_Designator.fbx',
+  att_laser_green:        'weapons/SM_Tactical_Laser_Designator.fbx',
+  att_laser_blue:         'weapons/SM_Tactical_Laser_Designator.fbx',
+  att_laser_pistol:       'weapons/SM_Tactical_Laser_Designator.fbx',
+  att_flashlight:         'weapons/SM_Tactical_Flashlight_01.fbx',
+  att_tac_light:          'weapons/SM_Tactical_Flashlight_03.fbx',
+  att_strobe:             'weapons/SM_Tactical_Flashlight_02.fbx',
+  // -- Under rail (foregrips / bipod)
+  att_foregrip:           'weapons/SM_Vertical_Handle_01.fbx',
+  att_foregrip_angled:    'weapons/SM_Horizontal_Handle_01.fbx',
+  att_foregrip_stubby:    'lowpolyguns_accessories/Grip.fbx',
+  att_grip_canted:        'weapons/SM_Side_Handle.fbx',
+  att_bipod:              'weapons/SM_Bipod__ForHigh_Precision_Sniper_Rifle.fbx',
+  // -- Top rail (sights)
+  att_reddot:             'weapons/SM_Cylindrical_Collimator_Sight.fbx',
+  att_reflex:             'weapons/SM_Square_Dot_Sight.fbx',
+  att_holo:               'weapons/SM_Optical_Sight_01.fbx',
+  att_scope:              'lowpolyguns_accessories/Scope_2.fbx',
+  att_long_scope:         'lowpolyguns_accessories/Scope_3.fbx',
+  // -- Stock
+  att_stock_heavy:        'weapons/SM_Wooden_Butt_01.fbx',
+  att_stock_skeleton:     'lowpolyguns_accessories/Stock.fbx',
+  att_stock_cqb:          'weapons/SM_Butt_Of_The_Rifle_For_Special_Submachine_Gun_Clean.fbx',
+  att_stock_folding:      'weapons/SM_Telescopic_Stock.fbx',
+  att_stock_crane:        'weapons/SM_Telescopic_Universal_Butt_01.fbx',
+  // -- Grip (pistol grip)
+  att_grip_match:         'weapons/SM_Pistol_Grip_Prototype.fbx',
+  att_grip_stippled:      'weapons/SM_Pistol_Grip_01_5_45.fbx',
+  att_grip_skeleton:      'weapons/SM_Polymer_Handle.fbx',
+  att_grip_rubberized:    'weapons/SM_Pistol_Grip_01_5_56.fbx',
+  // -- Magazine
+  att_mag_extended:       'weapons/SM_Larfe_For_Assault_Rifle_5_56.fbx',
+  att_mag_drum:           'weapons/SM_Large_Magazine_For_Assault_Rifle_5_45.fbx',
+  att_mag_banana:         'weapons/SM_Paired_For_Assault_Rifle_5_45.fbx',
+  att_mag_fast:           'weapons/SM_Magazine__For_Bulpam_Assault_Rifle.fbx',
 };
 
 // Per-type fallback — coarse category model when no name/id override
