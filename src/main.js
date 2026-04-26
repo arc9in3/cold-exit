@@ -3970,7 +3970,39 @@ function fireOneShot(playerInfo, weapon, aimPoint, isADS) {
     }
   }
   const pellets = Math.max(1, (eff.pelletCount | 0) + (derivedStats.pelletCountBonus || 0) + extraPellets);
-  const effRange = eff.range * (derivedStats.rangeMult || 1);
+  // --- Class-based effective range + damage-falloff -----------------
+  // Baseline "room" is ~14m (typical room dimension). Each class gets
+  // a base range expressed in rooms; the per-pellet computed range is
+  // jittered ±25% so bullets don't all die at the exact same spot.
+  // Damage falloff applies per hit: edge-of-range damage = 65% of base
+  // (35% loss). Curves: 'none' (sniper) / 'steady' (linear, pistol +
+  // smg + rifle + lmg) / 'steep' (quadratic, shotgun).
+  const ROOM_M = 14;
+  const _wclass = weapon.class || 'pistol';
+  let _baseRange;
+  let _falloffShape;
+  if (_wclass === 'shotgun')      { _baseRange = ROOM_M * 0.5;  _falloffShape = 'steep';  }
+  else if (_wclass === 'smg')     { _baseRange = ROOM_M * 0.85; _falloffShape = 'steady'; }
+  else if (_wclass === 'rifle')   { _baseRange = ROOM_M * 1.5;  _falloffShape = 'steady'; }
+  else if (_wclass === 'lmg')     { _baseRange = ROOM_M * 1.2;  _falloffShape = 'steady'; }
+  else if (_wclass === 'sniper')  { _baseRange = 100;           _falloffShape = 'none';   }
+  else                            { _baseRange = 100;           _falloffShape = 'steady'; }   // pistol default
+  // Honor any rangeMult perks/skills then jitter ±25% per shot.
+  const _classMaxRange = _baseRange * (derivedStats.rangeMult || 1);
+  // Per-shot jitter — applied at the loop body so each pellet gets its
+  // own random end-of-range. Helper to compute the falloff multiplier
+  // given a hit distance.
+  const _falloffMult = (dist, maxR) => {
+    if (_falloffShape === 'none' || maxR <= 0) return 1.0;
+    const t = Math.max(0, Math.min(1, dist / maxR));
+    const k = _falloffShape === 'steep' ? t * t : t;
+    // Lerp 1.0 → 0.65 (35% reduction at the edge).
+    return 1.0 - 0.35 * k;
+  };
+  // Backwards-compat with later code paths that still read `effRange`
+  // (penetration, ricochet target search). Use the un-jittered class
+  // range as the ceiling; per-pellet jitter happens inside the loop.
+  const effRange = _classMaxRange;
   // Exclude unlocked doors — their flattened mesh still intersects
   // raycasts otherwise, so bullets would invisibly hit the doorway.
   const hitTargets = [...allHittables(), ...level.solidObstacles()];
@@ -4029,7 +4061,13 @@ function fireOneShot(playerInfo, weapon, aimPoint, isADS) {
     // .clone() that was here. Saves 9-pellet shotgun volleys ~9 Vector3
     // allocations per fire. _tmpEndPt scratch covers the no-hit case.
     const dir = jitterDirY(_tmpDir, spread);
-    const hit = combat.raycast(fireFrom, dir, hitTargets, effRange);
+    // Per-pellet effective range — jitter ±25% so bullets die at
+    // varied points around the class's base max range. Sniper / pistol
+    // are effectively unlimited so the jitter is unnoticeable on their
+    // 100m baseline; on shotgun / smg / rifle / lmg it gives a clear
+    // "some shots reached, some didn't" feel near the edge.
+    const _pelletRange = _classMaxRange * (0.75 + Math.random() * 0.50);
+    const hit = combat.raycast(fireFrom, dir, hitTargets, _pelletRange);
     const endPoint = hit
       ? hit.point
       : _tmpEndPt.copy(fireFrom).addScaledVector(dir, effRange);
@@ -4063,6 +4101,16 @@ function fireOneShot(playerInfo, weapon, aimPoint, isADS) {
         mult += (derivedStats.headMultBonus || 0) + (weapon.headBonus || 0);
       }
       let dmg = eff.damage * mult * derivedStats.rangedDmgMult;
+      // Class-based damage falloff. Distance from the bullet's origin
+      // to the hit; multiplier 1.0 → 0.65 lerped over the class's
+      // base max range. Sniper has 'none' shape so this is a no-op.
+      if (_falloffShape !== 'none') {
+        const _fdx = hit.point.x - fireFrom.x;
+        const _fdy = hit.point.y - fireFrom.y;
+        const _fdz = hit.point.z - fireFrom.z;
+        const _fdist = Math.sqrt(_fdx * _fdx + _fdy * _fdy + _fdz * _fdz);
+        dmg *= _falloffMult(_fdist, _classMaxRange);
+      }
       if (crouched) dmg *= (derivedStats.crouchDmgMult || 1);
       // Point Blank: close-range damage bonus.
       if ((derivedStats.pointBlankBonus || 0) > 0) {
