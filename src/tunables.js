@@ -252,6 +252,19 @@ export const tunables = {
     duration: 12.0,
     dps: 6,
   },
+  // Pixel-aim mode. When `pixelMode` is true and the cursor is on an
+  // enemy mesh, fireOneShot multiplies the angular spread cone by the
+  // tighten factors below — single-pellet weapons collapse to ~20% of
+  // baseline cone (shots reliably land on the pixel under the
+  // cursor), multi-pellet weapons (shotguns) collapse to ~50%
+  // (cluster the pattern on the chosen body part instead of fanning
+  // across the whole silhouette). Set pixelMode = false to restore
+  // the legacy quadrant-feel spread behaviour.
+  aim: {
+    pixelMode: true,
+    enemyTightenSingle: 0.20,
+    enemyTightenPellet: 0.50,
+  },
   medkit: {
     smallHeal: 30,
     largeHeal: 65,

@@ -3570,7 +3570,21 @@ function enemyResolveCollision(oldX, oldZ, newX, newZ, radius) {
   return level.resolveCollision(sx, sz, pushX, pushZ, radius);
 }
 
+// Legacy aim resolution preserved verbatim. Toggled out of the live
+// fire path by `tunables.aim.pixelMode`. Kept here so the change can
+// be reverted without git archaeology — point resolveAim at this
+// function (or flip the tunable) to roll back. The behavioural
+// difference is downstream in fireOneShot: this function returns the
+// same shape; the new mode only changes how spread is applied.
+function resolveAim_legacy(muzzleWorld) {
+  return _resolveAimRaycast(muzzleWorld);
+}
+
 function resolveAim(muzzleWorld) {
+  return _resolveAimRaycast(muzzleWorld);
+}
+
+function _resolveAimRaycast(muzzleWorld) {
   if (!input.hasAim) return { point: null, zone: null, owner: null };
   input.raycaster.setFromCamera(input.mouseNDC, camera);
 
@@ -3948,7 +3962,7 @@ function firePlayerProjectile(playerInfo, weapon, aimPoint) {
   });
 }
 
-function fireOneShot(playerInfo, weapon, aimPoint, isADS) {
+function fireOneShot(playerInfo, weapon, aimPoint, isADS, aimOwner) {
   if (typeof weapon.ammo === 'number' && weapon.ammo <= 0 && !weapon.infiniteAmmo) {
     sfx.empty();
     tryReload(weapon);
@@ -3995,6 +4009,24 @@ function fireOneShot(playerInfo, weapon, aimPoint, isADS) {
     spread *= FIRST_SHOT_TIGHTEN;
   } else {
     spread *= (1 + _shotBloom * BLOOM_MAX_MULT);
+  }
+  // Pixel-aim mode — when the cursor is over an enemy mesh, the gun's
+  // hand-wobble cone collapses dramatically so the shot lands on the
+  // pixel under the cursor (the user's intent), not somewhere in a
+  // body-wide quadrant the gun rolled. Replaces the "locked" feel of
+  // the spread randomly picking which body part eats the round.
+  // Shotguns keep more of their pellet pattern (multi-pellet IS the
+  // weapon) — they get a softer tighten that just clusters the
+  // pattern around the cursor instead of fanning across the whole
+  // silhouette. Toggle via `tunables.aim.pixelMode`; legacy behaviour
+  // (no enemy-aware tighten) is preserved by setting it to false.
+  const _aimCfg = tunables.aim || {};
+  if (_aimCfg.pixelMode !== false && aimOwner) {
+    const isMultiPellet = (eff.pelletCount | 0) > 1;
+    const tighten = isMultiPellet
+      ? (_aimCfg.enemyTightenPellet ?? 0.50)   // shotgun / dragonbreath
+      : (_aimCfg.enemyTightenSingle ?? 0.20);  // pistol / smg / rifle / sniper / lmg
+    spread *= tighten;
   }
   // LMG Walking Fire — sustained-fire spread bleed. While holding the
   // trigger, multiply spread by max(0, 1 - decay * heldT). Decay tracked
@@ -4442,7 +4474,7 @@ function tickShooting(dt, playerInfo, inputState, aimInfo) {
   const eff = effectiveWeapon(weapon);
 
   if (playerBurstRemaining > 0 && playerBurstTimer <= 0 && aimInfo.point) {
-    fireOneShot(playerInfo, weapon, aimInfo.point, inputState.adsHeld);
+    fireOneShot(playerInfo, weapon, aimInfo.point, inputState.adsHeld, aimInfo.owner);
     playerBurstRemaining -= 1;
     playerBurstTimer = eff.burstInterval || 0.07;
     return;
