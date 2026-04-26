@@ -1000,30 +1000,54 @@
       font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
     }
     #store-upgrade-card {
-      width: 560px; max-width: 92vw;
+      width: 640px; max-width: 94vw; max-height: 88vh; overflow-y: auto;
       background: linear-gradient(180deg, #181b21 0%, #0e1018 100%);
-      border: 1px solid #c9a87a; border-radius: 10px;
-      padding: 24px 26px; color: #e8dfc8;
+      border: 1px solid #c9a87a; border-radius: 4px;
+      padding: 22px 26px; color: #e8dfc8;
+    }
+    #store-upgrade-header {
+      display: flex; align-items: flex-start; justify-content: space-between;
+      gap: 16px; padding-bottom: 14px;
+      border-bottom: 1px solid rgba(201,168,122,0.25);
+      margin-bottom: 16px;
     }
     #store-upgrade-title {
-      font-size: 16px; font-weight: 700; letter-spacing: 3px;
-      color: #c9a87a; text-transform: uppercase; text-align: center;
-      margin-bottom: 6px;
+      font-size: 22px; font-weight: 700; letter-spacing: 6px;
+      color: #c9a87a; text-transform: uppercase;
+      margin-bottom: 4px;
     }
     #store-upgrade-sub {
-      font-size: 11px; color: #9b8b6a; text-align: center; margin-bottom: 10px;
+      font-size: 11px; color: #9b8b6a; letter-spacing: 1.5px;
     }
     #store-upgrade-chips {
-      text-align: center; font-size: 13px; color: #d0a038; letter-spacing: 2px; margin-bottom: 16px;
+      font-size: 18px; color: #d0a038; letter-spacing: 2px;
+      white-space: nowrap;
+      padding: 6px 12px; border: 1px solid rgba(208,160,56,0.5);
+      border-radius: 3px; background: rgba(208,160,56,0.08);
     }
+    .store-chips-num { font-weight: 700; color: #f0c860; }
+    .store-chips-glyph { color: #c9a87a; margin-left: 2px; }
+    .store-section-title {
+      font-size: 10px; letter-spacing: 4px; color: #7da7c8;
+      text-transform: uppercase; margin: 16px 0 8px;
+      padding-bottom: 4px; border-bottom: 1px solid rgba(125,167,200,0.20);
+    }
+    .store-section-title:first-child { margin-top: 0; }
     .store-row {
-      border: 1px solid #2c323c; border-radius: 5px; padding: 10px 12px;
-      margin-bottom: 10px; background: #15181f;
+      display: flex; align-items: center; gap: 12px;
+      border: 1px solid #2c323c; border-radius: 3px;
+      padding: 10px 14px; margin-bottom: 6px; background: #15181f;
     }
-    .store-row-label { font-size: 12px; color: #e8dfc8; letter-spacing: 1px; margin-bottom: 4px; }
-    .store-row-label b { color: #c9a87a; }
-    .store-row-desc { font-size: 10px; color: #7a8290; margin-bottom: 8px; }
-    .store-row .menu-btn { width: 100%; }
+    .store-row:hover { background: #1a1e26; border-color: #3a4250; }
+    .store-row-left { flex: 1; min-width: 0; }
+    .store-row-label { font-size: 12px; color: #e8dfc8; letter-spacing: 1.5px; margin-bottom: 3px; text-transform: uppercase; }
+    .store-row-label b { color: #c9a87a; font-weight: 700; letter-spacing: 1px; }
+    .store-row-desc { font-size: 10px; color: #7a8290; line-height: 1.4; }
+    .store-row-btn {
+      flex: 0 0 auto; min-width: 150px;
+      padding: 8px 14px; font-size: 11px; letter-spacing: 1.5px;
+    }
+    .store-row-btn:disabled { opacity: 0.4; cursor: default; }
 
     /* Store roll (pick-a-weapon on run start) */
     #store-roll-root {

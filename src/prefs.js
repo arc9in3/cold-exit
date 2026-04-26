@@ -89,3 +89,52 @@ export function pouchNextSlotCost(currentSlots) {
   // currentSlots = 1 → buying slot #2 → index 0 of POUCH_SLOT_COSTS.
   return POUCH_SLOT_COSTS[currentSlots - POUCH_SLOT_MIN];
 }
+
+// Per-merchant stock-size upgrades + a one-time "reroll-any-shop"
+// unlock. Both fund out of contract chips.
+//
+// MERCHANT_KINDS lists every kind that can be upgraded. The bear
+// merchant ("bearMerchant") is intentionally surfaced under a
+// mysterious label in the UI — the player can spend on it without
+// knowing exactly what they're upgrading.
+const MERCHANT_UPGRADES_KEY = 'tacticalrogue_merchant_upgrades_v1';
+const REROLL_UNLOCK_KEY = 'tacticalrogue_merchant_reroll_v1';
+export const MERCHANT_KINDS = [
+  'merchant', 'healer', 'gunsmith', 'armorer',
+  'tailor', 'relicSeller', 'blackMarket', 'bearMerchant',
+];
+export const MERCHANT_UPGRADE_MAX = 4;
+// Cost to buy level N from level N-1 (index 0 = buy level 1).
+export const MERCHANT_UPGRADE_COSTS = [40, 80, 160, 280];
+export const REROLL_UNLOCK_COST = 220;
+
+export function getMerchantUpgrades() {
+  const raw = _read(MERCHANT_UPGRADES_KEY, null);
+  const out = {};
+  for (const k of MERCHANT_KINDS) {
+    const v = (raw && typeof raw === 'object') ? (raw[k] | 0) : 0;
+    out[k] = Math.max(0, Math.min(MERCHANT_UPGRADE_MAX, v));
+  }
+  return out;
+}
+export function setMerchantUpgrade(kind, level) {
+  if (!MERCHANT_KINDS.includes(kind)) return;
+  const all = getMerchantUpgrades();
+  all[kind] = Math.max(0, Math.min(MERCHANT_UPGRADE_MAX, level | 0));
+  _write(MERCHANT_UPGRADES_KEY, all);
+}
+export function merchantUpgradeNextCost(level) {
+  if ((level | 0) >= MERCHANT_UPGRADE_MAX) return null;
+  return MERCHANT_UPGRADE_COSTS[level | 0];
+}
+export function getMerchantStockBonus(kind) {
+  const all = getMerchantUpgrades();
+  return all[kind] | 0;     // adds N items to the kind's base stock size
+}
+
+export function getRerollUnlocked() {
+  return !!_read(REROLL_UNLOCK_KEY, false);
+}
+export function setRerollUnlocked(v) {
+  _write(REROLL_UNLOCK_KEY, !!v);
+}

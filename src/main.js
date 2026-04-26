@@ -23,7 +23,11 @@ import { initDebugPanel, setDebugPanelVisible } from './debug.js';
 import { getDevToolsEnabled, setDevToolsEnabled, getPlayerName, setPlayerName,
          getStartingStoreState, setStartingStoreState,
          getCharacterStyle, setCharacterStyle,
-         getPouchSlots, setPouchSlots, pouchNextSlotCost, POUCH_SLOT_MAX } from './prefs.js';
+         getPouchSlots, setPouchSlots, pouchNextSlotCost, POUCH_SLOT_MAX,
+         getMerchantUpgrades, setMerchantUpgrade, merchantUpgradeNextCost,
+         getMerchantStockBonus,
+         getRerollUnlocked, setRerollUnlocked,
+         MERCHANT_KINDS, MERCHANT_UPGRADE_MAX, REROLL_UNLOCK_COST } from './prefs.js';
 import { tunables } from './tunables.js';
 import {
   Inventory, SLOT_IDS,
@@ -860,6 +864,15 @@ const storeUpgradeUI = new StoreUpgradeUI({
   },
   pouchNextCost: pouchNextSlotCost,
   pouchMax: POUCH_SLOT_MAX,
+  // Per-merchant stock-size upgrades + global reroll unlock.
+  getMerchantUpgrades,
+  setMerchantUpgrade,
+  merchantUpgradeNextCost,
+  merchantKinds: MERCHANT_KINDS,
+  merchantUpgradeMax: MERCHANT_UPGRADE_MAX,
+  getRerollUnlocked,
+  setRerollUnlocked,
+  rerollUnlockCost: REROLL_UNLOCK_COST,
   onClose: () => { mainMenuUI.show(); },
 });
 
@@ -1034,6 +1047,30 @@ const shopUI = new ShopUI({
     }
     return ok;
   },
+  // Reroll: regenerate the open NPC's stock once per visit, gated on
+  // the persistent unlock from the Upgrades menu. Cost is paid in
+  // CONTRACT CHIPS, not run credits — making it a meta-loop choice
+  // rather than something a flush merchant run can spam.
+  getRerollUnlocked: () => getRerollUnlocked(),
+  onReroll: (npc) => {
+    if (!npc) return false;
+    if (!getRerollUnlocked()) return false;
+    if (npc._rerollUsed) return false;
+    if (persistentChips < 25) return false;        // small chip cost per use
+    persistentChips -= 25;
+    savePersistentChips();
+    if      (npc.kind === 'merchant')     npc.stock = makeMerchantStock();
+    else if (npc.kind === 'healer')       npc.stock = makeHealerStock();
+    else if (npc.kind === 'gunsmith')     npc.stock = makeGunsmithStock();
+    else if (npc.kind === 'armorer')      npc.stock = makeArmorerStock();
+    else if (npc.kind === 'tailor')       npc.stock = makeTailorStock();
+    else if (npc.kind === 'relicSeller')  npc.stock = makeRelicSellerStock();
+    else if (npc.kind === 'blackMarket')  npc.stock = makeBlackMarketStock();
+    else if (npc.kind === 'bearMerchant') npc.stock = makeMerchantStock('bearMerchant');
+    npc._rerollUsed = true;
+    sfx.uiAccept();
+    return true;
+  },
   onBearTrade: (toyIds) => {
     // Consume one of each toy id from anywhere in the inventory.
     const needed = new Set(toyIds);
@@ -1104,7 +1141,7 @@ function shopUpgradeRarity(item, { baseChance = 0.55, epicChance = 0.18 } = {}) 
   return item;
 }
 
-function makeMerchantStock() {
+function makeMerchantStock(kindOverride) {
   const pool = [
     ...tunables.weapons.filter(w => !w.artifact && !w.mythic && w.rarity !== 'mythic').map(w => wrapWeapon(w)),
     ...ALL_ARMOR.map(a => withAffixes(shopUpgradeRarity({ ...a, durability: { ...a.durability } }))),
@@ -1114,7 +1151,8 @@ function makeMerchantStock() {
     { ...CONSUMABLE_DEFS.medkit },
   ];
   const stock = [];
-  const n = Math.min(tunables.merchant.stockSize, pool.length);
+  const bonus = getMerchantStockBonus(kindOverride || 'merchant');
+  const n = Math.min(tunables.merchant.stockSize + bonus, pool.length);
   for (let i = 0; i < n; i++) {
     const idx = Math.floor(Math.random() * pool.length);
     stock.push(fluxify(pool.splice(idx, 1)[0]));
@@ -1124,14 +1162,22 @@ function makeMerchantStock() {
 
 // Healer NPC carries only health + buff consumables and a touch of armor.
 function makeHealerStock() {
-  return [
+  const base = [
     { ...CONSUMABLE_DEFS.bandage },
     { ...CONSUMABLE_DEFS.bandage },
     { ...CONSUMABLE_DEFS.medkit },
     { ...CONSUMABLE_DEFS.medkit },
     { ...CONSUMABLE_DEFS.adrenaline },
     { ...CONSUMABLE_DEFS.combatStim },
-  ].map(fluxify);
+  ];
+  const bonus = getMerchantStockBonus('healer');
+  // Each upgrade level adds one extra rolled consumable from the same pool.
+  const heals = ALL_CONSUMABLES.filter(c =>
+    c.useEffect?.kind === 'heal' || c.useEffect?.kind === 'buff');
+  for (let i = 0; i < bonus && heals.length; i++) {
+    base.push({ ...heals[Math.floor(Math.random() * heals.length)] });
+  }
+  return base.map(fluxify);
 }
 
 // Scatter rooms — each sells a focused slice of the merchant's pool, with
@@ -1146,20 +1192,27 @@ function pickN(arr, n) {
   return out;
 }
 function makeGunsmithStock() {
-  // 4 weapons + 3 attachments, weapons lean rare+.
+  // 4 weapons + 3 attachments base, weapons lean rare+. Upgrade level
+  // splits its bonus between weapons (rounded up) and attachments.
+  const bonus = getMerchantStockBonus('gunsmith');
+  const wBonus = Math.ceil(bonus / 2);
+  const aBonus = bonus - wBonus;
   const weapons = pickN(
     tunables.weapons.filter(w => !w.artifact && !w.mythic && w.rarity !== 'mythic').map(w => wrapWeapon(w)),
-    4,
+    4 + wBonus,
   );
-  const atts = pickN(ALL_ATTACHMENTS.map(a => rollAttachmentRarity({ ...a, modifier: { ...a.modifier } })), 3);
+  const atts = pickN(ALL_ATTACHMENTS.map(a => rollAttachmentRarity({ ...a, modifier: { ...a.modifier } })), 3 + aBonus);
   return [...weapons, ...atts].map((it) => {
     it.priceMult = (it.priceMult || 1) * 1.15;  // premium shop
     return fluxify(it);
   });
 }
 function makeArmorerStock() {
-  const armor = pickN(ALL_ARMOR.map(a => withAffixes(shopUpgradeRarity({ ...a, durability: { ...a.durability } }, { baseChance: 0.55, epicChance: 0.18 }))), 4);
-  const gear  = pickN(ALL_GEAR.map(g => withAffixes(shopUpgradeRarity({ ...g, durability: { ...(g.durability || { current: 100, max: 100, repairability: 0.9 }) } }, { baseChance: 0.50, epicChance: 0.15 }))), 3);
+  const bonus = getMerchantStockBonus('armorer');
+  const aBonus = Math.ceil(bonus / 2);
+  const gBonus = bonus - aBonus;
+  const armor = pickN(ALL_ARMOR.map(a => withAffixes(shopUpgradeRarity({ ...a, durability: { ...a.durability } }, { baseChance: 0.55, epicChance: 0.18 }))), 4 + aBonus);
+  const gear  = pickN(ALL_GEAR.map(g => withAffixes(shopUpgradeRarity({ ...g, durability: { ...(g.durability || { current: 100, max: 100, repairability: 0.9 }) } }, { baseChance: 0.50, epicChance: 0.15 }))), 3 + gBonus);
   return [...armor, ...gear].map((it) => {
     it.priceMult = (it.priceMult || 1) * 1.1;
     return fluxify(it);
@@ -1167,7 +1220,8 @@ function makeArmorerStock() {
 }
 function makeTailorStock() {
   // Tailor peddles cloth/clothing — gear items only (no armor plates).
-  const gear = pickN(ALL_GEAR.map(g => withAffixes(shopUpgradeRarity({ ...g, durability: { ...(g.durability || { current: 100, max: 100, repairability: 0.9 }) } }, { baseChance: 0.55, epicChance: 0.15 }))), 6);
+  const bonus = getMerchantStockBonus('tailor');
+  const gear = pickN(ALL_GEAR.map(g => withAffixes(shopUpgradeRarity({ ...g, durability: { ...(g.durability || { current: 100, max: 100, repairability: 0.9 }) } }, { baseChance: 0.55, epicChance: 0.15 }))), 6 + bonus);
   return gear.map((it) => {
     it.priceMult = (it.priceMult || 1) * 0.9;  // tailor is cheaper
     return fluxify(it);
@@ -1177,8 +1231,10 @@ function makeRelicSellerStock() {
   // Relic sellers now deal exclusively in artifact scrolls — permanent
   // run-altering buffs. Each visit offers 2-3 unowned artifacts plus a
   // couple of expensive high-rarity junk pieces as flavour stock.
+  // Upgrade level adds extra unowned-artifact slots.
   const unowned = ALL_ARTIFACTS.filter(a => !artifacts.has(a.id));
-  const offerCount = Math.min(3, unowned.length);
+  const bonus = getMerchantStockBonus('relicSeller');
+  const offerCount = Math.min(3 + bonus, unowned.length);
   const picks = [];
   const pool = [...unowned];
   for (let i = 0; i < offerCount; i++) {
@@ -1198,12 +1254,17 @@ function makeRelicSellerStock() {
 }
 function makeBlackMarketStock() {
   // Mix of high-tier everything — expensive but consistently good.
+  // Upgrade level adds one extra weapon + one extra gear/armor slot
+  // per two levels.
+  const bonus = getMerchantStockBonus('blackMarket');
+  const wBonus = Math.ceil(bonus / 2);
+  const eBonus = bonus - wBonus;
   const weapons = pickN(
     tunables.weapons.filter(w => !w.artifact && (w.rarity === 'rare' || w.rarity === 'epic' || !w.rarity))
       .map(w => wrapWeapon(w)),
-    3,
+    3 + wBonus,
   );
-  const gear = pickN(ALL_GEAR.map(g => withAffixes({ ...g, durability: { ...(g.durability || { current: 100, max: 100, repairability: 0.9 }) } })), 2);
+  const gear = pickN(ALL_GEAR.map(g => withAffixes({ ...g, durability: { ...(g.durability || { current: 100, max: 100, repairability: 0.9 }) } })), 2 + eBonus);
   const armor = pickN(ALL_ARMOR.map(a => withAffixes({ ...a, durability: { ...a.durability } })), 2);
   const att = pickN(ALL_ATTACHMENTS.map(a => rollAttachmentRarity({ ...a, modifier: { ...a.modifier } })), 2);
   return [...weapons, ...gear, ...armor, ...att].map((it) => {
@@ -5286,7 +5347,8 @@ function tryInteract({ nearItem, body, npc, container }) {
   }
   if (npc && ['merchant', 'bearMerchant', 'healer', 'gunsmith',
               'armorer', 'tailor', 'relicSeller', 'blackMarket'].includes(npc.kind)) {
-    if (npc.kind === 'bearMerchant' && !npc.stock) npc.stock = makeMerchantStock();
+    if (npc.kind === 'bearMerchant' && !npc.stock) npc.stock = makeMerchantStock('bearMerchant');
+    npc._rerollUsed = false;     // per-visit flag, cleared on each open
     shopUI.open(npc);
     return;
   }

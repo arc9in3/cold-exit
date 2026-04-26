@@ -102,7 +102,7 @@ export class MainMenuUI {
     //   this.hide();
     //   this.onTutorial?.();
     // }));
-    this.bodyEl.appendChild(this._btn('Store', () => {
+    this.bodyEl.appendChild(this._btn('Upgrades', () => {
       this.onOpenStore?.();
     }));
     this.bodyEl.appendChild(this._btn('Leaderboard', () => { this.view = 'leaderboard'; this.render(); }));

@@ -159,7 +159,7 @@ export function sellPriceFor(item) {
 }
 
 export class ShopUI {
-  constructor({ inventory, getCredits, spendCredits, earnCredits, onClose, onBearTrade, onAcquireArtifact, getShopMult }) {
+  constructor({ inventory, getCredits, spendCredits, earnCredits, onClose, onBearTrade, onAcquireArtifact, getShopMult, getRerollUnlocked, onReroll }) {
     this.inventory = inventory;
     this.getCredits = getCredits;
     this.spendCredits = spendCredits;
@@ -168,6 +168,8 @@ export class ShopUI {
     this.onBearTrade = onBearTrade;
     this.onAcquireArtifact = onAcquireArtifact;
     this.getShopMult = getShopMult || (() => 1);
+    this.getRerollUnlocked = getRerollUnlocked || (() => false);
+    this.onReroll = onReroll || (() => false);
     this.merchant = null;      // current NPC being traded with
 
     this.root = document.createElement('div');
@@ -188,7 +190,10 @@ export class ShopUI {
             <div id="shop-trade" style="display:none"></div>
           </div>
           <div class="shop-col">
-            <div class="inv-heading">For Sale</div>
+            <div class="inv-heading" style="display:flex;align-items:center;justify-content:space-between;gap:6px;">
+              <span>For Sale</span>
+              <button id="shop-reroll" type="button" style="display:none;padding:4px 10px;font-size:10px;letter-spacing:1.5px;text-transform:uppercase;background:rgba(120,160,210,0.18);color:#bcd4ee;border:1px solid rgba(120,160,210,0.55);border-radius:2px;cursor:pointer;font-family:inherit;font-weight:700;">Reroll · 25 ◆</button>
+            </div>
             <div id="shop-stock"></div>
             <div class="inv-heading" id="shop-buyback-heading" style="display:none">Buyback</div>
             <div id="shop-buyback"></div>
@@ -224,6 +229,12 @@ export class ShopUI {
     this.repairAllBtn = this.root.querySelector('#shop-repair-all');
     this.sellJunkBtn.addEventListener('click', () => this._sellAllJunk());
     this.repairAllBtn.addEventListener('click', () => this._repairAll());
+    this.rerollBtn = this.root.querySelector('#shop-reroll');
+    this.rerollBtn.addEventListener('click', () => {
+      if (!this.merchant) return;
+      const ok = this.onReroll(this.merchant);
+      if (ok) this.render();
+    });
     // In-session sold items — cleared when the merchant is closed so each
     // visit is an independent buyback window.
     this.buyback = [];
@@ -443,6 +454,19 @@ export class ShopUI {
       this.repairAllBtn.textContent = kind === 'gunsmith' ? 'Repair All Weapons'
                                     : kind === 'armorer'  ? 'Repair All Armor'
                                     : 'Repair All';
+    }
+    // Reroll: only when the unlock has been purchased AND this visit
+    // hasn't burned its single use. Disabled-greyed if used so the
+    // player still sees the affordance.
+    if (this.rerollBtn) {
+      const unlocked = this.getRerollUnlocked();
+      this.rerollBtn.style.display = unlocked ? '' : 'none';
+      this.rerollBtn.disabled = !!this.merchant._rerollUsed;
+      this.rerollBtn.style.opacity = this.merchant._rerollUsed ? '0.45' : '1';
+      this.rerollBtn.style.cursor = this.merchant._rerollUsed ? 'default' : 'pointer';
+      this.rerollBtn.textContent = this.merchant._rerollUsed
+        ? 'Rerolled'
+        : 'Reroll · 25 ◆';
     }
     const TITLES = {
       merchant: 'MERCHANT',
