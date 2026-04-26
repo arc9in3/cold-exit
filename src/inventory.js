@@ -1014,7 +1014,7 @@ export const JUNK_DEFS = {
   // Encounter-trigger junk. Reads as a normal cheap pickup until
   // dropped inside the Duck encounter — then it triggers a toy
   // reward. Outside that room it's just sell-fodder.
-  bagOfPeas:    { id: 'junk_peas',     name: 'Bag of Peas',         type: 'junk', tint: 0x8ac46a, sellValue: 25,   rarity: 'common',    description: 'A small canvas bag of dried peas. Smells of grass.', stackMax: 5, _encounter: true },
+  bagOfPeas:    { id: 'junk_peas',     name: 'Bag of Peas',         type: 'junk', tint: 0x8ac46a, sellValue: 25,   rarity: 'common',    description: 'A small canvas bag of dried peas. Smells of grass.', stackMax: 5 },
   // Duck encounter reward — used to be the Unused Rocket Ticket
   // artifact-scroll. Now drops as plain junk; selling it to the
   // Bear Merchant grants the Rocket Shoes relic instead.

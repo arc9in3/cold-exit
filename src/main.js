@@ -1281,6 +1281,13 @@ function makeMerchantStock(kindOverride) {
     ...ALL_ATTACHMENTS.map(a => rollAttachmentRarity({ ...a, modifier: { ...a.modifier } })),
     { ...CONSUMABLE_DEFS.bandage },
     { ...CONSUMABLE_DEFS.medkit },
+    // Encounter-trigger junk in the general pool so players can
+    // reliably acquire what the Duck and They Do Exist encounters
+    // need — random container drops are stochastic; merchant rolls
+    // are predictable buy paths.
+    { ...JUNK_DEFS.bagOfPeas },
+    { ...JUNK_DEFS.fancyAlcohol },
+    { ...JUNK_DEFS.yummyBiscuits },
   ];
   const stock = [];
   const bonus = getMerchantStockBonus(kindOverride || 'merchant');

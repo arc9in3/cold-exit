@@ -1215,7 +1215,7 @@ export const ENCOUNTER_DEFS = {
     floorColor: 0xb0d4e0,             // pale ghost-blue
     oncePerSave: true,
     condition: (state) => state.levelIndex >= 2,
-    LISTEN_TIME: 25,
+    LISTEN_TIME: 20,
     MOVE_THRESHOLD: 0.20,             // metres of drift considered "movement"
     spawn(scene, room, ctx) {
       const disc = _spawnFloorDisc(scene, room, this.floorColor);
@@ -1421,7 +1421,7 @@ export const ENCOUNTER_DEFS = {
     floorColor: 0xc8d0d8,             // silver
     oncePerSave: true,
     condition: (state) => state.levelIndex >= 2,
-    GAZE_TIME: 10,
+    GAZE_TIME: 6,
     spawn(scene, room, ctx) {
       const disc = _spawnFloorDisc(scene, room, this.floorColor);
       // Mirror prop — tall ornate frame + reflective slab.
