@@ -11,6 +11,11 @@ import { buildMeleePrimitive } from './melee_primitives.js';
 const FORWARD = new THREE.Vector3(-1, 0, -1).normalize();
 const RIGHT = new THREE.Vector3(1, 0, -1).normalize();
 
+// Module scratch — reused inside player.update for the aim-pitch
+// chest world-position read. Consumed synchronously inside the same
+// function so reuse is safe across frames.
+const _aimChestScratch = new THREE.Vector3();
+
 // Movement modes. Only one is active at a time.
 const MODE = {
   GROUND: 'ground',
@@ -1264,10 +1269,10 @@ export function createPlayer(scene) {
     // yaw stays 0 here; pitch drives head + arm tilt in the rig.
     let aimPitch = 0;
     if (aimPoint) {
-      const chest = body.getWorldPosition(new THREE.Vector3());
-      const dy = aimPoint.y - chest.y;
-      const dx = aimPoint.x - chest.x;
-      const dz = aimPoint.z - chest.z;
+      body.getWorldPosition(_aimChestScratch);
+      const dy = aimPoint.y - _aimChestScratch.y;
+      const dx = aimPoint.x - _aimChestScratch.x;
+      const dz = aimPoint.z - _aimChestScratch.z;
       const horiz = Math.hypot(dx, dz);
       if (horiz > 0.05) aimPitch = Math.atan2(dy, horiz);
       // Clamp so extreme angles (cursor on player's own feet) don't

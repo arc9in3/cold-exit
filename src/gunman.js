@@ -41,6 +41,11 @@ const _g_target      = new THREE.Vector3();
 const _g_toPlayer    = new THREE.Vector3();
 const _g_dir2d       = new THREE.Vector3();
 const _g_fwd         = new THREE.Vector3();
+// Scratch reused for the per-frame approach-direction copy in chase
+// — was `dir2d.clone()`, allocating one Vector3 per active gunman per
+// frame. The vector is consumed within the same iteration of the
+// gunman loop, so reuse is safe.
+const _g_approachDir = new THREE.Vector3();
 // Fire-path scratches — gunmen shoot every ~0.4s with up to 7 pellets
 // per fire, each previously allocating a fresh Vector3. Reuse one
 // instance per role across the per-volley loop. The onFireAt callback
@@ -1626,7 +1631,7 @@ export class GunmanManager {
       // easily walk around. Trigger cover-flanking twice as fast and
       // push the angle wider so they commit to swinging around the
       // cover rather than standing still in front of it.
-      const approachDir = dir2d.clone();
+      const approachDir = _g_approachDir.copy(dir2d);
       const crouchedHiding = !!ctx.playerCrouched;
       const coverDelay = crouchedHiding ? 0.6 : 1.2;
       const coverFlanking = (g.noLosT || 0) > coverDelay && typeof g.lastKnownX === 'number';

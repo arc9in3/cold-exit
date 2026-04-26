@@ -45,6 +45,9 @@ export function createScene() {
   // additional displacement so the camera can't run away. Lives at
   // module scope so it persists smoothly across frames.
   const _adsEdgePan = new THREE.Vector3();
+  // Scratch reused for the per-frame `desired` target — was a
+  // `base.clone()` allocation every camera tick.
+  const _desiredScratch = new THREE.Vector3();
 
   function updateCamera(dt, opts = {}) {
     const adsAmt = opts.adsAmount ?? 0;
@@ -71,7 +74,7 @@ export function createScene() {
     // weaponPeek for the entire ADS hold. NO continuous cursor chase
     // — that's the whole point. Tracking an enemy with the mouse
     // doesn't slide the world around anymore.
-    const desired = base.clone();
+    const desired = _desiredScratch.copy(base);
     if (adsEased > 0.05 && opts.adsPeekDir) {
       // "Scope factor" — blends from 0 at iron-sight peek (≤3m) to 1
       // at long-scope peek (≥7m). Mid-to-long sights get up to 35%

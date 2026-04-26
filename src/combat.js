@@ -472,7 +472,12 @@ export class Combat {
   // a wall's AABB, which would otherwise misclassify every enemy as
   // occluded and render the whole field as ghosts).
   hasLineOfSight(from, to, blockers) {
-    const dir = new THREE.Vector3().subVectors(to, from);
+    // Reuse the instance scratch — hasLineOfSight is called per-enemy
+    // per-frame (visibility checks, ghost rendering, AI awareness),
+    // and a fresh Vector3 every call adds up to thousands of allocs
+    // per second in busy rooms.
+    if (!this._losDir) this._losDir = new THREE.Vector3();
+    const dir = this._losDir.subVectors(to, from);
     const dist = dir.length();
     if (dist < 0.0001) return true;
     dir.normalize();
