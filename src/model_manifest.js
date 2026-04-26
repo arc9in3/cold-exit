@@ -211,46 +211,65 @@ const RENDER_BASE = 'Assets/UI/weapon_renders/';
 // generate them).
 export const WEAPON_RENDER_BY_NAME = {
   // Pistols
-  'Makarov':                'pistol.png',
-  'Glock 17':               'Glock.png',
+  'Makarov':                'Makarov.png',
+  'Glock 17':               'Glock_17.png',
   'M1911':                  'M1911.png',
-  'Desert Eagle .50':       'Desert_Eagle.png',
-  'Colt Anaconda .44':      'Snub_Revolver.png',
+  'Desert Eagle .50':       'Desert_Eagle_50.png',
+  'Colt Anaconda .44':      'Colt_Anaconda_44.png',
+  'Colt Python':            'Colt_Python.png',
+  'Colt 357':               'Colt_357.png',
+  '.38 Special':            '_38_Special.png',
+  'Colt Six Shooter':       'Colt_Six_Shooter.png',
 
   // SMGs
   'PDW':                    'PDW.png',
   'P90':                    'P90.png',
-  'UMP45':                  'AKS-74U.png',
+  'UMP45':                  'UMP45.png',
+  'Spectre':                'Spectre.png',
+  'Spectre CQB':            'Spectre_CQB.png',
+  'SPC9':                   'SPC9.png',
 
   // Rifles
   'AK47':                   'AK47.png',
+  'AKS-74':                 'AKS-74.png',
+  'AK104':                  'AK104.png',
   'AS VAL':                 'AS_VAL.png',
   'VSS':                    'VSS.png',
   'M16':                    'M16.png',
-  'AUG A3-CQC':             'Tavor.png',
+  'AUG A3-CQC':             'AUG_A3-CQC.png',
+  'CAR-15':                 'CAR-15.png',
+  'JARD J67':               'JARD_J67.png',
 
   // LMGs
-  'Type 80 LMG':            'PKM.png',
-  'M249':                   'lmg.png',
+  'Type 80 LMG':            'Type_80_LMG.png',
+  'M249':                   'M249.png',
 
   // Snipers
   'Remington 700':          'Remington_700.png',
-  'SVD Dragunov':           'SVD.png',
+  'SVD Dragunov':           'SVD_Dragunov.png',
   'Cheytac Intervention':   'Cheytac_Intervention.png',
+  'AWP':                    'AWP.png',
+  '.338 Lapua':             '_338_Lapua.png',
+  'Hunting Rifle':          'Hunting_Rifle.png',
 
   // Shotguns
   'AA-12':                  'AA-12.png',
-  'Benelli M4':             'shotgun.png',
+  'Benelli M4':             'Benelli_M4.png',
+  'Mossberg 500':           'Mossberg_500.png',
+  'Remington 870':          'Remington_870.png',
+  'Sawed-Off Shotgun':      'Sawed-Off_Shotgun.png',
+  'KSG-12':                 'KSG-12.png',
 
-  // Exotic
-  'Widowmaker Rocket Launcher': 'flamethrower.png',
+  // Exotic / mythic
+  'Widowmaker Rocket Launcher': 'Widowmaker_Rocket_Launcher.png',
+  'Dragonbreath':           'Dragonbreath.png',
 
   // Legendary artifact
   "Jessica's Rage":         'Jessica_s_Rage.png',
 
   // Melee
-  'Combat Knife':           'Knife.png',
-  'Hammer':                 'Club.png',
+  'Combat Knife':           'Combat_Knife.png',
+  'Hammer':                 'Hammer.png',
   'Baseball Bat':           'Baseball_Bat.png',
   'katana':                 'katana.png',
   'Brass Knuckles':         'Brass_Knuckles.png',
@@ -260,6 +279,7 @@ export const WEAPON_RENDER_BY_NAME = {
   'Fire Axe':               'Fire_Axe.png',
   'Sledgehammer':           'Sledgehammer.png',
   'Chainsaw':               'Chainsaw.png',
+  'Scimitar':               'Scimitar.png',
 };
 export function renderForWeaponName(name) {
   if (!name) return null;
@@ -267,20 +287,12 @@ export function renderForWeaponName(name) {
   return f ? RENDER_BASE + f : null;
 }
 
-// Weapons added in the lowpolyguns pass that need side-view PNG
-// renders generated. Re-run tools/weapon_assigner.html → 'Export
-// side-view PNGs' to produce the zip; drop the listed filenames into
-// Assets/UI/weapon_renders/ then add an entry to WEAPON_RENDER_BY_NAME
-// above. Sanitized name == filename without extension (replaces non
-// [A-Za-z0-9_-] with '_'), e.g. 'Mossberg 500' -> 'Mossberg_500.png'.
-export const RENDER_PENDING = [
-  'CAR-15', 'AKS-74', 'AK104', 'JARD J67',
-  'Spectre', 'Spectre CQB', 'SPC9',
-  'Mossberg 500', 'Remington 870', 'Sawed-Off Shotgun', 'KSG-12',
-  'AWP', '.338 Lapua', 'Hunting Rifle',
-  'Colt Python', 'Colt 357', '.38 Special', 'Colt Six Shooter',
-  'Scimitar',
-];
+// All in-game weapons currently have side-view PNG renders — see
+// WEAPON_RENDER_BY_NAME above. To add a new weapon:
+//   1) drop a side-view PNG into Assets/UI/weapon_renders/
+//   2) add an entry to WEAPON_RENDER_BY_NAME mapping name -> filename
+// The tool at tools/weapon_assigner.html exports the renders in a zip
+// and the filename convention is sanitized weapon name + .png.
 
 // ---------------------------------------------------------------
 // Hand-pose defaults per weapon class. Fractions of the side-view
