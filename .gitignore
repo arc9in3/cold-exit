@@ -36,4 +36,4 @@ tmp/
 # The extracted FBX/PNG files in subfolders are what the game loads
 # at runtime, those stay tracked.
 Assets/*.zip
-Assets/*.unitypackage
+Assets/*.unitypackageprofiling/*.json
