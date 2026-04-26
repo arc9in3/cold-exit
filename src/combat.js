@@ -217,13 +217,20 @@ export class Combat {
   }
 
   spawnDeflectFlash(point, color) {
-    const mat = new THREE.MeshBasicMaterial({
-      color: color ?? 0xffffff, transparent: true, opacity: 1, depthWrite: false,
-    });
-    const m = new THREE.Mesh(new THREE.SphereGeometry(0.22, 10, 8), mat);
-    m.position.copy(point);
-    this.scene.add(m);
-    this.impacts.push({ mesh: m, t: 0, life: tunables.block.deflectFlashLife });
+    // Reuse the impact pool — same fade-and-shrink visual envelope.
+    // Material color is reset per spawn (defaults to white). Slightly
+    // larger scale than a normal impact so the parry pop reads as
+    // distinct from a regular bullet hit.
+    this._ensurePools();
+    let entry = this._impactPool.find(e => !e.inUse);
+    if (!entry) entry = this._impactPool[0];
+    entry.inUse = true;
+    entry.mesh.position.copy(point);
+    entry.mesh.material.color.setHex(color ?? 0xffffff);
+    entry.mesh.material.opacity = 1;
+    entry.mesh.scale.setScalar(1.5);
+    entry.mesh.visible = true;
+    this.impacts.push({ entry, t: 0, life: tunables.block.deflectFlashLife });
   }
 
   // Filled cone of flame at ground level — call once per flame tick for a
@@ -233,6 +240,7 @@ export class Combat {
   // on wall contact. Replaces the flat cone mesh — reads as volumetric
   // and respects cover, which matters now that walls occlude LoS.
   spawnFlameParticles(origin, facing, range, angleRad) {
+    this._ensurePools();
     const N = 7;
     const baseSpeed = range / 0.28;  // cover full range in ~0.28s
     for (let i = 0; i < N; i++) {
@@ -241,22 +249,25 @@ export class Combat {
       const vx = facing.x * c - facing.z * s;
       const vz = facing.x * s + facing.z * c;
       const speed = baseSpeed * (0.8 + Math.random() * 0.4);
-      const mat = new THREE.MeshBasicMaterial({
-        color: i % 3 === 0 ? 0xffcc40 : (i % 3 === 1 ? 0xff7030 : 0xff4420),
-        transparent: true, opacity: 0.65,
-        depthWrite: false,
-        blending: THREE.AdditiveBlending,
-      });
-      const r = 0.25 + Math.random() * 0.25;
-      const m = new THREE.Mesh(new THREE.SphereGeometry(r, 6, 4), mat);
+      // Pool path — find idle slot, recycle oldest if full.
+      let entry = this._flamePool.find(e => !e.inUse);
+      if (!entry) entry = this._flamePool[0];
+      entry.inUse = true;
+      const m = entry.mesh;
+      m.material.color.setHex(i % 3 === 0 ? 0xffcc40 : (i % 3 === 1 ? 0xff7030 : 0xff4420));
+      m.material.opacity = 0.65;
+      // Geometry is shared — vary the size via scale instead of new geom.
+      const baseScale = (0.25 + Math.random() * 0.25) / 0.4;   // 0.4 = pool sphere radius
+      m.scale.setScalar(baseScale);
       m.position.set(
         origin.x + (Math.random() - 0.5) * 0.15,
         0.8 + Math.random() * 0.4,
         origin.z + (Math.random() - 0.5) * 0.15,
       );
-      this.scene.add(m);
+      m.visible = true;
       this.flameParticles.push({
-        mesh: m,
+        entry,
+        baseScale,
         vx: vx * speed,
         vz: vz * speed,
         vy: 0.4 + Math.random() * 0.4,   // slight upward drift
@@ -498,6 +509,9 @@ export class Combat {
     if (!entry) entry = this._impactPool[0];   // starved → overwrite oldest
     entry.inUse = true;
     entry.mesh.position.copy(point);
+    // Reset color in case the slot was last used by spawnDeflectFlash
+    // with a custom tint. Default impact spark is warm orange.
+    entry.mesh.material.color.setHex(0xffbb55);
     entry.mesh.material.opacity = 1;
     entry.mesh.scale.setScalar(1);
     entry.mesh.visible = true;
@@ -587,6 +601,19 @@ export class Combat {
     }
     this.tracers.length = 0;
     this.flashes.length = 0;
+    // Flame particles — pool-backed. Hide + release each in-flight
+    // entry; non-pool entries (legacy) get disposed normally.
+    for (const fp of this.flameParticles) {
+      if (fp.entry) {
+        fp.entry.mesh.visible = false;
+        fp.entry.inUse = false;
+      } else if (fp.mesh) {
+        if (fp.mesh.parent) fp.mesh.parent.remove(fp.mesh);
+        fp.mesh.geometry?.dispose();
+        fp.mesh.material?.dispose();
+      }
+    }
+    this.flameParticles.length = 0;
   }
 
   update(dt) {
@@ -746,11 +773,15 @@ export class Combat {
     for (let i = this.flameParticles.length - 1; i >= 0; i--) {
       const fp = this.flameParticles[i];
       fp.t += dt;
+      // Pool-backed: read from entry.mesh. Older direct-allocated
+      // path (if any caller still uses fp.mesh) is preserved as a
+      // fallback for safety.
+      const mesh = fp.entry ? fp.entry.mesh : fp.mesh;
+      const baseScale = fp.baseScale || 1;
       if (!fp.stopped) {
-        const nx = fp.mesh.position.x + fp.vx * dt;
-        const nz = fp.mesh.position.z + fp.vz * dt;
+        const nx = mesh.position.x + fp.vx * dt;
+        const nz = mesh.position.z + fp.vz * dt;
         let blocked = false;
-        const px = fp.mesh.position.x, pz = fp.mesh.position.z;
         const pr = 0.1;
         for (const o of this._flameBlockers) {
           const b = o.userData?.collisionXZ;
@@ -764,30 +795,28 @@ export class Combat {
         if (blocked) {
           fp.stopped = true;
           fp.vx = 0; fp.vz = 0;
-          // Shorten the remaining life so stopped particles don't
-          // linger as static orange blobs against the wall.
           fp.life = Math.min(fp.life, fp.t + 0.15);
         } else {
-          fp.mesh.position.x = nx;
-          fp.mesh.position.z = nz;
+          mesh.position.x = nx;
+          mesh.position.z = nz;
         }
-        fp.mesh.position.y += fp.vy * dt;
-        // Horizontal drag so the stream decelerates into the curl
-        // you see from a real flame jet.
+        mesh.position.y += fp.vy * dt;
         fp.vx *= 1 - Math.min(1, 1.8 * dt);
         fp.vz *= 1 - Math.min(1, 1.8 * dt);
-        void px; void pz;
       }
-      // Expand + fade. Scale ramps out to give the billow-out look;
-      // opacity drops faster once past 60% of life.
       const k = Math.max(0, 1 - fp.t / fp.life);
-      const scale = 1 + (fp.grow * (1 - k) * 0.6);
-      fp.mesh.scale.setScalar(scale);
-      fp.mesh.material.opacity = 0.65 * k * k;
+      const scale = baseScale * (1 + (fp.grow * (1 - k) * 0.6));
+      mesh.scale.setScalar(scale);
+      mesh.material.opacity = 0.65 * k * k;
       if (fp.t >= fp.life) {
-        this.scene.remove(fp.mesh);
-        fp.mesh.geometry.dispose();
-        fp.mesh.material.dispose();
+        if (fp.entry) {
+          mesh.visible = false;
+          fp.entry.inUse = false;
+        } else {
+          this.scene.remove(mesh);
+          mesh.geometry.dispose();
+          mesh.material.dispose();
+        }
         this.flameParticles.splice(i, 1);
       }
     }
@@ -906,6 +935,25 @@ export class Combat {
       m.frustumCulled = false;
       this.scene.add(m);
       this._impactPool.push({ mesh: m, inUse: false });
+    }
+    // Flame particle pool. spawnFlameParticles fires 7 spheres per
+    // flame-weapon tick (~60Hz while held) — that's 420 mesh +
+    // material allocations per second of held trigger, plus the
+    // matching disposes ~0.6s later. Pool 80 (7 × ~10 frames of
+    // life leaves a little headroom) sharing one SphereGeometry.
+    const FLAME_POOL = 80;
+    this._flamePool = [];
+    const flameGeom = new THREE.SphereGeometry(0.4, 6, 4);
+    for (let i = 0; i < FLAME_POOL; i++) {
+      const mat = new THREE.MeshBasicMaterial({
+        color: 0xff7030, transparent: true, opacity: 0,
+        depthWrite: false, blending: THREE.AdditiveBlending,
+      });
+      const m = new THREE.Mesh(flameGeom, mat);
+      m.visible = false;
+      m.frustumCulled = false;
+      this.scene.add(m);
+      this._flamePool.push({ mesh: m, inUse: false });
     }
     // Explosion fireball + scorch-ring pool. spawnExplosion was
     // creating a fresh SphereGeometry + RingGeometry + 2 materials
