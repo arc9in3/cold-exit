@@ -49,6 +49,15 @@ const _g_muzzle      = new THREE.Vector3();
 const _g_aim         = new THREE.Vector3();
 const _g_shotDir     = new THREE.Vector3();
 const _g_jittered    = new THREE.Vector3();
+// Speech-bubble head position scratch — separate from _g_eye so a
+// bubble call later in the tick doesn't clobber an eye write earlier.
+const _g_head        = new THREE.Vector3();
+// Muzzle world-position scratch for the AI fire LoS pre-check.
+// Distinct from _g_muzzle (used inside the actual fire path) because
+// the LoS pre-check happens in the same tick before the fire branch.
+const _g_muzzleTest  = new THREE.Vector3();
+// Aim-test scratch for the LoS pre-check — paired with _g_muzzleTest.
+const _g_aimTest     = new THREE.Vector3();
 
 // NOTE: Skinned-rig path has been removed from the live code — we're
 // committing to the primitive rig as the shipping art style. The
@@ -1223,7 +1232,7 @@ export class GunmanManager {
       if (g.chatterT <= 0) {
         g.chatterT = 9 + Math.random() * 14;
         if (Math.random() < 0.55) {
-          const head = g.rig ? g.rig.head.getWorldPosition(new THREE.Vector3())
+          const head = g.rig ? g.rig.head.getWorldPosition(_g_head)
                              : g.group.position.clone().setY(2);
           head.y += 0.5;
           const line = CHATTER_LINES[Math.floor(Math.random() * CHATTER_LINES.length)];
@@ -1274,7 +1283,7 @@ export class GunmanManager {
           g.disarmedTarget = pickup;
           g.disarmedPhaseT = pickup ? 6 : 4;
           if (ctx.camera && g.rig) {
-            const head = g.rig.head.getWorldPosition(new THREE.Vector3());
+            const head = g.rig.head.getWorldPosition(_g_head);
             head.y += 0.6;
             const line = pickup ? 'Pick it up!' : 'Get over here!';
             spawnSpeechBubble(head, ctx.camera, line, 2.0);
@@ -1306,7 +1315,7 @@ export class GunmanManager {
             g.disarmedPhase = null;
             g.disarmedTarget = null;
             if (ctx.camera && g.rig) {
-              const head = g.rig.head.getWorldPosition(new THREE.Vector3());
+              const head = g.rig.head.getWorldPosition(_g_head);
               head.y += 0.6;
               spawnSpeechBubble(head, ctx.camera, 'Now you die.', 2.0);
             }
@@ -1386,7 +1395,7 @@ export class GunmanManager {
       g.zzzT = (g.zzzT || 0) - dt;
       if (g.zzzT <= 0 && ctx.camera) {
         g.zzzT = 1.1 + Math.random() * 0.8;
-        const head = g.rig ? g.rig.head.getWorldPosition(new THREE.Vector3())
+        const head = g.rig ? g.rig.head.getWorldPosition(_g_head)
                            : g.group.position.clone().setY(2);
         head.y += 0.4;
         head.x += (Math.random() - 0.5) * 0.25;
@@ -2020,8 +2029,8 @@ export class GunmanManager {
           && (g.noLosT || 0) > 0.3
           && (g.noLosT || 0) < 1.1
           && dist <= (g.weapon?.range || 0) * 1.2) {
-        const mTest = g.muzzle.getWorldPosition(new THREE.Vector3());
-        const aTest = new THREE.Vector3(g.lastKnownX, mTest.y, g.lastKnownZ);
+        const mTest = g.muzzle.getWorldPosition(_g_muzzleTest);
+        const aTest = _g_aimTest.set(g.lastKnownX, mTest.y, g.lastKnownZ);
         if (ctx.combat.hasLineOfSight(mTest, aTest, ctx.obstacles)) {
           suppressing = true;
         }
@@ -2040,9 +2049,9 @@ export class GunmanManager {
         : dist <= (g.weapon?.range || 0) * 1.2;
       if (g.state === STATE.FIRING && g.weapon && rangeOk
           && (g.dazzleT || 0) <= 0) {
-        const mTest = g.muzzle.getWorldPosition(new THREE.Vector3());
+        const mTest = g.muzzle.getWorldPosition(_g_muzzleTest);
         if (canSee) {
-          const aTest = new THREE.Vector3(ctx.playerPos.x, mTest.y, ctx.playerPos.z);
+          const aTest = _g_aimTest.set(ctx.playerPos.x, mTest.y, ctx.playerPos.z);
           muzzleLos = ctx.combat.hasLineOfSight(mTest, aTest, ctx.obstacles);
         } else if (suppressing) {
           muzzleLos = true; // already validated above
@@ -2143,7 +2152,7 @@ export class GunmanManager {
             if (g.archetype === 'evasive') {
               g.aiReloadT = 5 + Math.random() * 2;
               if (ctx.camera && g.rig) {
-                const head = g.rig.head.getWorldPosition(new THREE.Vector3());
+                const head = g.rig.head.getWorldPosition(_g_head);
                 head.y += 0.55;
                 const EVA_RELOAD_LINES = [
                   'Reloading!', "Wait — I'm out!",
