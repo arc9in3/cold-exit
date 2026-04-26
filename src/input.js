@@ -48,6 +48,7 @@ export class Input {
     this.weaponSwitch = null;
     this.weaponCycle = false;
     this.handednessToggle = false;
+    this.lootAllPressed = false;
     this.lastSpaceTime = -999;
 
     // (gamepad edge tracking now uses _gpadHeld vs the freshly polled
@@ -110,6 +111,7 @@ export class Input {
       case ACTIONS.INVENTORY:     this.inventoryToggled = true; break;
       case ACTIONS.PERKS:         this.perksToggled = true; break;
       case ACTIONS.MENU:          this.menuToggled = true; break;
+      case ACTIONS.LOOT_ALL:      this.lootAllPressed = true; break;
       case ACTIONS.WEAPON_1: this.weaponSwitch = 0; break;
       case ACTIONS.WEAPON_2: this.weaponSwitch = 1; break;
       case ACTIONS.WEAPON_3: this.weaponSwitch = 2; break;
@@ -326,6 +328,7 @@ export class Input {
       weaponSwitch: this.weaponSwitch,
       weaponCycle: this.weaponCycle,
       handednessToggle: this.handednessToggle,
+      lootAllPressed: this.lootAllPressed,
     };
 
     this.spacePressed = false;
@@ -344,6 +347,7 @@ export class Input {
     this.weaponSwitch = null;
     this.weaponCycle = false;
     this.handednessToggle = false;
+    this.lootAllPressed = false;
     return out;
   }
 }

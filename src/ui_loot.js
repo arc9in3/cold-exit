@@ -150,7 +150,7 @@ export class LootUI {
               </div>
             </div>
             <div id="loot-body-footer">
-              <button id="loot-take-all" type="button" class="loot-btn">Take All</button>
+              <button id="loot-take-all" type="button" class="loot-btn">Take All (Y)</button>
             </div>
           </div>
         </div>

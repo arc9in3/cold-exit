@@ -7464,6 +7464,11 @@ function tick() {
   if (inputState.menuToggled) {
     if (!dismissTopModal()) gameMenuUI.toggle();
   }
+  // Loot All hotkey — only fires while the loot panel is open.
+  // Default Y; user-rebindable in Settings → Keybinds.
+  if (inputState.lootAllPressed && lootUI.isOpen() && lootUI._takeAll) {
+    lootUI._takeAll();
+  }
 
   // Throwable cooldowns tick on real elapsed time (rawDt) regardless
   // of modal / pause state — so three minutes of browsing the shop

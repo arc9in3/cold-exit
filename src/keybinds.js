@@ -45,6 +45,7 @@ export const ACTIONS = {
   INVENTORY:     'inventory',
   PERKS:         'perks',
   MENU:          'menu',
+  LOOT_ALL:      'loot_all',
 };
 
 // Display order + human-readable label for the rebind UI. Grouped so
@@ -86,6 +87,7 @@ export const ACTION_GROUPS = [
     [ACTIONS.INVENTORY, 'Inventory'],
     [ACTIONS.PERKS, 'Perks Menu'],
     [ACTIONS.MENU, 'Pause / Menu'],
+    [ACTIONS.LOOT_ALL, 'Loot All (in loot menu)'],
   ]},
 ];
 
@@ -118,6 +120,7 @@ const DEFAULT_KEYBOARD = {
   [ACTIONS.INVENTORY]:     'Tab',
   [ACTIONS.PERKS]:         'KeyK',
   [ACTIONS.MENU]:          'Escape',
+  [ACTIONS.LOOT_ALL]:      'KeyY',
   // ATTACK / ADS stay mouse-only by default (button 0 / button 2 are
   // hardcoded in the input layer). They're still in the action map so
   // gamepad bindings can target them.
@@ -160,6 +163,7 @@ const DEFAULT_GAMEPAD = {
   [ACTIONS.INVENTORY]:     'btn:8',   // View / Back
   [ACTIONS.PERKS]:         '',
   [ACTIONS.MENU]:          'btn:9',   // Menu / Start
+  [ACTIONS.LOOT_ALL]:      '',        // unbound by default — players can map a face button
   [ACTIONS.ATTACK]:        'btn:7',   // RT
   [ACTIONS.ADS]:           'btn:6',   // LT
 };
