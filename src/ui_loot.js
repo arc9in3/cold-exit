@@ -699,7 +699,19 @@ export class LootUI {
     }
     const tint = item.tint ?? 0x888888;
     const tintStr = `#${tint.toString(16).padStart(6, '0')}`;
-    const iconPath = iconForItem(item);
+    // Resolution rule: weapons (ranged + melee) use the curated
+    // side-view PNG returned by iconForItem (driven by
+    // WEAPON_RENDER_BY_NAME). Everything else — armor, gear,
+    // consumables, junk, throwables, attachments — uses the new
+    // procedural thumbnail (capsules + tapered cylinders + spheres
+    // for pants / chest rigs / gloves / boots, custom builders for
+    // distinctive junk like rings / skulls / walkies / bag-of-peas).
+    // Falls through to iconForItem if the procedural path returns
+    // null (cache miss, render fail).
+    const isWeapon = item.type === 'ranged' || item.type === 'melee';
+    const iconPath = isWeapon
+      ? iconForItem(item)
+      : (thumbnailFor(item) || iconForItem(item));
     const swatchInner = iconPath
       ? `<img class="cell-icon" src="${iconPath}" alt="">`
       : `<span class="cell-type-ico">${TYPE_ICONS[item.type] || '◇'}</span>`;
