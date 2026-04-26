@@ -93,6 +93,11 @@ const STATE = { IDLE: 'idle', ALERTED: 'alerted', FIRING: 'firing', DEAD: 'dead'
 // archetypes that should know not to dance in the kill zone. Standard
 // grunts + tanks + shielded keep their existing chase behaviour.
 const TUCK_VARIANTS = new Set(['dasher', 'runner', 'coverSeeker', 'sniper']);
+// 50 lines of "wait out the player" flavour. Used by both the
+// far-corner tuck (after taking cross-doorway hits) and the
+// side-of-door suppression hold (when player camping is detected).
+// Mostly grim, occasionally cheeky to match the John-Wick-via-CRPG
+// tone the rest of the chatter uses.
 const TUCK_BARKS = [
   'I can wait all day!',
   'You come to me!',
@@ -101,6 +106,49 @@ const TUCK_BARKS = [
   'Hold this corner.',
   'Try peeking again, hero.',
   "I've got time.",
+  'You poke your head out, you lose it.',
+  "I'm holding this room. You pay rent or you leave.",
+  'Bring lunch next time.',
+  "I've got a chair. You bring the orange juice.",
+  'Camping is two-player.',
+  'Smart move, kid. Now what?',
+  "I'll be here. Take your time.",
+  'You blink first.',
+  "Doorway's cute. Real defensive.",
+  'Step in. I dare you.',
+  'My grandma had better aim.',
+  "I'm not the one in a hurry.",
+  "Come over here and say it again.",
+  'Sit down. Stay a while.',
+  "I can hear you breathing.",
+  "Shoot all you want. Walls are free.",
+  "The wall and I are best friends now.",
+  "I'm not falling for that.",
+  "Nice try.",
+  "Plenty of ammo. You?",
+  "Run out yet?",
+  "I'm comfortable.",
+  "Got nowhere to be.",
+  "Make me come out there.",
+  "You first.",
+  "Tag, you're sitting.",
+  "Bored already?",
+  "Got a sandwich. You hungry?",
+  "I'll be here when you give up.",
+  "Watch the door. Or don't.",
+  "I see your boots, you know.",
+  "Wave the white flag whenever.",
+  "Polishing my barrel. Unrelated.",
+  "You stay there. I'll stay here. Beautiful.",
+  "Patience is a weapon too.",
+  "Half a magazine left and a coffee.",
+  "You come in, you leave in pieces.",
+  "Nothing personal. Just doors.",
+  "Time's on my side.",
+  "I've got a clock. You have one?",
+  "Counting your shots.",
+  "Cover's a good investment.",
+  "I'll be right here. Forever, if needed.",
 ];
 
 const VARIANT_PROFILES = {
@@ -1722,6 +1770,60 @@ export class GunmanManager {
       } else {
         g._tuckCorner = null;
       }
+    }
+
+    // Door-side suppression hold — when isPlayerCamping is true AND
+    // the gunman is in a different room AND there's a connecting door
+    // to walk to, advance to a point ~3m perpendicular to the door
+    // (on this gunman's side) and hold there. Player can't see the
+    // gunman from the corridor, but the gunman covers any peek
+    // through the doorway with the existing fire-on-LoS logic. Same
+    // bark cycle as the corner tuck.
+    if (TUCK_VARIANTS.has(g.variant)
+        && !tuckTarget
+        && g.state !== STATE.IDLE
+        && ctx.isPlayerCamping?.()
+        && typeof ctx.playerRoomId === 'number'
+        && ctx.playerRoomId !== g.roomId) {
+      // Refresh the chosen door + side-of-door point every 1s so a
+      // moving player still gets the right covering angle.
+      g._suppressRefreshT = (g._suppressRefreshT || 0) - dt;
+      if (g._suppressRefreshT <= 0 || !g._suppressTarget) {
+        g._suppressRefreshT = 1.0;
+        const door = ctx.findDoorToward
+          ? ctx.findDoorToward(g.roomId, g.group.position)
+          : null;
+        if (door) {
+          const ddx = door.x - g.group.position.x;
+          const ddz = door.z - g.group.position.z;
+          const ddLen = Math.hypot(ddx, ddz) || 1;
+          // Perpendicular vector to the door-approach direction.
+          const px = -ddz / ddLen;
+          const pz =  ddx / ddLen;
+          // Pick whichever side is farther from the player so the
+          // gunman tucks behind the doorframe wall on the safer
+          // angle. Side offset 3m from the door centre.
+          const sideA = { x: door.x + px * 3.0, z: door.z + pz * 3.0 };
+          const sideB = { x: door.x - px * 3.0, z: door.z - pz * 3.0 };
+          const adx = sideA.x - ctx.playerPos.x, adz = sideA.z - ctx.playerPos.z;
+          const bdx = sideB.x - ctx.playerPos.x, bdz = sideB.z - ctx.playerPos.z;
+          g._suppressTarget = (adx * adx + adz * adz) > (bdx * bdx + bdz * bdz) ? sideA : sideB;
+        }
+      }
+      if (g._suppressTarget) {
+        tuckTarget = g._suppressTarget;
+        g._tuckBarkT = (g._tuckBarkT || 0) - dt;
+        if (g._tuckBarkT <= 0 && ctx.camera) {
+          g._tuckBarkT = 6.0 + Math.random() * 3.0;
+          const head = g.group.position.clone(); head.y = 1.9;
+          const line = TUCK_BARKS[Math.floor(Math.random() * TUCK_BARKS.length)];
+          spawnSpeechBubble(head, ctx.camera, line, 5.0);
+        }
+      }
+    } else if (g._suppressTarget) {
+      // Player stopped camping or entered our room — drop the side-
+      // hold so the normal chase / fire logic resumes.
+      g._suppressTarget = null;
     }
 
     // Escort formation — standard / cover-seeker gunmen will nestle behind
