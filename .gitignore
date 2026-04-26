@@ -36,4 +36,10 @@ tmp/
 # The extracted FBX/PNG files in subfolders are what the game loads
 # at runtime, those stay tracked.
 Assets/*.zip
-Assets/*.unitypackageprofiling/*.json
+Assets/*.unitypackage
+
+# Chrome DevTools performance traces — accumulating reference snapshots
+# in the repo bloats clones. Keep one canonical trace if needed; toss
+# the rest.
+profiling/*.json
+profiling/*.json.gz

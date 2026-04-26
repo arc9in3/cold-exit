@@ -769,36 +769,29 @@ export class GunmanManager {
     const out = [];
     for (const g of this.gunmen) {
       if (!g.alive) continue;
-      // Every rig mesh carries a zone tag and (since spawn) an owner
-      // pointer, so we can hand the whole list to the raycaster.
-      // Right-arm chain is filtered when the enemy is disarmed.
-      if (g.rig) {
-        // Include every right-arm-chain sub-mesh (segments, joint
-        // spheres, pad, cuff) so disarm filtering hides the whole
-        // arm cleanly instead of leaving floating joint spheres.
-        const leftArmMeshes = new Set([
-          g.rig.leftArm.shoulder.mesh,
-          g.rig.leftArm.shoulderBulge,
-          g.rig.leftArm.shoulderPad,
-          g.rig.leftArm.forearm.mesh,
-          g.rig.leftArm.elbowBulge,
-          g.rig.leftArm.wristCuff,
-          g.rig.leftArm.hand.mesh,
-        ]);
-        const rightArmMeshes = new Set([
-          g.rig.rightArm.shoulder.mesh,
-          g.rig.rightArm.shoulderBulge,
-          g.rig.rightArm.shoulderPad,
-          g.rig.rightArm.forearm.mesh,
-          g.rig.rightArm.elbowBulge,
-          g.rig.rightArm.wristCuff,
-          g.rig.rightArm.hand.mesh,
-        ]);
-        for (const m of g.rig.meshes) {
-          if (g.disarmed && rightArmMeshes.has(m)) continue;
-          out.push(m);
-        }
+      if (!g.rig) continue;
+      // Hot path — called once per frame from main.allHittables (which
+      // caches across all callers). Was rebuilding two Sets per gunman
+      // every call (~7% of frame self-time in profile traces); now we
+      // cache the full mesh array and a disarmed variant per gunman
+      // and just push from whichever applies.
+      let meshes = g._hitMeshes;
+      if (!meshes) {
+        meshes = g._hitMeshes = g.rig.meshes.slice();
       }
+      if (g.disarmed) {
+        let dm = g._hitMeshesDisarmed;
+        if (!dm) {
+          const ra = g.rig.rightArm;
+          const right = new Set([
+            ra.shoulder.mesh, ra.shoulderBulge, ra.shoulderPad,
+            ra.forearm.mesh, ra.elbowBulge, ra.wristCuff, ra.hand.mesh,
+          ]);
+          dm = g._hitMeshesDisarmed = g.rig.meshes.filter(m => !right.has(m));
+        }
+        meshes = dm;
+      }
+      for (let i = 0, n = meshes.length; i < n; i++) out.push(meshes[i]);
       if (g.shield && g.shield.hp > 0) out.push(g.shield.mesh);
     }
     return out;
