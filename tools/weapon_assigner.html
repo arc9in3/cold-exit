@@ -63,13 +63,18 @@
                      border-top: 1px solid #23262c; background: #12181a;
                      white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
   .ftile .assigned.none { color: #555; }
-  .ftile .tag { display: block; width: 100%; box-sizing: border-box;
-                background: #0f1014; color: #f1d9a8; border: 0; border-top: 1px solid #23262c;
-                padding: 6px 8px; font: inherit; }
-  .ftile .tag::placeholder { color: #555; }
-  .ftile .tag:focus { outline: 1px solid #c9a87a; }
-  .ftile .tag.saved { border-top-color: #2a6030; transition: border-top-color 1.5s; }
+  .ftile .taglabel { display: block; padding: 6px 8px 0; font-size: 10px;
+                     color: #c9a87a; border-top: 1px solid #23262c; background: #0a0b0e; }
+  .ftile .tag { display: block; width: calc(100% - 16px); box-sizing: border-box;
+                margin: 4px 8px 8px; background: #1f2228; color: #ffe6b3;
+                border: 1px solid #4a4030; border-radius: 3px;
+                padding: 6px 8px; font: inherit; outline: none; }
+  .ftile .tag::placeholder { color: #6a6f78; font-style: italic; }
+  .ftile .tag:focus { border-color: #c9a87a; background: #2a2d34; }
+  .ftile .tag.saved { border-color: #5a8a4a; transition: border-color 1.5s; }
+  .ftile.tagged { border-color: #5a8a4a; }
   .ftile.tagged .label b { color: #f1d9a8; }
+  .ftile.tagged .tag { background: #1a2218; color: #d8efb8; }
 </style>
 </head>
 <body>
@@ -183,8 +188,15 @@ const renderer = new THREE.WebGLRenderer({ antialias: true, alpha: true });
 renderer.setPixelRatio(window.devicePixelRatio);
 renderer.setSize(320, 320, false);
 
+// Categories that ship with a shared atlas texture (animpic POLY packs).
+// Anything else we keep authored per-mesh material colors as-is — the
+// lowpolyguns set, for example, embeds Black/DarkMetal/DarkWood/Metal
+// diffuse colors per face group inside the FBX itself.
+const HAS_ATLAS = new Set(['weapons', 'melee', 'medical', 'tools', 'characters']);
+
 const atlasCache = {};
 function getAtlas(cat) {
+  if (!HAS_ATLAS.has(cat)) return null;
   if (cat in atlasCache) return atlasCache[cat];
   const tex = texLoader.load(`${MODEL_BASE}${cat}/_atlas.png`,
     (t) => {
@@ -234,15 +246,34 @@ function fitAndStage(t) {
     const hasUV = !!obj.geometry?.attributes?.uv;
     const hasVC = !!obj.geometry?.attributes?.color;
     const oldMat = obj.material;
-    obj.material = new THREE.MeshStandardMaterial({
-      color: 0xffffff,
-      map: hasUV ? atlas : null,
-      vertexColors: !hasUV && hasVC,
-      roughness: 0.55, metalness: 0.1,
-    });
-    if (oldMat) {
-      if (Array.isArray(oldMat)) oldMat.forEach(m => m.dispose?.());
-      else oldMat.dispose?.();
+
+    // Branch on whether this category ships an atlas. With one (animpic
+    // POLY packs) the FBX UVs reference it. Without one (lowpolyguns
+    // and similar) the FBX embeds per-material diffuse colors that
+    // we want to preserve — Black/DarkMetal/DarkWood/Metal etc.
+    const replaceWith = (srcMat) => {
+      if (atlas) {
+        return new THREE.MeshStandardMaterial({
+          color: 0xffffff,
+          map: hasUV ? atlas : null,
+          vertexColors: !hasUV && hasVC,
+          roughness: 0.55, metalness: 0.1,
+        });
+      }
+      const color = srcMat?.color ? srcMat.color.clone() : new THREE.Color(0x808080);
+      return new THREE.MeshStandardMaterial({
+        color,
+        vertexColors: hasVC,
+        roughness: 0.55, metalness: 0.1,
+      });
+    };
+
+    if (Array.isArray(oldMat)) {
+      obj.material = oldMat.map(m => replaceWith(m));
+      oldMat.forEach(m => m.dispose?.());
+    } else {
+      obj.material = replaceWith(oldMat);
+      oldMat?.dispose?.();
     }
   });
 
@@ -446,10 +477,13 @@ for (const cat of cats) {
       assignedEl.textContent = 'unassigned';
     }
 
+    const tagLabelEl = document.createElement('div');
+    tagLabelEl.className = 'taglabel';
+    tagLabelEl.textContent = 'TAG (real-world weapon name)';
     const tagEl = document.createElement('input');
     tagEl.type = 'text';
     tagEl.className = 'tag';
-    tagEl.placeholder = 'real-world weapon name (e.g. Glock 17, M4A1)';
+    tagEl.placeholder = 'e.g. Glock 17, M4A1, Mossberg 500';
     tagEl.value = tags[path] || '';
     tagEl.dataset.tagged = tagEl.value ? '1' : '0';
     tagEl.addEventListener('blur', () => {
@@ -466,7 +500,7 @@ for (const cat of cats) {
       if (e.key === 'Enter') tagEl.blur();
     });
 
-    tile.append(canvas, cat_el, label, assignedEl, tagEl);
+    tile.append(canvas, cat_el, label, assignedEl, tagLabelEl, tagEl);
     fbxGrid.appendChild(tile);
     const tileObj = { el: tile, canvas, file, cat, path, isFbxGrid: true,
                       obj: null, scene: null, camera: null, loaded: false, error: null };
