@@ -1632,27 +1632,42 @@ export class GunmanManager {
     // Escort formation — standard / cover-seeker gunmen will nestle behind
     // a shield bearer in the same room so the shield protects them from
     // the player's fire. Dashers and tanks ignore the escort urge.
+    // Refresh the nearest-shield lookup every 0.5s instead of every
+    // frame; with multiple gunmen and shield-bearers this saves the
+    // O(gunmen × shieldBearers) scan every tick.
     let escortTarget = null;
     const escortish = g.variant === 'standard' || g.variant === 'coverSeeker';
     if (escortish && ctx.shieldBearers?.length && g.state !== STATE.IDLE) {
-      let best = null, bestD = 40;
-      for (const sb of ctx.shieldBearers) {
-        if (sb.roomId !== undefined && g.roomId !== undefined && sb.roomId !== g.roomId) continue;
-        const sdx = sb.group.position.x - g.group.position.x;
-        const sdz = sb.group.position.z - g.group.position.z;
-        const sd = Math.hypot(sdx, sdz);
-        if (sd < bestD) { best = sb; bestD = sd; }
+      g._shieldRefreshT = (g._shieldRefreshT || 0) - dt;
+      if (g._shieldRefreshT <= 0 || !g._shieldRef || !g._shieldRef.alive) {
+        g._shieldRefreshT = 0.5;
+        let best = null, bestD = 40;
+        for (const sb of ctx.shieldBearers) {
+          if (sb.roomId !== undefined && g.roomId !== undefined && sb.roomId !== g.roomId) continue;
+          const sdx = sb.group.position.x - g.group.position.x;
+          const sdz = sb.group.position.z - g.group.position.z;
+          const sd = Math.hypot(sdx, sdz);
+          if (sd < bestD) { best = sb; bestD = sd; }
+        }
+        g._shieldRef = best;
       }
-      if (best) {
-        const sbPos = best.group.position;
-        const toPlayerX = ctx.playerPos.x - sbPos.x;
-        const toPlayerZ = ctx.playerPos.z - sbPos.z;
-        const tLen = Math.hypot(toPlayerX, toPlayerZ) || 1;
-        // Escort spot sits ~1.6m behind the shield from the player's side.
-        escortTarget = {
-          x: sbPos.x - (toPlayerX / tLen) * 1.6,
-          z: sbPos.z - (toPlayerZ / tLen) * 1.6,
-        };
+      const best = g._shieldRef;
+      if (best && best.alive) {
+        // FLANK-OUT trigger — when the player closes inside ~6m of
+        // this gunman, drop the escort hide and break out to the side
+        // for a clean shot. This is the "rush them once they're close"
+        // behaviour the user asked for.
+        if (dist > 6.0) {
+          const sbPos = best.group.position;
+          const toPlayerX = ctx.playerPos.x - sbPos.x;
+          const toPlayerZ = ctx.playerPos.z - sbPos.z;
+          const tLen = Math.hypot(toPlayerX, toPlayerZ) || 1;
+          // Escort spot sits ~1.6m behind the shield from the player's side.
+          escortTarget = {
+            x: sbPos.x - (toPlayerX / tLen) * 1.6,
+            z: sbPos.z - (toPlayerZ / tLen) * 1.6,
+          };
+        }
       }
     }
 
