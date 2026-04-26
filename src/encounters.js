@@ -719,13 +719,7 @@ export const ENCOUNTER_DEFS = {
       const label = _makeLabelSprite('CONFESSION BOOTH', '#f0d488');
       label.position.set(disc.cx, 3.2, disc.cz);
       scene.add(label);
-      // Subtle hint sprite below — the player has to figure out the
-      // mechanic, but we drop a small hint about weapons.
-      const hint = _makeLabelSprite('Drop a weapon to confess', '#c9a87a');
-      hint.scale.set(3.6, 0.65, 1);
-      hint.position.set(disc.cx, 0.55, disc.cz + 1.6);
-      scene.add(hint);
-      return { booth, label, hint, disc, complete: false };
+      return { booth, label, disc, complete: false };
     },
     tick(dt, ctx) {
       // No idle barks — booth is silent. Could add a faint glow pulse
@@ -1216,10 +1210,6 @@ export const ENCOUNTER_DEFS = {
       const label = _makeLabelSprite('WHISPERING DOOR', '#c8e0f0');
       label.position.set(disc.cx, 3.2, disc.cz);
       scene.add(label);
-      const hint = _makeLabelSprite('Stand still and listen', '#c9a87a');
-      hint.scale.set(3.6, 0.65, 1);
-      hint.position.set(disc.cx, 0.55, disc.cz + 1.6);
-      scene.add(hint);
       // Progress sprite — text fills in when listening.
       const progress = _makeLabelSprite('', '#c8e0f0');
       progress.scale.set(3.6, 0.65, 1);
@@ -1227,7 +1217,7 @@ export const ENCOUNTER_DEFS = {
       progress.visible = false;
       scene.add(progress);
       return {
-        door, label, hint, progress, disc,
+        door, label, progress, disc,
         listenT: 0,
         lastX: null, lastZ: null,
         complete: false,
@@ -1342,17 +1332,13 @@ export const ENCOUNTER_DEFS = {
       const label = _makeLabelSprite('FOUNTAIN', '#a0e0f0');
       label.position.set(disc.cx, 2.6, disc.cz);
       scene.add(label);
-      const hint = _makeLabelSprite('Press E to throw 100c', '#c9a87a');
-      hint.scale.set(3.6, 0.65, 1);
-      hint.position.set(disc.cx, 0.55, disc.cz + 1.8);
-      scene.add(hint);
       const progress = _makeLabelSprite('', '#a0e0f0');
       progress.scale.set(3.6, 0.65, 1);
       progress.position.set(disc.cx, 1.0, disc.cz + 1.8);
       progress.visible = false;
       scene.add(progress);
       return {
-        built, label, hint, progress, disc,
+        built, label, progress, disc,
         thrown: 0,
         complete: false,
         wobbleT: 0,
@@ -1445,17 +1431,13 @@ export const ENCOUNTER_DEFS = {
       const label = _makeLabelSprite('THE MIRROR', '#d8e0e8');
       label.position.set(disc.cx, 3.2, disc.cz);
       scene.add(label);
-      const hint = _makeLabelSprite('Stand still and look', '#c9a87a');
-      hint.scale.set(3.6, 0.65, 1);
-      hint.position.set(disc.cx, 0.55, disc.cz + 1.6);
-      scene.add(hint);
       const progress = _makeLabelSprite('', '#d8e0e8');
       progress.scale.set(3.6, 0.65, 1);
       progress.position.set(disc.cx, 1.0, disc.cz + 1.6);
       progress.visible = false;
       scene.add(progress);
       return {
-        group, glass, label, hint, progress, disc,
+        group, glass, label, progress, disc,
         gazeT: 0,
         cloneSpawned: false,
         clone: null,
@@ -1561,10 +1543,6 @@ export const ENCOUNTER_DEFS = {
       const label = _makeLabelSprite('SLEEPING BOSS', '#a0a8b0');
       label.position.set(disc.cx, 1.6, disc.cz);
       scene.add(label);
-      const hint = _makeLabelSprite('Zzz... do not disturb', '#7a8290');
-      hint.scale.set(3.6, 0.65, 1);
-      hint.position.set(disc.cx, 0.55, disc.cz + 1.6);
-      scene.add(hint);
       // Sub-boss loot pile in a corner.
       const cb = ctx.room.bounds;
       const chestX = cb.minX + 2.4;
@@ -1572,7 +1550,7 @@ export const ENCOUNTER_DEFS = {
       const items = ctx.rollSubBossLootPile ? ctx.rollSubBossLootPile() : [];
       if (ctx.spawnEncounterChest) ctx.spawnEncounterChest(chestX, chestZ, items);
       return {
-        npc, label, hint, disc,
+        npc, label, disc,
         slept: false,
         woke: false,
         complete: false,
@@ -1630,12 +1608,8 @@ export const ENCOUNTER_DEFS = {
       const label = _makeLabelSprite('CHOICES AND CONSEQUENCES', '#c0c8d8');
       label.position.set(disc.cx, 2.8, disc.cz);
       scene.add(label);
-      const hint = _makeLabelSprite('Talk · or shoot one', '#c9a87a');
-      hint.scale.set(3.6, 0.65, 1);
-      hint.position.set(disc.cx, 0.55, disc.cz + 1.8);
-      scene.add(hint);
       return {
-        pair, label, hint, disc,
+        pair, label, disc,
         phase: 'standoff',          // 'standoff' → 'aftermath' → 'returned'
         chosenDead: null,
         chosenSurvivor: null,
@@ -1786,12 +1760,8 @@ export const ENCOUNTER_DEFS = {
       const label = _makeLabelSprite('CIRCLE OF CANDLES', '#d8a0f0');
       label.position.set(disc.cx, 2.4, disc.cz);
       scene.add(label);
-      const hint = _makeLabelSprite('Drop an item in the centre', '#c9a87a');
-      hint.scale.set(3.6, 0.65, 1);
-      hint.position.set(disc.cx, 0.55, disc.cz + 2.0);
-      scene.add(hint);
       return {
-        group, flames, label, hint, disc,
+        group, flames, label, disc,
         wobbleT: 0,
         complete: false,
       };
@@ -1853,7 +1823,11 @@ export const ENCOUNTER_DEFS = {
         if (s.hint) s.hint.userData.setText('The circle has spoken.');
         return { consume: true, complete: true };
       }
-      // Anything else (junk, consumable, etc.): refuse.
+      // Anything else (junk, consumable, etc.): refuse loudly so the
+      // player gets clear feedback that the item was rejected and
+      // didn't disappear into the candles.
+      ctx.spawnSpeech(new THREE.Vector3(s.disc.cx, 1.8, s.disc.cz),
+        'The flames reject it.', 3.0);
       return { consume: false };
     },
   },
