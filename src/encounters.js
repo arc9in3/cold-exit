@@ -1025,11 +1025,7 @@ export const ENCOUNTER_DEFS = {
       const label = _makeLabelSprite('FORTUNE TELLER', '#e8a8e8');
       label.position.set(disc.cx, 2.4, disc.cz);
       scene.add(label);
-      const hint = _makeLabelSprite('Press E to consult', '#c9a87a');
-      hint.scale.set(3.6, 0.65, 1);
-      hint.position.set(disc.cx, 0.55, disc.cz + 1.6);
-      scene.add(hint);
-      return { npc, label, hint, orb, disc, complete: false, wobbleT: 0 };
+      return { npc, label, orb, disc, complete: false, wobbleT: 0 };
     },
     tick(dt, ctx) {
       const s = ctx.state;
@@ -1126,11 +1122,7 @@ export const ENCOUNTER_DEFS = {
       const label = _makeLabelSprite('THE SHRINE', '#f0d480');
       label.position.set(disc.cx, 2.4, disc.cz);
       scene.add(label);
-      const hint = _makeLabelSprite('Press E to make an offering', '#c9a87a');
-      hint.scale.set(4.2, 0.65, 1);
-      hint.position.set(disc.cx, 0.55, disc.cz + 1.6);
-      scene.add(hint);
-      return { altar, brazier, flame, label, hint, disc, wobbleT: 0 };
+      return { altar, brazier, flame, label, disc, wobbleT: 0 };
     },
     tick(dt, ctx) {
       const s = ctx.state;
@@ -1829,19 +1821,25 @@ export const ENCOUNTER_DEFS = {
         if (s.hint) s.hint.userData.setText('The circle has spoken.');
         return { consume: true, complete: true };
       }
-      // Legendary in → random non-Jessica's-Rage mythic.
+      // Legendary in → random non-Jessica's-Rage mythic. ONE conversion
+      // per run total — completes the encounter so subsequent drops
+      // don't re-trigger.
       if (item.rarity === 'legendary' && (item.type === 'ranged' || item.type === 'melee')) {
         const mythic = ctx.rollMythicWeapon && ctx.rollMythicWeapon();
         if (!mythic) return { consume: false };
         ctx.spawnSpeech(new THREE.Vector3(s.disc.cx, 1.8, s.disc.cz),
           'A greater shape emerges.', 4.0);
         ctx.spawnLoot(s.disc.cx, s.disc.cz + 0.6, mythic);
-        return { consume: true };
+        s.complete = true;
+        if (ctx.markEncounterComplete) ctx.markEncounterComplete('circle_of_candles');
+        if (s.hint) s.hint.userData.setText('The circle has spoken.');
+        return { consume: true, complete: true };
       }
       // Non-legendary → legendary version (5% mastercraft on top).
       // Only meaningful for items with a rarity ladder (weapons,
       // armor, gear, attachments, throwables). Junk + consumables
-      // don't have rarity tiers worth bumping.
+      // don't have rarity tiers worth bumping. Same one-per-run gate
+      // as the legendary path above.
       const ladderTypes = new Set(['ranged', 'melee', 'armor', 'gear', 'attachment', 'throwable']);
       if (ladderTypes.has(item.type) && item.rarity !== 'mythic') {
         const out = JSON.parse(JSON.stringify(item));
@@ -1850,7 +1848,10 @@ export const ENCOUNTER_DEFS = {
         ctx.spawnSpeech(new THREE.Vector3(s.disc.cx, 1.8, s.disc.cz),
           'The flames purify.', 4.0);
         ctx.spawnLoot(s.disc.cx, s.disc.cz + 0.6, out);
-        return { consume: true };
+        s.complete = true;
+        if (ctx.markEncounterComplete) ctx.markEncounterComplete('circle_of_candles');
+        if (s.hint) s.hint.userData.setText('The circle has spoken.');
+        return { consume: true, complete: true };
       }
       // Anything else (junk, consumable, etc.): refuse.
       return { consume: false };
@@ -1910,12 +1911,8 @@ export const ENCOUNTER_DEFS = {
       const label = _makeLabelSprite('THE BUTTON', '#ff8080');
       label.position.set(disc.cx, 2.4, disc.cz);
       scene.add(label);
-      const hint = _makeLabelSprite('Press E to push the button', '#c98080');
-      hint.scale.set(4.2, 0.65, 1);
-      hint.position.set(disc.cx, 0.55, disc.cz + 1.6);
-      scene.add(hint);
       return {
-        consoleGroup, button, light, label, hint, disc,
+        consoleGroup, button, light, label, disc,
         // Per-frame state.
         wobbleT: 0,
         outcome: null,             // null | 'nothing' | 'alarm' | 'chests'
