@@ -86,6 +86,19 @@
   .ftile.tagged { border-color: #5a8a4a; }
   .ftile.tagged .label b { color: #f1d9a8; }
   .ftile.tagged .tag { background: #1a2218; color: #d8efb8; }
+  /* MARKED FOR DELETION — distinct red treatment, beats .tagged. */
+  .ftile.deleted, .wtile.deleted { border-color: #b04a4a !important;
+                                    box-shadow: inset 0 0 0 1px #b04a4a; }
+  .ftile.deleted canvas, .wtile.deleted canvas { opacity: 0.35; filter: grayscale(0.6); }
+  .ftile.deleted .label b, .wtile.deleted .meta b { text-decoration: line-through;
+                                                     color: #e09090 !important; }
+  .ftile.deleted .tag, .wtile.deleted .tag { background: #2a1010; color: #e09090;
+                                              border-color: #b04a4a; }
+  .ftile.deleted .badge-del, .wtile.deleted .badge-del {
+    position: absolute; top: 4px; right: 4px; padding: 2px 8px;
+    background: #b04a4a; color: #fff; font-size: 10px; font-weight: bold;
+    border-radius: 2px; pointer-events: none; z-index: 5;
+  }
 
   /* ===== Fullscreen pose-tuning modal ===== */
   .pose-modal { position: fixed; inset: 0; background: rgba(0,0,0,0.92);
@@ -270,6 +283,33 @@ function saveWeaponTags() { localStorage.setItem(WEAPON_TAG_KEY, JSON.stringify(
 // older entry is dropped. Populated as tiles are created.
 const fbxInputByPath = {};        // fbx path -> { input, tile }
 const weaponInputByName = {};     // weapon name -> { input, tile }
+
+// Deletion sets — distinct from tag clearing. 'remove' clears the
+// tag; 'delete' both clears the tag AND flags the entity itself for
+// removal from the project (FBX file) or from tunables (in-game
+// weapon). Persisted as arrays in localStorage; exported in the
+// weapon_assignments.json so a downstream pass can act on them.
+const FBX_DEL_KEY = 'tacticalrogue.fbx_deletions';
+const WEAPON_DEL_KEY = 'tacticalrogue.weapon_deletions';
+let fbxDeletions = new Set();
+let weaponDeletions = new Set();
+try { fbxDeletions = new Set(JSON.parse(localStorage.getItem(FBX_DEL_KEY) || '[]')); } catch {}
+try { weaponDeletions = new Set(JSON.parse(localStorage.getItem(WEAPON_DEL_KEY) || '[]')); } catch {}
+function saveFbxDeletions() { localStorage.setItem(FBX_DEL_KEY, JSON.stringify([...fbxDeletions])); }
+function saveWeaponDeletions() { localStorage.setItem(WEAPON_DEL_KEY, JSON.stringify([...weaponDeletions])); }
+
+function _markDeleted(tile, isDeleted) {
+  tile.classList.toggle('deleted', isDeleted);
+  let badge = tile.querySelector('.badge-del');
+  if (isDeleted && !badge) {
+    badge = document.createElement('div');
+    badge.className = 'badge-del';
+    badge.textContent = 'DELETE';
+    tile.appendChild(badge);
+  } else if (!isDeleted && badge) {
+    badge.remove();
+  }
+}
 
 // Newest-wins dedupe. After a tag save, walk the map and remove any
 // OTHER entries whose value matches the newly-saved value (case-
@@ -552,18 +592,41 @@ for (const w of inGameWeapons) {
   const wTag = document.createElement('input');
   wTag.type = 'text';
   wTag.className = 'tag';
-  wTag.placeholder = w.name === w.class ? `e.g. Mossberg 500 (or 'remove')` :
-    `e.g. retag ${w.name} (or 'remove')`;
-  wTag.title = "Type a real-world weapon name to flag for revisit. Type 'remove' (or '#remove' / 'delete') to clear.";
+  wTag.placeholder = w.name === w.class ? `e.g. Mossberg 500 (or 'remove' / 'delete')` :
+    `e.g. retag ${w.name} (or 'remove' / 'delete')`;
+  wTag.title = "Type a real-world weapon name to flag for revisit.\n" +
+               "'remove' clears the tag.\n" +
+               "'delete' marks this weapon for removal from tunables.";
   wTag.value = weaponTags[w.name] || '';
   if (wTag.value) tile.classList.add('tagged');
+  if (weaponDeletions.has(w.name)) _markDeleted(tile, true);
   weaponInputByName[w.name] = { input: wTag, tile };
   wTag.addEventListener('blur', () => {
     let v = wTag.value.trim();
-    // Sentinels: 'remove', '#remove', or 'delete' clear the tag.
-    const isRemove = /^#?(remove|delete)$/i.test(v);
-    if (isRemove) { v = ''; wTag.value = ''; }
+    // 'remove' / '#remove' → just clear the tag.
+    // 'delete' / '#delete' → clear the tag AND mark the weapon for
+    // deletion from tunables. Any non-sentinel value clears the
+    // delete flag (you've replaced the deletion intent with a real
+    // tag).
+    const isRemove = /^#?remove$/i.test(v);
+    const isDelete = /^#?delete$/i.test(v);
+    if (isRemove || isDelete) { v = ''; wTag.value = ''; }
     if (v) weaponTags[w.name] = v; else delete weaponTags[w.name];
+
+    if (isDelete) {
+      weaponDeletions.add(w.name);
+      saveWeaponDeletions();
+      _markDeleted(tile, true);
+    } else if (v) {
+      // Real tag wins over a stale delete flag.
+      if (weaponDeletions.delete(w.name)) {
+        saveWeaponDeletions();
+        _markDeleted(tile, false);
+      }
+    }
+    // 'remove' alone leaves the delete flag untouched — it only
+    // affects the tag.
+
     // Newest-wins dedupe: drop any other in-game weapon already
     // tagged with the same real-world name and clear its UI.
     const dropped = dedupeMap(weaponTags, w.name, v, (otherName) => {
@@ -577,7 +640,9 @@ for (const w of inGameWeapons) {
     tile.classList.toggle('tagged', !!v);
     wTag.classList.add('saved');
     setTimeout(() => wTag.classList.remove('saved'), 1500);
-    if (isRemove) {
+    if (isDelete) {
+      count.textContent = `marked ${w.name} for DELETION`;
+    } else if (isRemove) {
       count.textContent = `removed tag for ${w.name}`;
     } else if (dropped.length) {
       count.textContent = `dropped ${dropped.length} older tag(s): ${dropped.join(', ')}`;
@@ -663,17 +728,36 @@ for (const cat of cats) {
     const tagEl = document.createElement('input');
     tagEl.type = 'text';
     tagEl.className = 'tag';
-    tagEl.placeholder = "e.g. Glock 17, M4A1 (or 'remove')";
-    tagEl.title = "Type a real-world weapon name to map this FBX to. Type 'remove' (or '#remove' / 'delete') to clear.";
+    tagEl.placeholder = "e.g. Glock 17, M4A1 (or 'remove' / 'delete')";
+    tagEl.title = "Type a real-world weapon name to map this FBX to.\n" +
+                  "'remove' clears the tag.\n" +
+                  "'delete' marks the FBX file for deletion from the project.";
     tagEl.value = tags[path] || '';
     tagEl.dataset.tagged = tagEl.value ? '1' : '0';
     fbxInputByPath[path] = { input: tagEl, tile };
+    if (fbxDeletions.has(path)) _markDeleted(tile, true);
     tagEl.addEventListener('blur', () => {
       let v = tagEl.value.trim();
-      // Sentinels: 'remove', '#remove', or 'delete' clear the tag.
-      const isRemove = /^#?(remove|delete)$/i.test(v);
-      if (isRemove) { v = ''; tagEl.value = ''; }
+      // 'remove' / '#remove' → just clear the tag.
+      // 'delete' / '#delete' → clear the tag AND mark the FBX for
+      // deletion from the project. Any non-sentinel value clears
+      // the delete flag (a real tag overrides a stale deletion).
+      const isRemove = /^#?remove$/i.test(v);
+      const isDelete = /^#?delete$/i.test(v);
+      if (isRemove || isDelete) { v = ''; tagEl.value = ''; }
       if (v) tags[path] = v; else delete tags[path];
+
+      if (isDelete) {
+        fbxDeletions.add(path);
+        saveFbxDeletions();
+        _markDeleted(tile, true);
+      } else if (v) {
+        if (fbxDeletions.delete(path)) {
+          saveFbxDeletions();
+          _markDeleted(tile, false);
+        }
+      }
+
       // Newest-wins dedupe: drop any other FBX already tagged with
       // the same real-world name and clear its UI / dataset flag.
       const dropped = dedupeMap(tags, path, v, (otherPath) => {
@@ -689,7 +773,9 @@ for (const cat of cats) {
       tile.classList.toggle('tagged', !!v);
       tagEl.classList.add('saved');
       setTimeout(() => tagEl.classList.remove('saved'), 1500);
-      if (isRemove) {
+      if (isDelete) {
+        count.textContent = `marked ${path} for DELETION`;
+      } else if (isRemove) {
         count.textContent = `removed tag for ${path}`;
       } else if (dropped.length) {
         count.textContent = `dropped ${dropped.length} older tag(s): ${dropped.join(', ')}`;
@@ -769,6 +855,11 @@ exportBtn.addEventListener('click', () => {
     weapons_to_revisit: Object.entries(weaponTags)
       .filter(([, v]) => v)
       .map(([k, v]) => ({ currentName: k, revisitAs: v })),
+    // Anything explicitly marked via the 'delete' sentinel.
+    // Downstream pass should remove these entries from tunables /
+    // delete the FBX file from the project.
+    deleted_in_game_weapons: [...weaponDeletions],
+    deleted_fbx: [...fbxDeletions],
   };
   const blob = new Blob([JSON.stringify(out, null, 2)], { type: 'application/json' });
   const a = document.createElement('a');
