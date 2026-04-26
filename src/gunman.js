@@ -36,11 +36,19 @@ function _stripDeadEnemyWeapon(g) {
 // vectors per second going to GC. Reusing module-scope scratches
 // removes that pressure entirely. Safe because none of these escape
 // the function scope they're used in.
-const _g_eye      = new THREE.Vector3();
-const _g_target   = new THREE.Vector3();
-const _g_toPlayer = new THREE.Vector3();
-const _g_dir2d    = new THREE.Vector3();
-const _g_fwd      = new THREE.Vector3();
+const _g_eye         = new THREE.Vector3();
+const _g_target      = new THREE.Vector3();
+const _g_toPlayer    = new THREE.Vector3();
+const _g_dir2d       = new THREE.Vector3();
+const _g_fwd         = new THREE.Vector3();
+// Fire-path scratches — gunmen shoot every ~0.4s with up to 7 pellets
+// per fire, each previously allocating a fresh Vector3. Reuse one
+// instance per role across the per-volley loop. The onFireAt callback
+// reads them synchronously so reuse is safe.
+const _g_muzzle      = new THREE.Vector3();
+const _g_aim         = new THREE.Vector3();
+const _g_shotDir     = new THREE.Vector3();
+const _g_jittered    = new THREE.Vector3();
 
 // NOTE: Skinned-rig path has been removed from the live code — we're
 // committing to the primitive rig as the shipping art style. The
@@ -869,6 +877,10 @@ export class GunmanManager {
     this._frame++;
     const odd = (this._frame & 1) === 1;
     for (const g of this.gunmen) {
+      // Hidden ambush bosses + minions are visually + behaviourally
+      // dormant until revealHiddenAmbush flips them. Skip the entire
+      // per-frame tick — animation, AI, perception — until then.
+      if (g.alive && g.hidden) continue;
       if (g.alive) {
         const isIdle = g.state === STATE.IDLE || g.state === STATE.SLEEP;
         if (isIdle) {
@@ -2057,15 +2069,18 @@ export class GunmanManager {
           // (hit.owner.applyHit → g.weapon = null), so we can't read from
           // g.weapon again until we're done firing this burst.
           const weapon = g.weapon;
-          const muzzleWorld = g.muzzle.getWorldPosition(new THREE.Vector3());
+          const muzzleWorld = g.muzzle.getWorldPosition(_g_muzzle);
           // Suppressive shots aim at the last-known spot, not the live player.
-          const aim = suppressing
-            ? new THREE.Vector3(g.lastKnownX, 0, g.lastKnownZ)
-            : ctx.playerPos.clone();
+          const aim = _g_aim;
+          if (suppressing) {
+            aim.set(g.lastKnownX, 0, g.lastKnownZ);
+          } else {
+            aim.copy(ctx.playerPos);
+          }
           // Aim at body center vertically; when crouched that's lower so
           // shots don't fly over the player's head.
           aim.y = ctx.playerCrouched ? 0.65 : muzzleWorld.y;
-          const shotDir = new THREE.Vector3().subVectors(aim, muzzleWorld);
+          const shotDir = _g_shotDir.subVectors(aim, muzzleWorld);
           if (shotDir.lengthSq() > 0.0001) {
             shotDir.normalize();
             const pellets = weapon.pelletCount || 1;
@@ -2099,12 +2114,12 @@ export class GunmanManager {
                 ? (volleyCount <= 1 ? 0 : ((i / (volleyCount - 1)) - 0.5) * 2 * volleySpread)
                 : (Math.random() - 0.5) * 2 * volleySpread;
               const c = Math.cos(a), s = Math.sin(a);
-              const jittered = new THREE.Vector3(
+              _g_jittered.set(
                 shotDir.x * c - shotDir.z * s,
                 shotDir.y,
                 shotDir.x * s + shotDir.z * c,
               );
-              ctx.onFireAt(muzzleWorld, jittered, weapon, g.damageMult);
+              ctx.onFireAt(muzzleWorld, _g_jittered, weapon, g.damageMult);
             }
             // Kick the recoil spring once per fire tick (not per pellet
             // so shotguns don't get N× the visible kick).

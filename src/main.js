@@ -2120,6 +2120,7 @@ document.addEventListener('dragend', _clearGridDragClass, true);
 
 const clock = new THREE.Clock();
 const _tmpDir = new THREE.Vector3();
+const _tmpEndPt = new THREE.Vector3();
 const _rotatedDir = new THREE.Vector3();
 const _muzzlePlane = new THREE.Plane(new THREE.Vector3(0, 1, 0), 0);
 
@@ -3724,11 +3725,15 @@ function fireOneShot(playerInfo, weapon, aimPoint, isADS) {
   combat.spawnFlash(tracerFrom, eff.tracerColor, qualityFlags.muzzleLights);
 
   for (let i = 0; i < pellets; i++) {
-    const dir = jitterDirY(_tmpDir, spread).clone();
+    // Re-jitter the SAME _tmpDir each iteration; raycast + spawnShot
+    // consume the direction synchronously so we can skip the per-pellet
+    // .clone() that was here. Saves 9-pellet shotgun volleys ~9 Vector3
+    // allocations per fire. _tmpEndPt scratch covers the no-hit case.
+    const dir = jitterDirY(_tmpDir, spread);
     const hit = combat.raycast(fireFrom, dir, hitTargets, effRange);
     const endPoint = hit
       ? hit.point
-      : fireFrom.clone().addScaledVector(dir, effRange);
+      : _tmpEndPt.copy(fireFrom).addScaledVector(dir, effRange);
     if (window.__debug?.traceShots && hit) {
       const m = hit.mesh || hit.object;
       const ud = m?.userData || {};

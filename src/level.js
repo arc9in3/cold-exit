@@ -373,9 +373,22 @@ export class Level {
     // becomes type='encounter' so spawn logic skips enemies and the
     // runtime knows to populate it. Sub-boss / boss / start / shop
     // rooms are never converted.
-    const combatRooms = rooms.filter(r => r.type === 'combat');
-    if (combatRooms.length > 0 && Math.random() < 0.10) {
-      const pick = combatRooms[Math.floor(Math.random() * combatRooms.length)];
+    //
+    // Layout filter: giant + corridor + lshape + bunker + center-pit +
+    // pillars-grid rooms have interior walls that cordon off the
+    // bounds-centre area where the encounter visuals + chest spawn.
+    // Skip those so the encounter NPC + reward chest never land
+    // inside an unreachable cell or "outside" a partition. Confirmed
+    // bug from a player session — encounter visible past the walls.
+    const ENCOUNTER_BANNED_LAYOUTS = new Set([
+      'corridor', 'lshape', 'bunker', 'center-pit',
+      'pillars-grid', 'partition',
+    ]);
+    const eligibleRooms = rooms.filter(r =>
+      r.type === 'combat' && !r.giant
+      && !ENCOUNTER_BANNED_LAYOUTS.has(r.layout));
+    if (eligibleRooms.length > 0 && Math.random() < 0.10) {
+      const pick = eligibleRooms[Math.floor(Math.random() * eligibleRooms.length)];
       pick.type = 'encounter';
       pick._encounterPlaceholder = true;
     }

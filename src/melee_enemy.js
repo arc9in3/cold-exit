@@ -12,6 +12,10 @@ const STATE = { IDLE: 'idle', CHASE: 'chase', WINDUP: 'windup', SWING: 'swing', 
 // frame. Avoids per-frame Vector3 allocations across the whole enemy
 // list.
 const _enemyTipTmp = new THREE.Vector3();
+// Per-frame approach scratch — every melee tick reassigns the
+// approach direction up to three times (assassin retreat, path-door,
+// stuck deflection). Reuse one instance to skip per-tick allocations.
+const _m_approach   = new THREE.Vector3();
 
 import { swapInBakedCorpse } from './corpse_bake.js';
 
@@ -459,6 +463,8 @@ export class MeleeEnemyManager {
     this._frame++;
     const odd = (this._frame & 1) === 1;
     for (const e of this.enemies) {
+      // Hidden ambush minions skip the whole tick until revealed.
+      if (e.alive && e.hidden) continue;
       if (e.alive && e.state === STATE.IDLE) {
         const dx = e.group.position.x - px;
         const dz = e.group.position.z - pz;
@@ -798,13 +804,16 @@ export class MeleeEnemyManager {
       // don't bee-line through walls — route via the shortest door
       // chain. The path is cached for a fraction of a second so the
       // BFS isn't run per-frame.
+      // Default approach mirrors dir2d. Use the module-level
+      // _m_approach scratch when we need a different heading so we
+      // don't allocate per tick.
       let approach = dir2d;
       let usePathDoor = false;
       // Assassin retreating: flip the approach direction so the
       // chase branch below moves them away instead of toward. Skip
       // door-graph lookup — just run.
       if (e.archetype === 'assassin' && e.assassinPhase === 'disengaging') {
-        approach = new THREE.Vector3(-dir2d.x, 0, -dir2d.z);
+        approach = _m_approach.set(-dir2d.x, 0, -dir2d.z);
       } else
       if (ctx.level && ctx.playerPos) {
         const here = ctx.level.roomAt(e.group.position.x, e.group.position.z);
@@ -824,7 +833,7 @@ export class MeleeEnemyManager {
             const tz = nd.userData.cz - e.group.position.z;
             const tl = Math.hypot(tx, tz);
             if (tl > 0.1) {
-              approach = new THREE.Vector3(tx / tl, 0, tz / tl);
+              approach = _m_approach.set(tx / tl, 0, tz / tl);
               usePathDoor = true;
             }
           }
@@ -843,7 +852,7 @@ export class MeleeEnemyManager {
         // wasn't enough to clear chunky props (couches, desks). Going
         // mostly sideways for the duration of stuckT slips around the
         // obstacle even if it's wider than the body.
-        approach = new THREE.Vector3(
+        approach = _m_approach.set(
           dir2d.x * 0.15 + nx * 1.0,
           0,
           dir2d.z * 0.15 + nz * 1.0,
@@ -872,21 +881,22 @@ export class MeleeEnemyManager {
       // off-frame still uses the corrected heading; halves the cost
       // when many adds are chasing.
       e._steerPhase = (e._steerPhase || 0) + 1;
+      // Read approach into local scalars so we don't mutate the
+      // module-scope dir2d when the default branch was taken.
+      let apX = approach.x, apZ = approach.z;
       if ((e._steerPhase & 1) === 0 && ctx.level && ctx.level.steerAround) {
         const lookAhead = Math.max(0.8, moveSpeed * 0.35);
         const steered = ctx.level.steerAround(beforeX, beforeZ,
-          approach.x, approach.z,
+          apX, apZ,
           tunables.meleeEnemy.collisionRadius + 0.15, lookAhead);
         e._steerDirX = steered.x;
         e._steerDirZ = steered.z;
-        approach.x = steered.x;
-        approach.z = steered.z;
+        apX = steered.x; apZ = steered.z;
       } else if (e._steerDirX !== undefined) {
-        approach.x = e._steerDirX;
-        approach.z = e._steerDirZ;
+        apX = e._steerDirX; apZ = e._steerDirZ;
       }
-      const nx = beforeX + approach.x * moveSpeed * dt;
-      const nz = beforeZ + approach.z * moveSpeed * dt;
+      const nx = beforeX + apX * moveSpeed * dt;
+      const nz = beforeZ + apZ * moveSpeed * dt;
       const res = ctx.resolveCollision(beforeX, beforeZ, nx, nz, tunables.meleeEnemy.collisionRadius);
       e.group.position.x = res.x;
       e.group.position.z = res.z;
