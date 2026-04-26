@@ -181,3 +181,15 @@ export function setShrineTierPurchased(tier) {
   set.add(tier);
   _write(SHRINE_TIERS_KEY, [...set].sort());
 }
+
+// Mythic-run unlock — flipped true when the player sells The Gift to
+// the Bear Merchant for 1c. Once set, the run-start weapon roll
+// includes one always-mythic offer; selecting it stamps the run as a
+// mythic run and starts difficulty at level 20.
+const MYTHIC_RUN_UNLOCK_KEY = 'tacticalrogue_mythic_run_unlocked_v1';
+export function getMythicRunUnlocked() {
+  return !!_read(MYTHIC_RUN_UNLOCK_KEY, false);
+}
+export function setMythicRunUnlocked(v) {
+  _write(MYTHIC_RUN_UNLOCK_KEY, !!v);
+}

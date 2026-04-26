@@ -30,6 +30,7 @@ export class RunStats {
     this.playerName = null;  // filled in on submit
     this.deathLevel = null;  // level index when the player died
     this.deathAt = null;     // timestamp of death
+    this.mythicRun = false;  // started via mythic-run unlock — leaderboard tag
   }
 
   markTainted() { this.tainted = true; }
@@ -110,6 +111,7 @@ async function _postCategory(category, entry) {
           deathLevel: entry.deathLevel,
           kills: entry.kills,
           credits: entry.credits,
+          mythicRun: !!entry.mythicRun,
         },
       }),
     });

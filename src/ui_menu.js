@@ -375,7 +375,8 @@ export class GameMenuUI {
         row.className = 'menu-lb-row';
         if (e) {
           const who = e.name || e.playerName || 'anon';
-          row.textContent = `${i + 1}. ${fmt(e)} — ${who}`;
+          const tag = (e.meta && e.meta.mythicRun) || e.mythicRun ? ' (mythic run)' : '';
+          row.textContent = `${i + 1}. ${fmt(e)} — ${who}${tag}`;
         } else {
           row.textContent = `${i + 1}. —`;
           row.style.color = '#6a7280';

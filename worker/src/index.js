@@ -92,6 +92,7 @@ async function submitScore(env, body) {
     if (typeof m.deathLevel === 'number') entry.meta.deathLevel = m.deathLevel | 0;
     if (typeof m.kills === 'number')      entry.meta.kills = m.kills | 0;
     if (typeof m.credits === 'number')    entry.meta.credits = Math.round(m.credits);
+    if (m.mythicRun === true)             entry.meta.mythicRun = true;
   }
   list.push(entry);
   list.sort((a, b) => b.score - a.score);

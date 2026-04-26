@@ -32,14 +32,15 @@ import { getDevToolsEnabled, setDevToolsEnabled, getPlayerName, setPlayerName,
          getRerollUnlocked, setRerollUnlocked,
          MERCHANT_KINDS, MERCHANT_UPGRADE_MAX, REROLL_UNLOCK_COST,
          getCompletedEncounters, markEncounterDone,
-         getShrineTiers, setShrineTierPurchased } from './prefs.js';
+         getShrineTiers, setShrineTierPurchased,
+         getMythicRunUnlocked, setMythicRunUnlocked } from './prefs.js';
 import { tunables } from './tunables.js';
 import {
   Inventory, SLOT_IDS,
   ALL_GEAR, ALL_ARMOR, ALL_CONSUMABLES, CONSUMABLE_DEFS, ALL_JUNK, ALL_TOYS, ARMOR_DEFS,
   JUNK_DEFS,
   wrapWeapon, withAffixes, randomArmor, randomGear, randomConsumable, randomJunk, randomToy, setLootLevel,
-  randomThrowable,
+  randomThrowable, THROWABLE_DEFS, makeThrowable,
 } from './inventory.js';
 import { ALL_ATTACHMENTS, ATTACHMENT_DEFS, effectiveWeapon, randomAttachment, rollAttachmentRarity } from './attachments.js';
 import { CustomizeUI } from './ui_customize.js';
@@ -337,6 +338,7 @@ if (deathMenuBtnEl) {
     runStats.reset();
     shrineHpBonus = 0;
     pendingShopRerolls = 0;
+    giftSacrificeHp = 0;
     sfx.ambientStop();
     mainMenuUI.show();
   });
@@ -783,6 +785,7 @@ const gameMenuUI = new GameMenuUI({
     runStats.reset();
     shrineHpBonus = 0;
     pendingShopRerolls = 0;
+    giftSacrificeHp = 0;
     sfx.ambientStop();
     gameMenuUI.hide();
     mainMenuUI.show();
@@ -797,6 +800,7 @@ const startUI = new StartUI({
     runStats.reset();
     shrineHpBonus = 0;
     pendingShopRerolls = 0;
+    giftSacrificeHp = 0;
     playerDead = false;
     if (deathRootEl) deathRootEl.style.display = 'none';
     // Full HP reset — otherwise state.health from the previous death
@@ -833,6 +837,16 @@ function startRunWithWeaponDef(def) {
   runStats.reset();
   shrineHpBonus = 0;
   pendingShopRerolls = 0;
+  giftSacrificeHp = 0;
+  // Mythic-run starter pick — flag the run + bump the difficulty
+  // index so the first generated floor reads at level 20 in the
+  // diff curve (regenerateLevel below will increment it to 20 from
+  // the 19 we set here).
+  if (def && def._mythicRunOffer) {
+    runStats.mythicRun = true;
+    level.index = 19;
+    transientHudMsg('MYTHIC RUN', 4.0);
+  }
   playerDead = false;
   if (deathRootEl) deathRootEl.style.display = 'none';
   // Recompute derived stats first so state.maxHealth reflects the
@@ -857,6 +871,17 @@ function rollStoreOffers(n, tier) {
     if (seen.has(w.name)) continue;
     seen.add(w.name);
     offers.push({ ...w, rarity: rollRarityForTier(tier) });
+  }
+  // Mythic-run unlock — append one always-mythic offer (excluding
+  // Jessica's Rage). Tag it so startRunWithWeaponDef can flip the
+  // run into mythic mode + lvl-20 difficulty.
+  if (getMythicRunUnlocked()) {
+    const mythicPool = tunables.weapons.filter(w =>
+      w.mythic && w.name !== "Jessica's Rage");
+    if (mythicPool.length) {
+      const mw = mythicPool[Math.floor(Math.random() * mythicPool.length)];
+      offers.push({ ...mw, rarity: 'mythic', _mythicRunOffer: true });
+    }
   }
   return offers;
 }
@@ -939,6 +964,7 @@ const mainMenuUI = new MainMenuUI({
     runStats.reset();
     shrineHpBonus = 0;
     pendingShopRerolls = 0;
+    giftSacrificeHp = 0;
     playerDead = false;
     if (deathRootEl) deathRootEl.style.display = 'none';
     recomputeStats();
@@ -1099,6 +1125,15 @@ const shopUI = new ShopUI({
       npc._rerollUsed = true;
     }
     sfx.uiAccept();
+    return true;
+  },
+  // Special bear-merchant trade: sell The Gift for 1c → flips the
+  // mythic-run unlock flag so the next New Game shows a bonus
+  // mythic offer in the starter store.
+  onSpecialBearTrade: (item) => {
+    if (item.id !== 'thr_the_gift') return false;
+    setMythicRunUnlocked(true);
+    transientHudMsg('THE PACT IS MADE', 4.0);
     return true;
   },
   onBearTrade: (toyIds) => {
@@ -1831,6 +1866,16 @@ function regenerateLevel() {
         spawnCnCPair: (cx, cz, room) => _spawnCnCPair(cx, cz, room),
         // Roll a body's worth of sub-boss-tier loot for chest seeding.
         rollSubBossLootPile: () => _rollSubBossLootPile(),
+        // Spawn The Gift item on the floor at world XZ. Returns false
+        // if the item def is missing (defensive — should never happen
+        // since theGift is in THROWABLE_DEFS).
+        spawnTheGift: (x, z) => {
+          const def = THROWABLE_DEFS && THROWABLE_DEFS.theGift;
+          if (!def) return false;
+          const item = makeThrowable(def);
+          loot.spawnItem({ x, y: 0.4, z }, item);
+          return true;
+        },
         // Awarded to the player wallet directly (Choices and
         // Consequences "kneeling man hands you 5000 gold" reward).
         awardPlayerCredits: (n) => {
@@ -2745,6 +2790,12 @@ let lastHpRatio = 1;  // updated each tick for perks that need mid-callback HP
 // adds +5 max HP for the rest of the run; this folds into the
 // derivedStats.maxHealthBonus during recomputeStats.
 let shrineHpBonus = 0;
+// Per-run Gift sacrifice (cleared on death). Each Gift use deducts 10
+// from the player's max HP via this counter; folded as a NEGATIVE
+// maxHealthBonus in recomputeStats. Floored so max HP can never drop
+// below 1 — the throw-block check fires before the count would be
+// large enough to wrap.
+let giftSacrificeHp = 0;
 // Stockpiled "next shop reroll" tokens — Fortune Teller can grant
 // these. ShopUI consumes one when the player hits Reroll, bypassing
 // the once-per-visit gate (and the unlock requirement).
@@ -2790,8 +2841,19 @@ function recomputeStats() {
   artifacts.applyTo(derivedStats);
   buffs.applyTo(derivedStats);
   // Shrine bonus folds in at the end so it survives later sources
-  // overwriting maxHealthBonus.
-  derivedStats.maxHealthBonus = (derivedStats.maxHealthBonus || 0) + shrineHpBonus;
+  // overwriting maxHealthBonus. Gift sacrifice is subtractive but
+  // also clamped — floor the resulting maxHealthBonus so the player's
+  // computed max HP never drops below 1.
+  derivedStats.maxHealthBonus = (derivedStats.maxHealthBonus || 0) + shrineHpBonus - giftSacrificeHp;
+  // tunables.player.maxHealth is the base (>= 10). The applyDerivedStats
+  // call already takes Math.max(10, base + bonus) — that lower clamp
+  // would silently cap the gift sacrifice at -90. We want the player
+  // to actually feel max-HP loss past that point, so override with a
+  // hard floor of 1 by under-clamping bonus to (1 - base) at minimum.
+  const baseMax = tunables.player.maxHealth;
+  if (baseMax + derivedStats.maxHealthBonus < 1) {
+    derivedStats.maxHealthBonus = 1 - baseMax;
+  }
   // Soft caps applied AFTER all sources roll up — prevents stack-stack
   // exploits flagged in the rebalance review (movespeed in particular
   // could pile to ~1.7×+ with artifact + Swift + class perks).
@@ -2984,6 +3046,50 @@ function _tickSmokePuffs(dt) {
       _smokePuffs.splice(i, 1);
     }
   }
+}
+
+// Build the in-flight visual for The Gift — a tiny crimson bear
+// with two slate-grey devil horns. Replaces the default tinted
+// sphere when projectiles.spawn receives a customBody. Cheap: 5
+// meshes total, no shadow casting, geometry created per throw
+// (rare event so allocation cost is irrelevant).
+function _buildGiftBear() {
+  const group = new THREE.Group();
+  const furMat = new THREE.MeshBasicMaterial({ color: 0xb02828 });
+  const hornMat = new THREE.MeshBasicMaterial({ color: 0x6a6a72 });
+  const eyeMat = new THREE.MeshBasicMaterial({ color: 0x101010 });
+  // Body — squat oblong.
+  const body = new THREE.Mesh(new THREE.SphereGeometry(0.16, 10, 8), furMat);
+  body.scale.set(1, 0.85, 1);
+  group.add(body);
+  // Head — slightly forward + up.
+  const head = new THREE.Mesh(new THREE.SphereGeometry(0.13, 10, 8), furMat);
+  head.position.set(0, 0.18, -0.05);
+  group.add(head);
+  // Two ears (small cones) on top of the head.
+  const ear = (sx) => {
+    const m = new THREE.Mesh(new THREE.SphereGeometry(0.045, 6, 6), furMat);
+    m.position.set(sx, 0.27, -0.05);
+    return m;
+  };
+  group.add(ear(-0.07), ear(0.07));
+  // Two grey devil horns — small cones angled outward + back.
+  const horn = (sx) => {
+    const m = new THREE.Mesh(new THREE.ConeGeometry(0.025, 0.10, 6), hornMat);
+    m.position.set(sx, 0.30, -0.06);
+    m.rotation.z = sx > 0 ? -0.4 : 0.4;
+    m.rotation.x = -0.2;
+    return m;
+  };
+  group.add(horn(-0.06), horn(0.06));
+  // Two black bead eyes.
+  const eye = (sx) => {
+    const m = new THREE.Mesh(new THREE.SphereGeometry(0.018, 6, 6), eyeMat);
+    m.position.set(sx, 0.20, -0.13);
+    return m;
+  };
+  group.add(eye(-0.04), eye(0.04));
+  return group;
 }
 
 // Mirror clone — spawn a gunman or melee carrying the player's
@@ -5004,6 +5110,43 @@ function onProjectileExplode(pos, explosion, owner, p) {
     if (sfx.uiAccept) sfx.uiAccept();
     return;
   }
+  if (kind === 'theGift') {
+    // The Gift — through-walls red shockwave that erases everything
+    // in `radius`. Bypasses LoS checks entirely. Pays the sacrifice
+    // cost on detonation (NOT on throw, so a wall-blocked throw still
+    // costs HP, which is intentional — the gift was given).
+    spawnExplosionFx(pos, radius);
+    if (sfx.explode) sfx.explode();
+    triggerShake(0.85, 0.50);
+    triggerHitStop?.(0.10);
+    const r2 = radius * radius;
+    const _dir = new THREE.Vector3();
+    const apply = (list) => {
+      for (const c of list) {
+        if (!c.alive) continue;
+        const dx = c.group.position.x - pos.x;
+        const dz = c.group.position.z - pos.z;
+        if (dx * dx + dz * dz > r2) continue;
+        // Massive damage — boss-killing on purpose.
+        const wasAlive = c.alive;
+        const d = Math.hypot(dx, dz) || 1;
+        _dir.set(dx / d, 0, dz / d);
+        runStats.addDamage(99999);
+        c.manager.applyHit(c, 99999, 'torso', _dir, { weaponClass: 'explosive' });
+        if (wasAlive && !c.alive) onEnemyKilled(c, { byThrowable: true });
+      }
+    };
+    apply(gunmen.gunmen);
+    apply(melees.enemies);
+    // Pay the sacrifice cost — accumulate into the giftSacrificeHp
+    // counter; recomputeStats subtracts it from derivedStats.
+    // maxHealthBonus and clamps the resulting max to >= 1.
+    const sacrifice = p.sacrificeMaxHp || 10;
+    giftSacrificeHp += sacrifice;
+    recomputeStats();
+    transientHudMsg(`-${sacrifice} max HP`, 2.4);
+    return;
+  }
 
   // --- default (frag / rocket / grenade-launcher) path ---
   // Visual pop — expanding fireball + scorched-ring shock wave
@@ -6038,6 +6181,19 @@ function applyConsumable(item) {
 // | 'stun'). Handled in `onProjectileExplode` below.
 function throwItem(item) {
   if (!lastPlayerInfo || !lastAim) return false;
+  // The Gift — refuses to fire when the player's max HP is below the
+  // sacrifice threshold (10). Not blocked at full health regardless
+  // of current; the cost is to MAX, not current.
+  let giftBodyMesh = null;
+  if (item && item.throwKind === 'theGift') {
+    const sacrifice = item.sacrificeMaxHp || 10;
+    const playerMax = playerMaxHealthCached || 100;
+    if (playerMax < sacrifice) {
+      transientHudMsg('Too weak to give', 2.0);
+      return false;
+    }
+    giftBodyMesh = _buildGiftBear();
+  }
   const muzzle = lastPlayerInfo.muzzleWorld ? lastPlayerInfo.muzzleWorld.clone()
     : player.mesh.position.clone().setY(1.2);
   // Target the GROUND at the cursor — clamp aim.y to 0 regardless of
@@ -6069,6 +6225,7 @@ function throwItem(item) {
          : item.throwKind === 'flash'   ? 0xfff0a0
          : item.throwKind === 'stun'    ? 0x80a0ff
          : item.throwKind === 'claymore'? 0x4a8030
+         : item.throwKind === 'theGift' ? 0xb04030
          : 0x60a040,
     explosion: {
       radius: item.aoeRadius ?? 3.5,
@@ -6093,6 +6250,11 @@ function throwItem(item) {
     stunDuration: item.stunDuration,
     triggerRadius: item.triggerRadius,
     triggerConeDeg: item.triggerConeDeg,
+    // The Gift propagates these so the explosion handler can pay the
+    // sacrifice cost and bypass LoS checks.
+    throughWalls: !!item.throughWalls,
+    sacrificeMaxHp: item.sacrificeMaxHp,
+    customBody: giftBodyMesh,
     // Throw heading — claymore aims its detonation cone in the throw
     // direction, so a player flicking left places a mine that fires left.
     throwDirX: dx,

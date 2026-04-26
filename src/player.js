@@ -740,7 +740,10 @@ export function createPlayer(scene) {
   function applyDerivedStats(s) {
     // Compose player-facing fields from the per-frame stats bag so takeDamage,
     // regen, and movement all share one source of truth.
-    state.maxHealth = Math.max(10, tunables.player.maxHealth + (s.maxHealthBonus || 0));
+    // Floor of 1 (not 10) so The Gift's sacrifice can drop max past
+    // the normal min. Main.js already clamps the bonus so the
+    // resulting max can never go below 1.
+    state.maxHealth = Math.max(1, tunables.player.maxHealth + (s.maxHealthBonus || 0));
     state.maxStamina = Math.max(10, tunables.stamina.max + (s.maxStaminaBonus || 0));
     state.moveSpeedMult = s.moveSpeedMult || 1;
     state.crouchMoveBonus = s.crouchMoveBonus || 1;

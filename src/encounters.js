@@ -1702,6 +1702,109 @@ export const ENCOUNTER_DEFS = {
     },
     onItemDropped(item, ctx) { return { consume: false }; },
   },
+
+  // -----------------------------------------------------------------
+  // Circle of Candles — drop ANY item in the centre to transform it.
+  //   non-legendary  → legendary version (5% chance also mastercraft)
+  //   legendary      → random non-Jessica's-Rage mythic
+  //   Jessica's Rage → spawns The Gift (one-shot lock)
+  // Re-enterable per item exchange until the Jessica's Rage → Gift
+  // conversion fires.
+  circle_of_candles: {
+    id: 'circle_of_candles',
+    name: 'Circle of Candles',
+    floorColor: 0xa060d0,             // violet ritual
+    oncePerSave: false,               // re-enterable; locks on Gift conversion
+    condition: (state) => state.levelIndex >= 3,
+    spawn(scene, room, ctx) {
+      const disc = _spawnFloorDisc(scene, room, this.floorColor);
+      // Ring of 8 candles around the centre.
+      const group = new THREE.Group();
+      const waxMat = new THREE.MeshStandardMaterial({ color: 0xeae0c8, roughness: 0.7 });
+      const flameMat = new THREE.MeshBasicMaterial({
+        color: 0xffc060, transparent: true, opacity: 0.85,
+        depthWrite: false, blending: THREE.AdditiveBlending,
+      });
+      const flames = [];
+      for (let i = 0; i < 8; i++) {
+        const a = (i / 8) * Math.PI * 2;
+        const r = 1.6;
+        const candle = new THREE.Mesh(new THREE.CylinderGeometry(0.06, 0.07, 0.45, 8), waxMat);
+        candle.position.set(Math.cos(a) * r, 0.225, Math.sin(a) * r);
+        candle.castShadow = true;
+        group.add(candle);
+        const flame = new THREE.Mesh(new THREE.ConeGeometry(0.05, 0.18, 6), flameMat);
+        flame.position.set(Math.cos(a) * r, 0.55, Math.sin(a) * r);
+        group.add(flame);
+        flames.push(flame);
+      }
+      group.position.set(disc.cx, 0, disc.cz);
+      scene.add(group);
+      const label = _makeLabelSprite('CIRCLE OF CANDLES', '#d8a0f0');
+      label.position.set(disc.cx, 2.4, disc.cz);
+      scene.add(label);
+      const hint = _makeLabelSprite('Drop an item in the centre', '#c9a87a');
+      hint.scale.set(3.6, 0.65, 1);
+      hint.position.set(disc.cx, 0.55, disc.cz + 2.0);
+      scene.add(hint);
+      return {
+        group, flames, label, hint, disc,
+        wobbleT: 0,
+        complete: false,
+      };
+    },
+    tick(dt, ctx) {
+      const s = ctx.state;
+      if (!s.flames) return;
+      s.wobbleT += dt;
+      for (let i = 0; i < s.flames.length; i++) {
+        const f = s.flames[i];
+        f.scale.y = 1 + Math.sin(s.wobbleT * 6 + i) * 0.15;
+        f.material.opacity = 0.78 + Math.sin(s.wobbleT * 9 + i * 0.7) * 0.12;
+      }
+    },
+    onItemDropped(item, ctx) {
+      const s = ctx.state;
+      if (s.complete) return { consume: false };
+      if (!item) return { consume: false };
+      // Jessica's Rage → The Gift (one-shot lock).
+      if (item.name === "Jessica's Rage") {
+        ctx.spawnSpeech(new THREE.Vector3(s.disc.cx, 1.8, s.disc.cz),
+          'Something old answers.', 4.5);
+        const gift = ctx.spawnTheGift && ctx.spawnTheGift(s.disc.cx, s.disc.cz);
+        if (gift === false) return { consume: false };
+        s.complete = true;
+        if (ctx.markEncounterComplete) ctx.markEncounterComplete('circle_of_candles');
+        if (s.hint) s.hint.userData.setText('The circle has spoken.');
+        return { consume: true, complete: true };
+      }
+      // Legendary in → random non-Jessica's-Rage mythic.
+      if (item.rarity === 'legendary' && (item.type === 'ranged' || item.type === 'melee')) {
+        const mythic = ctx.rollMythicWeapon && ctx.rollMythicWeapon();
+        if (!mythic) return { consume: false };
+        ctx.spawnSpeech(new THREE.Vector3(s.disc.cx, 1.8, s.disc.cz),
+          'A greater shape emerges.', 4.0);
+        ctx.spawnLoot(s.disc.cx, s.disc.cz + 0.6, mythic);
+        return { consume: true };
+      }
+      // Non-legendary → legendary version (5% mastercraft on top).
+      // Only meaningful for items with a rarity ladder (weapons,
+      // armor, gear, attachments, throwables). Junk + consumables
+      // don't have rarity tiers worth bumping.
+      const ladderTypes = new Set(['ranged', 'melee', 'armor', 'gear', 'attachment', 'throwable']);
+      if (ladderTypes.has(item.type) && item.rarity !== 'mythic') {
+        const out = JSON.parse(JSON.stringify(item));
+        out.rarity = 'legendary';
+        if (Math.random() < 0.05) out.mastercraft = true;
+        ctx.spawnSpeech(new THREE.Vector3(s.disc.cx, 1.8, s.disc.cz),
+          'The flames purify.', 4.0);
+        ctx.spawnLoot(s.disc.cx, s.disc.cz + 0.6, out);
+        return { consume: true };
+      }
+      // Anything else (junk, consumable, etc.): refuse.
+      return { consume: false };
+    },
+  },
 };
 
 // Helper — pick one valid encounter for the given level state, or null.

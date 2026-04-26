@@ -159,7 +159,7 @@ export function sellPriceFor(item) {
 }
 
 export class ShopUI {
-  constructor({ inventory, getCredits, spendCredits, earnCredits, onClose, onBearTrade, onAcquireArtifact, getShopMult, getRerollUnlocked, onReroll }) {
+  constructor({ inventory, getCredits, spendCredits, earnCredits, onClose, onBearTrade, onAcquireArtifact, getShopMult, getRerollUnlocked, onReroll, onSpecialBearTrade }) {
     this.inventory = inventory;
     this.getCredits = getCredits;
     this.spendCredits = spendCredits;
@@ -170,6 +170,7 @@ export class ShopUI {
     this.getShopMult = getShopMult || (() => 1);
     this.getRerollUnlocked = getRerollUnlocked || (() => false);
     this.onReroll = onReroll || (() => false);
+    this.onSpecialBearTrade = onSpecialBearTrade || (() => false);
     this.merchant = null;      // current NPC being traded with
 
     this.root = document.createElement('div');
@@ -319,6 +320,16 @@ export class ShopUI {
   _sell(idx) {
     const item = this.inventory.backpack[idx];
     if (!item) return;
+    // Special: selling The Gift to the Bear Merchant for 1c is the
+    // mythic-run unlock path. Item consumed, no buyback.
+    if (item.id === 'thr_the_gift' && this.merchant?.kind === 'bearMerchant') {
+      if (this.onSpecialBearTrade(item)) {
+        this.inventory.takeFromBackpack(idx);
+        this.earnCredits(1);
+        this.render();
+        return;
+      }
+    }
     const price = sellPriceFor(item);
     this.inventory.takeFromBackpack(idx);
     this.earnCredits(price);

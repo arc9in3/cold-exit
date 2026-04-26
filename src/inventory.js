@@ -1163,6 +1163,21 @@ export const THROWABLE_DEFS = {
     maxCharges: 2, cooldownSec: 50,
     description: 'Audio + visual lure pulls enemies to a location for 7s',
   },
+  // The Gift — Circle of Candles encounter reward only. Through-walls
+  // shockwave that obliterates everything in range; costs 10 permanent
+  // max HP per use; refuses to fire when max HP < 10. Description is
+  // intentionally vague — the player figures out the cost the hard way.
+  theGift: {
+    id: 'thr_the_gift', name: 'The Gift',
+    type: 'throwable', rarity: 'mythic', mythic: true,
+    tint: 0xb04030,
+    throwKind: 'theGift',
+    aoeRadius: 18, aoeDamage: 99999, aoeShake: 0.85, fuse: 0.6,
+    throughWalls: true,
+    sacrificeMaxHp: 10,
+    maxCharges: 999, cooldownSec: 1,
+    description: 'Something old, wrapped in red. Smells faintly of ash.',
+  },
   claymore: {
     id: 'thr_claymore', name: 'Claymore', type: 'throwable', rarity: 'uncommon',
     tint: 0x4a8030,
@@ -1176,7 +1191,9 @@ export const THROWABLE_DEFS = {
     description: 'Place a directional mine · proximity-triggered cone blast · 2 charges, 60s each',
   },
 };
-export const ALL_THROWABLES = Object.values(THROWABLE_DEFS);
+// Throwables for normal drop pools — excludes mythic-tagged items
+// (The Gift) which only the Circle of Candles encounter can hand out.
+export const ALL_THROWABLES = Object.values(THROWABLE_DEFS).filter(t => !t.mythic);
 // Clone a throwable def into a live item instance — sets initial
 // charges, zeroes the cooldown timer, and stamps the 1×1 grid dims.
 export function makeThrowable(def) {

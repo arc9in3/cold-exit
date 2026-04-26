@@ -25,10 +25,18 @@ export class ProjectileManager {
   //   bounciness: 0..1 (grenades bounce off walls/ground),
   // }
   spawn(spec) {
-    const body = new THREE.Mesh(
-      new THREE.SphereGeometry(spec.radius || 0.14, 10, 8),
-      new THREE.MeshBasicMaterial({ color: spec.color || 0xffa040 }),
-    );
+    // Caller can supply a custom Object3D for the in-flight visual
+    // (e.g. The Gift's little red bear). Falls back to a tinted
+    // sphere when omitted — the default for every other throwable.
+    let body;
+    if (spec.customBody) {
+      body = spec.customBody;
+    } else {
+      body = new THREE.Mesh(
+        new THREE.SphereGeometry(spec.radius || 0.14, 10, 8),
+        new THREE.MeshBasicMaterial({ color: spec.color || 0xffa040 }),
+      );
+    }
     body.position.copy(spec.pos);
     this.scene.add(body);
 
