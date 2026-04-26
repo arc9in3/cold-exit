@@ -1295,21 +1295,26 @@ function difficultyScale() {
   // Reaction tightening + aim sharpening ramp with level so high-tier
   // levels feel SHARPER, not just beefier. Caps prevent late-game
   // robotic perfection.
+  //
+  // Curve halved (2026-04-25) so what used to be stage-4 difficulty
+  // now lands at stage 7 — most playtesters were dying around stage 4
+  // and the early ramp felt too steep. Per-level coefficients are
+  // each ~0.5× the previous values; caps unchanged so late-game
+  // still tops out at the same ceiling, just reached later.
   const lv = Math.max(0, level.index - 1);
   return {
-    hpMult: 1 + 0.18 * lv,
-    damageMult: 1 + 0.12 * lv,
-    rarityBias: Math.min(0.6, 0.08 * lv),
+    hpMult: 1 + 0.09 * lv,
+    damageMult: 1 + 0.06 * lv,
+    rarityBias: Math.min(0.6, 0.04 * lv),
     // <1 means faster reaction. Cap at 0.45× so it never goes below
     // a reasonable "trained operator" floor.
-    reactionMult: Math.max(0.45, 1 - 0.05 * lv),
+    reactionMult: Math.max(0.45, 1 - 0.025 * lv),
     // <1 means tighter spread (better aim). Cap at 0.55× so it doesn't
-    // go full aimbot at level 10.
-    aimSpreadMult: Math.max(0.55, 1 - 0.05 * lv),
+    // go full aimbot in the late game.
+    aimSpreadMult: Math.max(0.55, 1 - 0.025 * lv),
     // Aggression scalar — boss frequency/attack-rate multiplier.
-    // 1.0 → 2.0 by level 10. Boss controllers read this and shorten
-    // gaps between attacks, increase pursuit speed, etc.
-    aggression: Math.min(2.0, 1 + 0.10 * lv),
+    // Cap stays at 2.0; reached around level 21 in the new curve.
+    aggression: Math.min(2.0, 1 + 0.05 * lv),
   };
 }
 window.__difficultyScale = difficultyScale;
