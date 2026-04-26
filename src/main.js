@@ -2842,6 +2842,12 @@ let lastInventoryVersion = -1;
 //   exoticChainKill → corpse marks + chance roll on subsequent kills
 //   shotgunShellsPerPump → divides reload duration in tryReload
 //   adsSpeedMult → multiplies adsRate in player.update
+// Flawless boundary tracker — when the player crosses the full-HP
+// threshold (either heal-to-full or first damage tick after full),
+// the Flawless perk's conditional bundle has to flip on or off, which
+// means re-running recomputeStats. Tracked at module scope so the
+// player tick can detect transitions cheaply.
+let _flawlessAtFull = false;
 function recomputeStats() {
   derivedStats = BASE_STATS();
   skills.applyTo(derivedStats);
@@ -2850,6 +2856,26 @@ function recomputeStats() {
   skillTree.applyTo(derivedStats, currentWeapon());
   artifacts.applyTo(derivedStats);
   buffs.applyTo(derivedStats);
+  // Flawless perk — conditional 10% bundle while at full HP. Reads
+  // the live player info if available (so equipping the perk while
+  // at full HP applies the bundle on the next recompute), otherwise
+  // falls back to the boundary tracker that the player tick maintains.
+  let _atFull = _flawlessAtFull;
+  if (derivedStats.flawlessActive && lastPlayerInfo && lastPlayerInfo.maxHealth > 0) {
+    _atFull = lastPlayerInfo.health >= lastPlayerInfo.maxHealth - 0.001;
+    _flawlessAtFull = _atFull;
+  }
+  if (derivedStats.flawlessActive && _atFull) {
+    derivedStats.moveSpeedMult    *= 1.10;
+    derivedStats.rangedDmgMult    *= 1.10;
+    derivedStats.meleeDmgMult     *= 1.10;
+    derivedStats.reloadSpeedMult  *= 1.10;
+    derivedStats.fireRateMult     *= 1.10;
+    // Hip-fire accuracy — lower spread = more accurate, hence the
+    // ~0.91 multiplier (1/1.10) rather than +1.10.
+    derivedStats.hipSpreadOnlyMult *= (1 / 1.10);
+    derivedStats.staminaRegenMult *= 1.10;
+  }
   // Shrine bonus folds in at the end so it survives later sources
   // overwriting maxHealthBonus. Gift sacrifice is subtractive but
   // also clamped — floor the resulting maxHealthBonus so the player's
@@ -3670,15 +3696,16 @@ function fireOneShot(playerInfo, weapon, aimPoint, isADS) {
     const k = Math.max(0, 1 - derivedStats.lmgSustainedSpreadDecay * _lmgHeldT);
     spread *= k;
   }
-  // Twin Fangs — each stack rolls a fresh 5% chance to add one
+  // Twin Fangs — each stack rolls a fresh 15% chance to add one
   // extra pellet to THIS shot. Independent rolls per stack so two
   // copies of the perk can both fire on the same trigger pull.
   let extraPellets = 0;
   const epc = derivedStats.extraPelletChance || 0;
   if (epc > 0) {
-    // Number of stacks = ceil(epc / 0.05); each rolls independently.
-    const stacks = Math.max(1, Math.round(epc / 0.05));
-    const perStack = epc / stacks;     // typically 0.05
+    // Stack count = round(epc / 0.15); each rolls independently at 15%.
+    // One Twin Fangs → 1 roll @ 15%; two → 2 rolls @ 15%; etc.
+    const stacks = Math.max(1, Math.round(epc / 0.15));
+    const perStack = epc / stacks;
     for (let i = 0; i < stacks; i++) {
       if (Math.random() < perStack) extraPellets++;
     }
@@ -3689,7 +3716,20 @@ function fireOneShot(playerInfo, weapon, aimPoint, isADS) {
   // raycasts otherwise, so bullets would invisibly hit the doorway.
   const hitTargets = [...allHittables(), ...level.solidObstacles()];
 
-  if (typeof weapon.ammo === 'number' && !weapon.infiniteAmmo) weapon.ammo -= 1;
+  // Scavenger's Eye / freeShotChance — chance the round isn't consumed.
+  // Battle Trance / instantReloadChance — chance to instantly fully reload
+  // after firing. Both perks proc independently per shot. Free-shot is
+  // checked BEFORE decrement; instant-reload AFTER (it's a refill, not
+  // a refund — works even on the last round in the mag).
+  const freeShot = (derivedStats.freeShotChance || 0) > 0
+    && Math.random() < derivedStats.freeShotChance;
+  if (typeof weapon.ammo === 'number' && !weapon.infiniteAmmo && !freeShot) weapon.ammo -= 1;
+  if ((derivedStats.instantReloadChance || 0) > 0
+      && typeof weapon.ammo === 'number' && !weapon.infiniteAmmo
+      && weapon.ammo < eff.magSize
+      && Math.random() < derivedStats.instantReloadChance) {
+    weapon.ammo = eff.magSize;
+  }
   sfx.fire(weapon.class || 'pistol');
   alertEnemiesFromShot(tracerFrom);
   // Player recoil spring — animation layer reads this via the rig's
@@ -3935,9 +3975,12 @@ function fireOneShot(playerInfo, weapon, aimPoint, isADS) {
       if (hit.zone === 'head') { agg.hadHead = true; agg.zone = 'head'; }
       agg.point.copy(hit.point);
       // Ricochet — roll to bounce a second/third round to another nearby enemy.
+      // Bounced damage = source dmg × ricochetDmgMult (default 0.6 from
+      // skill-tree path; the Ricochet perk explicitly sets 0.5).
       if ((derivedStats.ricochetCount || 0) > 0
           && Math.random() < (derivedStats.ricochetChance || 0)) {
-        spawnRicochet(hit.point, hit.owner, dmg * 0.6, derivedStats.ricochetCount, weapon);
+        const bounceMult = derivedStats.ricochetDmgMult ?? 0.6;
+        spawnRicochet(hit.point, hit.owner, dmg * bounceMult, derivedStats.ricochetCount, weapon);
       }
       // Sniper Penetrator — bullet pierces N enemies before stopping.
       // Re-resolves the same ray against every hittable, then deals
@@ -7958,6 +8001,16 @@ function tick() {
   if (playerInfo && playerInfo.maxHealth > 0) {
     lastHpRatio = Math.max(0, Math.min(1, playerInfo.health / playerInfo.maxHealth));
     playerMaxHealthCached = playerInfo.maxHealth;
+    // Flawless transition — recompute derived stats only when the
+    // full-HP boundary changes. Avoids the per-frame recompute cost
+    // and keeps every consumer (HUD, fire path, movement) in sync.
+    if (derivedStats.flawlessActive) {
+      const atFull = playerInfo.health >= playerInfo.maxHealth - 0.001;
+      if (atFull !== _flawlessAtFull) {
+        _flawlessAtFull = atFull;
+        recomputeStats();
+      }
+    }
   }
   lastPlayerInfo = playerInfo;
   // Footsteps — distance-based, so cadence tracks actual horizontal

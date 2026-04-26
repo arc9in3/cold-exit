@@ -57,10 +57,14 @@ export const GEAR_PERKS = {
   },
   ricochet: {
     id: 'ricochet', name: 'Ricochet Round', _lvl: 3,
-    description: '20% chance bullets ricochet to a 2nd target',
+    description: '20% chance bullets ricochet to a 2nd target (50% damage)',
     apply(s) {
       s.ricochetChance = Math.max(s.ricochetChance, 0.20);
       s.ricochetCount  = Math.max(s.ricochetCount, 1);
+      // Perk's defining trade: cheaper bounce source than the skill
+      // tree, but damage drops to 50%. Direct set so the perk's
+      // contract matches its tooltip even when default is higher.
+      s.ricochetDmgMult = 0.5;
     },
   },
   feverDream: {
@@ -97,10 +101,14 @@ export const GEAR_PERKS = {
       s.rangedSpreadMult *= 0.88;
     },
   },
-  freeRefill: {
-    id: 'freeRefill', name: 'Free Refill', _lvl: 4,
-    description: 'Kills refill 30% of current mag',
-    apply(s) { s.reloadOnKill = Math.max(s.reloadOnKill, 0.30); },
+  battleTrance: {
+    id: 'battleTrance', name: 'Battle Trance', _lvl: 4,
+    description: '20% chance per shot to instantly reload your weapon',
+    apply(s) {
+      // Stackable across multiple sources — each instance adds 20%.
+      // Consumed by the player fire path in main.js.
+      s.instantReloadChance = (s.instantReloadChance || 0) + 0.20;
+    },
   },
   payload: {
     id: 'payload', name: 'Heavy Payload', _lvl: 5,
@@ -117,12 +125,12 @@ export const GEAR_PERKS = {
   },
   twinFangs: {
     id: 'twinFangs', name: 'Twin Fangs', _lvl: 5,
-    description: '5% chance per shot to fire one extra pellet',
+    description: '15% chance per shot to fire one extra pellet',
     apply(s) {
       // Stackable across multiple Twin Fangs sources — each instance
-      // adds another 5% roll. Consumed by the fire path in main.js
+      // adds another 15% roll. Consumed by the fire path in main.js
       // (extra-pellet check before the pellet loop).
-      s.extraPelletChance = (s.extraPelletChance || 0) + 0.05;
+      s.extraPelletChance = (s.extraPelletChance || 0) + 0.15;
     },
   },
   goldenChance: {
@@ -140,9 +148,11 @@ export const GEAR_PERKS = {
   },
   scavenger: {
     id: 'scavenger', name: 'Scavenger\'s Eye', _lvl: 7,
-    description: '+15% ammo on hit, +2 backpack pockets',
+    description: '15% chance per shot to not consume ammo, +2 backpack pockets',
     apply(s) {
-      s.ammoOnHitChance = Math.max(s.ammoOnHitChance, 0.15);
+      // Free-shot proc — fires before ammo decrement in main.js's
+      // player fire path. Stackable: each instance adds another 15%.
+      s.freeShotChance = (s.freeShotChance || 0) + 0.15;
       s.pocketsBonus += 2;
     },
   },
@@ -163,17 +173,31 @@ export const GEAR_PERKS = {
       s.moveSpeedMult *= 1.10;
     },
   },
+  flawless: {
+    id: 'flawless', name: 'Flawless', _lvl: 6,
+    description: 'At full HP: +10% move, dmg, reload, fire rate, hip accuracy, melee dmg, stamina regen',
+    // Stamps the bundle on a `flawlessActive` flag so the player tick
+    // can apply it conditionally each frame (only while at full HP).
+    // Apply itself just stamps the modifier; main.js multiplies them
+    // into derivedStats while state.health >= state.maxHealth.
+    apply(s) {
+      s.flawlessActive = true;
+    },
+  },
 };
 
 export const ALL_GEAR_PERKS = Object.values(GEAR_PERKS);
 
-const PERK_COUNT_BY_RARITY = {
-  common: 0, uncommon: 0, rare: 1, epic: 2, legendary: 3,
-};
-
-export function rollPerks(rarity, opts = {}) {
-  let count = PERK_COUNT_BY_RARITY[rarity] ?? 0;
-  // Mastercraft items get one extra perk.
+// Perk-count roll model (post-rebalance): perks are meant to feel rare,
+// not guaranteed by rarity. Single roll on every item:
+//   <0.001 → 3 perks   (~0.1%)
+//   <0.011 → 2 perks   (~1%)
+//   <0.031 → 1 perk    (~2%)
+//   else   → 0 perks
+// Mastercraft (rare-tier mastercraft tag) still adds +1 on top.
+export function rollPerks(_rarity, opts = {}) {
+  const r = Math.random();
+  let count = r < 0.001 ? 3 : r < 0.011 ? 2 : r < 0.031 ? 1 : 0;
   if (opts.mastercraft) count += 1;
   if (count === 0) return [];
   // Filter the perk pool by the player's loot level — early levels

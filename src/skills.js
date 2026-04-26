@@ -255,6 +255,10 @@ export const BASE_STATS = () => ({
   // Wild-perk flags — main.js reads these at event time.
   ricochetCount: 0,
   ricochetChance: 0,
+  ricochetDmgMult: 0.6,    // damage multiplier on bounced shots; perks/skills raise/lower
+  freeShotChance: 0,       // chance a shot doesn't consume ammo (Scavenger's Eye)
+  instantReloadChance: 0,  // chance a shot triggers a free instant reload (Battle Trance)
+  flawlessActive: false,   // Flawless perk flag — main.js applies bundle while at full HP
   reloadOnKill: 0,         // fraction of mag refilled on a kill
   headshotHeal: 0,         // heal on headshot (flat HP)
   explodeOnKillChance: 0,  // chance kill triggers a small AoE
