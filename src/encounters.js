@@ -2147,6 +2147,366 @@ export const ENCOUNTER_DEFS = {
       return { consume: true, complete: true };
     },
   },
+
+  // -----------------------------------------------------------------
+  // Wishing Well — toss any throwable into the well, get Tim's Bag
+  // (−50% throwable cooldown). Detection scans active projectiles
+  // each tick for one within 0.7m XZ of the well. One-shot per save.
+  wishing_well: {
+    id: 'wishing_well',
+    name: 'The Wishing Well',
+    floorColor: 0x4ab8c0,
+    oncePerSave: true,
+    condition: (state) => state.levelIndex >= 1,
+    spawn(scene, room, ctx) {
+      const disc = _spawnFloorDisc(scene, room, this.floorColor);
+      const wellGroup = new THREE.Group();
+      const stoneMat = new THREE.MeshStandardMaterial({ color: 0x6a6e75, roughness: 0.85 });
+      const waterMat = new THREE.MeshBasicMaterial({ color: 0x103848, transparent: true, opacity: 0.85 });
+      const ring = new THREE.Mesh(
+        new THREE.CylinderGeometry(0.7, 0.75, 0.8, 22, 1, true),
+        stoneMat,
+      );
+      ring.position.y = 0.4;
+      wellGroup.add(ring);
+      const rim = new THREE.Mesh(new THREE.RingGeometry(0.55, 0.78, 22), stoneMat);
+      rim.rotation.x = -Math.PI / 2;
+      rim.position.y = 0.81;
+      wellGroup.add(rim);
+      const water = new THREE.Mesh(new THREE.CircleGeometry(0.55, 22), waterMat);
+      water.rotation.x = -Math.PI / 2;
+      water.position.y = 0.05;
+      wellGroup.add(water);
+      wellGroup.position.set(disc.cx, 0, disc.cz);
+      scene.add(wellGroup);
+      const label = _makeLabelSprite('THE WISHING WELL', '#a8e0e8');
+      label.position.set(disc.cx, 2.2, disc.cz);
+      scene.add(label);
+      return { wellGroup, label, disc, complete: false };
+    },
+    tick(_dt, ctx) {
+      const s = ctx.state;
+      if (s.complete || !ctx.getProjectiles) return;
+      const list = ctx.getProjectiles();
+      if (!list || !list.length) return;
+      const RADIUS = 0.7;
+      for (const p of list) {
+        if (p.dead || p.owner !== 'player') continue;
+        const dx = p.pos.x - s.disc.cx;
+        const dz = p.pos.z - s.disc.cz;
+        if (dx * dx + dz * dz > RADIUS * RADIUS) continue;
+        // Caught! Consume the projectile so it doesn't go off in the well.
+        p.dead = true;
+        if (p.body) ctx.scene.remove(p.body);
+        if (p.trail) ctx.scene.remove(p.trail);
+        s.complete = true;
+        ctx.spawnSpeech(new THREE.Vector3(s.disc.cx, 1.4, s.disc.cz),
+          'A coin-bright clatter answers from the dark.', 4.5);
+        const relic = ctx.relicFor && ctx.relicFor('tims_bag');
+        if (relic) ctx.spawnLoot(s.disc.cx, s.disc.cz + 1.4, relic);
+        if (ctx.markEncounterComplete) ctx.markEncounterComplete('wishing_well');
+        return;
+      }
+    },
+    onItemDropped(_item, _ctx) { return { consume: false }; },
+  },
+
+  // -----------------------------------------------------------------
+  // Target Practice — wooden dummy. 10 headshots in a row drops a
+  // random weapon. Body shots reset. Repeatable across levels.
+  target_practice: {
+    id: 'target_practice',
+    name: 'Target Practice',
+    floorColor: 0x9a6a40,
+    oncePerSave: false,
+    condition: (state) => state.levelIndex >= 1,
+    spawn(scene, room, ctx) {
+      const disc = _spawnFloorDisc(scene, room, this.floorColor);
+      const woodMat = new THREE.MeshStandardMaterial({ color: 0x8a5a30, roughness: 0.9 });
+      const headMat = new THREE.MeshStandardMaterial({ color: 0x6a4020, roughness: 0.9 });
+      const dummy = new THREE.Group();
+      const post = new THREE.Mesh(new THREE.CylinderGeometry(0.10, 0.12, 1.6, 10), woodMat);
+      post.position.y = 0.8;
+      dummy.add(post);
+      const body = new THREE.Mesh(new THREE.BoxGeometry(0.55, 0.7, 0.30), woodMat);
+      body.position.y = 1.2;
+      body.castShadow = true;
+      dummy.add(body);
+      const head = new THREE.Mesh(new THREE.SphereGeometry(0.20, 14, 10), headMat);
+      head.position.y = 1.75;
+      head.castShadow = true;
+      dummy.add(head);
+      dummy.position.set(disc.cx, 0, disc.cz);
+      scene.add(dummy);
+      const target = {
+        alive: true, hp: 9999, maxHp: 9999, tier: 'normal',
+        group: { position: { x: disc.cx, y: 1.2, z: disc.cz } },
+        manager: {
+          applyHit: (_owner, _dmg, zone) => {
+            target._lastZone = zone;
+            return { drops: [], blocked: false };
+          },
+        },
+      };
+      head.userData.zone = 'head';
+      head.userData.owner = target;
+      body.userData.zone = 'torso';
+      body.userData.owner = target;
+      const label = _makeLabelSprite('TARGET PRACTICE', '#e8c890');
+      label.position.set(disc.cx, 2.6, disc.cz);
+      scene.add(label);
+      const streak = _makeLabelSprite('0 / 10', '#e8c890');
+      streak.scale.set(2.4, 0.55, 1);
+      streak.position.set(disc.cx, 2.2, disc.cz);
+      scene.add(streak);
+      return {
+        dummy, head, body, target, label, streak, disc,
+        hitMeshes: [head, body],
+        streakCount: 0, complete: false,
+      };
+    },
+    tick(_dt, ctx) {
+      const s = ctx.state;
+      if (!s.target || s.complete) return;
+      const z = s.target._lastZone;
+      if (!z) return;
+      s.target._lastZone = null;
+      if (z === 'head') s.streakCount += 1;
+      else s.streakCount = 0;
+      s.streak.userData.setText(`${s.streakCount} / 10`);
+      if (s.streakCount >= 10) {
+        s.complete = true;
+        const wpn = ctx.rollRandomWeapon && ctx.rollRandomWeapon();
+        if (wpn) ctx.spawnLoot(s.disc.cx, s.disc.cz + 1.4, wpn);
+        ctx.spawnSpeech(new THREE.Vector3(s.disc.cx, 2.4, s.disc.cz),
+          'NICE GROUPING.', 4.0);
+        s.streak.userData.setText('CLEARED');
+      }
+    },
+    onItemDropped(_item, _ctx) { return { consume: false }; },
+    hittables(state) {
+      if (!state || !state.hitMeshes) return EMPTY_ARR;
+      return state.hitMeshes;
+    },
+  },
+
+  // -----------------------------------------------------------------
+  // Path of Fire — unlit brazier. Throw a Molotov INTO the bowl
+  // (projectile lands within 0.6m XZ) → ignites + drops Undying
+  // Embers. One-shot per save.
+  path_of_fire: {
+    id: 'path_of_fire',
+    name: 'Path of Fire',
+    floorColor: 0x802818,
+    oncePerSave: true,
+    condition: (state) => state.levelIndex >= 1,
+    spawn(scene, room, ctx) {
+      const disc = _spawnFloorDisc(scene, room, this.floorColor);
+      const stoneMat = new THREE.MeshStandardMaterial({ color: 0x4a4248, roughness: 0.9 });
+      const ironMat = new THREE.MeshStandardMaterial({ color: 0x2a2628, roughness: 0.6, metalness: 0.5 });
+      const brazier = new THREE.Group();
+      const base = new THREE.Mesh(new THREE.CylinderGeometry(0.45, 0.55, 0.18, 16), stoneMat);
+      base.position.y = 0.09;
+      brazier.add(base);
+      const post = new THREE.Mesh(new THREE.CylinderGeometry(0.10, 0.12, 0.85, 10), ironMat);
+      post.position.y = 0.6;
+      brazier.add(post);
+      const bowl = new THREE.Mesh(new THREE.CylinderGeometry(0.50, 0.30, 0.30, 18), ironMat);
+      bowl.position.y = 1.15;
+      brazier.add(bowl);
+      brazier.position.set(disc.cx, 0, disc.cz);
+      scene.add(brazier);
+      const flame = new THREE.Mesh(
+        new THREE.ConeGeometry(0.30, 0.85, 10),
+        new THREE.MeshBasicMaterial({
+          color: 0xff8030, transparent: true, opacity: 0.9,
+          depthWrite: false, blending: THREE.AdditiveBlending,
+        }),
+      );
+      flame.position.set(disc.cx, 1.7, disc.cz);
+      flame.visible = false;
+      scene.add(flame);
+      const flameLight = new THREE.PointLight(0xff7030, 0, 6);
+      flameLight.position.set(disc.cx, 1.7, disc.cz);
+      scene.add(flameLight);
+      const label = _makeLabelSprite('PATH OF FIRE', '#ffa080');
+      label.position.set(disc.cx, 2.6, disc.cz);
+      scene.add(label);
+      return { brazier, flame, flameLight, label, disc, lit: false, wobbleT: 0, complete: false };
+    },
+    tick(dt, ctx) {
+      const s = ctx.state;
+      if (!s.brazier) return;
+      if (s.lit) {
+        s.wobbleT += dt;
+        s.flame.scale.y = 1 + Math.sin(s.wobbleT * 5) * 0.15;
+        s.flame.material.opacity = 0.78 + Math.sin(s.wobbleT * 7) * 0.12;
+      }
+      if (s.complete || !ctx.getProjectiles) return;
+      const list = ctx.getProjectiles();
+      if (!list || !list.length) return;
+      const RADIUS = 0.6;
+      for (const p of list) {
+        if (p.dead || p.owner !== 'player') continue;
+        if (p.throwKind !== 'molotov') continue;
+        const dx = p.pos.x - s.disc.cx;
+        const dz = p.pos.z - s.disc.cz;
+        if (dx * dx + dz * dz > RADIUS * RADIUS) continue;
+        p.dead = true;
+        if (p.body) ctx.scene.remove(p.body);
+        if (p.trail) ctx.scene.remove(p.trail);
+        s.lit = true;
+        s.complete = true;
+        s.flame.visible = true;
+        s.flameLight.intensity = 2.2;
+        ctx.spawnSpeech(new THREE.Vector3(s.disc.cx, 2.0, s.disc.cz),
+          'The bowl drinks the fire.', 4.5);
+        const relic = ctx.relicFor && ctx.relicFor('undying_embers');
+        if (relic) ctx.spawnLoot(s.disc.cx, s.disc.cz + 1.6, relic);
+        if (ctx.markEncounterComplete) ctx.markEncounterComplete('path_of_fire');
+        return;
+      }
+    },
+    onItemDropped(_item, _ctx) { return { consume: false }; },
+  },
+
+  // -----------------------------------------------------------------
+  // The Tome — large open book on a pedestal. Press E to gain a
+  // skill point. One-shot per save.
+  the_tome: {
+    id: 'the_tome',
+    name: 'The Tome',
+    floorColor: 0x40508a,
+    oncePerSave: true,
+    condition: (state) => state.levelIndex >= 1,
+    spawn(scene, room, ctx) {
+      const disc = _spawnFloorDisc(scene, room, this.floorColor);
+      const woodMat = new THREE.MeshStandardMaterial({ color: 0x4a3018, roughness: 0.9 });
+      const pageMat = new THREE.MeshStandardMaterial({ color: 0xe8d8a8, roughness: 0.85 });
+      const coverMat = new THREE.MeshStandardMaterial({ color: 0x603030, roughness: 0.8, metalness: 0.1 });
+      const group = new THREE.Group();
+      const pedestal = new THREE.Mesh(new THREE.CylinderGeometry(0.55, 0.65, 0.85, 16), woodMat);
+      pedestal.position.y = 0.425;
+      pedestal.castShadow = true;
+      group.add(pedestal);
+      const leftCover = new THREE.Mesh(new THREE.BoxGeometry(0.55, 0.05, 0.75), coverMat);
+      leftCover.position.set(-0.28, 0.92, 0);
+      leftCover.rotation.z = 0.10;
+      group.add(leftCover);
+      const rightCover = new THREE.Mesh(new THREE.BoxGeometry(0.55, 0.05, 0.75), coverMat);
+      rightCover.position.set(0.28, 0.92, 0);
+      rightCover.rotation.z = -0.10;
+      group.add(rightCover);
+      const pages = new THREE.Mesh(new THREE.BoxGeometry(1.05, 0.04, 0.70), pageMat);
+      pages.position.y = 0.94;
+      group.add(pages);
+      const glow = new THREE.PointLight(0xffe0a0, 1.4, 4);
+      glow.position.y = 1.3;
+      group.add(glow);
+      group.position.set(disc.cx, 0, disc.cz);
+      scene.add(group);
+      const label = _makeLabelSprite('THE TOME', '#c8b8ff');
+      label.position.set(disc.cx, 2.4, disc.cz);
+      scene.add(label);
+      return { group, label, disc, complete: false };
+    },
+    tick(_dt, _ctx) { /* purely interactive */ },
+    interact(ctx) {
+      const s = ctx.state;
+      if (s.complete) return;
+      ctx.showPrompt({
+        title: 'The Tome',
+        body: 'The page in front of you turns on its own.',
+        options: [
+          { text: 'Read', enabled: true, onPick: () => {
+              if (s.complete) return;
+              s.complete = true;
+              if (ctx.grantSkillPoint) ctx.grantSkillPoint(1);
+              ctx.spawnSpeech(new THREE.Vector3(s.disc.cx, 2.0, s.disc.cz),
+                '+1 SKILL POINT', 4.0);
+              if (ctx.markEncounterComplete) ctx.markEncounterComplete('the_tome');
+            } },
+          { text: 'Walk away', onPick: () => {} },
+        ],
+      });
+    },
+    onItemDropped(_item, _ctx) { return { consume: false }; },
+  },
+
+  // -----------------------------------------------------------------
+  // The Quiet Man — fedora-clad NPC stands silently in the centre.
+  // Press E to demand answers (random player bark each press). After
+  // 10s the man "explodes" cosmetically and the player gets 100c per
+  // press. One-shot per save.
+  quiet_man: {
+    id: 'quiet_man',
+    name: 'The Quiet Man',
+    floorColor: 0x383844,
+    oncePerSave: true,
+    condition: (state) => state.levelIndex >= 1,
+    BARKS: [
+      'WHAT IS THAT?',
+      'WHAT ARE YOU DOING?',
+      'WHERE ARE YOU?',
+      'I WANT TO KNOW RIGHT NOW!',
+    ],
+    spawn(scene, room, ctx) {
+      const disc = _spawnFloorDisc(scene, room, this.floorColor);
+      const npc = _buildSimpleNpc({
+        bodyColor: 0xf0eadc, headColor: 0xc8a880,
+        accentColor: 0x6a6a72, height: 1.85,
+      });
+      npc.position.set(disc.cx, 0, disc.cz);
+      scene.add(npc);
+      const hatMat = new THREE.MeshStandardMaterial({ color: 0x18181c, roughness: 0.7 });
+      const crown = new THREE.Mesh(new THREE.CylinderGeometry(0.18, 0.18, 0.18, 14), hatMat);
+      crown.position.set(disc.cx, 1.78, disc.cz);
+      scene.add(crown);
+      const brim = new THREE.Mesh(new THREE.CylinderGeometry(0.30, 0.30, 0.03, 18), hatMat);
+      brim.position.set(disc.cx, 1.69, disc.cz);
+      scene.add(brim);
+      const label = _makeLabelSprite('THE QUIET MAN', '#c8c8d8');
+      label.position.set(disc.cx, 2.4, disc.cz);
+      scene.add(label);
+      return {
+        npc, crown, brim, label, disc,
+        engaged: false, timer: 10, presses: 0, complete: false,
+      };
+    },
+    tick(dt, ctx) {
+      const s = ctx.state;
+      if (!s.engaged || s.complete) return;
+      s.timer -= dt;
+      if (s.timer <= 0) {
+        s.complete = true;
+        if (ctx.spawnPuffAt) ctx.spawnPuffAt(s.disc.cx, s.disc.cz);
+        if (s.npc) s.npc.visible = false;
+        if (s.crown) s.crown.visible = false;
+        if (s.brim) s.brim.visible = false;
+        const earnings = s.presses * 100;
+        if (earnings > 0 && ctx.awardPlayerCredits) {
+          ctx.awardPlayerCredits(earnings);
+        }
+        ctx.spawnSpeech(new THREE.Vector3(s.disc.cx, 2.0, s.disc.cz),
+          earnings > 0
+            ? `The Quiet Man bursts. +${earnings}c found in the dust.`
+            : 'The Quiet Man bursts. Nothing remains.',
+          5.5);
+        if (ctx.markEncounterComplete) ctx.markEncounterComplete('quiet_man');
+      }
+    },
+    interact(ctx) {
+      const s = ctx.state;
+      if (s.complete) return;
+      s.engaged = true;
+      s.presses += 1;
+      const def = ENCOUNTER_DEFS.quiet_man;
+      const line = def.BARKS[Math.floor(Math.random() * def.BARKS.length)];
+      ctx.spawnSpeech(new THREE.Vector3(ctx.playerPos.x, 2.0, ctx.playerPos.z),
+        line, 1.8);
+    },
+    onItemDropped(_item, _ctx) { return { consume: false }; },
+  },
 };
 
 // Helper — pick one valid encounter for the given level state, or null.

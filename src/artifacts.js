@@ -147,6 +147,26 @@ export const ARTIFACT_DEFS = {
     encounterOnly: true,
     apply(s) { s.dashDistanceMult = (s.dashDistanceMult || 1) * 2; },
   },
+  // Wishing Well reward — sells for one cooldown halving across every
+  // throwable the player owns. Stacks multiplicatively with Grenadier
+  // skill-tree throwableCooldownMult perks.
+  tims_bag: {
+    id: 'tims_bag', name: "Tim's Bag",
+    lore: 'Always heavier than it looks. Always lighter than it should be.',
+    short: '−50% throwable cooldown',
+    tint: 0x808060, price: 4500, encounterOnly: true,
+    apply(s) { s.throwableCooldownMult = (s.throwableCooldownMult || 1) * 0.5; },
+  },
+  // Path of Fire reward — every shot / melee hit stacks a burn DoT
+  // on the target. Combos with Pyromaniac set + Fever Dream perk for
+  // truly nasty fire builds.
+  undying_embers: {
+    id: 'undying_embers', name: 'Undying Embers',
+    lore: 'A handful of warmth that refuses to cool.',
+    short: 'Any damage dealt applies a stacking burn',
+    tint: 0xff8030, price: 4500, encounterOnly: true,
+    apply(s) { s.appliesBurnOnHit = true; },
+  },
   // Choices and Consequences — Indecision relic. Drives a 10s ticker
   // in main.js that grants one of the standard short-buff defs. Pure
   // marker artifact; no per-stat apply.

@@ -914,11 +914,13 @@ export class GunmanManager {
       g.dazzleT = Math.max(0, (g.dazzleT || 0) - dt);
       g.aiSettleT = Math.max(0, (g.aiSettleT || 0) - dt);
 
-      // Burn DoT (flamethrower etc.).
-      if (g.burnT > 0 && g.alive) {
+      // Burn DoT (flamethrower etc.). Stacks per fire-damage instance
+      // — per-tick = stacks × dps. Stacks reset when the timer drains.
+      if (g.burnT > 0 && (g.burnStacks | 0) > 0 && g.alive) {
         g.burnT = Math.max(0, g.burnT - dt);
-        const tickDmg = tunables.burn.dps * dt;
+        const tickDmg = g.burnStacks * tunables.burn.dps * dt;
         g.hp -= tickDmg;
+        if (g.burnT <= 0) g.burnStacks = 0;
         ctx.onBurnDamage?.(g, tickDmg);
         if (g.hp <= 0) {
           g.alive = false;

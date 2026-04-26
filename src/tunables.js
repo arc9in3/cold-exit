@@ -245,7 +245,11 @@ export const tunables = {
     minRepairability: 0.85,      // doc'd here for the store later
   },
   burn: {
-    duration: 3.0,
+    // Burn now stacks per fire-damage instance — each stack contributes
+    // `dps` per second, and the stack count decays when burnT hits 0.
+    // Duration is the timer window per stack-refresh; longer exposure
+    // = bigger stack = bigger total DoT.
+    duration: 12.0,
     dps: 6,
   },
   medkit: {

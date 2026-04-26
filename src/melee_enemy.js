@@ -484,10 +484,14 @@ export class MeleeEnemyManager {
       // chase/windup logic below skips while surpriseT > 0.
       if (e.surpriseT > 0) e.surpriseT = Math.max(0, e.surpriseT - dt);
 
-      if (e.burnT > 0 && e.alive) {
+      if (e.burnT > 0 && (e.burnStacks | 0) > 0 && e.alive) {
         e.burnT = Math.max(0, e.burnT - dt);
-        const tickDmg = tunables.burn.dps * dt;
+        // Stack-based DoT — each fire-damage instance pushed a stack
+        // via applyBurnStack(); per-tick damage is stacks × dps so
+        // longer exposure ramps up. Stacks reset when the timer drains.
+        const tickDmg = e.burnStacks * tunables.burn.dps * dt;
         e.hp -= tickDmg;
+        if (e.burnT <= 0) e.burnStacks = 0;
         ctx.onBurnDamage?.(e, tickDmg);
         if (e.hp <= 0) {
           e.alive = false;

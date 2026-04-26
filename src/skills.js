@@ -259,6 +259,7 @@ export const BASE_STATS = () => ({
   freeShotChance: 0,       // chance a shot doesn't consume ammo (Scavenger's Eye)
   instantReloadChance: 0,  // chance a shot triggers a free instant reload (Battle Trance)
   flawlessActive: false,   // Flawless perk flag — main.js applies bundle while at full HP
+  appliesBurnOnHit: false, // Undying Embers relic — any hit stacks a burn DoT
   reloadOnKill: 0,         // fraction of mag refilled on a kill
   headshotHeal: 0,         // heal on headshot (flat HP)
   explodeOnKillChance: 0,  // chance kill triggers a small AoE

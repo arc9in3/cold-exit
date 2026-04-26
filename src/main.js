@@ -1985,6 +1985,20 @@ function regenerateLevel() {
           loot.spawnItem({ x, y: 0.4, z }, item);
           return true;
         },
+        // Active projectile list — Wishing Well + Path of Fire scan
+        // this each tick to detect throwables landing in their volume.
+        getProjectiles: () => projectiles.projectiles,
+        // Tome encounter — hand the player a skill point.
+        grantSkillPoint: (n = 1) => {
+          playerSkillPoints += Math.max(1, n | 0);
+        },
+        // Random non-mythic, non-artifact weapon for Target Practice.
+        rollRandomWeapon: () => {
+          const pool = tunables.weapons.filter(w =>
+            !w.artifact && !w.mythic && w.rarity !== 'mythic');
+          if (!pool.length) return null;
+          return wrapWeapon(pool[Math.floor(Math.random() * pool.length)]);
+        },
         // Awarded to the player wallet directly (Choices and
         // Consequences "kneeling man hands you 5000 gold" reward).
         awardPlayerCredits: (n) => {
@@ -3190,6 +3204,17 @@ function syncInventoryIfChanged() {
   }
 }
 
+// Apply (or refresh + stack) a burn DoT on an enemy. Each call adds
+// one stack and refreshes the timer; per-tick damage in the enemy's
+// own update loop multiplies by stack count, so longer fire exposure
+// = bigger total DoT. Stacks reset when burnT drains to 0.
+function applyBurnStack(target, duration) {
+  if (!target || !target.alive) return;
+  target.burnStacks = (target.burnStacks | 0) + 1;
+  target.burnT = Math.max(target.burnT || 0, duration);
+}
+window.__applyBurnStack = applyBurnStack;
+
 // Lazy stat-recompute. Was running every gameplay frame and walking
 // every equipped item / perk / skill / artifact / buff in the apply
 // chain — measurable GC + CPU contributor at 60Hz on top of all the
@@ -3642,7 +3667,7 @@ function tickFlame(dt, playerInfo, weapon, inputState, aimInfo) {
     const wasAlive = c.alive;
     runStats.addDamage(baseDmg);
     c.manager.applyHit(c, baseDmg, 'torso', dir, { weaponClass: 'melee' });
-    c.burnT = Math.max(c.burnT || 0, tunables.burn.duration * (derivedStats.burnDurationBonus || 1));
+    applyBurnStack(c, tunables.burn.duration * (derivedStats.burnDurationBonus || 1));
     if (wasAlive && !c.alive) {
       onEnemyKilled(c);
       awardClassXp('exotic', c.tier, c);
@@ -4103,9 +4128,15 @@ function fireOneShot(playerInfo, weapon, aimPoint, isADS) {
       // Dragonbreath / other igniteOnHit weapons — set normal-tier
       // enemies ablaze + panicking. Sub-bosses and bosses only take
       // burn DoT without the panic flag (they keep attacking).
+      // Undying Embers relic — every hit (any weapon) applies a burn
+      // stack. Damage scales naturally with hit frequency.
+      if (derivedStats.appliesBurnOnHit && hit.owner.alive) {
+        const burnBonus = derivedStats.burnDurationBonus || 1;
+        applyBurnStack(hit.owner, (tunables.burn?.duration || 5) * burnBonus);
+      }
       if (weapon.igniteOnHit && hit.owner.alive) {
         const burnBonus = derivedStats.burnDurationBonus || 1;
-        hit.owner.burnT = Math.max(hit.owner.burnT || 0,
+        applyBurnStack(hit.owner,
           (tunables.burn?.duration || 5) * burnBonus * 1.5);
         if (hit.owner.tier === 'normal' || !hit.owner.tier) {
           hit.owner.panicT = Math.max(hit.owner.panicT || 0, 4.0);
