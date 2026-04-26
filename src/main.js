@@ -633,6 +633,13 @@ function _seedStarterKit() {
 const _runCompletedEncounters = new Set();
 function _resetEncounterCompletionForRun() {
   _runCompletedEncounters.clear();
+  // Per-encounter "appears N times per run" counters live on the
+  // ENCOUNTER_DEFS singletons so they persist across multiple
+  // spawns within a run. Wipe them here so each new run starts
+  // with a fresh budget.
+  for (const def of Object.values(ENCOUNTER_DEFS || {})) {
+    if (typeof def._completionsThisRun === 'number') def._completionsThisRun = 0;
+  }
 }
 
 function startNewRun(weaponClass) {

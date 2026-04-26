@@ -486,8 +486,16 @@ export const ENCOUNTER_DEFS = {
     id: 'duck',
     name: 'The Duck',
     floorColor: 0xfff080,             // sunny yellow
-    oncePerSave: true,
-    condition: (state) => state.levelIndex >= 1,
+    // Two-shot per run so the player can get BOTH rewards (Innocent
+    // Heart relic + Unused Rocket Ticket → Rocket Shoes via the
+    // Bear Merchant). pickEncounterForLevel still filters out the
+    // encounter once `_completionsThisRun >= 2` via the condition
+    // check below — we mark it run-complete inside onItemDropped at
+    // that point so the level-gen filter respects the cap.
+    oncePerSave: false,
+    _completionsThisRun: 0,
+    condition: (state) => state.levelIndex >= 1
+      && (ENCOUNTER_DEFS?.duck?._completionsThisRun ?? 0) < 2,
     quacks: ['Quack.', 'Quack quack.', 'Quack?', 'QUACK.'],
     spawn(scene, room, ctx) {
       const disc = _spawnFloorDisc(scene, room, this.floorColor);
@@ -548,7 +556,14 @@ export const ENCOUNTER_DEFS = {
         const scroll = ctx.artifactScrollFor && ctx.artifactScrollFor('innocent_heart');
         if (scroll) ctx.spawnLoot(s.disc.cx + 0.8, s.disc.cz, scroll);
       }
-      return { consume: true, complete: true };
+      // Bump the per-run completion counter. Only mark the encounter
+      // run-complete after the SECOND successful peas-drop so the
+      // duck can re-roll on a later level for the other reward.
+      const def = ENCOUNTER_DEFS.duck;
+      def._completionsThisRun = (def._completionsThisRun || 0) + 1;
+      const exhausted = def._completionsThisRun >= 2;
+      if (exhausted && ctx.markEncounterComplete) ctx.markEncounterComplete('duck');
+      return { consume: true, complete: exhausted };
     },
   },
 
