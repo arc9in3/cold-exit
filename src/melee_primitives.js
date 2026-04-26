@@ -157,8 +157,11 @@ function _buildPowered(group, len, girth, accentColor) {
 // Per-weapon-name dispatch. Falls back to a generic shaft for any melee
 // weapon without a specific entry — keeps the system additive.
 const PROFILES = {
-  'Knife':         (g, l, gth, c) => _buildBlade(g, l, gth, c,
+  'Combat Knife':  (g, l, gth, c) => _buildBlade(g, l, gth, c,
                      { handleRatio: 0.30, handleColor: HANDLE_DARK }),
+  'Scimitar':      (g, l, gth, c) => _buildBlade(g, l, gth, c,
+                     { handleRatio: 0.22, handleColor: 0x2a1a14, curve: true,
+                       bladeWidthRatio: 1.5, bladeThicknessRatio: 0.20 }),
   'Kukri':         (g, l, gth, c) => _buildBlade(g, l, gth, c,
                      { handleRatio: 0.28, handleColor: 0x2a1a14, curve: true,
                        bladeWidthRatio: 1.9, bladeThicknessRatio: 0.3 }),
@@ -166,10 +169,7 @@ const PROFILES = {
                      { handleRatio: 0.22, handleColor: HANDLE_BLACK,
                        guard: true, curve: true,
                        bladeWidthRatio: 1.3, bladeThicknessRatio: 0.22 }),
-  'Stormbreaker':  (g, l, gth, c) => _buildHeaded(g, l, gth, c,
-                     { shaftRatio: 0.74, headShape: 'block',
-                       shaftColor: 0x6a4a2a }),
-  'Club':          (g, l, gth, c) => _buildShaft(g, l, gth, c,
+  'Hammer':        (g, l, gth, c) => _buildShaft(g, l, gth, c,
                      { taperRatio: 1.0, roughness: 0.9, metalness: 0.05 }),
   'Baseball Bat':  (g, l, gth, c) => _buildShaft(g, l, gth, c,
                      { taperRatio: 1.7, cap: 0x222018,

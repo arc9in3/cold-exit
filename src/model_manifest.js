@@ -12,74 +12,84 @@
 
 const MODEL_BASE = 'Assets/models/';
 
-// Per-weapon-name override. Exact match against `item.name` on ranged/melee
-// weapons. These names come from tunables.weapons[*].name.
+// Per-weapon-name model override. Exact match against `item.name` on
+// ranged/melee weapons. Names come from tunables.weapons[*].name.
+// Lowpoly entries are tagged matches from the user's weapon_assigner
+// session — see Assets/Weapons/weapon_assignments.json for the audit.
 export const MODEL_BY_WEAPON_NAME = {
-  // Generic class weapons (the first of each class in tunables).
-  'pistol':          'weapons/SM_Civilian_Pistol.fbx',
-  'smg':             'weapons/SM_Civilian_Submachine_Gun.fbx',
-  'shotgun':         'weapons/SM_Army_Shotgun.fbx',
-  'rifle':           'weapons/SM_Assault_Rifle_5_56.fbx',
-  'lmg':             'weapons/SM_Light_Machine_Gun.fbx',
-  'flamethrower':    'weapons/SM_Rocket_Launchers_01.fbx',  // no flame model; rocket launcher silhouette
+  // Pistols
+  'Makarov':            'weapons/SM_Civilian_Pistol.fbx',
+  'Glock 17':           'weapons/SM_Army_Pistol.fbx',
+  'M1911':              'weapons/SM_Police_Gun.fbx',
+  'Desert Eagle .50':   'weapons/SM_Hunting_Pistol.fbx',
+  'Colt Anaconda .44':  'lowpolyguns/Revolver_5.fbx',           // user: colt six shooter (.44 visual)
+  'Colt Python':        'lowpolyguns/Revolver_3.fbx',
+  'Colt 357':           'lowpolyguns/Revolver_1.fbx',
+  '.38 Special':        'lowpolyguns/Revolver_4.fbx',
+  'Colt Six Shooter':   'lowpolyguns/Revolver_5.fbx',
 
-  // Pistols. Identities confirmed against user's model_annotations.
-  'Glock':           'weapons/SM_Army_Pistol.fbx',         // user: glock 17
-  'Sig P320':        'weapons/SM_Civilian_Pistol.fbx',     // shares Makarov visual
-  'Beretta 92':      'weapons/SM_Civilian_Pistol.fbx',     // close visual match
-  'M1911':           'weapons/SM_Police_Gun.fbx',          // user: 1911
-  'Snub Revolver':   'weapons/SM_Revolver.fbx',            // shares revolver visual
-  'Revolver':        'weapons/SM_Revolver.fbx',            // user: 44 revolver
-  'Desert Eagle':    'weapons/SM_Hunting_Pistol.fbx',      // user: desert eagle
-  'Flare Gun':       'weapons/SM_Civilian_Pistol.fbx',     // fallback
+  // SMGs
+  'PDW':                'weapons/SM_Civilian_Submachine_Gun.fbx',
+  'P90':                'weapons/SM_Police_Submachine_Gun.fbx',
+  'UMP45':              'weapons/SM_Army_Submachine_Gun.fbx',
+  'Spectre':            'lowpolyguns/SubmachineGun_2.fbx',
+  'Spectre CQB':        'lowpolyguns/SubmachineGun_1.fbx',
+  'SPC9':               'lowpolyguns/SubmachineGun_3.fbx',
 
-  // SMGs. Models chosen against the user's annotations:
-  // Army_SMG=ump45, Civilian_SMG=roni(pcc), Police_SMG=p90, Tactical_SMG=vector.
-  'AKS-74U':         'weapons/SM_Army_Submachine_Gun.fbx',   // no AK-74U model; UMP silhouette stands in
-  'PDW':             'weapons/SM_Civilian_Submachine_Gun.fbx', // Roni PCC
-  'MP7':             'weapons/SM_Civilian_Submachine_Gun.fbx', // both Special_Submachine_Gun variants render invisible — reuse the generic SMG mesh (shared with PDW) as a stand-in until a working MP7 FBX lands
-  'P90':             'weapons/SM_Police_Submachine_Gun.fbx',  // user-confirmed P90
+  // Rifles
+  'AK47':               'lowpolyguns/AssaultRifle_2.fbx',
+  'AKS-74':             'lowpolyguns/AssaultRifle_4.fbx',
+  'AK104':              'lowpolyguns/AssaultRifle_5.fbx',
+  'AS VAL':             'weapons/SM_Assault_Rifle_9x39.fbx',
+  'VSS':                'weapons/SM_Police_Sniper_Rifle.fbx',     // user-tagged FBX = "VSS vintorez"
+  'M16':                'weapons/Assault_Rifle_5_56_Prototype.fbx',
+  'AUG A3-CQC':         'weapons/SM_Bulpam_Assault_Rifle.fbx',
+  'CAR-15':             'lowpolyguns/AssaultRifle2_1.fbx',
+  'JARD J67':           'lowpolyguns/Bullpup_2.fbx',
 
-  // Rifles.
-  'M4':              'weapons/SM_Assault_Rifle_5_56.fbx',
-  'M4 Block II':     'weapons/Assault_Rifle_5_56_Prototype.fbx',   // placeholder — reuses M16 model until a block-II specific one lands
-  'AK47':            'weapons/SM_Assault_Rifle_5_45.fbx',       // user: ak47
-  'AK47 ACOG':       'weapons/SM_Assault_Rifle_5_45_Clean.fbx',
-  'AS VAL':          'weapons/SM_Assault_Rifle_9x39.fbx',       // user: as val
-  'VSS':             'weapons/SM_Assault_Rifle_9x39.fbx',       // shares the 9×39 platform with the AS VAL IRL
-  'Tavor':           'weapons/SM_Bulpam_Assault_Rifle.fbx',     // user: bullpup ar
-  'M16':             'weapons/Assault_Rifle_5_56_Prototype.fbx', // user: m16
-  'M16A4':           'weapons/Assault_Rifle_5_56_Prototype.fbx',   // placeholder — reuses M16 mesh, the _Clean variant FBX is broken
+  // LMGs
+  'Type 80 LMG':        'weapons/SM_Heavy_Machine_Gun.fbx',
+  'M249':               'weapons/SM_Light_Machine_Gun.fbx',
 
-  // Marksman / bolt.
-  'Remington 700':   'weapons/SM_Hunting_Sniper_Rifle.fbx',     // user: m700
-  'Mosin':           'weapons/SM_Large_Caliber_Sniper_Rifle.fbx',
-  'SVD':             'weapons/SM_Army_Sniper_Rifle.fbx',        // user: svd
-  'Cheytac Intervention': 'weapons/SM_High_Precision_Sniper_Rifle.fbx', // user: cheytac intervention
+  // Snipers
+  'Remington 700':      'weapons/SM_Hunting_Sniper_Rifle.fbx',
+  'SVD Dragunov':       'weapons/SM_Army_Sniper_Rifle.fbx',
+  'Cheytac Intervention':'weapons/SM_High_Precision_Sniper_Rifle.fbx',
+  'AWP':                'lowpolyguns/SniperRifle_3.fbx',
+  '.338 Lapua':         'lowpolyguns/SniperRifle_5.fbx',
+  'Hunting Rifle':      'lowpolyguns/SniperRifle_6.fbx',
 
-  // LMG.
-  'M240':            'weapons/SM_Light_Machine_Gun.fbx',        // user: 240m lmg
-  'PKM':             'weapons/SM_Heavy_Machine_Gun.fbx',        // user: pkm with a bipod
-  'RPK':             'weapons/SM_Light_Machine_Gun.fbx',        // shares M240 visual
+  // Shotguns
+  'AA-12':              'weapons/SM_Assault_Shotgun.fbx',
+  'Benelli M4':         'weapons/SM_Army_Shotgun.fbx',
+  'Mossberg 500':       'lowpolyguns/Shotgun_1.fbx',
+  'Remington 870':      'lowpolyguns/Shotgun_3.fbx',
+  'Sawed-Off Shotgun':  'lowpolyguns/Shotgun_SawedOff.fbx',
+  'KSG-12':             'weapons/Modern_Pump_Action_Shotgun.fbx',
 
-  // Shotgun.
-  'AA-12':           'weapons/SM_Assault_Shotgun.fbx',          // user: aa-12
+  // Exotic
+  'Widowmaker Rocket Launcher': 'weapons/SM_Rocket_Launchers_01.fbx',
 
   // Legendary artifact pistol.
-  "Jessica's Rage":  'weapons/SM_Hunting_Pistol.fbx',
+  "Jessica's Rage":     'weapons/SM_Hunting_Pistol.fbx',
 
   // Melee.
-  'Knife':           'melee/SM_Combat_Knife.fbx',
-  'Club':            'melee/SM_Hammer.fbx',
-  'Baseball Bat':    'melee/SM_Baseball_bat_Nails_reinforced_.fbx',
-  'katana':          'melee/SM_Katana.fbx',
-  'Brass Knuckles':  'melee/SM_Brass_Knuckles_02.fbx',
-  'Crowbar':         'melee/SM_Tire_iron.fbx',          // closest visual — bent steel rod
-  'Kukri':           'weapons/SM_Kukri.fbx',
-  'Tomahawk':        'weapons/SM_Combat_Axe.fbx',
-  'Fire Axe':        'melee/SM_Fire_Axe.fbx',
-  'Sledgehammer':    'tools/SM_Sledgehammer.fbx',
-  'Chainsaw':        'tools/SM_Chainsaw.fbx',
+  'Combat Knife':       'melee/SM_Combat_Knife.fbx',
+  'Hammer':             'melee/SM_Hammer.fbx',
+  'Baseball Bat':       'melee/SM_Baseball_bat_Nails_reinforced_.fbx',
+  'katana':             'melee/SM_Katana.fbx',
+  'Brass Knuckles':     'melee/SM_Brass_Knuckles_02.fbx',
+  'Crowbar':            'melee/SM_Tire_iron.fbx',
+  'Kukri':              'weapons/SM_Kukri.fbx',
+  'Tomahawk':           'weapons/SM_Combat_Axe.fbx',
+  'Fire Axe':           'melee/SM_Fire_Axe.fbx',
+  'Sledgehammer':       'tools/SM_Sledgehammer.fbx',
+  'Chainsaw':           'tools/SM_Chainsaw.fbx',
+  'Scimitar':           'melee/SM_Handcrafted_Curved_Sword.fbx',
+
+  // Mythic kept around (Dragonbreath has no in-class shotgun model
+  // distinct from the others; reuse Benelli silhouette).
+  'Dragonbreath':       'weapons/SM_Army_Shotgun.fbx',
 };
 
 // Per-item-id override — consumables, armor pieces, junk — anything with a
@@ -102,6 +112,13 @@ export const MODEL_BY_ITEM_ID = {
   cons_regen:        'medical/SM_Injector_With_Regeneration.fbx',
   junk_carbatt:      'tools/SM_Car_Battery.fbx',
   junk_scrap:        'tools/SM_Scrap_Metal_02.fbx',
+  // Throwables — user-tagged per the Apr 2026 weapon-assigner pass.
+  thr_frag:          'weapons/SM_Frag_Grenade.fbx',
+  thr_flash:         'weapons/SM_Stun_Grenade.fbx',     // user-tagged "flashbang"
+  thr_stun:          'weapons/SM_Stun_Grenade.fbx',
+  thr_molotov:       'weapons/SM_Molotov_02.fbx',
+  thr_claymore:      'weapons/SM_Infantry_Mine.fbx',
+  thr_elven_knife:   'weapons/SM_Throwing_Knife.fbx',
 };
 
 // Per-type fallback — coarse category model when no name/id override
@@ -185,14 +202,104 @@ export function rotationOverrideForModelPath(fullPath) {
 // render path and layoutForWeapon embeds it as an <image> in the
 // attachment screen instead of the procedural class silhouette.
 const RENDER_BASE = 'Assets/UI/weapon_renders/';
+// Each key is the canonical in-game weapon name; value is the PNG
+// filename in Assets/UI/weapon_renders/. Most renders predate the
+// rename pass — values like 'Glock.png' map to the renamed
+// 'Glock 17' weapon. New weapons added from the lowpolyguns pack
+// don't have renders yet and fall through to the icon fallback
+// (re-run tools/weapon_assigner.html → 'Export side-view PNGs' to
+// generate them).
 export const WEAPON_RENDER_BY_NAME = {
-  // Populated as renders are produced. Example:
-  //   'AK47': 'AK47.png',
+  // Pistols
+  'Makarov':                'pistol.png',
+  'Glock 17':               'Glock.png',
+  'M1911':                  'M1911.png',
+  'Desert Eagle .50':       'Desert_Eagle.png',
+  'Colt Anaconda .44':      'Snub_Revolver.png',
+
+  // SMGs
+  'PDW':                    'PDW.png',
+  'P90':                    'P90.png',
+  'UMP45':                  'AKS-74U.png',
+
+  // Rifles
+  'AK47':                   'AK47.png',
+  'AS VAL':                 'AS_VAL.png',
+  'VSS':                    'VSS.png',
+  'M16':                    'M16.png',
+  'AUG A3-CQC':             'Tavor.png',
+
+  // LMGs
+  'Type 80 LMG':            'PKM.png',
+  'M249':                   'lmg.png',
+
+  // Snipers
+  'Remington 700':          'Remington_700.png',
+  'SVD Dragunov':           'SVD.png',
+  'Cheytac Intervention':   'Cheytac_Intervention.png',
+
+  // Shotguns
+  'AA-12':                  'AA-12.png',
+  'Benelli M4':             'shotgun.png',
+
+  // Exotic
+  'Widowmaker Rocket Launcher': 'flamethrower.png',
+
+  // Legendary artifact
+  "Jessica's Rage":         'Jessica_s_Rage.png',
+
+  // Melee
+  'Combat Knife':           'Knife.png',
+  'Hammer':                 'Club.png',
+  'Baseball Bat':           'Baseball_Bat.png',
+  'katana':                 'katana.png',
+  'Brass Knuckles':         'Brass_Knuckles.png',
+  'Crowbar':                'Crowbar.png',
+  'Kukri':                  'Kukri.png',
+  'Tomahawk':               'Tomahawk.png',
+  'Fire Axe':               'Fire_Axe.png',
+  'Sledgehammer':           'Sledgehammer.png',
+  'Chainsaw':               'Chainsaw.png',
 };
 export function renderForWeaponName(name) {
   if (!name) return null;
   const f = WEAPON_RENDER_BY_NAME[name];
   return f ? RENDER_BASE + f : null;
+}
+
+// ---------------------------------------------------------------
+// Hand-pose defaults per weapon class. Fractions of the side-view
+// render canvas (0..1, origin top-left). Authored from typical
+// silhouette positions on the 16:9 export — main hand lands on the
+// trigger; support hand lands on the foregrip / handguard; shoulder
+// lands at the buttstock end. Pistols share the support-hand
+// position with the main hand to read as a two-handed grip.
+//
+// Per-weapon overrides go in WEAPON_POSE_BY_NAME below — author
+// those interactively via tools/weapon_assigner.html (click any
+// model preview → drag the colored markers → 'Export all poses').
+// ---------------------------------------------------------------
+export const POSE_BY_CLASS = {
+  pistol:  { mainHand: { x: 0.49, y: 0.62 }, supportHand: { x: 0.49, y: 0.62 } },
+  smg:     { mainHand: { x: 0.46, y: 0.62 }, supportHand: { x: 0.62, y: 0.61 }, shoulder: { x: 0.30, y: 0.55 } },
+  rifle:   { mainHand: { x: 0.42, y: 0.62 }, supportHand: { x: 0.66, y: 0.62 }, shoulder: { x: 0.18, y: 0.55 } },
+  shotgun: { mainHand: { x: 0.42, y: 0.62 }, supportHand: { x: 0.66, y: 0.62 }, shoulder: { x: 0.18, y: 0.55 } },
+  sniper:  { mainHand: { x: 0.45, y: 0.62 }, supportHand: { x: 0.70, y: 0.62 }, shoulder: { x: 0.18, y: 0.55 } },
+  lmg:     { mainHand: { x: 0.45, y: 0.62 }, supportHand: { x: 0.65, y: 0.62 }, shoulder: { x: 0.20, y: 0.55 } },
+  exotic:  { mainHand: { x: 0.42, y: 0.62 }, supportHand: { x: 0.66, y: 0.62 }, shoulder: { x: 0.18, y: 0.55 } },
+  melee:   { mainHand: { x: 0.32, y: 0.62 } },
+};
+
+// Per-weapon overrides. Empty until authored via the pose modal.
+export const WEAPON_POSE_BY_NAME = {
+};
+
+export function poseForWeapon(weapon) {
+  if (!weapon) return null;
+  const override = WEAPON_POSE_BY_NAME[weapon.name];
+  if (override) return override;
+  const klass = weapon.class || (weapon.type === 'melee' ? 'melee' : 'pistol');
+  return POSE_BY_CLASS[klass] || POSE_BY_CLASS.pistol;
 }
 
 export function modelForItem(item) {

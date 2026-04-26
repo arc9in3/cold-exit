@@ -1,0 +1,1073 @@
+{
+  "tagged_fbx": {
+    "lowpolyguns/AssaultRifle2_1.fbx": {
+      "tag": "car-15",
+      "currently_used_by": []
+    },
+    "lowpolyguns/AssaultRifle2_2.fbx": {
+      "tag": "m4",
+      "currently_used_by": []
+    },
+    "lowpolyguns/AssaultRifle2_3.fbx": {
+      "tag": "ar-15 pistol",
+      "currently_used_by": []
+    },
+    "lowpolyguns/AssaultRifle2_4.fbx": {
+      "tag": "ar-15 snub nose SBR",
+      "currently_used_by": []
+    },
+    "lowpolyguns/AssaultRifle_1.fbx": {
+      "tag": "Draco NAK9",
+      "currently_used_by": []
+    },
+    "lowpolyguns/AssaultRifle_2.fbx": {
+      "tag": "ak47",
+      "currently_used_by": []
+    },
+    "lowpolyguns/AssaultRifle_3.fbx": {
+      "tag": "aks47",
+      "currently_used_by": []
+    },
+    "lowpolyguns/AssaultRifle_4.fbx": {
+      "tag": "aks-74",
+      "currently_used_by": []
+    },
+    "lowpolyguns/AssaultRifle_5.fbx": {
+      "tag": "ak104",
+      "currently_used_by": []
+    },
+    "lowpolyguns/Bullpup_2.fbx": {
+      "tag": "JARD J67",
+      "currently_used_by": []
+    },
+    "lowpolyguns/Bullpup_1.fbx": {
+      "tag": "JARD J68",
+      "currently_used_by": []
+    },
+    "lowpolyguns/Bullpup_3.fbx": {
+      "tag": "JARD J56",
+      "currently_used_by": []
+    },
+    "lowpolyguns/Revolver_1.fbx": {
+      "tag": "colt 357",
+      "currently_used_by": []
+    },
+    "lowpolyguns/Revolver_4.fbx": {
+      "tag": ".38 special",
+      "currently_used_by": []
+    },
+    "lowpolyguns/Revolver_5.fbx": {
+      "tag": "colt six shooter",
+      "currently_used_by": []
+    },
+    "lowpolyguns/Revolver_3.fbx": {
+      "tag": "Colt python",
+      "currently_used_by": []
+    },
+    "lowpolyguns/Shotgun_4.fbx": {
+      "tag": "henry slug rifle",
+      "currently_used_by": []
+    },
+    "lowpolyguns/Shotgun_SawedOff.fbx": {
+      "tag": "sawed off shotgun",
+      "currently_used_by": []
+    },
+    "lowpolyguns/Shotgun_1.fbx": {
+      "tag": "mossberg 500",
+      "currently_used_by": []
+    },
+    "lowpolyguns/Shotgun_3.fbx": {
+      "tag": "remington 870",
+      "currently_used_by": []
+    },
+    "lowpolyguns/SniperRifle_1.fbx": {
+      "tag": "m700",
+      "currently_used_by": []
+    },
+    "lowpolyguns/SniperRifle_2.fbx": {
+      "tag": "m700 tactical",
+      "currently_used_by": []
+    },
+    "lowpolyguns/SniperRifle_3.fbx": {
+      "tag": "AWP",
+      "currently_used_by": []
+    },
+    "lowpolyguns/SubmachineGun_1.fbx": {
+      "tag": "Spectre CQB",
+      "currently_used_by": []
+    },
+    "lowpolyguns/SniperRifle_5.fbx": {
+      "tag": "338 lapua",
+      "currently_used_by": []
+    },
+    "lowpolyguns/SniperRifle_6.fbx": {
+      "tag": "hunting rifle",
+      "currently_used_by": []
+    },
+    "lowpolyguns/SubmachineGun_2.fbx": {
+      "tag": "Spectre",
+      "currently_used_by": []
+    },
+    "lowpolyguns/SubmachineGun_4.fbx": {
+      "tag": "SPCA3",
+      "currently_used_by": []
+    },
+    "lowpolyguns/SubmachineGun_3.fbx": {
+      "tag": "SPC9",
+      "currently_used_by": []
+    },
+    "lowpolyguns/SubmachineGun_5.fbx": {
+      "tag": "SPC223",
+      "currently_used_by": []
+    },
+    "lowpolyguns_accessories/Bayonet.fbx": {
+      "tag": "survival knife",
+      "currently_used_by": []
+    },
+    "lowpolyguns_accessories/Bayonet_2.fbx": {
+      "tag": "combat knife",
+      "currently_used_by": []
+    },
+    "lowpolyguns_accessories/Flashlight.fbx": {
+      "tag": "OLIGHT pistol light",
+      "currently_used_by": []
+    },
+    "lowpolyguns_accessories/Grip.fbx": {
+      "tag": "stubby grip",
+      "currently_used_by": []
+    },
+    "lowpolyguns_accessories/Scope_1.fbx": {
+      "tag": "6x Sniper scope",
+      "currently_used_by": []
+    },
+    "lowpolyguns_accessories/Scope_2.fbx": {
+      "tag": "Nightforce ATACR",
+      "currently_used_by": []
+    },
+    "lowpolyguns_accessories/Scope_3.fbx": {
+      "tag": "12x sniper scope",
+      "currently_used_by": []
+    },
+    "lowpolyguns_accessories/Silencer_1.fbx": {
+      "tag": "silencer",
+      "currently_used_by": []
+    },
+    "lowpolyguns_accessories/Silencer_Short.fbx": {
+      "tag": "short silencer",
+      "currently_used_by": []
+    },
+    "lowpolyguns_accessories/Silencer_3.fbx": {
+      "tag": "fluted silencer",
+      "currently_used_by": []
+    },
+    "lowpolyguns_accessories/Silencer_2.fbx": {
+      "tag": "QD silencer",
+      "currently_used_by": []
+    },
+    "lowpolyguns_accessories/Silencer_long.fbx": {
+      "tag": "long silencer",
+      "currently_used_by": []
+    },
+    "lowpolyguns_accessories/Stock.fbx": {
+      "tag": "skeleton stock",
+      "currently_used_by": []
+    },
+    "melee/SM_Handcrafted_Curved_Sword.fbx": {
+      "tag": "scimitar",
+      "currently_used_by": []
+    },
+    "weapons/Modern_Pump_Action_Shotgun.fbx": {
+      "tag": "KSG 12",
+      "currently_used_by": []
+    },
+    "weapons/SM_Bipod__ForHigh_Precision_Sniper_Rifle.fbx": {
+      "tag": "bipod",
+      "currently_used_by": []
+    },
+    "weapons/SM_Butt_Of_The_Rifle_For_Special_Submachine_Gun_Clean.fbx": {
+      "tag": "cqb stock",
+      "currently_used_by": []
+    },
+    "weapons/SM_Cartridge_Box_For_Heavy_Machine_Gun.fbx": {
+      "tag": "HMG box mag",
+      "currently_used_by": []
+    },
+    "weapons/SM_Cartridge_Box_For_Light_Machine_Gun.fbx": {
+      "tag": "lmg box mag",
+      "currently_used_by": []
+    },
+    "weapons/SM_Compensator_For_High_Precision_Sniper_Rifle.fbx": {
+      "tag": "muzzle brake",
+      "currently_used_by": []
+    },
+    "weapons/SM_Compensator_For_Large_Caliber_Sniper_Rifle.fbx": {
+      "tag": "compensator",
+      "currently_used_by": []
+    },
+    "weapons/SM_Cylindrical_Collimator_Sight.fbx": {
+      "tag": "Amazon special red dot",
+      "currently_used_by": []
+    },
+    "weapons/SM_Flick_Knife.fbx": {
+      "tag": "pocket knife",
+      "currently_used_by": []
+    },
+    "weapons/SM_Forend_With_Picatinny_Rails_01.fbx": {
+      "tag": "quad rails",
+      "currently_used_by": []
+    },
+    "weapons/SM_Forend_With_Picatinny_Rails_02.fbx": {
+      "tag": "mlok rails",
+      "currently_used_by": []
+    },
+    "weapons/SM_Forend_With_Picatinny_Rails_5_45.fbx": {
+      "tag": "AK rails",
+      "currently_used_by": []
+    },
+    "weapons/SM_Frag_Grenade.fbx": {
+      "tag": "frag grenade",
+      "currently_used_by": []
+    },
+    "weapons/SM_Horizontal_Handle_01.fbx": {
+      "tag": "angled foregrip black",
+      "currently_used_by": []
+    },
+    "weapons/SM_Horizontal_Handle_02.fbx": {
+      "tag": "angled foregrip tan",
+      "currently_used_by": []
+    },
+    "weapons/SM_Horizontal_Handle_03.fbx": {
+      "tag": "vert grip",
+      "currently_used_by": []
+    },
+    "weapons/SM_Horizontal_Handle_04.fbx": {
+      "tag": "folding grip",
+      "currently_used_by": []
+    },
+    "weapons/SM_Infantry_Mine.fbx": {
+      "tag": "claymore",
+      "currently_used_by": []
+    },
+    "weapons/SM_Larfe_For_Assault_Rifle_5_56.fbx": {
+      "tag": "extended mag",
+      "currently_used_by": []
+    },
+    "weapons/SM_Large_Magazine_For_Assault_Rifle_5_45.fbx": {
+      "tag": "drum mag",
+      "currently_used_by": []
+    },
+    "weapons/SM_Muffler_01.fbx": {
+      "tag": "chinese silencer",
+      "currently_used_by": []
+    },
+    "weapons/SM_Muffler_03.fbx": {
+      "tag": "KA QD silencer",
+      "currently_used_by": []
+    },
+    "weapons/SM_Muffler_02.fbx": {
+      "tag": "russian silencer",
+      "currently_used_by": []
+    },
+    "weapons/SM_Muffler_04.fbx": {
+      "tag": "osprey silencer",
+      "currently_used_by": []
+    },
+    "weapons/SM_Muffler_05.fbx": {
+      "tag": "tactical silencer",
+      "currently_used_by": []
+    },
+    "weapons/SM_Muzzle_Brake_Compensator_01.fbx": {
+      "tag": "a2 birdcage",
+      "currently_used_by": []
+    },
+    "weapons/SM_Muzzle_Brake_Compensator_02.fbx": {
+      "tag": "sniper brake",
+      "currently_used_by": []
+    },
+    "weapons/SM_Muzzle_Brake_Compensator_03.fbx": {
+      "tag": "ak compensator",
+      "currently_used_by": []
+    },
+    "weapons/SM_Muzzle_Brake_Compensator_04.fbx": {
+      "tag": "ak brake",
+      "currently_used_by": []
+    },
+    "weapons/SM_Muzzle_Brake_Compensator_05.fbx": {
+      "tag": "linear compensator",
+      "currently_used_by": []
+    },
+    "weapons/SM_Muzzle_Brake_Compensator_06.fbx": {
+      "tag": "flash hider",
+      "currently_used_by": []
+    },
+    "weapons/SM_Muzzle_Brake_Compensator_07.fbx": {
+      "tag": "long flash hider",
+      "currently_used_by": []
+    },
+    "weapons/SM_Optical_Sight_01.fbx": {
+      "tag": "prism red dot",
+      "currently_used_by": []
+    },
+    "weapons/SM_Molotov_02.fbx": {
+      "tag": "molotov",
+      "currently_used_by": []
+    },
+    "weapons/SM_Magazine__For_Bulpam_Assault_Rifle.fbx": {
+      "tag": "fast mag",
+      "currently_used_by": []
+    },
+    "weapons/SM_Paired_For_Assault_Rifle_5_45.fbx": {
+      "tag": "banana clip",
+      "currently_used_by": []
+    },
+    "weapons/SM_Police_Sniper_Rifle.fbx": {
+      "tag": "VSS vintorez",
+      "currently_used_by": []
+    },
+    "weapons/SM_Polymer_Handle.fbx": {
+      "tag": "skeleton grip",
+      "currently_used_by": []
+    },
+    "weapons/SM_Molotov_01.fbx": {
+      "tag": "maotai molotov",
+      "currently_used_by": []
+    },
+    "weapons/SM_Pistol_Grip_01_5_45.fbx": {
+      "tag": "stippled grip",
+      "currently_used_by": []
+    },
+    "weapons/SM_Pistol_Grip_Prototype.fbx": {
+      "tag": "match grip",
+      "currently_used_by": []
+    },
+    "weapons/SM_Pistol_Grip_01_5_56.fbx": {
+      "tag": "rubberized grip",
+      "currently_used_by": []
+    },
+    "weapons/SM_Scope_For_Police_Sniper_Rifle.fbx": {
+      "tag": "pso scope",
+      "currently_used_by": []
+    },
+    "weapons/SM_SM_Sight_Bulpam_Assault_Rifle.fbx": {
+      "tag": "tube scope",
+      "currently_used_by": []
+    },
+    "weapons/SM_Side_Handle.fbx": {
+      "tag": "canted grip",
+      "currently_used_by": []
+    },
+    "weapons/SM_Sniper_Scope.fbx": {
+      "tag": "sniper scope",
+      "currently_used_by": []
+    },
+    "weapons/SM_Tactical_Flashlight_03.fbx": {
+      "tag": "TLR9",
+      "currently_used_by": []
+    },
+    "weapons/SM_Tactical_Flashlight_02.fbx": {
+      "tag": "strobe light",
+      "currently_used_by": []
+    },
+    "weapons/SM_Tactical_Block.fbx": {
+      "tag": "peq15",
+      "currently_used_by": []
+    },
+    "weapons/SM_Stun_Grenade.fbx": {
+      "tag": "flashbang",
+      "currently_used_by": []
+    },
+    "weapons/SM_Square_Dot_Sight.fbx": {
+      "tag": "vortex UH1",
+      "currently_used_by": []
+    },
+    "weapons/SM_Tactical_Flashlight_01.fbx": {
+      "tag": "flash light",
+      "currently_used_by": []
+    },
+    "weapons/SM_Tactical_Laser_Designator.fbx": {
+      "tag": "pistol laser",
+      "currently_used_by": []
+    },
+    "weapons/SM_Tactical_Submachine_Gun.fbx": {
+      "tag": "kriss vector",
+      "currently_used_by": []
+    },
+    "weapons/SM_Telescopic_Stock.fbx": {
+      "tag": "folding stock",
+      "currently_used_by": []
+    },
+    "weapons/SM_Telescopic_Universal_Butt_01.fbx": {
+      "tag": "crane stock",
+      "currently_used_by": []
+    },
+    "weapons/SM_Throwing_Knife.fbx": {
+      "tag": "throwing knife",
+      "currently_used_by": []
+    },
+    "weapons/SM_Vertical_Handle_01.fbx": {
+      "tag": "foregrip black",
+      "currently_used_by": []
+    },
+    "weapons/SM_Vertical_Handle_02.fbx": {
+      "tag": "foregrip tan",
+      "currently_used_by": []
+    },
+    "weapons/SM_Wooden_Butt_01.fbx": {
+      "tag": "wooden stock",
+      "currently_used_by": []
+    }
+  },
+  "in_game_weapons": [
+    {
+      "name": "pistol",
+      "class": "pistol",
+      "type": "ranged",
+      "rarity": "common",
+      "damage": 38,
+      "fireRate": 4.5,
+      "magSize": 14,
+      "currentModel": "weapons/SM_Civilian_Pistol.fbx",
+      "revisitAs": "makarov"
+    },
+    {
+      "name": "smg",
+      "class": "smg",
+      "type": "ranged",
+      "rarity": "common",
+      "damage": 15,
+      "fireRate": 14,
+      "magSize": 32,
+      "currentModel": "weapons/SM_Civilian_Submachine_Gun.fbx",
+      "revisitAs": null
+    },
+    {
+      "name": "shotgun",
+      "class": "shotgun",
+      "type": "ranged",
+      "rarity": "uncommon",
+      "damage": 13,
+      "fireRate": 1.3,
+      "magSize": 6,
+      "currentModel": "weapons/SM_Army_Shotgun.fbx",
+      "revisitAs": "benelli m4"
+    },
+    {
+      "name": "rifle",
+      "class": "rifle",
+      "type": "ranged",
+      "rarity": "uncommon",
+      "damage": 26,
+      "fireRate": 2.3,
+      "magSize": 30,
+      "currentModel": "weapons/SM_Assault_Rifle_5_56.fbx",
+      "revisitAs": null
+    },
+    {
+      "name": "lmg",
+      "class": "lmg",
+      "type": "ranged",
+      "rarity": "rare",
+      "damage": 34,
+      "fireRate": 11,
+      "magSize": 80,
+      "currentModel": "weapons/SM_Light_Machine_Gun.fbx",
+      "revisitAs": "m249"
+    },
+    {
+      "name": "flamethrower",
+      "class": "exotic",
+      "type": "ranged",
+      "rarity": "rare",
+      "damage": 5,
+      "fireRate": 0,
+      "magSize": 100,
+      "currentModel": "weapons/SM_Rocket_Launchers_01.fbx",
+      "revisitAs": "widowmaker rocket launcher"
+    },
+    {
+      "name": "Glock",
+      "class": "pistol",
+      "type": "ranged",
+      "rarity": "common",
+      "damage": 32,
+      "fireRate": 5,
+      "magSize": 17,
+      "currentModel": "weapons/SM_Army_Pistol.fbx",
+      "revisitAs": "glock 17"
+    },
+    {
+      "name": "Sig P320",
+      "class": "pistol",
+      "type": "ranged",
+      "rarity": "common",
+      "damage": 36,
+      "fireRate": 4.8,
+      "magSize": 17,
+      "currentModel": "weapons/SM_Civilian_Pistol.fbx",
+      "revisitAs": null
+    },
+    {
+      "name": "Beretta 92",
+      "class": "pistol",
+      "type": "ranged",
+      "rarity": "common",
+      "damage": 34,
+      "fireRate": 5.2,
+      "magSize": 15,
+      "currentModel": "weapons/SM_Civilian_Pistol.fbx",
+      "revisitAs": null
+    },
+    {
+      "name": "AKS-74U",
+      "class": "smg",
+      "type": "ranged",
+      "rarity": "common",
+      "damage": 16,
+      "fireRate": 13,
+      "magSize": 30,
+      "currentModel": "weapons/SM_Army_Submachine_Gun.fbx",
+      "revisitAs": "ump45"
+    },
+    {
+      "name": "PDW",
+      "class": "smg",
+      "type": "ranged",
+      "rarity": "common",
+      "damage": 14,
+      "fireRate": 16,
+      "magSize": 30,
+      "currentModel": "weapons/SM_Civilian_Submachine_Gun.fbx",
+      "revisitAs": null
+    },
+    {
+      "name": "P90",
+      "class": "smg",
+      "type": "ranged",
+      "rarity": "rare",
+      "damage": 14,
+      "fireRate": 18,
+      "magSize": 50,
+      "currentModel": "weapons/SM_Police_Submachine_Gun.fbx",
+      "revisitAs": "p90"
+    },
+    {
+      "name": "M4",
+      "class": "rifle",
+      "type": "ranged",
+      "rarity": "common",
+      "damage": 24,
+      "fireRate": 12,
+      "magSize": 30,
+      "currentModel": "weapons/SM_Assault_Rifle_5_56.fbx",
+      "revisitAs": null
+    },
+    {
+      "name": "AK47",
+      "class": "rifle",
+      "type": "ranged",
+      "rarity": "uncommon",
+      "damage": 32,
+      "fireRate": 9,
+      "magSize": 30,
+      "currentModel": "weapons/SM_Assault_Rifle_5_45.fbx",
+      "revisitAs": "ak47"
+    },
+    {
+      "name": "AS VAL",
+      "class": "rifle",
+      "type": "ranged",
+      "rarity": "rare",
+      "damage": 28,
+      "fireRate": 10,
+      "magSize": 30,
+      "currentModel": "weapons/SM_Assault_Rifle_9x39.fbx",
+      "revisitAs": "as val"
+    },
+    {
+      "name": "VSS",
+      "class": "rifle",
+      "type": "ranged",
+      "rarity": "rare",
+      "damage": 52,
+      "fireRate": 4.2,
+      "magSize": 10,
+      "currentModel": "weapons/SM_Assault_Rifle_9x39.fbx",
+      "revisitAs": "vss"
+    },
+    {
+      "name": "Snub Revolver",
+      "class": "pistol",
+      "type": "ranged",
+      "rarity": "common",
+      "damage": 40,
+      "fireRate": 4,
+      "magSize": 5,
+      "currentModel": "weapons/SM_Revolver.fbx",
+      "revisitAs": "colt anaconda .44"
+    },
+    {
+      "name": "Revolver",
+      "class": "pistol",
+      "type": "ranged",
+      "rarity": "uncommon",
+      "damage": 62,
+      "fireRate": 3.2,
+      "magSize": 6,
+      "currentModel": "weapons/SM_Revolver.fbx",
+      "revisitAs": null
+    },
+    {
+      "name": "Desert Eagle",
+      "class": "pistol",
+      "type": "ranged",
+      "rarity": "rare",
+      "damage": 95,
+      "fireRate": 2.6,
+      "magSize": 7,
+      "currentModel": "weapons/SM_Hunting_Pistol.fbx",
+      "revisitAs": "desert eagle .50"
+    },
+    {
+      "name": "M1911",
+      "class": "pistol",
+      "type": "ranged",
+      "rarity": "common",
+      "damage": 52,
+      "fireRate": 4.2,
+      "magSize": 7,
+      "currentModel": "weapons/SM_Police_Gun.fbx",
+      "revisitAs": "m1911"
+    },
+    {
+      "name": "Flare Gun",
+      "class": "exotic",
+      "type": "ranged",
+      "rarity": "uncommon",
+      "damage": 14,
+      "fireRate": 1.2,
+      "magSize": 1,
+      "currentModel": "weapons/SM_Civilian_Pistol.fbx",
+      "revisitAs": null
+    },
+    {
+      "name": "MP7",
+      "class": "smg",
+      "type": "ranged",
+      "rarity": "uncommon",
+      "damage": 13,
+      "fireRate": 15,
+      "magSize": 40,
+      "currentModel": "weapons/SM_Civilian_Submachine_Gun.fbx",
+      "revisitAs": null
+    },
+    {
+      "name": "Remington 700",
+      "class": "sniper",
+      "type": "ranged",
+      "rarity": "common",
+      "damage": 52,
+      "fireRate": 3.2,
+      "magSize": 5,
+      "currentModel": "weapons/SM_Hunting_Sniper_Rifle.fbx",
+      "revisitAs": null
+    },
+    {
+      "name": "Mosin",
+      "class": "sniper",
+      "type": "ranged",
+      "rarity": "common",
+      "damage": 85,
+      "fireRate": 1.2,
+      "magSize": 5,
+      "currentModel": "weapons/SM_Large_Caliber_Sniper_Rifle.fbx",
+      "revisitAs": null
+    },
+    {
+      "name": "SVD",
+      "class": "sniper",
+      "type": "ranged",
+      "rarity": "rare",
+      "damage": 72,
+      "fireRate": 3.8,
+      "magSize": 10,
+      "currentModel": "weapons/SM_Army_Sniper_Rifle.fbx",
+      "revisitAs": "SVD Dragonov"
+    },
+    {
+      "name": "Cheytac Intervention",
+      "class": "sniper",
+      "type": "ranged",
+      "rarity": "epic",
+      "damage": 200,
+      "fireRate": 0.9,
+      "magSize": 5,
+      "currentModel": "weapons/SM_High_Precision_Sniper_Rifle.fbx",
+      "revisitAs": null
+    },
+    {
+      "name": "M16",
+      "class": "rifle",
+      "type": "ranged",
+      "rarity": "uncommon",
+      "damage": 26,
+      "fireRate": 11,
+      "magSize": 30,
+      "currentModel": "weapons/Assault_Rifle_5_56_Prototype.fbx",
+      "revisitAs": "m16"
+    },
+    {
+      "name": "M16A4",
+      "class": "rifle",
+      "type": "ranged",
+      "rarity": "rare",
+      "damage": 38,
+      "fireRate": 9,
+      "magSize": 20,
+      "currentModel": "weapons/Assault_Rifle_5_56_Prototype.fbx",
+      "revisitAs": null
+    },
+    {
+      "name": "Tavor",
+      "class": "rifle",
+      "type": "ranged",
+      "rarity": "uncommon",
+      "damage": 26,
+      "fireRate": 11,
+      "magSize": 30,
+      "currentModel": "weapons/SM_Bulpam_Assault_Rifle.fbx",
+      "revisitAs": "AUG A3-CQC"
+    },
+    {
+      "name": "AK47 ACOG",
+      "class": "rifle",
+      "type": "ranged",
+      "rarity": "rare",
+      "damage": 36,
+      "fireRate": 9,
+      "magSize": 30,
+      "currentModel": "weapons/SM_Assault_Rifle_5_45_Clean.fbx",
+      "revisitAs": null
+    },
+    {
+      "name": "M4 Block II",
+      "class": "rifle",
+      "type": "ranged",
+      "rarity": "rare",
+      "damage": 26,
+      "fireRate": 13,
+      "magSize": 60,
+      "currentModel": "weapons/Assault_Rifle_5_56_Prototype.fbx",
+      "revisitAs": null
+    },
+    {
+      "name": "M240",
+      "class": "lmg",
+      "type": "ranged",
+      "rarity": "uncommon",
+      "damage": 24,
+      "fireRate": 11,
+      "magSize": 100,
+      "currentModel": "weapons/SM_Light_Machine_Gun.fbx",
+      "revisitAs": null
+    },
+    {
+      "name": "RPK",
+      "class": "lmg",
+      "type": "ranged",
+      "rarity": "uncommon",
+      "damage": 29,
+      "fireRate": 10,
+      "magSize": 75,
+      "currentModel": "weapons/SM_Light_Machine_Gun.fbx",
+      "revisitAs": null
+    },
+    {
+      "name": "PKM",
+      "class": "lmg",
+      "type": "ranged",
+      "rarity": "rare",
+      "damage": 36,
+      "fireRate": 10,
+      "magSize": 100,
+      "currentModel": "weapons/SM_Heavy_Machine_Gun.fbx",
+      "revisitAs": "type 80 LMG"
+    },
+    {
+      "name": "AA-12",
+      "class": "shotgun",
+      "type": "ranged",
+      "rarity": "uncommon",
+      "damage": 18,
+      "fireRate": 1.8,
+      "magSize": 8,
+      "currentModel": "weapons/SM_Assault_Shotgun.fbx",
+      "revisitAs": "aa-12 shotgun"
+    },
+    {
+      "name": "Jessica's Rage",
+      "class": "pistol",
+      "type": "ranged",
+      "rarity": "legendary",
+      "damage": 125,
+      "fireRate": 3.2,
+      "magSize": 999,
+      "currentModel": "weapons/SM_Hunting_Pistol.fbx",
+      "revisitAs": null
+    },
+    {
+      "name": "Dragonbreath",
+      "class": "shotgun",
+      "type": "ranged",
+      "rarity": "mythic",
+      "damage": 34,
+      "fireRate": 1.4,
+      "magSize": 6,
+      "currentModel": null,
+      "revisitAs": null
+    },
+    {
+      "name": "Hailstorm Minigun",
+      "class": "lmg",
+      "type": "ranged",
+      "rarity": "mythic",
+      "damage": 16,
+      "fireRate": 18,
+      "magSize": 200,
+      "currentModel": null,
+      "revisitAs": null
+    },
+    {
+      "name": "Kingsmaker GL",
+      "class": "shotgun",
+      "type": "ranged",
+      "rarity": "mythic",
+      "damage": 0,
+      "fireRate": 0.9,
+      "magSize": 4,
+      "currentModel": null,
+      "revisitAs": null
+    },
+    {
+      "name": "Widowmaker Rocket",
+      "class": "lmg",
+      "type": "ranged",
+      "rarity": "mythic",
+      "damage": 0,
+      "fireRate": 0.6,
+      "magSize": 2,
+      "currentModel": null,
+      "revisitAs": null
+    },
+    {
+      "name": "Whisper Dart",
+      "class": "pistol",
+      "type": "ranged",
+      "rarity": "mythic",
+      "damage": 22,
+      "fireRate": 1.6,
+      "magSize": 8,
+      "currentModel": null,
+      "revisitAs": null
+    },
+    {
+      "name": "Stormbreaker",
+      "class": "melee",
+      "type": "melee",
+      "rarity": "mythic",
+      "currentModel": null,
+      "revisitAs": null
+    },
+    {
+      "name": "Knife",
+      "class": "melee",
+      "type": "melee",
+      "rarity": "common",
+      "currentModel": "melee/SM_Combat_Knife.fbx",
+      "revisitAs": "combat knife"
+    },
+    {
+      "name": "Club",
+      "class": "melee",
+      "type": "melee",
+      "rarity": "common",
+      "currentModel": "melee/SM_Hammer.fbx",
+      "revisitAs": "hammer"
+    },
+    {
+      "name": "Baseball Bat",
+      "class": "melee",
+      "type": "melee",
+      "rarity": "uncommon",
+      "currentModel": "melee/SM_Baseball_bat_Nails_reinforced_.fbx",
+      "revisitAs": null
+    },
+    {
+      "name": "katana",
+      "class": "melee",
+      "type": "melee",
+      "rarity": "rare",
+      "currentModel": "melee/SM_Katana.fbx",
+      "revisitAs": null
+    },
+    {
+      "name": "Brass Knuckles",
+      "class": "melee",
+      "type": "melee",
+      "rarity": "common",
+      "currentModel": "melee/SM_Brass_Knuckles_02.fbx",
+      "revisitAs": null
+    },
+    {
+      "name": "Crowbar",
+      "class": "melee",
+      "type": "melee",
+      "rarity": "common",
+      "currentModel": "melee/SM_Tire_iron.fbx",
+      "revisitAs": null
+    },
+    {
+      "name": "Kukri",
+      "class": "melee",
+      "type": "melee",
+      "rarity": "uncommon",
+      "currentModel": "weapons/SM_Kukri.fbx",
+      "revisitAs": null
+    },
+    {
+      "name": "Tomahawk",
+      "class": "melee",
+      "type": "melee",
+      "rarity": "uncommon",
+      "currentModel": "weapons/SM_Combat_Axe.fbx",
+      "revisitAs": null
+    },
+    {
+      "name": "Fire Axe",
+      "class": "melee",
+      "type": "melee",
+      "rarity": "uncommon",
+      "currentModel": "melee/SM_Fire_Axe.fbx",
+      "revisitAs": null
+    },
+    {
+      "name": "Sledgehammer",
+      "class": "melee",
+      "type": "melee",
+      "rarity": "rare",
+      "currentModel": "tools/SM_Sledgehammer.fbx",
+      "revisitAs": null
+    },
+    {
+      "name": "Chainsaw",
+      "class": "melee",
+      "type": "melee",
+      "rarity": "epic",
+      "currentModel": "tools/SM_Chainsaw.fbx",
+      "revisitAs": null
+    }
+  ],
+  "weapons_to_revisit": [
+    {
+      "currentName": "lmg",
+      "revisitAs": "m249"
+    },
+    {
+      "currentName": "shotgun",
+      "revisitAs": "benelli m4"
+    },
+    {
+      "currentName": "pistol",
+      "revisitAs": "makarov"
+    },
+    {
+      "currentName": "Glock",
+      "revisitAs": "glock 17"
+    },
+    {
+      "currentName": "AKS-74U",
+      "revisitAs": "ump45"
+    },
+    {
+      "currentName": "P90",
+      "revisitAs": "p90"
+    },
+    {
+      "currentName": "AK47",
+      "revisitAs": "ak47"
+    },
+    {
+      "currentName": "AS VAL",
+      "revisitAs": "as val"
+    },
+    {
+      "currentName": "VSS",
+      "revisitAs": "vss"
+    },
+    {
+      "currentName": "Snub Revolver",
+      "revisitAs": "colt anaconda .44"
+    },
+    {
+      "currentName": "Desert Eagle",
+      "revisitAs": "desert eagle .50"
+    },
+    {
+      "currentName": "M1911",
+      "revisitAs": "m1911"
+    },
+    {
+      "currentName": "SVD",
+      "revisitAs": "SVD Dragonov"
+    },
+    {
+      "currentName": "M16",
+      "revisitAs": "m16"
+    },
+    {
+      "currentName": "Tavor",
+      "revisitAs": "AUG A3-CQC"
+    },
+    {
+      "currentName": "AA-12",
+      "revisitAs": "aa-12 shotgun"
+    },
+    {
+      "currentName": "PKM",
+      "revisitAs": "type 80 LMG"
+    },
+    {
+      "currentName": "flamethrower",
+      "revisitAs": "widowmaker rocket launcher"
+    },
+    {
+      "currentName": "Knife",
+      "revisitAs": "combat knife"
+    },
+    {
+      "currentName": "Club",
+      "revisitAs": "hammer"
+    }
+  ],
+  "deleted_in_game_weapons": [
+    "smg",
+    "rifle",
+    "Sig P320",
+    "Beretta 92",
+    "M4",
+    "Revolver",
+    "Flare Gun",
+    "MP7",
+    "Mosin",
+    "M16A4",
+    "AK47 ACOG",
+    "M4 Block II",
+    "M240",
+    "RPK",
+    "Hailstorm Minigun",
+    "Kingsmaker GL",
+    "Widowmaker Rocket",
+    "Whisper Dart",
+    "Stormbreaker"
+  ],
+  "deleted_fbx": []
+}

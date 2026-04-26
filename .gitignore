@@ -43,3 +43,4 @@ Assets/*.unitypackage
 # the rest.
 profiling/*.json
 profiling/*.json.gz
+tools/__pycache__/
