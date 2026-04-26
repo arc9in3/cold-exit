@@ -1342,6 +1342,12 @@ export class Level {
     } else if (room.layout === 'lshape') {
       // Block off one corner with two interior walls to form an L-shaped
       // floor. Pick a corner that isn't adjacent to any doorway.
+      // Each wall stops 2m short of the room boundary so the partitioned
+      // corner cell is always reachable through one of the two
+      // archways. Without this gap, an enemy / boss could spawn in the
+      // sealed cell and the player couldn't reach them — repro'd from
+      // a level-3 lshape boss room where the southeast corner was
+      // fully enclosed.
       const corners = [
         { name: 'NE', cx: (b.minX + b.maxX) / 2, cz: (b.minZ + b.maxZ) / 2, xSign: +1, zSign: -1, doors: ['east', 'north'] },
         { name: 'NW', cx: (b.minX + b.maxX) / 2, cz: (b.minZ + b.maxZ) / 2, xSign: -1, zSign: -1, doors: ['west', 'north'] },
@@ -1354,12 +1360,16 @@ export class Level {
       const centerZ = (b.minZ + b.maxZ) / 2;
       const halfW = (b.maxX - b.minX) / 2;
       const halfD = (b.maxZ - b.minZ) / 2;
-      // Horizontal wall from center→edge on the corner's X side.
-      const hx = (centerX + (pick.xSign > 0 ? b.maxX : b.minX)) / 2;
-      this._addObstacle(hx, WALL_HEIGHT / 2, centerZ, halfW, WALL_HEIGHT, WALL_THICK, FULL_WALL_COLOR);
-      // Vertical wall from center→edge on the corner's Z side.
-      const vz = (centerZ + (pick.zSign > 0 ? b.maxZ : b.minZ)) / 2;
-      this._addObstacle(centerX, WALL_HEIGHT / 2, vz, WALL_THICK, WALL_HEIGHT, halfD, FULL_WALL_COLOR);
+      const GAP = 2.0;                       // walkable archway at outer end
+      // Horizontal wall: stops GAP short of the X edge so the corner
+      // has an open passage along the room's outer wall.
+      const hLen = Math.max(1.0, halfW - GAP);
+      const hx = centerX + pick.xSign * hLen / 2;
+      this._addObstacle(hx, WALL_HEIGHT / 2, centerZ, hLen, WALL_HEIGHT, WALL_THICK, FULL_WALL_COLOR);
+      // Vertical wall: stops GAP short of the Z edge for the same reason.
+      const vLen = Math.max(1.0, halfD - GAP);
+      const vz = centerZ + pick.zSign * vLen / 2;
+      this._addObstacle(centerX, WALL_HEIGHT / 2, vz, WALL_THICK, WALL_HEIGHT, vLen, FULL_WALL_COLOR);
     } else if (room.layout === 'hallway') {
       // Two parallel interior walls narrow the passable corridor. They
       // would block door approaches on the short edges, so skip the
