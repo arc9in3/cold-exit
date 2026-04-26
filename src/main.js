@@ -1720,6 +1720,38 @@ function regenerateLevel() {
           const pick = pool[Math.floor(Math.random() * pool.length)];
           return wrapWeapon(pick);
         },
+        rollEpicWeapon: () => {
+          const pool = tunables.weapons.filter(w =>
+            !w.artifact && !w.mythic && w.rarity === 'epic');
+          const fallback = tunables.weapons.filter(w =>
+            !w.artifact && !w.mythic && w.rarity === 'rare');
+          const src = pool.length ? pool : fallback;
+          if (!src.length) return null;
+          return wrapWeapon(src[Math.floor(Math.random() * src.length)]);
+        },
+        rollLegendaryWeapon: () => {
+          const pool = tunables.weapons.filter(w =>
+            !w.artifact && !w.mythic && w.rarity === 'legendary');
+          const fallback = tunables.weapons.filter(w =>
+            !w.artifact && !w.mythic && w.rarity === 'epic');
+          const src = pool.length ? pool : fallback;
+          if (!src.length) return null;
+          return wrapWeapon(src[Math.floor(Math.random() * src.length)]);
+        },
+        rollUnownedArtifactScroll: () => {
+          const unowned = ALL_ARTIFACTS.filter(a => !artifacts.has(a.id));
+          if (!unowned.length) return null;
+          const def = unowned[Math.floor(Math.random() * unowned.length)];
+          return artifactScrollFor(def.id);
+        },
+        getKillCount: () => runStats.kills | 0,
+        markEncounterComplete: (id) => markEncounterDone(id),
+        // Smoke puff at world XZ — used by Glass Case telegraph.
+        // Cheap: a few additive grey spheres rising and fading.
+        spawnPuffAt: (x, z) => _spawnSmokePuff(x, z),
+        // Elite gunman spawn at world XZ tagged to the encounter
+        // room. Uses the standard gunman manager.
+        spawnEliteAt: (x, z, room) => _spawnEliteAtPos(x, z, room),
       }),
     };
   }
@@ -2653,8 +2685,89 @@ let _hittablesFrame = -1;
 function allHittables() {
   if (_hittablesFrame === frameCounter && _hittablesCache) return _hittablesCache;
   _hittablesCache = [...dummies.hittables(), ...gunmen.hittables(), ...melees.hittables(), ...drones.hittables()];
+  // Fold in encounter hittables (e.g. glass-case panels). Each one
+  // already carries userData.owner pointing to the encounter target,
+  // and target.manager.applyHit dispatches the encounter trigger.
+  if (level && level.rooms) {
+    for (const r of level.rooms) {
+      const enc = r._encounter;
+      if (!enc || !enc.def.hittables) continue;
+      const list = enc.def.hittables(enc.state);
+      if (list && list.length) _hittablesCache.push(...list);
+    }
+  }
   _hittablesFrame = frameCounter;
   return _hittablesCache;
+}
+
+// Light grey smoke-puff at XZ — 6 additive spheres rising and fading
+// over ~0.7s. Used by the Glass Case telegraph; cheap enough that
+// firing 4 in one frame is fine.
+function _spawnSmokePuff(x, z) {
+  const count = 6;
+  for (let i = 0; i < count; i++) {
+    const a = (i / count) * Math.PI * 2;
+    const r = 0.10 + Math.random() * 0.20;
+    const mesh = new THREE.Mesh(
+      new THREE.SphereGeometry(0.18 + Math.random() * 0.10, 6, 5),
+      new THREE.MeshBasicMaterial({
+        color: 0xa8a8b0, transparent: true, opacity: 0.55,
+        depthWrite: false,
+      }),
+    );
+    mesh.position.set(x + Math.cos(a) * r, 0.20, z + Math.sin(a) * r);
+    scene.add(mesh);
+    const drift = {
+      vy: 0.8 + Math.random() * 0.5,
+      dx: (Math.random() - 0.5) * 0.4,
+      dz: (Math.random() - 0.5) * 0.4,
+      life: 0.6 + Math.random() * 0.3, t: 0,
+    };
+    _smokePuffs.push({ mesh, drift });
+  }
+}
+const _smokePuffs = [];
+function _tickSmokePuffs(dt) {
+  for (let i = _smokePuffs.length - 1; i >= 0; i--) {
+    const p = _smokePuffs[i];
+    p.drift.t += dt;
+    p.mesh.position.x += p.drift.dx * dt;
+    p.mesh.position.z += p.drift.dz * dt;
+    p.mesh.position.y += p.drift.vy * dt;
+    const k = Math.max(0, 1 - p.drift.t / p.drift.life);
+    p.mesh.material.opacity = 0.55 * k;
+    p.mesh.scale.setScalar(1 + (1 - k) * 1.3);
+    if (p.drift.t >= p.drift.life) {
+      scene.remove(p.mesh);
+      p.mesh.geometry.dispose();
+      p.mesh.material.dispose();
+      _smokePuffs.splice(i, 1);
+    }
+  }
+}
+
+// Spawn one elite gunman at world XZ for a given encounter room.
+// Standard gunman manager + opts; the encounter handler treats the
+// resulting kills as normal kills (XP, drops, room clearance).
+function _spawnEliteAtPos(x, z, room) {
+  const diff = difficultyScale();
+  const opts = {
+    tier: 'elite', roomId: room.id,
+    hpMult: diff.hpMult, damageMult: diff.damageMult,
+    reactionMult: diff.reactionMult,
+    aimSpreadMult: diff.aimSpreadMult,
+    aggression: diff.aggression,
+    variant: 'standard',
+    gearLevel: (level?.index || 0),
+  };
+  const weapon = pickWeaponForAI('standard');
+  const g = gunmen.spawn(x, z, weapon, opts);
+  if (g) {
+    // Drop them into ALERTED so they engage the player without idle bark.
+    g.state = 'alerted';
+    g.reactionT = 0.20;
+  }
+  return g;
 }
 
 function resolveCollision(oldX, oldZ, newX, newZ, radius) {
@@ -7407,6 +7520,7 @@ function tick() {
   tickAmbushDrops(dt);
   tickCorpseDespawn(dt);
   tickEncounters(dt);
+  _tickSmokePuffs(dt);
   // Player flash + stun decay. Flash drives a fullscreen white
   // overlay that fades from 1.0 → 0 over the duration; stun decays
   // separately, the camera waver reads it below.

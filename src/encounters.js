@@ -152,6 +152,148 @@ function _buildDuck() {
   return group;
 }
 
+// Build a confession booth — tall narrow wooden box with a curtain
+// arch on the front and a small grille on the side. Reads as a small
+// religious confessional from a few metres away.
+function _buildConfessionBooth() {
+  const group = new THREE.Group();
+  const woodMat = new THREE.MeshStandardMaterial({ color: 0x4a2e1a, roughness: 0.85 });
+  const trimMat = new THREE.MeshStandardMaterial({
+    color: 0xc9a050, roughness: 0.4, metalness: 0.4,
+    emissive: 0x6a4810, emissiveIntensity: 0.35,
+  });
+  const curtainMat = new THREE.MeshStandardMaterial({ color: 0x682018, roughness: 0.9 });
+  // Booth shell.
+  const back = new THREE.Mesh(new THREE.BoxGeometry(1.4, 2.4, 0.10), woodMat);
+  back.position.set(0, 1.20, -0.50);
+  back.castShadow = true;
+  group.add(back);
+  const left = new THREE.Mesh(new THREE.BoxGeometry(0.10, 2.4, 1.0), woodMat);
+  left.position.set(-0.65, 1.20, 0);
+  group.add(left);
+  const right = left.clone();
+  right.position.set(0.65, 1.20, 0);
+  group.add(right);
+  const roof = new THREE.Mesh(new THREE.BoxGeometry(1.6, 0.10, 1.2), woodMat);
+  roof.position.set(0, 2.50, -0.05);
+  group.add(roof);
+  // Curtain arch — slight forward bulge using two stacked tilted boxes.
+  const curtain = new THREE.Mesh(new THREE.BoxGeometry(1.20, 1.6, 0.06), curtainMat);
+  curtain.position.set(0, 1.0, 0.50);
+  group.add(curtain);
+  // Gold trim cross above the curtain.
+  const cv = new THREE.Mesh(new THREE.BoxGeometry(0.10, 0.45, 0.06), trimMat);
+  cv.position.set(0, 2.30, 0.52);
+  group.add(cv);
+  const ch = new THREE.Mesh(new THREE.BoxGeometry(0.32, 0.10, 0.06), trimMat);
+  ch.position.set(0, 2.32, 0.52);
+  group.add(ch);
+  return group;
+}
+
+// Build a small skull for the cairn. Returns a Mesh.
+function _buildSkull() {
+  const mat = new THREE.MeshStandardMaterial({
+    color: 0xe8dfc8, roughness: 0.6,
+    emissive: 0x402010, emissiveIntensity: 0.10,
+  });
+  const eyeMat = new THREE.MeshBasicMaterial({ color: 0x080406 });
+  const group = new THREE.Group();
+  const cranium = new THREE.Mesh(new THREE.SphereGeometry(0.16, 10, 8), mat);
+  cranium.castShadow = true;
+  group.add(cranium);
+  const jaw = new THREE.Mesh(new THREE.BoxGeometry(0.18, 0.08, 0.18), mat);
+  jaw.position.set(0, -0.16, 0.04);
+  group.add(jaw);
+  const eyeL = new THREE.Mesh(new THREE.SphereGeometry(0.04, 6, 6), eyeMat);
+  const eyeR = eyeL.clone();
+  eyeL.position.set(-0.06, 0.02, 0.13);
+  eyeR.position.set( 0.06, 0.02, 0.13);
+  group.add(eyeL, eyeR);
+  return group;
+}
+
+// Build a cairn — pyramid stack of `count` skulls roughly 1m wide,
+// 0.8m tall. Returns a parent group with `dispose()` already wired
+// for the collapse animation (rotation per skull).
+function _buildSkullCairn(count = 9) {
+  const cairn = new THREE.Group();
+  let placed = 0;
+  for (let layer = 0; placed < count; layer++) {
+    const radius = 0.40 - layer * 0.10;
+    const ringCount = layer === 0 ? 5 : Math.max(1, 4 - layer);
+    for (let i = 0; i < ringCount && placed < count; i++) {
+      const a = (i / ringCount) * Math.PI * 2 + (layer * 0.25);
+      const skull = _buildSkull();
+      skull.position.set(
+        Math.cos(a) * radius,
+        0.18 + layer * 0.30,
+        Math.sin(a) * radius,
+      );
+      skull.rotation.y = a + Math.PI;
+      cairn.add(skull);
+      placed++;
+    }
+  }
+  return cairn;
+}
+
+// Build a glass display case — pedestal + four glass walls + roof.
+// Inner mesh shows a glowing stand-in for the legendary weapon.
+// Returns the group plus references to the glass meshes (for breaking)
+// and the inner item slot.
+function _buildGlassCase(itemTint = 0xffffff) {
+  const group = new THREE.Group();
+  const baseMat = new THREE.MeshStandardMaterial({ color: 0x383d48, roughness: 0.55, metalness: 0.4 });
+  const trimMat = new THREE.MeshStandardMaterial({
+    color: 0xc8a868, roughness: 0.4, metalness: 0.7,
+    emissive: 0x402a10, emissiveIntensity: 0.25,
+  });
+  const glassMat = new THREE.MeshStandardMaterial({
+    color: 0xa8c8d8, roughness: 0.05, metalness: 0.0,
+    transparent: true, opacity: 0.30,
+    emissive: 0x103040, emissiveIntensity: 0.18,
+  });
+  // Pedestal.
+  const pedestal = new THREE.Mesh(new THREE.BoxGeometry(0.95, 0.55, 0.95), baseMat);
+  pedestal.position.y = 0.275;
+  pedestal.castShadow = true;
+  group.add(pedestal);
+  const pedTop = new THREE.Mesh(new THREE.BoxGeometry(1.05, 0.05, 1.05), trimMat);
+  pedTop.position.y = 0.575;
+  group.add(pedTop);
+  // Four glass walls.
+  const glassRefs = [];
+  const wall = (x, z, w, d) => {
+    const m = new THREE.Mesh(new THREE.BoxGeometry(w, 1.4, d), glassMat);
+    m.position.set(x, 1.30, z);
+    group.add(m);
+    glassRefs.push(m);
+    return m;
+  };
+  wall(0,  0.45, 0.95, 0.04);
+  wall(0, -0.45, 0.95, 0.04);
+  wall( 0.45, 0, 0.04, 0.95);
+  wall(-0.45, 0, 0.04, 0.95);
+  // Roof.
+  const roof = new THREE.Mesh(new THREE.BoxGeometry(1.0, 0.05, 1.0), trimMat);
+  roof.position.y = 2.05;
+  group.add(roof);
+  // Inner item — a glowing rectangle tinted by the legendary's color.
+  const itemMat = new THREE.MeshStandardMaterial({
+    color: itemTint, roughness: 0.3, metalness: 0.6,
+    emissive: itemTint, emissiveIntensity: 0.55,
+  });
+  const innerItem = new THREE.Mesh(new THREE.BoxGeometry(0.55, 0.10, 0.18), itemMat);
+  innerItem.position.set(0, 1.10, 0);
+  group.add(innerItem);
+  // Small point light inside to make the item read.
+  const light = new THREE.PointLight(itemTint, 0.7, 3.5);
+  light.position.set(0, 1.20, 0);
+  group.add(light);
+  return { group, glassRefs, innerItem, glassMat, light };
+}
+
 // Build a smashed cart for the broken-vendor encounter — a couple of
 // tilted plank rectangles + a fallen wheel. Reads as wreckage from a
 // few metres away.
@@ -464,6 +606,278 @@ export const ENCOUNTER_DEFS = {
       const reward = ctx.rollLowTierWeapon && ctx.rollLowTierWeapon();
       if (reward) ctx.spawnLoot(s.disc.cx - 1.4, s.disc.cz, reward);
       return { consume: true, complete: true };
+    },
+  },
+
+  // -----------------------------------------------------------------
+  // Confession Booth — drop ANY weapon (ranged or melee, equipped
+  // OR backpack) and the booth absorbs it; a random unowned
+  // artifact scroll appears in its place. One-shot per save.
+  confession_booth: {
+    id: 'confession_booth',
+    name: 'Confession Booth',
+    floorColor: 0xe6c060,             // ecclesiastical gold
+    oncePerSave: true,
+    condition: (state) => state.levelIndex >= 2,
+    spawn(scene, room, ctx) {
+      const disc = _spawnFloorDisc(scene, room, this.floorColor);
+      const booth = _buildConfessionBooth();
+      booth.position.set(disc.cx, 0, disc.cz);
+      scene.add(booth);
+      const label = _makeLabelSprite('CONFESSION BOOTH', '#f0d488');
+      label.position.set(disc.cx, 3.2, disc.cz);
+      scene.add(label);
+      // Subtle hint sprite below — the player has to figure out the
+      // mechanic, but we drop a small hint about weapons.
+      const hint = _makeLabelSprite('Drop a weapon to confess', '#c9a87a');
+      hint.scale.set(3.6, 0.65, 1);
+      hint.position.set(disc.cx, 0.55, disc.cz + 1.6);
+      scene.add(hint);
+      return { booth, label, hint, disc, complete: false };
+    },
+    tick(dt, ctx) {
+      // No idle barks — booth is silent. Could add a faint glow pulse
+      // on the cross above the curtain, but skipping for perf.
+    },
+    onItemDropped(item, ctx) {
+      const s = ctx.state;
+      if (s.complete) return { consume: false };
+      const isWeapon = item && (item.type === 'ranged' || item.type === 'melee');
+      if (!isWeapon) return { consume: false };
+      s.complete = true;
+      ctx.spawnSpeech(s.booth.position.clone().setY(2.6),
+        '...your offering is heard.', 4.0);
+      // Roll an unowned artifact; if everything's owned bail without
+      // marking complete so the player gets their weapon back.
+      const scroll = ctx.rollUnownedArtifactScroll && ctx.rollUnownedArtifactScroll();
+      if (!scroll) {
+        s.complete = false;
+        return { consume: false };
+      }
+      ctx.spawnLoot(s.disc.cx, s.disc.cz + 1.0, scroll);
+      // Hide the hint sprite — completed.
+      if (s.hint) s.hint.visible = false;
+      return { consume: true, complete: true };
+    },
+  },
+
+  // -----------------------------------------------------------------
+  // Skull Pile — cairn of skulls. Need 25+ kills across the run.
+  // If the threshold's already met when the room is generated the
+  // cairn shows up pre-collapsed with the epic weapon already on
+  // the floor; otherwise it stands intact and barks a warning.
+  skull_pile: {
+    id: 'skull_pile',
+    name: 'Skull Pile',
+    floorColor: 0xeae0d0,             // bone white
+    oncePerSave: true,
+    condition: (state) => state.levelIndex >= 2,
+    THRESHOLD: 25,
+    spawn(scene, room, ctx) {
+      const disc = _spawnFloorDisc(scene, room, this.floorColor);
+      const cairn = _buildSkullCairn(11);
+      cairn.position.set(disc.cx, 0, disc.cz);
+      scene.add(cairn);
+      const label = _makeLabelSprite('SKULL PILE', '#e8dfc8');
+      label.position.set(disc.cx, 1.8, disc.cz);
+      scene.add(label);
+      // Already collapsed if the player has hit the kill threshold
+      // on the run by the time they enter. Don't spawn the reward
+      // yet — wait for first room entry so the player witnesses the
+      // collapse animation.
+      const killsAtGen = ctx.getKillCount ? ctx.getKillCount() : 0;
+      const preCollapsed = killsAtGen >= this.THRESHOLD;
+      return {
+        cairn, label, disc,
+        complete: false,
+        preCollapsed,
+        triggeredEntry: false,
+        barkT: 0,
+        nextBark: 0,
+        wobbleT: 0,
+        playerWasNear: false,
+      };
+    },
+    tick(dt, ctx) {
+      const s = ctx.state;
+      if (!s.cairn) return;
+      const px = ctx.playerPos.x - s.disc.cx;
+      const pz = ctx.playerPos.z - s.disc.cz;
+      const d2 = px * px + pz * pz;
+      const near = d2 < 36;
+      // First entry — fire the collapse if pre-collapsed, else bark
+      // the warning line.
+      if (near && !s.triggeredEntry) {
+        s.triggeredEntry = true;
+        if (s.preCollapsed) {
+          // Collapse animation runs in tick (see below). Spawn the
+          // reward immediately on the floor.
+          ctx.spawnSpeech(s.cairn.position.clone().setY(1.5),
+            'They... knew you were coming.', 4.0);
+          const reward = ctx.rollEpicWeapon && ctx.rollEpicWeapon();
+          if (reward) ctx.spawnLoot(s.disc.cx, s.disc.cz, reward);
+          s.collapseT = 1.4;
+          s.complete = true;
+        } else {
+          ctx.spawnSpeech(s.cairn.position.clone().setY(1.5),
+            'You sense them watching.', 3.5);
+        }
+      }
+      // Collapse animation — drop each skull with a wobble.
+      if (s.collapseT > 0) {
+        s.collapseT = Math.max(0, s.collapseT - dt);
+        const k = 1 - (s.collapseT / 1.4);
+        for (const child of s.cairn.children) {
+          child.position.y = Math.max(0.10, child.position.y - dt * 1.6);
+          child.rotation.z += dt * (Math.random() - 0.5) * 4;
+        }
+      }
+      // Idle bark while alive + uncollapsed.
+      if (!s.preCollapsed && !s.complete && near && s.barkT <= 0) {
+        s.barkT = 6.0 + Math.random() * 3;
+        const lines = [
+          'You sense them watching.',
+          'A breath of cold air. Behind you.',
+          'The skulls shift, just a little.',
+        ];
+        ctx.spawnSpeech(s.cairn.position.clone().setY(1.5),
+          lines[s.nextBark % lines.length], 3.5);
+        s.nextBark++;
+      }
+      s.barkT = Math.max(0, s.barkT - dt);
+      // While not pre-collapsed: every frame check kill count; once
+      // it crosses the threshold AND the player is in the room,
+      // trigger the collapse.
+      if (!s.complete && !s.preCollapsed && near && ctx.getKillCount) {
+        if (ctx.getKillCount() >= ENCOUNTER_DEFS.skull_pile.THRESHOLD) {
+          ctx.spawnSpeech(s.cairn.position.clone().setY(1.5),
+            'The cairn... it shifts. Something gives way.', 4.0);
+          const reward = ctx.rollEpicWeapon && ctx.rollEpicWeapon();
+          if (reward) ctx.spawnLoot(s.disc.cx, s.disc.cz, reward);
+          s.collapseT = 1.4;
+          s.complete = true;
+          if (ctx.markEncounterComplete) ctx.markEncounterComplete('skull_pile');
+        }
+      }
+      s.playerWasNear = near;
+    },
+    onItemDropped(item, ctx) {
+      return { consume: false };     // not item-driven
+    },
+  },
+
+  // -----------------------------------------------------------------
+  // Glass Case — visible legendary inside a fragile glass box. Any
+  // damage breaks the glass; the weapon drops to the floor and 4
+  // elite gunmen spawn at the room corners after a brief telegraph
+  // (puff of smoke). The case meshes are registered as hittables
+  // so the player's bullet pipeline triggers it through the normal
+  // raycast. Once broken, no take-backs.
+  glass_case: {
+    id: 'glass_case',
+    name: 'Glass Case',
+    floorColor: 0x70c8e0,             // cold cyan
+    oncePerSave: true,
+    condition: (state) => state.levelIndex >= 2,
+    spawn(scene, room, ctx) {
+      const disc = _spawnFloorDisc(scene, room, this.floorColor);
+      // Roll the legendary weapon NOW so the inner glow tints to its
+      // tracer color and the same item drops on break.
+      const reward = ctx.rollLegendaryWeapon && ctx.rollLegendaryWeapon();
+      const tint = reward?.tint ?? 0xffd060;
+      const built = _buildGlassCase(tint);
+      built.group.position.set(disc.cx, 0, disc.cz);
+      scene.add(built.group);
+      const label = _makeLabelSprite('GLASS CASE', '#a8e0f0');
+      label.position.set(disc.cx, 2.7, disc.cz);
+      scene.add(label);
+      // Register glass meshes as hittable targets — the bullet
+      // pipeline will hand them to the encounter via owner.manager.
+      const target = {
+        encounterId: 'glass_case',
+        room, disc,
+        broken: false,
+      };
+      const manager = {
+        applyHit: (tgt, dmg) => {
+          if (tgt.broken) return { drops: [], blocked: false };
+          tgt.broken = true;
+          // Fire the break sequence next encounter tick — the bullet
+          // pipeline doesn't have ctx access.
+          tgt._pendingBreak = true;
+          return { drops: [], blocked: false };
+        },
+      };
+      target.manager = manager;
+      for (const mesh of built.glassRefs) {
+        mesh.userData.zone = 'glass';
+        mesh.userData.owner = target;
+      }
+      return {
+        built, label, disc, reward,
+        target,
+        // Telegraph state machine: 'idle' → 'telegraph' (~0.8s of
+        // smoke puffs) → 'spawn' (instantly drops in 4 elites) →
+        // 'done'.
+        phase: 'idle',
+        telegraphT: 0,
+        complete: false,
+      };
+    },
+    tick(dt, ctx) {
+      const s = ctx.state;
+      if (!s.built) return;
+      // Detect the break via target flag.
+      if (s.target._pendingBreak && s.phase === 'idle') {
+        s.target._pendingBreak = false;
+        s.phase = 'telegraph';
+        s.telegraphT = 0.8;
+        // Drop the weapon onto the floor.
+        if (s.reward) ctx.spawnLoot(s.disc.cx, s.disc.cz, s.reward);
+        // Hide the glass walls + inner item — they "shatter".
+        for (const mesh of s.built.glassRefs) mesh.visible = false;
+        s.built.innerItem.visible = false;
+        if (s.built.light) s.built.light.intensity = 0;
+        // Puff smoke at the four room corners (where the elites will
+        // appear).
+        const b = s.disc; // disc carries cx/cz; use the room bounds
+        if (ctx.spawnPuffAt && ctx.room && ctx.room.bounds) {
+          const rb = ctx.room.bounds;
+          const inset = 2.4;
+          ctx.spawnPuffAt(rb.minX + inset, rb.minZ + inset);
+          ctx.spawnPuffAt(rb.maxX - inset, rb.minZ + inset);
+          ctx.spawnPuffAt(rb.minX + inset, rb.maxZ - inset);
+          ctx.spawnPuffAt(rb.maxX - inset, rb.maxZ - inset);
+        }
+        ctx.spawnSpeech(new THREE.Vector3(s.disc.cx, 1.6, s.disc.cz), 'AMBUSH', 2.0);
+      }
+      if (s.phase === 'telegraph') {
+        s.telegraphT = Math.max(0, s.telegraphT - dt);
+        if (s.telegraphT <= 0) {
+          s.phase = 'spawn';
+          if (ctx.spawnEliteAt && ctx.room && ctx.room.bounds) {
+            const rb = ctx.room.bounds;
+            const inset = 2.4;
+            ctx.spawnEliteAt(rb.minX + inset, rb.minZ + inset, ctx.room);
+            ctx.spawnEliteAt(rb.maxX - inset, rb.minZ + inset, ctx.room);
+            ctx.spawnEliteAt(rb.minX + inset, rb.maxZ - inset, ctx.room);
+            ctx.spawnEliteAt(rb.maxX - inset, rb.maxZ - inset, ctx.room);
+          }
+          s.phase = 'done';
+          s.complete = true;
+          if (ctx.markEncounterComplete) ctx.markEncounterComplete('glass_case');
+        }
+      }
+    },
+    onItemDropped(item, ctx) {
+      return { consume: false };     // glass case is shoot-to-trigger
+    },
+    // The encounter exposes hittable meshes so combat.raycast picks
+    // them up. main.js folds these into allHittables() each frame.
+    hittables(state) {
+      if (!state || !state.built) return [];
+      if (state.target && state.target.broken) return [];
+      return state.built.glassRefs;
     },
   },
 };
