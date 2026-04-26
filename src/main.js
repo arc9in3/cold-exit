@@ -5855,46 +5855,48 @@ function updateWallOcclusion() {
   if (level.obstacles && level.obstacles.length && !playerDead) {
     const px = player.mesh.position.x;
     const pz = player.mesh.position.z;
+    // Use the vision-blocker subset — walls + closed doors + elevator
+    // panels, excluding props. _addOcclusionHits filters props out
+    // anyway; passing the smaller pre-filtered list makes BVH
+    // intersect cheaper. Cached + invalidation-tracked by level.js
+    // (visionDirty flag) so this is a stable reference frame-to-frame.
+    const blockers = level.visionBlockers ? level.visionBlockers() : level.obstacles;
+
     // 1. Walls between camera and PLAYER (keeps player always visible).
     _occlTargetPt.set(px, 1.0, pz);
-    _addOcclusionHits(camera.position, _occlTargetPt, level.obstacles, nextFaded);
+    _addOcclusionHits(camera.position, _occlTargetPt, blockers, nextFaded);
 
-    // 2. Walls between camera and each relevant LIVING enemy. Every
-    //    enemy casts a 4-ray silhouette fan (head, chest, both
-    //    shoulders) so walls that clip part of their body still
-    //    fade. The range rule is split by threat state:
-    //      * ACTIVE enemies (alerted / chasing / firing / winding
-    //        up / recovering — anything that isn't idle or asleep)
-    //        get NO RANGE CAP. If they're a threat, the player
-    //        needs to see them regardless of distance.
-    //      * IDLE / SLEEPING enemies keep the `OCCL_ENEMY_RANGE`
-    //        cap (24m) so the system doesn't burn budget revealing
-    //        patrol-state gunmen across the whole map.
-    //    All of this is still gated behind the quality flag.
+    // 2. Walls between camera and each relevant LIVING enemy. Per-enemy
+    //    fan size scales with distance:
+    //      * ≤ 12m: full 4-ray fan (head, chest, both shoulders)
+    //      * > 12m: 2 rays (head + chest only) — the body-edge rays
+    //        rarely catch a wall the chest ray misses at range, and
+    //        the cost adds up across late-game rooms with many enemies.
+    //    Threat state still gates whether DISTANT idle enemies cast
+    //    at all (they don't past OCCL_ENEMY_RANGE).
     if (qualityFlags.wallOcclusionForEnemies) {
       const idleRangeSq = OCCL_ENEMY_RANGE * OCCL_ENEMY_RANGE;
-      // Walk both lists by index — avoids the [...gunmen.gunmen, ...melees.enemies]
-      // spread allocation that ran every frame.
+      const farFanRangeSq = 12 * 12;
       const gunmenList = gunmen.gunmen;
       const meleesList = melees.enemies;
       for (let i = 0, total = gunmenList.length + meleesList.length; i < total; i++) {
         const e = i < gunmenList.length ? gunmenList[i] : meleesList[i - gunmenList.length];
         if (!e.alive) continue;
+        // Hidden ambush bosses + minions skip occlusion fans —
+        // they're invisible by design until reveal.
+        if (e.hidden) continue;
         const ex = e.group.position.x, ez = e.group.position.z;
-        // Active-state detection. Gunman state machine uses strings
-        // (see gunman.js STATE table); melee rushers use the same
-        // pattern. Any state other than "idle" / "sleep" / "dead"
-        // counts as a threat worth revealing.
+        const dxe = ex - px, dze = ez - pz;
+        const d2 = dxe * dxe + dze * dze;
         const s = e.state;
         const active = !!s && s !== 'idle' && s !== 'sleep' && s !== 'dead';
-        if (!active) {
-          const d2 = (ex - px) * (ex - px) + (ez - pz) * (ez - pz);
-          if (d2 > idleRangeSq) continue;
-        }
-        for (let k = 0; k < _ENEMY_FAN_OFFSETS.length; k++) {
+        if (!active && d2 > idleRangeSq) continue;
+        // Distance-tiered fan count: 4 close, 2 far.
+        const fanCount = d2 <= farFanRangeSq ? 4 : 2;
+        for (let k = 0; k < fanCount; k++) {
           const off = _ENEMY_FAN_OFFSETS[k];
           _occlTargetPt.set(ex + off.dx, off.y, ez + off.dz);
-          _addOcclusionHits(camera.position, _occlTargetPt, level.obstacles, nextFaded);
+          _addOcclusionHits(camera.position, _occlTargetPt, blockers, nextFaded);
         }
       }
     }
@@ -5906,7 +5908,7 @@ function updateWallOcclusion() {
     //     works for pre-engagement "peek the corner" intent.
     if (qualityFlags.wallOcclusionForEnemies && lastAim) {
       _occlTargetPt.set(lastAim.x, 1.0, lastAim.z);
-      _addOcclusionHits(camera.position, _occlTargetPt, level.obstacles, nextFaded);
+      _addOcclusionHits(camera.position, _occlTargetPt, blockers, nextFaded);
     }
 
     // 3. Cast a fan of rays spanning the player's silhouette — chest
@@ -5920,7 +5922,7 @@ function updateWallOcclusion() {
     for (let i = 0; i < _CAM_CAST_OFFSETS.length; i++) {
       const off = _CAM_CAST_OFFSETS[i];
       _occlTargetPt.set(px + off.x, off.y, pz + off.z);
-      _addOcclusionHits(camera.position, _occlTargetPt, level.obstacles, nextFaded);
+      _addOcclusionHits(camera.position, _occlTargetPt, blockers, nextFaded);
     }
   }
   for (const m of _occlFaded) {

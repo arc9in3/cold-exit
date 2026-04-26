@@ -497,13 +497,15 @@ export class Combat {
   spawnFlash(origin, color, withLight = true) { this._spawnFlash(origin, color, withLight); }
 
   spawnImpact(point) {
-    const mat = new THREE.MeshBasicMaterial({
-      color: 0xffbb55, transparent: true, opacity: 1, depthWrite: false,
-    });
-    const m = new THREE.Mesh(new THREE.SphereGeometry(0.15, 8, 6), mat);
-    m.position.copy(point);
-    this.scene.add(m);
-    this.impacts.push({ mesh: m, t: 0, life: tunables.attack.impactLife });
+    this._ensurePools();
+    let entry = this._impactPool.find(e => !e.inUse);
+    if (!entry) entry = this._impactPool[0];   // starved → overwrite oldest
+    entry.inUse = true;
+    entry.mesh.position.copy(point);
+    entry.mesh.material.opacity = 1;
+    entry.mesh.scale.setScalar(1);
+    entry.mesh.visible = true;
+    this.impacts.push({ entry, t: 0, life: tunables.attack.impactLife });
   }
 
   // Wipe every transient effect — blood pools, gore, impacts,
@@ -526,7 +528,19 @@ export class Combat {
     };
     dispose(this.pools);
     dispose(this.gore);
-    dispose(this.impacts);
+    // Impacts are a mix of pool-backed (spawnImpact) and direct-allocated
+    // (deflect-flash). Release the pooled ones and dispose the rest.
+    for (const im of this.impacts) {
+      if (im.entry) {
+        im.entry.mesh.visible = false;
+        im.entry.inUse = false;
+      } else if (im.mesh) {
+        if (im.mesh.parent) im.mesh.parent.remove(im.mesh);
+        im.mesh.geometry?.dispose();
+        im.mesh.material?.dispose();
+      }
+    }
+    this.impacts.length = 0;
     dispose(this.arcs);
     // Bloods are pool-backed — hide + release each slot, no dispose.
     for (const b of this.bloods) {
@@ -606,12 +620,22 @@ export class Combat {
       const im = this.impacts[i];
       im.t += dt;
       const k = 1 - im.t / im.life;
-      im.mesh.scale.setScalar(0.5 + (1 - k) * 1.2);
-      im.mesh.material.opacity = Math.max(0, k);
+      // Two callers in flight today:
+      //   * spawnImpact uses pooled entries (im.entry.mesh)
+      //   * deflect-flash + legacy paths still allocate directly (im.mesh)
+      const mesh = im.entry ? im.entry.mesh : im.mesh;
+      mesh.scale.setScalar(0.5 + (1 - k) * 1.2);
+      mesh.material.opacity = Math.max(0, k);
       if (im.t >= im.life) {
-        this.scene.remove(im.mesh);
-        im.mesh.geometry.dispose();
-        im.mesh.material.dispose();
+        if (im.entry) {
+          // Pool path — hide + release, no dispose.
+          mesh.visible = false;
+          im.entry.inUse = false;
+        } else {
+          this.scene.remove(mesh);
+          mesh.geometry.dispose();
+          mesh.material.dispose();
+        }
         this.impacts.splice(i, 1);
       }
     }
@@ -856,6 +880,24 @@ export class Combat {
       L.position.set(0, -1000, 0); // parked below floor to be safe
       this.scene.add(L);
       this._lightPool.push({ light: L, inUse: false });
+    }
+    // Impact spark pool — small additive sphere per bullet hit. Was
+    // allocating a fresh SphereGeometry + MeshBasicMaterial per call
+    // inside spawnImpact; with shotgun pellets across multiple
+    // targets this fired 20+ times per shot. Pool a fixed 32.
+    const IMPACT_POOL = 32;
+    this._impactPool = [];
+    const impactGeom = new THREE.SphereGeometry(0.15, 8, 6);
+    for (let i = 0; i < IMPACT_POOL; i++) {
+      const mat = new THREE.MeshBasicMaterial({
+        color: 0xffbb55, transparent: true, opacity: 0,
+        depthWrite: false,
+      });
+      const m = new THREE.Mesh(impactGeom, mat);
+      m.visible = false;
+      m.frustumCulled = false;
+      this.scene.add(m);
+      this._impactPool.push({ mesh: m, inUse: false });
     }
   }
 
