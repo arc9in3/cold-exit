@@ -29,6 +29,12 @@
 
 import * as THREE from 'three';
 
+// Shared frozen empty list — every hittables() call that has nothing
+// to expose returns this reference instead of allocating [] per frame.
+// allHittables() runs at 60Hz and was creating one short-lived array
+// per encounter even when the encounter had no live targets.
+const EMPTY_ARR = Object.freeze([]);
+
 // Hex floor-disc helper used by every encounter spawn. Adds a flat
 // glowing ring at the room centre so the room reads as "special" from
 // the doorway. Returns the mesh so callers can add additional props
@@ -802,14 +808,18 @@ export const ENCOUNTER_DEFS = {
             'You sense them watching.', 3.5);
         }
       }
-      // Collapse animation — drop each skull with a wobble.
+      // Collapse animation — drop each skull with a wobble. While
+      // collapsing the encounter must keep ticking; once the timer
+      // hits zero the framework early-out can skip us.
       if (s.collapseT > 0) {
         s.collapseT = Math.max(0, s.collapseT - dt);
+        s.needsTick = true;
         const k = 1 - (s.collapseT / 1.4);
         for (const child of s.cairn.children) {
           child.position.y = Math.max(0.10, child.position.y - dt * 1.6);
           child.rotation.z += dt * (Math.random() - 0.5) * 4;
         }
+        if (s.collapseT <= 0) s.needsTick = false;
       }
       // Idle bark while alive + uncollapsed.
       if (!s.preCollapsed && !s.complete && near && s.barkT <= 0) {
@@ -953,9 +963,11 @@ export const ENCOUNTER_DEFS = {
     },
     // The encounter exposes hittable meshes so combat.raycast picks
     // them up. main.js folds these into allHittables() each frame.
+    // Returns the same cached array reference whenever possible to
+    // avoid building a new list per frame.
     hittables(state) {
-      if (!state || !state.built) return [];
-      if (state.target && state.target.broken) return [];
+      if (!state || !state.built) return EMPTY_ARR;
+      if (state.target && state.target.broken) return EMPTY_ARR;
       return state.built.glassRefs;
     },
   },
@@ -1696,6 +1708,9 @@ export const ENCOUNTER_DEFS = {
           if (scroll) ctx.spawnLoot(s.disc.cx, s.disc.cz, scroll);
           s.phase = 'returned';
           s.complete = true;
+          // Terminal phase — framework early-out skips ticking from
+          // this frame onward.
+          s.needsTick = false;
           if (ctx.markEncounterComplete) ctx.markEncounterComplete('choices_and_consequences');
         }
       }

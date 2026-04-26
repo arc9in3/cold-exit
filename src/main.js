@@ -2064,6 +2064,15 @@ function tickEncounters(dt) {
   for (const r of level.rooms) {
     if (!r._encounter) continue;
     const ent = r._encounter;
+    // Perf early-out: once an encounter has fully resolved, skip
+    // tick entirely. Saves ~60 calls/sec/encounter for completed
+    // ones and lets us scale the encounter roster without paying
+    // a tax for every prior visit.
+    if (ent.state && (ent.state.complete === true || ent.state._frozen === true)) {
+      // Some encounters animate after completion (e.g. Skull Pile
+      // collapseT > 0). Honour an explicit needsTick flag.
+      if (!ent.state.needsTick) continue;
+    }
     if (ent.def.tick) {
       const ctx = ent.ctxFactory();
       ctx.state = ent.state;
