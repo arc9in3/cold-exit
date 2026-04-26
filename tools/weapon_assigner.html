@@ -266,6 +266,32 @@ let weaponTags = {};
 try { weaponTags = JSON.parse(localStorage.getItem(WEAPON_TAG_KEY) || '{}'); } catch { weaponTags = {}; }
 function saveWeaponTags() { localStorage.setItem(WEAPON_TAG_KEY, JSON.stringify(weaponTags)); }
 
+// Per-tile element registries so dedupe can refresh the UI when an
+// older entry is dropped. Populated as tiles are created.
+const fbxInputByPath = {};        // fbx path -> { input, tile }
+const weaponInputByName = {};     // weapon name -> { input, tile }
+
+// Newest-wins dedupe. After a tag save, walk the map and remove any
+// OTHER entries whose value matches the newly-saved value (case-
+// insensitive, trimmed). Calls back with each removed key so the
+// UI can be cleared. Returns the array of removed keys.
+function dedupeMap(map, savedKey, savedValue, onRemove) {
+  if (!savedValue) return [];
+  const target = savedValue.trim().toLowerCase();
+  if (!target) return [];
+  const removed = [];
+  for (const k of Object.keys(map)) {
+    if (k === savedKey) continue;
+    const v = (map[k] || '').trim().toLowerCase();
+    if (v === target) {
+      delete map[k];
+      removed.push(k);
+      onRemove?.(k);
+    }
+  }
+  return removed;
+}
+
 // Reverse lookup: which manifest keys point at each FBX path.
 const assignedByPath = {};
 for (const [name, path] of Object.entries(MODEL_BY_WEAPON_NAME)) {
@@ -531,15 +557,28 @@ for (const w of inGameWeapons) {
   wTag.title = "Type a real-world weapon name to flag for revisit. Type '#remove' to clear.";
   wTag.value = weaponTags[w.name] || '';
   if (wTag.value) tile.classList.add('tagged');
+  weaponInputByName[w.name] = { input: wTag, tile };
   wTag.addEventListener('blur', () => {
     let v = wTag.value.trim();
     // Sentinel: typing '#remove' clears the tag.
     if (v.toLowerCase() === '#remove') { v = ''; wTag.value = ''; }
     if (v) weaponTags[w.name] = v; else delete weaponTags[w.name];
+    // Newest-wins dedupe: drop any other in-game weapon already
+    // tagged with the same real-world name and clear its UI.
+    const dropped = dedupeMap(weaponTags, w.name, v, (otherName) => {
+      const reg = weaponInputByName[otherName];
+      if (reg) {
+        reg.input.value = '';
+        reg.tile.classList.remove('tagged');
+      }
+    });
     saveWeaponTags();
     tile.classList.toggle('tagged', !!v);
     wTag.classList.add('saved');
     setTimeout(() => wTag.classList.remove('saved'), 1500);
+    if (dropped.length) {
+      count.textContent = `dropped ${dropped.length} older tag(s): ${dropped.join(', ')}`;
+    }
   });
   wTag.addEventListener('keydown', (e) => { if (e.key === 'Enter') wTag.blur(); });
 
@@ -625,16 +664,30 @@ for (const cat of cats) {
     tagEl.title = "Type a real-world weapon name to map this FBX to. Type '#remove' to clear.";
     tagEl.value = tags[path] || '';
     tagEl.dataset.tagged = tagEl.value ? '1' : '0';
+    fbxInputByPath[path] = { input: tagEl, tile };
     tagEl.addEventListener('blur', () => {
       let v = tagEl.value.trim();
       // Sentinel: typing '#remove' clears the tag.
       if (v.toLowerCase() === '#remove') { v = ''; tagEl.value = ''; }
       if (v) tags[path] = v; else delete tags[path];
+      // Newest-wins dedupe: drop any other FBX already tagged with
+      // the same real-world name and clear its UI / dataset flag.
+      const dropped = dedupeMap(tags, path, v, (otherPath) => {
+        const reg = fbxInputByPath[otherPath];
+        if (reg) {
+          reg.input.value = '';
+          reg.input.dataset.tagged = '0';
+          reg.tile.classList.remove('tagged');
+        }
+      });
       saveTags();
       tagEl.dataset.tagged = v ? '1' : '0';
       tile.classList.toggle('tagged', !!v);
       tagEl.classList.add('saved');
       setTimeout(() => tagEl.classList.remove('saved'), 1500);
+      if (dropped.length) {
+        count.textContent = `dropped ${dropped.length} older tag(s): ${dropped.join(', ')}`;
+      }
       applyFilters();
     });
     tagEl.addEventListener('keydown', (e) => {
