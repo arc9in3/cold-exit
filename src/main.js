@@ -8764,6 +8764,68 @@ function _safeRender(rawDt, modalPaused = false) {
 }
 
 regenerateLevel();
+
+// Shader pre-warm — first-time hitches when the player saw their
+// first enemy and dropped their first item were Three.js compiling
+// the lit MeshStandardMaterial shader variants for those entities on
+// the gameplay frame they entered the camera frustum (~100-300ms each
+// on cold GPU caches). Spin up one of each enemy archetype + a sample
+// loot drop in scene at far-off coords, then renderer.compile(scene,
+// camera) walks the scene and compiles every material's shader so the
+// gameplay frame doesn't pay that cost. Warmup entities tear down
+// immediately after — combat / loot pool materials are already in
+// scene at construction time and get covered by the same compile.
+function _warmShaders() {
+  if (!renderer || !scene || !camera) return;
+  // Spawn one of each archetype whose first appearance historically
+  // caused visible hitches: a regular gunman + sniper-armed gunman,
+  // a regular melee + a shield-bearer melee (so the shield mesh's
+  // material variant compiles before the player ever sees one), and
+  // a couple of loot drops at varying rarities so the beacon/light
+  // variants compile too. y/x/z are irrelevant — compile doesn't
+  // check visibility, just that the materials exist in scene.
+  const FAR = -9999;
+  // Pick a benign weapon for the warmup gunmen (any non-mythic ranged
+  // entry — the weapon mesh just needs to be in scene to compile).
+  const warmWeapon = (tunables.weapons || []).find(w =>
+    !w.artifact && w.rarity !== 'mythic' && w.type !== 'melee') || tunables.weapons?.[0];
+  try { gunmen.spawn(FAR, FAR, warmWeapon, { tier: 'normal', roomId: -1 }); } catch (_) {}
+  try { gunmen.spawn(FAR, FAR, warmWeapon, { tier: 'subBoss', roomId: -1, variant: 'shieldBearer' }); } catch (_) {}
+  try { melees.spawn(FAR, FAR, { tier: 'normal', roomId: -1 }); } catch (_) {}
+  try { melees.spawn(FAR, FAR, { tier: 'normal', roomId: -1, variant: 'shieldBearer' }); } catch (_) {}
+  // Loot pool — warm beacon variants for legendary + epic so the
+  // first rare-tier drop in gameplay (disarm push, kill loot, etc.)
+  // doesn't compile its beacon shader mid-frame.
+  const warmLootEntries = [];
+  try {
+    warmLootEntries.push(loot.spawnItem({ x: FAR, y: FAR, z: FAR },
+      { name: 'WARM_LEG', type: 'junk', tint: 0xffd040, rarity: 'legendary' }));
+  } catch (_) {}
+  try {
+    warmLootEntries.push(loot.spawnItem({ x: FAR, y: FAR, z: FAR },
+      { name: 'WARM_EPIC', type: 'junk', tint: 0xb060ff, rarity: 'epic' }));
+  } catch (_) {}
+  try {
+    warmLootEntries.push(loot.spawnItem({ x: FAR, y: FAR, z: FAR },
+      { name: 'WARM_COMMON', type: 'junk', tint: 0x808080, rarity: 'common' }));
+  } catch (_) {}
+  // Compile every material currently in the scene. Costs the same
+  // ~100-300ms hitch we wanted to avoid in gameplay, but here it
+  // happens at boot before the player can interact, so it reads as
+  // part of the load rather than a stutter mid-fight.
+  try { renderer.compile(scene, camera); } catch (_) {}
+  // Tear down the warmups. removeAll() disposes the rig geometry +
+  // materials per entity; loot.remove() returns the pool slot to
+  // the idle queue without disposing (geometry is shared, material
+  // stays compiled).
+  try { gunmen.removeAll(); } catch (_) {}
+  try { melees.removeAll(); } catch (_) {}
+  for (const e of warmLootEntries) {
+    if (e) { try { loot.remove(e); } catch (_) {} }
+  }
+}
+_warmShaders();
+
 // Initial screen: the main menu. Play routes through the starting
 // store picker; classic class-picker is still accessible as a
 // fallback if someone hits startUI.show() from a callback (e.g. the
