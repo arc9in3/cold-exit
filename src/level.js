@@ -1562,20 +1562,40 @@ export class Level {
       }
     } else if (room.layout === 'center-pit') {
       // Center pit — four short walls forming a rectangular cover
-      // ring around the room centre, with corner gaps so players /
-      // AI can flow through. Reads as a "courtyard" cover formation.
+      // ring around the room centre, with a 1.6m walkable gap cut
+      // into the middle of each wall so players + AI can pass
+      // through to the centre instead of getting locked out. (Earlier
+      // version relied on diagonal corner gaps, but those collapsed
+      // to ~0.2m of axis-aligned clearance after AABB resolution and
+      // the centre became unreachable — bug seen on a level-3 boss
+      // room where the exit + boss were both inside the pit.)
       const halfW = (b.maxX - b.minX) * 0.18;
       const halfD = (b.maxZ - b.minZ) * 0.18;
       const segLen = halfW * 1.4;
       const segDepth = halfD * 1.4;
+      const GAP = 1.6;
       const placeWall = (x, z, w, d) => {
         if (this._blocksDoor(room, x, z, 1.4)) return;
         this._addObstacle(x, WALL_HEIGHT / 2, z, w, WALL_HEIGHT, d, FULL_WALL_COLOR);
       };
-      placeWall(cx, cz - halfD, segLen, WALL_THICK);
-      placeWall(cx, cz + halfD, segLen, WALL_THICK);
-      placeWall(cx - halfW, cz, WALL_THICK, segDepth);
-      placeWall(cx + halfW, cz, WALL_THICK, segDepth);
+      // Each wall split into two pieces with a centred GAP so the
+      // pit reads as a courtyard with four open archways.
+      const sideLen = (segLen - GAP) / 2;
+      const sideDepth = (segDepth - GAP) / 2;
+      if (sideLen > 0.4) {
+        // North + south walls: split horizontally.
+        placeWall(cx - (GAP / 2 + sideLen / 2), cz - halfD, sideLen, WALL_THICK);
+        placeWall(cx + (GAP / 2 + sideLen / 2), cz - halfD, sideLen, WALL_THICK);
+        placeWall(cx - (GAP / 2 + sideLen / 2), cz + halfD, sideLen, WALL_THICK);
+        placeWall(cx + (GAP / 2 + sideLen / 2), cz + halfD, sideLen, WALL_THICK);
+      }
+      if (sideDepth > 0.4) {
+        // West + east walls: split vertically.
+        placeWall(cx - halfW, cz - (GAP / 2 + sideDepth / 2), WALL_THICK, sideDepth);
+        placeWall(cx - halfW, cz + (GAP / 2 + sideDepth / 2), WALL_THICK, sideDepth);
+        placeWall(cx + halfW, cz - (GAP / 2 + sideDepth / 2), WALL_THICK, sideDepth);
+        placeWall(cx + halfW, cz + (GAP / 2 + sideDepth / 2), WALL_THICK, sideDepth);
+      }
     } else if (room.layout === 'zigzag') {
       // Zigzag — three short walls offset along the room's long axis,
       // each angled to push the player into the next bay. Forces
