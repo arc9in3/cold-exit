@@ -305,6 +305,13 @@ export class Input {
     const crouchHeld = this.crouchToggled;
     const adsFromAction = this._isHeld(ACTIONS.ADS);
     const attackFromAction = this._isHeld(ACTIONS.ATTACK);
+    // Currently-held quickslot index (0..3) or -1 if none.
+    // Used by the throwable arc-preview hold/release flow in main.
+    let actionSlotHeld = -1;
+    if      (this._isHeld(ACTIONS.QUICKSLOT_1)) actionSlotHeld = 0;
+    else if (this._isHeld(ACTIONS.QUICKSLOT_2)) actionSlotHeld = 1;
+    else if (this._isHeld(ACTIONS.QUICKSLOT_3)) actionSlotHeld = 2;
+    else if (this._isHeld(ACTIONS.QUICKSLOT_4)) actionSlotHeld = 3;
 
     const out = {
       move,
@@ -325,6 +332,7 @@ export class Input {
       lightToggled: this.lightToggled,
       healPressed: this.healPressed,
       actionSlotPressed: this.actionSlotPressed,
+      actionSlotHeld,
       weaponSwitch: this.weaponSwitch,
       weaponCycle: this.weaponCycle,
       handednessToggle: this.handednessToggle,

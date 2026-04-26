@@ -6357,6 +6357,122 @@ function throwItem(item) {
   return true;
 }
 
+// --- Throw arc preview ---------------------------------------------
+// While the player holds a quickslot bound to a throwable, render the
+// predicted arc + landing ring. Path turns red when an obstacle blocks
+// the throw before it reaches the cursor.
+const _THROW_PREVIEW_SEGMENTS = 32;
+const _THROW_OK_COLOR = 0x6abe5a;       // green when the path lands clean
+const _THROW_BAD_COLOR = 0xc94a3a;      // red when an obstacle interrupts it
+let _throwPreview = null;
+function _buildThrowPreview() {
+  if (_throwPreview) return _throwPreview;
+  // Line: pre-allocated vertex buffer reused every frame. We rewrite
+  // the buffer in-place + adjust setDrawRange to truncate when the
+  // arc terminates early on an obstacle.
+  const positions = new Float32Array((_THROW_PREVIEW_SEGMENTS + 1) * 3);
+  const lineGeom = new THREE.BufferGeometry();
+  lineGeom.setAttribute('position', new THREE.BufferAttribute(positions, 3));
+  const lineMat = new THREE.LineBasicMaterial({
+    color: _THROW_OK_COLOR, transparent: true, opacity: 0.85, depthTest: false,
+  });
+  const line = new THREE.Line(lineGeom, lineMat);
+  line.renderOrder = 9;
+  line.visible = false;
+  scene.add(line);
+  // Landing ring — flat disc at the impact point. Two rings stacked
+  // for readability: filled centre + thicker outer outline.
+  const ringGeom = new THREE.RingGeometry(0.55, 0.70, 28);
+  const ringMat = new THREE.MeshBasicMaterial({
+    color: _THROW_OK_COLOR, transparent: true, opacity: 0.85, side: THREE.DoubleSide,
+    depthTest: false,
+  });
+  const ring = new THREE.Mesh(ringGeom, ringMat);
+  ring.rotation.x = -Math.PI / 2;
+  ring.renderOrder = 9;
+  ring.visible = false;
+  scene.add(ring);
+  _throwPreview = { line, lineGeom, lineMat, positions, ring, ringMat };
+  return _throwPreview;
+}
+const _throwSamplePt = new THREE.Vector3();
+function _hitsThrowObstacle(x, y, z) {
+  // Mirrors ProjectileManager._hitsObstacle so the preview matches the
+  // projectile's actual collision rules. Skips the y>3 ceiling so the
+  // arc isn't clipped by tall walls' invisible upper bound.
+  if (y > 3.0) return false;
+  const obstacles = level.solidObstacles ? level.solidObstacles() : [];
+  const r = 0.1;
+  for (const o of obstacles) {
+    const b = o.userData.collisionXZ;
+    if (!b) continue;
+    if (x > b.minX - r && x < b.maxX + r && z > b.minZ - r && z < b.maxZ + r) {
+      return true;
+    }
+  }
+  return false;
+}
+function tickThrowAimPreview(item) {
+  if (!lastPlayerInfo || !lastAim) { hideThrowPreview(); return; }
+  const pv = _buildThrowPreview();
+  // Match throwItem's launch math exactly so the preview is truthful.
+  const muzzle = lastPlayerInfo.muzzleWorld || player.mesh.position;
+  const aimX = lastAim.x, aimZ = lastAim.z;
+  const dx = aimX - muzzle.x;
+  const dz = aimZ - muzzle.z;
+  const throwDist = Math.hypot(dx, dz);
+  if (throwDist < 0.05) { hideThrowPreview(); return; }
+  const MIN_APEX = 0.35;
+  const MAX_APEX = 2.7;
+  const apex = MIN_APEX + (MAX_APEX - MIN_APEX) * Math.min(1, throwDist / 14);
+  const gravity = 9.8;
+  _throwSamplePt.set(aimX, 0, aimZ);
+  const vel = ProjectileManager.ballisticVelocityApex(muzzle, _throwSamplePt, apex, gravity);
+  // Step the arc in fixed time slices. tFlight = (vel.y + sqrt(vel.y² +
+  // 2g*muzzle.y)) / g — solves y(t) = muzzle.y + vel.y*t - 0.5*g*t² = 0.
+  // We over-sample slightly + clamp.
+  const tFlight = (vel.y + Math.sqrt(vel.y * vel.y + 2 * gravity * Math.max(0, muzzle.y))) / gravity;
+  const segs = _THROW_PREVIEW_SEGMENTS;
+  let blocked = false;
+  let endX = aimX, endY = 0.05, endZ = aimZ;
+  let usedVerts = segs + 1;
+  const positions = pv.positions;
+  for (let i = 0; i <= segs; i++) {
+    const t = (i / segs) * tFlight;
+    const px = muzzle.x + vel.x * t;
+    const py = Math.max(0.04, muzzle.y + vel.y * t - 0.5 * gravity * t * t);
+    const pz = muzzle.z + vel.z * t;
+    positions[i * 3 + 0] = px;
+    positions[i * 3 + 1] = py;
+    positions[i * 3 + 2] = pz;
+    if (i > 0 && _hitsThrowObstacle(px, py, pz)) {
+      blocked = true;
+      endX = px; endY = Math.max(0.05, py); endZ = pz;
+      usedVerts = i + 1;
+      break;
+    }
+  }
+  pv.lineGeom.attributes.position.needsUpdate = true;
+  pv.lineGeom.setDrawRange(0, usedVerts);
+  const color = blocked ? _THROW_BAD_COLOR : _THROW_OK_COLOR;
+  pv.lineMat.color.setHex(color);
+  pv.ringMat.color.setHex(color);
+  // Landing ring sits on the ground at the impact point (or aim point
+  // if the throw lands clean). Lifted slightly so it doesn't z-fight.
+  pv.ring.position.set(endX, 0.03, endZ);
+  pv.line.visible = true;
+  pv.ring.visible = true;
+}
+function hideThrowPreview() {
+  if (!_throwPreview) return;
+  _throwPreview.line.visible = false;
+  _throwPreview.ring.visible = false;
+}
+
+// Quickslot index (0..3) currently being held to aim a throwable, or
+// -1 if none. Captured on press; on release the throw fires.
+let _throwAimSlot = -1;
+
 // --- Fire zones -----------------------------------------------------
 // Persistent DoT patches left by molotovs. Each tick we iterate the
 // list, burn alive enemies within `radius`, and decay `t` toward
@@ -8127,7 +8243,33 @@ function tick() {
   // Keys 5-8 fire the upper four hotbar slots. actionSlotPressed
   // arrives as 0..3 from the input layer (legacy naming) so we offset
   // by 4 to land in the right unified-actionBar slot.
-  if (inputState.actionSlotPressed >= 0) useActionSlot(inputState.actionSlotPressed + 4);
+  // Throwables defer to release: on press we just capture the slot so
+  // the player can hold and aim, and the gameplay-tick block below
+  // fires the throw on release. Other consumables fire immediately.
+  if (inputState.actionSlotPressed >= 0) {
+    const _qIdx = inputState.actionSlotPressed;
+    const _slotItem = inventory.actionSlotItem(_qIdx + 4);
+    if (_slotItem && _slotItem.type === 'throwable' && (_slotItem.charges | 0) > 0) {
+      _throwAimSlot = _qIdx;
+    } else {
+      useActionSlot(_qIdx + 4);
+    }
+  }
+  // Throw aim/release loop. While the same quickslot is still held,
+  // refresh the trajectory preview each frame; once the player lets go
+  // (or swaps the bound item / runs out of charges), fire the throw
+  // and tear the preview down.
+  if (_throwAimSlot >= 0) {
+    const aimItem = inventory.actionSlotItem(_throwAimSlot + 4);
+    const stillBoundThrowable = aimItem && aimItem.type === 'throwable' && (aimItem.charges | 0) > 0;
+    if (inputState.actionSlotHeld === _throwAimSlot && stillBoundThrowable) {
+      tickThrowAimPreview(aimItem);
+    } else {
+      hideThrowPreview();
+      if (stillBoundThrowable) useActionSlot(_throwAimSlot + 4);
+      _throwAimSlot = -1;
+    }
+  }
 
   tickLight(playerInfo, aimInfo);
   updateBeamAndCone(playerInfo, aimInfo, inputState);
