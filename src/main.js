@@ -6285,13 +6285,16 @@ function updateLootPrompt() {
 }
 
 function tryInteract({ nearItem, body, npc, container }) {
-  // Loot pickup beats the encounter interact when the player is
-  // standing on top of an item — Shrine reward scrolls were
-  // unreachable because pressing E re-opened the Shrine prompt
-  // instead of picking up the scroll the previous purchase dropped.
-  // The encounter prompt is still reachable when there's no nearby
-  // loot; the player just has to step off the ground item.
-  if (!nearItem) {
+  // Loot pickup / body loot / encounter-spawned containers all beat
+  // the encounter interact when the player is standing on / next to
+  // them — encounter rewards (Shrine scroll, Fountain signet chest,
+  // Sleeping Boss chest, Royal Emissary masterwork, The Button
+  // container scatter) were unreachable because pressing E re-opened
+  // the encounter prompt instead. The encounter prompt is still
+  // reachable when there's no nearby pickup; the player just has to
+  // step off the ground item / move away from the chest.
+  const hasPickup = !!(nearItem || body || (container && !container.container?.looted));
+  if (!hasPickup) {
     const enc = nearestInteractableEncounter();
     if (enc) {
       const ctx = enc.ctxFactory();
