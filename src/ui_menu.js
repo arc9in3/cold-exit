@@ -366,20 +366,22 @@ export class GameMenuUI {
       h.className = 'menu-lb-heading';
       h.textContent = col._label;
       col.appendChild(h);
-      if (!entries || entries.length === 0) {
-        const empty = document.createElement('div');
-        empty.className = 'menu-lb-empty';
-        empty.textContent = '—';
-        col.appendChild(empty);
-        return;
-      }
-      entries.forEach((e, i) => {
+      // Always paint 10 row slots so the panel reads as a true top-10
+      // leaderboard. Empty ranks get a dim placeholder.
+      const TOP_N = 10;
+      for (let i = 0; i < TOP_N; i++) {
+        const e = entries && entries[i];
         const row = document.createElement('div');
         row.className = 'menu-lb-row';
-        const who = e.name || e.playerName || 'anon';
-        row.textContent = `${i + 1}. ${fmt(e)} — ${who}`;
+        if (e) {
+          const who = e.name || e.playerName || 'anon';
+          row.textContent = `${i + 1}. ${fmt(e)} — ${who}`;
+        } else {
+          row.textContent = `${i + 1}. —`;
+          row.style.color = '#6a7280';
+        }
         col.appendChild(row);
-      });
+      }
     };
     for (const c of cats) {
       const col = document.createElement('div');

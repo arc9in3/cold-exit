@@ -309,21 +309,24 @@ export class MainMenuUI {
   }
 
   _fillLbCol(col, entries, fmt) {
-    if (!entries || entries.length === 0) {
-      const empty = document.createElement('div');
-      empty.className = 'menu-lb-empty';
-      empty.textContent = '—';
-      col.appendChild(empty);
-      return;
-    }
-    entries.forEach((e, i) => {
+    // Always paint 10 row slots so the panel reads as a true top-10
+    // leaderboard. Filled entries take ranks 1..N; empty ranks N+1..10
+    // get a dim placeholder so the player can see the leaderboard has
+    // headroom and where their next run could land.
+    const TOP_N = 10;
+    for (let i = 0; i < TOP_N; i++) {
+      const e = entries && entries[i];
       const row = document.createElement('div');
       row.className = 'menu-lb-row';
-      // Remote rows expose `name`; local rows expose `playerName`.
-      const who = e.name || e.playerName || 'anon';
-      row.textContent = `${i + 1}. ${fmt(e)} — ${who}`;
+      if (e) {
+        const who = e.name || e.playerName || 'anon';
+        row.textContent = `${i + 1}. ${fmt(e)} — ${who}`;
+      } else {
+        row.textContent = `${i + 1}. —`;
+        row.style.color = '#6a7280';
+      }
       col.appendChild(row);
-    });
+    }
   }
 
   render() {
