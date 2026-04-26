@@ -6285,17 +6285,22 @@ function updateLootPrompt() {
 }
 
 function tryInteract({ nearItem, body, npc, container }) {
-  // Encounter interact — takes priority when the player is standing
-  // in an encounter room with an interactable NPC. Encounters use
-  // showPrompt to surface their menu.
-  const enc = nearestInteractableEncounter();
-  if (enc) {
-    const ctx = enc.ctxFactory();
-    ctx.state = enc.state;
-    ctx.showPrompt = showEncounterPrompt;
-    ctx.closePrompt = closeEncounterPrompt;
-    enc.def.interact(ctx);
-    return;
+  // Loot pickup beats the encounter interact when the player is
+  // standing on top of an item — Shrine reward scrolls were
+  // unreachable because pressing E re-opened the Shrine prompt
+  // instead of picking up the scroll the previous purchase dropped.
+  // The encounter prompt is still reachable when there's no nearby
+  // loot; the player just has to step off the ground item.
+  if (!nearItem) {
+    const enc = nearestInteractableEncounter();
+    if (enc) {
+      const ctx = enc.ctxFactory();
+      ctx.state = enc.state;
+      ctx.showPrompt = showEncounterPrompt;
+      ctx.closePrompt = closeEncounterPrompt;
+      enc.def.interact(ctx);
+      return;
+    }
   }
   if (nearItem) {
     // Two or more items in the pickup radius — open the ground-loot modal
