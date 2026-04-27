@@ -159,6 +159,13 @@ function _buildPowered(group, len, girth, accentColor) {
 const PROFILES = {
   'Combat Knife':  (g, l, gth, c) => _buildBlade(g, l, gth, c,
                      { handleRatio: 0.30, handleColor: HANDLE_DARK }),
+  // Survival Knife — same blade pattern as Combat Knife but a slightly
+  // longer blade with a tan-rope handle wrap to differentiate it.
+  // Without this entry it fell through to _buildShaft, which painted
+  // the whole weapon the tracerColor (light gray) and read as "all
+  // white" with no handle silhouette.
+  'Survival Knife':(g, l, gth, c) => _buildBlade(g, l, gth, c,
+                     { handleRatio: 0.28, handleColor: 0x6a4a2a }),
   'Scimitar':      (g, l, gth, c) => _buildBlade(g, l, gth, c,
                      { handleRatio: 0.22, handleColor: 0x2a1a14, curve: true,
                        bladeWidthRatio: 1.5, bladeThicknessRatio: 0.20 }),
