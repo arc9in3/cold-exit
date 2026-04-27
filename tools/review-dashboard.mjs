@@ -515,34 +515,54 @@ let gameServer = null;
 // CLI launcher — open Claude / Codex / Gemini in their own terminal windows
 // ===========================================================================
 
+// Each CLI's launch flags + match patterns for the running-detection
+// scan. The `flags` field gets appended to the CLI binary on launch
+// — set to "danger mode" by default so the AIs auto-approve their
+// own tool calls without prompting (you wanted unattended runs).
+//
+// The `match` regex is tested against the full command-line of every
+// running process (via PowerShell's Get-CimInstance Win32_Process).
+// Matches a path component containing the CLI binary so an editor
+// with "claude" in a filename doesn't false-positive.
 const CLI_TARGETS = [
-  { id: 'claude', title: 'Claude Code',  cli: 'claude', greeting: 'Active session — ships to main directly. Read CLAUDE.md.' },
-  { id: 'codex',  title: 'Codex (GPT)',  cli: 'codex',  greeting: 'Algorithm + tooling lane. Read AGENTS.md. ALWAYS git checkout -b before editing.' },
-  { id: 'gemini', title: 'Gemini',       cli: 'gemini', greeting: 'Audits + sweeps lane. Read GEMINI.md. ALWAYS git checkout -b before editing.' },
+  {
+    id: 'claude', title: 'Claude Code', cli: 'claude',
+    flags: '--dangerously-skip-permissions',
+    match: /[\\/](claude\.(cmd|exe|js|ps1)|claude)([\\/" ]|$)/i,
+  },
+  {
+    id: 'codex', title: 'Codex (GPT)', cli: 'codex',
+    flags: '--dangerously-bypass-approvals-and-sandbox',
+    match: /[\\/](codex\.(cmd|exe|js|ps1)|codex)([\\/" ]|$)/i,
+  },
+  {
+    id: 'gemini', title: 'Gemini', cli: 'gemini',
+    flags: '--yolo',
+    match: /[\\/](gemini\.(cmd|exe|js|ps1)|gemini)([\\/" ]|$)/i,
+  },
 ];
 
 function launchOneCli(target) {
   if (process.platform === 'win32') {
-    // Reliable Windows pattern:
-    //   cmd /c start "Title" /D "<cwd>" cmd /K "<cli>"
+    // Spawn a new PowerShell window via start, then run the CLI with
+    // its danger-mode flag. PowerShell defaults to overriding the
+    // window title with "Windows PowerShell" on launch — we set it
+    // back via $Host.UI.RawUI.WindowTitle so cliRunningStatus's
+    // window-title scan still finds the window.
     //
-    // - The outer `cmd /c` runs the `start` builtin (which spawns a
-    //   new console window).
-    // - "Title" sets the window title (for our running-detection
-    //   match in cliRunningStatus).
-    // - /D sets the new shell's working directory directly via
-    //   start, instead of relying on exec's cwd option propagating
-    //   through two layers of cmd.
-    // - Inner `cmd /K "<cli>"` runs the CLI and keeps the window
-    //   open after it exits.
+    //   start "<Title>" powershell.exe
+    //     -NoExit -NoLogo -ExecutionPolicy Bypass
+    //     -Command "$Host.UI.RawUI.WindowTitle='<Title>';
+    //              Set-Location '<repo>';
+    //              <cli> <flags>"
     //
-    // The previous version chained `^&^&` to print a greeting
-    // message before launching the CLI; the escapes parsed
-    // inconsistently through nested cmd layers and the launch
-    // silently no-op'd. Greeting dropped — the CLI prints its own
-    // intro anyway.
-    const dir = REPO_ROOT.replace(/"/g, '""');
-    const command = `start "${target.title}" /D "${dir}" cmd /K "${target.cli}"`;
+    // -NoExit keeps the window open after the CLI exits.
+    // ExecutionPolicy Bypass lets the npm-installed .cmd shims run
+    // even on machines where script execution is restricted.
+    const dir = REPO_ROOT.replace(/'/g, "''");
+    const titleEscaped = target.title.replace(/'/g, "''");
+    const psInner = `$Host.UI.RawUI.WindowTitle='${titleEscaped}'; Set-Location '${dir}'; ${target.cli} ${target.flags || ''}`;
+    const command = `start "${target.title}" powershell.exe -NoExit -NoLogo -ExecutionPolicy Bypass -Command "${psInner.replace(/"/g, '\\"')}"`;
     return new Promise((resolve, reject) => {
       exec(command, (err, stdout, stderr) => {
         if (err) {
@@ -555,7 +575,7 @@ function launchOneCli(target) {
   }
   if (process.platform === 'darwin') {
     const dir = REPO_ROOT.replace(/"/g, '\\"');
-    const script = `tell application "Terminal" to do script "cd \\"${dir}\\" && ${target.cli}"`;
+    const script = `tell application "Terminal" to do script "cd \\"${dir}\\" && ${target.cli} ${target.flags || ''}"`;
     return new Promise((resolve, reject) => {
       exec(`osascript -e '${script}'`, (err, stdout, stderr) => {
         if (err) return reject(new Error(stderr || err.message));
@@ -565,7 +585,7 @@ function launchOneCli(target) {
   }
   return Promise.resolve({
     id: target.id, launched: false,
-    hint: `Linux: run manually:  cd ${REPO_ROOT} && ${target.cli}`,
+    hint: `Linux: run manually:  cd ${REPO_ROOT} && ${target.cli} ${target.flags || ''}`,
   });
 }
 
@@ -583,32 +603,47 @@ async function launchAllClis(opts = {}) {
   return { results, status };
 }
 
-// Detect whether each CLI is already running by inspecting open
-// console window titles. We launched them via `start "Title" cmd /K ...`
-// so each window carries the title in CLI_TARGETS — match against it.
-// On non-Windows, fall back to a `ps` command-line scan.
+// Detect whether each CLI is already running. Two-pass scan on
+// Windows: window titles (catches dashboard-launched shells) plus
+// process command lines via PowerShell's Get-CimInstance (catches
+// CLIs started manually in any shell — cmd, PowerShell, Git Bash,
+// or VS Code's integrated terminal). Either match counts.
 async function cliRunningStatus() {
   const out = { claude: false, codex: false, gemini: false };
-  try {
-    if (process.platform === 'win32') {
-      // tasklist /v with CSV output. The last quoted column on each
-      // row is the window title.
-      const { stdout } = await execP('tasklist /v /fo csv /nh');
-      const titles = [];
+  if (process.platform === 'win32') {
+    // 1) Window-title scan via tasklist /v.
+    try {
+      const { stdout } = await execP('tasklist /v /fo csv /nh', { maxBuffer: 8 * 1024 * 1024 });
       for (const line of stdout.split(/\r?\n/)) {
         const m = line.match(/"([^"]*)"\s*$/);
-        if (m) titles.push(m[1]);
+        if (!m) continue;
+        const title = m[1];
+        for (const t of CLI_TARGETS) {
+          if (title.includes(t.title)) out[t.id] = true;
+        }
       }
-      for (const t of CLI_TARGETS) {
-        if (titles.some(title => title.includes(t.title))) out[t.id] = true;
-      }
-    } else {
-      const { stdout } = await execP('ps -ef');
-      out.claude = /\b(claude)\b/.test(stdout);
-      out.codex  = /\b(codex)\b/.test(stdout);
-      out.gemini = /\b(gemini)\b/.test(stdout);
+    } catch (_) { /* if tasklist fails, fall through to the cmdline scan */ }
+    // 2) Process command-line scan via PowerShell. CIM gives us the
+    // CommandLine property of every running process; we test each
+    // CLI's `match` regex against the joined output.
+    if (!out.claude || !out.codex || !out.gemini) {
+      try {
+        const psCmd = 'powershell -NoLogo -NoProfile -Command "Get-CimInstance Win32_Process | ForEach-Object { $_.CommandLine }"';
+        const { stdout } = await execP(psCmd, { maxBuffer: 32 * 1024 * 1024 });
+        for (const t of CLI_TARGETS) {
+          if (!out[t.id] && t.match.test(stdout)) out[t.id] = true;
+        }
+      } catch (_) { /* PowerShell probe failed — keep whatever we got from tasklist */ }
     }
-  } catch (_) { /* if the probe fails, assume nothing running */ }
+  } else {
+    // POSIX — inspect command lines via ps. Match the same regexes.
+    try {
+      const { stdout } = await execP('ps -ef', { maxBuffer: 8 * 1024 * 1024 });
+      for (const t of CLI_TARGETS) {
+        if (t.match.test(stdout)) out[t.id] = true;
+      }
+    } catch (_) { /* ignore */ }
+  }
   return out;
 }
 
