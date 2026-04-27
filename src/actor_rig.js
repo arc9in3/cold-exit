@@ -659,47 +659,7 @@ export function initAnim(rig) {
     deadFallDir: { x: 0, z: 1 },
     deadFallMag: 1,
   };
-  // Cache the authored joint positions so per-frame pose offsets
-  // (e.g. RIFLE_HIP_POSE.supShoulder.pos) are applied as deltas
-  // rather than absolutes. Captured here, after buildRig has set
-  // the at-rest position, so we don't drift each frame.
-  const _v = (p) => ({ x: p.x, y: p.y, z: p.z });
-  rig.anim._basePos = {
-    leftShoulder:  _v(rig.leftArm.shoulder.pivot.position),
-    rightShoulder: _v(rig.rightArm.shoulder.pivot.position),
-    rightShoulderAnchor: _v(rig.rightShoulderAnchor.position),
-  };
 }
-
-// --- rifle HIP-mode (low-ready) pose ---------------------------------
-// Authored in tools/pose_editor.html and saved to Assets/poses/. Lerped
-// against the existing aimed pose by `aimBlend` (0=hip, 1=aim) so the
-// player slumps into a relaxed carry stance when the cursor is calm and
-// snaps into the bladed firing stance when ADS is active. Only applies
-// to weaponClass === 'rifle'; SMG/shotgun/sniper/lmg keep the prior
-// stiff-on stance until each gets its own authored pose.
-//
-// Slider rz values are RAW (pre-yawSign). When applying, multiply by
-// the same yawSign actor_rig.js uses for that joint:
-//   domShoulder, supShoulder → supportYawSign (== dominantYawSign on right-handed)
-//   everything else (elbow / wrist / spine) → 1
-const RIFLE_HIP_POSE = {
-  spine: {
-    stomachRotY: -0.39,
-    chestRotY:   -0.27,
-    headRotY:     0.58,
-  },
-  domShoulder:  { rx: -0.46, ry: -0.70, rz:  0.79 },
-  domElbow:     { rx: -1.04, ry: -0.18, rz:  0.36 },
-  domWrist:     { rx: -0.08, ry: -0.11, rz:  0.08 },
-  supShoulder:  { rx: -1.00, ry:  0.38, rz:  0.43,
-                  px:  0.13, py: -0.01, pz:  0.18 },
-  supElbow:     { rx:  1.44, ry: -0.90, rz:  2.08 },
-  // Weapon offset is applied to rightShoulderAnchor so the gun (which
-  // is parented to that anchor) inherits the rotation/translation.
-  weapon:       { rx:  0.00, ry:  0.68, rz: -0.52,
-                  px:  0.26, py: -0.23, pz:  0.13 },
-};
 
 // Smoothly drive `current` toward `target` at `rate` per second.
 function lerpT(current, target, rate, dt) {
@@ -1434,120 +1394,69 @@ export function updateAnim(rig, state, dt) {
   // along the barrel. More bladed body yaw too, because proper
   // rifle stance turns the body into the weapon.
   if (state.rifleHold && !state.meleeStance) {
-    // Aim-pose values — what the arms snap to under full ADS.
-    // hipBlend (1 - aimBlend) controls how much the authored
-    // RIFLE_HIP_POSE pulls the arms back into a relaxed carry.
-    const aimDomShoulderX = -1.05 + recoilKick * 0.25 - armLeanComp;
-    const aimDomShoulderZ = -0.12;   // raw, before yawSign
-    const aimDomElbowX    = -1.70 - recK * 0.45;
-    let aimSupShoulderX, aimSupShoulderZ, aimSupElbowX;
+    // Two-handed rifle hold — stock rests on the dominant shoulder
+    // anchor, one hand near the trigger / pistol grip, other hand on
+    // the front handguard. Both arms bent, body slightly bladed
+    // (bladeYaw below).
+    //
+    // Dominant (trigger) arm: shoulder pitches more forward
+    // (-1.05 from -0.85) so the upper arm projects further out
+    // instead of hanging close to the side. Elbow opened up
+    // (-1.70 from -2.25) so the forearm extends rather than
+    // folding back to the bicep — the hand drops UNDER the
+    // shoulder line and forward to the pistol grip rather than
+    // tucking up at chest. Yaw eased (-0.12 from -0.18) so the
+    // arm sits slightly more relaxed away from the ribs. The
+    // RIFLE itself doesn't move (parented to the shoulder anchor);
+    // only the arm pose changes.
+    //
+    // Recoil unchanged — only tightens the elbow on fire.
+    const rifleDomShoulder = -1.05 + recoilKick * 0.25 - armLeanComp;
+    const rifleDomYaw      = -0.12 * supportYawSign;
+    const rifleDomElbow    = -1.70 - recK * 0.45;
+    weaponArm.shoulder.pivot.rotation.x = rifleDomShoulder;
+    weaponArm.shoulder.pivot.rotation.z = rifleDomYaw;
+    weaponArm.elbow.rotation.x = rifleDomElbow;
+    // Support arm — two sub-variants:
+    //
+    //   RIFLE (proper long-gun reach):
+    //     Arm fully extended (elbow nearly straight) and angled
+    //     ACROSS the body so the support hand ends up out at the
+    //     front of the dominant shoulder. The rifle's handguard
+    //     extends well past the chest, so the support arm needs
+    //     reach + cross-body angle to actually meet it.
+    //
+    //   Other long guns (SMG / shotgun / sniper / lmg):
+    //     Bent foregrip pose — elbow folds back, hand sits closer
+    //     to the receiver. Better for shorter weapons whose
+    //     handguard doesn't extend as far.
+    let rifleSupShoulder, rifleSupYaw, rifleSupElbow;
     if (state.weaponClass === 'rifle') {
-      aimSupShoulderX = -1.55 + (a.aimBlend * -0.05) - armLeanComp;
-      aimSupShoulderZ =  0.55;
-      aimSupElbowX    = -0.20;
+      rifleSupShoulder = -1.55 + (a.aimBlend * -0.05) - armLeanComp;
+      rifleSupYaw      = 0.55 * supportYawSign;   // strong cross-body
+      rifleSupElbow    = -0.20;                   // nearly straight
     } else {
-      aimSupShoulderX = -1.45 + (a.aimBlend * -0.10) - armLeanComp;
-      aimSupShoulderZ =  0.18;
-      aimSupElbowX    = -0.85;
+      rifleSupShoulder = -1.45 + (a.aimBlend * -0.10) - armLeanComp;
+      rifleSupYaw      = 0.18 * supportYawSign;
+      rifleSupElbow    = -0.85;
     }
-
-    if (state.weaponClass === 'rifle') {
-      // Blend authored hip pose into the aim pose. ab = aim, hb = hip.
-      // Both shoulders use supportYawSign (rz multiplier matches editor
-      // pipeline). Elbow / wrist / spine use raw values.
-      const ab = a.aimBlend, hb = 1 - ab;
-      const H = RIFLE_HIP_POSE;
-      const sgn = supportYawSign;
-
-      weaponArm.shoulder.pivot.rotation.x = H.domShoulder.rx * hb + aimDomShoulderX * ab;
-      weaponArm.shoulder.pivot.rotation.y = H.domShoulder.ry * hb;
-      weaponArm.shoulder.pivot.rotation.z = (H.domShoulder.rz * hb + aimDomShoulderZ * ab) * sgn;
-      weaponArm.elbow.rotation.x = H.domElbow.rx * hb + aimDomElbowX * ab;
-      weaponArm.elbow.rotation.y = H.domElbow.ry * hb;
-      weaponArm.elbow.rotation.z = H.domElbow.rz * hb;
-      weaponArm.wrist.rotation.x = H.domWrist.rx * hb;
-      weaponArm.wrist.rotation.y = H.domWrist.ry * hb;
-      weaponArm.wrist.rotation.z = H.domWrist.rz * hb;
-
-      supportArm.shoulder.pivot.rotation.x = H.supShoulder.rx * hb + aimSupShoulderX * ab;
-      supportArm.shoulder.pivot.rotation.y = H.supShoulder.ry * hb;
-      supportArm.shoulder.pivot.rotation.z = (H.supShoulder.rz * hb + aimSupShoulderZ * ab) * sgn;
-      supportArm.elbow.rotation.x = H.supElbow.rx * hb + aimSupElbowX * ab;
-      supportArm.elbow.rotation.y = H.supElbow.ry * hb;
-      supportArm.elbow.rotation.z = H.supElbow.rz * hb;
-
-      // Sup-shoulder pivot translation — pulls the off-arm in toward
-      // the cradle of the rifle when relaxed.
-      const supBase = a._basePos.leftShoulder;   // support = leftArm on right-handed
-      supportArm.shoulder.pivot.position.set(
-        supBase.x + H.supShoulder.px * hb,
-        supBase.y + H.supShoulder.py * hb,
-        supBase.z + H.supShoulder.pz * hb,
-      );
-
-      // Spine sway — additive on top of the locomotion / aim writes
-      // earlier in updateAnim. Sits at the authored offset when the
-      // player is relaxed, decays to 0 under ADS so chestAimYaw +
-      // head-toward-cursor logic takes over cleanly.
-      rig.stomach.rotation.y += H.spine.stomachRotY * hb;
-      rig.chest.rotation.y   += H.spine.chestRotY   * hb;
-      rig.head.rotation.y    += H.spine.headRotY    * hb;
-
-      // Weapon offset — applied to rightShoulderAnchor so the gun
-      // (parented to it via _makeInHandGroup in player.js) inherits.
-      // armLeanComp keeps the gun level on body pitch; the hip pose
-      // adds extra rotation/offset on top of that.
-      const rsBase = a._basePos.rightShoulderAnchor;
-      rig.rightShoulderAnchor.rotation.x = -armLeanComp + H.weapon.rx * hb;
-      rig.rightShoulderAnchor.rotation.y =                 H.weapon.ry * hb;
-      rig.rightShoulderAnchor.rotation.z =                 H.weapon.rz * hb;
-      rig.rightShoulderAnchor.position.set(
-        rsBase.x + H.weapon.px * hb,
-        rsBase.y + H.weapon.py * hb,
-        rsBase.z + H.weapon.pz * hb,
-      );
-      rig.leftShoulderAnchor.rotation.x = -armLeanComp;
-    } else {
-      // SMG / shotgun / sniper / lmg — no authored hip pose yet, so
-      // run the original aim-only branch. Match-for-match with the
-      // pre-refactor code so non-rifle long guns are untouched. Also
-      // zero the rifle-only anchor y/z + position writes in case the
-      // previous frame held a rifle and we just swapped class.
-      weaponArm.shoulder.pivot.rotation.x = aimDomShoulderX;
-      weaponArm.shoulder.pivot.rotation.y = 0;
-      weaponArm.shoulder.pivot.rotation.z = aimDomShoulderZ * supportYawSign;
-      weaponArm.elbow.rotation.x = aimDomElbowX;
-      weaponArm.elbow.rotation.y = 0;
-      weaponArm.elbow.rotation.z = 0;
-      weaponArm.wrist.rotation.set(0, 0, 0);
-      supportArm.shoulder.pivot.rotation.x = aimSupShoulderX;
-      supportArm.shoulder.pivot.rotation.y = 0;
-      supportArm.shoulder.pivot.rotation.z = aimSupShoulderZ * supportYawSign;
-      supportArm.elbow.rotation.x = aimSupElbowX;
-      supportArm.elbow.rotation.y = 0;
-      supportArm.elbow.rotation.z = 0;
-      rig.rightShoulderAnchor.rotation.set(-armLeanComp, 0, 0);
-      rig.leftShoulderAnchor.rotation.x  = -armLeanComp;
-      if (a._basePos) {
-        const rsBase = a._basePos.rightShoulderAnchor;
-        rig.rightShoulderAnchor.position.set(rsBase.x, rsBase.y, rsBase.z);
-        const supBase = a._basePos.leftShoulder;
-        supportArm.shoulder.pivot.position.set(supBase.x, supBase.y, supBase.z);
-      }
-    }
+    supportArm.shoulder.pivot.rotation.x = rifleSupShoulder;
+    supportArm.shoulder.pivot.rotation.z = rifleSupYaw;
+    supportArm.elbow.rotation.x = rifleSupElbow;
+    // The rifle itself is parented to rightShoulderAnchor (see
+    // player.js setWeapon), which is a child of chest.pivot. When
+    // chest + hips pitch forward for a crouch/run/dash, the anchor
+    // inherits that pitch and the rifle tips downward. Counter-rotate
+    // the anchors by the same lean amount so the rifle stays level
+    // with the ground — matches what armLeanComp does for the arms.
+    rig.rightShoulderAnchor.rotation.x = -armLeanComp;
+    rig.leftShoulderAnchor.rotation.x  = -armLeanComp;
   } else if (rig.rightShoulderAnchor && rig.leftShoulderAnchor) {
     // Non-rifle holds don't use the shoulder anchor for weapon
-    // parenting, but we still zero the compensation rotation +
-    // restore base pose offsets so a swap from rifle → pistol
-    // doesn't leave the anchor or the support shoulder displaced.
-    rig.rightShoulderAnchor.rotation.set(0, 0, 0);
-    rig.leftShoulderAnchor.rotation.x = 0;
-    if (a._basePos) {
-      const rsBase = a._basePos.rightShoulderAnchor;
-      rig.rightShoulderAnchor.position.set(rsBase.x, rsBase.y, rsBase.z);
-      const supBase = a._basePos.leftShoulder;
-      supportArm.shoulder.pivot.position.set(supBase.x, supBase.y, supBase.z);
-    }
+    // parenting, but we still zero the compensation rotation so the
+    // anchor stays at its authored offset when a weapon swap happens.
+    rig.rightShoulderAnchor.rotation.x = 0;
+    rig.leftShoulderAnchor.rotation.x  = 0;
   }
 
   // --- melee block-stance override ---------------------------------
