@@ -235,10 +235,19 @@ class RigInstancer {
   // zero-scale for them instead of matrixWorld. Used when the right
   // arm is hidden (boss/grunt disarm). Re-call with hidden=false to
   // restore (e.g. boss picks up a fallen weapon).
+  //
+  // Sets BOTH `_instHide` (the effective flag syncFrame reads) and
+  // `_instHideByDisarm` (the source flag) so the per-actor visibility
+  // helper (`_setEnemyInstHidden` in main.js) can leave disarm-hidden
+  // meshes alone when restoring visibility on LoS recovery.
   hideMeshes(meshes, hidden) {
     if (!meshes) return;
+    const want = !!hidden;
     for (const m of meshes) {
-      if (m && m.userData) m.userData._instHide = !!hidden;
+      if (m && m.userData) {
+        m.userData._instHide = want;
+        m.userData._instHideByDisarm = want;
+      }
     }
   }
 }

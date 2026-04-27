@@ -6911,6 +6911,25 @@ function _isEnemyActive(e) {
   return s === 'firing' || s === 'alerted' || s === 'chase'
     || s === 'windup' || s === 'swing' || s === 'recovery';
 }
+
+// Tag every rig source mesh's _instHide flag — drives whether the
+// rig instancer parks that mesh's instance slot at zero-scale or
+// reads matrixWorld each frame. Used when an actor needs to be
+// FULLY hidden (beyond hearing range, cloaked, dead-and-baked,
+// past-fog culling). Ghost mode handles its own _instHide toggle
+// inside _setEnemyGhost; this helper is for the all-hidden case.
+function _setEnemyInstHidden(e, hide) {
+  const rig = e && e.rig;
+  if (!rig || !rig.meshes) return;
+  for (const m of rig.meshes) {
+    if (!m) continue;
+    // Don't override the disarm flag — disarm is a separate concern
+    // tracked elsewhere on the actor's right-arm subset. Setting
+    // _instHide=false here would re-show a disarmed arm.
+    if (!hide && m.userData._instHideByDisarm) continue;
+    m.userData._instHide = !!hide;
+  }
+}
 // Persistent scratch values for updateEnemyVisibility — recreating
 // these every frame ran roughly 60 × 2 Vector3 allocs/sec at 60fps,
 // plus the spread allocation for `everyone`.
@@ -6944,6 +6963,7 @@ function updateEnemyVisibility() {
     if (!e.alive) {
       // Corpses always render fully — fresnel ghost is for live enemies.
       _setEnemyGhost(e, false);
+      _setEnemyInstHidden(e, false);
       e.group.visible = true;
       continue;
     }
@@ -6954,6 +6974,7 @@ function updateEnemyVisibility() {
     // ghost mode for one frame so the appearance reads).
     if (e.cloaked) {
       _setEnemyGhost(e, false);
+      _setEnemyInstHidden(e, true);
       e.group.visible = false;
       continue;
     }
@@ -6967,6 +6988,7 @@ function updateEnemyVisibility() {
       const farSq = (range + 4) * (range + 4);
       if (dxe * dxe + dze * dze > farSq) {
         _setEnemyGhost(e, false);
+        _setEnemyInstHidden(e, true);
         e.group.visible = false;
         continue;
       }
@@ -6976,13 +6998,17 @@ function updateEnemyVisibility() {
     e._occluded = !los;
     if (los) {
       _setEnemyGhost(e, false);
+      _setEnemyInstHidden(e, false);
       e.group.visible = true;
       continue;
     }
     const d = Math.hypot(e.group.position.x - px, e.group.position.z - pz);
     if (d >= range) {
-      // Beyond hearing range — hide entirely.
+      // Beyond hearing range — hide entirely. The InstancedMesh
+      // doesn't honour e.group.visible (it's not a child of the
+      // group); explicitly park instance slots at zero-scale.
       _setEnemyGhost(e, false);
+      _setEnemyInstHidden(e, true);
       e.group.visible = false;
       continue;
     }
