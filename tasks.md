@@ -11,7 +11,6 @@ Status legend: `open` (unassigned, ready) · `in-progress` ·
 
 | Task | Owner | Status | Notes |
 |---|---|---|---|
-| BVH for `_hitsObstacle` projectile path | codex | in-progress | Cached obstacle index for projectile sweeps on `codex/projectile-bvh`. |
 | Audit: every `geometry.dispose()` callsite for `sharedRigGeom` guard | gemini | open | Past regression; verify no new gaps. Report to `audits/dispose-guard.md`. |
 | Audit: artifact `apply()` mutations vs `BASE_STATS()` field declarations | gemini | open | Catches relics that mutate undefined fields. |
 | Refactor: rename `_baseBody` / `_baseHead` → `_normalBodyColor` / `_normalHeadColor` in gunman.js | gemini | open | Single sweep, single commit. Previous attempt got lost via dirty working tree (no checkout) — must follow REQUIRED pre-edit sequence. |
@@ -22,6 +21,7 @@ Status legend: `open` (unassigned, ready) · `in-progress` ·
 
 | Task | Owner | Shipped |
 |---|---|---|
+| BVH/grid for `_hitsObstacle` (5.9x at current scale, 25x stress-scale) | codex | 2026-04-27 |
 | Weapon FBX audit script (`tools/audit_weapon_fbx.py`) | codex | 2026-04-27 |
 | Plain-English summary + tasks view + AI summary on review dashboard | claude | 2026-04-27 |
 | Review dashboard tool (`tools/review-dashboard.mjs`) | claude | 2026-04-27 |
