@@ -1959,10 +1959,19 @@ export class LootUI {
     const count = (entry.item.count | 0) || 1;
     const stackBadge = ((entry.item.type === 'consumable' || entry.item.type === 'junk') && count > 1)
       ? `<span class="pkt-stack">×${count}</span>` : '';
+    // Keep / junk tag — same .cell-mark-tag the equipment cells +
+    // shop cells render via renderItemCell. Body-loot tile builds
+    // its own HTML so the tag has to be threaded in here too.
+    const markBadge = entry.item.markedJunk
+      ? `<div class="cell-mark-tag mark-junk pkt-mark-tag" title="Marked as Junk">JUNK</div>`
+      : entry.item.markedKeep
+      ? `<div class="cell-mark-tag mark-keep pkt-mark-tag" title="Marked to Keep">KEEP</div>`
+      : '';
     tile.innerHTML = `
       ${thumb ? `<img class="ws-thumb" src="${thumb}" alt="" draggable="false">` : `<span class="ws-glyph">${TYPE_ICONS[entry.item.type] || '◇'}</span>`}
       ${brokenTag}
       ${stackBadge}
+      ${markBadge}
       <div class="ws-name">${entry.item.name || ''}</div>
       ${ammo}
       ${bonusHtml}
