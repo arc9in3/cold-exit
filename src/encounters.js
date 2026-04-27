@@ -2743,6 +2743,96 @@ export const ENCOUNTER_DEFS = {
   },
 
   // -----------------------------------------------------------------
+  // Travel Buddy — small white bear standing in the centre wearing
+  // a tiny backpack. Drop the Unused Rocket Ticket (junk_rocket_ticket)
+  // and he hands you the Small Magical Pack — a mythic 50-slot
+  // backpack that taxes your move speed by 25%. One-shot per save.
+  // -----------------------------------------------------------------
+  travel_buddy: {
+    id: 'travel_buddy',
+    name: 'Travel Buddy',
+    floorColor: 0xc0d8e0,             // pale ice-blue dais
+    oncePerSave: true,
+    condition: (state) => state.levelIndex >= 2,
+    spawn(scene, room, ctx) {
+      const disc = _spawnFloorDisc(scene, room, this.floorColor);
+      // Build a small white bear inline — two stacked spheres, ear
+      // dots, and a felt backpack mounted on its back so the iso
+      // camera reads the silhouette as "bear with a pack".
+      const bear = new THREE.Group();
+      const furMat = new THREE.MeshStandardMaterial({ color: 0xf2f2f2, roughness: 0.85 });
+      const noseMat = new THREE.MeshStandardMaterial({ color: 0x202020, roughness: 0.5 });
+      const packMat = new THREE.MeshStandardMaterial({ color: 0x6a4a30, roughness: 0.7 });
+      const strapMat = new THREE.MeshStandardMaterial({ color: 0x402a18, roughness: 0.6 });
+      const body = new THREE.Mesh(new THREE.SphereGeometry(0.42, 14, 10), furMat);
+      body.position.y = 0.42;
+      body.castShadow = true;
+      bear.add(body);
+      const head = new THREE.Mesh(new THREE.SphereGeometry(0.28, 12, 10), furMat);
+      head.position.set(0, 0.95, 0.18);
+      head.castShadow = true;
+      bear.add(head);
+      // Ears.
+      for (const xs of [-1, 1]) {
+        const ear = new THREE.Mesh(new THREE.SphereGeometry(0.10, 8, 6), furMat);
+        ear.position.set(0.20 * xs, 1.16, 0.10);
+        bear.add(ear);
+      }
+      // Snout + nose.
+      const snout = new THREE.Mesh(new THREE.SphereGeometry(0.13, 8, 6), furMat);
+      snout.position.set(0, 0.86, 0.40);
+      bear.add(snout);
+      const nose = new THREE.Mesh(new THREE.SphereGeometry(0.05, 6, 6), noseMat);
+      nose.position.set(0, 0.92, 0.50);
+      bear.add(nose);
+      // Backpack — box on the bear's back (-Z side) with two strap
+      // cylinders running over the shoulders.
+      const pack = new THREE.Mesh(new THREE.BoxGeometry(0.45, 0.55, 0.22), packMat);
+      pack.position.set(0, 0.55, -0.40);
+      pack.castShadow = true;
+      bear.add(pack);
+      const flap = new THREE.Mesh(new THREE.BoxGeometry(0.42, 0.18, 0.04), packMat);
+      flap.position.set(0, 0.78, -0.50);
+      bear.add(flap);
+      for (const xs of [-1, 1]) {
+        const strap = new THREE.Mesh(
+          new THREE.CylinderGeometry(0.025, 0.025, 0.55, 6),
+          strapMat,
+        );
+        strap.position.set(0.18 * xs, 0.55, -0.10);
+        strap.rotation.x = -0.45;
+        bear.add(strap);
+      }
+      bear.position.set(disc.cx, 0, disc.cz);
+      // Rotate so the iso camera (looking from +X+Z) catches the
+      // backpack edge — bear faces roughly toward the camera, pack
+      // hangs visibly off the +X-back side.
+      bear.rotation.y = -Math.PI * 0.25;
+      scene.add(bear);
+      const label = _makeLabelSprite('TRAVEL BUDDY', '#cce0e8');
+      label.position.set(disc.cx, 1.7, disc.cz);
+      scene.add(label);
+      return { bear, label, disc, complete: false };
+    },
+    tick(_dt, _ctx) { /* purely reactive */ },
+    onItemDropped(item, ctx) {
+      const s = ctx.state;
+      if (s.complete || !item) return { consume: false };
+      if (item.id !== 'junk_rocket_ticket') return { consume: false };
+      s.complete = true;
+      ctx.spawnSpeech(s.bear.position.clone().setY(2.0),
+        'Take this — it\'ll fit more than it should.', 5.0);
+      // Spawn the Small Magical Pack as a fresh inventory item.
+      // Resolved through ctx so encounters.js doesn't import inventory
+      // directly; main.js exposes the def on the ctx factory.
+      const pack = ctx.makeMagicalPack && ctx.makeMagicalPack();
+      if (pack) ctx.spawnLoot(s.disc.cx + 0.8, s.disc.cz, pack);
+      if (ctx.markEncounterComplete) ctx.markEncounterComplete('travel_buddy');
+      return { consume: true, complete: true };
+    },
+  },
+
+  // -----------------------------------------------------------------
   // The Priest — recurring encounter. Stands in the room and asks
   // the player if they want to pray. "Yes" → heals; "No" → flavor
   // line about salvation + increments runStats.priestRefusals.

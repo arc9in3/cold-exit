@@ -896,6 +896,16 @@ export const ARMOR_DEFS = {
     tint: 0x3a3418, durability: dur(220, 0.88), pockets: 15, rarity: 'rare',
     gridLayout: { w: 5, h: 3 },
     description: '15 pack slots' },
+  // Apr-26 — Travel Buddy encounter reward. _encounter flag keeps it
+  // out of merchant stocks / random gear pools; only the bear-trade
+  // for the unused rocket ticket yields it.
+  backpack_magical: { id: 'backpack_magical', name: 'Small Magical Pack',
+    slot: 'backpack', type: 'backpack',
+    tint: 0xeaeaff, durability: dur(400, 0.95), pockets: 50, rarity: 'mythic',
+    gridLayout: { w: 10, h: 5 },
+    speedMult: 0.75,
+    description: '50 pack slots · −25% move',
+    _encounter: true },
 
   // Expanded lineup — distinct per-slot utility so build variety matters.
   helmet_ballistic: { id: 'helmet_ballistic', name: 'Ballistic Helmet', slot: 'head', type: 'armor',
@@ -1373,8 +1383,11 @@ if (typeof window !== 'undefined') {
   window.__inv = window.__inv || {};
   window.__inv.maybeApplyMastercraft = maybeApplyMastercraft;
 }
-export const ALL_ARMOR = Object.values(ARMOR_DEFS);
-export const ALL_GEAR = Object.values(GEAR_DEFS);
+// Encounter-only items (e.g. Small Magical Pack) get filtered out
+// of the random pools so they only appear via their dedicated quest
+// hook. ARMOR_DEFS / GEAR_DEFS still expose them for direct id access.
+export const ALL_ARMOR = Object.values(ARMOR_DEFS).filter(d => !d._encounter);
+export const ALL_GEAR  = Object.values(GEAR_DEFS).filter(d => !d._encounter);
 export const ALL_CONSUMABLES = Object.values(CONSUMABLE_DEFS);
 
 // Random pickers used by enemy drop logic.

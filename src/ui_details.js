@@ -148,6 +148,7 @@ export const ITEM_LORE = {
   // Mythic
   'Dragonbreath':      'Pump shotgun loaded with incendiary slug shells. Each shot leaves a lane of fire and apologies.',
   'Pain':              'A mace made of soft grey felt, seems to emit pure evil.',
+  'Small Magical Pack':'so much space that curly arms could really rummage wildly in here. Strangely heavy though…',
 
   // Gear — face / head / ears / hands / belts / pants / boots
   'Combat Helmet':       'Military-issue half-shell, scuffed paint, replaceable padding. Standard issue, standard luck.',

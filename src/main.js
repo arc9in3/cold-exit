@@ -748,6 +748,10 @@ const gameMenuUI = new GameMenuUI({
     classXp: { ...classMastery.xp },
     specialPerks: [...specialPerks.unlocked],
     skillTree: { ...skillTree.levels },
+    // Owned artifacts/relics — was previously omitted, so a save/load
+    // wiped every relic the player had collected. Persist as a flat
+    // id list to mirror the resetSnapshot / runStats pattern.
+    artifacts: [...artifacts.owned],
     inventory: snapshotInventory(),
     currentWeaponIndex,
     savedAt: Date.now(),
@@ -766,6 +770,12 @@ const gameMenuUI = new GameMenuUI({
     classMastery.fillMissing();
     specialPerks.unlocked = new Set(s.specialPerks || []);
     skillTree.levels = { ...(s.skillTree || {}) };
+    // Restore owned artifacts. Older saves predate this field — fall
+    // back to whatever's in artifacts.owned so we don't wipe relics
+    // a long-running save user may have on a now-loaded older save.
+    if (Array.isArray(s.artifacts)) {
+      artifacts.owned = new Set(s.artifacts);
+    }
     // Full inventory restore mirrors the extraction snapshot path.
     if (s.inventory) {
       for (const slot in s.inventory.equipment) {
@@ -2118,6 +2128,15 @@ function regenerateLevel() {
           if (!def) return false;
           loot.spawnItem({ x, y: 0.4, z }, { ...def });
           return true;
+        },
+        // Travel Buddy reward — fresh Small Magical Pack instance with
+        // its own durability object so two pickups don't share state.
+        makeMagicalPack: () => {
+          const def = ARMOR_DEFS && ARMOR_DEFS.backpack_magical;
+          if (!def) return null;
+          const item = { ...def };
+          if (def.durability) item.durability = { ...def.durability };
+          return item;
         },
         // Live in-flight projectile list. Hoop Dreams reads this each
         // tick to detect grenades passing through the basketball ring.
