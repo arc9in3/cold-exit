@@ -104,6 +104,7 @@
     <button id="reset-class">Reset to current preset defaults</button>
     <button id="undo">Undo (Ctrl+Z)</button>
     <button id="flip-view">Flip camera (front ↔ back)</button>
+    <button id="swap-handed">Swap handedness — current: <span id="handed-label">RIGHT</span></button>
     <div class="mode-toggle">
       <button id="gizmo-translate">Translate (T)</button>
       <button id="gizmo-rotate" class="active">Rotate (R)</button>
@@ -335,41 +336,56 @@ rig.group.traverse(o => {
 });
 
 // ---------- handedness --------------------------------------------
-// Match actor_rig.js: dominant arm yaw also multiplies by supportYawSign
-// (rifleDomYaw = -0.12 * supportYawSign). See game pipeline notes.
-const handed = 'right';
-const weaponArm  = handed === 'right' ? rig.rightArm : rig.leftArm;
-const supportArm = handed === 'right' ? rig.leftArm  : rig.rightArm;
-const supportYawSign = handed === 'right' ? 1 : -1;
-const dominantYawSign = supportYawSign;
+// `mirror` is the unified sign applied to all Y rotations, Z rotations,
+// and X positions on apply / readback. Right-handed = +1 (no flip);
+// left-handed = -1 mirrors the pose across the YZ plane. Saved JSON
+// is therefore handedness-agnostic — reload the same file on either
+// side and it'll look symmetric.
+let handed = 'right';
+let weaponArm, supportArm, mirror;
+function _applyHandedness() {
+  weaponArm  = handed === 'right' ? rig.rightArm : rig.leftArm;
+  supportArm = handed === 'right' ? rig.leftArm  : rig.rightArm;
+  mirror     = handed === 'right' ? 1 : -1;
+}
+_applyHandedness();
 
 // ---------- joints ------------------------------------------------
-// Every controllable joint exposed by the rig. yawSign mirrors the
-// game's supportYawSign multiplier so the slider value the user
-// sees matches what authoring code in actor_rig.js will read back.
+// Every controllable joint. Targets are accessor functions so they
+// re-resolve to the correct arm after a handedness swap.
 const JOINTS = [
-  { key: 'hips',        label: 'Hips (whole-body lean)', target: () => rig.hips,                 yawSign: 1 },
-  { key: 'stomach',     label: 'Stomach (torso sway)',   target: () => rig.stomach,              yawSign: 1 },
-  { key: 'chest',       label: 'Chest (upper spine)',    target: () => rig.chest,                yawSign: 1 },
-  { key: 'neck',        label: 'Neck',                   target: () => rig.neck,                 yawSign: 1 },
-  { key: 'head',        label: 'Head',                   target: () => rig.head,                 yawSign: 1 },
-  { key: 'domShoulder', label: 'Dom shoulder (right · trigger)', target: () => weaponArm.shoulder.pivot, yawSign: dominantYawSign },
-  { key: 'domElbow',    label: 'Dom elbow (right)',              target: () => weaponArm.elbow,          yawSign: 1 },
-  { key: 'domWrist',    label: 'Dom wrist (right)',              target: () => weaponArm.wrist,          yawSign: 1 },
-  { key: 'supShoulder', label: 'Sup shoulder (left · foregrip)', target: () => supportArm.shoulder.pivot, yawSign: supportYawSign },
-  { key: 'supElbow',    label: 'Sup elbow (left)',               target: () => supportArm.elbow,         yawSign: 1 },
-  { key: 'supWrist',    label: 'Sup wrist (left)',               target: () => supportArm.wrist,         yawSign: 1 },
+  { key: 'hips',        label: 'Hips (whole-body lean)',         target: () => rig.hips     },
+  { key: 'stomach',     label: 'Stomach (torso sway)',           target: () => rig.stomach  },
+  { key: 'chest',       label: 'Chest (upper spine)',            target: () => rig.chest    },
+  { key: 'neck',        label: 'Neck',                           target: () => rig.neck     },
+  { key: 'head',        label: 'Head',                           target: () => rig.head     },
+  { key: 'domShoulder', label: 'Dom shoulder (trigger)',         target: () => weaponArm.shoulder.pivot  },
+  { key: 'domElbow',    label: 'Dom elbow',                      target: () => weaponArm.elbow           },
+  { key: 'domWrist',    label: 'Dom wrist',                      target: () => weaponArm.wrist           },
+  { key: 'supShoulder', label: 'Sup shoulder (foregrip)',        target: () => supportArm.shoulder.pivot },
+  { key: 'supElbow',    label: 'Sup elbow',                      target: () => supportArm.elbow          },
+  { key: 'supWrist',    label: 'Sup wrist',                      target: () => supportArm.wrist          },
 ];
 
-// Capture the rig's authored base position for every joint exactly
-// once. Position sliders apply as deltas on top of this baseline so
-// "0" always means "rig default" instead of "joint at world origin".
-const _basePos = {};
-for (const j of JOINTS) {
-  const t = j.target();
-  _basePos[j.key] = t ? { x: t.position.x, y: t.position.y, z: t.position.z }
-                      : { x: 0, y: 0, z: 0 };
+// Cache rest position by Object3D identity so swap-handedness still
+// resolves to the correct base for whichever side is now active.
+// Captured BEFORE any pose runs (rig is at rest immediately after
+// buildRig).
+const _baseObjPos = new WeakMap();
+const _captureBase = (obj) => { if (obj) _baseObjPos.set(obj, obj.position.clone()); };
+for (const arm of [rig.leftArm, rig.rightArm]) {
+  _captureBase(arm.shoulder.pivot);
+  _captureBase(arm.elbow);
+  _captureBase(arm.wrist);
 }
+_captureBase(rig.hips);
+_captureBase(rig.stomach);
+_captureBase(rig.chest);
+_captureBase(rig.neck);
+_captureBase(rig.head);
+
+const _getBase = (t) => _baseObjPos.get(t)
+  || { x: t.position.x, y: t.position.y, z: t.position.z };
 
 // Slider field shape — six axes per joint, raw user-facing values.
 const FIELDS = ['rx', 'ry', 'rz', 'px', 'py', 'pz'];
@@ -530,15 +546,22 @@ function _tagArm(arm, shoulderKey, elbowKey, wristKey) {
   _tagDescendants(arm.elbow, elbowKey);
   _tagDescendants(arm.shoulder?.pivot, shoulderKey);
 }
-_tagArm(weaponArm,  'domShoulder', 'domElbow', 'domWrist');
-_tagArm(supportArm, 'supShoulder', 'supElbow', 'supWrist');
-// Spine — tag innermost first so chest descendants resolve to chest,
-// stomach descendants resolve to stomach, etc.
-_tagDescendants(rig.head,    'head');
-_tagDescendants(rig.neck,    'neck');
-_tagDescendants(rig.chest,   'chest');
-_tagDescendants(rig.stomach, 'stomach');
-_tagDescendants(rig.hips,    'hips');
+function _retagJoints() {
+  // Clear any stale tags (left over from a prior handedness).
+  rig.group.traverse(o => {
+    if (o.userData && 'jointKey' in o.userData) delete o.userData.jointKey;
+  });
+  _tagArm(weaponArm,  'domShoulder', 'domElbow', 'domWrist');
+  _tagArm(supportArm, 'supShoulder', 'supElbow', 'supWrist');
+  // Spine — tag innermost first so chest descendants resolve to chest,
+  // stomach descendants resolve to stomach, etc.
+  _tagDescendants(rig.head,    'head');
+  _tagDescendants(rig.neck,    'neck');
+  _tagDescendants(rig.chest,   'chest');
+  _tagDescendants(rig.stomach, 'stomach');
+  _tagDescendants(rig.hips,    'hips');
+}
+_retagJoints();
 
 let _selectedKey = null;
 let _selectedJoint = null;   // entry from JOINTS, or null for 'weapon'
@@ -581,22 +604,24 @@ tcontrols.addEventListener('objectChange', () => {
   const v = _selectedKey === 'weapon'
     ? pose[mode].weapon
     : (pose[mode].joints[_selectedKey] = pose[mode].joints[_selectedKey] || ZERO_JOINT());
+  // Sliders store the canonical right-handed value. On left-handed
+  // we divide back through the mirror so the slider/save state stays
+  // handedness-agnostic.
   if (_selectedKey === 'weapon') {
-    v.px = t.position.x - _baseWeaponPos.x;
-    v.py = t.position.y - _baseWeaponPos.y;
-    v.pz = t.position.z - _baseWeaponPos.z;
-    v.rx = t.rotation.x - _baseWeaponRot.x;
-    v.ry = t.rotation.y - _baseWeaponRot.y;
-    v.rz = t.rotation.z - _baseWeaponRot.z;
+    v.px = (t.position.x - _baseWeaponPos.x) / mirror;
+    v.py =  t.position.y - _baseWeaponPos.y;
+    v.pz =  t.position.z - _baseWeaponPos.z;
+    v.rx =  t.rotation.x - _baseWeaponRot.x;
+    v.ry = (t.rotation.y - _baseWeaponRot.y) / mirror;
+    v.rz = (t.rotation.z - _baseWeaponRot.z) / mirror;
   } else {
-    const bp = _basePos[_selectedKey];
-    const ys = _selectedJoint?.yawSign ?? 1;
-    v.px = t.position.x - bp.x;
-    v.py = t.position.y - bp.y;
-    v.pz = t.position.z - bp.z;
-    v.rx = t.rotation.x;
-    v.ry = t.rotation.y;
-    v.rz = t.rotation.z / ys;   // sliders store the raw user value
+    const bp = _getBase(t);
+    v.px = (t.position.x - bp.x) / mirror;
+    v.py =  t.position.y - bp.y;
+    v.pz =  t.position.z - bp.z;
+    v.rx =  t.rotation.x;
+    v.ry =  t.rotation.y / mirror;
+    v.rz =  t.rotation.z / mirror;
   }
   // Push slider element values + visible labels in sync.
   const prefix = _selectedKey;
@@ -709,20 +734,21 @@ function applyPose() {
     const t = j.target();
     if (!t) continue;
     const v = p.joints[j.key] || ZERO_JOINT();
-    t.rotation.set(v.rx, v.ry, v.rz * j.yawSign);
-    const bp = _basePos[j.key];
-    t.position.set(bp.x + v.px, bp.y + v.py, bp.z + v.pz);
+    // Y rot, Z rot, and X pos mirror across YZ plane on left-handed.
+    t.rotation.set(v.rx, v.ry * mirror, v.rz * mirror);
+    const bp = _getBase(t);
+    t.position.set(bp.x + v.px * mirror, bp.y + v.py, bp.z + v.pz);
   }
-  // Weapon FBX offset — applied to the in-hand intermediate group
-  // on top of the game's authored anchor transform.
+  // Weapon FBX offset — same mirror rules so a swap puts the gun on
+  // the opposite side at the symmetric position/rotation.
   if (_inHandGroup) {
     const v = p.weapon;
-    _inHandGroup.position.set(_baseWeaponPos.x + v.px,
+    _inHandGroup.position.set(_baseWeaponPos.x + v.px * mirror,
                               _baseWeaponPos.y + v.py,
                               _baseWeaponPos.z + v.pz);
     _inHandGroup.rotation.set(_baseWeaponRot.x + v.rx,
-                              _baseWeaponRot.y + v.ry,
-                              _baseWeaponRot.z + v.rz);
+                              _baseWeaponRot.y + v.ry * mirror,
+                              _baseWeaponRot.z + v.rz * mirror);
   }
 
   // === Combat viz update ============================================
@@ -898,6 +924,42 @@ document.getElementById('flip-view').addEventListener('click', () => {
   controls.update();
 });
 
+// Handedness swap. Lifts the gun + muzzle to the opposite anchor,
+// re-tags joint meshes, and re-applies the current pose. The pose
+// buffer values themselves are unchanged — `mirror` flips Y rot,
+// Z rot, and X position at apply time so the result is symmetric.
+function swapHanded() {
+  // Reset the about-to-be-abandoned arm to its rest pose so it
+  // doesn't stay frozen mid-twist after the swap.
+  for (const j of JOINTS) {
+    const t = j.target();
+    if (!t) continue;
+    t.rotation.set(0, 0, 0);
+    const bp = _getBase(t);
+    t.position.set(bp.x, bp.y, bp.z);
+  }
+  handed = handed === 'right' ? 'left' : 'right';
+  _applyHandedness();
+  _retagJoints();
+  // Re-parent the gun + muzzle to the new side. Easiest: rebuild
+  // the inHandGroup via _makeInHandGroup so all the offset math
+  // mirrors the loader's path exactly.
+  if (_inHandGroup && _loadedWeapon) {
+    const fbx = _weaponMesh;
+    if (fbx?.parent) fbx.parent.remove(fbx);
+    _inHandGroup.parent?.remove(_inHandGroup);
+    _inHandGroup = _makeInHandGroup(_loadedWeapon.cls, _loadedWeapon.len);
+    if (fbx) _inHandGroup.add(fbx);
+  }
+  // Re-attach gizmo to the now-correct target.
+  const t = _selectedKey ? _targetForKey(_selectedKey) : null;
+  if (t) tcontrols.attach(t); else tcontrols.detach();
+  document.getElementById('handed-label').textContent = handed.toUpperCase();
+  applyPose();
+  _pushUndo();
+}
+document.getElementById('swap-handed').addEventListener('click', swapHanded);
+
 const btnHip = document.getElementById('mode-hip');
 const btnAim = document.getElementById('mode-aim');
 function setMode(m) {
@@ -932,7 +994,7 @@ function _buildPoseJson() {
       hip: pose.hip,
       aim: pose.aim,
     },
-    note: 'joints[*].rz is the raw user value; multiply by the same yawSign actor_rig.js uses for that joint when applying. weapon.{px,py,pz,rx,ry,rz} are deltas on top of the in-hand intermediate group transform.',
+    note: 'Canonical right-handed pose. At apply time multiply joints[*].ry, joints[*].rz, joints[*].px AND weapon.{ry,rz,px} by `mirror` (-1 for left-handed actors, +1 otherwise) to get the symmetric mirrored stance. weapon.{px,py,pz,rx,ry,rz} are deltas on top of the in-hand intermediate group transform.',
     saved_at: new Date().toISOString(),
   };
 }
@@ -990,32 +1052,37 @@ function _fitToRadius(obj, target) {
 // marker exactly where the game spawns muzzle flash + tracer FX.
 let _muzzleObj = null;
 
+// Track what's loaded so swap-handedness can re-parent + reload state.
+let _loadedWeapon = null;   // { cls, len }
+
 function _makeInHandGroup(cls, len) {
   const ws = 1.0;
   const isShouldered = ['rifle', 'shotgun', 'lmg', 'sniper'].includes(cls);
   const g = new THREE.Group();
-  // Detach the muzzle Object3D from its previous parent so we can
-  // re-parent it to the new anchor (matches player.js setWeapon).
   if (_muzzleObj?.parent) _muzzleObj.parent.remove(_muzzleObj);
   if (!_muzzleObj) _muzzleObj = new THREE.Object3D();
+
+  // Side-aware anchor selection. swapHanded re-runs the loader so a
+  // swap with a gun in hand puts it on the new side.
+  const shoulderAnchor = handed === 'right' ? rig.rightShoulderAnchor : rig.leftShoulderAnchor;
+  const wristNode      = (handed === 'right' ? rig.rightArm : rig.leftArm).wrist;
 
   if (isShouldered) {
     g.rotation.set(0, 0, 0);
     g.position.set(0, 0, (0.1 + len / 2) * ws);
-    rig.rightShoulderAnchor.add(g);
-    // Game: muzzle.position.set(0, 0, (0.1 + len) * ws) on the anchor.
-    rig.rightShoulderAnchor.add(_muzzleObj);
+    shoulderAnchor.add(g);
+    shoulderAnchor.add(_muzzleObj);
     _muzzleObj.position.set(0, 0, (0.1 + len) * ws);
   } else {
     g.rotation.set(Math.PI / 2, 0, 0);
     g.position.set(0, -(0.1 + len / 2) * ws, 0);
-    rig.rightArm.wrist.add(g);
-    // Game: muzzle.position.set(0, -(0.1 + len) * ws, 0) on the wrist.
-    rig.rightArm.wrist.add(_muzzleObj);
+    wristNode.add(g);
+    wristNode.add(_muzzleObj);
     _muzzleObj.position.set(0, -(0.1 + len) * ws, 0);
   }
   _baseWeaponPos = { x: g.position.x, y: g.position.y, z: g.position.z };
   _baseWeaponRot = { x: g.rotation.x, y: g.rotation.y, z: g.rotation.z };
+  _loadedWeapon = { cls, len };
   return g;
 }
 
