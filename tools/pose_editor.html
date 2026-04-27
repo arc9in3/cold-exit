@@ -524,6 +524,15 @@ weaponWrap.appendChild(_buildJointBlock('weapon', 'Weapon (FBX in-hand offset)')
 // Tag every descendant mesh of a joint pivot with that joint's key.
 // On canvas click, raycast → hit object → walk up parents until we
 // find a tagged ancestor → highlight + scroll its slider block.
+// Forward-declared so _tagDescendants can prune the gun subtree
+// during the initial _retagJoints() call (which runs before the
+// weapon loader code further down assigns these). Reassigned by
+// _makeInHandGroup / weapon-pick handler when a real weapon loads.
+var _inHandGroup = null;
+var _muzzleObj = null;
+var _weaponMesh = null;
+var _loadedWeapon = null;
+
 function _tagDescendants(root, key) {
   // Manual recursion (instead of traverse) so we can prune subtrees:
   // the gun + muzzle live under the rig (parented to a shoulder
@@ -1034,8 +1043,7 @@ document.getElementById('copy').addEventListener('click', async () => {
 // ---------- weapon FBX loader ------------------------------------
 const MODEL_BASE = '../Assets/models/';
 const fbxLoader = new FBXLoader();
-let _weaponMesh = null;
-let _inHandGroup = null;
+// _weaponMesh and _inHandGroup are hoisted near _tagDescendants.
 
 const CLASS_FIT_RADIUS = {
   pistol: 0.45, smg: 0.65, rifle: 0.75, shotgun: 0.75,
@@ -1055,13 +1063,13 @@ function _fitToRadius(obj, target) {
   obj.scale.multiplyScalar(scale);
 }
 
-// Bare Object3D matching player.js's `muzzle` — re-parented + repositioned
-// per weapon swap. We read its world position to place the orange muzzle
-// marker exactly where the game spawns muzzle flash + tracer FX.
-let _muzzleObj = null;
+// _muzzleObj — bare Object3D matching player.js's `muzzle`,
+// re-parented + repositioned per weapon swap so its world position
+// gives us the spot where the game spawns muzzle flash + tracer FX.
+// Hoisted near _tagDescendants for TDZ safety.
 
-// Track what's loaded so swap-handedness can re-parent + reload state.
-let _loadedWeapon = null;   // { cls, len }
+// _loadedWeapon — { cls, len }, hoisted near _tagDescendants. Used by
+// swap-handedness to re-parent + reload state.
 
 function _makeInHandGroup(cls, len) {
   const ws = 1.0;
