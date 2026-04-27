@@ -5226,11 +5226,14 @@ function buildBodyLoot(enemy) {
   const levelIdx = (level && level.index) || 0;
   const isMeleeEnemy = melees.enemies.includes(enemy);
 
-  // Drop economy is intentionally lean — containers in the level
+  // Drop economy is intentionally lean — containers + lootable props
   // carry the bulk of the items, so bodies are mostly weapon + maybe
-  // a single extra. Regular grunts can come up entirely empty so the
-  // player has to engage with containers to keep stocked.
-  const isEmptyBody = tier === 'normal' && Math.random() < 0.35;
+  // a single extra. Most grunts come up entirely empty: late-game
+  // rooms used to leave a graveyard of corpses each carrying a single
+  // common melee, which made looting a tedious slog. 70% empty means
+  // the 30% that DO drop feel meaningful again, and those are the
+  // bodies that get auto-rolled into the "Loot Area" pile prompt.
+  const isEmptyBody = tier === 'normal' && Math.random() < 0.70;
 
   if (!isEmptyBody) {
     // Weapons: most enemies drop what they were using. Some grunts
@@ -5297,31 +5300,51 @@ function buildBodyLoot(enemy) {
     }
   }
 
-  // Tier-specific extras — bosses still feel rewarding but drop
-  // ~half the bonus items they used to. Sub-bosses lose one bonus
-  // roll. Grunts lose almost everything.
+  // Tier-specific extras. Grunts now skip these almost entirely (the
+  // 70% empty roll above already strips most of them), so to keep
+  // total run loot roughly flat we push more onto the bosses + sub-
+  // bosses. Each elite kill should feel like opening a small chest.
   if (tier === 'boss') {
     const g = randomGear();
     const gearR = Math.random();
-    items.push({ ...g, rarity: gearR < 0.20 ? 'legendary' : gearR < 0.55 ? 'epic' : 'rare',
+    items.push({ ...g, rarity: gearR < 0.22 ? 'legendary' : gearR < 0.60 ? 'epic' : 'rare',
       durability: { ...(g.durability || { current: 100, max: 100, repairability: 0.9 }) } });
-    if (Math.random() < 0.30) items.push(randomAttachment());
-    if (Math.random() < 0.50) items.push(randomJunk());
-    if (Math.random() < 0.20) items.push(randomThrowable());
-  } else if (tier === 'subBoss') {
+    // Extra gear roll on bosses — second piece is rarely legendary
+    // but reads as "boss room actually pays out."
     if (Math.random() < 0.55) {
+      const g2 = randomGear();
+      const r2 = Math.random();
+      items.push({ ...g2, rarity: r2 < 0.10 ? 'epic' : r2 < 0.50 ? 'rare' : 'uncommon',
+        durability: { ...(g2.durability || { current: 100, max: 100, repairability: 0.9 }) } });
+    }
+    if (Math.random() < 0.45) items.push(randomAttachment());
+    if (Math.random() < 0.60) items.push(randomJunk());
+    if (Math.random() < 0.30) items.push(randomThrowable());
+  } else if (tier === 'subBoss') {
+    // Sub-boss gear roll bumped 0.55 → 0.80 with a higher rarity floor.
+    if (Math.random() < 0.80) {
       const g = randomGear();
       const r = Math.random();
-      items.push({ ...g, rarity: r < 0.15 ? 'epic' : r < 0.55 ? 'rare' : 'uncommon',
+      items.push({ ...g, rarity: r < 0.20 ? 'epic' : r < 0.65 ? 'rare' : 'uncommon',
         durability: { ...(g.durability || { current: 100, max: 100, repairability: 0.9 }) } });
     }
-    if (Math.random() < 0.20) items.push(randomAttachment());
-    if (Math.random() < 0.30) items.push(randomJunk());
-    if (Math.random() < 0.10) items.push(randomThrowable());
+    if (Math.random() < 0.35) items.push(randomAttachment());
+    if (Math.random() < 0.45) items.push(randomJunk());
+    if (Math.random() < 0.20) items.push(randomThrowable());
+    // Second consumable on sub-bosses so a clean kill rewards more
+    // than just the gear piece.
+    if (Math.random() < 0.30) {
+      const heals = ALL_CONSUMABLES.filter(c =>
+        c.useEffect?.kind === 'heal' || c.useEffect?.kind === 'buff');
+      if (heals.length) items.push({ ...heals[Math.floor(Math.random() * heals.length)] });
+    }
   } else if (!isEmptyBody) {
-    if (Math.random() < 0.05) items.push(randomAttachment());
-    if (Math.random() < 0.12) items.push(randomJunk());
-    if (Math.random() < 0.03) items.push(randomThrowable());
+    // Grunt drop only fires on the 30% non-empty roll. Bumped slightly
+    // since the surviving 30% needs to feel like the right corpse to
+    // walk over to.
+    if (Math.random() < 0.10) items.push(randomAttachment());
+    if (Math.random() < 0.18) items.push(randomJunk());
+    if (Math.random() < 0.05) items.push(randomThrowable());
   }
   return items;
 }
@@ -6773,6 +6796,28 @@ function nearestBody(playerPos, radius = 2.2) {
   return best;
 }
 
+// All dead, unlooted bodies within reach. When 2+ corpses are stacked
+// on top of each other (the late-game pile-up complaint), the prompt
+// flips to "loot area" and tryInteract opens a merged modal showing
+// every body's loot at once. Skips empty / already-looted bodies so
+// the count reflects what the player will actually see.
+function nearbyBodies(playerPos, radius = 2.2) {
+  const out = [];
+  const r2 = radius * radius;
+  const check = (e) => {
+    if (e.alive) return;
+    if (e.looted) return;
+    if (!e.loot || !e.loot.length) return;
+    const dx = e.group.position.x - playerPos.x;
+    const dz = e.group.position.z - playerPos.z;
+    if (dx * dx + dz * dz > r2) return;
+    out.push(e);
+  };
+  for (const g of gunmen.gunmen) check(g);
+  for (const m of melees.enemies) check(m);
+  return out;
+}
+
 // Overhead layer — per-frame 2D overlay projected from world-space positions.
 // Used for the reload ring, AI burst-settle ring, and blinded/dazzled status
 // badges. Cheap reusable-div pool.
@@ -7407,6 +7452,12 @@ function updateReloadHud(weapon, effWeapon) {
 
 function updateLootPrompt() {
   const near = loot.nearest(player.mesh.position, tunables.loot.pickupRadius);
+  // Pull every unlooted body within reach. When 2+ are present (the
+  // pile-up case), `tryInteract` opens a merged "Loot Area" modal so
+  // the player doesn't have to nudge through the stack one corpse at
+  // a time. Single-body and empty-corpse cases keep the existing
+  // prompts.
+  const bodies = !near ? nearbyBodies(player.mesh.position, 2.2) : [];
   const body = !near ? nearestBody(player.mesh.position, 2.2) : null;
   const containerHit = (!near && !body) ? level.nearestContainer(player.mesh.position, 1.8) : null;
   const npc = (!near && !body && !containerHit) ? level.nearestNPC(player.mesh.position, 2.5) : null;
@@ -7418,6 +7469,11 @@ function updateLootPrompt() {
         ? `[E] examine ${pile.length} items on the ground`
         : `[E] pick up ${near.item.name}`;
       fireHint('pickup');
+    } else if (bodies.length >= 2) {
+      promptEl.style.display = 'block';
+      const totalItems = bodies.reduce((n, b) => n + (b.loot?.length || 0), 0);
+      promptEl.textContent = `[E] loot area (${bodies.length} bodies · ${totalItems} items)`;
+      fireHint('searchBody');
     } else if (body && !body.looted && body.loot && body.loot.length) {
       promptEl.style.display = 'block';
       promptEl.textContent = `[E] search body`;
@@ -7467,10 +7523,10 @@ function updateLootPrompt() {
       promptEl.style.display = 'none';
     }
   }
-  return { nearItem: near, body, npc, container: containerHit };
+  return { nearItem: near, body, bodies, npc, container: containerHit };
 }
 
-function tryInteract({ nearItem, body, npc, container }) {
+function tryInteract({ nearItem, body, bodies, npc, container }) {
   // Loot pickup / body loot / encounter-spawned containers all beat
   // the encounter interact when the player is standing on / next to
   // them — encounter rewards (Shrine relic, Fountain signet chest,
@@ -7526,6 +7582,40 @@ function tryInteract({ nearItem, body, npc, container }) {
     inventoryUI.render();
     if (tutorialMode) tutorialUI.markStep('pickup');
     return;
+  }
+  // Multi-body pile — when 2+ unlooted corpses overlap, build a
+  // merged target so all their loot shows in one modal. Each item
+  // remembers which body it came from; taking it splices the item
+  // out of that body's loot list (by reference, not by index — items
+  // get rearranged as the player drags things, so the index would
+  // go stale).
+  if (bodies && bodies.length >= 2) {
+    const merged = [];
+    const refs = [];
+    for (const b of bodies) {
+      if (!b.loot) continue;
+      for (const it of b.loot) {
+        merged.push(it);
+        refs.push({ body: b, item: it });
+      }
+    }
+    if (merged.length) {
+      const target = {
+        loot: merged,
+        _bodyPile: true,
+        _bodyCount: bodies.length,
+        _groundRefs: refs,
+        _removeGround: ({ body: srcBody, item }) => {
+          if (!srcBody || !srcBody.loot) return;
+          const i = srcBody.loot.indexOf(item);
+          if (i >= 0) srcBody.loot.splice(i, 1);
+          if (srcBody.loot.length === 0) srcBody.looted = true;
+        },
+        looted: false,
+      };
+      lootUI.open(target);
+      return;
+    }
   }
   if (body && !body.looted && body.loot && body.loot.length > 0) {
     lootUI.open(body);

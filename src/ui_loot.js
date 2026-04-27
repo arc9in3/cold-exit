@@ -222,11 +222,15 @@ export class LootUI {
     const titleEl = this.bodyColEl.querySelector('.loot-col-title');
     if (titleEl) {
       titleEl.textContent = target?.kind === 'container' ? 'Container'
-        : target?._groundRefs ? 'Ground Pile' : 'Body';
+        : target?._bodyPile ? 'Loot Area'
+        : target?._groundRefs ? 'Ground Pile'
+        : 'Body';
     }
     const subtitleEl = this.bodyColEl.querySelector('.loot-col-subtitle');
     if (subtitleEl) {
-      subtitleEl.textContent = isContainerLike ? 'Contents' : 'Pockets';
+      subtitleEl.textContent = target?._bodyPile
+        ? `${target._bodyCount || 2} bodies`
+        : (isContainerLike ? 'Contents' : 'Pockets');
     }
     this.root.style.display = 'flex';
     this._updateBodyType();
@@ -249,6 +253,11 @@ export class LootUI {
       // Ground pile — no type.
       this.bodyTypeEl.textContent = '';
       this.bodyTypeEl.className = 'loot-body-type';
+      return;
+    }
+    if (t._bodyPile) {
+      this.bodyTypeEl.textContent = `${t._bodyCount || 2} Bodies`;
+      this.bodyTypeEl.className = 'loot-body-type tier-ground';
       return;
     }
     if (t._groundRefs) {
