@@ -9,6 +9,7 @@ import { modelForItem, shouldMirrorInHand,
 import { buildMeleePrimitive } from './melee_primitives.js';
 import { swapInBakedCorpse } from './corpse_bake.js';
 import { rigInstancer } from './rig_instancer.js';
+import { SpatialHash2D } from './spatial_hash.js';
 
 // Strip the held weapon meshes off a dead enemy — detach the primitive
 // gun box, the FBX weaponModel group, and the muzzle anchor from the
@@ -66,6 +67,44 @@ const _g_head        = new THREE.Vector3();
 const _g_muzzleTest  = new THREE.Vector3();
 // Aim-test scratch for the LoS pre-check — paired with _g_muzzleTest.
 const _g_aimTest     = new THREE.Vector3();
+const _g_losBlockers = [];
+const _g_shieldQuery = [];
+
+const AI_SPATIAL_HASH_CELL = 5;
+const _obstacleHash = new SpatialHash2D(AI_SPATIAL_HASH_CELL);
+const _shieldHash = new SpatialHash2D(AI_SPATIAL_HASH_CELL);
+
+function _obstacleBounds(obstacle) {
+  return obstacle?.userData?.collisionXZ || null;
+}
+
+function _actorPoint(actor) {
+  return actor?.group?.position || null;
+}
+
+function _queryLosBlockers(from, to) {
+  const pad = 0.15;
+  const minX = Math.min(from.x, to.x) - pad;
+  const maxX = Math.max(from.x, to.x) + pad;
+  const minZ = Math.min(from.z, to.z) - pad;
+  const maxZ = Math.max(from.z, to.z) + pad;
+  const blockers = _obstacleHash.queryAabb(
+    minX,
+    maxX,
+    minZ,
+    maxZ,
+    _g_losBlockers,
+  );
+  let write = 0;
+  for (let i = 0; i < blockers.length; i++) {
+    const bounds = blockers[i]?.userData?.collisionXZ;
+    if (!bounds) continue;
+    if (bounds.maxX < minX || bounds.minX > maxX || bounds.maxZ < minZ || bounds.minZ > maxZ) continue;
+    blockers[write++] = blockers[i];
+  }
+  blockers.length = write;
+  return blockers;
+}
 
 // NOTE: Skinned-rig path has been removed from the live code — we're
 // committing to the primitive rig as the shipping art style. The
@@ -1002,6 +1041,8 @@ export class GunmanManager {
 
   update(ctx) {
     const dt = ctx.dt;
+    _obstacleHash.rebuildAabbs(ctx.obstacles || [], _obstacleBounds);
+    _shieldHash.rebuildPoints(ctx.shieldBearers || [], _actorPoint);
     // LOD scheduler — distant idle gunmen tick at half rate. Cuts AI
     // cost roughly in half on big late-game rooms with 6+ gunmen
     // sprinkled across adjacent rooms. Active enemies (alerted /
@@ -1357,7 +1398,7 @@ export class GunmanManager {
     g._losT = (g._losT || 0) - ctx.dt;
     if (g._losT <= 0 || g._losCached === undefined) {
       g._losT = 0.05;
-      g._losCached = ctx.combat.hasLineOfSight(eye, target, ctx.obstacles);
+      g._losCached = ctx.combat.hasLineOfSight(eye, target, _queryLosBlockers(eye, target));
     }
     const hasLos = roomActive && !playerInSmoke && g._losCached;
     const fwd = _g_fwd.set(Math.sin(g.group.rotation.y), 0, Math.cos(g.group.rotation.y));
@@ -1955,7 +1996,16 @@ export class GunmanManager {
       if (g._shieldRefreshT <= 0 || !g._shieldRef || !g._shieldRef.alive) {
         g._shieldRefreshT = 0.5;
         let best = null, bestD = 40;
-        for (const sb of ctx.shieldBearers) {
+        const nearbyShieldBearers = ctx.shieldBearers.length >= 8
+          ? _shieldHash.queryAabb(
+            g.group.position.x - bestD,
+            g.group.position.x + bestD,
+            g.group.position.z - bestD,
+            g.group.position.z + bestD,
+            _g_shieldQuery,
+          )
+          : ctx.shieldBearers;
+        for (const sb of nearbyShieldBearers) {
           if (sb.roomId !== undefined && g.roomId !== undefined && sb.roomId !== g.roomId) continue;
           const sdx = sb.group.position.x - g.group.position.x;
           const sdz = sb.group.position.z - g.group.position.z;
@@ -2392,7 +2442,7 @@ export class GunmanManager {
           && dist <= (g.weapon?.range || 0) * 1.2) {
         const mTest = g.muzzle.getWorldPosition(_g_muzzleTest);
         const aTest = _g_aimTest.set(g.lastKnownX, mTest.y, g.lastKnownZ);
-        if (ctx.combat.hasLineOfSight(mTest, aTest, ctx.obstacles)) {
+        if (ctx.combat.hasLineOfSight(mTest, aTest, _queryLosBlockers(mTest, aTest))) {
           suppressing = true;
         }
       }
@@ -2413,7 +2463,7 @@ export class GunmanManager {
         const mTest = g.muzzle.getWorldPosition(_g_muzzleTest);
         if (canSee) {
           const aTest = _g_aimTest.set(ctx.playerPos.x, mTest.y, ctx.playerPos.z);
-          muzzleLos = ctx.combat.hasLineOfSight(mTest, aTest, ctx.obstacles);
+          muzzleLos = ctx.combat.hasLineOfSight(mTest, aTest, _queryLosBlockers(mTest, aTest));
         } else if (suppressing) {
           muzzleLos = true; // already validated above
         }
