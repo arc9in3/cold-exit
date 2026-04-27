@@ -29,6 +29,7 @@
 
 import * as THREE from 'three';
 import { buildProp } from './props.js';
+import { getCompletedEncounters, markEncounterDone } from './prefs.js';
 
 // Shared frozen empty list — every hittables() call that has nothing
 // to expose returns this reference instead of allocating [] per frame.
@@ -3893,6 +3894,343 @@ export const ENCOUNTER_DEFS = {
       // Never marks complete — the Council keeps buying.
       return { consume: true };
     },
+  },
+
+  // -----------------------------------------------------------------
+  // An Epic — two NPCs in the middle of an encounter room performing
+  // a short scripted scene. Five scripts (rom-com, buddy cop, noir,
+  // space horror, spaghetti western), each playable ONCE per save —
+  // marked done via prefs.markEncounterDone('epic_<scriptId>') the
+  // moment the curtain rises so a re-roll never repeats. If the
+  // player stays in the encounter room until the script ends, a
+  // random chest spawns. Walking out cancels the reward but the play
+  // is still spent.
+  //
+  // The encounter's `condition` filters out a roll when all five
+  // plays have been seen. `oncePerSave: false` so the room itself
+  // can keep appearing until exhausted.
+  // -----------------------------------------------------------------
+  an_epic: {
+    id: 'an_epic',
+    name: 'An Epic',
+    floorColor: 0xa07058,             // theatre-curtain umber
+    oncePerSave: false,
+    condition: (state) => {
+      if (state.levelIndex < 1) return false;
+      const saved = getCompletedEncounters();
+      // Available as long as at least one of the five scripts is unseen.
+      const ids = ['epic_romcom', 'epic_buddy_cop', 'epic_noir',
+                   'epic_space_horror', 'epic_western'];
+      return ids.some((id) => !saved.has(id));
+    },
+    spawn(scene, room, ctx) {
+      const disc = _spawnFloorDisc(scene, room, this.floorColor);
+      // Pick an unseen script. If somehow all are seen at spawn time
+      // (race with another save load), fall back to romcom so the
+      // encounter still plays — but skip the markDone so the player
+      // can see it again on a fresh save.
+      const saved = getCompletedEncounters();
+      const allScripts = ['romcom', 'buddy_cop', 'noir', 'space_horror', 'western'];
+      const unseen = allScripts.filter((id) => !saved.has(`epic_${id}`));
+      const scriptId = unseen.length
+        ? unseen[Math.floor(Math.random() * unseen.length)]
+        : 'romcom';
+      const script = _EPIC_SCRIPTS[scriptId];
+
+      // Build the two actors with the script's costumes. Stage them
+      // ~1.4m apart facing one another.
+      const stageY = 0;
+      const actor1 = _buildSimpleNpc(script.actor1.costume);
+      actor1.position.set(disc.cx - 0.85, stageY, disc.cz);
+      actor1.rotation.y = Math.PI / 2;       // face +X (toward actor2)
+      scene.add(actor1);
+      const actor2 = _buildSimpleNpc(script.actor2.costume);
+      actor2.position.set(disc.cx + 0.85, stageY, disc.cz);
+      actor2.rotation.y = -Math.PI / 2;      // face -X (toward actor1)
+      scene.add(actor2);
+
+      // Title sign above the stage. Scripts choose their own headline
+      // colour to match the genre (rose pink for rom-com, neon green
+      // for space horror, etc.).
+      const title = _makeLabelSprite(script.title, script.titleColor || '#f0d8a0');
+      title.position.set(disc.cx, 3.0, disc.cz);
+      scene.add(title);
+
+      // Optional staged props (a typewriter, a saloon table, etc.)
+      // Each prop entry is { kind, ox, oz, yaw }. Kind matches a
+      // buildProp key; missing kinds fall back to a tiny placeholder
+      // box so a typo doesn't crash the encounter.
+      const propGroups = [];
+      for (const p of script.props || []) {
+        const placed = _placeAmbience(scene, ctx, disc, p.kind, p.ox, p.oz, p.yaw || 0,
+          p.collide !== false);
+        if (placed) propGroups.push(placed);
+      }
+
+      // Encounter-room bounds — used to detect "did the player stay?"
+      // We use room.bounds (the encounter room is already cleared of
+      // props by _clearEncounterRoom, so the bounds == playable area).
+      const roomB = room.bounds;
+      const STAY = { minX: roomB.minX, maxX: roomB.maxX,
+                     minZ: roomB.minZ, maxZ: roomB.maxZ };
+
+      // Mark the script as seen the moment the curtain rises so a
+      // re-roll on a later level can't pick the same script even if
+      // the player walks out before it finishes.
+      markEncounterDone(`epic_${scriptId}`);
+
+      return {
+        scriptId, script,
+        actor1, actor2, title, propGroups, disc,
+        stageY,
+        // Per-line cursor + timer.
+        lineIdx: 0,
+        nextLineT: 1.2,        // 1.2s pause before the first line
+        // Subtle idle bob params — different phases per actor so they
+        // don't pulse in lockstep.
+        bobT1: 0, bobT2: Math.PI * 0.35,
+        // Stay tracking. flips false the first frame the player is
+        // outside the room. If still true at the curtain call, reward.
+        stayed: true,
+        complete: false,
+        finished: false,
+        STAY,
+        // Auto-collider opt-out — the spawn helper sets up the actor
+        // colliders explicitly below, so the default `state.npc`
+        // hook in main.js doesn't fire (no `npc` field exposed).
+        _noCollider: true,
+        // Hand-rolled colliders so player + AI walk around the actors.
+        _actorColliders: [
+          ctx.level?.addEncounterCollider?.(actor1.position.x, actor1.position.z, 0.6, 0.6, 1.6),
+          ctx.level?.addEncounterCollider?.(actor2.position.x, actor2.position.z, 0.6, 0.6, 1.6),
+        ].filter(Boolean),
+      };
+    },
+    tick(dt, ctx) {
+      const s = ctx.state;
+      if (!s.script || s.finished) return;
+      // Idle bob so the actors read as alive even between lines.
+      s.bobT1 += dt; s.bobT2 += dt;
+      if (s.actor1) s.actor1.position.y = s.stageY + Math.abs(Math.sin(s.bobT1 * 1.1)) * 0.04;
+      if (s.actor2) s.actor2.position.y = s.stageY + Math.abs(Math.sin(s.bobT2 * 1.0)) * 0.05;
+
+      // Stay tracking — flip false if the player ever steps outside
+      // the encounter room. Doesn't end the script; just gates the
+      // chest reward.
+      const px = ctx.playerPos.x, pz = ctx.playerPos.z;
+      const inRoom = px >= s.STAY.minX && px <= s.STAY.maxX
+                  && pz >= s.STAY.minZ && pz <= s.STAY.maxZ;
+      if (!inRoom) s.stayed = false;
+
+      // Drive the script line-by-line. Each line spawns a speech
+      // bubble above the speaking actor; the next line waits for
+      // `delay` seconds.
+      s.nextLineT -= dt;
+      if (s.nextLineT > 0) return;
+      const lines = s.script.lines || [];
+      if (s.lineIdx >= lines.length) {
+        // Script complete. Curtain call.
+        s.finished = true;
+        const closer = s.script.closer || 'CURTAIN';
+        ctx.spawnSpeech(s.actor1.position.clone().setY(2.4), '— end —', 6.0);
+        // Reward only if the player watched the whole thing.
+        if (s.stayed && !s.complete) {
+          s.complete = true;
+          // Random container roll — uses the same machinery as the
+          // shrine + button. Lands a generous chest beside the disc.
+          if (ctx.spawnRandomContainerAt) {
+            ctx.spawnRandomContainerAt(s.disc.cx, s.disc.cz - 2.4);
+          } else if (ctx.spawnMasterworkChest) {
+            ctx.spawnMasterworkChest(s.disc.cx, s.disc.cz - 2.4);
+          }
+          // Short applause line so the reward feels earned.
+          ctx.spawnSpeech(s.disc.cx
+            ? new THREE.Vector3(s.disc.cx, 2.0, s.disc.cz - 2.4)
+            : s.actor1.position.clone().setY(2.4),
+            'Bravo! A token from the box office.', 6.0);
+        }
+        void closer;
+        return;
+      }
+      const line = lines[s.lineIdx++];
+      const actor = line.who === 2 ? s.actor2 : s.actor1;
+      if (actor) {
+        ctx.spawnSpeech(actor.position.clone().setY(2.4),
+          line.text, line.dur || 4.0);
+      }
+      s.nextLineT = line.gap ?? 4.5;
+    },
+    // No drop interactions — the player is an audience member, not
+    // a participant. Anything they drop bounces to the floor.
+    onItemDropped(_item, _ctx) { return { consume: false }; },
+  },
+};
+
+// -----------------------------------------------------------------
+// Five scripts for the An Epic encounter. Each script defines:
+//   title         — sign above the stage
+//   titleColor    — sign tint (hex string)
+//   actor1/2.costume — _buildSimpleNpc opts
+//   props         — optional prop list { kind, ox, oz, yaw, collide }
+//   lines         — sequence of { who: 1|2, text, dur, gap }
+//                   `dur` = how long the bubble sits on screen
+//                   `gap` = pause before the NEXT line starts
+//   closer        — final off-stage flourish (cosmetic)
+//
+// Total runtime per script targets ~120s = sum of (gap) values
+// plus the 1.2s prelude in tick(). Lines are short, dramatic, and
+// genre-tropey on purpose — the joke is the cliché.
+// -----------------------------------------------------------------
+const _EPIC_SCRIPTS = {
+  romcom: {
+    title: 'NIGHTS IN PARIS',
+    titleColor: '#f8b0c8',
+    actor1: { costume: { bodyColor: 0xa05468, headColor: 0xe8c8a8,
+                          accentColor: 0xd0a0b0, height: 1.78,
+                          hairColor: 0x4a3018 } },
+    actor2: { costume: { bodyColor: 0x4868a8, headColor: 0xd8b890,
+                          accentColor: 0xc8b840, height: 1.88,
+                          hairColor: 0x2a1810 } },
+    props: [
+      { kind: 'coffeeTable', ox: 0,    oz: -1.6, yaw: 0,         collide: true },
+      { kind: 'vase',         ox: 0,    oz: -1.6, yaw: 0,         collide: false },
+    ],
+    lines: [
+      { who: 1, text: 'I told myself I\'d never come back here.', dur: 5, gap: 6 },
+      { who: 2, text: 'And yet — the rain. The lights. You.',     dur: 5, gap: 6 },
+      { who: 1, text: 'Don\'t. We agreed.',                        dur: 4, gap: 5 },
+      { who: 2, text: 'I lied. About all of it. Except you.',     dur: 5, gap: 6 },
+      { who: 1, text: 'My flight leaves in an hour, Marcus.',     dur: 5, gap: 6 },
+      { who: 2, text: 'Then let it leave. I\'ve been a coward.',  dur: 5, gap: 6 },
+      { who: 1, text: '...You have always been a coward.',         dur: 5, gap: 5 },
+      { who: 2, text: 'Marry me. Tonight. The Seine. A judge.',   dur: 5, gap: 6 },
+      { who: 1, text: 'God, you\'re ridiculous.',                  dur: 4, gap: 5 },
+      { who: 2, text: 'I am. And I am yours.',                     dur: 5, gap: 6 },
+      { who: 1, text: '...Get the cab.',                           dur: 4, gap: 6 },
+      { who: 2, text: 'I love you. I have always loved you.',     dur: 5, gap: 8 },
+    ],
+    closer: 'fin.',
+  },
+
+  buddy_cop: {
+    title: 'BADGE & GREASE',
+    titleColor: '#ffd060',
+    actor1: { costume: { bodyColor: 0x303a4a, headColor: 0xc8a070,
+                          accentColor: 0xc8a020, height: 1.92,
+                          hairColor: 0x18120a } },
+    actor2: { costume: { bodyColor: 0x6a3020, headColor: 0xd8b8a0,
+                          accentColor: 0xd0d0d0, height: 1.82,
+                          hairColor: 0x2a1810 } },
+    props: [
+      { kind: 'desk',    ox:  0,   oz: -1.5, yaw: 0,           collide: true },
+      { kind: 'chair',   ox: -0.9, oz: -1.5, yaw: 0,           collide: true },
+    ],
+    lines: [
+      { who: 1, text: 'Cap wants us off this case, Reyes.',       dur: 5, gap: 6 },
+      { who: 2, text: 'Cap can eat my partner\'s lunch.',          dur: 4, gap: 5 },
+      { who: 1, text: 'I AM your partner.',                        dur: 4, gap: 5 },
+      { who: 2, text: 'And your sandwiches are TERRIBLE.',         dur: 4, gap: 5 },
+      { who: 1, text: 'The dock job. It\'s the same crew.',        dur: 4, gap: 5 },
+      { who: 2, text: 'Same crew, same warehouse, same suits.',   dur: 4, gap: 5 },
+      { who: 1, text: 'We don\'t have a warrant.',                 dur: 4, gap: 5 },
+      { who: 2, text: 'I have something better. A bad attitude.', dur: 5, gap: 6 },
+      { who: 1, text: 'I\'m too old for this.',                   dur: 4, gap: 5 },
+      { who: 2, text: 'You said that before the academy.',         dur: 4, gap: 5 },
+      { who: 1, text: 'Fine. We do it your way. Loud.',           dur: 5, gap: 6 },
+      { who: 2, text: 'LOUD is the only way I know how, baby.',   dur: 5, gap: 8 },
+    ],
+    closer: 'roll credits.',
+  },
+
+  noir: {
+    title: 'THE LAST CIGARETTE',
+    titleColor: '#c0c8d0',
+    actor1: { costume: { bodyColor: 0x18181a, headColor: 0xc8a070,
+                          accentColor: 0x6a6a6a, height: 1.85,
+                          hairColor: 0x18120a } },
+    actor2: { costume: { bodyColor: 0x6a1828, headColor: 0xe0c0a8,
+                          accentColor: 0x8a2030, height: 1.74,
+                          hairColor: 0x4a2818 } },
+    props: [
+      { kind: 'table',  ox:  0,   oz: -1.6, yaw: 0, collide: true },
+      { kind: 'chair',  ox: -0.7, oz: -1.6, yaw: 0, collide: true },
+      { kind: 'chair',  ox:  0.7, oz: -1.6, yaw: Math.PI, collide: true },
+    ],
+    lines: [
+      { who: 2, text: 'You always smoke them down to the filter.', dur: 5, gap: 6 },
+      { who: 1, text: 'It\'s the only thing that\'s honest.',       dur: 5, gap: 6 },
+      { who: 2, text: 'I came to ask a favor, Sam.',                dur: 4, gap: 5 },
+      { who: 1, text: 'Of course you did. They always do.',         dur: 5, gap: 6 },
+      { who: 2, text: 'My husband. He\'s gone missing.',            dur: 4, gap: 5 },
+      { who: 1, text: 'Did you check the bottom of the bay?',       dur: 4, gap: 5 },
+      { who: 2, text: 'You\'re cruel.',                              dur: 4, gap: 5 },
+      { who: 1, text: 'I\'m thorough. There\'s a difference.',      dur: 5, gap: 6 },
+      { who: 2, text: 'I can pay. Whatever you want.',              dur: 4, gap: 5 },
+      { who: 1, text: 'I want the truth. The whole, ugly thing.',  dur: 5, gap: 6 },
+      { who: 2, text: '...You always knew, didn\'t you.',           dur: 5, gap: 6 },
+      { who: 1, text: 'Sister, I\'ve known since the rain started.', dur: 5, gap: 8 },
+    ],
+    closer: 'fade out.',
+  },
+
+  space_horror: {
+    title: 'OBJECTIVE: ECHO-9',
+    titleColor: '#80ffa0',
+    actor1: { costume: { bodyColor: 0x1a3040, headColor: 0xd8c8a8,
+                          accentColor: 0x40c080, height: 1.80,
+                          hairColor: 0x2a1808 } },
+    actor2: { costume: { bodyColor: 0x202428, headColor: 0xc8a888,
+                          accentColor: 0xc04040, height: 1.92,
+                          hairColor: 0x18120a } },
+    props: [
+      { kind: 'crate',   ox:  0.0, oz: -1.4, yaw: 0,         collide: true },
+      { kind: 'barrel',  ox: -1.6, oz: -1.4, yaw: 0,         collide: true },
+    ],
+    lines: [
+      { who: 1, text: 'Captain — Bay Three is venting again.',   dur: 5, gap: 6 },
+      { who: 2, text: 'Seal it. We can\'t lose more atmosphere.', dur: 5, gap: 6 },
+      { who: 1, text: 'Sir... someone\'s in there.',              dur: 5, gap: 6 },
+      { who: 2, text: 'Identify them. Now.',                       dur: 4, gap: 5 },
+      { who: 1, text: 'It says... it says it\'s me.',              dur: 5, gap: 6 },
+      { who: 2, text: 'Don\'t open that door, Officer Reyes.',    dur: 5, gap: 6 },
+      { who: 1, text: 'It\'s wearing my face, Captain.',           dur: 5, gap: 6 },
+      { who: 2, text: 'Then it isn\'t you. PURGE THE BAY.',       dur: 5, gap: 6 },
+      { who: 1, text: 'I— I can hear it singing.',                 dur: 5, gap: 6 },
+      { who: 2, text: 'REYES. PURGE. THE. BAY.',                   dur: 4, gap: 5 },
+      { who: 1, text: 'It knows our names, sir.',                  dur: 4, gap: 5 },
+      { who: 2, text: '...In space, no one is supposed to.',      dur: 5, gap: 8 },
+    ],
+    closer: 'static.',
+  },
+
+  western: {
+    title: 'NOON ON RIO BRAVO',
+    titleColor: '#e8a040',
+    actor1: { costume: { bodyColor: 0x4a2a18, headColor: 0xc89870,
+                          accentColor: 0xc8a020, height: 1.86,
+                          hairColor: 0x18120a } },
+    actor2: { costume: { bodyColor: 0x18181a, headColor: 0xb8987a,
+                          accentColor: 0x884030, height: 1.90,
+                          hairColor: 0x080806 } },
+    props: [
+      { kind: 'barrel',  ox: -2.4, oz: -0.6, yaw: 0, collide: true },
+      { kind: 'crate',   ox:  2.4, oz: -0.6, yaw: 0, collide: true },
+    ],
+    lines: [
+      { who: 1, text: 'You shouldn\'t have come back, Cole.',     dur: 5, gap: 6 },
+      { who: 2, text: 'You shouldn\'t have left her, Wyatt.',     dur: 5, gap: 6 },
+      { who: 1, text: 'She made her choice.',                      dur: 4, gap: 5 },
+      { who: 2, text: 'And you made yours. With a coward\'s pistol.', dur: 5, gap: 6 },
+      { who: 1, text: 'I buried my brother for you.',              dur: 5, gap: 6 },
+      { who: 2, text: 'You buried him for the bounty.',            dur: 5, gap: 6 },
+      { who: 1, text: 'Call your draw, then. Or ride out.',        dur: 5, gap: 6 },
+      { who: 2, text: 'I rode three hundred miles for this draw.', dur: 5, gap: 6 },
+      { who: 1, text: 'The sun\'s in your eyes, partner.',         dur: 4, gap: 5 },
+      { who: 2, text: 'It always was. That\'s how I knew it was you.', dur: 5, gap: 7 },
+      { who: 1, text: '...',                                        dur: 3, gap: 5 },
+      { who: 2, text: 'Draw.',                                      dur: 3, gap: 8 },
+    ],
+    closer: 'tumbleweed.',
   },
 };
 

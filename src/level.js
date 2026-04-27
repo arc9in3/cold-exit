@@ -628,21 +628,30 @@ export class Level {
   // grouped fields like `disc: { disc, light, cx, cz }` are reached.
   _teardownEncounterState(state, depth = 0) {
     if (!state || typeof state !== 'object') return;
+    const _disposeObj = (v) => {
+      if (!v || !v.isObject3D) return;
+      try {
+        if (v.parent) v.parent.remove(v);
+        v.traverse?.((obj) => {
+          if (obj.geometry?.dispose) obj.geometry.dispose();
+          if (obj.material) {
+            if (Array.isArray(obj.material)) obj.material.forEach(m => m?.dispose?.());
+            else obj.material.dispose?.();
+          }
+        });
+      } catch (_) { /* defensive — keep tearing down siblings */ }
+    };
     for (const key of Object.keys(state)) {
       const v = state[key];
       if (!v) continue;
       if (typeof v === 'object' && v.isObject3D) {
-        try {
-          if (v.parent) v.parent.remove(v);
-          v.traverse?.((obj) => {
-            if (obj.geometry?.dispose) obj.geometry.dispose();
-            if (obj.material) {
-              if (Array.isArray(obj.material)) obj.material.forEach(m => m?.dispose?.());
-              else obj.material.dispose?.();
-            }
-          });
-        } catch (_) { /* defensive — keep tearing down siblings */ }
-      } else if (depth < 1 && typeof v === 'object' && !Array.isArray(v)) {
+        _disposeObj(v);
+      } else if (Array.isArray(v)) {
+        // Arrays of Object3D (An Epic stage props, future encounter
+        // prop bundles) need tearing down too. Non-Object3D entries
+        // are skipped (loot state, line indices, etc.).
+        for (const item of v) _disposeObj(item);
+      } else if (depth < 1 && typeof v === 'object') {
         this._teardownEncounterState(v, depth + 1);
       }
     }
