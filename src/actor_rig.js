@@ -673,6 +673,18 @@ export function buildRig(opts = {}) {
       rightArm.forearm.mesh, rightArm.elbowBulge, rightArm.wristCuff,
       rightArm.hand.mesh,
     ],
+    // Subset of `meshes` that lives in the right-arm subtree. The
+    // disarm path hides the whole subtree via group.visible = false;
+    // with the rig instancer, gunman.js additionally calls
+    // rigInstancer.hideMeshes(rig.rightArmMeshes, true) so the
+    // corresponding instance slots write zero-scale matrices and
+    // stop drawing. Without this list the disarm-hide silently
+    // no-ops because the gunman.js calls use optional chaining.
+    rightArmMeshes: [
+      rightArm.shoulder.mesh, rightArm.shoulderBulge, rightArm.shoulderPad,
+      rightArm.forearm.mesh, rightArm.elbowBulge, rightArm.wristCuff,
+      rightArm.hand.mesh,
+    ],
     // Materials kept for color lerp / re-tint.
     materials: { bodyMat, headMat, legMat, armMat, handMat, gearMat, bootMat },
     scale,
