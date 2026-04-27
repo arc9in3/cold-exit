@@ -1171,6 +1171,33 @@ export class InventoryUI {
       affixRows.push(`<div class="inv-prog-affix">• ${label}${stack}</div>`);
     }
 
+    // — Inherent gear bonuses. Each ARMOR_DEFS / GEAR_DEFS entry can
+    //   carry numeric stats (reduction, speedMult, stealthMult, pockets)
+    //   and/or an apply() callback that mutates derivedStats. Both feed
+    //   into recomputeStats already; this section just SHOWS them.
+    //   Lists one row per equipped item with its description string —
+    //   that text already spells the effect ("+25% melee dmg, +25%
+    //   knockback") so the player can read what each piece is doing.
+    //   Broken items get a tag so the player knows the stats aren't
+    //   actually live.
+    const inherentRows = [];
+    for (const slot of SLOT_IDS) {
+      const it = eq[slot]; if (!it) continue;
+      // Only items that contribute SOMETHING via the inherent path:
+      // a stat field, an apply hook, pocket bonus, or a grid layout.
+      const hasInherent = !!(it.reduction || it.speedMult || it.stealthMult
+                          || typeof it.apply === 'function'
+                          || it.pockets || it.gridLayout
+                          || it.maxStaminaBonus);
+      if (!hasInherent) continue;
+      const desc = it.description || '';
+      const broken = it.durability && it.durability.current <= 0;
+      const brokenTag = broken
+        ? ' <span class="inv-prog-perk-stack" style="color:#d04040">BROKEN</span>'
+        : '';
+      inherentRows.push(`<div class="inv-prog-affix">• <strong>${it.baseName || it.name}</strong>${desc ? ` — ${desc}` : ''}${brokenTag}</div>`);
+    }
+
     // — Relics now live in a separate overlay panel (see
     //   `_renderRelics` below). Kept the data-collection step out of
     //   this method so the Gear Bonuses panel reads as gear-only.
@@ -1180,6 +1207,12 @@ export class InventoryUI {
       sections.push(`<div class="inv-prog-section">
         <div class="inv-prog-section-title">Set Bonuses</div>
         ${setHtml}
+      </div>`);
+    }
+    if (inherentRows.length) {
+      sections.push(`<div class="inv-prog-section">
+        <div class="inv-prog-section-title">Inherent Bonuses (${inherentRows.length})</div>
+        ${inherentRows.join('')}
       </div>`);
     }
     if (perkRows.length) {
