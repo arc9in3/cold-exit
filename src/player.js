@@ -4,7 +4,8 @@ import { modelForItem, gripOffsetForModelPath, rotationOverrideForModelPath, sho
 import { getCharacterStyle } from './prefs.js';
 import { loadModelClone, fitToRadius } from './gltf_cache.js';
 import { buildRig, initAnim, updateAnim, pokeHit, pokeRecoil, pokeDeath,
-         RIFLE_WEAPON_HIP, RIFLE_WEAPON_AIM } from './actor_rig.js';
+         RIFLE_WEAPON_HIP, RIFLE_WEAPON_AIM,
+         SMG_WEAPON_HIP,   SMG_WEAPON_AIM } from './actor_rig.js';
 import { buildMeleePrimitive } from './melee_primitives.js';
 
 // Isometric camera is rotated 45° around Y. Map input directions so W goes
@@ -1397,6 +1398,42 @@ export function createPlayer(scene) {
       // rotation applied to the tip-offset vector before adding to
       // the gun pivot. Result: muzzle marker tracks the gun barrel
       // tip wherever the gun swings.
+      _muzzleTipScratch.set(0, 0, (wlen / 2) * wsScale);
+      _muzzleTipScratch.applyEuler(gunMesh.rotation);
+      muzzle.position.set(
+        gunMesh.position.x + _muzzleTipScratch.x,
+        gunMesh.position.y + _muzzleTipScratch.y,
+        gunMesh.position.z + _muzzleTipScratch.z,
+      );
+      muzzle.rotation.copy(gunMesh.rotation);
+    }
+
+    // SMG weapon-offset overlay — same authoring pipeline as the
+    // shouldered classes, but the SMG hand-mount baseline differs:
+    // gunMesh starts at (0, -(0.1+len/2)*ws, 0) in WRIST-local with
+    // rotation (π/2, 0, 0). The offset is added on top. Tip-offset
+    // in gun-local +Z still resolves to the muzzle (gun's own +Z
+    // axis points along the barrel post-rotation), so the muzzle
+    // formula is identical to the shouldered branch.
+    if (cls2 === 'smg' && rig.anim) {
+      const ab = rig.anim.aimBlend ?? 0;
+      const hb = 1 - ab;
+      const m  = state.handedness === 'left' ? -1 : 1;
+      const lerp = (h, x) => h * hb + x * ab;
+      const wlen = (state.equipped?.muzzleLength ?? 0.5);
+      const wsScale = WEAPON_SCALE;
+      const baseGunY = -(0.1 + wlen / 2) * wsScale;
+      const baseRotX = Math.PI / 2;
+      const px = lerp(SMG_WEAPON_HIP.px, SMG_WEAPON_AIM.px) * m;
+      const py = lerp(SMG_WEAPON_HIP.py, SMG_WEAPON_AIM.py);
+      const pz = lerp(SMG_WEAPON_HIP.pz, SMG_WEAPON_AIM.pz);
+      const rx = lerp(SMG_WEAPON_HIP.rx, SMG_WEAPON_AIM.rx);
+      const ry = lerp(SMG_WEAPON_HIP.ry, SMG_WEAPON_AIM.ry) * m;
+      const rz = lerp(SMG_WEAPON_HIP.rz, SMG_WEAPON_AIM.rz) * m;
+      gunMesh.position.set(px, baseGunY + py, pz);
+      gunMesh.rotation.set(baseRotX + rx, ry, rz);
+      inHandModel.position.copy(gunMesh.position);
+      inHandModel.rotation.copy(gunMesh.rotation);
       _muzzleTipScratch.set(0, 0, (wlen / 2) * wsScale);
       _muzzleTipScratch.applyEuler(gunMesh.rotation);
       muzzle.position.set(

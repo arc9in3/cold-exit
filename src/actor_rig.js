@@ -712,6 +712,48 @@ const RIFLE_POSE_AIM = {
 export const RIFLE_WEAPON_HIP = RIFLE_POSE_HIP.weapon;
 export const RIFLE_WEAPON_AIM = RIFLE_POSE_AIM.weapon;
 
+// --- SMG pose data (authored in tools/pose_editor.html) ---------------
+// Authored against the SMG hand-mount baseline (gun parented to the
+// dominant wrist with rotation (π/2, 0, 0); gun extends in wrist-
+// local -Y). Same lerp + mirror rules as the rifle pose.
+const SMG_POSE_HIP = {
+  stomach:     { rx:  0,    ry:  0,    rz:  0,    px:  0,    py:  0,    pz:  0    },
+  chest:       { rx:  0,    ry: -0.30, rz:  0,    px:  0,    py:  0,    pz:  0    },
+  head:        { rx:  0,    ry:  0,    rz:  0,    px:  0,    py:  0,    pz:  0    },
+  domShoulder: { rx: -0.38, ry:  0.13, rz: -0.27, px:  0,    py:  0,    pz:  0    },
+  domElbow:    { rx: -1.84, ry: -0.01, rz: -0.06, px:  0,    py:  0,    pz:  0    },
+  domWrist:    { rx:  0.21, ry:  0.03, rz:  0.09, px:  0,    py:  0,    pz:  0    },
+  supShoulder: { rx: -1.16, ry: -0.03, rz:  0.64, px:  0.06, py:  0,    pz:  0.18 },
+  supElbow:    { rx: -0.33, ry:  0.72, rz:  0.38, px:  0,    py:  0,    pz:  0    },
+  supWrist:    { rx:  0.01, ry: -0.13, rz:  0.15, px:  0,    py:  0,    pz:  0    },
+  weapon:      { rx:  0.38, ry:  0.32, rz:  0.31, px: -0.05, py:  0.50, pz: -0.01 },
+};
+const SMG_POSE_AIM = {
+  stomach:     { rx:  0,    ry:  0,    rz:  0,    px:  0,    py:  0,    pz:  0    },
+  chest:       { rx:  0,    ry: -0.30, rz:  0,    px:  0,    py:  0,    pz:  0    },
+  head:        { rx:  0,    ry:  0,    rz:  0,    px:  0,    py:  0,    pz:  0    },
+  domShoulder: { rx: -1.05, ry:  0,    rz: -0.12, px:  0,    py:  0,    pz:  0    },
+  domElbow:    { rx: -1.70, ry:  0,    rz:  0,    px:  0,    py:  0,    pz:  0    },
+  domWrist:    { rx:  0,    ry:  0,    rz:  0,    px:  0,    py:  0,    pz:  0    },
+  supShoulder: { rx: -1.88, ry:  0.27, rz:  0.59, px:  0.16, py:  0,    pz:  0.17 },
+  supElbow:    { rx: -0.05, ry: -0.04, rz: -0.09, px:  0,    py:  0,    pz:  0    },
+  supWrist:    { rx:  0,    ry:  0,    rz:  0,    px:  0,    py:  0,    pz:  0    },
+  weapon:      { rx:  1.11, ry:  0.26, rz:  0.11, px: -0.02, py:  0.46, pz: -0.08 },
+};
+export const SMG_WEAPON_HIP = SMG_POSE_HIP.weapon;
+export const SMG_WEAPON_AIM = SMG_POSE_AIM.weapon;
+
+// rifleHold dispatch table — pick the authored pose pair per class.
+// Shotgun / sniper / lmg currently inherit the rifle pose until they
+// get their own authored data; pistol falls outside rifleHold.
+const POSE_BY_CLASS = {
+  rifle:   { hip: RIFLE_POSE_HIP, aim: RIFLE_POSE_AIM },
+  smg:     { hip: SMG_POSE_HIP,   aim: SMG_POSE_AIM   },
+  shotgun: { hip: RIFLE_POSE_HIP, aim: RIFLE_POSE_AIM },
+  sniper:  { hip: RIFLE_POSE_HIP, aim: RIFLE_POSE_AIM },
+  lmg:     { hip: RIFLE_POSE_HIP, aim: RIFLE_POSE_AIM },
+};
+
 // Smoothly drive `current` toward `target` at `rate` per second.
 function lerpT(current, target, rate, dt) {
   const k = 1 - Math.exp(-rate * dt);
@@ -1453,7 +1495,8 @@ export function updateAnim(rig, state, dt) {
     const ab = a.aimBlend, hb = 1 - ab;
     const m = supportYawSign;
     const lerp = (h, x) => h * hb + x * ab;
-    const H = RIFLE_POSE_HIP, A = RIFLE_POSE_AIM;
+    const _poseSet = POSE_BY_CLASS[state.weaponClass] || POSE_BY_CLASS.rifle;
+    const H = _poseSet.hip, A = _poseSet.aim;
     const baseMap = a._basePosByObj;
     const apply = (target, hipJoint, aimJoint, extraRX = 0) => {
       if (!target) return;
