@@ -104,6 +104,16 @@
     <button id="reset-class">Reset to current preset defaults</button>
     <button id="undo">Undo (Ctrl+Z)</button>
     <button id="flip-view">Flip camera (front ↔ back)</button>
+    <div class="mode-toggle">
+      <button id="gizmo-translate">Translate (T)</button>
+      <button id="gizmo-rotate" class="active">Rotate (R)</button>
+    </div>
+    <div class="legend" style="font-size:10px">
+      Click a joint sphere or limb in the 3D view → gizmo attaches.
+      Drag the gizmo to rotate/translate that joint directly. Sliders
+      mirror the gizmo. Press <strong>R</strong> for rotate,
+      <strong>T</strong> for translate, <strong>Esc</strong> to deselect.
+    </div>
 
     <div class="mode-toggle">
       <button id="mode-hip" class="active">HIP (idle)</button>
@@ -187,6 +197,7 @@ window.addEventListener('unhandledrejection', (e) => {
 
 import * as THREE from 'three';
 import { OrbitControls } from 'three/addons/controls/OrbitControls.js';
+import { TransformControls } from 'three/addons/controls/TransformControls.js';
 import { FBXLoader } from 'three/addons/loaders/FBXLoader.js';
 import { buildRig } from '../src/actor_rig.js';
 import { MODEL_BY_WEAPON_NAME, gripOffsetForModelPath,
@@ -223,6 +234,19 @@ camera.position.set(0, 1.6, 3.5);
 const controls = new OrbitControls(camera, renderer.domElement);
 controls.target.set(0, 1.0, 0);
 controls.update();
+
+// Direct-manipulation gizmo. Attached to the currently selected
+// joint's pivot (or the weapon in-hand group). Dragging it writes
+// pivot.rotation / pivot.position; we mirror those values back to
+// the slider deltas so the panel stays in sync. OrbitControls is
+// disabled while dragging the gizmo to avoid camera fighting.
+const tcontrols = new TransformControls(camera, renderer.domElement);
+tcontrols.size = 0.7;
+scene.add(tcontrols);
+tcontrols.addEventListener('dragging-changed', (e) => {
+  controls.enabled = !e.value;
+  if (!e.value) _pushUndo();   // snapshot on drag release
+});
 
 scene.add(new THREE.AmbientLight(0xffffff, 0.55));
 const key = new THREE.DirectionalLight(0xffffff, 1.1); key.position.set(3, 5, 2); scene.add(key);
@@ -463,15 +487,25 @@ _tagDescendants(rig.stomach, 'stomach');
 _tagDescendants(rig.hips,    'hips');
 
 let _selectedKey = null;
+let _selectedJoint = null;   // entry from JOINTS, or null for 'weapon'
+function _targetForKey(key) {
+  if (key === 'weapon') return _inHandGroup;
+  const j = JOINTS.find(j => j.key === key);
+  return j ? j.target() : null;
+}
 function selectJoint(key) {
-  if (_selectedKey === key) return;
+  // Don't bail when key matches — re-attach in case the target was
+  // recreated (e.g. weapon swap rebuilt _inHandGroup).
   _selectedKey = key;
-  // Clear all highlights, then mark the selected block.
   for (const el of document.querySelectorAll('.joint-block.selected')) {
     el.classList.remove('selected');
   }
+  _selectedJoint = key && key !== 'weapon'
+    ? JOINTS.find(j => j.key === key) || null : null;
+  const t = _targetForKey(key);
+  if (t) tcontrols.attach(t);
+  else tcontrols.detach();
   if (!key) return;
-  // Find the slider block whose reset link carries this key.
   const reset = document.querySelector(`[data-reset="${key}"]`);
   const block = reset?.closest('.joint-block');
   if (block) {
@@ -479,6 +513,55 @@ function selectJoint(key) {
     block.scrollIntoView({ behavior: 'smooth', block: 'center' });
   }
 }
+
+// Gizmo drag → mirror the live pivot/group transform back into the
+// slider buffer for the active mode, so the slider values stay
+// truthful and Save captures what the user dragged. We do NOT call
+// applyPose here — the gizmo already mutated the target directly,
+// and applyPose would clobber the in-progress drag with the
+// previous slider values.
+tcontrols.addEventListener('objectChange', () => {
+  if (!_selectedKey) return;
+  const t = _targetForKey(_selectedKey);
+  if (!t) return;
+  const v = _selectedKey === 'weapon'
+    ? pose[mode].weapon
+    : (pose[mode].joints[_selectedKey] = pose[mode].joints[_selectedKey] || ZERO_JOINT());
+  if (_selectedKey === 'weapon') {
+    v.px = t.position.x - _baseWeaponPos.x;
+    v.py = t.position.y - _baseWeaponPos.y;
+    v.pz = t.position.z - _baseWeaponPos.z;
+    v.rx = t.rotation.x - _baseWeaponRot.x;
+    v.ry = t.rotation.y - _baseWeaponRot.y;
+    v.rz = t.rotation.z - _baseWeaponRot.z;
+  } else {
+    const bp = _basePos[_selectedKey];
+    const ys = _selectedJoint?.yawSign ?? 1;
+    v.px = t.position.x - bp.x;
+    v.py = t.position.y - bp.y;
+    v.pz = t.position.z - bp.z;
+    v.rx = t.rotation.x;
+    v.ry = t.rotation.y;
+    v.rz = t.rotation.z / ys;   // sliders store the raw user value
+  }
+  // Push slider element values + visible labels in sync.
+  const prefix = _selectedKey;
+  for (const f of FIELDS) {
+    const el = document.getElementById(`${prefix}-${f}`);
+    if (el) el.value = v[f];
+  }
+  _updateValueLabels();
+});
+
+// Keyboard mode shortcuts — match Blender / Three.js editor convention.
+window.addEventListener('keydown', (e) => {
+  if ((e.ctrlKey || e.metaKey) || e.altKey) return;
+  const tag = (e.target?.tagName || '').toLowerCase();
+  if (tag === 'input' && e.target.type !== 'range') return;
+  if (e.key === 'g' || e.key === 't') tcontrols.setMode('translate');
+  else if (e.key === 'r') tcontrols.setMode('rotate');
+  else if (e.key === 'Escape') selectJoint(null);
+});
 
 const _raycaster = new THREE.Raycaster();
 const _mouse = new THREE.Vector2();
@@ -704,6 +787,17 @@ document.getElementById('reset-class').addEventListener('click',
   () => loadPreset(document.getElementById('preset').value));
 document.getElementById('undo').addEventListener('click', _undo);
 
+const btnTranslate = document.getElementById('gizmo-translate');
+const btnRotate    = document.getElementById('gizmo-rotate');
+function _setGizmoMode(m) {
+  tcontrols.setMode(m);
+  btnTranslate.classList.toggle('active', m === 'translate');
+  btnRotate.classList.toggle('active',    m === 'rotate');
+}
+btnTranslate.addEventListener('click', () => _setGizmoMode('translate'));
+btnRotate.addEventListener('click',    () => _setGizmoMode('rotate'));
+_setGizmoMode('rotate');
+
 document.getElementById('flip-view').addEventListener('click', () => {
   // Mirror the camera through the actor across both X and Z so the
   // orbit pivot stays put and the user just sees the opposite side.
@@ -857,6 +951,7 @@ document.getElementById('weapon-pick').addEventListener('change', (e) => {
     _weaponMesh = null;
   }
   if (_inHandGroup) {
+    if (_selectedKey === 'weapon') tcontrols.detach();
     _inHandGroup.parent?.remove(_inHandGroup);
     _inHandGroup = null;
     _baseWeaponPos = { x: 0, y: 0, z: 0 };
@@ -892,6 +987,7 @@ document.getElementById('weapon-pick').addEventListener('change', (e) => {
     document.getElementById('output').textContent =
       `loaded ${name} → ${path}\n  cls=${cls}, anchor=${anchorName}\n  fitR=${(len*cs*scaleForModelPath(url)).toFixed(3)}, mirror=${shouldMirrorInHand({baseName:name})}\n  grip=${grip ? `(${grip.x},${grip.y},${grip.z})` : 'none'}`;
     applyPose();
+    if (_selectedKey === 'weapon') tcontrols.attach(_inHandGroup);
   }, undefined, (err) => {
     document.getElementById('output').textContent =
       `failed to load ${path}: ${err?.message || err}`;
