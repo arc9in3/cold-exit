@@ -181,7 +181,12 @@ function taperedSegment(opts) {
 // showing a hard cylinder step.
 function jointSphere(radius, material, zone) {
   const mesh = new THREE.Mesh(_sph(radius, 10, 8), material);
-  mesh.castShadow = true;
+  // Joint bulges are always tiny accessory blobs that fill the gap
+  // between two limb segments — disable shadow casting since they
+  // don't change the silhouette and Three.js's shadow pass renders
+  // every cast-shadow mesh twice (shadow map + main scene). With 20
+  // actors × 4 joint bulges that's ~80 redundant shadow draws/frame.
+  mesh.castShadow = false;
   mesh.receiveShadow = true;
   if (zone) mesh.userData.zone = zone;
   return mesh;
@@ -320,7 +325,8 @@ export function buildRig(opts = {}) {
       gearMat,
     );
     thighRig.position.set(sign * L.thighRigX * scale, L.thighRigYK * thighH, 0);
-    thighRig.castShadow = true;
+    // Accessory — silhouette covered by the thigh cylinder.
+    thighRig.castShadow = false;
     thighRig.userData.zone = 'leg';
     thigh.pivot.add(thighRig);
 
@@ -336,7 +342,8 @@ export function buildRig(opts = {}) {
       gearMat,
     );
     kneePad.position.set(0, 0, L.kneePadZ * scale);
-    kneePad.castShadow = true;
+    // Accessory — covered by the calf shadow.
+    kneePad.castShadow = false;
     kneePad.userData.zone = 'leg';
     knee.add(kneePad);
 
@@ -365,7 +372,8 @@ export function buildRig(opts = {}) {
       bootMat,
     );
     bootTop.position.set(0, L.bootTopYK * calfH, 0);
-    bootTop.castShadow = true;
+    // Accessory — covered by the calf+boot shadow at the same height.
+    bootTop.castShadow = false;
     bootTop.userData.zone = 'leg';
     calf.pivot.add(bootTop);
 
@@ -449,7 +457,8 @@ export function buildRig(opts = {}) {
   );
   collar.position.set(0, chestH + T.collarDY * scale, 0);
   collar.scale.z = T.depthRatio;
-  collar.castShadow = true;
+  // Accessory — silhouette inside the chest+head shadow.
+  collar.castShadow = false;
   collar.receiveShadow = true;
   collar.userData.zone = 'torso';
   chest.pivot.add(collar);
@@ -470,7 +479,8 @@ export function buildRig(opts = {}) {
   );
   chestPlate.position.set(0, T.chestPlateYK * chestH, 0);
   chestPlate.scale.z = T.depthRatio;
-  chestPlate.castShadow = true;
+  // Accessory — sits inside the chest cylinder shadow.
+  chestPlate.castShadow = false;
   chestPlate.userData.zone = 'torso';
   chest.pivot.add(chestPlate);
 
@@ -482,7 +492,8 @@ export function buildRig(opts = {}) {
   );
   belt.position.set(0, T.beltY * scale, 0);
   belt.scale.z = T.depthRatio;
-  belt.castShadow = true;
+  // Accessory — same vertical band as the stomach, no silhouette gain.
+  belt.castShadow = false;
   belt.userData.zone = 'torso';
   chest.pivot.add(belt);
 
@@ -516,7 +527,8 @@ export function buildRig(opts = {}) {
     }
     const shoulderPad = new THREE.Mesh(shoulderPadGeom, gearMat);
     shoulderPad.position.set(0, 0, 0);
-    shoulderPad.castShadow = true;
+    // Accessory — pauldron sits over the shoulder cylinder shadow.
+    shoulderPad.castShadow = false;
     shoulderPad.userData.zone = 'arm';
     shoulder.pivot.add(shoulderPad);
 
@@ -541,7 +553,8 @@ export function buildRig(opts = {}) {
       gearMat,
     );
     wristCuff.position.set(0, A.wristCuffYK * forearmH, 0);
-    wristCuff.castShadow = true;
+    // Accessory — same band as the wrist of the forearm cylinder.
+    wristCuff.castShadow = false;
     wristCuff.userData.zone = 'arm';
     forearm.pivot.add(wristCuff);
 
@@ -592,7 +605,9 @@ export function buildRig(opts = {}) {
       bodyMat,
     );
     mesh.position.y = H.neckMeshY * scale;
-    mesh.castShadow = true;
+    // Neck sits between the chest cylinder + cranium shadows from
+    // any iso angle — its own shadow contributes nothing visible.
+    mesh.castShadow = false;
     mesh.receiveShadow = true;
     mesh.userData.zone = 'torso';
     pivot.add(mesh);
@@ -617,7 +632,8 @@ export function buildRig(opts = {}) {
     headMat,
   );
   jawMesh.position.y = H.jawY * scale;
-  jawMesh.castShadow = true;
+  // Accessory — sits inside the cranium shadow.
+  jawMesh.castShadow = false;
   jawMesh.userData.zone = 'head';
   head.add(jawMesh);
 
