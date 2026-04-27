@@ -1399,16 +1399,21 @@ export function updateAnim(rig, state, dt) {
     // the front handguard. Both arms bent, body slightly bladed
     // (bladeYaw below).
     //
-    // Dominant (trigger) arm: shoulder pitches forward, elbow folds
-    // tight so the hand lands at the pistol grip just forward of
-    // the shoulder anchor. Recoil now BUCKS BACK (compresses the
-    // elbow further) instead of lifting the arm up — the previous
-    // -recoilKick on shoulder pitch was rotating the arm overhead.
-    // Now recoil only tightens the elbow, simulating the arm
-    // absorbing the kick toward the shoulder.
-    const rifleDomShoulder = -0.85 + recoilKick * 0.25 - armLeanComp;
-    const rifleDomYaw      = -0.18 * supportYawSign;    // elbow toward body
-    const rifleDomElbow    = -2.25 - recK * 0.45;
+    // Dominant (trigger) arm: shoulder pitches more forward
+    // (-1.05 from -0.85) so the upper arm projects further out
+    // instead of hanging close to the side. Elbow opened up
+    // (-1.70 from -2.25) so the forearm extends rather than
+    // folding back to the bicep — the hand drops UNDER the
+    // shoulder line and forward to the pistol grip rather than
+    // tucking up at chest. Yaw eased (-0.12 from -0.18) so the
+    // arm sits slightly more relaxed away from the ribs. The
+    // RIFLE itself doesn't move (parented to the shoulder anchor);
+    // only the arm pose changes.
+    //
+    // Recoil unchanged — only tightens the elbow on fire.
+    const rifleDomShoulder = -1.05 + recoilKick * 0.25 - armLeanComp;
+    const rifleDomYaw      = -0.12 * supportYawSign;
+    const rifleDomElbow    = -1.70 - recK * 0.45;
     weaponArm.shoulder.pivot.rotation.x = rifleDomShoulder;
     weaponArm.shoulder.pivot.rotation.z = rifleDomYaw;
     weaponArm.elbow.rotation.x = rifleDomElbow;
