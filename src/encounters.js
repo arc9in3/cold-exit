@@ -1755,13 +1755,25 @@ export const ENCOUNTER_DEFS = {
           if (legendary) ctx.spawnLoot(s.disc.cx + 0.6, s.disc.cz, legendary);
           if (s.hint) s.hint.userData.setText('Leave the room and return...');
         } else if (!gAlive && !kAlive) {
-          // Both fell to a single volley — gunman died first by
-          // narrative convention. Treat as gunman-first kill.
-          s.phase = 'aftermath';
-          s.chosenDead = 'gunman';
+          // Both fell to a single volley — there's no survivor to
+          // remember, no per-choice reward to grant. Skip straight to
+          // the consequence: drop the Indecision relic right where they
+          // fell, mark the encounter done. Pin both bodies so the
+          // dummies system doesn't auto-respawn them mid-flavor.
+          s.phase = 'returned';
+          s.chosenDead = 'both';
           s.chosenSurvivor = null;
-          if (ctx.awardPlayerCredits) ctx.awardPlayerCredits(5000);
-          if (s.hint) s.hint.userData.setText('You spared neither. The room is silent.');
+          s.relicSpawned = true;
+          s.complete = true;
+          s.needsTick = false;
+          if (s.pair.gunman) s.pair.gunman.keepDead = true;
+          if (s.pair.kneeler) s.pair.kneeler.keepDead = true;
+          if (s.hint) s.hint.userData.setText('You spared neither. Indecision lies between them.');
+          ctx.spawnSpeech(new THREE.Vector3(s.disc.cx, 2.2, s.disc.cz),
+            'Indecision lies between them.', 4.0);
+          const relic = ctx.relicFor && ctx.relicFor('indecision');
+          if (relic) ctx.spawnLoot(s.disc.cx, s.disc.cz, relic);
+          if (ctx.markEncounterComplete) ctx.markEncounterComplete('choices_and_consequences');
         }
       }
 

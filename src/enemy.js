@@ -102,7 +102,10 @@ export class DummyManager {
         d.deathT += dt;
         const tipProgress = Math.min(1, d.deathT / 0.35);
         d.group.rotation.x = THREE.MathUtils.lerp(0, Math.PI / 2, tipProgress);
-        if (d.deathT >= tunables.enemy.respawnDelay) {
+        // `keepDead` is set by encounters that need a corpse to STAY a
+        // corpse (Choices and Consequences both-die path, etc.) so the
+        // tutorial/range respawn doesn't clobber the narrative.
+        if (!d.keepDead && d.deathT >= tunables.enemy.respawnDelay) {
           d.alive = true;
           d.hp = tunables.enemy.maxHealth;
           d.deathT = 0;
