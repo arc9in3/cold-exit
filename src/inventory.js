@@ -1301,6 +1301,11 @@ export const THROWABLE_DEFS = {
     decoyDuration: 7.0,
     maxCharges: 2, cooldownSec: 50,
     description: 'Audio + visual lure pulls enemies to a location for 7s',
+    // Apr-26: pulled from loot pools while the AI hijack design is
+    // sorted out (see git revert of de0eaca). The def stays so the
+    // existing visual + tick code keeps working when an in-flight
+    // decoy lands; just no new ones spawn as drops.
+    encounterOnly: true,
   },
   // The Gift — Circle of Candles encounter reward only. Through-walls
   // shockwave that obliterates everything in range; costs 10 permanent
