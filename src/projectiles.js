@@ -203,7 +203,7 @@ export class ProjectileManager {
       // were destroyed mid-air or ricocheted off invisible geometry.
       const hitWall = p.throwKind === 'molotov'
         ? false
-        : this._hitsObstacle(level, nx, ny, nz);
+        : this._hitsObstacle(level, p.pos.x, p.pos.z, nx, ny, nz);
       if (hitWall) {
         if (p.type === 'rocket') {
           this._detPos.set(nx, Math.max(0.08, ny), nz);
@@ -260,7 +260,7 @@ export class ProjectileManager {
     this.projectiles = this.projectiles.filter((p) => !p.dead);
   }
 
-  _hitsObstacle(level, x, y, z) {
+  _hitsObstacle(level, fromX, fromZ, x, y, z) {
     // Walls extend full height (~3m); props / cover / containers
     // are short (~1m). The previous coarse `y > 3` cutoff treated
     // every obstacle's AABB as if it reached 3m, so grenades and
@@ -269,7 +269,16 @@ export class ProjectileManager {
     // height threshold: tall walls always block, short props only
     // block when the projectile is below their plausible top.
     if (y > 3.0) return false;
-    const obstacles = level.solidObstacles ? level.solidObstacles() : [];
+    const obstacleGrid = level.projectileObstacleGrid ? level.projectileObstacleGrid() : null;
+    const obstacles = obstacleGrid
+      ? obstacleGrid.queryAabb(
+        Math.min(fromX, x) - 0.1,
+        Math.max(fromX, x) + 0.1,
+        Math.min(fromZ, z) - 0.1,
+        Math.max(fromZ, z) + 0.1,
+        this._obstacleScratch || (this._obstacleScratch = []),
+      )
+      : (level.solidObstacles ? level.solidObstacles() : []);
     const PROP_TOP = 1.5;     // generous over-approximation of cover height
     for (const o of obstacles) {
       const b = o.userData.collisionXZ;
