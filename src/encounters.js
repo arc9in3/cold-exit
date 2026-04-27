@@ -2840,6 +2840,118 @@ export const ENCOUNTER_DEFS = {
   // and your bag bounces to the floor as normal loot.
   // -----------------------------------------------------------------
   // -----------------------------------------------------------------
+  // The Tailor — kindly seamstress at a small workbench. Drop a
+  // BROKEN piece of armor / gear / backpack at her feet and she
+  // returns it as a mastercraft version: full durability, MASTERCRAFT
+  // tag, +50% on every numeric stat that matters (affix values, set
+  // bonuses, etc.). Refuses anything that isn't broken or isn't gear.
+  // One-shot per save.
+  // -----------------------------------------------------------------
+  the_tailor: {
+    id: 'the_tailor',
+    name: 'The Tailor',
+    floorColor: 0xc890a8,             // soft rose dais
+    oncePerSave: true,
+    condition: (state) => state.levelIndex >= 2,
+    spawn(scene, room, ctx) {
+      const disc = _spawnFloorDisc(scene, room, this.floorColor);
+      const npc = _buildSimpleNpc({
+        bodyColor: 0x6a3848, headColor: 0xd0a890,
+        accentColor: 0xe8c0a0, height: 1.85,
+      });
+      npc.position.set(disc.cx - 0.55, 0, disc.cz);
+      npc.rotation.y = Math.PI * 0.15;
+      scene.add(npc);
+      // Workbench — short box with a stack of folded cloth on top.
+      const bench = new THREE.Group();
+      const woodMat = new THREE.MeshStandardMaterial({ color: 0x6a4a30, roughness: 0.85 });
+      const top = new THREE.Mesh(new THREE.BoxGeometry(0.95, 0.08, 0.55), woodMat);
+      top.position.y = 0.85;
+      top.castShadow = true;
+      bench.add(top);
+      // Four legs.
+      const legGeom = new THREE.BoxGeometry(0.08, 0.85, 0.08);
+      for (const [lx, lz] of [[-0.42, -0.22], [0.42, -0.22], [-0.42, 0.22], [0.42, 0.22]]) {
+        const leg = new THREE.Mesh(legGeom, woodMat);
+        leg.position.set(lx, 0.42, lz);
+        bench.add(leg);
+      }
+      // Stack of folded cloth — three short slabs in different
+      // colours so the bench reads as her workspace.
+      const clothMats = [
+        new THREE.MeshStandardMaterial({ color: 0x4a6a8a, roughness: 0.85 }),
+        new THREE.MeshStandardMaterial({ color: 0x8a5040, roughness: 0.85 }),
+        new THREE.MeshStandardMaterial({ color: 0x607048, roughness: 0.85 }),
+      ];
+      for (let i = 0; i < clothMats.length; i++) {
+        const slab = new THREE.Mesh(
+          new THREE.BoxGeometry(0.32, 0.045, 0.22),
+          clothMats[i],
+        );
+        slab.position.set(0.20, 0.91 + i * 0.046, 0.05);
+        slab.castShadow = true;
+        bench.add(slab);
+      }
+      // Spool of thread — small cylinder.
+      const spoolMat = new THREE.MeshStandardMaterial({ color: 0xd0c060, roughness: 0.6 });
+      const spool = new THREE.Mesh(
+        new THREE.CylinderGeometry(0.05, 0.05, 0.07, 12),
+        spoolMat,
+      );
+      spool.position.set(-0.25, 0.92, 0);
+      bench.add(spool);
+      // Pin cushion — squashed red sphere.
+      const cushionMat = new THREE.MeshStandardMaterial({ color: 0x8a2030, roughness: 0.85 });
+      const cushion = new THREE.Mesh(new THREE.SphereGeometry(0.07, 10, 8), cushionMat);
+      cushion.scale.set(1, 0.55, 1);
+      cushion.position.set(-0.10, 0.91, -0.10);
+      bench.add(cushion);
+      bench.position.set(disc.cx + 0.35, 0, disc.cz);
+      bench.rotation.y = -Math.PI * 0.05;
+      scene.add(bench);
+      const label = _makeLabelSprite('THE TAILOR', '#f0c0d0');
+      label.position.set(disc.cx, 2.4, disc.cz);
+      scene.add(label);
+      // Hint sprite — small line so the player knows what to drop.
+      const hint = _makeLabelSprite('drop a broken piece, she\'ll mend it', '#e0b0c0');
+      hint.scale.set(4.2, 0.6, 1);
+      hint.position.set(disc.cx, 0.5, disc.cz + 1.6);
+      scene.add(hint);
+      return { npc, bench, label, hint, disc, complete: false };
+    },
+    tick(_dt, _ctx) { /* purely interactive */ },
+    onItemDropped(item, ctx) {
+      const s = ctx.state;
+      if (s.complete || !item) return { consume: false };
+      const isMendable = item.type === 'armor' || item.type === 'gear' || item.type === 'backpack';
+      if (!isMendable) {
+        ctx.spawnSpeech(s.npc.position.clone().setY(2.4),
+          'I only mend cloth and leather, dear.', 3.5);
+        return { consume: false };
+      }
+      const broken = item.durability && item.durability.current <= 0;
+      if (!broken) {
+        ctx.spawnSpeech(s.npc.position.clone().setY(2.4),
+          'There\'s nothing wrong with this one. Bring me something broken.', 4.0);
+        return { consume: false };
+      }
+      // Already mastercraft? Repair only — don't lose the offering for nothing.
+      const already = !!item.mastercraft;
+      if (ctx.mendToMastercraft) ctx.mendToMastercraft(item);
+      s.complete = true;
+      ctx.spawnSpeech(s.npc.position.clone().setY(2.4),
+        already
+          ? 'Already masterwork — but the seams needed kissing. Take it.'
+          : 'Look at that. A bit of patience and it sings again.',
+        4.5);
+      ctx.spawnLoot(s.disc.cx, s.disc.cz + 1.4, item);
+      if (s.hint) s.hint.visible = false;
+      if (ctx.markEncounterComplete) ctx.markEncounterComplete('the_tailor');
+      return { consume: true, complete: true };
+    },
+  },
+
+  // -----------------------------------------------------------------
   // The Lamp — golden lamp on a pedestal. E to interact summons three
   // chests in a small arc: two masterwork, one cursed. The cursed
   // chest is visually distinct (darker, bloody tint) so the player

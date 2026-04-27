@@ -455,6 +455,50 @@ if (typeof window !== 'undefined') {
   window.__inv = window.__inv || {};
   // Populated below the function definition — see end of module.
 }
+// Deterministic mastercraft promotion — used by the Tailor encounter
+// so a hand-mended piece is GUARANTEED mastercraft, not a 0.5% roll.
+// Repairs durability to max as part of the mend, bumps existing affix
+// values 1.5× (same multiplier rollAffixes uses when mastercraft is
+// pre-flagged), and stamps the visual tag. Idempotent: if the item is
+// already mastercraft, only the durability heal applies.
+export function forceMastercraft(item) {
+  if (!item) return item;
+  if (item.durability && typeof item.durability.max === 'number') {
+    item.durability.current = item.durability.max;
+  }
+  if (item.mastercraft) return item;
+  item.mastercraft = true;
+  if (typeof item.name === 'string' && !item.name.includes('mastercraft-tag')) {
+    item.name = `<span class="mastercraft-tag">MASTERCRAFT</span> ${item.name}`;
+  }
+  // Numeric stat bumps mirroring maybeApplyMastercraft's body, but
+  // unconditional. Only fields that are present on the item touch.
+  const e = item.useEffect;
+  if (e) {
+    if (typeof e.amount === 'number')   e.amount   = Math.round(e.amount * 1.5);
+    if (typeof e.duration === 'number') e.duration = Math.max(1, Math.round(e.duration * 1.5));
+    if (typeof e.dmgMult === 'number')  e.dmgMult  = +(e.dmgMult  * 1.5).toFixed(2);
+    if (typeof e.regen === 'number')    e.regen    = Math.max(1, Math.round(e.regen * 1.5));
+  }
+  if (typeof item.aoeRadius === 'number') item.aoeRadius = Math.max(1, Math.round(item.aoeRadius * 1.5));
+  if (typeof item.aoeDamage === 'number') item.aoeDamage = Math.round(item.aoeDamage * 1.5);
+  if (typeof item.maxCharges === 'number') item.maxCharges = Math.max(1, Math.round(item.maxCharges * 1.5));
+  if (typeof item.sellValue === 'number')  item.sellValue  = Math.round(item.sellValue * 1.5);
+  // Armor / gear affix values get the same 1.5× lift as a freshly
+  // rolled mastercraft. Re-derive the label so the UI shows the new
+  // number ("+8.4% move" instead of the original "+5.6% move").
+  if (Array.isArray(item.affixes)) {
+    for (const aff of item.affixes) {
+      if (typeof aff.value === 'number') {
+        aff.value = Math.round(aff.value * 1.5 * 10) / 10;
+        const def = AFFIX_POOL.find(a => a.kind === aff.kind);
+        if (def) aff.label = def.label(aff.value);
+      }
+    }
+  }
+  return item;
+}
+
 export function maybeApplyMastercraft(item) {
   if (!item || item.mastercraft) return item;
   if (!rollMastercraft()) return item;

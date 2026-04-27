@@ -41,7 +41,7 @@ import {
   ALL_GEAR, ALL_ARMOR, ALL_CONSUMABLES, CONSUMABLE_DEFS, ALL_JUNK, ALL_TOYS, ARMOR_DEFS,
   JUNK_DEFS, TOY_DEFS,
   wrapWeapon, withAffixes, randomArmor, randomGear, randomConsumable, randomJunk, randomToy, setLootLevel,
-  randomThrowable, THROWABLE_DEFS, makeThrowable,
+  randomThrowable, THROWABLE_DEFS, makeThrowable, forceMastercraft,
 } from './inventory.js';
 import { ALL_ATTACHMENTS, ATTACHMENT_DEFS, effectiveWeapon, randomAttachment, rollAttachmentRarity } from './attachments.js';
 import { CustomizeUI } from './ui_customize.js';
@@ -2181,6 +2181,9 @@ function regenerateLevel() {
         // player opens it like any other chest; auto-acquire on
         // pickup grants the relic + flags the curse.
         spawnCursedChest: (x, z, relicId) => _spawnCursedChestAt(x, z, relicId),
+        // The Tailor — deterministic mastercraft promotion + full
+        // durability heal. Returns the same item ref, mutated.
+        mendToMastercraft: (item) => forceMastercraft(item),
         // Curse Breaker — strip a relic from the player's owned set
         // (e.g. brass_prisoner). Returns true if it was present and
         // removed; false otherwise.
