@@ -589,7 +589,21 @@ function launchOneCli(target) {
   });
 }
 
-async function launchAllClis(opts = {}) {
+// Per-CLI "just launched" timestamps. cliRunningStatus reads these
+// and returns the CLI as running for `LAUNCH_OPTIMISTIC_MS` ms after
+// a successful launch — saves the user from waiting on a 1-3s
+// PowerShell scan to discover what we already know.
+const _cliJustLaunched = { claude: 0, codex: 0, gemini: 0 };
+const LAUNCH_OPTIMISTIC_MS = 30 * 1000;
+
+// Cache the real scan result for a short window so the dashboard's
+// 6s polling loop and burst clicks don't fire fresh PowerShell+CIM
+// calls every time.
+let _cliStatusCache = null;
+let _cliStatusCacheT = 0;
+const CLI_STATUS_CACHE_MS = 4000;
+
+async function launchAllClis() {
   const status = await cliRunningStatus();
   const results = [];
   for (const t of CLI_TARGETS) {
@@ -597,21 +611,55 @@ async function launchAllClis(opts = {}) {
       results.push({ id: t.id, launched: false, alreadyRunning: true });
       continue;
     }
-    try { results.push(await launchOneCli(t)); }
+    try {
+      const r = await launchOneCli(t);
+      if (r.launched) _cliJustLaunched[t.id] = Date.now();
+      results.push(r);
+    }
     catch (e) { results.push({ id: t.id, launched: false, error: e.message }); }
   }
+  // Invalidate the cache so the next status check reflects the new
+  // launches (still fast — optimistic flag covers the wait).
+  _cliStatusCache = null;
   return { results, status };
 }
 
-// Detect whether each CLI is already running. Two-pass scan on
-// Windows: window titles (catches dashboard-launched shells) plus
-// process command lines via PowerShell's Get-CimInstance (catches
-// CLIs started manually in any shell — cmd, PowerShell, Git Bash,
-// or VS Code's integrated terminal). Either match counts.
+// Detect whether each CLI is already running. Cached for 4s + an
+// optimistic overlay for ~30s after each launch, so the dashboard
+// stays responsive even on a busy box where the PowerShell scan can
+// take 1-3 seconds. Caller doesn't see the cache — this function
+// always returns the merged effective state.
 async function cliRunningStatus() {
+  const now = Date.now();
+  // Optimistic overlay — if we just launched a CLI, treat it as
+  // running until it has time to actually appear in tasklist/CIM.
+  const optimistic = {};
+  for (const id of ['claude', 'codex', 'gemini']) {
+    if (now - _cliJustLaunched[id] < LAUNCH_OPTIMISTIC_MS) optimistic[id] = true;
+  }
+  // Cache hit — return cached + optimistic.
+  if (_cliStatusCache && (now - _cliStatusCacheT) < CLI_STATUS_CACHE_MS) {
+    return _mergeStatus(_cliStatusCache, optimistic);
+  }
+  // Cache miss — run the actual scan.
+  const fresh = await _scanCliRunningRaw();
+  _cliStatusCache = fresh;
+  _cliStatusCacheT = now;
+  return _mergeStatus(fresh, optimistic);
+}
+function _mergeStatus(a, b) {
+  return {
+    claude: !!(a.claude || b.claude),
+    codex:  !!(a.codex  || b.codex),
+    gemini: !!(a.gemini || b.gemini),
+  };
+}
+
+async function _scanCliRunningRaw() {
   const out = { claude: false, codex: false, gemini: false };
   if (process.platform === 'win32') {
-    // 1) Window-title scan via tasklist /v.
+    // 1) Window-title scan via tasklist /v — typically 50-150ms,
+    // catches dashboard-launched shells whose title we set ourselves.
     try {
       const { stdout } = await execP('tasklist /v /fo csv /nh', { maxBuffer: 8 * 1024 * 1024 });
       for (const line of stdout.split(/\r?\n/)) {
@@ -622,21 +670,32 @@ async function cliRunningStatus() {
           if (title.includes(t.title)) out[t.id] = true;
         }
       }
-    } catch (_) { /* if tasklist fails, fall through to the cmdline scan */ }
-    // 2) Process command-line scan via PowerShell. CIM gives us the
-    // CommandLine property of every running process; we test each
-    // CLI's `match` regex against the joined output.
+    } catch (_) { /* fall through to cmdline scan */ }
+    // 2) Process command-line scan — only run if at least one CLI
+    // is still missing. Catches CLIs started outside the dashboard.
+    // Try wmic first (fast: ~200ms) since it ships with Windows
+    // 11; fall back to PowerShell+CIM (~1-3s, cold) if wmic is
+    // missing or returns nothing.
     if (!out.claude || !out.codex || !out.gemini) {
+      let cmdlines = '';
       try {
-        const psCmd = 'powershell -NoLogo -NoProfile -Command "Get-CimInstance Win32_Process | ForEach-Object { $_.CommandLine }"';
-        const { stdout } = await execP(psCmd, { maxBuffer: 32 * 1024 * 1024 });
+        const { stdout } = await execP('wmic process get commandline /format:list', { maxBuffer: 32 * 1024 * 1024 });
+        cmdlines = stdout;
+      } catch (_) { /* wmic missing or failed */ }
+      if (!cmdlines) {
+        try {
+          const psCmd = 'powershell -NoLogo -NoProfile -Command "Get-CimInstance Win32_Process | ForEach-Object { $_.CommandLine }"';
+          const { stdout } = await execP(psCmd, { maxBuffer: 32 * 1024 * 1024 });
+          cmdlines = stdout;
+        } catch (_) { /* ignore — keep tasklist results */ }
+      }
+      if (cmdlines) {
         for (const t of CLI_TARGETS) {
-          if (!out[t.id] && t.match.test(stdout)) out[t.id] = true;
+          if (!out[t.id] && t.match.test(cmdlines)) out[t.id] = true;
         }
-      } catch (_) { /* PowerShell probe failed — keep whatever we got from tasklist */ }
+      }
     }
   } else {
-    // POSIX — inspect command lines via ps. Match the same regexes.
     try {
       const { stdout } = await execP('ps -ef', { maxBuffer: 8 * 1024 * 1024 });
       for (const t of CLI_TARGETS) {
@@ -1494,16 +1553,24 @@ async function launchAll() {
     const r = await api('/api/clis/launch-all', { method: 'POST' });
     let launched = 0, skipped = 0;
     for (const x of r.results) {
-      if (x.launched) { log('  ✓ ' + x.id + ' launched', 'ok'); launched++; }
+      if (x.launched) {
+        log('  ✓ ' + x.id + ' launched', 'ok');
+        launched++;
+        // Optimistic local update — flip the dot green immediately.
+        cliStatusCache[x.id] = true;
+      }
       else if (x.alreadyRunning) { log('  · ' + x.id + ' already running — skipped'); skipped++; }
       else log('  ✗ ' + x.id + ' — ' + (x.hint || x.error || 'failed'), 'err');
     }
+    paintCliStatus();
     if (launched === 0 && skipped > 0) log('all running CLIs were already open. nothing to do.', 'ok');
-    setTimeout(refreshCliStatus, 1500);
+    // Background reconcile — confirms the optimistic update against
+    // a real scan ~3s later. Server cache + optimistic overlay means
+    // this is fast and won't flicker the dot back to grey.
+    setTimeout(refreshCliStatus, 3000);
   } catch (e) { log('launch-all failed: ' + e.message, 'err'); }
 }
 async function launchOne(id) {
-  // If already running, ask whether to spawn another window anyway.
   if (cliStatusCache[id]) {
     if (!confirm(id + ' looks like it\\'s already running. Launch another window anyway?')) return;
   }
@@ -1514,11 +1581,15 @@ async function launchOne(id) {
       body: JSON.stringify({ id, force: cliStatusCache[id] }),
     });
     if (r.alreadyRunning && !r.launched) {
-      log(id + ' already running — skipped (status flag mismatch?)');
+      log(id + ' already running — skipped');
+    } else if (r.launched) {
+      log(id + ' launched', 'ok');
+      cliStatusCache[id] = true;
+      paintCliStatus();
     } else {
-      log(r.launched ? (id + ' launched') : (id + ' — ' + (r.hint || 'failed')), r.launched ? 'ok' : 'err');
+      log(id + ' — ' + (r.hint || 'failed'), 'err');
     }
-    setTimeout(refreshCliStatus, 1500);
+    setTimeout(refreshCliStatus, 3000);
   } catch (e) { log('launch failed: ' + e.message, 'err'); }
 }
 $('btn-launch-all').onclick = launchAll;
@@ -1793,7 +1864,12 @@ async function dashApi(req, res, parsedUrl) {
       if (running[target.id] && !body.force) {
         return send(200, { id: target.id, launched: false, alreadyRunning: true });
       }
-      return send(200, await launchOneCli(target));
+      const r = await launchOneCli(target);
+      if (r.launched) {
+        _cliJustLaunched[target.id] = Date.now();
+        _cliStatusCache = null;
+      }
+      return send(200, r);
     }
     if (parsedUrl.pathname === '/api/clis/status' && req.method === 'GET') {
       return send(200, await cliRunningStatus());
