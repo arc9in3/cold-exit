@@ -350,26 +350,43 @@ function parseTasksMd() {
 }
 
 // ===========================================================================
-// AI summary — optional, requires OPENAI_API_KEY env var.
+// AI summary — provider-pluggable. Default chain:
+//   1. AI_PROVIDER=ollama  → call local Ollama (no API key, free, fast)
+//   2. AI_PROVIDER=openai  → cloud OpenAI gpt-4o-mini (requires OPENAI_API_KEY)
+//   3. unset → prefer Ollama if reachable, else fall back to OpenAI.
+//
+// Local Ollama setup:
+//   1. Install Ollama from https://ollama.com (Windows installer, runs as a
+//      background service on http://localhost:11434).
+//   2. Pull a model:    ollama pull qwen2.5-coder:32b   (~20GB)
+//                       ollama pull deepseek-r1:32b     (~20GB, reasoning)
+//   3. Set env var:     setx AI_PROVIDER "ollama"
+//                       setx OLLAMA_MODEL "qwen2.5-coder:32b"
+//      (or omit OLLAMA_MODEL to default to qwen2.5-coder:32b)
+//   4. Restart this dashboard.
 // ===========================================================================
-async function aiSummary({ branch, owner, diff, stats, commits, files }) {
-  const key = process.env.OPENAI_API_KEY;
-  if (!key) {
-    return {
-      ok: false,
-      reason: 'OPENAI_API_KEY not set. Run `setx OPENAI_API_KEY "sk-..."` and restart this dashboard to enable AI summaries.',
-    };
+const OLLAMA_HOST = process.env.OLLAMA_HOST || 'http://localhost:11434';
+const OLLAMA_MODEL_DEFAULT = process.env.OLLAMA_MODEL || 'qwen2.5-coder:32b';
+
+async function _ollamaReachable() {
+  try {
+    const r = await fetch(`${OLLAMA_HOST}/api/tags`, { method: 'GET' });
+    return r.ok;
+  } catch (_) {
+    return false;
   }
-  // Truncate diff to 12k chars — gpt-4o-mini handles ~128k tokens but
-  // we don't want to pay for huge diffs that the heuristic summary
-  // already covered.
+}
+
+async function aiSummary({ branch, owner, diff, stats, commits, files }) {
+  const provider = (process.env.AI_PROVIDER || '').toLowerCase();
+  // Truncate diff — same budget regardless of provider.
   const trimmed = diff.length > 12000
     ? diff.slice(0, 12000) + '\n\n[... diff truncated, ' + (diff.length - 12000) + ' more chars ...]'
     : diff;
   const fileList = files.map(f => `${f.file} (+${f.added}/-${f.removed}) — ${f.purpose}`).join('\n');
   const commitList = commits.map(c => `${c.short}  ${c.subject}`).join('\n');
 
-  const prompt = [
+  const messages = [
     { role: 'system', content: 'You are explaining a code change to someone who does not read code. Be concise. Output exactly four bullet points — no preamble, no closing remarks. Use plain English, no jargon. If a technical term is unavoidable, put a quick parenthesized hint after it.' },
     { role: 'user', content:
 `Branch: ${branch}
@@ -392,7 +409,66 @@ Output four bullet points in this exact order:
     },
   ];
 
-  // Direct fetch to OpenAI — node 18+ has global fetch.
+  // Provider routing.
+  let useOllama = false;
+  if (provider === 'ollama') useOllama = true;
+  else if (provider === 'openai') useOllama = false;
+  else useOllama = await _ollamaReachable();    // auto-detect
+
+  if (useOllama) {
+    return await _callOllama(messages);
+  }
+  return await _callOpenAI(messages);
+}
+
+async function _callOllama(messages) {
+  // Ollama exposes an OpenAI-compatible /v1/chat/completions endpoint.
+  // No API key required; it's a localhost POST. Streaming off so we
+  // get one consolidated JSON response that fits the existing return
+  // shape.
+  try {
+    const res = await fetch(`${OLLAMA_HOST}/v1/chat/completions`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        model: OLLAMA_MODEL_DEFAULT,
+        messages,
+        max_tokens: 400,
+        temperature: 0.25,
+        stream: false,
+      }),
+    });
+    if (!res.ok) {
+      const errText = await res.text();
+      return {
+        ok: false,
+        reason: `Ollama error ${res.status}: ${errText.slice(0, 300)}. Is the model pulled? Try: ollama pull ${OLLAMA_MODEL_DEFAULT}`,
+      };
+    }
+    const json = await res.json();
+    const text = json.choices?.[0]?.message?.content?.trim() || '';
+    return {
+      ok: true,
+      summary: text,
+      tokens: json.usage,
+      model: `ollama/${json.model || OLLAMA_MODEL_DEFAULT}`,
+    };
+  } catch (e) {
+    return {
+      ok: false,
+      reason: `Ollama unreachable at ${OLLAMA_HOST}: ${e.message}. Start the Ollama service or set AI_PROVIDER=openai.`,
+    };
+  }
+}
+
+async function _callOpenAI(messages) {
+  const key = process.env.OPENAI_API_KEY;
+  if (!key) {
+    return {
+      ok: false,
+      reason: 'No AI provider available. Either install Ollama (https://ollama.com) and run `ollama pull qwen2.5-coder:32b`, or set OPENAI_API_KEY.',
+    };
+  }
   const res = await fetch('https://api.openai.com/v1/chat/completions', {
     method: 'POST',
     headers: {
@@ -401,7 +477,7 @@ Output four bullet points in this exact order:
     },
     body: JSON.stringify({
       model: 'gpt-4o-mini',
-      messages: prompt,
+      messages,
       max_tokens: 400,
       temperature: 0.25,
     }),
@@ -1798,7 +1874,13 @@ async function dashApi(req, res, parsedUrl) {
       // Heuristic plain-English summary.
       const files = await getFileStats(ref);
       const summary = generateHeuristicSummary({ files, stats, commits, owner, isPushed });
-      const aiAvailable = !!process.env.OPENAI_API_KEY;
+      // AI summary is available if EITHER Ollama is reachable OR an
+      // OpenAI key is set. Auto-detected so the dashboard shows the
+      // "Generate AI Summary" button without manual config when the
+      // local Ollama service is running.
+      const aiAvailable = !!process.env.OPENAI_API_KEY
+        || (process.env.AI_PROVIDER || '').toLowerCase() === 'ollama'
+        || await _ollamaReachable();
 
       return send(200, {
         ref, owner, checklist, diff, stats, commits, isPushed, canCheckout,
