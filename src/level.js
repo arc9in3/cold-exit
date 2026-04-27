@@ -1390,7 +1390,10 @@ export class Level {
     // (bookshelves, couches) could push their visible mesh past
     // a room's outer wall and read as floating in the void.
     const _propFitsInBounds = (prop, x, z, yaw) => {
-      const col = prop.collision;
+      // `footprint` covers walkable-but-bounded props (pallets — flat
+      // floor objects that should still respect room walls + doorway
+      // clearance even though the player can step over them).
+      const col = prop.collision || prop.footprint;
       if (!col) return true;
       let w = col.w, d = col.d;
       const yawAbs = Math.abs(yaw || 0) % Math.PI;
@@ -1419,7 +1422,7 @@ export class Level {
     // walking gap between props instead of letting them touch.
     const PROP_GAP = 0.45;
     const _propFootprintFree = (x, z, prop, yaw) => {
-      const col = prop.collision;
+      const col = prop.collision || prop.footprint;
       if (!col) return true;
       let w = col.w, d = col.d;
       const yawAbs = Math.abs(yaw || 0) % Math.PI;
@@ -1553,45 +1556,118 @@ export class Level {
     // passes collision + bounds gets the chair. Chair faces the table
     // (not the room centre — the table IS the focal point). Silent
     // failure if every side is blocked — pairing is a polish bonus.
-    const _addChairBy = (anchor) => {
-      if (!anchor || !anchor.collision) return false;
+    // Anchor's world-frame AABB extents. Reads from collision OR
+    // footprint (so walkable-but-bounded props like pallets contribute
+    // their visible size). Returns null if the prop has neither.
+    const _anchorWD = (anchor) => {
+      const col = anchor.collision || anchor.footprint;
+      if (!col) return null;
+      const yaw = anchor.group.rotation.y || 0;
+      let w = col.w, d = col.d;
+      const yawAbs = Math.abs(yaw) % Math.PI;
+      if (Math.abs(yawAbs - Math.PI / 2) < 0.05) [w, d] = [d, w];
+      return { w, d };
+    };
+
+    // Generic "place a prop adjacent to an anchor" helper. Tries each
+    // of the 4 cardinal sides; first slot that passes collision +
+    // bounds wins. `facing` controls how the new prop is rotated:
+    //   - 'inward'  — local +Z points back at the anchor (chair behind
+    //                 a desk, end-table beside a couch)
+    //   - 'match'   — same yaw as the anchor (nightstand against the
+    //                 same wall as the bed)
+    //   - 'outward' — local +Z points away from the anchor
+    // `preferSide` (optional, 'left'|'right'|'front'|'back') biases
+    // toward one side and falls through if blocked.
+    const _placeAdjacent = (anchor, kind, opts = {}) => {
+      if (!anchor) return null;
+      const wd = _anchorWD(anchor);
+      if (!wd) return null;
       const ax = anchor.group.position.x;
       const az = anchor.group.position.z;
-      const yaw = anchor.group.rotation.y || 0;
-      // Anchor's world AABB extents — already swapped for axis yaw.
-      let aw = anchor.collision.w, ad = anchor.collision.d;
-      const yawAbs = Math.abs(yaw) % Math.PI;
-      if (Math.abs(yawAbs - Math.PI / 2) < 0.05) [aw, ad] = [ad, aw];
-      const chair = buildProp('chair');
-      if (!chair) return false;
-      const cw = chair.collision.w, cd = chair.collision.d;
-      // Each entry: { dx, dz, chairYaw } — chair sits one footprint
-      // away from the anchor in that direction, facing back at it.
-      const sides = [
-        { dx:  (aw / 2 + cd / 2 + 0.05), dz: 0,                              chairYaw: -Math.PI / 2 },
-        { dx: -(aw / 2 + cd / 2 + 0.05), dz: 0,                              chairYaw:  Math.PI / 2 },
-        { dx: 0,                              dz:  (ad / 2 + cd / 2 + 0.05), chairYaw:  Math.PI },
-        { dx: 0,                              dz: -(ad / 2 + cd / 2 + 0.05), chairYaw: 0 },
-      ].sort(() => Math.random() - 0.5);
-      for (const s of sides) {
+      const aYaw = anchor.group.rotation.y || 0;
+      const prop = buildProp(kind);
+      if (!prop) return null;
+      const pcol = prop.collision || prop.footprint;
+      const pw = pcol ? pcol.w : 0.4;
+      const pd = pcol ? pcol.d : 0.4;
+      const facing = opts.facing || 'inward';
+      const gap = opts.gap ?? 0.05;
+      const slots = [
+        { dx:  (wd.w / 2 + pd / 2 + gap), dz: 0,                          dir:  Math.PI / 2 },
+        { dx: -(wd.w / 2 + pd / 2 + gap), dz: 0,                          dir: -Math.PI / 2 },
+        { dx: 0,                          dz:  (wd.d / 2 + pd / 2 + gap), dir:  0 },
+        { dx: 0,                          dz: -(wd.d / 2 + pd / 2 + gap), dir:  Math.PI },
+      ];
+      const yawFor = (dir) => {
+        if (facing === 'match')   return aYaw;
+        if (facing === 'outward') return dir;
+        return dir + Math.PI;       // inward — face back at the anchor
+      };
+      let order = slots;
+      if (opts.preferSide) {
+        const map = { right: 0, left: 1, back: 2, front: 3 };
+        const i = map[opts.preferSide];
+        if (i != null) order = [slots[i], ...slots.filter((_, k) => k !== i)];
+      } else {
+        order = slots.slice().sort(() => Math.random() - 0.5);
+      }
+      for (const s of order) {
         const x = ax + s.dx, z = az + s.dz;
         if (tooCloseToElev(x, z)) continue;
         if (inKeepOut(x, z)) continue;
-        if (this._collidesAt(x, z, Math.max(cw, cd) * 0.7 + 0.4)) continue;
-        if (!_propFitsInBounds(chair, x, z, s.chairYaw)) continue;
-        if (!_propFootprintFree(x, z, chair, s.chairYaw)) continue;
-        chair.group.position.set(x, 0, z);
-        chair.group.rotation.y = s.chairYaw;
-        return this._registerProp(chair);
+        const radius = Math.max(pw, pd) * 0.7 + 0.4;
+        if (this._collidesAt(x, z, radius)) continue;
+        const yaw = yawFor(s.dir);
+        if (!_propFitsInBounds(prop, x, z, yaw)) continue;
+        if (!_propFootprintFree(x, z, prop, yaw)) continue;
+        prop.group.position.set(x, 0, z);
+        prop.group.rotation.y = yaw;
+        if (this._registerProp(prop)) return prop;
+        return null;
       }
-      // None of the four sides worked — drop the chair group so the
-      // shared geometry isn't leaked into the scene.
-      chair.group.traverse?.((obj) => {
-        if (obj.geometry?.userData?.sharedRigGeom) return;
-        if (obj.geometry?.dispose) obj.geometry.dispose();
-      });
-      return false;
+      return null;
     };
+
+    // Place a prop ACROSS the room from anchor — used for the
+    // tv-across-from-couch pattern. Walks outward along the anchor's
+    // local +Z (its "front") until a valid spot lands, points the new
+    // prop back at the anchor.
+    const _placeAcross = (anchor, kind, opts = {}) => {
+      if (!anchor) return null;
+      const ax = anchor.group.position.x;
+      const az = anchor.group.position.z;
+      const aYaw = anchor.group.rotation.y || 0;
+      const fx = -Math.sin(aYaw);
+      const fz =  Math.cos(aYaw);
+      const prop = buildProp(kind);
+      if (!prop) return null;
+      const pcol = prop.collision || prop.footprint;
+      const pw = pcol ? pcol.w : 0.6;
+      const pd = pcol ? pcol.d : 0.6;
+      const minDist = opts.minDist ?? 2.5;
+      const maxDist = opts.maxDist ?? 6.0;
+      // Try furthest first so the tv ends up against the far wall.
+      for (let step = 6; step >= 0; step--) {
+        const t = minDist + (maxDist - minDist) * (step / 6);
+        const x = ax + fx * t, z = az + fz * t;
+        if (tooCloseToElev(x, z)) continue;
+        if (inKeepOut(x, z)) continue;
+        const radius = Math.max(pw, pd) * 0.7 + 0.4;
+        if (this._collidesAt(x, z, radius)) continue;
+        const yaw = aYaw + Math.PI;
+        if (!_propFitsInBounds(prop, x, z, yaw)) continue;
+        if (!_propFootprintFree(x, z, prop, yaw)) continue;
+        prop.group.position.set(x, 0, z);
+        prop.group.rotation.y = yaw;
+        if (this._registerProp(prop)) return prop;
+        return null;
+      }
+      return null;
+    };
+
+    // Backwards-compatible chair-pairing wrapper.
+    const _addChairBy = (anchor) => !!_placeAdjacent(anchor, 'chair', { facing: 'inward' });
 
     // Build a prop, place it via `placer`, then optionally pair a
     // chair next to it. Returns the placed prop (so the caller can
@@ -1605,58 +1681,152 @@ export class Level {
       return prop;
     };
 
-    // Per-theme placement scripts. Prop counts intentionally lean low
-    // so rooms read as "a space with character" rather than a
-    // furniture showroom that chokes every sight-line.
+    // Helper — anchor a prop placement, then optionally mark the
+    // anchor lootable per LOOT_PROP_CONFIG. Wraps the common pattern
+    // of "place X, roll loot chance" so each composed arrangement
+    // reads as a recipe instead of a 4-line dance.
+    const _maybeLoot = (prop) => {
+      if (!prop || !prop.kind) return prop;
+      const cfg = LOOT_PROP_CONFIG[prop.kind];
+      if (cfg && Math.random() < cfg.p) {
+        this._markPropLootable(prop, cfg.type(), cfg.size);
+      }
+      return prop;
+    };
+
+    // Per-theme placement scripts. Each theme composes a small
+    // ARRANGEMENT instead of scattering pieces independently — the
+    // bedroom's nightstand sits at the head of the bed, the living
+    // room's coffee table sits in front of the couch, the office's
+    // chair sits behind its desk.
+    // Build + place + mark-loot in one call. Returns the placed prop
+    // (or null) so a caller can chain adjacency placements off it.
+    const _placeAndLoot = (kind, placer) => {
+      const prop = buildProp(kind);
+      if (!prop) return null;
+      if (!placer(prop)) return null;
+      _maybeLoot(prop);
+      return prop;
+    };
+
     if (theme === 'library') {
+      // Reading nook: 1-2 bookshelves on a wall, a desk facing the
+      // room centre, and a chair tucked behind the desk.
       const shelves = 1 + Math.floor(Math.random() * 2);
-      for (let i = 0; i < shelves; i++) placeLootable('bookshelf', placeAlongWall);
-      if (Math.random() < 0.7) {
-        const desk = placeWithChair('desk', placeInterior, 0.85);
-        const cfg = LOOT_PROP_CONFIG.desk;
-        if (desk && Math.random() < cfg.p) {
-          this._markPropLootable(desk, cfg.type(), cfg.size);
+      for (let i = 0; i < shelves; i++) _placeAndLoot('bookshelf', placeAlongWall);
+      if (Math.random() < 0.85) {
+        const desk = _placeAndLoot('desk', placeInterior);
+        if (desk) {
+          // Chair behind the desk (the side pointing AWAY from the
+          // room centre — that's where someone would sit). Falls back
+          // to any open side if the back is blocked.
+          _placeAdjacent(desk, 'chair', { facing: 'inward', preferSide: 'back' });
         }
       }
     } else if (theme === 'lobby') {
-      placeAlongWall(buildProp('couch'));
-      if (Math.random() < 0.6) placeWithChair('coffeeTable', placeInterior, 0.5);
-      if (Math.random() < 0.4) placeLootable('desk', placeAlongWall);
-    } else if (theme === 'bedroom') {
-      placeAlongWall(buildProp('bed'));
-      if (Math.random() < 0.6) placeLootable('nightstand', placeAlongWall);
-    } else if (theme === 'livingRoom') {
-      placeAlongWall(buildProp('couch'));
-      if (Math.random() < 0.7) placeInterior(buildProp('coffeeTable'));
-      if (Math.random() < 0.7) placeAlongWall(buildProp('tv'));
-    } else if (theme === 'warehouse') {
-      const crates = 1 + Math.floor(Math.random() * 2);
-      for (let i = 0; i < crates; i++) placeLootable('crate', placeInterior);
-      if (Math.random() < 0.6) placeLootable('barrel', placeInterior);
-      if (Math.random() < 0.5) placeLootable('pallet', placeInterior);
-    } else if (theme === 'office') {
-      // Cubicle / admin floor — desks against the walls, EACH paired
-      // with a chair so it reads as "someone worked here." Filing
-      // cabinet for vertical clutter; lamp centerpiece.
-      const cfg = LOOT_PROP_CONFIG.desk;
-      const desk1 = placeWithChair('desk', placeAlongWall, 0.85);
-      if (desk1 && Math.random() < cfg.p) {
-        this._markPropLootable(desk1, cfg.type(), cfg.size);
-      }
-      if (Math.random() < 0.6) {
-        const desk2 = placeWithChair('desk', placeAlongWall, 0.85);
-        if (desk2 && Math.random() < cfg.p) {
-          this._markPropLootable(desk2, cfg.type(), cfg.size);
+      // Reception arrangement: couch on a wall + coffee table directly
+      // in FRONT of the couch (anchored, not random) + a side chair
+      // facing the couch from across the coffee table. Reception desk
+      // optional.
+      const couch = buildProp('couch');
+      if (couch && placeAlongWall(couch)) {
+        const ct = _placeAdjacent(couch, 'coffeeTable', { facing: 'match', preferSide: 'front', gap: 0.30 });
+        if (ct && Math.random() < 0.55) {
+          // Side chair across from the coffee table — completes the
+          // conversation triangle.
+          _placeAdjacent(ct, 'chair', { facing: 'inward', preferSide: 'front' });
         }
       }
-      if (Math.random() < 0.5) placeLootable('cabinet', placeAlongWall);
-      if (Math.random() < 0.4) placeInterior(buildProp('lamp'));
+      if (Math.random() < 0.4) _placeAndLoot('desk', placeAlongWall);
+    } else if (theme === 'bedroom') {
+      // Bedroom set: bed against a wall + nightstand at the head end
+      // (matches anchor yaw so the nightstand sits beside the bed
+      // against the same wall, not poking into the room).
+      const bed = buildProp('bed');
+      if (bed && placeAlongWall(bed)) {
+        if (Math.random() < 0.85) {
+          // Nightstand on the right side of the bed (head end). Falls
+          // through to other sides if blocked.
+          const ns = _placeAdjacent(bed, 'nightstand', { facing: 'match', preferSide: 'right', gap: 0.05 });
+          _maybeLoot(ns);
+        }
+        // Occasional second nightstand on the OTHER side of the bed.
+        if (Math.random() < 0.30) {
+          const ns2 = _placeAdjacent(bed, 'nightstand', { facing: 'match', preferSide: 'left', gap: 0.05 });
+          _maybeLoot(ns2);
+        }
+      }
+    } else if (theme === 'livingRoom') {
+      // Living room arrangement: couch on wall + coffee table in
+      // front + tv across from the couch (placed by anchored projection,
+      // not a separate random wall slot — guarantees the tv ends up in
+      // the couch's sightline).
+      const couch = buildProp('couch');
+      if (couch && placeAlongWall(couch)) {
+        if (Math.random() < 0.85) {
+          _placeAdjacent(couch, 'coffeeTable', { facing: 'match', preferSide: 'front', gap: 0.40 });
+        }
+        if (Math.random() < 0.70) {
+          // TV across from the couch — projects along couch's local
+          // +Z (its front), so the screen ends up facing the cushions.
+          _placeAcross(couch, 'tv', { minDist: 3.0, maxDist: 5.5 });
+        }
+      }
+    } else if (theme === 'warehouse') {
+      // Crate stack: pick a wall slot for the FIRST crate, then stack
+      // 1-2 more next to it so the eye reads "supply staging" instead
+      // of "random boxes." A barrel beside the stack completes it.
+      const c1 = buildProp('crate');
+      if (c1 && placeAlongWall(c1)) {
+        _maybeLoot(c1);
+        if (Math.random() < 0.65) {
+          const c2 = _placeAdjacent(c1, 'crate', { facing: 'match', gap: 0.05 });
+          if (c2) _maybeLoot(c2);
+        }
+        if (Math.random() < 0.40) {
+          const c3 = _placeAdjacent(c1, 'crate', { facing: 'match', gap: 0.05 });
+          if (c3) _maybeLoot(c3);
+        }
+        if (Math.random() < 0.55) {
+          const barrel = _placeAdjacent(c1, 'barrel', { facing: 'match', gap: 0.10 });
+          _maybeLoot(barrel);
+        }
+      }
+      // Pallet pad on the floor — flat, walkable, just a warehouse
+      // texture. Lootable so the player has a reason to step on it.
+      if (Math.random() < 0.55) {
+        const pal = buildProp('pallet');
+        if (pal && placeInterior(pal)) _maybeLoot(pal);
+      }
+    } else if (theme === 'office') {
+      // Workstation: desk against wall + chair behind it (back side =
+      // away from room centre = where someone sits) + filing cabinet on
+      // the same wall. Up to two workstations; cabinet shared.
+      const _workstation = () => {
+        const desk = buildProp('desk');
+        if (!desk || !placeAlongWall(desk)) return null;
+        _maybeLoot(desk);
+        // Chair on the room-centre side of the desk so it reads as
+        // "someone sits here facing their work."
+        _placeAdjacent(desk, 'chair', { facing: 'inward', preferSide: 'front' });
+        return desk;
+      };
+      _workstation();
+      if (Math.random() < 0.55) _workstation();
+      if (Math.random() < 0.55) _placeAndLoot('cabinet', placeAlongWall);
+      if (Math.random() < 0.35) placeInterior(buildProp('lamp'));
     } else if (theme === 'kitchen') {
-      // Break room / mess — a central table with TWO paired chairs,
-      // a cabinet along the wall. Reads as "people eat here."
-      const table = placeWithChair('table', placeInterior, 1.0);
-      if (table && Math.random() < 0.65) _addChairBy(table);
-      if (Math.random() < 0.6) placeLootable('cabinet', placeAlongWall);
+      // Dining set: central table + chairs anchored on each of its
+      // 4 sides (2-4 per room; dropped if a side is blocked). Cabinet
+      // on a wall completes the room-as-room.
+      const table = buildProp('table');
+      if (table && placeInterior(table)) {
+        const chairCount = 2 + (Math.random() < 0.5 ? 1 : 0) + (Math.random() < 0.4 ? 1 : 0);
+        for (let i = 0; i < chairCount; i++) {
+          _placeAdjacent(table, 'chair', { facing: 'inward' });
+        }
+      }
+      if (Math.random() < 0.65) _placeAndLoot('cabinet', placeAlongWall);
     }
 
     // -----------------------------------------------------------------

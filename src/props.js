@@ -458,7 +458,13 @@ export function buildPallet(opts = {}) {
     blk.position.set(sx, 0.04, 0);
     group.add(blk);
   }
-  return { group, collision: { w, d } };
+  // Pallet is ~17cm tall — well below the player's step height.
+  // collision: null lets the player + AI walk straight over it; the
+  // separate `footprint` is used by placement-bounds + footprint-free
+  // checks so we still avoid spawning the visible mesh past a wall or
+  // overlapping another prop. Lootable continues to work because
+  // _markPropLootable keys off prop position, not the collision proxy.
+  return { group, collision: null, footprint: { w, d } };
 }
 
 export function buildNightstand(opts = {}) {
@@ -894,6 +900,12 @@ export function buildProp(kind, opts) {
     result.collision = {
       w: result.collision.w * PROP_SCALE,
       d: result.collision.d * PROP_SCALE,
+    };
+  }
+  if (result.footprint) {
+    result.footprint = {
+      w: result.footprint.w * PROP_SCALE,
+      d: result.footprint.d * PROP_SCALE,
     };
   }
   return result;
