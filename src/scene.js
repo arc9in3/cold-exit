@@ -232,7 +232,9 @@ export function createScene() {
   scene.add(grid);
 
   const groundPlane = new THREE.Plane(new THREE.Vector3(0, 1, 0), 0);
+  // `ground` exposed so the level can re-tint the floor per theme on
+  // each regen (per-level visual theming, see LEVEL_THEMES in props.js).
   return { scene, camera, updateCamera, resize, groundPlane,
     hemiLight: hemi, keyLight: key, fillLight: fill, rimLight: rim,
-    gridHelper: grid };
+    gridHelper: grid, ground, gridLines: grid };
 }

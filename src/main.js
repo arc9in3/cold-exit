@@ -439,7 +439,7 @@ renderer.domElement.addEventListener('webglcontextrestored', () => {
 }, false);
 
 const { scene, camera, updateCamera, resize, groundPlane,
-  hemiLight, keyLight, fillLight, rimLight, gridHelper } = createScene();
+  hemiLight, keyLight, fillLight, rimLight, gridHelper, ground } = createScene();
 applyQuality(initialQuality, { renderer, scene, keyLight, fillLight, rimLight, gridHelper });
 
 // Post-FX composer — bloom + vignette/grain. Only rendered through
@@ -499,7 +499,7 @@ const gunmen = new GunmanManager(scene);
 const melees = new MeleeEnemyManager(scene);
 const drones = new DroneManager(scene);
 const loot = new LootManager(scene);
-const level = new Level(scene);
+const level = new Level(scene, { ground });
 const projectiles = new ProjectileManager(scene);
 
 // Live-tune helpers for the currently equipped weapon. `tuneWeapon`

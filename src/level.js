@@ -1,6 +1,6 @@
 import * as THREE from 'three';
 import { tunables } from './tunables.js';
-import { buildProp } from './props.js';
+import { buildProp, getLevelTheme } from './props.js';
 import { buildRig, initAnim, updateAnim } from './actor_rig.js';
 import { makeContainer, pickContainerType, pickContainerSize, buildContainerMesh } from './containers.js';
 import { StaticObstacleGrid2D } from './obstacle_grid.js';
@@ -27,12 +27,27 @@ export const KEEPER_PALETTE = {
 // Enemies spawn once per room and do not respawn. The player must clear the
 // current room before its doors open; the boss room reveals the extract.
 
-const FULL_WALL_COLOR = 0x2a2e38;
-const LOW_COVER_COLOR = 0x3a3a34;
-const OUTER_WALL_COLOR = 0x1a1e24;
+// Wall + cover colours are now `let` so the theme system can re-
+// tint them at the start of each generate(). Defaults match the
+// pre-theme look so any code that runs before theme application
+// (tutorial, edge-cases) still has reasonable values.
+let FULL_WALL_COLOR = 0x2a2e38;
+let LOW_COVER_COLOR = 0x3a3a34;
+let OUTER_WALL_COLOR = 0x1a1e24;
 const DOOR_COLOR = 0x8a3a2a;
 const DOOR_OPEN_COLOR = 0x3a5a3a;
 const EXIT_COLOR = 0x00ff88;
+
+// Darken a hex colour by `k` (0..1). Used to derive outer wall
+// (darker than inner) + low cover (slightly darker accent) from a
+// theme's primary wall colour. Same helper pattern as actor_rig.
+function _darkenHex(hex, k) {
+  const r = (hex >> 16) & 0xff;
+  const g = (hex >> 8) & 0xff;
+  const b = hex & 0xff;
+  const m = 1 - k;
+  return ((Math.round(r * m)) << 16) | ((Math.round(g * m)) << 8) | (Math.round(b * m));
+}
 
 const ROOM_W = 18;
 const ROOM_H = 18;
@@ -42,8 +57,16 @@ const DOOR_WIDTH = 4;
 const PROJECTILE_OBSTACLE_CELL_SIZE = 5;
 
 export class Level {
-  constructor(scene) {
+  constructor(scene, opts = {}) {
     this.scene = scene;
+    // Optional reference to the global ground mesh from createScene.
+    // Used to re-tint the floor on each level regen so the per-theme
+    // colour palette extends underfoot, not just to walls/props.
+    this.ground = opts.ground || null;
+    // Active theme — assigned at the start of each generate() based
+    // on this.index. Exposed so render code (HUD, props, encounters)
+    // can read the palette if it needs to match.
+    this.theme = null;
     this.obstacles = [];
     this.decorations = [];
     this.exitGroup = null;
@@ -124,6 +147,19 @@ export class Level {
     // instead of random-walking a normal chain.
     if (typeof window !== 'undefined' && window.__tutorialMode && window.__tutorialMode()) {
       return this.generateTutorial();
+    }
+    // Pick + apply this floor's visual theme. Tints walls, outer
+    // walls, low cover, and the ground mesh. Subsequent code that
+    // reads FULL_WALL_COLOR / OUTER_WALL_COLOR / LOW_COVER_COLOR
+    // gets the theme-tinted values for the rest of generate().
+    this.theme = getLevelTheme(this.index);
+    if (this.theme) {
+      FULL_WALL_COLOR  = this.theme.wall;
+      OUTER_WALL_COLOR = _darkenHex(this.theme.wall, 0.55);
+      LOW_COVER_COLOR  = _darkenHex(this.theme.wall, 0.30);
+      if (this.ground && this.ground.material && this.ground.material.color) {
+        this.ground.material.color.setHex(this.theme.floor);
+      }
     }
 
     // --- Layout: random-walk chain so each level bends differently --------
@@ -1404,6 +1440,49 @@ export class Level {
       if (Math.random() < 0.7) placeInterior(buildProp('chair'));
       if (Math.random() < 0.5) placeInterior(buildProp('chair'));
       if (Math.random() < 0.6) placeAlongWall(buildProp('cabinet'));
+    }
+
+    // -----------------------------------------------------------------
+    // Theme sprinkle — additive layer on top of the room-theme pass.
+    // Picks 2-3 props from the active level theme's propWeights so a
+    // hotel floor's "lobby" room gets planters + door frames, a
+    // garage's "warehouse" room gets pillars, a nightclub's
+    // "lounge" gets neon sticks, etc. Doesn't replace the room-
+    // theme furnishing — adds character on top.
+    // -----------------------------------------------------------------
+    if (this.theme && this.theme.propWeights) {
+      const weights = this.theme.propWeights;
+      const kinds = Object.keys(weights);
+      if (kinds.length) {
+        // Pre-build the cumulative-weights array once for fast picks.
+        let total = 0;
+        const cumulative = kinds.map(k => (total += weights[k], total));
+        const pickThemed = () => {
+          const r = Math.random() * total;
+          for (let i = 0; i < kinds.length; i++) {
+            if (r < cumulative[i]) return kinds[i];
+          }
+          return kinds[kinds.length - 1];
+        };
+        // 2-3 sprinkles per room. Boss rooms get one extra for
+        // weight; start rooms skip entirely (path is sacred).
+        if (room.type !== 'start') {
+          const count = (room.type === 'boss' ? 3 : 2)
+                      + (Math.random() < 0.4 ? 1 : 0);
+          for (let i = 0; i < count; i++) {
+            const kind = pickThemed();
+            const prop = buildProp(kind);
+            if (!prop) continue;
+            // Pillars + railings + windows lean against the perimeter
+            // (visual logic). Neon sticks, planters, lamps,
+            // door frames sit in the interior.
+            const wallish = (kind === 'pillar' || kind === 'railing'
+                          || kind === 'window' || kind === 'doorFrame');
+            const placed = wallish ? placeAlongWall(prop) : placeInterior(prop);
+            void placed;
+          }
+        }
+      }
     }
   }
 
