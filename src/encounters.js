@@ -2833,6 +2833,105 @@ export const ENCOUNTER_DEFS = {
   },
 
   // -----------------------------------------------------------------
+  // The Crow — small black bird perched on a stone. Drop any backpack
+  // and he hops, caws, and trades you a strictly-larger non-magical
+  // bag (small → med → large). If you already have the largest
+  // non-magical bag (or somehow drop the magical one), he refuses
+  // and your bag bounces to the floor as normal loot.
+  // -----------------------------------------------------------------
+  the_crow: {
+    id: 'the_crow',
+    name: 'The Crow',
+    floorColor: 0x303040,             // slate dais
+    oncePerSave: true,
+    condition: (state) => state.levelIndex >= 2,
+    spawn(scene, room, ctx) {
+      const disc = _spawnFloorDisc(scene, room, this.floorColor);
+      const bird = new THREE.Group();
+      const bodyMat = new THREE.MeshStandardMaterial({ color: 0x14141a, roughness: 0.65 });
+      const beakMat = new THREE.MeshStandardMaterial({ color: 0x886030, roughness: 0.5 });
+      const eyeMat  = new THREE.MeshStandardMaterial({
+        color: 0xfff080, emissive: 0xa07020, emissiveIntensity: 0.6, roughness: 0.3,
+      });
+      // Stone perch.
+      const perch = new THREE.Mesh(
+        new THREE.CylinderGeometry(0.32, 0.36, 0.42, 10),
+        new THREE.MeshStandardMaterial({ color: 0x44464c, roughness: 0.85 }),
+      );
+      perch.position.y = 0.21;
+      perch.castShadow = true;
+      bird.add(perch);
+      // Body — egg shape on top of perch.
+      const body = new THREE.Mesh(new THREE.SphereGeometry(0.22, 14, 10), bodyMat);
+      body.scale.set(1, 1.2, 1.4);
+      body.position.set(0, 0.62, 0.04);
+      body.castShadow = true;
+      bird.add(body);
+      // Head.
+      const head = new THREE.Mesh(new THREE.SphereGeometry(0.16, 12, 10), bodyMat);
+      head.position.set(0, 0.92, 0.18);
+      head.castShadow = true;
+      bird.add(head);
+      // Beak — short cone forward.
+      const beak = new THREE.Mesh(new THREE.ConeGeometry(0.05, 0.15, 6), beakMat);
+      beak.position.set(0, 0.90, 0.34);
+      beak.rotation.x = Math.PI / 2;
+      bird.add(beak);
+      // Eyes.
+      for (const xs of [-1, 1]) {
+        const eye = new THREE.Mesh(new THREE.SphereGeometry(0.025, 6, 6), eyeMat);
+        eye.position.set(0.06 * xs, 0.96, 0.27);
+        bird.add(eye);
+      }
+      // Tail wedge.
+      const tail = new THREE.Mesh(new THREE.ConeGeometry(0.10, 0.30, 6), bodyMat);
+      tail.position.set(0, 0.62, -0.22);
+      tail.rotation.x = -Math.PI / 2;
+      bird.add(tail);
+      bird.position.set(disc.cx, 0, disc.cz);
+      // Slight body-twist so the iso camera catches the silhouette.
+      bird.rotation.y = -Math.PI * 0.20;
+      scene.add(bird);
+      const label = _makeLabelSprite('THE CROW', '#a8a0c0');
+      label.position.set(disc.cx, 1.6, disc.cz);
+      scene.add(label);
+      return { bird, label, disc, complete: false, bobT: Math.random() * Math.PI * 2 };
+    },
+    tick(dt, ctx) {
+      // Idle bob — head dip + slight body sway so he reads as alive.
+      const s = ctx.state;
+      if (!s.bird || s.complete) return;
+      s.bobT += dt;
+      s.bird.position.y = Math.abs(Math.sin(s.bobT * 1.6)) * 0.04;
+    },
+    onItemDropped(item, ctx) {
+      const s = ctx.state;
+      if (s.complete || !item) return { consume: false };
+      // Only backpacks accepted. Mythic Magical Pack rejected — Crow
+      // can't outdo it, and there's no point trading it for a downgrade.
+      if (item.type !== 'backpack') return { consume: false };
+      if (item._encounter) {
+        ctx.spawnSpeech(s.bird.position.clone().setY(1.6),
+          'Caw! Too fancy for me.', 4.0);
+        return { consume: false };
+      }
+      const currentPockets = (item.pockets | 0) || 0;
+      const bigger = ctx.pickBiggerBackpack && ctx.pickBiggerBackpack(currentPockets);
+      if (!bigger) {
+        ctx.spawnSpeech(s.bird.position.clone().setY(1.6),
+          'Caw! Bring me something smaller.', 4.0);
+        return { consume: false };
+      }
+      s.complete = true;
+      ctx.spawnSpeech(s.bird.position.clone().setY(1.6),
+        'Caw! A fair trade.', 4.5);
+      ctx.spawnLoot(s.disc.cx + 0.8, s.disc.cz, bigger);
+      if (ctx.markEncounterComplete) ctx.markEncounterComplete('the_crow');
+      return { consume: true, complete: true };
+    },
+  },
+
+  // -----------------------------------------------------------------
   // The Priest — recurring encounter. Stands in the room and asks
   // the player if they want to pray. "Yes" → heals; "No" → flavor
   // line about salvation + increments runStats.priestRefusals.

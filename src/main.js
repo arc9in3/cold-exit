@@ -2141,6 +2141,19 @@ function regenerateLevel() {
           if (def.durability) item.durability = { ...def.durability };
           return item;
         },
+        // The Crow — pick a random backpack with strictly more pockets
+        // than the offered one, excluding encounter-only packs (e.g.
+        // the Small Magical Pack from Travel Buddy).
+        pickBiggerBackpack: (currentPockets) => {
+          const cur = currentPockets | 0;
+          const candidates = Object.values(ARMOR_DEFS).filter(d =>
+            d && d.type === 'backpack' && !d._encounter && (d.pockets | 0) > cur);
+          if (!candidates.length) return null;
+          const pick = candidates[(Math.random() * candidates.length) | 0];
+          const item = { ...pick };
+          if (pick.durability) item.durability = { ...pick.durability };
+          return item;
+        },
         // Live in-flight projectile list. Hoop Dreams reads this each
         // tick to detect grenades passing through the basketball ring.
         activeProjectiles: () => projectiles.projectiles,
@@ -7458,6 +7471,11 @@ function hideThrowPreview() {
 // Quickslot index (0..3) currently being held to aim a throwable, or
 // -1 if none. Captured on press; on release the throw fires.
 let _throwAimSlot = -1;
+// True when the held slot lives in the weapon cluster (keys 1-4),
+// false when it's in the upper hotbar (keys 5-8). Determines which
+// held-tracker (weaponSlotHeld vs actionSlotHeld) the release loop
+// reads from, and which hotbar offset useActionSlot needs.
+let _throwAimFromWeaponBar = false;
 
 // --- Fire zones -----------------------------------------------------
 // Persistent DoT patches left by molotovs. Each tick we iterate the
@@ -9217,8 +9235,20 @@ function tick() {
     // is empty so equipping a new weapon still gives a sane default
     // hotkey for it.
     const idx = inputState.weaponSwitch;
-    if (inventory.actionSlotItem(idx)) useActionSlot(idx);
-    else setWeaponIndex(idx);
+    const _slotItem14 = inventory.actionSlotItem(idx);
+    if (_slotItem14 && _slotItem14.type === 'throwable' && (_slotItem14.charges | 0) > 0) {
+      // Throwables in the weapon cluster (1-4) get the same hold-to-aim
+      // behaviour as the upper hotbar (5-8). Without this, pressing 1-4
+      // on a throwable fires it instantly with no trajectory preview.
+      // Reuse _throwAimSlot but mark with a +10 sentinel so the release
+      // loop knows to read from actionSlotHeld14 instead of actionSlotHeld.
+      _throwAimSlot = idx;
+      _throwAimFromWeaponBar = true;
+    } else if (_slotItem14) {
+      useActionSlot(idx);
+    } else {
+      setWeaponIndex(idx);
+    }
   }
   else if (inputState.weaponCycle) {
     const rotation = getRotation();
@@ -9400,6 +9430,7 @@ function tick() {
     const _slotItem = inventory.actionSlotItem(_qIdx + 4);
     if (_slotItem && _slotItem.type === 'throwable' && (_slotItem.charges | 0) > 0) {
       _throwAimSlot = _qIdx;
+      _throwAimFromWeaponBar = false;
     } else {
       useActionSlot(_qIdx + 4);
     }
@@ -9407,16 +9438,23 @@ function tick() {
   // Throw aim/release loop. While the same quickslot is still held,
   // refresh the trajectory preview each frame; once the player lets go
   // (or swaps the bound item / runs out of charges), fire the throw
-  // and tear the preview down.
+  // and tear the preview down. Works for both the weapon cluster
+  // (keys 1-4 → actionBar 0-3) and the upper hotbar (keys 5-8 →
+  // actionBar 4-7).
   if (_throwAimSlot >= 0) {
-    const aimItem = inventory.actionSlotItem(_throwAimSlot + 4);
+    const slotOffset = _throwAimFromWeaponBar ? 0 : 4;
+    const heldIdx = _throwAimFromWeaponBar
+      ? inputState.weaponSlotHeld
+      : inputState.actionSlotHeld;
+    const aimItem = inventory.actionSlotItem(_throwAimSlot + slotOffset);
     const stillBoundThrowable = aimItem && aimItem.type === 'throwable' && (aimItem.charges | 0) > 0;
-    if (inputState.actionSlotHeld === _throwAimSlot && stillBoundThrowable) {
+    if (heldIdx === _throwAimSlot && stillBoundThrowable) {
       tickThrowAimPreview(aimItem);
     } else {
       hideThrowPreview();
-      if (stillBoundThrowable) useActionSlot(_throwAimSlot + 4);
+      if (stillBoundThrowable) useActionSlot(_throwAimSlot + slotOffset);
       _throwAimSlot = -1;
+      _throwAimFromWeaponBar = false;
     }
   }
 

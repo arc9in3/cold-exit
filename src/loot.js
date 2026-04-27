@@ -488,6 +488,14 @@ export class LootManager {
   update(dt, playerPos) {
     const tagRadius = (tunables.loot.pickupRadius ?? 2.0) + 0.6;
     const tagR2 = tagRadius * tagRadius;
+    // Cap the number of nametag canvases repainted per frame. When the
+    // player walks past a fresh pile of disarmed-weapon drops, every
+    // sprite flips visible at once; without a cap, we'd repaint +
+    // upload a texture for every entry on the same frame, spiking
+    // ~3-10ms in one go. One paint per frame keeps the visible labels
+    // catching up over the next few frames instead of jamming up.
+    let paintsThisFrame = 0;
+    const MAX_PAINTS_PER_FRAME = 1;
     for (const it of this.items) {
       it.age += dt;
       const baseY = it.isToy ? 0.3 : 0.45;
@@ -506,9 +514,11 @@ export class LootManager {
         // visible AND the name has changed since last paint. Saves a
         // texture upload per drop the player can't see yet.
         if (visible && it.slot && it.slot.pendingName
-            && it.slot.pendingName !== it.slot.paintedName) {
+            && it.slot.pendingName !== it.slot.paintedName
+            && paintsThisFrame < MAX_PAINTS_PER_FRAME) {
           this._paintNameTag(it.slot, it.slot.pendingName);
           it.slot.paintedName = it.slot.pendingName;
+          paintsThisFrame++;
         }
       }
     }

@@ -266,17 +266,15 @@ export class MeleeEnemyManager {
         side: THREE.DoubleSide,
       });
       // Curved ballistic panel — open-ended cylinder wedge gives the
-      // characteristic riot-shield arc. Radius 1.0 with a 0.7 rad
-      // span puts the outer face at roughly z=+0.55 from the enemy's
-      // origin (axis offset backwards so the shell sits in front of
-      // the body), arc width ~0.7 m, height 1.15 m — chest-to-knee
-      // coverage, not the prior 2.1 m slab.
+      // characteristic riot-shield arc. Radius 1.05 with a 0.95 rad
+      // span (~54°) gives a meatier front arc; height 1.7 m covers
+      // head-to-shin so the player can't snipe the head over the rim.
       const shieldGeom = new THREE.CylinderGeometry(
-        1.0, 1.0, 1.15, 24, 1, true,
-        -0.35, 0.7,
+        1.05, 1.05, 1.7, 24, 1, true,
+        -0.475, 0.95,
       );
       const shieldMesh = new THREE.Mesh(shieldGeom, shieldMat);
-      shieldMesh.position.set(0, 1.05, -0.45);
+      shieldMesh.position.set(0, 1.25, -0.45);
       shieldMesh.castShadow = true;
       shieldMesh.userData = { zone: 'shield', owner: e };
       group.add(shieldMesh);
@@ -289,18 +287,18 @@ export class MeleeEnemyManager {
       });
       const visor = new THREE.Mesh(
         new THREE.CylinderGeometry(
-          1.005, 1.005, 0.11, 24, 1, true,
-          -0.28, 0.56,
+          1.055, 1.055, 0.13, 24, 1, true,
+          -0.38, 0.76,
         ),
         visorMat,
       );
-      visor.position.set(0, 1.45, -0.45);
+      visor.position.set(0, 1.85, -0.45);
       group.add(visor);
-      // Shield HP is meaningful to MELEE attacks specifically — bullets
+      // Shield HP — bigger panel earns a bigger health pool. Bullets
       // don't subtract from this pool because ranged hits to the shield
-      // are absorbed entirely (fullBlock). Set low enough that 3-5
-      // melee swings shatter the shield and expose the 50-HP chassis.
-      e.shield = { mesh: shieldMesh, visor, hp: 60, maxHp: 60, fullBlock: true };
+      // are absorbed entirely (fullBlock); melee/shotgun shatters it
+      // outright. ~6-8 melee swings to break, exposing the 50-HP chassis.
+      e.shield = { mesh: shieldMesh, visor, hp: 110, maxHp: 110, fullBlock: true };
     }
 
     this.enemies.push(e);

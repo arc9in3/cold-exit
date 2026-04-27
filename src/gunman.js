@@ -1131,6 +1131,27 @@ export class GunmanManager {
         continue;
       }
 
+      // Spawner boss — high HP, minimal direct damage. Periodically
+      // teleports to a random point in the boss room and spawns 4-6
+      // melee adds at its new position. Ticks UNCONDITIONALLY so the
+      // necromancer keeps the pressure on even while the player breaks
+      // LoS or hides behind cover. Drone-summoner uses the same pattern.
+      if (g.archetype === 'spawner') {
+        g.archT = (g.archT || 0) - dt;
+        if (g.archT <= 0 && ctx.spawnerTeleportAndSummon) {
+          const baseCd = 5.5;
+          g.archT = Math.max(2.5, baseCd / Math.max(0.5, g.aggression || 1));
+          ctx.spawnerTeleportAndSummon(g);
+        }
+      } else if (g.archetype === 'droneSummoner') {
+        g.archT = (g.archT || 0) - dt;
+        if (g.archT <= 0 && ctx.droneSummonAt) {
+          const baseCd = 6.5;
+          g.archT = Math.max(2.5, baseCd / Math.max(0.5, g.aggression || 1));
+          ctx.droneSummonAt(g.group.position.x, g.group.position.z);
+        }
+      }
+
       this._updateRanged(g, ctx, dt);
 
       // Procedural animation layer — pose the limbs on top of whatever
@@ -2068,20 +2089,8 @@ export class GunmanManager {
         }
       }
 
-      // Drone-summoner boss — on a slow cooldown, summons 2-3
-      // suicide drones at its position. The boss itself is fragile-
-      // ish in direct combat; the threat is the drone wave. Player
-      // must shoot drones down before they detonate on contact.
-      if (g.archetype === 'droneSummoner') {
-        g.archT = (g.archT || 0) - dt;
-        if (g.archT <= 0 && ctx.droneSummonAt && (g.canSeePlayer || canSee)) {
-          // Cooldown shortens with aggression so a level-10 summoner
-          // pulses every ~3.5s; level-1 every ~6s. Caps below.
-          const baseCd = 6.5;
-          g.archT = Math.max(2.5, baseCd / Math.max(0.5, g.aggression || 1));
-          ctx.droneSummonAt(g.group.position.x, g.group.position.z);
-        }
-      }
+      // Drone-summoner boss — handled outside the FIRING gate (above)
+      // so the swarm keeps coming even if the player breaks LoS.
       // Berserker boss — HP-driven phases. Above 60% HP: patient
       // pacer (no extra speed). Below 60%: sprints (movement +40%).
       // Below 30%: rage — extra speed, lifesteal on hits, knockback
@@ -2106,20 +2115,11 @@ export class GunmanManager {
           g.knockVel.x *= 0.0; g.knockVel.z *= 0.0;
         }
       }
-      // Spawner boss — high HP, minimal direct damage. Periodically
-      // teleports to a random point in the boss room and spawns 3-4
-      // melee adds at its new position. Player has to clear adds OR
-      // pressure the boss during the brief recharge window where it
-      // can be shot. Same droneSummonAt-style hook is reused for the
-      // teleport via spawnerTeleport, defined in main.js.
-      if (g.archetype === 'spawner') {
-        g.archT = (g.archT || 0) - dt;
-        if (g.archT <= 0 && ctx.spawnerTeleportAndSummon) {
-          const baseCd = 5.5;
-          g.archT = Math.max(2.5, baseCd / Math.max(0.5, g.aggression || 1));
-          ctx.spawnerTeleportAndSummon(g);
-        }
-      }
+      // Spawner boss — handled outside the FIRING gate (above) so the
+      // necromancer keeps summoning even while the player breaks LoS.
+      // Original block here was a duplicate that only ran inside the
+      // ALERTED/FIRING block, which silenced the boss whenever the
+      // player ducked behind cover.
 
       // Grenadier boss — periodically lobs a frag at the player
       // while still firing their main weapon. Cooldown shortens with

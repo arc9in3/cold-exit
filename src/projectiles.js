@@ -198,7 +198,28 @@ export class ProjectileManager {
       // Obstacle contact — AABB check against solid walls.
       const hitWall = this._hitsObstacle(level, nx, ny, nz);
       if (hitWall) {
-        if (p.type === 'rocket' || !(p.bounciness > 0)) {
+        if (p.type === 'rocket') {
+          this._detPos.set(nx, Math.max(0.08, ny), nz);
+          this._detonate(p, this._detPos, onExplode);
+          continue;
+        }
+        // Molotovs (bounciness 0) used to detonate immediately on any
+        // wall contact, which made mid-arc throws over a low partition
+        // pop a fireball in the air. They now BOUNCE off walls with a
+        // low coefficient and only detonate on FLOOR contact, matching
+        // the player's expectation of a glass bottle skimming a wall
+        // and falling. Claymores keep the original on-impact place
+        // behavior since they read as a sticky mine.
+        if (!(p.bounciness > 0) && p.throwKind !== 'claymore') {
+          if (Math.abs(p.vel.x) > Math.abs(p.vel.z)) p.vel.x = -p.vel.x * 0.35;
+          else p.vel.z = -p.vel.z * 0.35;
+          p.vel.y *= 0.35;
+          p.bounces += 1;
+          p.body.position.copy(p.pos);
+          p.trail.position.copy(p.pos);
+          continue;
+        }
+        if (!(p.bounciness > 0)) {
           this._detPos.set(nx, Math.max(0.08, ny), nz);
           this._detonate(p, this._detPos, onExplode);
           continue;

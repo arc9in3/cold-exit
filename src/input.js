@@ -314,6 +314,14 @@ export class Input {
     else if (this._isHeld(ACTIONS.QUICKSLOT_2)) actionSlotHeld = 1;
     else if (this._isHeld(ACTIONS.QUICKSLOT_3)) actionSlotHeld = 2;
     else if (this._isHeld(ACTIONS.QUICKSLOT_4)) actionSlotHeld = 3;
+    // Mirrors the upper hotbar held-tracker for the weapon cluster
+    // (keys 1-4). Drives the throwable hold-to-aim flow when a
+    // throwable is bound to slots 0-3 instead of 4-7.
+    let weaponSlotHeld = -1;
+    if      (this._isHeld(ACTIONS.WEAPON_1)) weaponSlotHeld = 0;
+    else if (this._isHeld(ACTIONS.WEAPON_2)) weaponSlotHeld = 1;
+    else if (this._isHeld(ACTIONS.WEAPON_3)) weaponSlotHeld = 2;
+    else if (this._isHeld(ACTIONS.WEAPON_4)) weaponSlotHeld = 3;
 
     const out = {
       move,
@@ -335,6 +343,7 @@ export class Input {
       healPressed: this.healPressed,
       actionSlotPressed: this.actionSlotPressed,
       actionSlotHeld,
+      weaponSlotHeld,
       weaponSwitch: this.weaponSwitch,
       weaponCycle: this.weaponCycle,
       handednessToggle: this.handednessToggle,
