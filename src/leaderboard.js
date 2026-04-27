@@ -36,6 +36,12 @@ export class RunStats {
     // priest AND the special bear-merchant trade for the Pain mace.
     this.priestRefusals = 0;
     this.hasDemonBear = false;
+    // Pity-timer for random encounters. Base spawn chance is 30% per
+    // level; every level WITHOUT an encounter pumps this by +10%
+    // (capped at 95%). Resets to 0 the moment an encounter actually
+    // spawns. Read by level.js _pickAndMarkEncounterRoom via a
+    // per-level config field set by main.js before generate().
+    this.encounterChanceBonus = 0;
   }
 
   markTainted() { this.tainted = true; }

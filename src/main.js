@@ -1658,6 +1658,11 @@ function regenerateLevel() {
   // blood pools, gore, impacts, explosions, etc. These persisted
   // across level transitions and accumulated across a long run.
   if (combat.clearAll) combat.clearAll();
+  // Pity-timer encounter chance — base 30% + 10% per consecutive
+  // encounter-less level, capped at 95%. The post-resolution loop
+  // below resets / increments the counter based on whether an
+  // encounter actually placed.
+  level._encounterChance = Math.min(0.95, 0.30 + (runStats.encounterChanceBonus || 0));
   level.generate();
   // Loot scaling context — every random armor/gear/weapon roll reads
   // this to gate slot drops, scale affix ranges, and weight rarity
@@ -1891,6 +1896,9 @@ function regenerateLevel() {
   // its visuals, and stash the per-encounter runtime state on the room.
   // Skip if the player has cleared every available encounter — the room
   // just stays empty.
+  // Track whether ANY encounter actually spawns this level so we can
+  // reset / bump the pity timer below.
+  let _spawnedEncounterThisLevel = false;
   for (const r of level.rooms) {
     if (r.type !== 'encounter' || !r._encounterPlaceholder) continue;
     r._encounterPlaceholder = false;
@@ -2141,6 +2149,16 @@ function regenerateLevel() {
       state: def.spawn(scene, r, _ctxFactory()) || {},
       ctxFactory: _ctxFactory,
     };
+    _spawnedEncounterThisLevel = true;
+  }
+  // Pity-timer roll — reset the bonus when an encounter actually
+  // landed, otherwise +10% for next level (capped via the Math.min
+  // at the read site). Fires regardless of whether the player ever
+  // triggers it; the spawn IS the event.
+  if (_spawnedEncounterThisLevel) {
+    runStats.encounterChanceBonus = 0;
+  } else {
+    runStats.encounterChanceBonus = Math.min(0.65, (runStats.encounterChanceBonus || 0) + 0.10);
   }
   // After encounter visuals (which add fresh material variants —
   // braziers, fountains, dummies, tomes, etc.) land in scene, run

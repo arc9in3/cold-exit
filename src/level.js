@@ -591,11 +591,13 @@ export class Level {
     const eligible = this.rooms.filter(r =>
       r.type === 'combat' && !r.giant && r.bounds);
     if (!eligible.length) return;
-    // 30% chance per level. Combined with a now-much-larger encounter
-    // pool (22 defs as of the Quiet Man / Wishing Well / Tome batch),
-    // this lands roughly one encounter every 3-4 floors which keeps
-    // them feeling like discoveries rather than guaranteed checkpoints.
-    if (Math.random() >= 0.30) return;
+    // Pity-timer chance. Base 30% per level; main.js bumps via
+    // `level._encounterChance` (runStats.encounterChanceBonus stacks
+    // +10% per encounter-less level, capped at 95%, resets when one
+    // actually spawns). Pre-pity behaviour was a flat 30%.
+    const chance = typeof this._encounterChance === 'number'
+      ? this._encounterChance : 0.30;
+    if (Math.random() >= chance) return;
     // Shuffle so we don't always favour earlier rooms when the first
     // candidate's centroid is blocked.
     const order = eligible.slice().sort(() => Math.random() - 0.5);
