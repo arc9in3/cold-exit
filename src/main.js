@@ -4862,7 +4862,16 @@ function tryStartQuickMelee(inputState, aimInfo) {
   const d = Math.hypot(dx, dz);
   if (d < 0.0001) return;
   const facing = new THREE.Vector3(dx / d, 0, dz / d);
-  player.tryQuickMelee?.(weapon, facing);
+  const ok = player.tryQuickMelee?.(weapon, facing);
+  // One in the Chamber relic — every successful quick-melee swing
+  // refunds a single round to the equipped gun's mag, capped at
+  // effective mag size. No kill or hit requirement; the swing IS
+  // the trigger ("always save one bullet").
+  if (ok && derivedStats.oneInChamberActive
+      && typeof weapon.ammo === 'number' && !weapon.infiniteAmmo) {
+    const cap = (effectiveWeapon(weapon).magSize | 0) || weapon.magSize | 0;
+    if (cap > 0 && weapon.ammo < cap) weapon.ammo = Math.min(cap, weapon.ammo + 1);
+  }
 }
 
 // Called when the player's current combo step enters its `active` phase.

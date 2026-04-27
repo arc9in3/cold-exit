@@ -260,6 +260,16 @@ export const ARTIFACT_DEFS = {
     apply(s) { s.meleeReflectBleedPercent = Math.max(s.meleeReflectBleedPercent || 0, 25); },
   },
 
+  // Quick-melee with a ranged weapon equipped tops the mag up by 1.
+  // No kill / hit requirement — the swing itself triggers it.
+  bloody_mag: {
+    id: 'bloody_mag', name: 'Bloody Mag',
+    lore: 'always save one bullet.',
+    short: 'Quick-melee reloads 1 bullet into your mag',
+    tint: 0xc9a868, price: 4200,
+    apply(s) { s.oneInChamberActive = true; },
+  },
+
   // Cursed bell — flavor-cloaked nerf. Inspect text shows "???"; the
   // real effect is +30% incoming damage and a buffed mythic-drop floor
   // (3% → 6%). main.js damagePlayer + rollMythicDrop read the flags.
