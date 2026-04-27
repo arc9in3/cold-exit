@@ -710,6 +710,19 @@ export class Level {
       if (!inRoom(px, pz)) { keptObstacles.push(m); continue; }
       const ud = m.userData || {};
       if (ud.isDoor) { keptObstacles.push(m); continue; }
+      // Columns / pillars — explicitly stripped from encounter rooms.
+      // The encounter visuals (disc, NPC, prop) need open floor so a
+      // pillar at the centre would block the player's approach to the
+      // ritual / interact target. Tagged via _addColumn.
+      if (ud.isColumn) {
+        this.scene.remove(m);
+        m.geometry?.dispose?.();
+        if (m.material) {
+          if (Array.isArray(m.material)) m.material.forEach(mat => mat?.dispose?.());
+          else m.material.dispose?.();
+        }
+        continue;
+      }
       const isWall = !ud.isProp && !ud.containerRef && m.position.y >= 1.0;
       if (isWall) { keptObstacles.push(m); continue; }
       // Prop / cover / container — tear down.
@@ -1926,21 +1939,43 @@ export class Level {
       cx += (cx - room.elevatorCenter.x) * 0.2;
       cz += (cz - room.elevatorCenter.z) * 0.2;
     }
-    // Spotlight pointing straight down gives a much stronger "pool
-    // of light under the lamp / dark corners" read than a point light.
-    // Point lights decay spherically so the entire room gets a fairly
-    // uniform wash; a downward cone leaves the corners in proper
-    // shadow and lets the player see where it's safe to hide.
-    const light = new THREE.SpotLight(0xffcf80, 6.0, 14.0, Math.PI * 0.33, 0.6, 1.2);
-    light.position.set(cx, WALL_HEIGHT - 0.2, cz);
-    light.target.position.set(cx, 0, cz);
-    light.castShadow = false;
-    this.scene.add(light);
-    this.scene.add(light.target);
-    this.decorations.push(light);
-    this.decorations.push(light.target);
+    // Phase 4 light reduction — every non-start room used to spawn
+    // its own real SpotLight (8+ per level after the first few floors,
+    // each forcing a per-light shader path on every nearby surface).
+    // Replaced with an emissive disc + a faint additive cone mesh; the
+    // hemi+key directionals from scene.js carry the actual shading and
+    // bloom in postfx pulls the warm glow back. Stealth math still
+    // reads a radial light entry so detection / cover gameplay is
+    // unchanged.
+    const fixtureMat = new THREE.MeshStandardMaterial({
+      color: 0xffcf80,
+      emissive: 0xffcf80,
+      emissiveIntensity: 1.6,
+      roughness: 0.3,
+    });
+    const fixture = new THREE.Mesh(
+      new THREE.CircleGeometry(0.55, 18),
+      fixtureMat,
+    );
+    fixture.rotation.x = Math.PI / 2;     // face down from the ceiling
+    fixture.position.set(cx, WALL_HEIGHT - 0.05, cz);
+    this.scene.add(fixture);
+    this.decorations.push(fixture);
+    // Soft additive cone mesh — sells the "pool of light below"
+    // silhouette without a real cone-light.
+    const cone = new THREE.Mesh(
+      new THREE.ConeGeometry(2.4, WALL_HEIGHT, 18, 1, true),
+      new THREE.MeshBasicMaterial({
+        color: 0xffcf80, transparent: true, opacity: 0.10,
+        depthWrite: false, blending: THREE.AdditiveBlending,
+        side: THREE.DoubleSide,
+      }),
+    );
+    cone.position.set(cx, (WALL_HEIGHT - 0.05) * 0.5, cz);
+    this.scene.add(cone);
+    this.decorations.push(cone);
     // Stealth sampling keeps the old radial model — good enough for
-    // gameplay detection math even though the visual is a cone.
+    // gameplay detection math even though the visual is now emissive.
     this.lights.push({ x: cx, z: cz, radius: 8.0, intensity: 1.8 });
   }
 
@@ -2111,6 +2146,10 @@ export class Level {
     // was sometimes squeezing tables into. The player rarely actually
     // hugs columns in combat, so accuracy wins here.
     mesh.userData.collisionXZ = { minX: x - radius, maxX: x + radius, minZ: z - radius, maxZ: z + radius };
+    // Tag so `_clearEncounterRoom` can drop pillars/columns when an
+    // encounter conversion lands on a column-heavy layout. Columns
+    // belong to combat rooms, not encounter spaces.
+    mesh.userData.isColumn = true;
     this.obstacles.push(mesh);
     this.scene.add(mesh);
     return mesh;
@@ -2389,7 +2428,10 @@ export class Level {
           const x = b.minX + pad + (cols === 1 ? usableW / 2 : (usableW * i) / (cols - 1));
           const z = b.minZ + pad + (rows === 1 ? usableD / 2 : (usableD * j) / (rows - 1));
           if (this._blocksDoor(room, x, z, 1.6)) continue;
-          this._addObstacle(x, WALL_HEIGHT / 2, z, 0.6, WALL_HEIGHT, 0.6, FULL_WALL_COLOR);
+          const m = this._addObstacle(x, WALL_HEIGHT / 2, z, 0.6, WALL_HEIGHT, 0.6, FULL_WALL_COLOR);
+          // Tag so encounter conversion strips this pillar from rooms
+          // that get re-rolled as encounter spaces.
+          if (m) m.userData.isColumn = true;
         }
       }
     } else if (room.layout === 'alcove') {
@@ -2849,30 +2891,25 @@ export class Level {
       group.add(m);
     });
 
-    // Ambient glow from the sign.
-    const light = new THREE.PointLight(accent, 0.7, 6);
-    light.position.set(0, 1.8, -0.3);
-    group.add(light);
+    // Sign tint is already MeshBasicMaterial (unlit, full-bright) and
+    // bloom in postfx carries the glow. The per-shop PointLight that
+    // used to live here cost ~6 shops × per-mesh shader recompile and
+    // didn't add much over the bloom. Phase 4 light reduction policy:
+    // shop kiosks are emissive-only, no real lights.
 
-    // Pick a placement slot. Iso camera sits at (+X, +Y, +Z) offset
-    // looking back at the player, so a shop pressed against the
-    // EAST wall or SOUTH wall has its back to the camera and the
-    // player can't read what kind of shop it is. Keep only the
-    // walls / centre placements that face the camera (or at worst,
-    // sideways) so the displays + signage are readable.
+    // Pick a placement slot. Centre placement is dropped — the user
+    // wants every merchant on a wall facing inward so the kiosk
+    // signage and displays always read clearly. The Bear Merchant
+    // keeps its centre placement (handled in _spawnBearMerchant).
+    // East and south walls are excluded because the iso camera at
+    // (+X, +Y, +Z) would frame the kiosk's back; only N/W placements
+    // present the front to the camera.
     const b = room.bounds;
     const spots = [
       // West wall, face east — camera sees the front in 3/4 from the right.
       { x: b.minX + 2.2, z: (b.minZ + b.maxZ) / 2, rot: Math.PI / 2 },
-      // North wall, face south — camera sees the front straight on
-      // (this is the "top of screen" placement).
+      // North wall, face south — camera sees the front straight on.
       { x: (b.minX + b.maxX) / 2, z: b.minZ + 2.2, rot: 0 },
-      // Centre — rotation biased toward the camera (front pointed at
-      // +X+Z corner). ±15° wobble so it doesn't look perfectly canned.
-      {
-        x: room.cx, z: room.cz,
-        rot: Math.PI / 4 + (Math.random() - 0.5) * (Math.PI / 6),
-      },
     ];
     const spot = spots[Math.floor(Math.random() * spots.length)];
     group.position.set(spot.x, 0, spot.z);

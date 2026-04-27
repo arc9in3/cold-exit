@@ -368,18 +368,26 @@ export function buildLamp(opts = {}) {
   const stem = cyl(0.03, h * 0.8, COL.metalDark);
   stem.position.y = 0.04 + h * 0.4;
   group.add(stem);
-  // Shade (cone).
+  // Shade — emissive linen. Replaces the per-lamp PointLight that
+  // used to live here. With ~3-6 lamps per level, a real PointLight
+  // each meant the renderer paid the per-light shader cost on every
+  // affected mesh; emissive material is free at the lighting stage
+  // and bloom in postfx gives the warm halo back. Light reduction
+  // policy: only the player flashlight, muzzle-flash pool, ceiling
+  // lamp budget, and a small VFX pool may use real dynamic lights.
+  const shadeMat = new THREE.MeshStandardMaterial({
+    color: COL.linen,
+    emissive: COL.lampGlow,
+    emissiveIntensity: 1.4,
+    roughness: 0.6,
+  });
   const shade = new THREE.Mesh(
     new THREE.ConeGeometry(0.22, 0.28, 12),
-    mat(COL.linen),
+    shadeMat,
   );
   shade.position.y = h - 0.14;
   shade.castShadow = true;
   group.add(shade);
-  // Warm point light under the shade so the lamp actually lights.
-  const light = new THREE.PointLight(COL.lampGlow, 1.4, 4.0);
-  light.position.y = h - 0.2;
-  group.add(light);
   return { group, collision: null };
 }
 

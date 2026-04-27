@@ -99,15 +99,30 @@ function _spawnFloorDisc(scene, room, color) {
     group.add(stone);
   }
   scene.add(group);
-  // Overhead light — warm cream tinted toward the encounter colour
-  // at lower intensity. The old saturated coloured light read as a
-  // spawn marker; this reads as ambient mood lighting.
+  // Overhead glow — a flat additive ring above the disc instead of a
+  // real PointLight. The disc itself is already emissive; this ring
+  // sells "this room has its own light source" via bloom in postfx,
+  // at zero per-frame lighting cost. Per the light reduction policy
+  // (Phase 4): every encounter spawn used to add a real PointLight
+  // here, and a level often had 1-2 encounter rooms live, so dropping
+  // them at the source removes 2-4 dynamic lights per floor.
   const warm = new THREE.Color(color).lerp(new THREE.Color(0xfff0d8), 0.55);
-  const light = new THREE.PointLight(warm, 0.45, 8);
-  light.position.set(cx, 3.2, cz);
-  scene.add(light);
+  const overhead = new THREE.Mesh(
+    new THREE.CircleGeometry(0.55, 16),
+    new THREE.MeshBasicMaterial({
+      color: warm, transparent: true, opacity: 0.55,
+      depthWrite: false, blending: THREE.AdditiveBlending,
+      side: THREE.DoubleSide,
+    }),
+  );
+  overhead.rotation.x = -Math.PI / 2;
+  overhead.position.set(cx, 3.2, cz);
+  scene.add(overhead);
   group.position.set(cx, 0, cz);
-  return { disc: inner, light, cx, cz, root: group };
+  // `light` slot retained as the overhead mesh so encounter teardown
+  // (which traverses state and removes Object3D refs) cleans it up
+  // exactly the same way the old PointLight was cleaned up.
+  return { disc: inner, light: overhead, cx, cz, root: group };
 }
 
 // Build a single themed ambience prop near an encounter disc and
@@ -2201,9 +2216,17 @@ export const ENCOUNTER_DEFS = {
       );
       button.position.set(0, 0.92, 0.04);
       consoleGroup.add(button);
-      // Subtle pulsing red light over the button.
-      const light = new THREE.PointLight(0xff4040, 0.8, 4);
-      light.position.set(0, 1.4, 0);
+      // Pulsing additive halo over the button — same visual read as
+      // the old PointLight, no per-frame lighting cost. Button mat is
+      // already emissive; the halo carries the bloom.
+      const light = new THREE.Mesh(
+        new THREE.SphereGeometry(0.30, 12, 10),
+        new THREE.MeshBasicMaterial({
+          color: 0xff4040, transparent: true, opacity: 0.30,
+          depthWrite: false, blending: THREE.AdditiveBlending,
+        }),
+      );
+      light.position.set(0, 1.0, 0);
       consoleGroup.add(light);
       consoleGroup.position.set(disc.cx, 0, disc.cz);
       scene.add(consoleGroup);
@@ -2669,9 +2692,19 @@ export const ENCOUNTER_DEFS = {
       const pages = new THREE.Mesh(new THREE.BoxGeometry(1.05, 0.04, 0.70), pageMat);
       pages.position.y = 0.94;
       group.add(pages);
-      const glow = new THREE.PointLight(0xffe0a0, 1.4, 4);
-      glow.position.y = 1.3;
-      group.add(glow);
+      // Pages already glow via emissive — no real PointLight needed.
+      // Add a small additive halo above the open book; bloom carries
+      // the warm cast onto the stand without the per-frame lighting
+      // cost of a real light source.
+      const glowHalo = new THREE.Mesh(
+        new THREE.SphereGeometry(0.35, 12, 10),
+        new THREE.MeshBasicMaterial({
+          color: 0xffe0a0, transparent: true, opacity: 0.20,
+          depthWrite: false, blending: THREE.AdditiveBlending,
+        }),
+      );
+      glowHalo.position.y = 1.3;
+      group.add(glowHalo);
       group.position.set(disc.cx, 0, disc.cz);
       scene.add(group);
       const label = _makeLabelSprite('THE TOME', '#c8b8ff');
@@ -3323,10 +3356,19 @@ export const ENCOUNTER_DEFS = {
       handle.position.set(-0.20, 1.04, 0);
       handle.rotation.set(Math.PI / 2, Math.PI / 2, 0);
       group.add(handle);
-      // Soft glow point light — gold cast on the pedestal stone.
-      const glow = new THREE.PointLight(0xffc060, 0.85, 4.5);
-      glow.position.set(0, 1.1, 0);
-      group.add(glow);
+      // Soft glow halo — additive sphere instead of a real PointLight.
+      // The lamp body itself is already heavily emissive (lampMat
+      // emissive 0xa06020 @ 0.55 baseline). Bloom in postfx provides
+      // the gold cast on nearby stone for free.
+      const glowMesh = new THREE.Mesh(
+        new THREE.SphereGeometry(0.45, 14, 10),
+        new THREE.MeshBasicMaterial({
+          color: 0xffc060, transparent: true, opacity: 0.18,
+          depthWrite: false, blending: THREE.AdditiveBlending,
+        }),
+      );
+      glowMesh.position.y = 1.04;
+      group.add(glowMesh);
       group.position.set(disc.cx, 0, disc.cz);
       group.rotation.y = -Math.PI * 0.18;
       scene.add(group);
@@ -3337,8 +3379,8 @@ export const ENCOUNTER_DEFS = {
       const _pedCollider = ctx.level?.addEncounterCollider
         ? ctx.level.addEncounterCollider(disc.cx, disc.cz, 1.0, 1.0, 1.4)
         : null;
-      return { group, label, disc, complete: false, lampBodyMat: lampMat, glow,
-               _pedCollider };
+      return { group, label, disc, complete: false, lampBodyMat: lampMat,
+               glowMesh, glowMat: glowMesh.material, _pedCollider };
     },
     tick(dt, ctx) {
       // Subtle emissive pulse so the lamp looks alive even before the
@@ -3350,8 +3392,8 @@ export const ENCOUNTER_DEFS = {
       if (s.lampBodyMat) {
         s.lampBodyMat.emissiveIntensity = 0.45 + 0.15 * Math.sin(s._t * 2.0);
       }
-      if (s.glow) {
-        s.glow.intensity = 0.75 + 0.25 * Math.sin(s._t * 2.0);
+      if (s.glowMat) {
+        s.glowMat.opacity = 0.16 + 0.06 * Math.sin(s._t * 2.0);
       }
     },
     interact(ctx) {
@@ -3500,9 +3542,18 @@ export const ENCOUNTER_DEFS = {
       cradle.position.set(0, 1.00, 0.32);
       cradle.rotation.x = Math.PI * 0.10;
       npc.add(cradle);
-      const ballLight = new THREE.PointLight(0x60a0e0, 0.7, 3.5);
-      ballLight.position.set(0, 1.05, 0.32);
-      npc.add(ballLight);
+      // Ball already emissive — replace the per-encounter PointLight
+      // with a small additive halo. Same bloom-driven glow read at
+      // zero per-frame lighting cost.
+      const ballHalo = new THREE.Mesh(
+        new THREE.SphereGeometry(0.22, 12, 10),
+        new THREE.MeshBasicMaterial({
+          color: 0x60a0e0, transparent: true, opacity: 0.30,
+          depthWrite: false, blending: THREE.AdditiveBlending,
+        }),
+      );
+      ballHalo.position.set(0, 1.05, 0.32);
+      npc.add(ballHalo);
 
       npc.position.set(disc.cx, 0, disc.cz);
       npc.rotation.y = -Math.PI * 0.20;

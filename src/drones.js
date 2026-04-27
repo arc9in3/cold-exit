@@ -45,22 +45,25 @@ export class DroneManager {
     body.userData.owner = null;        // filled in below
     group.add(body);
     // Inner glowing core — visual interest + reads as "armed".
+    // Bumped to fully-saturated emissive (was MeshBasicMaterial which
+    // is already unlit). Replaces the per-drone PointLight underglow:
+    // drones swarm 8+ at a time and each PointLight forced a per-mesh
+    // shader recompile path, so the swarm tanked the frame. Bloom in
+    // postfx gives the moving glow effect for free.
     const coreMat = new THREE.MeshBasicMaterial({
-      color: 0xffaa50, transparent: true, opacity: 0.85,
+      color: 0xff6020, transparent: true, opacity: 0.95,
     });
-    const core = new THREE.Mesh(new THREE.SphereGeometry(0.10, 8, 6), coreMat);
+    const core = new THREE.Mesh(new THREE.SphereGeometry(0.14, 10, 8), coreMat);
     group.add(core);
-    // Underglow — small point light so the drone leaves a moving
-    // pool of red light on the floor as it tracks. Range is small
-    // to keep the perf cost bounded with multiple drones.
-    const light = new THREE.PointLight(0xff4030, 0.6, 2.5);
-    light.position.y = -0.2;
-    group.add(light);
     group.position.set(x, y || DRONE_HOVER_Y, z);
     this.scene.add(group);
     const drone = {
       group,
-      body, core, light,
+      body, core,
+      // `light` slot retained as null so any ticker that previously
+      // animated the underglow intensity becomes a no-op instead of
+      // a TypeError.
+      light: null,
       hp: DRONE_HP,
       maxHp: DRONE_HP,
       bobT: Math.random() * Math.PI * 2,
