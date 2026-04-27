@@ -4041,7 +4041,15 @@ function firePlayerProjectile(playerInfo, weapon, aimPoint) {
 
 function fireOneShot(playerInfo, weapon, aimPoint, isADS, aimOwner) {
   if (typeof weapon.ammo === 'number' && weapon.ammo <= 0 && !weapon.infiniteAmmo) {
-    sfx.empty();
+    // Defensive backstop — tickShooting handles the empty-click
+    // throttle for the trigger-press path. This branch is reached
+    // when a burst sequence runs out mid-volley; throttle here too
+    // so consecutive dry rounds don't stack a second click.
+    const nowMs = performance.now();
+    if (nowMs - (_emptyClickT || 0) >= 200) {
+      sfx.empty();
+      _emptyClickT = nowMs;
+    }
     tryReload(weapon);
     return;
   }
@@ -4515,6 +4523,9 @@ function fireOneShot(playerInfo, weapon, aimPoint, isADS, aimOwner) {
 // Throttle for the "Weapon broken" toast in tickShooting — held
 // triggers would otherwise spam the message at frame rate.
 let _brokenToastT = 0;
+// Last empty-magazine dry-fire click timestamp (ms). Held-trigger
+// clicks throttle off this; tap-trigger clicks reset it.
+let _emptyClickT = 0;
 function tickShooting(dt, playerInfo, inputState, aimInfo) {
   // Reload timers tick for EVERY weapon the player has rotated in, not
   // only the active one. Otherwise swapping away from a reloading gun
@@ -4565,6 +4576,31 @@ function tickShooting(dt, playerInfo, inputState, aimInfo) {
     ? inputState.attackHeld
     : inputState.attackPressed;
   if (!wantsNew) return;
+
+  // Empty-magazine handling — intercept BEFORE fireOneShot so the
+  // dry-fire click doesn't spam at the weapon's full fire-rate.
+  // Tap (rising edge) plays a click + tries reload immediately. A
+  // held trigger plays a slower, louder click roughly every
+  // EMPTY_CLICK_HOLD_INTERVAL seconds — the "I'm out, you can hear
+  // it" cue. fireOneShot still owns the actual reload trigger so
+  // the press timing for that stays unchanged.
+  if (typeof weapon.ammo === 'number' && weapon.ammo <= 0
+      && !weapon.infiniteAmmo) {
+    const nowMs = performance.now();
+    const EMPTY_CLICK_HOLD_INTERVAL = 600;  // ms between held clicks
+    if (inputState.attackPressed) {
+      sfx.empty();
+      _emptyClickT = nowMs;
+      tryReload(weapon);
+    } else if (inputState.attackHeld) {
+      if (nowMs - (_emptyClickT || 0) >= EMPTY_CLICK_HOLD_INTERVAL) {
+        sfx.empty({ loud: true });
+        _emptyClickT = nowMs;
+      }
+    }
+    // Don't re-arm the fire cooldown — empty pulls aren't shots.
+    return;
+  }
 
   fireOneShot(playerInfo, weapon, aimInfo.point, inputState.adsHeld);
 

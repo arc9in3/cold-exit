@@ -164,8 +164,18 @@ export const sfx = {
       tone({ freq: 320, dur: 0.04, type: 'square', gain: 0.12, sweep: -80 });
     }
   },
-  empty() {
-    tone({ freq: 180, dur: 0.05, type: 'square', gain: 0.2 });
+  empty(opts = {}) {
+    // Held-trigger dry-fire (`loud: true`) plays a meatier, longer
+    // mechanical click at higher gain — a sustained "I'm pulling
+    // empty here" cue. Tap dry-fire is the original sharp tick.
+    if (opts.loud) {
+      tone({ freq: 130, dur: 0.09, type: 'square', gain: 0.42 });
+      // Tail thump that gives the click body — sounds like the
+      // hammer hitting an empty chamber.
+      setTimeout(() => burstNoise({ dur: 0.05, lp: 350, gain: 0.20 }), 35);
+    } else {
+      tone({ freq: 180, dur: 0.05, type: 'square', gain: 0.2 });
+    }
   },
   reload() {
     tone({ freq: 420, dur: 0.08, type: 'square', gain: 0.18, sweep: 60 });
