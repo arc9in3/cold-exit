@@ -70,6 +70,61 @@ function makeMat(color, toon) {
   return new THREE.MeshStandardMaterial({ color, roughness: 0.78 });
 }
 
+// =====================================================================
+// Geometry cache — every gunman / dummy / NPC built through buildRig
+// previously allocated ~36 fresh BufferGeometries. With 20+ enemies on
+// late-game floors that's hundreds of buffers + uploads + bounding-box
+// computes per spawn. Since every rig built with the same dims is
+// pixel-identical, we hash the constructor arguments and reuse the
+// underlying buffer across actors.
+//
+// `geometry.dispose()` would now be unsafe (other rigs share the
+// buffer); the rig disposes its meshes via group removal in
+// gunmen.removeAll without calling geometry.dispose, so we don't break
+// existing teardown.
+//
+// Keys are stable string concatenations of the constructor args. No
+// floating-point matching is needed because dims are derived from the
+// same DEFAULT_DIMS scaled by the same `opts.scale` for every gunman.
+// =====================================================================
+const _geomCache = new Map();
+function _stamp(g) {
+  // Mark every cached buffer so traversal-based disposal loops
+  // (gunmen.removeAll, melees.removeAll, encounter teardown) can skip
+  // them. Disposing a shared buffer would break every other actor
+  // holding a reference + the cache itself.
+  g.userData = g.userData || {};
+  g.userData.sharedRigGeom = true;
+  return g;
+}
+function _cyl(topR, botR, h, segs = 12, openEnded = false, ts = 0, tl = Math.PI * 2) {
+  const k = `cyl|${topR}|${botR}|${h}|${segs}|${openEnded?1:0}|${ts}|${tl}`;
+  let g = _geomCache.get(k);
+  if (!g) {
+    g = _stamp(new THREE.CylinderGeometry(topR, botR, h, segs, 1, openEnded, ts, tl));
+    _geomCache.set(k, g);
+  }
+  return g;
+}
+function _sph(r, ws = 10, hs = 8) {
+  const k = `sph|${r}|${ws}|${hs}`;
+  let g = _geomCache.get(k);
+  if (!g) {
+    g = _stamp(new THREE.SphereGeometry(r, ws, hs));
+    _geomCache.set(k, g);
+  }
+  return g;
+}
+function _box(w, h, d) {
+  const k = `box|${w}|${h}|${d}`;
+  let g = _geomCache.get(k);
+  if (!g) {
+    g = _stamp(new THREE.BoxGeometry(w, h, d));
+    _geomCache.set(k, g);
+  }
+  return g;
+}
+
 // Darken a hex colour by `k` (0..1). Used to derive a default gear
 // accent colour from the body colour when the caller doesn't supply
 // one — so we always get *some* contrast between the body and its
@@ -88,10 +143,7 @@ function _darken(hex, k) {
 function segment(opts) {
   const pivot = new THREE.Group();
   pivot.position.set(opts.px || 0, opts.py || 0, opts.pz || 0);
-  const mesh = new THREE.Mesh(
-    new THREE.BoxGeometry(opts.w, opts.h, opts.d),
-    opts.material,
-  );
+  const mesh = new THREE.Mesh(_box(opts.w, opts.h, opts.d), opts.material);
   mesh.position.set(opts.mx || 0, opts.my, opts.mz || 0);
   mesh.castShadow = true;
   mesh.receiveShadow = true;
@@ -111,7 +163,7 @@ function taperedSegment(opts) {
   const pivot = new THREE.Group();
   pivot.position.set(opts.px || 0, opts.py || 0, opts.pz || 0);
   const mesh = new THREE.Mesh(
-    new THREE.CylinderGeometry(opts.topR, opts.botR, opts.h, opts.segs || 12),
+    _cyl(opts.topR, opts.botR, opts.h, opts.segs || 12),
     opts.material,
   );
   // Cylinder geometry is Y-centered by default; shift down so the
@@ -128,10 +180,7 @@ function taperedSegment(opts) {
 // limb connects smoothly to the torso / next segment instead of
 // showing a hard cylinder step.
 function jointSphere(radius, material, zone) {
-  const mesh = new THREE.Mesh(
-    new THREE.SphereGeometry(radius, 10, 8),
-    material,
-  );
+  const mesh = new THREE.Mesh(_sph(radius, 10, 8), material);
   mesh.castShadow = true;
   mesh.receiveShadow = true;
   if (zone) mesh.userData.zone = zone;
@@ -267,7 +316,7 @@ export function buildRig(opts = {}) {
     thigh.pivot.add(hipBulge);
     // Thigh rig — small gear-coloured strap on the outer thigh.
     const thighRig = new THREE.Mesh(
-      new THREE.BoxGeometry(L.thighRigW * scale, L.thighRigH * scale, L.thighRigD * scale),
+      _box(L.thighRigW * scale, L.thighRigH * scale, L.thighRigD * scale),
       gearMat,
     );
     thighRig.position.set(sign * L.thighRigX * scale, L.thighRigYK * thighH, 0);
@@ -283,7 +332,7 @@ export function buildRig(opts = {}) {
     knee.add(kneeBulge);
     // Knee pad — gear-coloured cap over the joint on the front.
     const kneePad = new THREE.Mesh(
-      new THREE.BoxGeometry(L.kneePadW * scale, L.kneePadH * scale, L.kneePadD * scale),
+      _box(L.kneePadW * scale, L.kneePadH * scale, L.kneePadD * scale),
       gearMat,
     );
     kneePad.position.set(0, 0, L.kneePadZ * scale);
@@ -312,7 +361,7 @@ export function buildRig(opts = {}) {
     ankle.add(foot.pivot);
     // Boot top — gear-coloured cuff above the foot, on the calf.
     const bootTop = new THREE.Mesh(
-      new THREE.CylinderGeometry(L.bootTopR * scale, L.bootTopR * scale, L.bootTopH * scale, 12),
+      _cyl(L.bootTopR * scale, L.bootTopR * scale, L.bootTopH * scale, 12),
       bootMat,
     );
     bootTop.position.set(0, L.bootTopYK * calfH, 0);
@@ -342,9 +391,7 @@ export function buildRig(opts = {}) {
   // Pelvis — fills the gap between thigh pivots and stomach bottom.
   // Uses legMat so it reads as pants/hip region, not extra torso.
   const pelvis = new THREE.Mesh(
-    new THREE.CylinderGeometry(
-      T.pelvisTopR * scale, T.pelvisBotR * scale, T.pelvisH * scale, T.segs,
-    ),
+    _cyl(T.pelvisTopR * scale, T.pelvisBotR * scale, T.pelvisH * scale, T.segs),
     legMat,
   );
   pelvis.position.set(0, T.pelvisY * scale, 0);
@@ -360,9 +407,7 @@ export function buildRig(opts = {}) {
     pivot.rotation.order = 'YXZ';
     pivot.position.set(0, T.stomachY * scale, 0);
     const mesh = new THREE.Mesh(
-      new THREE.CylinderGeometry(
-        T.stomachTopR * scale, T.stomachBotR * scale, stomachH, T.segs,
-      ),
+      _cyl(T.stomachTopR * scale, T.stomachBotR * scale, stomachH, T.segs),
       bodyMat,
     );
     mesh.position.y = stomachH / 2;
@@ -381,9 +426,7 @@ export function buildRig(opts = {}) {
     pivot.rotation.order = 'YXZ';
     pivot.position.set(0, stomachH, 0);
     const mesh = new THREE.Mesh(
-      new THREE.CylinderGeometry(
-        T.chestTopR * scale, T.chestBotR * scale, chestH, T.segs,
-      ),
+      _cyl(T.chestTopR * scale, T.chestBotR * scale, chestH, T.segs),
       bodyMat,
     );
     mesh.position.y = chestH / 2;
@@ -401,9 +444,7 @@ export function buildRig(opts = {}) {
   // chest's flat top disc catches direct warm key light and reads as
   // a bright tan ring around the neck.
   const collar = new THREE.Mesh(
-    new THREE.CylinderGeometry(
-      T.collarTopR * scale, T.collarBotR * scale, T.collarH * scale, T.segs,
-    ),
+    _cyl(T.collarTopR * scale, T.collarBotR * scale, T.collarH * scale, T.segs),
     bodyMat,
   );
   collar.position.set(0, chestH + T.collarDY * scale, 0);
@@ -420,10 +461,9 @@ export function buildRig(opts = {}) {
   // +Z then sweeps through +X, so the arc spans -75°..+75° around
   // the front axis.
   const chestPlate = new THREE.Mesh(
-    new THREE.CylinderGeometry(
+    _cyl(
       T.chestPlateTopR * scale, T.chestPlateBotR * scale,
-      T.chestPlateH * scale,
-      14, 1, true,
+      T.chestPlateH * scale, 14, true,
       -Math.PI / 2.4, Math.PI / 1.2,
     ),
     gearMat,
@@ -437,9 +477,7 @@ export function buildRig(opts = {}) {
   // Belt — full cylinder ring at the stomach/chest seam, slightly
   // oversized relative to the waist so it reads as worn over.
   const belt = new THREE.Mesh(
-    new THREE.CylinderGeometry(
-      T.beltR * scale, T.beltR * scale, T.beltH * scale, T.segs,
-    ),
+    _cyl(T.beltR * scale, T.beltR * scale, T.beltH * scale, T.segs),
     gearMat,
   );
   belt.position.set(0, T.beltY * scale, 0);
@@ -466,10 +504,17 @@ export function buildRig(opts = {}) {
     const shoulderBulge = jointSphere(A.shoulderBulgeR * scale, armMat, 'arm');
     shoulder.pivot.add(shoulderBulge);
     // Shoulder pad — hemispherical pauldron over the deltoid.
-    const shoulderPad = new THREE.Mesh(
-      new THREE.SphereGeometry(A.shoulderPadR * scale, 12, 6, 0, Math.PI * 2, 0, Math.PI / 2),
-      gearMat,
-    );
+    // Hemispherical pauldron — partial-sphere geometry (φ = 0..π/2)
+    // distinct from the full jointSpheres, so it gets its own cache key.
+    const shoulderPadKey = `sphP|${A.shoulderPadR * scale}|12|6|0|${Math.PI * 2}|0|${Math.PI / 2}`;
+    let shoulderPadGeom = _geomCache.get(shoulderPadKey);
+    if (!shoulderPadGeom) {
+      shoulderPadGeom = _stamp(new THREE.SphereGeometry(
+        A.shoulderPadR * scale, 12, 6, 0, Math.PI * 2, 0, Math.PI / 2,
+      ));
+      _geomCache.set(shoulderPadKey, shoulderPadGeom);
+    }
+    const shoulderPad = new THREE.Mesh(shoulderPadGeom, gearMat);
     shoulderPad.position.set(0, 0, 0);
     shoulderPad.castShadow = true;
     shoulderPad.userData.zone = 'arm';
@@ -492,7 +537,7 @@ export function buildRig(opts = {}) {
     elbow.add(forearm.pivot);
     // Wrist cuff — gear cylinder band just above the hand.
     const wristCuff = new THREE.Mesh(
-      new THREE.CylinderGeometry(A.wristCuffR * scale, A.wristCuffR * scale, A.wristCuffH * scale, 12),
+      _cyl(A.wristCuffR * scale, A.wristCuffR * scale, A.wristCuffH * scale, 12),
       gearMat,
     );
     wristCuff.position.set(0, A.wristCuffYK * forearmH, 0);
@@ -543,7 +588,7 @@ export function buildRig(opts = {}) {
     const pivot = new THREE.Group();
     pivot.position.set(0, chestH, 0);
     const mesh = new THREE.Mesh(
-      new THREE.CylinderGeometry(H.neckTopR * scale, H.neckBotR * scale, H.neckH * scale, 12),
+      _cyl(H.neckTopR * scale, H.neckBotR * scale, H.neckH * scale, 12),
       bodyMat,
     );
     mesh.position.y = H.neckMeshY * scale;
@@ -558,10 +603,7 @@ export function buildRig(opts = {}) {
   head.position.y = H.headY * scale;
   neck.pivot.add(head);
   // Cranium — faceted low-poly sphere with vertical stretch.
-  const headMesh = new THREE.Mesh(
-    new THREE.SphereGeometry(H.craniumR * scale, 14, 10),
-    headMat,
-  );
+  const headMesh = new THREE.Mesh(_sph(H.craniumR * scale, 14, 10), headMat);
   headMesh.scale.set(1.0, H.craniumStretchY, H.craniumStretchZ);
   headMesh.position.y = H.craniumY * scale;
   headMesh.castShadow = true;
@@ -571,7 +613,7 @@ export function buildRig(opts = {}) {
   // Jaw — narrower box just above the neck so the head→neck
   // transition has some geometry where the jaw would be.
   const jawMesh = new THREE.Mesh(
-    new THREE.BoxGeometry(H.jawW * scale, H.jawH * scale, H.jawD * scale),
+    _box(H.jawW * scale, H.jawH * scale, H.jawD * scale),
     headMat,
   );
   jawMesh.position.y = H.jawY * scale;

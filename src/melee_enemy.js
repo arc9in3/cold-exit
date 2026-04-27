@@ -306,9 +306,15 @@ export class MeleeEnemyManager {
   }
 
   removeAll() {
+    // Rig geometries (actor_rig.js) are pooled module-level — skip
+    // those during disposal or we'd nuke buffers other actors still
+    // hold. Local meshes (shield, visor, etc.) are not pooled and
+    // dispose normally.
     for (const e of this.enemies) {
       e.group.traverse((obj) => {
-        if (obj.geometry) obj.geometry.dispose();
+        if (obj.geometry && !obj.geometry.userData?.sharedRigGeom) {
+          obj.geometry.dispose();
+        }
         if (obj.material) {
           if (Array.isArray(obj.material)) obj.material.forEach(m => m.dispose());
           else obj.material.dispose();

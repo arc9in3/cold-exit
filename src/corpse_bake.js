@@ -126,9 +126,14 @@ export function swapInBakedCorpse(rigGroup) {
   }
   // Dispose the original rig's geometries — the merge cloned + folded
   // them into `merged`, so the originals are no longer referenced and
-  // would otherwise leak GPU memory until the level regen.
+  // would otherwise leak GPU memory until the level regen. Rig
+  // primitives are pooled at module level (actor_rig _geomCache) and
+  // tagged with userData.sharedRigGeom; skip those or we'd nuke
+  // buffers every other actor still holds.
   rigGroup.traverse((obj) => {
-    if (obj.isMesh && obj.geometry) obj.geometry.dispose();
+    if (obj.isMesh && obj.geometry && !obj.geometry.userData?.sharedRigGeom) {
+      obj.geometry.dispose();
+    }
   });
   return baked;
 }

@@ -762,10 +762,15 @@ export class GunmanManager {
 
   removeAll() {
     // Traverse each gunman's group and dispose GPU resources so level
-    // regenerations don't leak geometry/materials.
+    // regenerations don't leak geometry/materials. Rig geometries are
+    // pooled at module level (actor_rig.js _geomCache) and tagged with
+    // userData.sharedRigGeom so we skip those — disposing a shared
+    // buffer would crash every other actor still holding it.
     for (const g of this.gunmen) {
       g.group.traverse((obj) => {
-        if (obj.geometry) obj.geometry.dispose();
+        if (obj.geometry && !obj.geometry.userData?.sharedRigGeom) {
+          obj.geometry.dispose();
+        }
         if (obj.material) {
           if (Array.isArray(obj.material)) obj.material.forEach(m => m.dispose());
           else obj.material.dispose();
