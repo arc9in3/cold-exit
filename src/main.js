@@ -1800,9 +1800,17 @@ function regenerateLevel() {
   // elite spawn so no key ever goes unassigned and softlocks a door.
   const holderSpawns = level.enemySpawns.filter(s => s.tier === 'subBoss' || s.majorBoss);
   const keyPool = [...(level.keycardColors || [])];
-  const shuffled = holderSpawns.slice().sort(() => Math.random() - 0.5);
+  // Major bosses go FIRST in the assignment order so the floor's boss
+  // always gets a key when one is available — players expect "kill
+  // the boss → get the key on this floor's locked door." Sub-bosses
+  // get the remaining keys after. Within each band the order is
+  // shuffled so multi-key levels don't always assign the same colour
+  // to the same archetype.
+  const majors = holderSpawns.filter(s => s.majorBoss).sort(() => Math.random() - 0.5);
+  const subs   = holderSpawns.filter(s => !s.majorBoss).sort(() => Math.random() - 0.5);
+  const ordered = [...majors, ...subs];
   const keyAssignments = new Map();   // spawn entry → colour
-  for (const sb of shuffled) {
+  for (const sb of ordered) {
     if (!keyPool.length) break;
     keyAssignments.set(sb, keyPool.shift());
   }
