@@ -349,9 +349,11 @@ export function attachmentStatRows(item) {
     const sign = raw > 0 ? '+' : '−';
     rows.push([label, `${sign}${Math.abs(raw)}`, '+', '%']);
   }
-  // Sights — adsPeekBonus is metres added to drag distance.
+  // Sights — adsPeekBonus is extra metres of cursor lead while ADSed.
+  // Renamed from 'Drag' so the player can map it to the on-screen
+  // peek behaviour without needing the engine vocabulary.
   if (typeof mod.adsPeekBonus === 'number' && mod.adsPeekBonus !== 0) {
-    rows.push(['Drag', `+${mod.adsPeekBonus}`, '+', 'm']);
+    rows.push(['ADS Peek', `+${mod.adsPeekBonus}`, '+', 'm']);
   }
   // Sight zoom — the sightZoom field on the def, not modifier. >1 = zoom in.
   if (typeof item.sightZoom === 'number' && item.sightZoom !== 1) {
@@ -362,9 +364,14 @@ export function attachmentStatRows(item) {
     rows.push(['Laser Range', `${item.laserRange}`, '+', 'm']);
   }
   // Lights — lightCone.{range, angleDeg} for the visible cone.
+  // Width row added so flood-vs-spot lights read distinct (a 50°
+  // OLIGHT cone vs a 35° tactical beam differ at a glance).
   if (item.lightCone) {
     if (typeof item.lightCone.range === 'number') {
       rows.push(['Light Range', `${item.lightCone.range}`, '+', 'm']);
+    }
+    if (typeof item.lightCone.angleDeg === 'number') {
+      rows.push(['Cone Width', `${item.lightCone.angleDeg}`, '+', '°']);
     }
   }
   // Blind / dazzle windows (tactical lights / strobes).

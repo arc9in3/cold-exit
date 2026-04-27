@@ -534,7 +534,7 @@ export const ATTACHMENT_DEFS = {
   under_foregrip_folding: {
     id: 'att_foregrip_folding', name: 'Folding Foregrip', type: 'attachment',
     slot: 'underRail', tint: 0x303034,
-    description: 'Folds flat against the handguard when stowed. Trades grip indexing for clean low-profile carry.',
+    description: 'Folds flat against the handguard when stowed — low-profile carry without sacrificing grip control.',
     modifier: { hipSpreadMult: 0.90, adsSpreadMult: 0.90, moveSpeedMult: 1.05 },
   },
 
