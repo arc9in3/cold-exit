@@ -11,18 +11,25 @@ Status legend: `open` (unassigned, ready) · `in-progress` ·
 
 | Task | Owner | Status | Notes |
 |---|---|---|---|
-| Spatial hash for AI proximity queries (gunman.update LoS / shield-bearer scan) | codex | blocked | Benchmark shows Map-backed hash slower than naive iteration at current and stress-scale counts. Revisit with flatter index or different approach. |
-| BVH for `_hitsObstacle` projectile path | codex | open | Currently O(walls) per projectile step. |
-| Audit: every encounter that calls a ctx helper not exposed in `_ctxFactory` | gemini | open | High-recall pass. Report to `audits/encounter-ctx.md`. |
+| BVH for `_hitsObstacle` projectile path | codex | open | Currently O(walls) per projectile step. Read PROJECT.md's pre-edit sequence first. |
 | Audit: every `geometry.dispose()` callsite for `sharedRigGeom` guard | gemini | open | Past regression; verify no new gaps. Report to `audits/dispose-guard.md`. |
 | Audit: artifact `apply()` mutations vs `BASE_STATS()` field declarations | gemini | open | Catches relics that mutate undefined fields. |
-| Web Worker AI tick (perf plan #4) | unassigned | open | Wait for spatial hash + BVH first. |
+| Refactor: rename `_baseBody` / `_baseHead` → `_normalBodyColor` / `_normalHeadColor` in gunman.js | gemini | open | Single sweep, single commit. Previous attempt got lost via dirty working tree (no checkout) — must follow REQUIRED pre-edit sequence. |
+| Web Worker AI tick (perf plan #4) | unassigned | open | Wait for BVH first. |
 | Melee enemy InstancedMesh integration | claude | open | Mirror the gunman hooks. Lower priority — most floors are gunman-heavy. |
 
 ## Done (last 7 days)
 
 | Task | Owner | Shipped |
 |---|---|---|
+| Weapon FBX audit script (`tools/audit_weapon_fbx.py`) | codex | 2026-04-27 |
+| Plain-English summary + tasks view + AI summary on review dashboard | claude | 2026-04-27 |
+| Review dashboard tool (`tools/review-dashboard.mjs`) | claude | 2026-04-27 |
+| Multi-AI scaffolding tightening (PROJECT.md required pre-edit) | claude | 2026-04-27 |
+| Spatial hash perf experiment (closed — benchmark showed regression) | codex | 2026-04-27 |
+| Audit: encounter ctx helpers (found showPrompt/closePrompt fix) | gemini | 2026-04-27 |
+| Fix: actor_rig.js exposes rightArmMeshes (disarm hide) | claude | 2026-04-27 |
+| Fix: showPrompt/closePrompt in `_ctxFactory` | claude | 2026-04-27 |
 | Rig instancer for gunmen (perf #1d) | claude | 2026-04-27 |
 | Geometry pool + shadow cuts + LOD revert | claude | 2026-04-27 |
 | Encounter polish + molotov rework | claude | 2026-04-27 |
