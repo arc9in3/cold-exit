@@ -1,5 +1,6 @@
 import { SLOT_IDS, SLOT_POSITIONS, SLOT_ICONS, TYPE_ICONS, inferRarity,
-         SET_DEFS, countEquippedSetPieces, weaponImageMirrorStyle } from './inventory.js';
+         SET_DEFS, countEquippedSetPieces, weaponImageMirrorStyle,
+         affixLabelFor } from './inventory.js';
 import { SKILLS } from './skills.js';
 import { renderItemCell } from './ui_item_cell.js';
 import { thumbnailFor } from './item_thumbnails.js';
@@ -1139,18 +1140,35 @@ export class InventoryUI {
       </div>`);
     }
 
-    // — Affixes: roll up every non-set affix on every equipped piece.
-    //   Affix.label already carries the human-readable "+ X to Y"
-    //   so we just list them. Skip the setMark entries (those are
-    //   the set membership flags, surfaced in the Set Bonuses block
-    //   above).
-    const affixRows = [];
+    // — Affixes: collapse duplicates by kind and SUM the values so a
+    //   helmet's +5% move + boots' +7% move surface as one '+12% move
+    //   speed' line, not two. Skip setMark entries (handled by the
+    //   Set Bonuses block above). Per-source breakdown is still
+    //   visible on each item's own inspect.
+    const affixSums = new Map();   // kind → { value, count }
     for (const slot of SLOT_IDS) {
       const it = eq[slot]; if (!it || !it.affixes) continue;
       for (const a of it.affixes) {
         if (a.kind === 'setMark') continue;
-        affixRows.push(`<div class="inv-prog-affix">• ${a.label}</div>`);
+        const v = (typeof a.value === 'number') ? a.value : 0;
+        const ex = affixSums.get(a.kind);
+        if (ex) { ex.value += v; ex.count += 1; ex.fallback = a.label; }
+        else affixSums.set(a.kind, { value: v, count: 1, fallback: a.label });
       }
+    }
+    const affixRows = [];
+    for (const [kind, info] of affixSums) {
+      // Recompute the label off the summed value so '+12% move speed'
+      // reads as one entry. If the affix kind isn't in the lookup
+      // (defensive — shouldn't happen with current pool) fall back to
+      // the per-item label so we never silently drop a row.
+      const label = (typeof info.value === 'number' && info.value !== 0)
+        ? affixLabelFor(kind, info.value)
+        : (info.fallback || kind);
+      const stack = info.count > 1
+        ? ` <span class="inv-prog-perk-stack">× ${info.count}</span>`
+        : '';
+      affixRows.push(`<div class="inv-prog-affix">• ${label}${stack}</div>`);
     }
 
     // — Relics now live in a separate overlay panel (see

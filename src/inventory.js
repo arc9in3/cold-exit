@@ -514,6 +514,15 @@ function _slotAllowedAtLevel(slot, lv) {
 
 // Random affix pool. Each affix has a `kind`, a label template, and an
 // `apply` function that mutates the shared stats bag.
+// Lookup helper — recompute an affix label for a summed value when
+// the gear-bonuses panel collapses duplicates into a single row.
+// Falls back to the kind name if the kind isn't in the pool (defensive).
+export function affixLabelFor(kind, value) {
+  const def = AFFIX_POOL.find(a => a.kind === kind);
+  if (def) return def.label(value);
+  return `+${value} ${kind}`;
+}
+
 const AFFIX_POOL = [
   { kind: 'moveSpeed', roll: () => Math.round(3 + Math.random() * 7),
     label: v => `+${v}% move speed`,
