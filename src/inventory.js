@@ -913,6 +913,14 @@ export const ARMOR_DEFS = {
     tint: 0x3a3418, durability: dur(220, 0.88), pockets: 15, rarity: 'rare',
     gridLayout: { w: 5, h: 3 },
     description: '15 pack slots' },
+  backpack_ranger: { id: 'backpack_ranger', name: 'Ranger Pack', slot: 'backpack', type: 'backpack',
+    tint: 0x33321c, durability: dur(240, 0.87), pockets: 17, rarity: 'rare',
+    // 17 is prime — closest clean rectangle is 6×3=18, so the grid
+    // gets one extra cell. Bumping `pockets` to 17 keeps The Crow's
+    // ladder correct (15 → 17 → 20) and the description honest; the
+    // 18th cell reads as a small bonus, not a bug.
+    gridLayout: { w: 6, h: 3 },
+    description: '17 pack slots' },
   backpack_expedition: { id: 'backpack_expedition', name: 'Expedition Frame', slot: 'backpack', type: 'backpack',
     tint: 0x2a2a18, durability: dur(260, 0.86), pockets: 20, rarity: 'epic',
     gridLayout: { w: 5, h: 4 },
