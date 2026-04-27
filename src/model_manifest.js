@@ -161,6 +161,14 @@ export const MODEL_BY_ITEM_ID = {
   att_suppressor_fluted:  'lowpolyguns_accessories/Silencer_3.fbx',
   att_suppressor_osprey:  'weapons/SM_Muffler_04.fbx',
   att_suppressor_tactical:'weapons/SM_Muffler_05.fbx',
+  // Apr-26 second-pass — extra muzzle/suppressor variants from
+  // weapon_assignments.json (chinese / russian / KA QD cans, plus
+  // a precision sniper brake and an alternate AK slant brake).
+  att_brake_precision:    'weapons/SM_Compensator_For_High_Precision_Sniper_Rifle.fbx',
+  att_brake_ak2:          'weapons/SM_Muzzle_Brake_Compensator_04.fbx',
+  att_suppressor_chinese: 'weapons/SM_Muffler_01.fbx',
+  att_suppressor_russian: 'weapons/SM_Muffler_02.fbx',
+  att_suppressor_ka_qd:   'weapons/SM_Muffler_03.fbx',
   // -- Side rail
   att_laser:              'weapons/SM_Tactical_Laser_Designator.fbx',
   att_laser_red:          'weapons/SM_Tactical_Laser_Designator.fbx',
@@ -170,12 +178,19 @@ export const MODEL_BY_ITEM_ID = {
   att_flashlight:         'weapons/SM_Tactical_Flashlight_01.fbx',
   att_tac_light:          'weapons/SM_Tactical_Flashlight_03.fbx',
   att_strobe:             'weapons/SM_Tactical_Flashlight_02.fbx',
+  att_flashlight_olight:  'lowpolyguns_accessories/Flashlight.fbx',
   // -- Under rail (foregrips / bipod)
   att_foregrip:           'weapons/SM_Vertical_Handle_01.fbx',
   att_foregrip_angled:    'weapons/SM_Horizontal_Handle_01.fbx',
   att_foregrip_stubby:    'lowpolyguns_accessories/Grip.fbx',
   att_grip_canted:        'weapons/SM_Side_Handle.fbx',
   att_bipod:              'weapons/SM_Bipod__ForHigh_Precision_Sniper_Rifle.fbx',
+  // Apr-26 second-pass foregrip variants (tan colorways + a folding
+  // grip + a short vertical alternative).
+  att_foregrip_tan:           'weapons/SM_Vertical_Handle_02.fbx',
+  att_foregrip_angled_tan:    'weapons/SM_Horizontal_Handle_02.fbx',
+  att_foregrip_vert_alt:      'weapons/SM_Horizontal_Handle_03.fbx',
+  att_foregrip_folding:       'weapons/SM_Horizontal_Handle_04.fbx',
   // -- Top rail (sights)
   att_reddot:             'weapons/SM_Cylindrical_Collimator_Sight.fbx',
   att_reflex:             'weapons/SM_Square_Dot_Sight.fbx',
@@ -190,6 +205,15 @@ export const MODEL_BY_ITEM_ID = {
   att_holo_uh1:           'weapons/SM_Square_Dot_Sight.fbx',
   att_scope_pso:          'weapons/SM_Scope_For_Police_Sniper_Rifle.fbx',
   att_peq15:              'weapons/SM_Tactical_Block.fbx',
+  // Apr-26 second-pass top-rail variants (6× lowpoly scope, bullpup
+  // tube scope, and an alt long-range scope from animpic).
+  att_scope_6x:           'lowpolyguns_accessories/Scope_1.fbx',
+  att_scope_tube:         'weapons/SM_SM_Sight_Bulpam_Assault_Rifle.fbx',
+  att_scope_sniper:       'weapons/SM_Sniper_Scope.fbx',
+  // -- Barrel: handguard rail kits (Apr-26 second pass)
+  att_rails_quad:         'weapons/SM_Forend_With_Picatinny_Rails_01.fbx',
+  att_rails_mlok:         'weapons/SM_Forend_With_Picatinny_Rails_02.fbx',
+  att_rails_ak:           'weapons/SM_Forend_With_Picatinny_Rails_5_45.fbx',
   // -- Stock
   att_stock_heavy:        'weapons/SM_Wooden_Butt_01.fbx',
   att_stock_skeleton:     'lowpolyguns_accessories/Stock.fbx',

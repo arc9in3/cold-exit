@@ -439,6 +439,127 @@ export const ATTACHMENT_DEFS = {
     description: 'Tape-pulled fast mag. Slightly fewer rounds, much faster swap. −10% mag size, −20% reload time.',
     modifier: { magSizeMult: 0.9, reloadTimeMult: 0.80 },
   },
+
+  // ================================================================
+  // Apr-26 second-pass batch — wires the remaining tagged FBXes from
+  // weapon_assignments.json that didn't have an attachment def yet.
+  // Same schema, same modifier conventions; rarity-scaling kicks in
+  // automatically via _rollAttachmentRarity / _scaleByRarity.
+  // ================================================================
+
+  // -- MUZZLE: brake / suppressor variants ---------------------------
+  muzzle_brake_precision: {
+    id: 'att_brake_precision', name: 'Precision Muzzle Brake', type: 'attachment',
+    slot: 'muzzle', tint: 0x4a4a52,
+    description: 'Heavy-radial brake for high-precision sniper rifles. Maximum vertical recoil control on a single platform. −25% ADS spread.',
+    modifier: { adsSpreadMult: 0.75, hipSpreadMult: 0.94 },
+  },
+  muzzle_brake_ak2: {
+    id: 'att_brake_ak2', name: 'AK Slant Brake', type: 'attachment',
+    slot: 'muzzle', tint: 0x44444a,
+    description: 'Angled-cut Soviet brake — pushes blast right to counter the platform\'s natural climb. −20% ADS spread, modest hip benefit.',
+    modifier: { adsSpreadMult: 0.80, hipSpreadMult: 0.92 },
+  },
+  muzzle_suppressor_chinese: {
+    id: 'att_suppressor_chinese', name: 'PRC Suppressor', type: 'attachment',
+    slot: 'muzzle', tint: 0x383840,
+    description: 'Chinese-issue full-length can. Heavy steel baffle stack. Big noise drop, modest range cost. −60% noise, −10% range, −5% damage.',
+    modifier: { rangeMult: 0.90, damageMult: 0.95, noiseRangeMult: 0.40 },
+  },
+  muzzle_suppressor_russian: {
+    id: 'att_suppressor_russian', name: 'PBS Suppressor', type: 'attachment',
+    slot: 'muzzle', tint: 0x363640,
+    description: 'Russian PBS-pattern subsonic-tuned can. Best paired with heavy-bullet platforms. −65% noise, −12% range, −7% damage.',
+    modifier: { rangeMult: 0.88, damageMult: 0.93, noiseRangeMult: 0.35 },
+  },
+  muzzle_suppressor_ka_qd: {
+    id: 'att_suppressor_ka_qd', name: 'KA QD Suppressor', type: 'attachment',
+    slot: 'muzzle', tint: 0x3a3a44,
+    description: 'Knight\'s Armament quick-detach can. Trades a bit of suppression for fast on/off. −50% noise, −5% range.',
+    modifier: { rangeMult: 0.95, damageMult: 0.97, noiseRangeMult: 0.50 },
+  },
+
+  // -- BARREL: handguard rail kits -----------------------------------
+  // Rails replace the standard handguard with a more accessory-
+  // friendly platform. Modest spread benefit (better grip indexing)
+  // and a small hipfire bonus from the extra mounting weight.
+  barrel_rails_quad: {
+    id: 'att_rails_quad', name: 'Quad Picatinny Rail', type: 'attachment',
+    slot: 'barrel', tint: 0x484850,
+    description: 'Four-side milspec picatinny handguard. Heavy, but you can hang anything off it. −8% spread.',
+    modifier: { hipSpreadMult: 0.92, adsSpreadMult: 0.92 },
+  },
+  barrel_rails_mlok: {
+    id: 'att_rails_mlok', name: 'M-LOK Handguard', type: 'attachment',
+    slot: 'barrel', tint: 0x42424a,
+    description: 'M-LOK slot pattern — lighter than a quad rail, same accessory flexibility. −10% ADS spread, +3% move speed.',
+    modifier: { adsSpreadMult: 0.90, moveSpeedMult: 1.03 },
+  },
+  barrel_rails_ak: {
+    id: 'att_rails_ak', name: 'AK Rail Handguard', type: 'attachment',
+    slot: 'barrel', tint: 0x3a3a40,
+    description: 'AK-pattern bolt-on rail handguard. Lets older platforms mount modern accessories. −7% spread.',
+    modifier: { hipSpreadMult: 0.93, adsSpreadMult: 0.93 },
+  },
+
+  // -- SIDE RAIL: extra light variant --------------------------------
+  side_flashlight_olight: {
+    id: 'att_flashlight_olight', name: 'OLIGHT Pistol Light', type: 'attachment',
+    slot: 'sideRail', tint: 0xf0eaa0,
+    description: 'Compact pistol-frame light, magnetic rail mount. Wide flood pattern. Lights dark rooms — no combat effect.',
+    modifier: {},
+    lightTier: 'basic',
+    lightCone: { range: 8, angleDeg: 50 },
+  },
+
+  // -- UNDER RAIL: extra foregrip variants ---------------------------
+  under_foregrip_tan: {
+    id: 'att_foregrip_tan', name: 'Vertical Foregrip (Tan)', type: 'attachment',
+    slot: 'underRail', tint: 0x6a5a40,
+    description: 'Tan-polymer vertical handle. Same control as the black version, different cosmetic. −18% spread, +8% ADS zoom.',
+    modifier: { hipSpreadMult: 0.82, adsSpreadMult: 0.82, adsZoomMult: 0.92 },
+  },
+  under_foregrip_angled_tan: {
+    id: 'att_foregrip_angled_tan', name: 'Angled Foregrip (Tan)', type: 'attachment',
+    slot: 'underRail', tint: 0x6c5e44,
+    description: 'Tan forward-leaning grip. Same numbers as the black angled grip. −15% hip spread, −10% ADS spread.',
+    modifier: { hipSpreadMult: 0.85, adsSpreadMult: 0.90 },
+  },
+  under_foregrip_vert_alt: {
+    id: 'att_foregrip_vert_alt', name: 'Short Vertical Grip', type: 'attachment',
+    slot: 'underRail', tint: 0x2a2a30,
+    description: 'Short vertical grip — between full-length and stubby. Balanced spread / mobility. −12% spread, +1% move speed.',
+    modifier: { hipSpreadMult: 0.88, adsSpreadMult: 0.88, moveSpeedMult: 1.01 },
+  },
+  under_foregrip_folding: {
+    id: 'att_foregrip_folding', name: 'Folding Foregrip', type: 'attachment',
+    slot: 'underRail', tint: 0x303034,
+    description: 'Folds flat against the handguard when stowed. Trades a bit of grip indexing for cleaner low-profile carry. −10% spread, +5% move speed.',
+    modifier: { hipSpreadMult: 0.90, adsSpreadMult: 0.90, moveSpeedMult: 1.05 },
+  },
+
+  // -- TOP RAIL: extra scope variants --------------------------------
+  sight_scope_6x: {
+    id: 'att_scope_6x', name: '6× Sniper Scope', type: 'attachment',
+    slot: 'topRail', tint: 0x303a48,
+    description: '6× fixed-power glass. Sits between mid-power and long-range scopes — focused on rifle DMR builds. −32% ADS spread, 1.24× ADS zoom, +4m drag.',
+    modifier: { adsSpreadMult: 0.68, adsZoomMult: 0.6, adsPeekBonus: 4 },
+    sightZoom: 1.24,
+  },
+  sight_tube: {
+    id: 'att_scope_tube', name: 'Tube Scope', type: 'attachment',
+    slot: 'topRail', tint: 0x383844,
+    description: 'Bullpup-style integrated tube scope. Thin profile, clean reticle, no parallax. −22% ADS spread, 1.15× ADS zoom.',
+    modifier: { adsSpreadMult: 0.78, adsZoomMult: 0.85 },
+    sightZoom: 1.15,
+  },
+  sight_sniper_alt: {
+    id: 'att_scope_sniper', name: 'Long-Range Scope', type: 'attachment',
+    slot: 'topRail', tint: 0x282e3a,
+    description: 'Heavy long-range scope — same role as the Long Scope, milled-aluminum body. −38% ADS spread, 1.28× ADS zoom, +5m drag.',
+    modifier: { adsSpreadMult: 0.62, adsZoomMult: 0.55, adsPeekBonus: 5 },
+    sightZoom: 1.28,
+  },
 };
 
 export const ALL_ATTACHMENTS = Object.values(ATTACHMENT_DEFS);
