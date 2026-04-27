@@ -6158,17 +6158,29 @@ function redirectShotAtCursor(weapon, impactPoint) {
 // status row every frame).
 let _hpCache_h = -1, _hpCache_m = -1, _hpCache_r = -1;
 let _hpCache_bleed = -1, _hpCache_broken = -1;
+let _hpCache_sta = -1, _hpCache_staMax = -1, _hpCache_blocking = -1, _hpCache_parry = -1;
 function updateHealthHud(playerInfo) {
   // The status-row branch reads bleedT/brokenT and DOM-mutates only
   // when those values change; bail when nothing the panel depends on
   // has changed so we don't keep rebuilding the same width strings.
+  // STAMINA is checked too — earlier the cache only watched HP fields
+  // and the function would early-return while stamina was draining,
+  // freezing the bar visually during sprint / block / dodge.
   const bleed = playerInfo.bleedT || 0;
   const broken = playerInfo.brokenT || 0;
+  const stamina = playerInfo.stamina || 0;
+  const staMax = playerInfo.maxStamina || 0;
+  const blocking = playerInfo.blocking ? 1 : 0;
+  const parry = playerInfo.parryActive ? 1 : 0;
   if (playerInfo.health === _hpCache_h
       && playerInfo.maxHealth === _hpCache_m
       && (playerInfo.regenCap ?? playerInfo.maxHealth) === _hpCache_r
       && bleed === _hpCache_bleed
-      && broken === _hpCache_broken) {
+      && broken === _hpCache_broken
+      && stamina === _hpCache_sta
+      && staMax === _hpCache_staMax
+      && blocking === _hpCache_blocking
+      && parry === _hpCache_parry) {
     return;
   }
   _hpCache_h = playerInfo.health;
@@ -6176,6 +6188,10 @@ function updateHealthHud(playerInfo) {
   _hpCache_r = playerInfo.regenCap ?? playerInfo.maxHealth;
   _hpCache_bleed = bleed;
   _hpCache_broken = broken;
+  _hpCache_sta = stamina;
+  _hpCache_staMax = staMax;
+  _hpCache_blocking = blocking;
+  _hpCache_parry = parry;
   if (hpFillEl) {
     const pct = Math.max(0, Math.min(1, playerInfo.health / playerInfo.maxHealth));
     // Only touch DOM when the displayed value actually changes — was
