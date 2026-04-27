@@ -19,7 +19,6 @@
 // No npm dependencies — pure Node stdlib + ES modules.
 
 import http from 'node:http';
-import url from 'node:url';
 import path from 'node:path';
 import fs from 'node:fs';
 import { exec, spawn } from 'node:child_process';
@@ -486,8 +485,10 @@ const MIME = {
 };
 
 function staticHandler(req, res) {
-  // Resolve to repo root, prevent path traversal.
-  const parsed = url.parse(req.url);
+  // Resolve to repo root, prevent path traversal. WHATWG URL needs a
+  // base since req.url is relative (e.g. "/foo?bar=1"); the base is
+  // discarded once we read .pathname.
+  const parsed = new URL(req.url, 'http://localhost');
   let pathname = decodeURIComponent(parsed.pathname || '/');
   if (pathname === '/' || pathname === '') pathname = '/index.html';
   const safePath = path.normalize(pathname).replace(/^[\\/]+/, '');
@@ -1786,7 +1787,12 @@ function readJsonBody(req) {
 }
 
 const dashServer = http.createServer(async (req, res) => {
-  const parsed = url.parse(req.url, true);
+  // Wrap req.url in a WHATWG URL — base is dummy since req.url is
+  // already absolute-on-host. Expose a .query helper that mirrors
+  // the legacy url.parse(true) shape so existing handlers don't
+  // need to switch to searchParams.get() everywhere.
+  const parsed = new URL(req.url, 'http://localhost');
+  parsed.query = Object.fromEntries(parsed.searchParams);
   if (parsed.pathname.startsWith('/api/')) return dashApi(req, res, parsed);
   if (parsed.pathname === '/' || parsed.pathname === '/index.html') {
     res.writeHead(200, { 'Content-Type': 'text/html; charset=utf-8' });
