@@ -1352,7 +1352,7 @@ export function createPlayer(scene) {
       aimPitch,
     }, dt);
 
-    // --- rifle weapon-offset overlay (per-frame) ---------------------
+    // --- weapon-offset overlay (per-frame, shouldered classes) ------
     // Rotates / nudges gunMesh + inHandModel + muzzle on top of the
     // class-default position laid down in setWeapon. Hip ↔ aim values
     // come from RIFLE_WEAPON_{HIP,AIM} (authored in tools/pose_editor)
@@ -1360,7 +1360,17 @@ export function createPlayer(scene) {
     // Applied here (not actor_rig.js) because gunMesh / muzzle live
     // outside the rig — they're parented to a shoulder anchor by
     // setWeapon and we don't want the rig module to know about them.
-    if (cls2 === 'rifle' && rig.anim) {
+    //
+    // Apr-26: extended from rifle-only to ALL shouldered classes
+    // (rifle/shotgun/lmg/sniper). They share the rifle anchor + the
+    // same Z-forward base orientation, so the same offset formula
+    // applies cleanly. SMG is hand-anchored (wrist mount, base rot
+    // π/2 around X, gun extends in -Y) — its math is different and
+    // we'd dunk it into a weird spot if we used the rifle deltas, so
+    // SMG keeps the no-overlay default for now.
+    const _shouldered = cls2 === 'rifle' || cls2 === 'shotgun'
+      || cls2 === 'lmg' || cls2 === 'sniper';
+    if (_shouldered && rig.anim) {
       const ab = rig.anim.aimBlend ?? 0;
       const hb = 1 - ab;
       const m  = state.handedness === 'left' ? -1 : 1;

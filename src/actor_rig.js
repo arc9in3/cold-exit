@@ -1445,88 +1445,61 @@ export function updateAnim(rig, state, dt) {
   // along the barrel. More bladed body yaw too, because proper
   // rifle stance turns the body into the weapon.
   if (state.rifleHold && !state.meleeStance) {
-    if (state.weaponClass === 'rifle') {
-      // Authored two-pose system (HIP ↔ AIM) lerped by aimBlend.
-      // Multiplier `m` mirrors Y rot, Z rot, X pos for left-handed.
-      const ab = a.aimBlend, hb = 1 - ab;
-      const m = supportYawSign;
-      const lerp = (h, x) => h * hb + x * ab;
-      const H = RIFLE_POSE_HIP, A = RIFLE_POSE_AIM;
-      const baseMap = a._basePosByObj;
-      const apply = (target, hipJoint, aimJoint, extraRX = 0) => {
-        if (!target) return;
-        target.rotation.x = lerp(hipJoint.rx, aimJoint.rx) + extraRX;
-        target.rotation.y = lerp(hipJoint.ry, aimJoint.ry) * m;
-        target.rotation.z = lerp(hipJoint.rz, aimJoint.rz) * m;
-        const bp = baseMap?.get(target);
-        if (bp) {
-          target.position.set(
-            bp.x + lerp(hipJoint.px, aimJoint.px) * m,
-            bp.y + lerp(hipJoint.py, aimJoint.py),
-            bp.z + lerp(hipJoint.pz, aimJoint.pz),
-          );
-        }
-      };
-      // Dominant arm carries recoil + body-pitch compensation.
-      const recoilExtra = recoilKick * 0.25 - armLeanComp;
-      const elbowExtra  = -recK * 0.45;
-      apply(weaponArm.shoulder.pivot,  H.domShoulder, A.domShoulder, recoilExtra);
-      apply(weaponArm.elbow,           H.domElbow,    A.domElbow,    elbowExtra);
-      apply(weaponArm.wrist,           H.domWrist,    A.domWrist);
-      apply(supportArm.shoulder.pivot, H.supShoulder, A.supShoulder, -armLeanComp);
-      apply(supportArm.elbow,          H.supElbow,    A.supElbow);
-      apply(supportArm.wrist,          H.supWrist,    A.supWrist);
-      // Spine — additive on top of locomotion / aim writes earlier
-      // in updateAnim (so chestAimYaw / breath / etc. still layer).
-      rig.stomach.rotation.y += lerp(H.stomach.ry, A.stomach.ry) * m;
-      rig.chest.rotation.y   += lerp(H.chest.ry,   A.chest.ry)   * m;
-      rig.head.rotation.y    += lerp(H.head.ry,    A.head.ry)    * m;
-      const stomBase = baseMap?.get(rig.stomach);
-      if (stomBase) {
-        rig.stomach.position.set(
-          stomBase.x, stomBase.y,
-          stomBase.z + lerp(H.stomach.pz, A.stomach.pz),
+    // Authored two-pose system (HIP ↔ AIM) lerped by aimBlend.
+    // Apr-26: extended to ALL rifleHold classes (rifle/smg/shotgun/
+    // sniper/lmg). Pistol falls outside rifleHold and keeps its own
+    // pose. Per-class authored variants will replace this shared
+    // pose later — for now they all share the rifle-authored set.
+    const ab = a.aimBlend, hb = 1 - ab;
+    const m = supportYawSign;
+    const lerp = (h, x) => h * hb + x * ab;
+    const H = RIFLE_POSE_HIP, A = RIFLE_POSE_AIM;
+    const baseMap = a._basePosByObj;
+    const apply = (target, hipJoint, aimJoint, extraRX = 0) => {
+      if (!target) return;
+      target.rotation.x = lerp(hipJoint.rx, aimJoint.rx) + extraRX;
+      target.rotation.y = lerp(hipJoint.ry, aimJoint.ry) * m;
+      target.rotation.z = lerp(hipJoint.rz, aimJoint.rz) * m;
+      const bp = baseMap?.get(target);
+      if (bp) {
+        target.position.set(
+          bp.x + lerp(hipJoint.px, aimJoint.px) * m,
+          bp.y + lerp(hipJoint.py, aimJoint.py),
+          bp.z + lerp(hipJoint.pz, aimJoint.pz),
         );
       }
-      const headBase = baseMap?.get(rig.head);
-      if (headBase) {
-        rig.head.position.set(
-          headBase.x + lerp(H.head.px, A.head.px) * m,
-          headBase.y + lerp(H.head.py, A.head.py),
-          headBase.z + lerp(H.head.pz, A.head.pz),
-        );
-      }
-      rig.rightShoulderAnchor.rotation.x = -armLeanComp;
-      rig.leftShoulderAnchor.rotation.x  = -armLeanComp;
-    } else {
-      // SMG / shotgun / sniper / lmg — keep the original aim-only
-      // pose until each gets its own authored two-pose data.
-      const rifleDomShoulder = -1.05 + recoilKick * 0.25 - armLeanComp;
-      const rifleDomYaw      = -0.12 * supportYawSign;
-      const rifleDomElbow    = -1.70 - recK * 0.45;
-      weaponArm.shoulder.pivot.rotation.set(rifleDomShoulder, 0, rifleDomYaw);
-      weaponArm.elbow.rotation.set(rifleDomElbow, 0, 0);
-      weaponArm.wrist.rotation.set(0, 0, 0);
-      const rifleSupShoulder = -1.45 + (a.aimBlend * -0.10) - armLeanComp;
-      const rifleSupYaw      = 0.18 * supportYawSign;
-      const rifleSupElbow    = -0.85;
-      supportArm.shoulder.pivot.rotation.set(rifleSupShoulder, 0, rifleSupYaw);
-      supportArm.elbow.rotation.set(rifleSupElbow, 0, 0);
-      supportArm.wrist.rotation.set(0, 0, 0);
-      // Reset the rifle-only spine + arm-position + anchor writes so a
-      // class swap from rifle → SMG mid-frame doesn't leave them stuck.
-      const baseMap = a._basePosByObj;
-      const restorePos = (t) => {
-        const bp = baseMap?.get(t);
-        if (bp) t.position.set(bp.x, bp.y, bp.z);
-      };
-      restorePos(weaponArm.shoulder.pivot);
-      restorePos(supportArm.shoulder.pivot);
-      restorePos(rig.stomach);
-      restorePos(rig.head);
-      rig.rightShoulderAnchor.rotation.x = -armLeanComp;
-      rig.leftShoulderAnchor.rotation.x  = -armLeanComp;
+    };
+    // Dominant arm carries recoil + body-pitch compensation.
+    const recoilExtra = recoilKick * 0.25 - armLeanComp;
+    const elbowExtra  = -recK * 0.45;
+    apply(weaponArm.shoulder.pivot,  H.domShoulder, A.domShoulder, recoilExtra);
+    apply(weaponArm.elbow,           H.domElbow,    A.domElbow,    elbowExtra);
+    apply(weaponArm.wrist,           H.domWrist,    A.domWrist);
+    apply(supportArm.shoulder.pivot, H.supShoulder, A.supShoulder, -armLeanComp);
+    apply(supportArm.elbow,          H.supElbow,    A.supElbow);
+    apply(supportArm.wrist,          H.supWrist,    A.supWrist);
+    // Spine — additive on top of locomotion / aim writes earlier
+    // in updateAnim (so chestAimYaw / breath / etc. still layer).
+    rig.stomach.rotation.y += lerp(H.stomach.ry, A.stomach.ry) * m;
+    rig.chest.rotation.y   += lerp(H.chest.ry,   A.chest.ry)   * m;
+    rig.head.rotation.y    += lerp(H.head.ry,    A.head.ry)    * m;
+    const stomBase = baseMap?.get(rig.stomach);
+    if (stomBase) {
+      rig.stomach.position.set(
+        stomBase.x, stomBase.y,
+        stomBase.z + lerp(H.stomach.pz, A.stomach.pz),
+      );
     }
+    const headBase = baseMap?.get(rig.head);
+    if (headBase) {
+      rig.head.position.set(
+        headBase.x + lerp(H.head.px, A.head.px) * m,
+        headBase.y + lerp(H.head.py, A.head.py),
+        headBase.z + lerp(H.head.pz, A.head.pz),
+      );
+    }
+    rig.rightShoulderAnchor.rotation.x = -armLeanComp;
+    rig.leftShoulderAnchor.rotation.x  = -armLeanComp;
   } else if (rig.rightShoulderAnchor && rig.leftShoulderAnchor) {
     // Non-rifle holds don't use the shoulder anchor for weapon
     // parenting. Zero the compensation rotation, AND restore any
