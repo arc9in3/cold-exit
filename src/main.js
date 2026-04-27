@@ -1454,7 +1454,7 @@ function makeRelicSellerStock() {
   // Upgrade level adds extra unowned-artifact slots.
   // Encounter-only artifacts are filtered out — they're earned via
   // their dedicated encounter, not bought from the shop.
-  const unowned = ALL_ARTIFACTS.filter(a => !artifacts.has(a.id) && !a.encounterOnly);
+  const unowned = ALL_ARTIFACTS.filter(a => !artifacts.has(a.id) && !a.encounterOnly && !a.synthetic);
   const bonus = getMerchantStockBonus('relicSeller');
   const offerCount = Math.min(3 + bonus, unowned.length);
   const picks = [];
@@ -1995,7 +1995,7 @@ function regenerateLevel() {
         rollUnownedRelic: () => {
           // Skip encounter-only artifacts; they have their own
           // dedicated encounter as the acquisition path.
-          const unowned = ALL_ARTIFACTS.filter(a => !artifacts.has(a.id) && !a.encounterOnly);
+          const unowned = ALL_ARTIFACTS.filter(a => !artifacts.has(a.id) && !a.encounterOnly && !a.synthetic);
           if (!unowned.length) return null;
           const def = unowned[Math.floor(Math.random() * unowned.length)];
           return relicFor(def.id);
@@ -4200,7 +4200,12 @@ function firePlayerProjectile(playerInfo, weapon, aimPoint) {
 }
 
 function fireOneShot(playerInfo, weapon, aimPoint, isADS, aimOwner) {
-  if (typeof weapon.ammo === 'number' && weapon.ammo <= 0 && !weapon.infiniteAmmo) {
+  // Magnum Opus override — full-auto weapons may fire past empty if
+  // the relic is owned. Cost is paid in tickShooting (3 HP/s drain).
+  const _magnumBypass = (derivedStats.magnumOpusActive
+    && weapon.fireMode === 'auto');
+  if (typeof weapon.ammo === 'number' && weapon.ammo <= 0
+      && !weapon.infiniteAmmo && !_magnumBypass) {
     // Defensive backstop — tickShooting handles the empty-click
     // throttle for the trigger-press path. This branch is reached
     // when a burst sequence runs out mid-volley; throttle here too
@@ -4341,6 +4346,10 @@ function fireOneShot(playerInfo, weapon, aimPoint, isADS, aimOwner) {
   // a refund — works even on the last round in the mag).
   const freeShot = (derivedStats.freeShotChance || 0) > 0
     && Math.random() < derivedStats.freeShotChance;
+  // Capture pre-decrement ammo so the Opening / Closing Act +100%
+  // bonuses can identify the first / last bullet of the mag. ammo
+  // === eff.magSize before decrement = first round; ammo === 1 = last.
+  const _ammoBefore = (typeof weapon.ammo === 'number') ? weapon.ammo : -1;
   if (typeof weapon.ammo === 'number' && !weapon.infiniteAmmo && !freeShot) weapon.ammo -= 1;
   if ((derivedStats.instantReloadChance || 0) > 0
       && typeof weapon.ammo === 'number' && !weapon.infiniteAmmo
@@ -4434,6 +4443,11 @@ function fireOneShot(playerInfo, weapon, aimPoint, isADS, aimOwner) {
         mult += (derivedStats.headMultBonus || 0) + (weapon.headBonus || 0);
       }
       let dmg = eff.damage * mult * derivedStats.rangedDmgMult;
+      // Opening Act / Closing Act — first and last bullet in the mag
+      // each deal +100% damage. Both stack (a 1-mag pistol's only
+      // shot is both first AND last → +300% total).
+      if (derivedStats.openingActActive && _ammoBefore === eff.magSize) dmg *= 2;
+      if (derivedStats.closingActActive && _ammoBefore === 1)            dmg *= 2;
       // Class-based damage falloff. Distance from the bullet's origin
       // to the hit; multiplier 1.0 → 0.65 lerped over the class's
       // base max range. Sniper has 'none' shape so this is a no-op.
@@ -4612,6 +4626,11 @@ function fireOneShot(playerInfo, weapon, aimPoint, isADS, aimOwner) {
       if (hit.zone === 'head' && (derivedStats.headshotHeal || 0) > 0) {
         player.heal(derivedStats.headshotHeal);
       }
+      // Vampire's Mark relic — flat % of damage dealt heals on any
+      // ranged hit. Mirrors the existing melee lifesteal pipeline.
+      if ((derivedStats.lifestealRangedPercent || 0) > 0) {
+        player.heal(dmg * derivedStats.lifestealRangedPercent * 0.01);
+      }
       let agg = hitAgg.get(hit.owner);
       if (!agg) {
         agg = { totalDmg: 0, hadHead: false, point: hit.point.clone(), dir: dir.clone(), zone: hit.zone || 'torso' };
@@ -4669,6 +4688,20 @@ function fireOneShot(playerInfo, weapon, aimPoint, isADS, aimOwner) {
     }
   }
 
+  // Dervish Prayer relic — any successful player attack briefly slows
+  // gunmen within radius. Stamps slowT (existing leg-shot slow system)
+  // so the gunman's slowFactor multiplier kicks in for the duration.
+  // Sweep runs once per fire event, not per pellet.
+  if ((derivedStats.dervishSlowRadius || 0) > 0 && hitAgg.size > 0) {
+    const r2 = derivedStats.dervishSlowRadius * derivedStats.dervishSlowRadius;
+    const px = player.mesh.position.x, pz = player.mesh.position.z;
+    const dur = derivedStats.dervishSlowDuration || 1.0;
+    for (const g of gunmen.gunmen) {
+      if (!g.alive) continue;
+      const dx = g.group.position.x - px, dz = g.group.position.z - pz;
+      if (dx * dx + dz * dz <= r2) g.slowT = Math.max(g.slowT || 0, dur);
+    }
+  }
   // Flush aggregated target effects. One blood burst + one floating
   // damage number + at most one hit sfx per shot, head-priority.
   let anyHead = false;
@@ -4747,8 +4780,22 @@ function tickShooting(dt, playerInfo, inputState, aimInfo) {
   // EMPTY_CLICK_HOLD_INTERVAL seconds — the "I'm out, you can hear
   // it" cue. fireOneShot still owns the actual reload trigger so
   // the press timing for that stays unchanged.
+  // Magnum Opus relic — sustained-fire past empty on full-auto
+  // weapons, drain 3 HP/s. Bypasses the empty-click handler entirely
+  // when conditions match. Weapon's ammo stays at 0; fireOneShot also
+  // honours the override.
+  const _magnumOpusFiring = (derivedStats.magnumOpusActive
+    && weapon.fireMode === 'auto'
+    && inputState.attackHeld
+    && typeof weapon.ammo === 'number' && weapon.ammo <= 0
+    && !weapon.infiniteAmmo);
+  if (_magnumOpusFiring) {
+    // 3 HP/s drain — applied per frame regardless of fire-rate so
+    // the cost reads as a constant time-tax, not a per-shot one.
+    if (player?.takeDamage) player.takeDamage(3 * dt);
+  }
   if (typeof weapon.ammo === 'number' && weapon.ammo <= 0
-      && !weapon.infiniteAmmo) {
+      && !weapon.infiniteAmmo && !_magnumOpusFiring) {
     const nowMs = performance.now();
     const EMPTY_CLICK_HOLD_INTERVAL = 600;  // ms between held clicks
     if (inputState.attackPressed) {
@@ -4834,6 +4881,7 @@ function resolveComboHit(attackEvent) {
     return da - db;
   });
 
+  let _meleeHitLanded = false;
   for (const c of candidates) {
     const dx = c.group.position.x - origin.x;
     const dz = c.group.position.z - origin.z;
@@ -4842,6 +4890,7 @@ function resolveComboHit(attackEvent) {
     const nx = dx / Math.max(0.0001, d);
     const nz = dz / Math.max(0.0001, d);
     if (nx * facing.x + nz * facing.z < halfCos) continue;
+    _meleeHitLanded = true;
 
     const strikePoint = new THREE.Vector3(c.group.position.x, 1.2, c.group.position.z);
     let dmg = attack.damage * derivedStats.meleeDmgMult * berserkMult();
@@ -4864,6 +4913,19 @@ function resolveComboHit(attackEvent) {
       onEnemyKilled(c);
       awardClassXp('melee', c.tier, c);
       if (skillTree.level('bloodlust') > 0) buffs.grant('bloodlust', { moveSpeedMult: 1.55 }, 4);
+    }
+  }
+  // Dervish Prayer relic — melee swing (incl. quick melee with a
+  // ranged weapon equipped) slows nearby gunmen on hit. Same sweep
+  // pattern as the ranged-hit branch above.
+  if ((derivedStats.dervishSlowRadius || 0) > 0 && _meleeHitLanded) {
+    const r2d = derivedStats.dervishSlowRadius * derivedStats.dervishSlowRadius;
+    const dpx = player.mesh.position.x, dpz = player.mesh.position.z;
+    const dur = derivedStats.dervishSlowDuration || 1.0;
+    for (const g of gunmen.gunmen) {
+      if (!g.alive) continue;
+      const dx = g.group.position.x - dpx, dz = g.group.position.z - dpz;
+      if (dx * dx + dz * dz <= r2d) g.slowT = Math.max(g.slowT || 0, dur);
     }
   }
 
@@ -5079,10 +5141,11 @@ function onEnemyKilled(enemy, opts = {}) {
   // reward.
   if (enemy.majorBoss) {
     awardPersistentChips(3 + Math.floor(Math.random() * 3));
-    // Mythics are boss-only AND rare — 3% so a successful run *might*
-    // yield one, not a predictable grind reward. Tune down further if
-    // even this feels too common across a session.
-    if (Math.random() < 0.03) {
+    // Mythics are boss-only AND rare — 3% baseline so a successful
+    // run *might* yield one. Mourner's Bell relic raises the floor
+    // to 6% as a counterweight to its incoming-damage curse.
+    const _mythicChance = Math.max(0.03, derivedStats.mythicDropChanceFloor || 0);
+    if (Math.random() < _mythicChance) {
       const mythic = rollMythicDrop();
       if (mythic) enemy.loot.unshift(mythic);
     }
@@ -5231,6 +5294,11 @@ runStats.reset = function () { _origRunStatsReset(); _resetDeathRecap(); };
 
 function damagePlayer(amount, damageType = 'generic', srcCtx = null) {
   if (amount <= 0) return;
+  // Mourner's Bell relic — incoming damage scales by the bell's hidden
+  // multiplier (default no-op when the relic isn't owned).
+  if ((derivedStats.incomingDmgMult || 1) !== 1) {
+    amount *= derivedStats.incomingDmgMult;
+  }
   // Apply damage-type resistance from skills.
   if (damageType === 'ballistic' && derivedStats.ballisticResist > 0) {
     amount *= (1 - Math.min(0.7, derivedStats.ballisticResist));
@@ -9467,6 +9535,16 @@ function tick() {
         _meleeDist = Math.hypot(dx, dz);
       }
       damagePlayer(d, 'melee', { source: enemy, zone: 'torso', distance: _meleeDist });
+      // Thread Cuts Both Ways relic — reflect 25% of incoming melee
+      // damage back on the attacker. Modeled as instant counter-damage
+      // (no enemy bleed-DoT system exists, so this is the closest
+      // mechanical analogue; reads as "they bleed for it").
+      if (enemy && enemy.alive && enemy.manager
+          && (derivedStats.meleeReflectBleedPercent || 0) > 0) {
+        const reflect = d * derivedStats.meleeReflectBleedPercent * 0.01;
+        enemy.manager.applyHit(enemy, reflect, 'torso', { x: 0, z: 0 });
+        if (!enemy.alive) onEnemyKilled(enemy);
+      }
       // Melee-hit feedback — louder than bullet hits so the player
       // feels the impact: rig flinch in the hit direction, heavy
       // camera shake, brief hit-stop, red vignette pulse, audio.

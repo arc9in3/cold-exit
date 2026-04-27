@@ -180,6 +180,99 @@ export const ARTIFACT_DEFS = {
     apply(_s) { /* trigger-based — see _tickIndecisionRelic in main.js */ },
     trigger: 'indecision',
   },
+
+  // ================================================================
+  // Apr-26 batch — themed performance relics + a paired meta synth.
+  // ================================================================
+
+  // First round in any mag deals double. Implemented in main.js fire
+  // path via derivedStats.openingActActive flag.
+  opening_act: {
+    id: 'opening_act', name: 'Opening Act',
+    lore: 'open with a bang.',
+    short: 'First bullet of every mag deals +100% damage',
+    tint: 0xf2c060, price: 4800,
+    apply(s) { s.openingActActive = true; },
+  },
+  // Last round in any mag deals double. Same flag pattern.
+  closing_act: {
+    id: 'closing_act', name: 'Closing Act',
+    lore: 'close with a bang.',
+    short: 'Last bullet of every mag deals +100% damage',
+    tint: 0xc04830, price: 4800,
+    apply(s) { s.closingActActive = true; },
+  },
+  // Synthetic — auto-granted by ArtifactCollection.acquire when both
+  // Opening Act and Closing Act are owned. Never appears in shop pools
+  // (synthetic flag) and isn't manually acquireable. Hold-fire past
+  // empty mag costs 3 HP/s; full-auto only.
+  magnum_opus: {
+    id: 'magnum_opus', name: 'Magnum Opus',
+    lore: 'perfection takes sacrifice.',
+    short: 'Hold-fire past empty on full-auto. 3 HP/s.',
+    tint: 0xe8e8ff, price: 0,
+    synthetic: true,
+    apply(s) { s.magnumOpusActive = true; },
+  },
+
+  // 4% lifesteal on ranged hits — mirrors the existing melee
+  // lifesteal that lives in derivedStats.lifestealMeleePercent.
+  vampires_mark: {
+    id: 'vampires_mark', name: "Vampire's Mark",
+    lore: 'Brand burned into your wrist. Drinks where it bites.',
+    short: 'Ranged hits heal 4% of damage dealt',
+    tint: 0x801818, price: 4400,
+    apply(s) { s.lifestealRangedPercent = (s.lifestealRangedPercent || 0) + 4; },
+  },
+
+  // +30% move speed while crouched. Routes through derivedStats.crouch-
+  // MoveBonus, which player.js multiplies into crouchSpeed each frame.
+  swift_shadows: {
+    id: 'swift_shadows', name: 'Swift Shadows',
+    lore: 'A thief\'s prayer. The patient never get caught.',
+    short: '+30% move speed while crouched',
+    tint: 0x303040, price: 4000,
+    apply(s) { s.crouchMoveBonus = (s.crouchMoveBonus || 1) * 1.30; },
+  },
+
+  // Player attacks (ranged hits AND melee swings — including quick
+  // melee while a gun is equipped) slow nearby enemies for 1s.
+  // Implemented via derivedStats.dervishSlowRadius — main.js sweeps
+  // gunmen within radius and stamps slowT.
+  dervish_prayer: {
+    id: 'dervish_prayer', name: 'Dervish Prayer',
+    lore: 'Whispered while spinning. Time hesitates around you.',
+    short: 'Attacks briefly slow enemies within 4m',
+    tint: 0xc8a0e8, price: 4500,
+    apply(s) {
+      s.dervishSlowRadius = Math.max(s.dervishSlowRadius || 0, 4);
+      s.dervishSlowDuration = Math.max(s.dervishSlowDuration || 0, 1.0);
+    },
+  },
+
+  // Reflect 25% of melee damage taken back as bleed on the attacker.
+  // Implemented in main.js onPlayerHit for melee enemies.
+  thread_cuts: {
+    id: 'thread_cuts', name: 'Thread Cuts Both Ways',
+    lore: 'A length of red string wrapped twice. The price of binding two things.',
+    short: 'Melee hits taken bleed the attacker for 25%',
+    tint: 0xb02040, price: 4500,
+    apply(s) { s.meleeReflectBleedPercent = Math.max(s.meleeReflectBleedPercent || 0, 25); },
+  },
+
+  // Cursed bell — flavor-cloaked nerf. Inspect text shows "???"; the
+  // real effect is +30% incoming damage and a buffed mythic-drop floor
+  // (3% → 6%). main.js damagePlayer + rollMythicDrop read the flags.
+  mourners_bell: {
+    id: 'mourners_bell', name: "Mourner's Bell",
+    lore: 'A quiet reminder of a life well lived.',
+    short: '???',
+    tint: 0x404048, price: 5500,
+    apply(s) {
+      s.incomingDmgMult = (s.incomingDmgMult || 1) * 1.30;
+      s.mythicDropChanceFloor = Math.max(s.mythicDropChanceFloor || 0, 0.06);
+    },
+  },
 };
 
 export const ALL_ARTIFACTS = Object.values(ARTIFACT_DEFS);
@@ -191,6 +284,14 @@ export class ArtifactCollection {
     if (!ARTIFACT_DEFS[id]) return false;
     if (this.owned.has(id)) return false;
     this.owned.add(id);
+    // Synth chain — owning both Acts auto-grants Magnum Opus. The
+    // synthetic isn't shoppable; this is the only acquisition path.
+    if ((id === 'opening_act' || id === 'closing_act')
+        && this.owned.has('opening_act')
+        && this.owned.has('closing_act')
+        && !this.owned.has('magnum_opus')) {
+      this.owned.add('magnum_opus');
+    }
     return true;
   }
   reset() { this.owned.clear(); }
