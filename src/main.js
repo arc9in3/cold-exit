@@ -33,7 +33,7 @@ import { getDevToolsEnabled, setDevToolsEnabled, getPlayerName, setPlayerName,
          getRerollUnlocked, setRerollUnlocked,
          MERCHANT_KINDS, MERCHANT_UPGRADE_MAX, REROLL_UNLOCK_COST,
          getCompletedEncounters, markEncounterDone,
-         getShrineTiers, setShrineTierPurchased,
+         getShrineTiers, setShrineTierPurchased, resetShrineTiersForRun,
          getMythicRunUnlocked, setMythicRunUnlocked } from './prefs.js';
 import { tunables } from './tunables.js';
 import {
@@ -657,6 +657,9 @@ function _resetEncounterCompletionForRun() {
   for (const def of Object.values(ENCOUNTER_DEFS || {})) {
     if (typeof def._completionsThisRun === 'number') def._completionsThisRun = 0;
   }
+  // Shrine tier purchases are scoped to the current run too — wipe
+  // them here so each fresh run gets all three tiers back.
+  resetShrineTiersForRun();
 }
 
 function startNewRun(weaponClass) {

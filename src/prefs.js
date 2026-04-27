@@ -163,23 +163,24 @@ export function resetEncounterCompletion(id) {
   _write(COMPLETED_ENCOUNTERS_KEY, [...set].sort());
 }
 
-// Shrine tiers — three independent purchases, each one-shot per save:
+// Shrine tiers — three independent purchases, each one-shot per RUN
+// (not per save). Tracked in-memory only so a fresh run resets every
+// tier. resetShrineTiersForRun() is called from main.js on startNewRun.
 //   tier 1 (500c)   → +5 max HP for the rest of the run
 //   tier 2 (5000c)  → unowned artifact scroll
 //   tier 3 (50000c) → guaranteed mythic weapon
 // Tracked separately from getCompletedEncounters so the room itself
-// can re-appear (until ALL tiers are claimed) while individual tiers
-// stay locked.
-const SHRINE_TIERS_KEY = 'tacticalrogue_shrine_tiers_v1';
+// can re-appear (until ALL tiers are claimed in the current run) while
+// individual tiers stay locked.
+let _shrineTiersThisRun = new Set();
 export function getShrineTiers() {
-  const arr = _read(SHRINE_TIERS_KEY, []);
-  return new Set(Array.isArray(arr) ? arr : []);
+  return new Set(_shrineTiersThisRun);
 }
 export function setShrineTierPurchased(tier) {
-  const set = getShrineTiers();
-  if (set.has(tier)) return;
-  set.add(tier);
-  _write(SHRINE_TIERS_KEY, [...set].sort());
+  _shrineTiersThisRun.add(tier);
+}
+export function resetShrineTiersForRun() {
+  _shrineTiersThisRun = new Set();
 }
 
 // Mythic-run unlock — flipped true when the player sells The Gift to
