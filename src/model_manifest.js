@@ -261,20 +261,26 @@ export const MODEL_ROTATION_OVERRIDE = {
   // Key -> { x, y, z } in radians. Replaces the default (0, π/2, 0).
 };
 
-// FBX paths whose in-hand orientation is correct under the DEFAULT
-// rotation (no mirror needed). Used as an exclusion list when
-// shouldMirrorInHand consults MIRROR_X_BY_NAME — the user manually
-// flagged these for tool/PNG mirror but in-hand they should NOT be
-// flipped (would put them backwards).
-export const IN_HAND_MIRROR_EXCLUDE = new Set([
-  'weapons/SM_Assault_Rifle_9x39.fbx',   // AS VAL
-  'weapons/SM_Police_Sniper_Rifle.fbx',  // VSS Vintorez
-]);
+// In-hand mirror rule, by FBX source pack. The lowpolyguns.zip pack
+// authors every weapon mesh muzzle-on-+X — under the default in-hand
+// yaw of +π/2, that points the muzzle along world -Z (backward). So
+// every lowpoly weapon needs scale.x = -1 in-hand. The animpic POLY
+// weapons pack (weapons/*) authors muzzle-on-(-X) — the default
+// yaw already points it +Z (forward), no mirror needed.
+//
+// This is an INDEPENDENT axis from the user's MIRROR_X_BY_NAME list
+// (which captures PNG / UI orientation per the user's manual tool
+// toggle). The pack rule for in-hand is uniform per pack and
+// doesn't need per-weapon exceptions.
+const IN_HAND_MIRROR_PACK_PREFIXES = [
+  'lowpolyguns/',
+  'lowpolyguns_accessories/',
+];
 export function shouldMirrorInHand(item) {
-  if (!shouldMirrorWeapon(item)) return false;
+  if (!item) return false;
   const path = MODEL_BY_WEAPON_NAME[item.baseName || item.name];
-  if (path && IN_HAND_MIRROR_EXCLUDE.has(path)) return false;
-  return true;
+  if (!path) return false;
+  return IN_HAND_MIRROR_PACK_PREFIXES.some(p => path.startsWith(p));
 }
 
 export function gripOffsetForModelPath(fullPath) {
