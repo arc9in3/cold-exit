@@ -1339,14 +1339,36 @@ export class Level {
     const roomD = b.maxZ - b.minZ;
     const area = roomW * roomD;
 
-    // Theme pool selection — small rooms get cozier themes, big rooms
-    // get warehouse/library. `boss` rooms favour warehouse or lobby for
-    // a dramatic silhouette.
+    // Theme pool selection — restricted by LAYOUT first, then by area.
+    // A hallway / corridor / partition layout doesn't have the floor
+    // shape to host a bedroom or living-room set; forcing those there
+    // is what produced the "bed in a hallway" reports. Utility-shape
+    // layouts get utility themes; only rectangular open-ish layouts
+    // are eligible for furnished-residential themes.
+    const utilityLayouts = new Set([
+      'hallway', 'corridor', 'partition', 'lshape', 'closet', 'split',
+      'zigzag', 'bunker', 'alcove', 'center-pit',
+    ]);
+    const isUtility = utilityLayouts.has(room.layout);
     let themes;
-    if (room.type === 'boss') themes = ['warehouse', 'lobby', 'office'];
-    else if (area < 30) themes = ['bedroom', 'lobby', 'kitchen'];
-    else if (area < 60) themes = ['bedroom', 'livingRoom', 'lobby', 'library', 'office', 'kitchen'];
-    else themes = ['warehouse', 'library', 'lobby', 'office'];
+    if (room.type === 'boss') {
+      themes = ['warehouse', 'lobby', 'office'];
+    } else if (isUtility) {
+      // Hallway-shaped + L-shaped + closet rooms are warehouses /
+      // offices only. No beds, no couches, no library reading nooks
+      // in a corridor.
+      themes = ['warehouse', 'office'];
+    } else if (area < 30) {
+      // Tiny open rooms — cozy themes only.
+      themes = ['bedroom', 'lobby', 'kitchen'];
+    } else if (area < 60) {
+      // Mid-size open rooms — broader pool, but only those that read
+      // as "a furnished room" in a square shape.
+      themes = ['bedroom', 'livingRoom', 'lobby', 'library', 'office', 'kitchen'];
+    } else {
+      // Large open rooms — public / utility themes.
+      themes = ['warehouse', 'library', 'lobby', 'office'];
+    }
     const theme = themes[Math.floor(Math.random() * themes.length)];
     room.theme = theme;
 
@@ -1843,18 +1865,32 @@ export class Level {
     }
 
     // -----------------------------------------------------------------
-    // Theme sprinkle — additive layer on top of the room-theme pass.
-    // Picks 2-3 props from the active level theme's propWeights so a
-    // hotel floor's "lobby" room gets planters + door frames, a
-    // garage's "warehouse" room gets pillars, a nightclub's
-    // "lounge" gets neon sticks, etc. Doesn't replace the room-
-    // theme furnishing — adds character on top.
+    // Theme sprinkle — ARCHITECTURAL / AMBIENCE ONLY. The level theme's
+    // propWeights is curated to skip furniture (props.js comment)
+    // because scattering beds / couches / bookshelves across every
+    // combat room produced visibly broken results: bed in a hallway,
+    // bookshelf floating mid-room. Furniture is locked to the per-
+    // room theme branch above; this sprinkle only places architectural
+    // dressing (pillars / planters / lamps / windows / vases / rugs /
+    // door frames / railings / neonSticks) plus the loot-container
+    // ambience kinds (locker / crate / barrel / pallet).
+    //
+    // Placement rules:
+    //   - Planters spawn in symmetric pairs flanking a door, OR in a
+    //     room corner. Never strewn in the middle.
+    //   - Pillars / railings / windows / neonSticks / doorFrames hug
+    //     the perimeter. No interior fallback — if the wall slot is
+    //     full, we just skip rather than dropping the prop in the
+    //     middle of the floor.
+    //   - Lamps + vases + rugs ARE allowed interior (small, decorative).
+    //   - Loot ambience (locker / crate / barrel / pallet) goes against
+    //     a wall first; falls back to interior only for crates / barrels
+    //     which read fine free-standing.
     // -----------------------------------------------------------------
-    if (this.theme && this.theme.propWeights) {
+    if (this.theme && this.theme.propWeights && room.type !== 'start') {
       const weights = this.theme.propWeights;
       const kinds = Object.keys(weights);
       if (kinds.length) {
-        // Pre-build the cumulative-weights array once for fast picks.
         let total = 0;
         const cumulative = kinds.map(k => (total += weights[k], total));
         const pickThemed = () => {
@@ -1864,56 +1900,143 @@ export class Level {
           }
           return kinds[kinds.length - 1];
         };
-        // 2-3 sprinkles per room. Boss rooms get one extra for
-        // weight; start rooms skip entirely (path is sacred).
-        if (room.type !== 'start') {
-          const count = (room.type === 'boss' ? 3 : 2)
-                      + (Math.random() < 0.4 ? 1 : 0);
-          for (let i = 0; i < count; i++) {
-            const kind = pickThemed();
-            // Pillars + railings + windows + neon sticks ALWAYS hug
-            // the perimeter (architectural logic). Living props (couch,
-            // table, planter, lamp, etc.) bias 70% toward the wall
-            // facing inward — leaves the room center clear for combat
-            // movement and AI pathing. Falls back to interior if the
-            // wall slot is full.
-            const wallOnly = (kind === 'pillar' || kind === 'railing'
-                          || kind === 'window' || kind === 'doorFrame'
-                          || kind === 'neonStick');
-            const tryWall = wallOnly || Math.random() < 0.70;
-            // Theme-sprinkle props that read as loot containers
-            // (lockers, crates, barrels, cabinets) get the same
-            // lootable roll as the room-theme pass. Everything else
-            // falls through to a plain placement.
-            const loot = LOOT_PROP_CONFIG[kind];
-            if (loot) {
-              if (tryWall) {
-                if (!placeLootable(kind, placeAlongWall) && !wallOnly) {
-                  placeLootable(kind, placeInterior);
-                }
-              } else {
-                if (!placeLootable(kind, placeInterior)) {
-                  placeLootable(kind, placeAlongWall);
-                }
-              }
-              continue;
+
+        // PERIMETER-ONLY — wall placement only, no interior fallback.
+        const PERIMETER_KINDS = new Set([
+          'pillar', 'railing', 'window', 'doorFrame', 'neonStick',
+        ]);
+        // Decorative interior-friendly kinds (small, low-impact).
+        const INTERIOR_OK = new Set(['lamp', 'vase', 'rug']);
+        // Loot ambience — wall-first, but crates / barrels are OK
+        // free-standing if the wall is full.
+        const LOOT_AMBIENCE = new Set(['locker', 'crate', 'barrel', 'pallet']);
+
+        // Symmetric door-flanking planters. Pick one of the room's
+        // doors; place a planter on each side along the inner-room
+        // axis perpendicular to the door normal. Reads as an entryway
+        // welcome motif instead of "random plant in the corridor."
+        const _flankDoorWithPlanters = () => {
+          const doors = this.obstacles.filter(o =>
+            o.userData.isDoor && o.userData.connects?.includes(room.id));
+          if (!doors.length) return false;
+          const door = doors[Math.floor(Math.random() * doors.length)];
+          const dx = door.userData.cx, dz = door.userData.cz;
+          // Door geometry width tells us which axis it spans.
+          const horiz = (door.geometry?.parameters?.width || 4)
+                      > (door.geometry?.parameters?.depth || 1.2);
+          const offset = 1.1;
+          const insetIntoRoom = 1.2;
+          const cx = (b.minX + b.maxX) / 2, cz = (b.minZ + b.maxZ) / 2;
+          // Direction inward (room centre relative to door).
+          const inDX = Math.sign(cx - dx);
+          const inDZ = Math.sign(cz - dz);
+          const slots = horiz
+            ? [
+                { x: dx - offset, z: dz + (inDZ || 1) * insetIntoRoom },
+                { x: dx + offset, z: dz + (inDZ || 1) * insetIntoRoom },
+              ]
+            : [
+                { x: dx + (inDX || 1) * insetIntoRoom, z: dz - offset },
+                { x: dx + (inDX || 1) * insetIntoRoom, z: dz + offset },
+              ];
+          let placed = 0;
+          for (const s of slots) {
+            const prop = buildProp('planter');
+            if (!prop) continue;
+            if (tooCloseToElev(s.x, s.z)) continue;
+            if (inKeepOut(s.x, s.z)) continue;
+            const radius = Math.max(prop.collision.w, prop.collision.d) * 0.7 + 0.4;
+            if (this._collidesAt(s.x, s.z, radius)) continue;
+            if (!_propFitsInBounds(prop, s.x, s.z, 0)) continue;
+            if (!_propFootprintFree(s.x, s.z, prop, 0)) continue;
+            prop.group.position.set(s.x, 0, s.z);
+            prop.group.rotation.y = 0;
+            if (this._registerProp(prop)) placed++;
+          }
+          return placed > 0;
+        };
+
+        // Corner planter — try each of the 4 room corners offset
+        // inward; first slot that fits wins. Falls back to a normal
+        // wall placement if every corner is blocked.
+        const _placeCornerPlanter = () => {
+          const inset = 1.5;
+          const corners = [
+            { x: b.minX + inset, z: b.minZ + inset },
+            { x: b.maxX - inset, z: b.minZ + inset },
+            { x: b.minX + inset, z: b.maxZ - inset },
+            { x: b.maxX - inset, z: b.maxZ - inset },
+          ].sort(() => Math.random() - 0.5);
+          for (const c of corners) {
+            const prop = buildProp('planter');
+            if (!prop) continue;
+            if (tooCloseToElev(c.x, c.z)) continue;
+            if (inKeepOut(c.x, c.z)) continue;
+            const radius = Math.max(prop.collision.w, prop.collision.d) * 0.7 + 0.4;
+            if (this._collidesAt(c.x, c.z, radius)) continue;
+            if (!_propFitsInBounds(prop, c.x, c.z, 0)) continue;
+            if (!_propFootprintFree(c.x, c.z, prop, 0)) continue;
+            prop.group.position.set(c.x, 0, c.z);
+            prop.group.rotation.y = 0;
+            if (this._registerProp(prop)) return true;
+          }
+          // Last resort — wall slot.
+          const prop = buildProp('planter');
+          return prop ? placeAlongWall(prop) : false;
+        };
+
+        // Pair planters on either side of one door before the random
+        // sprinkle runs — deliberate entryway dressing.
+        if ((weights.planter || 0) > 0 && Math.random() < 0.65) {
+          _flankDoorWithPlanters();
+        }
+
+        const count = (room.type === 'boss' ? 3 : 2)
+                    + (Math.random() < 0.4 ? 1 : 0);
+        for (let i = 0; i < count; i++) {
+          const kind = pickThemed();
+
+          if (kind === 'planter') {
+            // Planter: try a corner; fall back to a wall slot. Never
+            // drop interior.
+            _placeCornerPlanter();
+            continue;
+          }
+
+          if (PERIMETER_KINDS.has(kind)) {
+            // Wall-only. Silently skip if no slot.
+            const prop = buildProp(kind);
+            if (prop) placeAlongWall(prop);
+            continue;
+          }
+
+          if (LOOT_AMBIENCE.has(kind)) {
+            const wallTry = placeLootable(kind, placeAlongWall);
+            if (!wallTry && (kind === 'crate' || kind === 'barrel')) {
+              placeLootable(kind, placeInterior);
             }
+            continue;
+          }
+
+          if (INTERIOR_OK.has(kind)) {
             const prop = buildProp(kind);
             if (!prop) continue;
-            let placed = false;
-            if (tryWall) {
-              placed = placeAlongWall(prop);
-              if (!placed && !wallOnly) placed = placeInterior(prop);
-            } else {
-              placed = placeInterior(prop);
-              if (!placed) placed = placeAlongWall(prop);
-            }
-            void placed;
+            // Lamps + vases + rugs interior — no fallback to wall (a
+            // wall-mounted lamp reads odd in this catalog).
+            placeInterior(prop);
+            continue;
           }
+
+          // Anything else (shouldn't fire under the new whitelist) —
+          // wall-first, no fallback.
+          const prop = buildProp(kind);
+          if (prop) placeAlongWall(prop);
         }
       }
     }
   }
+
+
 
   // Register a built prop: add its group to the scene and, if it
   // carries a collision AABB, create an invisible collision proxy

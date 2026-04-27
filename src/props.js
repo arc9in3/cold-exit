@@ -807,9 +807,18 @@ export const PROP_BUILDERS = {
 // pass uses to bias which props show up. Phase 2 wires
 // `getLevelTheme(level.index)` to pick a theme per floor.
 //
-// `propWeights` is sparse — only entries present apply. A theme that
-// omits e.g. `bed` simply won't spawn beds. Higher numbers = more
-// frequent.
+// `propWeights` is the LEVEL-WIDE ambience sprinkle. STRICT POLICY:
+// only architectural / ambience kinds belong here — pillars, planters,
+// neonSticks, vases, rugs, doorFrames, railings, windows, locker /
+// crate / barrel / pallet. NEVER include furniture (bed, couch,
+// bookshelf, desk, table, chair, tv, nightstand, cabinet, coffeeTable)
+// in this list. Furniture is locked to the per-room theme pass
+// (_themeRoom in level.js) so a "bedroom" room is the ONLY place a
+// bed can spawn — putting `bed: 0.5` here scattered beds into
+// hallways and combat rooms across the entire level. Same for
+// couches and bookshelves.
+//
+// Higher weight = more frequent in the sprinkle.
 export const LEVEL_THEMES = {
   continental: {
     name: 'The Continental',
@@ -818,10 +827,9 @@ export const LEVEL_THEMES = {
     accent: 0xc9a464,
     ambientHex: 0xe8d8b0,
     propWeights: {
-      table: 1.0, chair: 1.2, couch: 0.8, coffeeTable: 0.8,
-      bed: 0.5, nightstand: 0.5, bookshelf: 0.7,
-      lamp: 1.0, planter: 0.7, doorFrame: 0.3,
-      rug: 0.6, vase: 0.5,
+      // Hotel / classical lobby ambience — no random furniture.
+      pillar: 0.6, planter: 1.0, lamp: 0.6,
+      vase: 0.5, rug: 0.5, doorFrame: 0.4,
     },
   },
   nightclub: {
@@ -831,9 +839,8 @@ export const LEVEL_THEMES = {
     accent: 0xd040a0,
     ambientHex: 0xb840d8,
     propWeights: {
-      bench: 1.2, table: 0.4, chair: 0.6, couch: 0.7,
-      neonStick: 1.4, lamp: 0.2,
-      doorFrame: 0.4, locker: 0.4, barrel: 0.4,
+      neonStick: 1.4, locker: 0.5, barrel: 0.5,
+      doorFrame: 0.4, lamp: 0.2, planter: 0.3,
     },
   },
   garage: {
@@ -854,9 +861,10 @@ export const LEVEL_THEMES = {
     accent: 0xc9a464,
     ambientHex: 0xeae0c0,
     propWeights: {
-      couch: 1.0, table: 1.0, coffeeTable: 0.8, chair: 1.0,
-      bed: 0.4, nightstand: 0.4, lamp: 1.0, tv: 0.5,
-      planter: 0.8, rug: 0.6, window: 0.7, doorFrame: 0.3,
+      // Refined skyrise — planters + windows + lamps; no random
+      // couches.
+      planter: 1.2, lamp: 0.9, window: 0.8,
+      rug: 0.5, vase: 0.4, doorFrame: 0.4, pillar: 0.3,
     },
   },
   rooftop: {
