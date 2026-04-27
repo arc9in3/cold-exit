@@ -203,7 +203,7 @@ import { OrbitControls } from 'three/addons/controls/OrbitControls.js';
 import { TransformControls } from 'three/addons/controls/TransformControls.js';
 import { FBXLoader } from 'three/addons/loaders/FBXLoader.js';
 import { buildRig } from '../src/actor_rig.js';
-import { MODEL_BY_WEAPON_NAME, gripOffsetForModelPath,
+import { MODEL_BY_WEAPON_NAME, MODEL_BY_ITEM_ID, gripOffsetForModelPath,
          rotationOverrideForModelPath, scaleForModelPath,
          shouldMirrorInHand } from '../src/model_manifest.js';
 import { tunables } from '../src/tunables.js';
@@ -1104,18 +1104,27 @@ function _makeInHandGroup(cls, len) {
 
 function _populateWeaponPicker() {
   const sel = document.getElementById('weapon-pick');
+  // Combined catalog: weapons keyed by name + item-id assets
+  // (attachments, throwables, tools, consumables) keyed by id. Both
+  // get exposed so the editor can preview anything the inventory
+  // could render. The picker `value` is the lookup key — name for
+  // weapons, id for item-id entries — and the loader resolves it.
   const groups = {};
   for (const [name, path] of Object.entries(MODEL_BY_WEAPON_NAME)) {
     const folder = path.split('/')[0];
-    (groups[folder] = groups[folder] || []).push({ name, path });
+    (groups[folder] = groups[folder] || []).push({ key: name, label: name, path });
+  }
+  for (const [id, path] of Object.entries(MODEL_BY_ITEM_ID || {})) {
+    const folder = path.split('/')[0];
+    (groups[folder] = groups[folder] || []).push({ key: id, label: id, path });
   }
   for (const folder of Object.keys(groups).sort()) {
     const grp = document.createElement('optgroup');
     grp.label = folder;
-    for (const { name } of groups[folder].sort((a, b) => a.name.localeCompare(b.name))) {
+    for (const { key, label } of groups[folder].sort((a, b) => a.label.localeCompare(b.label))) {
       const opt = document.createElement('option');
-      opt.value = name;
-      opt.textContent = name;
+      opt.value = key;
+      opt.textContent = label;
       grp.appendChild(opt);
     }
     sel.appendChild(grp);
@@ -1149,9 +1158,15 @@ document.getElementById('weapon-pick').addEventListener('change', (e) => {
     if (_muzzleObj?.parent) _muzzleObj.parent.remove(_muzzleObj);
   }
   if (!name) { applyPose(); return; }
-  const path = MODEL_BY_WEAPON_NAME[name];
+  // Lookup precedence: weapon-name first (so 'Benelli M4' resolves
+  // to the shotgun before any item-id collision), then item-id
+  // (att_*, thr_*, cons_*, junk_*).
+  const path = MODEL_BY_WEAPON_NAME[name] || (MODEL_BY_ITEM_ID && MODEL_BY_ITEM_ID[name]);
   if (!path) return;
   const url = MODEL_BASE + path;
+  // Tunable lookup only meaningful for weapon names. Item-id assets
+  // (attachments / throwables / tools) fall back to a small pistol-
+  // sized hand-held default — they're not posed against weapon stats.
   const w = _findTunable(name) || { class: 'pistol', muzzleLength: 0.5 };
   const cls = w.class || 'pistol';
   const len = w.muzzleLength ?? 0.5;
