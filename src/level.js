@@ -2320,6 +2320,25 @@ export class Level {
     return proxy;
   }
 
+  // Public — tear down a previously-registered encounter collider.
+  // Idempotent: safe to call on a proxy that was already removed (e.g.
+  // by level regen sweeping obstacles). Used by encounters whose NPC
+  // disappears mid-run (Quiet Man burst, Sleepy Beauty wake-up moves
+  // her position, etc.) so the leftover invisible collision box doesn't
+  // keep blocking the player + AI from walking through.
+  removeEncounterCollider(proxy) {
+    if (!proxy) return;
+    const idx = this.obstacles.indexOf(proxy);
+    if (idx >= 0) this.obstacles.splice(idx, 1);
+    if (proxy.parent) this.scene.remove(proxy);
+    proxy.geometry?.dispose?.();
+    if (proxy.material) {
+      if (Array.isArray(proxy.material)) proxy.material.forEach(m => m?.dispose?.());
+      else proxy.material.dispose?.();
+    }
+    if (typeof this._dirtySolid === 'function') this._dirtySolid();
+  }
+
   // Convert a placed prop into a lootable container. The prop visual
   // stays as-is; the player just gets a "Search desk" prompt instead
   // of "Open chest." Helps eliminate redundant chest clutter — a

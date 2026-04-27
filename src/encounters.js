@@ -1935,8 +1935,53 @@ export const ENCOUNTER_DEFS = {
     condition: (state) => state.levelIndex >= 3,
     spawn(scene, room, ctx) {
       const disc = _spawnFloorDisc(scene, room, this.floorColor);
-      // Spawn the standoff pair via main.js helper (uses dummies).
+      // Spawn the standoff pair via main.js helper (uses dummies for
+      // hit detection — body + head are the raycast targets).
       const pair = ctx.spawnCnCPair && ctx.spawnCnCPair(disc.cx, disc.cz, ctx.room);
+
+      // Visual upgrade — the bare primitives (capsule body + sphere
+      // head) read as practice dummies, not characters in a standoff.
+      // Hide the dummy meshes (transparent + opacity 0 keeps them as
+      // raycast targets) and parent a properly-built _buildSimpleNpc
+      // actor under each dummy's group so head shots / body shots
+      // still resolve via the dummy hittables list while the player
+      // sees real costumed characters.
+      if (pair) {
+        const _hideDummyMesh = (mesh) => {
+          if (!mesh || !mesh.material) return;
+          mesh.material.transparent = true;
+          mesh.material.opacity = 0;
+          mesh.material.depthWrite = false;
+        };
+        // Gunman — black coat, pistol-grip pose, full height.
+        if (pair.gunman?.group) {
+          _hideDummyMesh(pair.gunman.body);
+          _hideDummyMesh(pair.gunman.head);
+          const npc = _buildSimpleNpc({
+            bodyColor: 0x18181a, headColor: 0xc8a070,
+            accentColor: 0x404048, pantsColor: 0x18181a,
+            bootColor: 0x080808, height: 1.88,
+          });
+          pair.gunman.group.add(npc);
+        }
+        // Kneeler — earth-tones, slight forward tilt + shorter actor
+        // for "begging on his knees" silhouette. Undo the dummy
+        // group's prior 0.6× squash since we're showing a real-sized
+        // actor that already encodes the kneeling height.
+        if (pair.kneeler?.group) {
+          if (pair.kneeler.group.scale) pair.kneeler.group.scale.set(1, 1, 1);
+          _hideDummyMesh(pair.kneeler.body);
+          _hideDummyMesh(pair.kneeler.head);
+          const npc = _buildSimpleNpc({
+            bodyColor: 0x6a4030, headColor: 0xd8b890,
+            accentColor: 0x8a5040, pantsColor: 0x3a2a18,
+            bootColor: 0x18120a, height: 1.25,
+          });
+          npc.rotation.x = -0.30;        // forward tilt for begging pose
+          pair.kneeler.group.add(npc);
+        }
+      }
+
       const label = _makeLabelSprite('CHOICES AND CONSEQUENCES', '#c0c8d8');
       label.position.set(disc.cx, 2.8, disc.cz);
       scene.add(label);
@@ -2819,6 +2864,14 @@ export const ENCOUNTER_DEFS = {
         if (s.npc) s.npc.visible = false;
         if (s.crown) s.crown.visible = false;
         if (s.brim) s.brim.visible = false;
+        // Tear down the auto-collider — the Quiet Man's invisible
+        // 0.65×0.65 proxy was sitting around after the burst because
+        // hiding the visual mesh doesn't touch the obstacles list. The
+        // player + AI would still bump into him post-explosion.
+        if (s._collider && ctx.level?.removeEncounterCollider) {
+          ctx.level.removeEncounterCollider(s._collider);
+          s._collider = null;
+        }
         const earnings = s.presses * 100;
         if (earnings > 0 && ctx.awardPlayerCredits) {
           ctx.awardPlayerCredits(earnings);
