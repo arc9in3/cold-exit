@@ -2433,7 +2433,11 @@ export const ENCOUNTER_DEFS = {
       const label = _makeLabelSprite('THE WISHING WELL', '#a8e0e8');
       label.position.set(disc.cx, 2.2, disc.cz);
       scene.add(label);
-      return { wellGroup, label, disc, complete: false };
+      // Stone well rim is solid — block walk-through.
+      const _wellCollider = ctx.level?.addEncounterCollider
+        ? ctx.level.addEncounterCollider(disc.cx, disc.cz, 1.4, 1.4, 1.0)
+        : null;
+      return { wellGroup, label, disc, complete: false, _wellCollider };
     },
     tick(_dt, ctx) {
       const s = ctx.state;
@@ -2583,7 +2587,11 @@ export const ENCOUNTER_DEFS = {
       const label = _makeLabelSprite('PATH OF FIRE', '#ffa080');
       label.position.set(disc.cx, 2.6, disc.cz);
       scene.add(label);
-      return { brazier, flame, flameLight, label, disc, lit: false, wobbleT: 0, complete: false };
+      const _brazierCollider = ctx.level?.addEncounterCollider
+        ? ctx.level.addEncounterCollider(disc.cx, disc.cz, 1.0, 1.0, 1.4)
+        : null;
+      return { brazier, flame, flameLight, label, disc, lit: false, wobbleT: 0,
+               complete: false, _brazierCollider };
     },
     tick(dt, ctx) {
       const s = ctx.state;
