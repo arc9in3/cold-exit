@@ -1069,6 +1069,130 @@ export const ARMOR_DEFS = {
     tint: 0x3a4828, durability: dur(70, 0.9), pockets: 1,
     description: '+2 pockets, +15% throw range', rarity: 'uncommon',
     apply(s) { s.throwRangeMult = (s.throwRangeMult || 1) * 1.15; } },
+
+  // --- Identity-fill batch (Apr 27) — doubles pants/boots/hands/belt
+  // counts to broaden the build space. Each piece anchors a build
+  // archetype we didn't previously have a clean slot for: silent /
+  // pocket-rich / gold / regen / penetration / throwables / balanced.
+
+  // Pants — silent / regen / heavy / pocket
+  pants_stalker: { id: 'pants_stalker', name: 'Stalker Pants', slot: 'pants', type: 'gear',
+    tint: 0x232a30, durability: dur(70, 0.92), pockets: 1,
+    description: '−18% detection, −4% move', rarity: 'rare',
+    apply(s) { s.stealthMult *= 0.82; s.moveSpeedMult *= 0.96; } },
+  pants_marathon: { id: 'pants_marathon', name: 'Marathon Pants', slot: 'pants', type: 'gear',
+    tint: 0x2c4438, durability: dur(60, 0.93), pockets: 1,
+    description: '+25 max stam, +18% stam regen', rarity: 'rare',
+    apply(s) { s.maxStaminaBonus += 25; s.staminaRegenMult *= 1.18; } },
+  pants_greaved: { id: 'pants_greaved', name: 'Greaved Pants', slot: 'pants', type: 'armor',
+    tint: 0x322a2a, reduction: 0.22, speedMult: 0.92, durability: dur(140, 0.86), pockets: 1,
+    description: '−22% dmg, −8% move', rarity: 'epic' },
+  pants_cargo: { id: 'pants_cargo', name: 'Cargo Pants', slot: 'pants', type: 'gear',
+    tint: 0x52442a, durability: dur(55, 0.94), pockets: 2,
+    description: '+2 pockets, +6% credits', rarity: 'common',
+    apply(s) {
+      s.pocketsBonus += 2;
+      s.creditDropMult = (s.creditDropMult || 1) * 1.06;
+    } },
+
+  // Boots — silent / gold / melee / hearing
+  boots_tracker: { id: 'boots_tracker', name: 'Tracker Boots', slot: 'boots', type: 'gear',
+    tint: 0x4a3a26, durability: dur(60, 0.92),
+    description: 'Sense enemies +6m, +3% move', rarity: 'common',
+    apply(s) { s.hearingRange += 6; s.hearingAlpha += 0.05; s.moveSpeedMult *= 1.03; } },
+  boots_steeltoe: { id: 'boots_steeltoe', name: 'Steel-Toe Boots', slot: 'boots', type: 'armor',
+    tint: 0x404448, reduction: 0.10, durability: dur(120, 0.88),
+    description: '−10% dmg, +20% melee dmg, +10% knockback', rarity: 'uncommon',
+    apply(s) { s.meleeDmgMult *= 1.20; s.knockbackMult *= 1.10; } },
+  boots_treasure: { id: 'boots_treasure', name: 'Treasure Treads', slot: 'boots', type: 'gear',
+    tint: 0x8a6a30, durability: dur(70, 0.9),
+    description: '+12% credits from kills, +4% move', rarity: 'rare',
+    apply(s) {
+      s.creditDropMult = (s.creditDropMult || 1) * 1.12;
+      s.moveSpeedMult *= 1.04;
+    } },
+  boots_dancer: { id: 'boots_dancer', name: 'Dancer Soles', slot: 'boots', type: 'gear',
+    tint: 0x9a3a6a, durability: dur(45, 0.96),
+    description: '+8% move, +12% stam regen, −15% melee stam cost', rarity: 'rare',
+    apply(s) {
+      s.moveSpeedMult *= 1.08;
+      s.staminaRegenMult *= 1.12;
+      s.meleeStaminaMult *= 0.85;
+    } },
+
+  // Hands — reload / crit / silent / gold / regen
+  hands_loader: { id: 'hands_loader', name: 'Loader Gloves', slot: 'hands', type: 'gear',
+    tint: 0x483a28, durability: dur(50, 0.92),
+    description: '+18% reload', rarity: 'common',
+    apply(s) { s.reloadSpeedMult *= 1.18; } },
+  hands_hunter: { id: 'hands_hunter', name: 'Hunter Gloves', slot: 'hands', type: 'gear',
+    tint: 0x3a2a1a, durability: dur(55, 0.90),
+    description: '+5% crit, +15% crit dmg', rarity: 'rare',
+    apply(s) { s.critChance += 0.05; s.critDamageMult += 0.15; } },
+  hands_wraith: { id: 'hands_wraith', name: 'Wraith Wraps', slot: 'hands', type: 'gear',
+    tint: 0x1c1822, durability: dur(45, 0.93),
+    description: '−20% detection while still', rarity: 'rare',
+    apply(s) { s.stealthMult *= 0.80; } },
+  hands_pickpocket: { id: 'hands_pickpocket', name: 'Pickpocket Gloves', slot: 'hands', type: 'gear',
+    tint: 0x2a1a10, durability: dur(40, 0.95),
+    description: '+18% credits from kills, +1 pocket', rarity: 'rare',
+    apply(s) {
+      s.creditDropMult = (s.creditDropMult || 1) * 1.18;
+      s.pocketsBonus += 1;
+    } },
+  hands_stim: { id: 'hands_stim', name: 'Stim Gloves', slot: 'hands', type: 'gear',
+    tint: 0xc04a4a, durability: dur(40, 0.94),
+    description: '+25% health regen, −1.0s regen delay', rarity: 'uncommon',
+    apply(s) {
+      s.healthRegenMult *= 1.25;
+      s.healthRegenDelayBonus -= 1.0;
+    } },
+
+  // Belts — pocket / gold / penetration / throwable / balanced / silent
+  belt_bandolier: { id: 'belt_bandolier', name: 'Pocket Bandolier', slot: 'belt', type: 'gear',
+    tint: 0x603822, durability: dur(75, 0.91), pockets: 2,
+    gridLayout: { w: 3, h: 1 },
+    description: '+3 pockets · 3 rig slots', rarity: 'common',
+    apply(s) { s.pocketsBonus += 3; } },
+  belt_coinpouch: { id: 'belt_coinpouch', name: 'Coin Pouch', slot: 'belt', type: 'gear',
+    tint: 0xa07028, durability: dur(60, 0.93), pockets: 1,
+    description: '+15% credits from kills, −5% shop prices', rarity: 'uncommon',
+    apply(s) {
+      s.creditDropMult = (s.creditDropMult || 1) * 1.15;
+      s.shopPriceMult = Math.min(s.shopPriceMult || 1, 0.95);
+    } },
+  belt_penetrator: { id: 'belt_penetrator', name: 'Penetrator Belt', slot: 'belt', type: 'gear',
+    tint: 0x2a3a4a, durability: dur(85, 0.88), pockets: 1,
+    description: 'Bullets pierce +1 enemy, +5% ranged dmg', rarity: 'rare',
+    apply(s) {
+      s.penetration += 1;
+      s.rangedDmgMult *= 1.05;
+    } },
+  belt_demolition: { id: 'belt_demolition', name: 'Demolition Belt', slot: 'belt', type: 'gear',
+    tint: 0x4a3018, durability: dur(80, 0.88), pockets: 1,
+    description: '+1 throwable charge, −15% throwable cooldown', rarity: 'rare',
+    apply(s) {
+      s.throwableChargeBonus += 1;
+      s.throwableCooldownMult *= 0.85;
+    } },
+  belt_generalist: { id: 'belt_generalist', name: "Generalist's Belt", slot: 'belt', type: 'gear',
+    tint: 0x4a4a3a, durability: dur(85, 0.90), pockets: 2,
+    gridLayout: { w: 3, h: 2 },
+    description: '+4% to all — move, reload, stam regen, crit · 6 rig slots',
+    rarity: 'rare',
+    apply(s) {
+      s.moveSpeedMult *= 1.04;
+      s.reloadSpeedMult *= 1.04;
+      s.staminaRegenMult *= 1.04;
+      s.critChance += 0.04;
+    } },
+  belt_silent: { id: 'belt_silent', name: 'Silent Belt', slot: 'belt', type: 'gear',
+    tint: 0x18181a, durability: dur(70, 0.91), pockets: 1,
+    description: '−18% detection, +6% move while crouched', rarity: 'rare',
+    apply(s) {
+      s.stealthMult *= 0.82;
+      s.crouchMoveBonus *= 1.06;
+    } },
 };
 
 // Relic-style gear that goes in body slots (not chest armor).
