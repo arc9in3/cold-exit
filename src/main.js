@@ -1658,11 +1658,14 @@ function regenerateLevel() {
   // blood pools, gore, impacts, explosions, etc. These persisted
   // across level transitions and accumulated across a long run.
   if (combat.clearAll) combat.clearAll();
-  // Pity-timer encounter chance — base 30% + 10% per consecutive
-  // encounter-less level, capped at 95%. The post-resolution loop
-  // below resets / increments the counter based on whether an
-  // encounter actually placed.
-  level._encounterChance = Math.min(0.95, 0.30 + (runStats.encounterChanceBonus || 0));
+  // Pity-timer encounter chance — hard floor 30%, +20% per consecutive
+  // encounter-less level (set in the post-resolution loop below),
+  // capped at 95%. The Math.max guarantees the floor even if the
+  // bonus drifts negative for any reason.
+  level._encounterChance = Math.max(
+    0.30,
+    Math.min(0.95, 0.30 + (runStats.encounterChanceBonus || 0)),
+  );
   level.generate();
   // Loot scaling context — every random armor/gear/weapon roll reads
   // this to gate slot drops, scale affix ranges, and weight rarity
