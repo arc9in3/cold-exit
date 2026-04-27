@@ -1336,6 +1336,10 @@ export function createPlayer(scene) {
       handedness: state.handedness,
       dashing: state.mode === MODE.DASH || state.mode === MODE.SLIDE,
       rifleHold,
+      // Specific class drives sub-variants of the rifle hold —
+      // rifles get a fully-extended support arm across the body;
+      // SMG / shotgun / sniper / lmg keep the bent foregrip pose.
+      weaponClass: cls2,
       blockPose,
       meleeStance,
       attacking: state.attack.phase !== 'idle',

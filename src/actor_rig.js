@@ -1412,17 +1412,29 @@ export function updateAnim(rig, state, dt) {
     weaponArm.shoulder.pivot.rotation.x = rifleDomShoulder;
     weaponArm.shoulder.pivot.rotation.z = rifleDomYaw;
     weaponArm.elbow.rotation.x = rifleDomElbow;
-    // Support arm — reaches forward to land the hand on the front
-    // of the gun (foregrip / handguard). Less elbow bend than
-    // before (was −1.40, now −0.85) so the arm extends further
-    // forward instead of folding back. Slight INWARD yaw (+0.18)
-    // brings the hand toward the gun's centerline without yanking
-    // the elbow into the torso. The slight downward shoulder
-    // pitch keeps the hand at gun-height (chest level), not
-    // floating in the air above.
-    const rifleSupShoulder = -1.45 + (a.aimBlend * -0.10) - armLeanComp;
-    const rifleSupYaw      = 0.18 * supportYawSign;     // mild inward
-    const rifleSupElbow    = -0.85;
+    // Support arm — two sub-variants:
+    //
+    //   RIFLE (proper long-gun reach):
+    //     Arm fully extended (elbow nearly straight) and angled
+    //     ACROSS the body so the support hand ends up out at the
+    //     front of the dominant shoulder. The rifle's handguard
+    //     extends well past the chest, so the support arm needs
+    //     reach + cross-body angle to actually meet it.
+    //
+    //   Other long guns (SMG / shotgun / sniper / lmg):
+    //     Bent foregrip pose — elbow folds back, hand sits closer
+    //     to the receiver. Better for shorter weapons whose
+    //     handguard doesn't extend as far.
+    let rifleSupShoulder, rifleSupYaw, rifleSupElbow;
+    if (state.weaponClass === 'rifle') {
+      rifleSupShoulder = -1.55 + (a.aimBlend * -0.05) - armLeanComp;
+      rifleSupYaw      = 0.55 * supportYawSign;   // strong cross-body
+      rifleSupElbow    = -0.20;                   // nearly straight
+    } else {
+      rifleSupShoulder = -1.45 + (a.aimBlend * -0.10) - armLeanComp;
+      rifleSupYaw      = 0.18 * supportYawSign;
+      rifleSupElbow    = -0.85;
+    }
     supportArm.shoulder.pivot.rotation.x = rifleSupShoulder;
     supportArm.shoulder.pivot.rotation.z = rifleSupYaw;
     supportArm.elbow.rotation.x = rifleSupElbow;
