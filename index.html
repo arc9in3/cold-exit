@@ -1648,6 +1648,15 @@
       background: rgba(200, 80, 80, 0.22);
       border: 1px solid rgba(200, 80, 80, 0.8);
     }
+    /* Attachment-on-weapon hover glow — overlays the weapon's full
+       footprint when a compatible attachment is being dragged onto it.
+       Drop will auto-equip into the matching slot (swap if occupied). */
+    .pocket-preview.attach-glow {
+      background: rgba(240, 200, 80, 0.18);
+      border: 2px solid rgba(240, 200, 80, 0.95);
+      box-shadow: 0 0 14px rgba(240, 200, 80, 0.85),
+                  inset 0 0 12px rgba(240, 200, 80, 0.45);
+    }
     #inv-backpack-heading { margin-top: 6px; }
     .inv-cell {
       position: relative;

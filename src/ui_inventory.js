@@ -721,6 +721,28 @@ export class InventoryUI {
       const x = Math.floor((clientX - rect.left) / (CELL_PX + CELL_GAP));
       const y = Math.floor((clientY - rect.top)  / (CELL_PX + CELL_GAP));
       if (x < 0 || y < 0 || x >= blk.grid.w || y >= blk.grid.h) return;
+      // === ATTACHMENT auto-attach intercept ===
+      // Drop an attachment onto a weapon cell → equip into the
+      // matching slot. attachToWeapon swaps the existing slot's
+      // attachment back to inventory if there's one, falling back to
+      // the standard placement on incompatible drops or if the swap
+      // can't fit.
+      if (item.type === 'attachment') {
+        const targetEntry = blk.grid.at(x, y);
+        const targetItem = targetEntry?.item;
+        if (targetItem && (targetItem.type === 'ranged' || targetItem.type === 'melee')
+            && targetItem.attachments && (item.slot in targetItem.attachments)) {
+          srcGrid.remove(item);
+          const ok = this.inventory.attachToWeapon(targetItem, item.slot, item);
+          if (!ok) {
+            // Couldn't fit the displaced attachment — restore source
+            // placement so nothing is lost.
+            this.inventory.add(item);
+          }
+          this.render();
+          return;
+        }
+      }
       const ok = this.inventory.moveInGrid(item, blk.grid, x, y, false);
       if (!ok && srcGrid !== blk.grid) {
         // Target cell occupied — remove from source then autoPlace
@@ -871,6 +893,28 @@ export class InventoryUI {
     this._clearCellPreview();
     const d = this._gridDrag || this.getDragState();
     if (!d || !d.item) return;
+    // Attachment-on-weapon glow — when dragging an attachment over
+    // a weapon cell whose attachments object exposes the matching
+    // slot, paint a gold preview spanning the weapon's full footprint
+    // instead of the standard 1×1 ok/bad cell. Drop will auto-equip.
+    if (d.item.type === 'attachment') {
+      const e = grid.at(x, y);
+      const w = e?.item;
+      if (w && (w.type === 'ranged' || w.type === 'melee')
+          && w.attachments && (d.item.slot in w.attachments)) {
+        const preview = document.createElement('div');
+        preview.className = 'pocket-preview attach-glow';
+        const itemW = Math.max(1, (w.w | 0) || 1);
+        const itemH = Math.max(1, (w.h | 0) || 1);
+        preview.style.left   = `${e.x * (CELL_PX + CELL_GAP)}px`;
+        preview.style.top    = `${e.y * (CELL_PX + CELL_GAP)}px`;
+        preview.style.width  = `${itemW * CELL_PX + (itemW - 1) * CELL_GAP}px`;
+        preview.style.height = `${itemH * CELL_PX + (itemH - 1) * CELL_GAP}px`;
+        wrap.appendChild(preview);
+        this._previewEl = preview;
+        return;
+      }
+    }
     const ignore = (this._gridDrag && this.inventory.gridOf(d.item) === grid)
       ? this._gridDrag.entry : null;
     const ok = grid.canPlace(d.item, x, y, false, ignore);
