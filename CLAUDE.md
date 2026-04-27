@@ -48,3 +48,29 @@ runs (e.g. via `/loop`) should still branch.
 If the user asks for one of these and you're in lane, say so and
 suggest delegating: "this is a Gemini-shaped audit; want me to scaffold
 the prompt for it?" Don't push back if they want you to do it anyway.
+
+## You are the pre-merge reviewer for Codex / Gemini branches
+
+When the user asks for a branch review, run `git diff main..origin/<branch>`
+and check:
+- Files touched stay in that AI's lane
+- No edits to encounters / inventory / rig from Codex (their lane is
+  algorithm modules + tools)
+- No code edits at all from Gemini on audit tasks (audits are
+  read+report only)
+- Co-author trailer present on each commit
+- Branch is actually pushed (`git branch -r` shows it)
+- Benchmark output included for any Codex perf claim
+- Critical-interactions list in PROJECT.md isn't violated (the
+  rig instancer + corpse bake + ghost mode triangle especially)
+
+Give the user a thumbs-up/down + risk notes + suggested merge order.
+**You do NOT review your own work.** That's the user's call (or
+`/ultrareview`). Don't write self-approving review messages.
+
+## When you're the active session
+
+You ship to main directly (the historical pattern). Skip the branch
+flow for in-session iterative work — that's faster and matches how
+the user runs the project. Background Claude (e.g. `/loop`) still
+branches per PROJECT.md.

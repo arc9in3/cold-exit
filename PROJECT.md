@@ -94,22 +94,112 @@ Three AIs work on this repo. Each owns a lane; lanes are aspirational
 | **Gemini** | Codebase audits, consistency reviews, dead-code sweeps, large-context refactors |
 | **Codex (GPT)** | Algorithm-heavy modules (spatial hash, AI pathing, math-heavy VFX), isolated unit work |
 
+### Who arbitrates merges
+
+The user makes every merge decision. No AI auto-merges to `main`.
+
+For pre-merge review on branches you did NOT author:
+- **Codex / Gemini branches** → reviewed by Claude when the user asks.
+  Claude reads the diff, sanity-checks against the "critical
+  interactions" list above, gives a thumbs-up/down with risk notes.
+- **Claude branches** → reviewed by the user (or `/ultrareview`).
+  Claude does NOT review its own work.
+
+In all cases the user is the final gate.
+
+### REQUIRED pre-edit sequence
+
+Before you write a single line, ALWAYS run this sequence. Failures
+here have caused multi-branch contamination in past sessions.
+
+```bash
+# 1. Verify clean tree on a known branch.
+git status                   # MUST be clean. If not, STOP and ask.
+git branch --show-current    # MUST be `main`. If not, STOP and ask.
+
+# 2. Pull the latest main.
+git fetch origin
+git pull --ff-only origin main
+
+# 3. Create + check out YOUR branch. Both steps in one command:
+git checkout -b <your-prefix>/<task-slug>
+# Example:  git checkout -b codex/spatial-hash
+#           git checkout -b gemini/audit-encounter-ctx
+#           git checkout -b claude/molotov-rework
+
+# 4. CONFIRM the checkout actually happened.
+git branch --show-current    # MUST print your new branch name.
+
+# 5. (Optional) claim a lock for hot-file work — see locks below.
+
+# 6. Edit. Commit early — every meaningful step gets a commit.
+
+# 7. PUSH IMMEDIATELY after the first commit so work isn't local-only.
+git push -u origin <your-prefix>/<task-slug>
+
+# 8. Continue committing + pushing as you work.
+```
+
+**`git checkout -b` is non-negotiable.** Past failure mode: an AI ran
+`git branch <name>` (creates a pointer but doesn't switch) and then
+edited files. The edits landed on whatever branch was previously
+checked out — usually somebody else's work in progress. The `-b` flag
+to `checkout` does both steps atomically; use it.
+
+**Push immediately after first commit** so your work is on the remote
+even if your shell crashes or another AI nukes the working tree.
+
 ### Branch + commit etiquette
 
-- Each AI commits to its own branch: `claude/<task>`, `gemini/<task>`,
+- Branch names are owner-prefixed: `claude/<task>`, `gemini/<task>`,
   `codex/<task>`. **Never commit directly to `main` from an AI tool**
   except for the active session the user is driving.
 - The active session can ship to main (the historical pattern in this
   repo). Background AIs always branch.
 - One change per commit. Co-author trailer required.
+- One task = one branch. Don't pile multiple unrelated changes onto
+  the same branch.
+
+### Verification before declaring success
+
+Before you tell the user "I shipped the X task," run these and verify:
+
+```bash
+# Your branch exists locally AND on remote.
+git branch --show-current
+git rev-parse --abbrev-ref --symbolic-full-name @{upstream}
+
+# Your commits are present.
+git log origin/main..HEAD --oneline
+
+# Working tree is clean (no untracked or modified files).
+git status
+```
+
+Tell the user the actual state in your handoff message:
+- Branch name
+- Commit shas + one-line summaries
+- That you verified the branch is pushed
+- Any deferred work or open questions
+
+Don't say "I created the branch and wrote the report" if you only ran
+`git branch <name>` and dropped a file in the working tree. That's
+how the encounter-ctx audit got lost on Apr 27 — fixed by hand.
 
 ### Shared task queue
 
 `tasks.md` at repo root holds the open backlog. Each entry has an
 owner (`claude` / `gemini` / `codex` / `unassigned`) and a status
-(`open` / `in-progress` / `done`). Pick from `unassigned` if your
-lane fits; flip to `in-progress` before you start; flip to `done`
-when shipped.
+(`open` / `in-progress` / `done`).
+
+**Read `tasks.md` BEFORE you start work.** Specifically:
+- Confirm no other AI has already claimed this task (status
+  `in-progress` with a different owner).
+- Flip your task to `in-progress` and assign yourself in the SAME
+  commit you start work on, so the queue stays accurate.
+- Flip to `done` when the branch is pushed AND the user has merged.
+  Don't mark it `done` while still on your branch — it isn't done
+  until it's in main.
 
 ### File locks
 
@@ -121,11 +211,25 @@ don't conflict. Touch a file in `.locks/` named after the area:
 .locks/combat.lock            # combat.js, projectiles.js
 .locks/main.lock              # src/main.js
 .locks/level.lock             # level.js, level generation
+.locks/rig.lock               # actor_rig.js, rig_instancer.js, gunman.js, melee_enemy.js
+.locks/inventory.lock         # inventory.js, attachments.js, gear / loot
+.locks/ui.lock                # ui_*.js
 ```
 
 Lock file content is plain text: `<branch>:<one-line description>`.
-Release by deleting the file. If a lock is older than 24h, it's
-stale — assume the previous agent crashed and reclaim it.
+Release by deleting the file when you commit. If a lock is older
+than 24h, it's stale — assume the previous agent crashed and reclaim
+it.
+
+Check for an existing lock BEFORE editing:
+
+```bash
+ls .locks/<area>.lock 2>/dev/null && echo "LOCKED — read it before continuing"
+cat .locks/<area>.lock 2>/dev/null
+```
+
+If a lock exists and isn't yours, STOP and tell the user. Don't try
+to coordinate around it silently.
 
 This is crude but it works when 2-3 agents are running in parallel.
 Skip it for single-file fixes that take less than a minute.

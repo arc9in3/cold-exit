@@ -32,17 +32,67 @@ reasoning earns its keep. Specifically:
 
 ## How to work in this repo
 
+**Read PROJECT.md's "REQUIRED pre-edit sequence" before doing
+anything.** It's there to prevent past failure modes (uncommitted
+work lost across branch switches, branch pointers without checkouts).
+Use `git checkout -b` for branch creation — always.
+
 - **Branch convention:** `codex/<task-name>`. Never push to `main`
   from a Codex run; the user merges from your branch after review.
 - **One change per commit.** Co-author trailer:
   ```
   Co-Authored-By: GPT (Codex) <noreply@openai.com>
   ```
+- **Push after the first commit.** `git push -u origin codex/<task>`.
+  Don't sit on local-only commits — they're at risk and invisible to
+  the user.
 - **Deploy when shipping a measurable change** (the user wants to
   test it): `npx wrangler pages deploy . --project-name=cold-exit --commit-dirty=true`.
   Skip the deploy on pure-refactor commits with no behavioural change.
 - **Lock the file area** before long edits. See `PROJECT.md`'s lock
   convention. Skip for sub-minute single-file fixes.
+
+### Self-correct on perf regressions — required
+
+Algorithm tasks here often turn into "is this actually faster?"
+**Always write a benchmark for perf claims, run it, and read the
+wall-time numbers honestly.** Reduction in candidate-check counts
+is NOT the same as reduction in wall-clock time. Map.get / Set ops
+are slower per-op than V8-inlined array iteration; small N often
+loses the rebuild cost.
+
+If your benchmark shows a regression vs naive (slower wall time),
+the right move is one of:
+
+1. **Diagnose the regression** — find the dominant cost (rebuild
+   per frame? Map allocation? redundant filtering?) and try a fix.
+2. **Cache the rebuild** — if level data is static between regens
+   (it is — see level.js `_solidDirty`), rebuild only on dirty.
+3. **Threshold the optimization** — only use the data structure
+   when N is large enough to win.
+4. **Close the branch** — write a one-paragraph commit message
+   explaining why the premise didn't pan out, retain the benchmark
+   in `tools/`, mark the task closed in tasks.md.
+
+Past behaviour you got right: `dd27c9c "Close spatial hash task
+after benchmark"` self-corrected an honest regression. Keep doing
+that. Don't ship a slower implementation because "the algorithm is
+correct" — perf changes are wall-time-or-bust.
+
+### Verification before declaring success
+
+See PROJECT.md. Specifically for Codex:
+
+```bash
+# After your last commit on a perf branch, run the benchmark fresh.
+node tools/<your-bench>.mjs
+# Numbers go in the final commit's message OR a short note in
+# the user-facing handoff.
+
+# Confirm pushed.
+git rev-parse --abbrev-ref --symbolic-full-name @{upstream}
+git log origin/main..HEAD --oneline
+```
 
 ## Strengths to lean into
 

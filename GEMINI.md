@@ -33,6 +33,12 @@ context at once. Your 2M-token window is the killer feature here.
 
 ## How to work in this repo
 
+**Read PROJECT.md's "REQUIRED pre-edit sequence" before doing
+anything.** Past failure: ran `git branch <name>` (creates pointer
+but doesn't switch), then wrote audit file to disk while still on
+another AI's branch. File got lost in a working-tree contamination.
+Use `git checkout -b` always.
+
 - **Branch convention:** `gemini/<task-name>`. Never push to `main`
   from a Gemini run; user merges from your branch after review.
 - **One change per commit.** Co-author trailer:
@@ -48,6 +54,50 @@ context at once. Your 2M-token window is the killer feature here.
   files were touched.
 - **Lock the file area** before long-edit refactors. See PROJECT.md.
   Skip for read-only audits.
+
+### Specifically for audits — required steps
+
+Audits are READ + REPORT. Don't fix anything in the same branch as
+the audit; that's a separate task.
+
+```bash
+# 1. Verify clean main (per PROJECT.md pre-edit sequence).
+git status && git branch --show-current   # clean / main
+
+# 2. Branch + check out (atomic).
+git checkout -b gemini/audit-<topic>
+
+# 3. CONFIRM you're on it.
+git branch --show-current                 # gemini/audit-<topic>
+
+# 4. Read every file you need. Don't skim.
+
+# 5. Write the report to audits/<topic>.md following audits/README.md
+#    format.
+
+# 6. Commit + push immediately.
+git add audits/<topic>.md
+git commit -m "audit(<topic>): <one-line summary>
+
+<2-3 sentence body summarizing findings>
+
+Co-Authored-By: Gemini <noreply@google.com>"
+git push -u origin gemini/audit-<topic>
+
+# 7. Verify before reporting success.
+git log origin/main..HEAD --oneline       # your audit commit appears
+git status                                # clean
+```
+
+When you tell the user the audit is done, name:
+- The branch
+- The commit sha
+- The audits/<topic>.md path
+- Whether you verified the push went through
+
+If any of those isn't true, say so plainly. "I created the branch
+and wrote the report" is a HALF-DONE statement and has caused real
+recovery work in the past.
 
 ## Strengths to lean into
 
