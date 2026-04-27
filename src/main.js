@@ -8033,6 +8033,44 @@ function _tickBurnFlames(dt) {
   }
 }
 
+// Use a specific consumable / throwable from anywhere in the player's
+// inventory (E hotkey while hovering an item in the inventory grid).
+// Mirrors tryUseMedkit's stack-aware decrement: if the item is a
+// stack of N > 1, peel one off and apply; otherwise remove the item
+// from its backpack slot. Throwables stay (applyConsumable spends a
+// charge + starts cooldown). Returns true if the item was usable.
+function useInventoryItem(item) {
+  if (!item) return false;
+  if (item.type === 'throwable') {
+    applyConsumable(item);
+    inventoryUI.render();
+    renderActionBar();
+    return true;
+  }
+  if (item.type !== 'consumable') return false;
+  const stackCount = (item.count | 0) || 1;
+  if (stackCount > 1) {
+    item.count = stackCount - 1;
+    inventory._bump?.();
+    applyConsumable({ ...item, count: 1 });
+  } else {
+    // Walk the inventory grids and remove the matching item. The
+    // flat `backpack` view covers pockets / rig / backpack so a
+    // single indexOf finds it regardless of which container holds it.
+    const idx = inventory.backpack.indexOf(item);
+    if (idx < 0) return false;
+    const taken = inventory.takeFromBackpack(idx);
+    if (taken) applyConsumable(taken);
+  }
+  inventoryUI.render();
+  renderActionBar();
+  return true;
+}
+// Exposed for ui_inventory.js E-key hotkey — bound there so the
+// keydown listener can stay scoped to "inventory open" without main
+// having to know about the hover state.
+window.__useInventoryItem = useInventoryItem;
+
 function tryUseMedkit() {
   const found = inventory.findFirstConsumable(it => it.useEffect?.kind === 'heal');
   if (!found) return;

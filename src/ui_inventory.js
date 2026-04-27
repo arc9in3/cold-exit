@@ -86,6 +86,20 @@ export class InventoryUI {
       if (e.repeat) return;
       const ae = document.activeElement;
       if (ae && (ae.tagName === 'INPUT' || ae.tagName === 'TEXTAREA' || ae.isContentEditable)) return;
+      // E while hovering a consumable / throwable → use it in place.
+      // Saves the player from dragging a bandage to the action bar
+      // just to eat it. Throwables spend a charge per press.
+      if (e.code === 'KeyE' && this._hoveredItem) {
+        const it = this._hoveredItem;
+        if (it.type === 'consumable' || it.type === 'throwable') {
+          if (window.__useInventoryItem?.(it)) {
+            e.preventDefault();
+            e.stopPropagation();
+            this.render();
+          }
+        }
+        return;
+      }
       let slotIdx = -1;
       switch (e.code) {
         case 'Digit1': slotIdx = 0; break;
