@@ -3,7 +3,8 @@ import { tunables } from './tunables.js';
 import { modelForItem, gripOffsetForModelPath, rotationOverrideForModelPath, shouldMirrorInHand, scaleForModelPath } from './model_manifest.js';
 import { getCharacterStyle } from './prefs.js';
 import { loadModelClone, fitToRadius } from './gltf_cache.js';
-import { buildRig, initAnim, updateAnim, pokeHit, pokeRecoil, pokeDeath } from './actor_rig.js';
+import { buildRig, initAnim, updateAnim, pokeHit, pokeRecoil, pokeDeath,
+         RIFLE_WEAPON_HIP, RIFLE_WEAPON_AIM } from './actor_rig.js';
 import { buildMeleePrimitive } from './melee_primitives.js';
 
 // Isometric camera is rotated 45° around Y. Map input directions so W goes
@@ -15,6 +16,7 @@ const RIGHT = new THREE.Vector3(1, 0, -1).normalize();
 // chest world-position read. Consumed synchronously inside the same
 // function so reuse is safe across frames.
 const _aimChestScratch = new THREE.Vector3();
+const _muzzleTipScratch = new THREE.Vector3();
 
 // Movement modes. Only one is active at a time.
 const MODE = {
@@ -1349,6 +1351,51 @@ export function createPlayer(scene) {
       aimYaw: state.chestTwist || 0,
       aimPitch,
     }, dt);
+
+    // --- rifle weapon-offset overlay (per-frame) ---------------------
+    // Rotates / nudges gunMesh + inHandModel + muzzle on top of the
+    // class-default position laid down in setWeapon. Hip ↔ aim values
+    // come from RIFLE_WEAPON_{HIP,AIM} (authored in tools/pose_editor)
+    // and lerp by aimBlend. Mirror across YZ for left-handed actors.
+    // Applied here (not actor_rig.js) because gunMesh / muzzle live
+    // outside the rig — they're parented to a shoulder anchor by
+    // setWeapon and we don't want the rig module to know about them.
+    if (cls2 === 'rifle' && rig.anim) {
+      const ab = rig.anim.aimBlend ?? 0;
+      const hb = 1 - ab;
+      const m  = state.handedness === 'left' ? -1 : 1;
+      const lerp = (h, x) => h * hb + x * ab;
+      const wlen = (state.equipped?.muzzleLength ?? 0.5);
+      const wsScale = WEAPON_SCALE;
+      // Class-default base position / rotation set by setWeapon for
+      // shouldered rifles. We rebuild them here so the offset is
+      // additive even after weapon swaps.
+      const baseGunZ = (0.1 + wlen / 2) * wsScale;
+      const baseMuzZ = (0.1 + wlen)     * wsScale;
+      const px = lerp(RIFLE_WEAPON_HIP.px, RIFLE_WEAPON_AIM.px) * m;
+      const py = lerp(RIFLE_WEAPON_HIP.py, RIFLE_WEAPON_AIM.py);
+      const pz = lerp(RIFLE_WEAPON_HIP.pz, RIFLE_WEAPON_AIM.pz);
+      const rx = lerp(RIFLE_WEAPON_HIP.rx, RIFLE_WEAPON_AIM.rx);
+      const ry = lerp(RIFLE_WEAPON_HIP.ry, RIFLE_WEAPON_AIM.ry) * m;
+      const rz = lerp(RIFLE_WEAPON_HIP.rz, RIFLE_WEAPON_AIM.rz) * m;
+      gunMesh.position.set(px, py, baseGunZ + pz);
+      gunMesh.rotation.set(rx, ry, rz);
+      inHandModel.position.copy(gunMesh.position);
+      inHandModel.rotation.copy(gunMesh.rotation);
+      // Muzzle is parented to the SAME anchor as gunMesh, not as a
+      // child of gunMesh — so its world position needs the gun's
+      // rotation applied to the tip-offset vector before adding to
+      // the gun pivot. Result: muzzle marker tracks the gun barrel
+      // tip wherever the gun swings.
+      _muzzleTipScratch.set(0, 0, (wlen / 2) * wsScale);
+      _muzzleTipScratch.applyEuler(gunMesh.rotation);
+      muzzle.position.set(
+        gunMesh.position.x + _muzzleTipScratch.x,
+        gunMesh.position.y + _muzzleTipScratch.y,
+        gunMesh.position.z + _muzzleTipScratch.z,
+      );
+      muzzle.rotation.copy(gunMesh.rotation);
+    }
 
     // Virtual firing origin — always at chest height of the rig so
     // bullets don't follow the hand's pose. Keeps shots straight at
