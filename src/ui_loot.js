@@ -589,8 +589,22 @@ export class LootUI {
     let r;
     if (item.type === 'relic' && this.onAcquireArtifact(item)) {
       r = { placed: true, slot: 'artifact' };
-    } else {
+    } else if (item.type === 'consumable' || (item.type === 'junk' && item.stackMax)) {
+      // Stackable types still route through inventory.add so they
+      // merge into existing stacks. Empty-slot auto-equip doesn't
+      // apply to consumables / junk anyway.
       r = this.inventory.add(item);
+    } else {
+      // Weapons / armor / gear / throwables / attachments: force the
+      // pickup into the bag, never auto-equip into an empty slot.
+      // Player chooses what to equip via shift+right-click or drag.
+      const placed = this.inventory.autoPlaceAnywhere(item);
+      if (placed) {
+        this.inventory._bump();
+        r = { placed: true, pocketEntry: placed.entry };
+      } else {
+        r = { placed: false };
+      }
     }
     if (r.placed) {
       const refs = this.target._groundRefs;
