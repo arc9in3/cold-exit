@@ -26,20 +26,45 @@
                 border-radius: 4px; font-size: 11px; max-width: 60vw;
                 display: none; z-index: 1000; }
   #panel {
-    flex: 0 0 360px; background: #1b1d22; border-left: 1px solid #2a2d34;
+    flex: 0 0 420px; background: #1b1d22; border-left: 1px solid #2a2d34;
     padding: 12px; overflow-y: auto; box-sizing: border-box;
   }
   h1 { margin: 0 0 12px 0; color: #c9a87a; font-size: 14px; font-weight: 600; }
   h2 { margin: 14px 0 6px 0; color: #c9a87a; font-size: 12px;
        border-bottom: 1px solid #2a2d34; padding-bottom: 4px; font-weight: 500; }
-  label { display: block; margin: 6px 0 2px; color: #9aa; font-size: 11px; }
+  h3 { margin: 10px 0 4px 0; color: #b0c0d0; font-size: 11px;
+       text-transform: uppercase; letter-spacing: 0.04em; font-weight: 500; }
+  label { display: block; margin: 4px 0 1px; color: #9aa; font-size: 10px; }
   select, input[type=range] {
     width: 100%; box-sizing: border-box;
     background: #0f1014; color: #ddd; border: 1px solid #2a2d34;
     padding: 4px 8px; border-radius: 3px; font: inherit;
   }
-  .row { display: flex; gap: 6px; align-items: center; }
-  .row span { color: #f1d9a8; font-size: 11px; min-width: 50px; text-align: right; }
+  input[type=range] { padding: 0; }
+  .slider-row { display: grid; grid-template-columns: 16px 1fr 42px;
+                gap: 4px; align-items: center; margin: 1px 0; }
+  .slider-row .axis { color: #c9a87a; font-size: 10px; text-align: center; }
+  .slider-row .val  { color: #f1d9a8; font-size: 10px; text-align: right;
+                      font-variant-numeric: tabular-nums; }
+  .joint-block { margin-bottom: 8px; padding: 6px; background: #15171b;
+                 border: 1px solid #20232a; border-radius: 3px; }
+  .joint-block .title { display: flex; justify-content: space-between;
+                        align-items: baseline; margin-bottom: 4px; }
+  .joint-block .title .name { color: #b0c0d0; font-size: 11px; font-weight: 500; }
+  .joint-block .title .reset { color: #6a7a8a; font-size: 10px;
+                               cursor: pointer; user-select: none;
+                               text-decoration: underline; }
+  .joint-block .title .reset:hover { color: #b0c0d0; }
+  .six-grid { display: grid; grid-template-columns: 1fr 1fr;
+              gap: 2px 8px; }
+  .six-grid .col-title { color: #6a7a8a; font-size: 9px;
+                         text-transform: uppercase; text-align: center;
+                         border-bottom: 1px solid #20232a;
+                         padding-bottom: 1px; margin-bottom: 2px; }
+  .mode-toggle { display: flex; gap: 4px; margin: 8px 0; }
+  .mode-toggle button { flex: 1; margin: 0; }
+  .mode-toggle button.active { background: #4a6a3a; border-color: #5a8a4a;
+                               color: #fff; }
   button { background: #2a2d34; color: #ddd; border: 1px solid #3a3d44;
            padding: 6px 12px; border-radius: 3px; font: inherit;
            cursor: pointer; margin-top: 8px; width: 100%; }
@@ -75,6 +100,11 @@
     </select>
     <button id="reset-class">Reset to current preset defaults</button>
 
+    <div class="mode-toggle">
+      <button id="mode-hip" class="active">HIP (idle)</button>
+      <button id="mode-aim">AIM (ADS)</button>
+    </div>
+
     <label style="margin-top:10px">Optional: load a real weapon FBX</label>
     <select id="weapon-pick">
       <option value="">— none —</option>
@@ -82,7 +112,8 @@
     <div class="legend" style="font-size:10px">
       Loads the chosen weapon's FBX with the SAME transforms it gets
       in-game (per-class scale, pack-scale, mirror, rotation override,
-      grip offset). Helps you align the hand to the actual gun.
+      grip offset). Weapon sliders below offset the FBX from that
+      baseline.
     </div>
 
     <div class="legend">
@@ -91,35 +122,23 @@
       <div>Drag the canvas to orbit. Scroll to zoom.</div>
     </div>
 
-    <h2>Dominant arm (trigger)</h2>
-    <label>Shoulder pitch (X) <span id="dom-shoulder-x-v">-1.05</span></label>
-    <input type="range" id="dom-shoulder-x" min="-3.14" max="0" step="0.01" value="-1.05">
-    <label>Shoulder yaw (Z) <span id="dom-shoulder-z-v">-0.12</span></label>
-    <input type="range" id="dom-shoulder-z" min="-1.5" max="1.5" step="0.01" value="-0.12">
-    <label>Elbow bend (X) <span id="dom-elbow-x-v">-1.70</span></label>
-    <input type="range" id="dom-elbow-x" min="-3.14" max="0" step="0.01" value="-1.70">
+    <h2>Aim direction (preview)</h2>
+    <div class="slider-row">
+      <span class="axis">Y</span>
+      <input type="range" id="aim-yaw" min="-1.57" max="1.57" step="0.01" value="0">
+      <span class="val" id="aim-yaw-v">0.00</span>
+    </div>
+    <div class="slider-row">
+      <span class="axis">X</span>
+      <input type="range" id="aim-pitch" min="-0.6" max="0.6" step="0.01" value="0">
+      <span class="val" id="aim-pitch-v">0.00</span>
+    </div>
 
-    <h2>Support arm</h2>
-    <label>Shoulder pitch (X) <span id="sup-shoulder-x-v">-1.55</span></label>
-    <input type="range" id="sup-shoulder-x" min="-3.14" max="0" step="0.01" value="-1.55">
-    <label>Shoulder yaw (Z) <span id="sup-shoulder-z-v">0.55</span></label>
-    <input type="range" id="sup-shoulder-z" min="-1.5" max="1.5" step="0.01" value="0.55">
-    <label>Elbow bend (X) <span id="sup-elbow-x-v">-0.20</span></label>
-    <input type="range" id="sup-elbow-x" min="-3.14" max="0" step="0.01" value="-0.20">
+    <h2 id="joints-heading">Joints — HIP</h2>
+    <div id="joints"></div>
 
-    <h2>Body</h2>
-    <label>Chest pitch (X) <span id="chest-x-v">0</span></label>
-    <input type="range" id="chest-x" min="-1" max="1" step="0.01" value="0">
-    <label>Chest yaw (Y) — body blade <span id="chest-y-v">-0.30</span></label>
-    <input type="range" id="chest-y" min="-1" max="1" step="0.01" value="-0.30">
-    <label>Head pitch (X) <span id="head-x-v">0</span></label>
-    <input type="range" id="head-x" min="-1" max="1" step="0.01" value="0">
-
-    <h2>Aim direction (drives bullet vector)</h2>
-    <label>Aim yaw (Y) <span id="aim-yaw-v">0</span></label>
-    <input type="range" id="aim-yaw" min="-1.57" max="1.57" step="0.01" value="0">
-    <label>Aim pitch (X) <span id="aim-pitch-v">0</span></label>
-    <input type="range" id="aim-pitch" min="-0.6" max="0.6" step="0.01" value="0">
+    <h2 id="weapon-heading">Weapon offset — HIP</h2>
+    <div id="weapon-block"></div>
 
     <h2>Save</h2>
     <button id="save" class="primary">Download pose JSON</button>
@@ -184,9 +203,6 @@ const resize = () => {
   }
 };
 stage.appendChild(renderer.domElement);
-// Keep the renderer locked to the actual stage size — covers initial
-// layout settle, panel-toggle, mobile rotation, and any flex
-// reflow that would otherwise leave the canvas at the wrong size.
 new ResizeObserver(() => resize()).observe(stage);
 
 const scene = new THREE.Scene();
@@ -202,20 +218,16 @@ scene.add(new THREE.AmbientLight(0xffffff, 0.55));
 const key = new THREE.DirectionalLight(0xffffff, 1.1); key.position.set(3, 5, 2); scene.add(key);
 const fill = new THREE.DirectionalLight(0x8fbaff, 0.35); fill.position.set(-3, 2, -1); scene.add(fill);
 
-// Ground reference grid + circle so the user can read the floor.
 const grid = new THREE.GridHelper(6, 12, 0x2a2d34, 0x222428);
 scene.add(grid);
 const axes = new THREE.AxesHelper(0.5);
 scene.add(axes);
 
 // ---------- rig ---------------------------------------------------
-// Build a rig WITHOUT the animation system — we'll drive joint
-// rotations manually from the sliders. Skip initAnim entirely.
 const rig = buildRig({ toon: false });
 scene.add(rig.group);
 rig.group.position.y = 0;
 
-// Bullet origin marker (fire origin sphere) + aim direction arrow.
 const fireOriginMat = new THREE.MeshBasicMaterial({ color: 0x50c8ff });
 const fireOriginMarker = new THREE.Mesh(
   new THREE.SphereGeometry(0.04, 12, 8), fireOriginMat,
@@ -227,8 +239,6 @@ const arrowOrigin = new THREE.Vector3(0, 1.4, 0);
 const aimArrow = new THREE.ArrowHelper(arrowDir, arrowOrigin, 2.0, 0xff5050, 0.10, 0.06);
 scene.add(aimArrow);
 
-// Tag every visible primitive in the rig with shadow-friendly mats so
-// the body reads cleanly under the directional lights.
 rig.group.traverse(o => {
   if (o.isMesh && o.material) {
     o.material.flatShading = false;
@@ -236,151 +246,339 @@ rig.group.traverse(o => {
   }
 });
 
-// ---------- presets -----------------------------------------------
-// Class-default poses pulled from actor_rig.js's rifleHold block +
-// per-class sub-variants. Pistol uses a derived two-handed stance
-// that doesn't currently exist in actor_rig as its own branch — the
-// editor lets us author one.
-const PRESETS = {
-  pistol: {
-    domShoulderX: -1.20, domShoulderZ: -0.10, domElbowX: -1.20,
-    supShoulderX: -1.20, supShoulderZ:  0.40, supElbowX: -1.20,
-    chestX: 0, chestY: -0.20, headX: 0,
-  },
-  smg: {
-    domShoulderX: -1.05, domShoulderZ: -0.12, domElbowX: -1.70,
-    supShoulderX: -1.45, supShoulderZ:  0.18, supElbowX: -0.85,
-    chestX: 0, chestY: -0.30, headX: 0,
-  },
-  rifle: {
-    domShoulderX: -1.05, domShoulderZ: -0.12, domElbowX: -1.70,
-    supShoulderX: -1.55, supShoulderZ:  0.55, supElbowX: -0.20,
-    chestX: 0, chestY: -0.30, headX: 0,
-  },
-  shotgun: {
-    domShoulderX: -1.05, domShoulderZ: -0.12, domElbowX: -1.70,
-    supShoulderX: -1.45, supShoulderZ:  0.18, supElbowX: -0.85,
-    chestX: 0, chestY: -0.30, headX: 0,
-  },
-  sniper: {
-    domShoulderX: -1.05, domShoulderZ: -0.12, domElbowX: -1.70,
-    supShoulderX: -1.45, supShoulderZ:  0.18, supElbowX: -0.85,
-    chestX: 0, chestY: -0.30, headX: 0,
-  },
-  lmg: {
-    domShoulderX: -1.05, domShoulderZ: -0.12, domElbowX: -1.70,
-    supShoulderX: -1.45, supShoulderZ:  0.18, supElbowX: -0.85,
-    chestX: 0, chestY: -0.30, headX: 0,
-  },
-  melee: {
-    domShoulderX: -1.40, domShoulderZ:  0.15, domElbowX: -1.10,
-    supShoulderX: -0.40, supShoulderZ: -0.10, supElbowX: -0.40,
-    chestX: 0.05, chestY: -0.10, headX: 0,
-  },
-};
-
 // ---------- handedness --------------------------------------------
-// Match actor_rig.js exactly. For right-handed: weaponArm = rightArm,
-// supportArm = leftArm, and the YAW sign for BOTH arms is +1
-// (supportYawSign in the game). I previously flipped the dominant
-// arm via dominantYawSign = -1 — that was wrong; the game multiplies
-// dominant shoulder.z by supportYawSign too. Result of the bug: the
-// dominant arm crossed inward, both hands wrapped the gun's back
-// instead of one trigger / one foregrip.
+// Match actor_rig.js: dominant arm yaw also multiplies by supportYawSign
+// (rifleDomYaw = -0.12 * supportYawSign). See game pipeline notes.
 const handed = 'right';
 const weaponArm  = handed === 'right' ? rig.rightArm : rig.leftArm;
 const supportArm = handed === 'right' ? rig.leftArm  : rig.rightArm;
 const supportYawSign = handed === 'right' ? 1 : -1;
-// Same sign — see actor_rig.js: rifleDomYaw = -0.12 * supportYawSign.
 const dominantYawSign = supportYawSign;
 
-// ---------- pose application --------------------------------------
-function applyPose(p) {
-  weaponArm.shoulder.pivot.rotation.x = p.domShoulderX;
-  weaponArm.shoulder.pivot.rotation.z = p.domShoulderZ * dominantYawSign;
-  weaponArm.elbow.rotation.x = p.domElbowX;
-  supportArm.shoulder.pivot.rotation.x = p.supShoulderX;
-  supportArm.shoulder.pivot.rotation.z = p.supShoulderZ * supportYawSign;
-  supportArm.elbow.rotation.x = p.supElbowX;
-  rig.chest.rotation.x = p.chestX;
-  rig.chest.rotation.y = p.chestY;
-  rig.head.rotation.x = p.headX;
+// ---------- joints ------------------------------------------------
+// Every controllable joint exposed by the rig. yawSign mirrors the
+// game's supportYawSign multiplier so the slider value the user
+// sees matches what authoring code in actor_rig.js will read back.
+const JOINTS = [
+  { key: 'hips',        label: 'Hips (whole-body lean)', target: () => rig.hips,                 yawSign: 1 },
+  { key: 'stomach',     label: 'Stomach (torso sway)',   target: () => rig.stomach,              yawSign: 1 },
+  { key: 'chest',       label: 'Chest (upper spine)',    target: () => rig.chest,                yawSign: 1 },
+  { key: 'neck',        label: 'Neck',                   target: () => rig.neck,                 yawSign: 1 },
+  { key: 'head',        label: 'Head',                   target: () => rig.head,                 yawSign: 1 },
+  { key: 'domShoulder', label: 'Dom shoulder',           target: () => weaponArm.shoulder.pivot, yawSign: dominantYawSign },
+  { key: 'domElbow',    label: 'Dom elbow',              target: () => weaponArm.elbow,          yawSign: 1 },
+  { key: 'domWrist',    label: 'Dom wrist',              target: () => weaponArm.wrist,          yawSign: 1 },
+  { key: 'supShoulder', label: 'Sup shoulder',           target: () => supportArm.shoulder.pivot, yawSign: supportYawSign },
+  { key: 'supElbow',    label: 'Sup elbow',              target: () => supportArm.elbow,         yawSign: 1 },
+  { key: 'supWrist',    label: 'Sup wrist',              target: () => supportArm.wrist,         yawSign: 1 },
+];
 
-  // Fire origin — must match the game EXACTLY. player.js builds
-  // playerInfo.fireOrigin from `body.getWorldPosition()` where
-  // `body = rig.chestMesh`. NOT the shoulder anchor — bullets
-  // come from chest center regardless of which arm holds the gun.
+// Capture the rig's authored base position for every joint exactly
+// once. Position sliders apply as deltas on top of this baseline so
+// "0" always means "rig default" instead of "joint at world origin".
+const _basePos = {};
+for (const j of JOINTS) {
+  const t = j.target();
+  _basePos[j.key] = t ? { x: t.position.x, y: t.position.y, z: t.position.z }
+                      : { x: 0, y: 0, z: 0 };
+}
+
+// Slider field shape — six axes per joint, raw user-facing values.
+const FIELDS = ['rx', 'ry', 'rz', 'px', 'py', 'pz'];
+const FIELD_LABELS = { rx: 'rot X', ry: 'rot Y', rz: 'rot Z',
+                       px: 'pos X', py: 'pos Y', pz: 'pos Z' };
+const FIELD_MIN = { rx: -3.14, ry: -3.14, rz: -3.14,
+                    px: -0.5, py: -0.5, pz: -0.5 };
+const FIELD_MAX = { rx:  3.14, ry:  3.14, rz:  3.14,
+                    px:  0.5, py:  0.5, pz:  0.5 };
+
+const ZERO_JOINT = () => ({ rx: 0, ry: 0, rz: 0, px: 0, py: 0, pz: 0 });
+
+// ---------- presets -----------------------------------------------
+// Class-default poses pulled from actor_rig.js's rifleHold block. Aim
+// variant seeds same-as-hip; user tunes the difference.
+function _zeroFullPose() {
+  const j = {};
+  for (const J of JOINTS) j[J.key] = ZERO_JOINT();
+  return { joints: j, weapon: ZERO_JOINT() };
+}
+function _seed(cls, hipOverrides) {
+  const hip = _zeroFullPose();
+  Object.assign(hip.joints, hipOverrides);
+  // Aim defaults match hip — the user authors the difference in the
+  // editor and saves both modes at once.
+  const aim = JSON.parse(JSON.stringify(hip));
+  return { hip, aim };
+}
+
+const PRESETS = {
+  pistol: _seed('pistol', {
+    domShoulder: { rx: -1.20, ry: 0, rz: -0.10, px: 0, py: 0, pz: 0 },
+    domElbow:    { rx: -1.20, ry: 0, rz:  0,    px: 0, py: 0, pz: 0 },
+    supShoulder: { rx: -1.20, ry: 0, rz:  0.40, px: 0, py: 0, pz: 0 },
+    supElbow:    { rx: -1.20, ry: 0, rz:  0,    px: 0, py: 0, pz: 0 },
+    chest:       { rx:  0,    ry: -0.20, rz: 0, px: 0, py: 0, pz: 0 },
+  }),
+  smg: _seed('smg', {
+    domShoulder: { rx: -1.05, ry: 0, rz: -0.12, px: 0, py: 0, pz: 0 },
+    domElbow:    { rx: -1.70, ry: 0, rz:  0,    px: 0, py: 0, pz: 0 },
+    supShoulder: { rx: -1.45, ry: 0, rz:  0.18, px: 0, py: 0, pz: 0 },
+    supElbow:    { rx: -0.85, ry: 0, rz:  0,    px: 0, py: 0, pz: 0 },
+    chest:       { rx:  0,    ry: -0.30, rz: 0, px: 0, py: 0, pz: 0 },
+  }),
+  rifle: _seed('rifle', {
+    domShoulder: { rx: -1.05, ry: 0, rz: -0.12, px: 0, py: 0, pz: 0 },
+    domElbow:    { rx: -1.70, ry: 0, rz:  0,    px: 0, py: 0, pz: 0 },
+    supShoulder: { rx: -1.55, ry: 0, rz:  0.55, px: 0, py: 0, pz: 0 },
+    supElbow:    { rx: -0.20, ry: 0, rz:  0,    px: 0, py: 0, pz: 0 },
+    chest:       { rx:  0,    ry: -0.30, rz: 0, px: 0, py: 0, pz: 0 },
+  }),
+  shotgun: _seed('shotgun', {
+    domShoulder: { rx: -1.05, ry: 0, rz: -0.12, px: 0, py: 0, pz: 0 },
+    domElbow:    { rx: -1.70, ry: 0, rz:  0,    px: 0, py: 0, pz: 0 },
+    supShoulder: { rx: -1.45, ry: 0, rz:  0.18, px: 0, py: 0, pz: 0 },
+    supElbow:    { rx: -0.85, ry: 0, rz:  0,    px: 0, py: 0, pz: 0 },
+    chest:       { rx:  0,    ry: -0.30, rz: 0, px: 0, py: 0, pz: 0 },
+  }),
+  sniper: _seed('sniper', {
+    domShoulder: { rx: -1.05, ry: 0, rz: -0.12, px: 0, py: 0, pz: 0 },
+    domElbow:    { rx: -1.70, ry: 0, rz:  0,    px: 0, py: 0, pz: 0 },
+    supShoulder: { rx: -1.45, ry: 0, rz:  0.18, px: 0, py: 0, pz: 0 },
+    supElbow:    { rx: -0.85, ry: 0, rz:  0,    px: 0, py: 0, pz: 0 },
+    chest:       { rx:  0,    ry: -0.30, rz: 0, px: 0, py: 0, pz: 0 },
+  }),
+  lmg: _seed('lmg', {
+    domShoulder: { rx: -1.05, ry: 0, rz: -0.12, px: 0, py: 0, pz: 0 },
+    domElbow:    { rx: -1.70, ry: 0, rz:  0,    px: 0, py: 0, pz: 0 },
+    supShoulder: { rx: -1.45, ry: 0, rz:  0.18, px: 0, py: 0, pz: 0 },
+    supElbow:    { rx: -0.85, ry: 0, rz:  0,    px: 0, py: 0, pz: 0 },
+    chest:       { rx:  0,    ry: -0.30, rz: 0, px: 0, py: 0, pz: 0 },
+  }),
+  melee: _seed('melee', {
+    domShoulder: { rx: -1.40, ry: 0, rz:  0.15, px: 0, py: 0, pz: 0 },
+    domElbow:    { rx: -1.10, ry: 0, rz:  0,    px: 0, py: 0, pz: 0 },
+    supShoulder: { rx: -0.40, ry: 0, rz: -0.10, px: 0, py: 0, pz: 0 },
+    supElbow:    { rx: -0.40, ry: 0, rz:  0,    px: 0, py: 0, pz: 0 },
+    chest:       { rx:  0.05, ry: -0.10, rz: 0, px: 0, py: 0, pz: 0 },
+  }),
+};
+
+// Live edit buffer — what the UI reflects and what gets saved.
+let pose = JSON.parse(JSON.stringify(PRESETS.rifle));
+let mode = 'hip';   // 'hip' | 'aim'
+
+// ---------- panel build -------------------------------------------
+// Build per-joint slider blocks programmatically so adding a new
+// joint = adding one line to JOINTS, no HTML edits.
+const jointsWrap = document.getElementById('joints');
+const weaponWrap = document.getElementById('weapon-block');
+
+function _buildSliderRow(id, field) {
+  const row = document.createElement('div');
+  row.className = 'slider-row';
+  row.innerHTML = `
+    <span class="axis">${field[1].toUpperCase()}</span>
+    <input type="range" id="${id}-${field}"
+           min="${FIELD_MIN[field]}" max="${FIELD_MAX[field]}"
+           step="0.01" value="0">
+    <span class="val" id="${id}-${field}-v">0.00</span>
+  `;
+  return row;
+}
+
+function _buildJointBlock(id, label) {
+  const block = document.createElement('div');
+  block.className = 'joint-block';
+  const title = document.createElement('div');
+  title.className = 'title';
+  title.innerHTML = `<span class="name">${label}</span>
+                     <span class="reset" data-reset="${id}">reset</span>`;
+  block.appendChild(title);
+  const grid = document.createElement('div');
+  grid.className = 'six-grid';
+  // Two columns: rotation (rx/ry/rz), position (px/py/pz).
+  const rotCol = document.createElement('div');
+  const posCol = document.createElement('div');
+  const rotHead = document.createElement('div');
+  rotHead.className = 'col-title'; rotHead.textContent = 'rotation';
+  const posHead = document.createElement('div');
+  posHead.className = 'col-title'; posHead.textContent = 'position';
+  rotCol.appendChild(rotHead);
+  posCol.appendChild(posHead);
+  for (const f of ['rx', 'ry', 'rz']) rotCol.appendChild(_buildSliderRow(id, f));
+  for (const f of ['px', 'py', 'pz']) posCol.appendChild(_buildSliderRow(id, f));
+  grid.appendChild(rotCol);
+  grid.appendChild(posCol);
+  block.appendChild(grid);
+  return block;
+}
+
+for (const j of JOINTS) jointsWrap.appendChild(_buildJointBlock(j.key, j.label));
+weaponWrap.appendChild(_buildJointBlock('weapon', 'Weapon (FBX in-hand offset)'));
+
+// ---------- pose <-> UI sync --------------------------------------
+function writePoseToUI() {
+  const p = pose[mode];
+  for (const j of JOINTS) {
+    const v = p.joints[j.key] || ZERO_JOINT();
+    for (const f of FIELDS) {
+      const el = document.getElementById(`${j.key}-${f}`);
+      if (el) el.value = v[f] ?? 0;
+    }
+  }
+  for (const f of FIELDS) {
+    const el = document.getElementById(`weapon-${f}`);
+    if (el) el.value = p.weapon[f] ?? 0;
+  }
+  _updateValueLabels();
+}
+
+function readPoseFromUI() {
+  const p = pose[mode];
+  for (const j of JOINTS) {
+    if (!p.joints[j.key]) p.joints[j.key] = ZERO_JOINT();
+    const v = p.joints[j.key];
+    for (const f of FIELDS) {
+      v[f] = parseFloat(document.getElementById(`${j.key}-${f}`).value);
+    }
+  }
+  for (const f of FIELDS) {
+    p.weapon[f] = parseFloat(document.getElementById(`weapon-${f}`).value);
+  }
+}
+
+function _updateValueLabels() {
+  const ids = [];
+  for (const j of JOINTS) for (const f of FIELDS) ids.push(`${j.key}-${f}`);
+  for (const f of FIELDS) ids.push(`weapon-${f}`);
+  ids.push('aim-yaw', 'aim-pitch');
+  for (const id of ids) {
+    const el = document.getElementById(id);
+    const lbl = document.getElementById(id + '-v');
+    if (el && lbl) lbl.textContent = parseFloat(el.value).toFixed(2);
+  }
+}
+
+// ---------- pose application --------------------------------------
+let _baseWeaponPos = { x: 0, y: 0, z: 0 };
+let _baseWeaponRot = { x: 0, y: 0, z: 0 };
+
+function applyPose() {
+  const p = pose[mode];
+  for (const j of JOINTS) {
+    const t = j.target();
+    if (!t) continue;
+    const v = p.joints[j.key] || ZERO_JOINT();
+    t.rotation.set(v.rx, v.ry, v.rz * j.yawSign);
+    const bp = _basePos[j.key];
+    t.position.set(bp.x + v.px, bp.y + v.py, bp.z + v.pz);
+  }
+  // Weapon FBX offset — applied to the in-hand intermediate group
+  // on top of the game's authored anchor transform.
+  if (_inHandGroup) {
+    const v = p.weapon;
+    _inHandGroup.position.set(_baseWeaponPos.x + v.px,
+                              _baseWeaponPos.y + v.py,
+                              _baseWeaponPos.z + v.pz);
+    _inHandGroup.rotation.set(_baseWeaponRot.x + v.rx,
+                              _baseWeaponRot.y + v.ry,
+                              _baseWeaponRot.z + v.rz);
+  }
+
+  // Fire origin matches game: chest center, NOT shoulder. Bullets
+  // come from rig.chestMesh.getWorldPosition() in player.js.
   const _v = new THREE.Vector3();
   (rig.chestMesh || rig.chest).getWorldPosition(_v);
   fireOriginMarker.position.copy(_v);
 
-  // Aim vector — relative to the body. The game computes aim from
-  // cursor → muzzle each frame; here we drive yaw + pitch from
-  // sliders so the user can see how the arrow lines up with the
-  // weapon hand.
-  const yaw = parseFloat(document.getElementById('aim-yaw').value);
+  const yaw   = parseFloat(document.getElementById('aim-yaw').value);
   const pitch = parseFloat(document.getElementById('aim-pitch').value);
-  arrowDir.set(Math.sin(yaw) * Math.cos(pitch), Math.sin(pitch), Math.cos(yaw) * Math.cos(pitch));
+  arrowDir.set(Math.sin(yaw) * Math.cos(pitch),
+               Math.sin(pitch),
+               Math.cos(yaw) * Math.cos(pitch));
   aimArrow.position.copy(_v);
   aimArrow.setDirection(arrowDir);
 }
 
-// ---------- UI wiring ---------------------------------------------
-const fields = [
-  ['dom-shoulder-x', 'domShoulderX'],
-  ['dom-shoulder-z', 'domShoulderZ'],
-  ['dom-elbow-x',    'domElbowX'],
-  ['sup-shoulder-x', 'supShoulderX'],
-  ['sup-shoulder-z', 'supShoulderZ'],
-  ['sup-elbow-x',    'supElbowX'],
-  ['chest-x',        'chestX'],
-  ['chest-y',        'chestY'],
-  ['head-x',         'headX'],
-];
-const aimFields = [['aim-yaw', 'aimYaw'], ['aim-pitch', 'aimPitch']];
-
-function readPose() {
-  const p = {};
-  for (const [id, key] of fields) {
-    p[key] = parseFloat(document.getElementById(id).value);
-  }
-  return p;
-}
-
 function applyFromUI() {
-  applyPose(readPose());
-  for (const [id] of [...fields, ...aimFields]) {
-    const lbl = document.getElementById(id + '-v');
-    if (lbl) lbl.textContent = parseFloat(document.getElementById(id).value).toFixed(2);
-  }
+  readPoseFromUI();
+  applyPose();
+  _updateValueLabels();
 }
 
-for (const [id] of [...fields, ...aimFields]) {
-  document.getElementById(id).addEventListener('input', applyFromUI);
-}
-
-function loadPreset(name) {
-  const p = PRESETS[name];
-  if (!p) return;
-  for (const [id, key] of fields) {
-    document.getElementById(id).value = p[key];
+// Wire input events for every slider on the panel.
+function _wireAllSliders() {
+  const ids = [];
+  for (const j of JOINTS) for (const f of FIELDS) ids.push(`${j.key}-${f}`);
+  for (const f of FIELDS) ids.push(`weapon-${f}`);
+  for (const id of ids) {
+    document.getElementById(id).addEventListener('input', applyFromUI);
   }
-  applyFromUI();
+  document.getElementById('aim-yaw').addEventListener('input', applyFromUI);
+  document.getElementById('aim-pitch').addEventListener('input', applyFromUI);
 }
-document.getElementById('preset').addEventListener('change', (e) => loadPreset(e.target.value));
-document.getElementById('reset-class').addEventListener('click', () => {
-  loadPreset(document.getElementById('preset').value);
+_wireAllSliders();
+
+// Per-joint reset buttons — zero only that block in the current mode.
+document.addEventListener('click', (e) => {
+  const id = e.target?.dataset?.reset;
+  if (!id) return;
+  if (id === 'weapon') {
+    pose[mode].weapon = ZERO_JOINT();
+  } else if (pose[mode].joints[id]) {
+    pose[mode].joints[id] = ZERO_JOINT();
+  }
+  writePoseToUI();
+  applyPose();
 });
+
+// ---------- preset + mode wiring ----------------------------------
+function loadPreset(name) {
+  const src = PRESETS[name];
+  if (!src) return;
+  pose = JSON.parse(JSON.stringify(src));
+  writePoseToUI();
+  applyPose();
+}
+document.getElementById('preset').addEventListener('change',
+  (e) => loadPreset(e.target.value));
+document.getElementById('reset-class').addEventListener('click',
+  () => loadPreset(document.getElementById('preset').value));
+
+const btnHip = document.getElementById('mode-hip');
+const btnAim = document.getElementById('mode-aim');
+function setMode(m) {
+  // Save the values currently in the UI back to the previous mode
+  // before swapping — otherwise tweaks made under "hip" get lost
+  // when the user clicks "aim".
+  readPoseFromUI();
+  mode = m;
+  btnHip.classList.toggle('active', mode === 'hip');
+  btnAim.classList.toggle('active', mode === 'aim');
+  document.getElementById('joints-heading').textContent =
+    `Joints — ${mode.toUpperCase()}`;
+  document.getElementById('weapon-heading').textContent =
+    `Weapon offset — ${mode.toUpperCase()}`;
+  writePoseToUI();
+  applyPose();
+}
+btnHip.addEventListener('click', () => setMode('hip'));
+btnAim.addEventListener('click', () => setMode('aim'));
 
 // ---------- save --------------------------------------------------
 function _buildPoseJson() {
+  // Always read current UI into the buffer first so save captures the
+  // active mode's latest tweaks.
+  readPoseFromUI();
   const cls = document.getElementById('preset').value;
-  const pose = readPose();
   return {
     weapon_class: cls,
     handedness: handed,
-    pose,
-    note: 'Apply via actor_rig.js rifleHold block (or matching pose branch). Multiply shoulder.z by supportYawSign for support arm and dominantYawSign for dominant arm.',
+    modes: {
+      hip: pose.hip,
+      aim: pose.aim,
+    },
+    note: 'joints[*].rz is the raw user value; multiply by the same yawSign actor_rig.js uses for that joint when applying. weapon.{px,py,pz,rx,ry,rz} are deltas on top of the in-hand intermediate group transform.',
     saved_at: new Date().toISOString(),
   };
 }
@@ -390,9 +588,6 @@ document.getElementById('save').addEventListener('click', () => {
   const text = JSON.stringify(out, null, 2);
   document.getElementById('output').textContent =
     `// Saved pose_${out.weapon_class}.json — commit it under Assets/poses/\n` + text;
-  // Trigger a browser download — file lands in the user's Downloads
-  // folder. Filename includes the weapon class so multiple presets
-  // produce distinct files when the user iterates.
   const blob = new Blob([text], { type: 'application/json' });
   const a = document.createElement('a');
   a.href = URL.createObjectURL(blob);
@@ -413,13 +608,10 @@ document.getElementById('copy').addEventListener('click', async () => {
 });
 
 // ---------- weapon FBX loader ------------------------------------
-// Load the FBX with the same transform pipeline the game uses, so
-// the user can align hand position against the actual gun.
 const MODEL_BASE = '../Assets/models/';
 const fbxLoader = new FBXLoader();
-let _weaponMesh = null;        // currently loaded weapon
-let _weaponPivot = new THREE.Group();
-scene.add(_weaponPivot);
+let _weaponMesh = null;
+let _inHandGroup = null;
 
 const CLASS_FIT_RADIUS = {
   pistol: 0.45, smg: 0.65, rifle: 0.75, shotgun: 0.75,
@@ -427,11 +619,6 @@ const CLASS_FIT_RADIUS = {
 };
 
 function _fitToRadius(obj, target) {
-  // Match gltf_cache.fitToRadius EXACTLY — instead of moving the
-  // object, shift its CHILDREN by -localCenter and multiply scale.
-  // This matters for rotation: if the parent's origin is the visual
-  // centroid, rotation pivots around the centroid (correct). If the
-  // parent has a non-zero position offset, rotation swings wide.
   obj.updateMatrixWorld(true);
   const box = new THREE.Box3().setFromObject(obj);
   if (box.isEmpty()) return;
@@ -444,35 +631,28 @@ function _fitToRadius(obj, target) {
   obj.scale.multiplyScalar(scale);
 }
 
-// Build an in-hand intermediate group that mirrors the game's
-// inHandModel — different rotation + position depending on whether
-// the weapon class is shouldered (rifle/shotgun/lmg/sniper) or
-// hand-held (pistol/smg/melee). The FBX clone is parented INSIDE
-// this group, not directly to the rig anchor.
 function _makeInHandGroup(cls, len) {
-  const ws = 1.0;   // WEAPON_SCALE = rig.scale, default 1.0
+  const ws = 1.0;
   const isShouldered = ['rifle', 'shotgun', 'lmg', 'sniper'].includes(cls);
   const g = new THREE.Group();
   if (isShouldered) {
-    // Stock at the shoulder, barrel forward by `len`. Anchor's
-    // local +Z is forward.
     g.rotation.set(0, 0, 0);
     g.position.set(0, 0, (0.1 + len / 2) * ws);
     rig.rightShoulderAnchor.add(g);
   } else {
-    // Hand-held — mounted on the wrist (handPivot in player.js).
-    // Hand's local "forward" is -Y after the cumulative arm
-    // rotation chain, so the inHandModel applies a π/2 X-rotation.
     g.rotation.set(Math.PI / 2, 0, 0);
     g.position.set(0, -(0.1 + len / 2) * ws, 0);
     rig.rightArm.wrist.add(g);
   }
+  // Capture this anchor transform as the weapon-offset baseline so
+  // the "weapon" sliders apply as deltas, not absolutes.
+  _baseWeaponPos = { x: g.position.x, y: g.position.y, z: g.position.z };
+  _baseWeaponRot = { x: g.rotation.x, y: g.rotation.y, z: g.rotation.z };
   return g;
 }
 
 function _populateWeaponPicker() {
   const sel = document.getElementById('weapon-pick');
-  // Group entries by source pack so the dropdown is browsable.
   const groups = {};
   for (const [name, path] of Object.entries(MODEL_BY_WEAPON_NAME)) {
     const folder = path.split('/')[0];
@@ -496,11 +676,8 @@ function _findTunable(name) {
   return tunables.weapons.find(w => w.name === name) || null;
 }
 
-let _inHandGroup = null;
 document.getElementById('weapon-pick').addEventListener('change', (e) => {
   const name = e.target.value;
-  // Tear down any previous weapon mesh + intermediate group so the
-  // swap is clean.
   if (_weaponMesh) {
     _weaponMesh.parent?.remove(_weaponMesh);
     _weaponMesh.traverse?.(o => {
@@ -515,8 +692,10 @@ document.getElementById('weapon-pick').addEventListener('change', (e) => {
   if (_inHandGroup) {
     _inHandGroup.parent?.remove(_inHandGroup);
     _inHandGroup = null;
+    _baseWeaponPos = { x: 0, y: 0, z: 0 };
+    _baseWeaponRot = { x: 0, y: 0, z: 0 };
   }
-  if (!name) return;
+  if (!name) { applyPose(); return; }
   const path = MODEL_BY_WEAPON_NAME[name];
   if (!path) return;
   const url = MODEL_BASE + path;
@@ -525,10 +704,6 @@ document.getElementById('weapon-pick').addEventListener('change', (e) => {
   const len = w.muzzleLength ?? 0.5;
   document.getElementById('output').textContent = `loading ${name}…`;
   fbxLoader.load(url, (obj) => {
-    // Mirror player.js setWeapon() pipeline EXACTLY so the editor
-    // shows what the game will render. The inHandGroup applies the
-    // shouldered-vs-handheld outer transform; the FBX clone goes
-    // INSIDE it with per-FBX rotation/mirror/grip-offset.
     const cs = CLASS_FIT_RADIUS[cls] ?? 0.9;
     _fitToRadius(obj, len * cs * scaleForModelPath(url));
     const rotOverride = rotationOverrideForModelPath(url);
@@ -542,9 +717,6 @@ document.getElementById('weapon-pick').addEventListener('change', (e) => {
     if (shouldMirrorInHand({ baseName: name })) obj.scale.x *= -1;
     const grip = gripOffsetForModelPath(url);
     if (grip) obj.position.set(grip.x || 0, grip.y || 0, grip.z || 0);
-    // Build the same intermediate group the game uses, parented to
-    // the SAME rig node (shoulder anchor for shouldered, wrist for
-    // hand-held). FBX clone goes inside.
     _inHandGroup = _makeInHandGroup(cls, len);
     _inHandGroup.add(obj);
     _weaponMesh = obj;
@@ -552,6 +724,7 @@ document.getElementById('weapon-pick').addEventListener('change', (e) => {
       ? 'rightShoulderAnchor' : 'rightArm.wrist';
     document.getElementById('output').textContent =
       `loaded ${name} → ${path}\n  cls=${cls}, anchor=${anchorName}\n  fitR=${(len*cs*scaleForModelPath(url)).toFixed(3)}, mirror=${shouldMirrorInHand({baseName:name})}\n  grip=${grip ? `(${grip.x},${grip.y},${grip.z})` : 'none'}`;
+    applyPose();
   }, undefined, (err) => {
     document.getElementById('output').textContent =
       `failed to load ${path}: ${err?.message || err}`;
