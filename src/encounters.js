@@ -30,6 +30,7 @@
 import * as THREE from 'three';
 import { buildProp } from './props.js';
 import { getCompletedEncounters, markEncounterDone } from './prefs.js';
+import { TOY_DEFS } from './inventory.js';
 
 // Shared frozen empty list — every hittables() call that has nothing
 // to expose returns this reference instead of allocating [] per frame.
@@ -2964,12 +2965,15 @@ export const ENCOUNTER_DEFS = {
       s.npc.position.y = 0;
       let reward = null;
       if (isDemonBear) {
-        // Demon Bear path — she's smitten. Always drops a random
-        // toy, never the bear itself (randomToy filters _encounter
-        // items so the demon bear can't dupe).
+        // Demon Bear path — she's smitten. Drops the Beary Doll,
+        // which is the ONLY way to obtain it (Beary Doll is now
+        // _encounter-flagged so the random toy pool can't surface
+        // it). Cleanly anchors the toy to a specific chain instead
+        // of having it appear from arbitrary "random toy" rewards.
         ctx.spawnSpeech(s.npc.position.clone().setY(2.0),
           'I love him!!!', 5.0);
-        reward = ctx.rollRandomToy && ctx.rollRandomToy();
+        const def = TOY_DEFS && TOY_DEFS.bearyDoll;
+        if (def) reward = { ...def };
       } else {
         // Cheesecake path — random reward from the standard mix.
         ctx.spawnSpeech(s.npc.position.clone().setY(2.0),

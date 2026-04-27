@@ -1363,7 +1363,11 @@ export function jitterJunkValue(item) {
 // The dropped mesh becomes a glowing stacked-primitive bear or duck.
 export const TOY_DEFS = {
   jokeBear:   { id: 'toy_joke_bear',   name: 'Joke Bear',   type: 'junk', shape: 'bear', tint: 0xffffff, sellValue: 1700,  rarity: 'legendary', description: 'A suspiciously smiling bear' },
-  bearyDoll:  { id: 'toy_beary_doll',  name: 'Beary Doll',  type: 'junk', shape: 'bear', tint: 0xffffff, sellValue: 1900,  rarity: 'legendary', description: 'Plush bear · glows faintly' },
+  // Encounter-only — granted by Sleepy Beauty when she's woken with
+  // the Demon Bear. _encounter flag keeps it out of the random toy
+  // pool so it stops appearing as a generic "Mmm cheesecake!" reward
+  // or as a bear-merchant toy-trade duplicate.
+  bearyDoll:  { id: 'toy_beary_doll',  name: 'Beary Doll',  type: 'junk', shape: 'bear', tint: 0xffffff, sellValue: 1900,  rarity: 'legendary', description: 'Plush bear · glows faintly', _encounter: true },
   sleepDuck:  { id: 'toy_sleep_duck',  name: 'Sleep Duck',  type: 'junk', shape: 'duck', tint: 0xffe040, sellValue: 1800,  rarity: 'legendary', description: 'A duck with a dreamy look' },
   duckStatue: { id: 'toy_duck_statue', name: 'Duck Statue', type: 'junk', shape: 'duck', tint: 0xffe040, sellValue: 2000,  rarity: 'legendary', description: 'Polished ornamental duck' },
   // Awarded by the Priest after the player refuses prayer 3 times.
