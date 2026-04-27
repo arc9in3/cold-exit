@@ -8,6 +8,7 @@ import { modelForItem, shouldMirrorInHand,
          gripOffsetForModelPath } from './model_manifest.js';
 import { buildMeleePrimitive } from './melee_primitives.js';
 import { swapInBakedCorpse } from './corpse_bake.js';
+import { rigInstancer } from './rig_instancer.js';
 
 // Strip the held weapon meshes off a dead enemy — detach the primitive
 // gun box, the FBX weaponModel group, and the muzzle anchor from the
@@ -756,6 +757,18 @@ export class GunmanManager {
 
     if (profile.shield === 'partial') this._attachShield(g, { full: false });
 
+    // Register with the global rig instancer — pools this actor's
+    // ~36 source meshes into shared InstancedMesh draw calls keyed by
+    // (geometry, role). Source meshes go .visible=false; their
+    // matrixWorld feeds the instance buffer each frame in syncFrame.
+    // Initial matrixWorld is computed here so the first render lands
+    // the actor in the right place.
+    const _ri = rigInstancer && rigInstancer();
+    if (_ri && rig) {
+      g.group.updateMatrixWorld(true);
+      _ri.register(rig);
+    }
+
     this.gunmen.push(g);
     return g;
   }
@@ -766,7 +779,12 @@ export class GunmanManager {
     // pooled at module level (actor_rig.js _geomCache) and tagged with
     // userData.sharedRigGeom so we skip those — disposing a shared
     // buffer would crash every other actor still holding it.
+    const _ri = rigInstancer && rigInstancer();
     for (const g of this.gunmen) {
+      // Release rig-instancer slots first so the InstancedMeshes
+      // park this actor's instances off-screen before we tear the
+      // source meshes down.
+      if (_ri && g.rig) _ri.unregister(g.rig);
       g.group.traverse((obj) => {
         if (obj.geometry && !obj.geometry.userData?.sharedRigGeom) {
           obj.geometry.dispose();
@@ -921,6 +939,14 @@ export class GunmanManager {
       if (g.rightArmGroup) g.rightArmGroup.visible = false;
       else g.rightArm.visible = false;
       g.gun.visible = false;
+      // Source meshes go .visible=false above — but the InstancedMesh
+      // doesn't honour source visibility. Flag the right-arm rig
+      // meshes so syncFrame writes zero-scale matrices for those
+      // instance slots and the disarmed arm actually disappears.
+      const _riHide = rigInstancer && rigInstancer();
+      if (_riHide && g.rig?.rightArmMeshes) {
+        _riHide.hideMeshes(g.rig.rightArmMeshes, true);
+      }
       g.weapon = null;
       g.burstLeft = 0;
       g.fireT = 0.8;
@@ -1014,8 +1040,18 @@ export class GunmanManager {
       if (g.flashT > 0) {
         g.flashT = Math.max(0, g.flashT - dt);
         const k = g.flashT / tunables.enemy.hitFlashTime;
-        g.bodyMat.color.copy(this._baseBody).lerp(this._hurt, k);
-        g.headMat.color.copy(this._baseHead).lerp(this._hurt, k);
+        // Source meshes are invisible (rendered via InstancedMesh);
+        // tinting their materials would have no visible effect. Drive
+        // the flash through per-instance colour instead.
+        const _ri = rigInstancer && rigInstancer();
+        if (_ri && g.rig) {
+          _ri.setActorFlash(g.rig, k);
+        } else {
+          // Fallback for any path that bypassed the instancer (baked
+          // corpse, headless tests).
+          g.bodyMat.color.copy(this._baseBody).lerp(this._hurt, k);
+          g.headMat.color.copy(this._baseHead).lerp(this._hurt, k);
+        }
       }
       g.slowT = Math.max(0, g.slowT - dt);
       g.blindT = Math.max(0, (g.blindT || 0) - dt);
@@ -1103,6 +1139,12 @@ export class GunmanManager {
               // gear which keeps its own material). Each corpse retains
               // its individual tier colours and gear silhouette so
               // bosses still read distinctly.
+              // Release rig-instancer slots BEFORE the bake replaces
+              // the rig group with a static merged mesh — otherwise
+              // the dead actor's instance slots would keep rendering
+              // their last pose alongside the baked corpse.
+              const _riBake = rigInstancer && rigInstancer();
+              if (_riBake && g.rig) _riBake.unregister(g.rig);
               const baked = swapInBakedCorpse(g.group);
               if (baked) {
                 g.group = baked;
@@ -1203,6 +1245,12 @@ export class GunmanManager {
     if (g.rightArmGroup) g.rightArmGroup.visible = true;
     else g.rightArm.visible = true;
     g.gun.visible = true;
+    // Restore right-arm instance slots so the InstancedMesh draws
+    // them again after a respawn.
+    const _riReArmA = rigInstancer && rigInstancer();
+    if (_riReArmA && g.rig?.rightArmMeshes) {
+      _riReArmA.hideMeshes(g.rig.rightArmMeshes, false);
+    }
     g.gun.geometry.dispose();
     g.gun.geometry = new THREE.BoxGeometry(
       g.weapon.muzzleGirth, g.weapon.muzzleGirth, g.weapon.muzzleLength,
@@ -1457,6 +1505,12 @@ export class GunmanManager {
             if (g.rightArmGroup) g.rightArmGroup.visible = true;
             else if (g.rightArm) g.rightArm.visible = true;
             if (g.gun) g.gun.visible = true;
+            // Restore right-arm InstancedMesh slots so the
+            // re-armed boss's arm actually re-appears.
+            const _riReArmB = rigInstancer && rigInstancer();
+            if (_riReArmB && g.rig?.rightArmMeshes) {
+              _riReArmB.hideMeshes(g.rig.rightArmMeshes, false);
+            }
             g.aiMagLeft = g.weapon?.magSize || 30;
             g.aiReloadT = 0;
             ctx.loot.remove?.(target);

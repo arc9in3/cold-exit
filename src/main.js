@@ -15,6 +15,7 @@ import { Combat } from './combat.js';
 import { DummyManager } from './enemy.js';
 import { GunmanManager } from './gunman.js';
 import { MeleeEnemyManager } from './melee_enemy.js';
+import { initRigInstancer, rigInstancer } from './rig_instancer.js';
 import { separateEnemies } from './ai_separation.js';
 import { LootManager } from './loot.js';
 import { ENCOUNTER_DEFS, pickEncounterForLevel } from './encounters.js';
@@ -489,6 +490,11 @@ const player = createPlayer(scene);
 const input = new Input(renderer.domElement, camera, groundPlane);
 const combat = new Combat(scene);
 const dummies = new DummyManager(scene);
+// Rig instancer — collapses ~36 source meshes per gunman into shared
+// InstancedMesh pools keyed by (geometry, role). Per-actor tint and
+// hit-flash drive instanceColor instead of per-rig material lerps.
+// Initialized BEFORE GunmanManager so spawn() can call register().
+initRigInstancer(scene);
 const gunmen = new GunmanManager(scene);
 const melees = new MeleeEnemyManager(scene);
 const drones = new DroneManager(scene);
@@ -10109,6 +10115,12 @@ function _safeRender(rawDt, modalPaused = false) {
     // bloom mip chain + finisher chroma/grain, which is the single
     // biggest GPU cost per frame. The pause UI typically covers most
     // of the screen so the visual delta is minimal.
+    // Rig instancer per-frame sync — refreshes registered actors'
+    // matrixWorld and writes each source mesh's world transform into
+    // its InstancedMesh slot. Runs BEFORE render so the instance
+    // matrices are current when the renderer walks the scene.
+    const _ri = rigInstancer && rigInstancer();
+    if (_ri) _ri.syncFrame();
     _perf.start('render');
     if (modalPaused) {
       renderer.render(scene, camera);
