@@ -1,5 +1,5 @@
 import * as THREE from 'three';
-import { inferRarity, rarityColor, SLOT_LABEL, SET_DEFS, countEquippedSetPieces } from './inventory.js';
+import { inferRarity, rarityColor, weaponImageMirrorStyle, SLOT_LABEL, SET_DEFS, countEquippedSetPieces } from './inventory.js';
 import { thumbnailFor } from './item_thumbnails.js';
 import { modelForItem, rotationOverrideForModelPath } from './model_manifest.js';
 import { loadModelClone, fitToRadius, applyEmissiveTint, addOutlines } from './gltf_cache.js';
@@ -759,7 +759,7 @@ export class DetailsUI {
     return `
       <div class="details-header" style="border-left: 4px solid ${rColor}">
         <div class="details-swatch" style="background:${tintStr}">
-          ${icon ? `<img src="${icon}" alt="">` : ''}
+          ${icon ? `<img src="${icon}" alt="" style="${weaponImageMirrorStyle(item)}">` : ''}
         </div>
         <div class="details-title-col">
           <div class="details-name" style="color:${rColor}">${item.name}</div>

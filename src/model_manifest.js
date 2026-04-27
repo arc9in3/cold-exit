@@ -238,6 +238,13 @@ export const MODEL_GRIP_OFFSET = {
   'weapons/SM_Special_Submachine_Gun.fbx':       { x: 0, y: 0, z: -0.28 },   // MP7 fallback
   'weapons/SM_Special_Submachine_Gun_Clean.fbx': { x: 0, y: 0, z: -0.28 },   // MP7 active mesh
   'weapons/SM_Tactical_Submachine_Gun.fbx': { x: 0, y: 0, z: -0.30 },   // Vector
+  // Lowpolyguns SMG variants — same negative-Z convention to pull
+  // the grip into the hand (otherwise held by the stock end).
+  'lowpolyguns/SubmachineGun_1.fbx':         { x: 0, y: 0, z: -0.30 },  // Spectre CQB
+  'lowpolyguns/SubmachineGun_2.fbx':         { x: 0, y: 0, z: -0.30 },  // Spectre
+  'lowpolyguns/SubmachineGun_3.fbx':         { x: 0, y: 0, z: -0.30 },  // SPC9
+  'lowpolyguns/SubmachineGun_4.fbx':         { x: 0, y: 0, z: -0.30 },  // SPCA3
+  'lowpolyguns/SubmachineGun_5.fbx':         { x: 0, y: 0, z: -0.30 },  // SPC223
   // Melee — handle is at one end of the mesh, but fitToRadius
   // centres the bbox at the hand, so the handle ends up ~half the
   // mesh length away. Negative Z shifts the model back so the grip
@@ -252,6 +259,11 @@ export const MODEL_GRIP_OFFSET = {
 
 export const MODEL_ROTATION_OVERRIDE = {
   // Key -> { x, y, z } in radians. Replaces the default (0, π/2, 0).
+  // Use INVERTED yaw (-π/2) for FBXes authored muzzle-on-+X — the
+  // default yaw +π/2 maps local +X to world -Z (backward); -π/2 maps
+  // it to world +Z (forward). User-confirmed "in hand backwards":
+  'weapons/SM_Assault_Rifle_9x39.fbx':  { x: 0, y: -Math.PI / 2, z: 0 }, // AS VAL
+  'weapons/SM_Police_Sniper_Rifle.fbx': { x: 0, y: -Math.PI / 2, z: 0 }, // VSS Vintorez
 };
 
 export function gripOffsetForModelPath(fullPath) {

@@ -2,7 +2,7 @@ import { effectiveWeapon } from './attachments.js';
 import { layoutForWeapon } from './weapon_layouts.js';
 import { renderItemCell } from './ui_item_cell.js';
 import { thumbnailFor } from './item_thumbnails.js';
-import { rarityColor } from './inventory.js';
+import { rarityColor, weaponImageMirrorStyle } from './inventory.js';
 
 // Canonical slot presentation order so the legend + schematic labels
 // always read the same way across weapon classes — muzzle first, then
@@ -110,9 +110,10 @@ export class CustomizeUI {
     const subtitle = w.type === 'melee'
       ? `Melee · ${w.class || 'weapon'}`
       : `${w.class || 'ranged'} · ${w.fireMode || 'semi'} · ${(w.fireRate || 0).toFixed(1)}/s`;
+    const wartMirror = weaponImageMirrorStyle(w);
     this.weaponEl.innerHTML = `
       <div class="cust-wart" style="background:${tintStr}">
-        ${thumb ? `<img class="cust-wart-img" src="${thumb}" alt="" draggable="false">` : ''}
+        ${thumb ? `<img class="cust-wart-img" src="${thumb}" alt="" draggable="false" style="${wartMirror}">` : ''}
       </div>
       <div class="cust-winfo">
         <div class="cust-wname">${w.name}</div>

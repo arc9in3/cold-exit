@@ -7,7 +7,7 @@
 // offscreen WebGL canvas and cached by a stable item key. This
 // replaces the old Military icon-pack PNG stack which was too dense
 // and too similar to tell items apart at a glance.
-import { inferRarity, rarityColor, TYPE_ICONS, SLOT_LABEL, SLOT_ICONS } from './inventory.js';
+import { inferRarity, rarityColor, weaponImageMirrorStyle, TYPE_ICONS, SLOT_LABEL, SLOT_ICONS } from './inventory.js';
 import { thumbnailFor } from './item_thumbnails.js';
 
 export function renderItemCell(item, slotId = null, opts = {}) {
@@ -26,8 +26,9 @@ export function renderItemCell(item, slotId = null, opts = {}) {
   // Primary item art — 3D-rendered thumbnail of the item's category
   // silhouette, tinted by the item's color. Falls back to a type
   // glyph if WebGL thumb generation fails (e.g. headless test).
+  const mirrorStyle = weaponImageMirrorStyle(item);
   const artInner = thumbUrl
-    ? `<img class="cell-art-img" src="${thumbUrl}" alt="">`
+    ? `<img class="cell-art-img" src="${thumbUrl}" alt="" style="${mirrorStyle}">`
     : `<span class="cell-type-ico">${TYPE_ICONS[item.type] || '◇'}</span>`;
 
   const slotTag = slotLabel ? `<div class="cell-slot-tag">${slotLabel}</div>` : '';

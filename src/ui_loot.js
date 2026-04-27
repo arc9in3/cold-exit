@@ -1,4 +1,4 @@
-import { inferRarity, iconForItem, rarityColor, TYPE_ICONS, SLOT_IDS, SLOT_POSITIONS, SLOT_ICONS, SLOT_LABEL } from './inventory.js';
+import { inferRarity, iconForItem, rarityColor, weaponImageMirrorStyle, TYPE_ICONS, SLOT_IDS, SLOT_POSITIONS, SLOT_ICONS, SLOT_LABEL } from './inventory.js';
 import { renderItemCell } from './ui_item_cell.js';
 import { GridContainer, stampItemDims } from './grid_container.js';
 import { thumbnailFor } from './item_thumbnails.js';
@@ -717,8 +717,9 @@ export class LootUI {
     const iconPath = isWeapon
       ? iconForItem(item)
       : (thumbnailFor(item) || iconForItem(item));
+    const cellMirror = weaponImageMirrorStyle(item);
     const swatchInner = iconPath
-      ? `<img class="cell-icon" src="${iconPath}" alt="">`
+      ? `<img class="cell-icon" src="${iconPath}" alt="" style="${cellMirror}">`
       : `<span class="cell-type-ico">${TYPE_ICONS[item.type] || '◇'}</span>`;
     const slotTag = slotLabel ? `<div class="cell-slot-tag">${slotLabel}</div>` : '';
     const dur = item.durability;

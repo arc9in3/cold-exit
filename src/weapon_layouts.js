@@ -157,7 +157,7 @@ export const WEAPON_LAYOUTS = {
   },
 };
 
-import { renderForWeaponName } from './model_manifest.js';
+import { renderForWeaponName, shouldMirrorWeapon } from './model_manifest.js';
 
 export function layoutForWeapon(weapon) {
   const baseLayout = (() => {
@@ -173,8 +173,15 @@ export function layoutForWeapon(weapon) {
   if (lookupName) {
     const url = renderForWeaponName(lookupName);
     if (url) {
+      // Mirror the SVG image for weapons whose static PNG was
+      // exported before the muzzle-LEFT convention landed. Uses
+      // `transform="scale(-1 1) translate(-600 0)"` so the image
+      // ends up flipped horizontally within the same 600×260 box.
+      const mirror = shouldMirrorWeapon(weapon)
+        ? ' transform="scale(-1 1) translate(-600 0)"'
+        : '';
       return {
-        svg: `<image href="${url}" x="0" y="0" width="600" height="260" preserveAspectRatio="xMidYMid meet"/>`,
+        svg: `<image href="${url}" x="0" y="0" width="600" height="260" preserveAspectRatio="xMidYMid meet"${mirror}/>`,
         slots: baseLayout.slots,
       };
     }

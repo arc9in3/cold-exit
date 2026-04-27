@@ -1399,24 +1399,31 @@ export function updateAnim(rig, state, dt) {
     // the front handguard. Both arms bent, body slightly bladed
     // (bladeYaw below).
     //
-    // Dominant (trigger) arm: shoulder pitches forward and the elbow
-    // folds tight so the hand lands at the pistol grip just forward
-    // of the shoulder anchor — roughly the back end of the gun. A
-    // slight inward shoulder yaw tucks the elbow against the ribs
-    // (signed per-side so a lefty mirrors cleanly).
-    const rifleDomShoulder = -0.85 - recoilKick - armLeanComp;
+    // Dominant (trigger) arm: shoulder pitches forward, elbow folds
+    // tight so the hand lands at the pistol grip just forward of
+    // the shoulder anchor. Recoil now BUCKS BACK (compresses the
+    // elbow further) instead of lifting the arm up — the previous
+    // -recoilKick on shoulder pitch was rotating the arm overhead.
+    // Now recoil only tightens the elbow, simulating the arm
+    // absorbing the kick toward the shoulder.
+    const rifleDomShoulder = -0.85 + recoilKick * 0.25 - armLeanComp;
     const rifleDomYaw      = -0.18 * supportYawSign;    // elbow toward body
-    const rifleDomElbow    = -2.25;
+    const rifleDomElbow    = -2.25 - recK * 0.45;
     weaponArm.shoulder.pivot.rotation.x = rifleDomShoulder;
     weaponArm.shoulder.pivot.rotation.z = rifleDomYaw;
-    weaponArm.elbow.rotation.x = rifleDomElbow + recK * 0.3;
-    // Support arm: extends forward AND across the centerline so the
-    // hand lands on the front rail of the gun (barrel-forward, near
-    // the muzzle). Moderate elbow bend so the arm still reads as
-    // "supporting" rather than locked-out.
-    const rifleSupShoulder = -1.30 + (a.aimBlend * -0.15) - armLeanComp;
-    const rifleSupYaw      = 0.55 * supportYawSign;
-    const rifleSupElbow    = -0.75;
+    weaponArm.elbow.rotation.x = rifleDomElbow;
+    // Support arm: extends FORWARD enough that the hand actually
+    // reaches the foregrip / handguard. Elbow flares OUTWARD instead
+    // of tucking inward (was clipping into the torso). Tighter
+    // elbow bend so the hand lands at the front rail rather than
+    // dangling beside the gun.
+    //
+    //   shoulder.x more negative  → more horizontal forward reach
+    //   shoulder.z OUTWARD sign   → elbow flares away from body
+    //   elbow more negative       → forearm folds forward
+    const rifleSupShoulder = -1.55 + (a.aimBlend * -0.10) - armLeanComp;
+    const rifleSupYaw      = -0.18 * supportYawSign;    // OUTWARD flare
+    const rifleSupElbow    = -1.40;
     supportArm.shoulder.pivot.rotation.x = rifleSupShoulder;
     supportArm.shoulder.pivot.rotation.z = rifleSupYaw;
     supportArm.elbow.rotation.x = rifleSupElbow;
