@@ -2,6 +2,7 @@ import { effectiveWeapon } from './attachments.js';
 import { layoutForWeapon } from './weapon_layouts.js';
 import { renderItemCell } from './ui_item_cell.js';
 import { thumbnailFor } from './item_thumbnails.js';
+import { rarityColor } from './inventory.js';
 
 // Canonical slot presentation order so the legend + schematic labels
 // always read the same way across weapon classes — muzzle first, then
@@ -99,8 +100,9 @@ export class CustomizeUI {
   render() {
     if (!this.weapon) return;
     const w = this.weapon;
-    const tint = w.tint ?? 0xaaaaaa;
-    const tintStr = `#${tint.toString(16).padStart(6, '0')}`;
+    // Cell background uses RARITY color (not item.tint) so the
+    // weapon image sits cleanly on a tier-coded backdrop.
+    const tintStr = rarityColor(w);
     // Real rendered weapon thumbnail instead of a plain colour swatch
     // so players see the actual gun silhouette. Falls back to a
     // colour swatch for weapons without a registered thumbnail.

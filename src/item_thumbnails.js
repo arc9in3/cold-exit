@@ -247,25 +247,86 @@ function buildMelee(item) {
 function buildHelmet(item) {
   const tint = item.tint ?? NEUTRAL.synthetic;
   const g = new THREE.Group();
-  // Dome — neutral helmet shell.
-  const dome = new THREE.Mesh(
-    new THREE.SphereGeometry(0.5, 18, 10, 0, Math.PI * 2, 0, Math.PI / 2),
-    _mat(NEUTRAL.synthetic, { metalness: 0.25, roughness: 0.6 }),
-  );
-  dome.position.y = 0.05;
-  g.add(dome);
-  const rim = _cyl(0.52, 0.08, NEUTRAL.metalDark);
-  rim.position.y = 0.0;
-  g.add(rim);
-  // ACCENT — tinted stripe running front-to-back over the crown.
-  const stripe = _box(0.14, 0.09, 1.02, tint, { roughness: 0.5 });
-  stripe.position.set(0, 0.45, 0);
-  g.add(stripe);
-  // Visor — black.
-  const visor = _box(0.8, 0.08, 0.04, 0x1a1a1a);
-  visor.position.set(0, 0.08, 0.5);
-  g.add(visor);
-  g.rotation.y = -0.4;
+  const id = item.id || '';
+  const isGhillie = /ghillie/.test(id);
+  const isHat = /captain|cap_|hat/.test(id);
+  const helmetMat = { roughness: 0.55, metalness: 0.25 };
+
+  if (isGhillie) {
+    // Ghillie hood — irregular cloth bumps stacked on top of a soft
+    // base sphere. No hard helmet shell.
+    const base = _sph(0.42, NEUTRAL.fabric, { roughness: 0.95 }, 14);
+    base.scale.set(1.05, 0.85, 1.0);
+    base.position.y = 0.06;
+    g.add(base);
+    for (let i = 0; i < 6; i++) {
+      const a = (i / 6) * Math.PI * 2;
+      const r = 0.32 + Math.random() * 0.05;
+      const tuft = _sph(0.10 + Math.random() * 0.04, tint, { roughness: 0.95 }, 8);
+      tuft.position.set(Math.cos(a) * r, 0.20 + Math.random() * 0.18,
+                         Math.sin(a) * r);
+      g.add(tuft);
+    }
+    g.rotation.y = -0.35;
+    return g;
+  }
+  if (isHat) {
+    // Soft cap — wider crown, softer dome, brim disc out front.
+    const crown = _sph(0.42, tint, helmetMat, 14);
+    crown.scale.set(1.0, 0.55, 1.0);
+    crown.position.y = 0.20;
+    g.add(crown);
+    // Brim — flat disc forward.
+    const brim = new THREE.Mesh(
+      new THREE.CylinderGeometry(0.55, 0.55, 0.04, 18, 1, false, 0, Math.PI),
+      _mat(NEUTRAL.metalDark, { roughness: 0.7 }),
+    );
+    brim.position.set(0, 0.05, 0.10);
+    g.add(brim);
+    g.rotation.y = -0.35;
+    return g;
+  }
+
+  // Tactical / ballistic / kevlar — proper helmet silhouette:
+  // - Stretched ellipsoid shell (taller in back, sloped in front)
+  // - Wide brim/edge ring
+  // - Front visor or NVG mount stub
+  // - Side rail bumps for accessories
+  // - Tinted side panel as the identity color
+  const shell = _sph(0.50, NEUTRAL.synthetic, helmetMat, 16);
+  shell.scale.set(1.0, 0.78, 1.10);   // back-to-front longer, slightly squashed top
+  shell.position.set(0, 0.18, -0.03);
+  g.add(shell);
+  // Edge ring — thin torus around the bottom rim.
+  const edge = _torus(0.50, 0.04, NEUTRAL.metalDark, helmetMat, 18, 6);
+  edge.rotation.x = Math.PI / 2;
+  edge.scale.x = 1.0; edge.scale.y = 1.10;
+  edge.position.set(0, -0.02, -0.03);
+  g.add(edge);
+  // NVG mount stub — small bracket on the forehead.
+  const nvg = _box(0.16, 0.12, 0.10, NEUTRAL.metalDark, helmetMat);
+  nvg.position.set(0, 0.10, 0.42);
+  g.add(nvg);
+  // Side rails — short bumps on each ear side.
+  for (const sx of [-0.42, 0.42]) {
+    const rail = _box(0.08, 0.10, 0.42, NEUTRAL.metalDark, helmetMat);
+    rail.position.set(sx, 0.10, 0);
+    g.add(rail);
+  }
+  // Tinted side panel — the helmet's identity color sits on each
+  // side as a stitched cloth stripe under the rail.
+  for (const sx of [-0.46, 0.46]) {
+    const panel = _box(0.04, 0.18, 0.52, tint, { roughness: 0.7 });
+    panel.position.set(sx, 0.02, -0.03);
+    g.add(panel);
+  }
+  // Chin strap hint — small triangle tab under the back of the helmet.
+  const strap = _box(0.20, 0.08, 0.05, NEUTRAL.fabric, { roughness: 0.85 });
+  strap.position.set(0, -0.16, -0.30);
+  g.add(strap);
+
+  g.rotation.y = -0.35;
+  g.rotation.x = 0.05;
   return g;
 }
 
@@ -357,65 +418,97 @@ function buildChest(item) {
     return g;
   }
 
-  // Standard tactical rig / plate carrier:
-  // - Torso panel (rounded capsule reads as fabric, not a box)
-  // - Front plate (tinted, harder material on plate variants)
-  // - Two shoulder straps (visible webbing crossing over the top)
-  // - 3-4 MOLLE pouches stitched to the front
-  // - Side cummerbund panels suggesting fit
-  const torso = _cap(0.42, 0.55, NEUTRAL.fabric, 6, 14, { roughness: 0.85 });
-  torso.scale.set(1.0, 1.0, 0.55);   // squash the depth so it's a torso not a sausage
-  torso.position.y = 0.1;
+  // Shirt-shaped silhouette — visible neckline, sleeves, and a torso
+  // that tapers from chest to waist. Plate variants get a hard
+  // armor panel + MOLLE pouches stitched onto the shirt; light /
+  // soft variants are just the shirt with a subtle tinted accent.
+  // No more 'plate on a circle' look.
+  const shirtMat  = { roughness: 0.85, metalness: 0.05 };
+  const fabricCol = isPlate ? NEUTRAL.metalDark : NEUTRAL.fabric;
+
+  // Torso — tapered cylinder (wider at the chest, narrower at the
+  // waist). Reads as a shirt body instead of a flat panel.
+  const torso = _cylT(0.40, 0.32, 0.65, fabricCol, 14, shirtMat);
+  torso.position.y = 0.05;
   g.add(torso);
+  // Slight shoulder slope cap — sphere on top so the neckline reads.
+  const upperBody = _sph(0.40, fabricCol, shirtMat, 14);
+  upperBody.scale.set(1.0, 0.5, 0.85);
+  upperBody.position.y = 0.36;
+  g.add(upperBody);
+  // Neck opening — small darker disc on top of the shoulders.
+  const neckHole = _cyl(0.10, 0.08, 0x1a1a20, 12);
+  neckHole.position.y = 0.50;
+  g.add(neckHole);
+  // Collar ring — thin tinted band around the neck opening as the
+  // shirt's identity color (subtle, not painted across the whole body).
+  const collar = _torus(0.13, 0.025, tint, { roughness: 0.7 }, 14, 6);
+  collar.rotation.x = Math.PI / 2;
+  collar.position.y = 0.50;
+  g.add(collar);
 
-  // Front armor plate — flat for plate variants, just a fabric panel
-  // for light vest (suggests stitched canvas).
-  const plateMetal = isPlate ? 0.5 : 0.05;
-  const plateRough = isPlate ? 0.35 : 0.7;
-  const plate = _box(0.62, 0.68, isPlate ? 0.08 : 0.04, tint,
-    { metalness: plateMetal, roughness: plateRough });
-  plate.position.set(0, 0.22, 0.27);
-  g.add(plate);
+  // Sleeves — tapered cylinders extending from each shoulder, slightly
+  // angled outward. Length depends on whether this is a t-shirt-style
+  // light vest or a long-sleeve shirt under a plate carrier.
+  const sleeveLen = isLight ? 0.38 : 0.50;
+  const sleeveR0 = 0.16, sleeveR1 = 0.13;
+  for (const side of [-1, 1]) {
+    const sleeve = _cylT(sleeveR0, sleeveR1, sleeveLen, fabricCol, 12, shirtMat);
+    sleeve.rotation.z = side * (Math.PI / 2 - 0.25);
+    sleeve.position.set(side * 0.42, 0.28, 0);
+    g.add(sleeve);
+    // Sleeve cuff — thin band at the end (light tint).
+    const cuff = _torus(sleeveR1, 0.025, NEUTRAL.metalDark, shirtMat, 10, 6);
+    cuff.rotation.y = side * Math.PI / 2;
+    cuff.rotation.x = Math.PI / 2;
+    cuff.position.set(side * (0.42 + Math.sin(Math.PI / 2 - 0.25) * sleeveLen / 2),
+                       0.28 - Math.cos(Math.PI / 2 - 0.25) * sleeveLen / 2, 0);
+    g.add(cuff);
+  }
 
-  if (!isLight) {
-    // MOLLE pouches — three small cuboids stitched onto the front
-    // panel. Read as separate compartments rather than one flat slab.
-    const pouchMat = NEUTRAL.fabric;
+  if (isPlate) {
+    // Hard plate panel mounted on the chest — clearly a separate
+    // armor plate, not the body itself. Tinted so different plate
+    // variants stay distinguishable.
+    const plate = _box(0.55, 0.55, 0.08, tint,
+      { metalness: 0.5, roughness: 0.35 });
+    plate.position.set(0, 0.18, 0.30);
+    g.add(plate);
+    // Plate edge bevel — thin frame around it.
+    const frame = _torus(0.30, 0.020, NEUTRAL.metalDark,
+      { metalness: 0.7, roughness: 0.3 }, 14, 4);
+    frame.scale.set(1.0, 1.0, 0.5);
+    frame.position.set(0, 0.18, 0.34);
+    g.add(frame);
+    // MOLLE pouches stitched to the front panel under the plate.
+    const pouchMat = { roughness: 0.85 };
     for (let i = 0; i < 3; i++) {
-      const x = -0.2 + i * 0.20;
-      const pouch = _box(0.16, 0.18, 0.10, pouchMat, { roughness: 0.85 });
-      pouch.position.set(x, -0.05, 0.32);
+      const x = -0.18 + i * 0.18;
+      const pouch = _box(0.14, 0.16, 0.09, NEUTRAL.fabric, pouchMat);
+      pouch.position.set(x, -0.18, 0.30);
       g.add(pouch);
-      // Tiny buckle dot on each pouch flap.
       const buckle = _box(0.04, 0.04, 0.02, NEUTRAL.metalDark,
         { metalness: 0.7, roughness: 0.3 });
-      buckle.position.set(x, -0.10, 0.38);
+      buckle.position.set(x, -0.22, 0.36);
       g.add(buckle);
     }
-    // Top-row admin pouch.
-    const admin = _box(0.36, 0.10, 0.08, pouchMat, { roughness: 0.85 });
-    admin.position.set(0, 0.45, 0.32);
-    g.add(admin);
-  }
-
-  // Shoulder straps — two angled webbing bands going over each shoulder.
-  for (const sx of [-0.18, 0.18]) {
-    const strap = _box(0.10, 0.62, 0.05, 0x18181c, { roughness: 0.75 });
-    strap.position.set(sx, 0.32, 0.24);
-    strap.rotation.x = -0.18;
-    g.add(strap);
-    // Buckle on the strap front.
-    const sb = _box(0.10, 0.06, 0.03, NEUTRAL.metalDark,
-      { metalness: 0.7, roughness: 0.3 });
-    sb.position.set(sx, 0.05, 0.30);
-    g.add(sb);
-  }
-
-  // Cummerbund — short side panels suggesting fit at the waist.
-  for (const sx of [-0.40, 0.40]) {
-    const side = _box(0.08, 0.36, 0.42, NEUTRAL.fabric, { roughness: 0.85 });
-    side.position.set(sx, 0.0, 0);
-    g.add(side);
+    // Two visible shoulder webbing straps.
+    for (const sx of [-0.16, 0.16]) {
+      const strap = _box(0.09, 0.50, 0.04, 0x18181c, { roughness: 0.75 });
+      strap.position.set(sx, 0.32, 0.30);
+      strap.rotation.x = -0.18;
+      g.add(strap);
+    }
+  } else {
+    // Soft armor / shirt — subtle tinted button strip down the
+    // center as the only accent, plus an optional pocket.
+    const buttons = _box(0.04, 0.40, 0.02, tint, { roughness: 0.7 });
+    buttons.position.set(0, 0.10, 0.32);
+    g.add(buttons);
+    // Front pocket on the chest.
+    const pocket = _box(0.16, 0.14, 0.02, fabricCol, shirtMat);
+    pocket.position.set(0.18, 0.20, 0.33);
+    g.add(pocket);
   }
 
   g.rotation.y = -0.35;
@@ -599,40 +692,62 @@ function buildBoots(item) {
 function buildBackpack(item) {
   const tint = item.tint ?? 0x6a5a3a;
   const g = new THREE.Group();
-  // Backpack silhouette — capsule body for soft fabric read, side
-  // pocket as its own capsule, top flap with a buckle, two visible
-  // shoulder straps with grab handle. Tint colours the flap so two
-  // packs (combat / large) stay visually distinct.
-  const fabricMat = { roughness: 0.85, metalness: 0.05 };
-  const body = _cap(0.42, 0.7, NEUTRAL.fabric, 6, 14, fabricMat);
+  // Backpack — soft duffel shape: tall capsule body (taller than it
+  // is wide, suggesting a vertical haul), rounded top, drawstring/
+  // flap detail at the top, side pocket capsules, two shoulder
+  // straps and a top grab handle. No flat boxy slab.
+  const fabricMat = { roughness: 0.92, metalness: 0.0 };
+  // Main body — tall vertical capsule, slightly squashed in depth
+  // so it reads as a backpack pressed flat against a wearer's back.
+  const body = _cap(0.38, 0.95, NEUTRAL.fabric, 6, 14, fabricMat);
   body.scale.set(1.0, 1.0, 0.55);
-  body.position.y = 0.0;
+  body.position.y = -0.05;
   g.add(body);
-  // Side pocket — a smaller capsule attached to one side, suggests
-  // a water-bottle compartment.
-  const pkt = _cap(0.18, 0.30, NEUTRAL.fabric, 4, 10, fabricMat);
-  pkt.scale.set(0.8, 1.0, 0.55);
-  pkt.position.set(0.50, -0.05, 0.10);
-  g.add(pkt);
-  // Top flap — tinted, slightly larger than the body so it overhangs.
-  const flap = _box(0.78, 0.18, 0.50, tint, { roughness: 0.7 });
-  flap.position.set(0, 0.50, 0);
-  g.add(flap);
-  // Buckle on the flap.
-  const buckle = _box(0.12, 0.06, 0.04, NEUTRAL.metalDark,
-    { metalness: 0.7, roughness: 0.3 });
-  buckle.position.set(0, 0.42, 0.27);
-  g.add(buckle);
-  // Two shoulder straps + a grab handle.
-  for (const sx of [-0.22, 0.22]) {
-    const strap = _box(0.10, 0.95, 0.05, 0x18181c, { roughness: 0.75 });
-    strap.position.set(sx, 0.05, 0.28);
-    g.add(strap);
+  // Top dome cap — slight bulge above the body, tinted as the pack's
+  // identity color. Sphere makes the top read as drawstring puff.
+  const top = _sph(0.36, tint, fabricMat, 14);
+  top.scale.set(1.0, 0.55, 0.55);
+  top.position.y = 0.55;
+  g.add(top);
+  // Drawstring loop at the very top.
+  const draw = _torus(0.08, 0.022, NEUTRAL.metalDark, fabricMat, 12, 6);
+  draw.rotation.x = Math.PI / 2;
+  draw.position.set(0, 0.68, 0);
+  g.add(draw);
+  // Two side pockets — smaller capsules hugging each side of the
+  // body. Mesh-style water bottle pockets.
+  for (const side of [-1, 1]) {
+    const pkt = _cap(0.13, 0.30, NEUTRAL.fabric, 4, 10, fabricMat);
+    pkt.scale.set(0.8, 1.0, 0.55);
+    pkt.position.set(side * 0.42, -0.10, 0.05);
+    g.add(pkt);
   }
-  // Top grab handle — small loop at the top.
-  const handle = _torus(0.10, 0.025, NEUTRAL.fabric, fabricMat, 12, 6);
+  // Front pouch — flat-ish smaller capsule on the front of the pack
+  // with a tinted strip across it (where the brand patch would be).
+  const front = _cap(0.22, 0.25, NEUTRAL.fabric, 4, 12, fabricMat);
+  front.scale.set(1.0, 1.0, 0.30);
+  front.position.set(0, -0.05, 0.34);
+  g.add(front);
+  const patch = _box(0.30, 0.10, 0.02, tint, { roughness: 0.8 });
+  patch.position.set(0, 0.00, 0.46);
+  g.add(patch);
+  // Two shoulder straps — angled out from the top, curving down the
+  // sides of the body so they read as wearable straps.
+  for (const side of [-1, 1]) {
+    const strap = _cylT(0.07, 0.06, 0.85, 0x18181c, 8, { roughness: 0.8 });
+    strap.position.set(side * 0.18, 0.10, 0.32);
+    strap.rotation.z = side * 0.08;
+    g.add(strap);
+    // Sternum buckle on each strap.
+    const bk = _box(0.08, 0.04, 0.03, NEUTRAL.metalDark,
+      { metalness: 0.7, roughness: 0.3 });
+    bk.position.set(side * 0.20, -0.05, 0.36);
+    g.add(bk);
+  }
+  // Top grab handle — small loop standing up between the straps.
+  const handle = _torus(0.09, 0.025, NEUTRAL.fabric, fabricMat, 12, 6);
   handle.rotation.x = Math.PI / 2;
-  handle.position.set(0, 0.65, 0);
+  handle.position.set(0, 0.75, -0.05);
   g.add(handle);
   g.rotation.y = -0.35;
   return g;

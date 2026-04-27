@@ -1,5 +1,5 @@
 import * as THREE from 'three';
-import { inferRarity, SLOT_LABEL, SET_DEFS, countEquippedSetPieces } from './inventory.js';
+import { inferRarity, rarityColor, SLOT_LABEL, SET_DEFS, countEquippedSetPieces } from './inventory.js';
 import { thumbnailFor } from './item_thumbnails.js';
 import { modelForItem, rotationOverrideForModelPath } from './model_manifest.js';
 import { loadModelClone, fitToRadius, applyEmissiveTint, addOutlines } from './gltf_cache.js';
@@ -650,8 +650,8 @@ export class DetailsUI {
     }
     const rows = collectStats(item);
     const diffs = diffStats(item, compareTo);
-    const tint = item.tint ?? 0x888888;
-    const tintStr = `#${tint.toString(16).padStart(6, '0')}`;
+    // Cell background = rarity color, not item.tint.
+    const tintStr = rarityColor(item);
     const slotLabel = item.slot ? (SLOT_LABEL[item.slot] || item.slot) : (item.type || '');
 
     const statRows = rows.map(([key, val, dir, suffix]) => {
