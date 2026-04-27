@@ -46,21 +46,66 @@ function _spawnFloorDisc(scene, room, color) {
   // outside the normal pipeline.
   const cx = room._encounterSpawn?.x ?? (room.bounds.minX + room.bounds.maxX) / 2;
   const cz = room._encounterSpawn?.z ?? (room.bounds.minZ + room.bounds.maxZ) / 2;
-  const geom = new THREE.CircleGeometry(3.6, 36);
-  const mat = new THREE.MeshBasicMaterial({
-    color, transparent: true, opacity: 0.55,
-    side: THREE.DoubleSide, depthWrite: false,
+  // Encounter floor markers used to be a single bright saturated
+  // circle that read as "developer debug arena". Replaced with a
+  // restrained shrine-style marker:
+  //   - faint inner glow disc (the encounter colour, but pale)
+  //   - a stone outer ring (dark grey) so the silhouette reads as
+  //     a deliberate carved marker, not a colour wash
+  //   - 6 small marker stones around the perimeter for a ritual feel
+  //   - warm-white overhead light at half the old intensity, with a
+  //     subtle hint of the encounter colour for identity
+  const RADIUS = 3.6;
+  const group = new THREE.Group();
+  // Inner pale glow — same colour as before but opacity dropped from
+  // 0.55 to 0.18 so the floor underneath shows through.
+  const inner = new THREE.Mesh(
+    new THREE.CircleGeometry(RADIUS - 0.18, 40),
+    new THREE.MeshBasicMaterial({
+      color, transparent: true, opacity: 0.18,
+      side: THREE.DoubleSide, depthWrite: false,
+    }),
+  );
+  inner.rotation.x = -Math.PI / 2;
+  inner.position.y = 0.025;
+  group.add(inner);
+  // Outer stone ring — narrow band that frames the disc.
+  const ring = new THREE.Mesh(
+    new THREE.RingGeometry(RADIUS - 0.12, RADIUS + 0.04, 48, 1),
+    new THREE.MeshStandardMaterial({
+      color: 0x3a3a44, roughness: 0.85, metalness: 0.1,
+      side: THREE.DoubleSide,
+    }),
+  );
+  ring.rotation.x = -Math.PI / 2;
+  ring.position.y = 0.04;
+  group.add(ring);
+  // Marker stones around the perimeter — six small low cylinders.
+  // Catch the warm overhead light and read as carved markers from
+  // iso. Cheap (6 instances of one shared geometry).
+  const stoneGeom = new THREE.CylinderGeometry(0.12, 0.16, 0.18, 6);
+  const stoneMat  = new THREE.MeshStandardMaterial({
+    color: 0x4a4854, roughness: 0.9,
   });
-  const mesh = new THREE.Mesh(geom, mat);
-  mesh.rotation.x = -Math.PI / 2;
-  mesh.position.set(cx, 0.03, cz);
-  scene.add(mesh);
-  // Soft point light overhead — colour matches the floor for a cozy
-  // pool of light readable from across the room.
-  const light = new THREE.PointLight(color, 0.9, 9);
+  const STONES = 6;
+  for (let i = 0; i < STONES; i++) {
+    const a = (i / STONES) * Math.PI * 2 + Math.PI / STONES;
+    const stone = new THREE.Mesh(stoneGeom, stoneMat);
+    stone.position.set(Math.cos(a) * (RADIUS - 0.05), 0.09, Math.sin(a) * (RADIUS - 0.05));
+    stone.rotation.y = Math.random() * Math.PI;     // break grid alignment
+    stone.castShadow = true;
+    group.add(stone);
+  }
+  scene.add(group);
+  // Overhead light — warm cream tinted toward the encounter colour
+  // at lower intensity. The old saturated coloured light read as a
+  // spawn marker; this reads as ambient mood lighting.
+  const warm = new THREE.Color(color).lerp(new THREE.Color(0xfff0d8), 0.55);
+  const light = new THREE.PointLight(warm, 0.45, 8);
   light.position.set(cx, 3.2, cz);
   scene.add(light);
-  return { disc: mesh, light, cx, cz };
+  group.position.set(cx, 0, cz);
+  return { disc: inner, light, cx, cz, root: group };
 }
 
 // Floating speech-bubble helper — the level builds a sprite-style
@@ -99,6 +144,7 @@ function _makeLabelSprite(text, color = '#e8dfc8') {
 function _buildSimpleNpc({
   bodyColor = 0x4a5060, headColor = 0xd8c8a8, accentColor = 0xc9a87a,
   pantsColor, hairColor, bootColor, height = 1.8,
+  skipEyes = false, skipHair = false, skipAccent = false,
 } = {}) {
   // Humanoid silhouette built from primitives — boots, legs, torso,
   // shoulders, arms, hands, neck, head, eyes, hair cap, belt, accent
@@ -201,13 +247,17 @@ function _buildSimpleNpc({
 
   // Accent strip — thin band on the chest carrying the role colour.
   // Old single-mesh NPC used this same field, so existing per-encounter
-  // tints (priest's gold, gypsy's gold, etc.) still read.
-  const accent = new THREE.Mesh(
-    new THREE.CylinderGeometry(0.205, 0.205, 0.06, 12),
-    accentMat,
-  );
-  accent.position.y = LEG_TOP + torsoLen * 0.62;
-  group.add(accent);
+  // tints (priest's gold, gypsy's gold, etc.) still read. `skipAccent`
+  // is for NPCs whose costume already carries the colour (Curse Breaker
+  // shawl trim) so the strip doesn't double-up.
+  if (!skipAccent) {
+    const accent = new THREE.Mesh(
+      new THREE.CylinderGeometry(0.205, 0.205, 0.06, 12),
+      accentMat,
+    );
+    accent.position.y = LEG_TOP + torsoLen * 0.62;
+    group.add(accent);
+  }
 
   // Neck.
   const neck = new THREE.Mesh(
@@ -223,17 +273,21 @@ function _buildSimpleNpc({
   head.castShadow = true;
   group.add(head);
 
-  // Eyes — two tiny dark dots near the front of the face.
-  for (const xs of [-1, 1]) {
-    const eye = new THREE.Mesh(new THREE.SphereGeometry(0.014, 6, 4), eyeMat);
-    eye.position.set(HEAD_R * 0.38 * xs, NECK_TOP + HEAD_R * 1.10, HEAD_R * 0.88);
-    group.add(eye);
+  // Eyes — two tiny dark dots near the front of the face. `skipEyes`
+  // is for NPCs that paint their own (Sus's glowing menace under the
+  // brim hat).
+  if (!skipEyes) {
+    for (const xs of [-1, 1]) {
+      const eye = new THREE.Mesh(new THREE.SphereGeometry(0.014, 6, 4), eyeMat);
+      eye.position.set(HEAD_R * 0.38 * xs, NECK_TOP + HEAD_R * 1.10, HEAD_R * 0.88);
+      group.add(eye);
+    }
   }
 
   // Hair cap — top hemisphere over the head, tilted slightly back so
-  // it doesn't cover the eyes. Skipped if hairColor is explicitly null
-  // (lets the priest stay bald-headed if a caller wants).
-  if (HAIR !== null) {
+  // it doesn't cover the eyes. `skipHair` is for NPCs wearing a hat or
+  // headscarf that owns the entire crown silhouette.
+  if (!skipHair && HAIR !== null) {
     const hair = new THREE.Mesh(
       new THREE.SphereGeometry(HEAD_R * 1.04, 12, 8, 0, Math.PI * 2, 0, Math.PI * 0.55),
       hairMat,
@@ -3247,48 +3301,95 @@ export const ENCOUNTER_DEFS = {
     condition: (state) => !!(state.artifacts && state.artifacts.has('brass_prisoner')),
     spawn(scene, room, ctx) {
       const disc = _spawnFloorDisc(scene, room, this.floorColor);
-      const npc = new THREE.Group();
+      // Humanoid base in muted skin/clothes — most of the body is
+      // hidden by the shawl skirt + draped upper layer, but the arms,
+      // hands, head, and face still come from the shared rig so she
+      // matches the project silhouette. Hair skipped (headscarf wraps
+      // the whole crown) and accent skipped (gold trim does that work).
+      const npc = _buildSimpleNpc({
+        bodyColor: 0x4a1828,    // dark plum bodice (mostly covered)
+        headColor: 0xa07050,    // tan skin
+        accentColor: 0xc8a040,
+        pantsColor: 0x3a1024,   // dark plum trousers (covered by skirt)
+        bootColor: 0x18080c,
+        height: 1.78,
+        skipHair: true, skipAccent: true,
+      });
       const shawlMat = new THREE.MeshStandardMaterial({ color: 0x6a2030, roughness: 0.85 });
       const trimMat  = new THREE.MeshStandardMaterial({
         color: 0xc8a040, roughness: 0.5, metalness: 0.4,
       });
-      const skinMat = new THREE.MeshStandardMaterial({ color: 0xa07050, roughness: 0.7 });
-      const headMat = new THREE.MeshStandardMaterial({ color: 0x7a3a52, roughness: 0.85 });
-      // Layered shawl — wider at base, narrower up top so the
-      // silhouette reads as a draped figure.
-      const skirt = new THREE.Mesh(new THREE.ConeGeometry(0.65, 1.4, 14, 1, true), shawlMat);
-      skirt.position.y = 0.7;
+      const scarfMat = new THREE.MeshStandardMaterial({ color: 0x7a3a52, roughness: 0.85 });
+
+      // Long shawl skirt — open cone draped from waist to floor. Wider
+      // at the hem than the shoulders so the silhouette reads "robed
+      // figure" rather than "wearing pants".
+      const skirt = new THREE.Mesh(
+        new THREE.ConeGeometry(0.65, 1.0, 16, 1, true),
+        shawlMat,
+      );
+      skirt.position.y = 0.50;
       skirt.castShadow = true;
       npc.add(skirt);
       // Gold trim band around the hem.
       const hem = new THREE.Mesh(new THREE.TorusGeometry(0.62, 0.04, 6, 18), trimMat);
-      hem.position.y = 0.05;
+      hem.position.y = 0.04;
       hem.rotation.x = Math.PI / 2;
       npc.add(hem);
-      const upper = new THREE.Mesh(new THREE.SphereGeometry(0.36, 14, 10), shawlMat);
-      upper.scale.set(1.0, 0.85, 0.9);
-      upper.position.y = 1.45;
+      // Upper drape — squashed sphere over the shoulders carrying the
+      // shawl colour. Sits over the humanoid's torso + shoulder caps.
+      const upper = new THREE.Mesh(new THREE.SphereGeometry(0.38, 14, 10), shawlMat);
+      upper.scale.set(1.0, 0.75, 0.95);
+      upper.position.y = 1.40;
+      upper.castShadow = true;
       npc.add(upper);
-      // Headscarf + face.
-      const scarf = new THREE.Mesh(new THREE.SphereGeometry(0.25, 14, 10), headMat);
-      scarf.position.y = 1.85;
+      // Sash — diagonal gold trim across the upper drape.
+      const sash = new THREE.Mesh(
+        new THREE.BoxGeometry(0.65, 0.06, 0.04),
+        trimMat,
+      );
+      sash.position.set(0, 1.36, 0.34);
+      sash.rotation.z = 0.32;
+      npc.add(sash);
+
+      // Headscarf — wraps the back + sides of the head, leaving the
+      // face visible. Built as a partial sphere so the front of the
+      // face peeks through.
+      const scarf = new THREE.Mesh(
+        new THREE.SphereGeometry(0.18, 14, 10, Math.PI * 0.20, Math.PI * 1.60),
+        scarfMat,
+      );
+      scarf.position.y = 1.715;
       scarf.castShadow = true;
       npc.add(scarf);
-      const face = new THREE.Mesh(new THREE.SphereGeometry(0.18, 14, 10), skinMat);
-      face.position.set(0, 1.84, 0.10);
-      npc.add(face);
-      // Crystal ball she's holding — small glowing sphere in front of chest.
+      // Veil drape — a soft hanging strip down the back of the
+      // headscarf so the back silhouette has motion.
+      const veil = new THREE.Mesh(
+        new THREE.BoxGeometry(0.30, 0.42, 0.03),
+        scarfMat,
+      );
+      veil.position.set(0, 1.50, -0.16);
+      npc.add(veil);
+
+      // Crystal ball — small glowing sphere held in front of her hands.
       const ballMat = new THREE.MeshStandardMaterial({
         color: 0x80c0e8, roughness: 0.2, metalness: 0.1,
         emissive: 0x4080c0, emissiveIntensity: 0.7,
         transparent: true, opacity: 0.85,
       });
-      const ball = new THREE.Mesh(new THREE.SphereGeometry(0.15, 14, 10), ballMat);
-      ball.position.set(0, 1.30, 0.42);
+      const ball = new THREE.Mesh(new THREE.SphereGeometry(0.14, 14, 10), ballMat);
+      ball.position.set(0, 1.05, 0.32);
       npc.add(ball);
+      // Brass cradle — a thin torus the ball "rests" in.
+      const cradle = new THREE.Mesh(new THREE.TorusGeometry(0.13, 0.018, 8, 16),
+        trimMat);
+      cradle.position.set(0, 1.00, 0.32);
+      cradle.rotation.x = Math.PI * 0.10;
+      npc.add(cradle);
       const ballLight = new THREE.PointLight(0x60a0e0, 0.7, 3.5);
-      ballLight.position.set(0, 1.30, 0.42);
+      ballLight.position.set(0, 1.05, 0.32);
       npc.add(ballLight);
+
       npc.position.set(disc.cx, 0, disc.cz);
       npc.rotation.y = -Math.PI * 0.20;
       scene.add(npc);
@@ -3353,54 +3454,87 @@ export const ENCOUNTER_DEFS = {
     condition: (state) => state.levelIndex >= 1,
     spawn(scene, room, ctx) {
       const disc = _spawnFloorDisc(scene, room, this.floorColor);
-      // Build the trench-coat NPC. Body is a dark vertical box; head is
-      // a slightly hooded sphere; brim hat sits on top so the
-      // silhouette reads as "shady stranger" from iso angle.
-      const npc = new THREE.Group();
+      // Humanoid skeleton in coat-dark colours — pants/boots peek out
+      // below the trench coat hem so the silhouette has weight at the
+      // ground instead of just floating. Eyes + hair skipped because
+      // the brim hat owns the crown and we paint glowing eyes ourselves.
+      const npc = _buildSimpleNpc({
+        bodyColor: 0x1a1812,    // coat shoulders / arms
+        headColor: 0xa07050,    // tan skin
+        accentColor: 0x6a4a20,  // dim brass
+        pantsColor: 0x12100c,
+        bootColor: 0x080606,
+        height: 1.85,
+        skipEyes: true, skipHair: true, skipAccent: true,
+      });
       const coatMat = new THREE.MeshStandardMaterial({ color: 0x1a1812, roughness: 0.85 });
-      const skinMat = new THREE.MeshStandardMaterial({ color: 0xa07050, roughness: 0.7 });
       const hatMat  = new THREE.MeshStandardMaterial({ color: 0x0a0806, roughness: 0.85 });
       const accentMat = new THREE.MeshStandardMaterial({
         color: 0x6a4a20, roughness: 0.7, emissive: 0x301a08, emissiveIntensity: 0.4,
       });
-      // Coat — wide tall box, slight forward lean read.
-      const coat = new THREE.Mesh(new THREE.BoxGeometry(0.9, 1.5, 0.55), coatMat);
-      coat.position.y = 0.95;
-      coat.castShadow = true;
-      npc.add(coat);
-      // Coat lapel V — a brighter accent strip down the front so the
-      // trench-coat reads as buttoned, not a slab.
-      const lapel = new THREE.Mesh(new THREE.BoxGeometry(0.06, 0.9, 0.04), accentMat);
-      lapel.position.set(0, 1.0, 0.29);
+
+      // Front + back coat panels — long flat boards from belt to shin
+      // hung off the body. Reads as a draped trench coat skirt rather
+      // than a solid slab.
+      const frontPanel = new THREE.Mesh(new THREE.BoxGeometry(0.46, 0.95, 0.04), coatMat);
+      frontPanel.position.set(0, 0.78, 0.18);
+      frontPanel.castShadow = true;
+      npc.add(frontPanel);
+      const backPanel = new THREE.Mesh(new THREE.BoxGeometry(0.46, 0.95, 0.04), coatMat);
+      backPanel.position.set(0, 0.78, -0.18);
+      backPanel.castShadow = true;
+      npc.add(backPanel);
+      // Side coat skirts bridging front and back so the silhouette has
+      // mass instead of two parallel boards.
+      for (const xs of [-1, 1]) {
+        const side = new THREE.Mesh(new THREE.BoxGeometry(0.04, 0.95, 0.36), coatMat);
+        side.position.set(0.25 * xs, 0.78, 0);
+        side.castShadow = true;
+        npc.add(side);
+      }
+      // Upturned collar — two angled panels flanking the neck.
+      for (const xs of [-1, 1]) {
+        const collar = new THREE.Mesh(new THREE.BoxGeometry(0.16, 0.18, 0.06), coatMat);
+        collar.position.set(0.10 * xs, 1.55, 0.02);
+        collar.rotation.z = xs * 0.18;
+        collar.castShadow = true;
+        npc.add(collar);
+      }
+      // Lapel V — single brass strip down the chest.
+      const lapel = new THREE.Mesh(new THREE.BoxGeometry(0.06, 0.55, 0.02), accentMat);
+      lapel.position.set(0, 1.30, 0.21);
       npc.add(lapel);
-      // Head + neck.
-      const neck = new THREE.Mesh(new THREE.CylinderGeometry(0.10, 0.12, 0.12, 8), skinMat);
-      neck.position.y = 1.78;
-      npc.add(neck);
-      const head = new THREE.Mesh(new THREE.SphereGeometry(0.22, 14, 10), skinMat);
-      head.position.y = 1.96;
-      head.castShadow = true;
-      npc.add(head);
-      // Wide-brim hat — disc + low cylinder cap.
-      const brim = new THREE.Mesh(new THREE.CylinderGeometry(0.36, 0.36, 0.04, 18), hatMat);
-      brim.position.y = 2.10;
+
+      // Wide-brim hat — sits on the head crown (head top ≈ y=1.94 at
+      // height=1.85). Brim slightly forward to throw a shadow over the
+      // eyes for the "I see you, you don't see me" read.
+      const brim = new THREE.Mesh(new THREE.CylinderGeometry(0.34, 0.34, 0.04, 18), hatMat);
+      brim.position.set(0, 1.94, 0.02);
+      brim.castShadow = true;
       npc.add(brim);
-      const cap = new THREE.Mesh(new THREE.CylinderGeometry(0.18, 0.20, 0.18, 14), hatMat);
-      cap.position.y = 2.21;
+      const cap = new THREE.Mesh(new THREE.CylinderGeometry(0.16, 0.18, 0.18, 14), hatMat);
+      cap.position.y = 2.05;
+      cap.castShadow = true;
       npc.add(cap);
-      // Suspicious glow under the brim — two small emissive dots where
-      // eyes would be. Sells "what's he hiding under there?"
+      // Hatband — thin lighter strip just above the brim, sells the
+      // "real hat" silhouette instead of a stack of cylinders.
+      const band = new THREE.Mesh(new THREE.CylinderGeometry(0.165, 0.185, 0.04, 14),
+        new THREE.MeshStandardMaterial({ color: 0x40301a, roughness: 0.6 }));
+      band.position.y = 1.97;
+      npc.add(band);
+
+      // Glowing orange eyes under the brim — same shady-stranger flair
+      // as the original build. Slightly more forward + a hair brighter
+      // to win over the dark eyes the humanoid would have placed.
       const eyeMat = new THREE.MeshStandardMaterial({
-        color: 0xff8030, emissive: 0xff5010, emissiveIntensity: 1.0, roughness: 0.4,
+        color: 0xff8030, emissive: 0xff5010, emissiveIntensity: 1.2, roughness: 0.4,
       });
       for (const xs of [-1, 1]) {
-        const eye = new THREE.Mesh(new THREE.SphereGeometry(0.025, 8, 6), eyeMat);
-        eye.position.set(0.06 * xs, 1.99, 0.20);
+        const eye = new THREE.Mesh(new THREE.SphereGeometry(0.022, 8, 6), eyeMat);
+        eye.position.set(0.058 * xs, 1.83, 0.16);
         npc.add(eye);
       }
       npc.position.set(disc.cx, 0, disc.cz);
-      // Slight twist toward the room centre so the iso camera catches
-      // the lapel + brim shadow.
       npc.rotation.y = -Math.PI * 0.15;
       scene.add(npc);
       const label = _makeLabelSprite('SUS', '#d8a060');
