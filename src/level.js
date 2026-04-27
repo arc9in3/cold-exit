@@ -3,6 +3,7 @@ import { tunables } from './tunables.js';
 import { buildProp } from './props.js';
 import { buildRig, initAnim, updateAnim } from './actor_rig.js';
 import { makeContainer, pickContainerType, pickContainerSize, buildContainerMesh } from './containers.js';
+import { StaticObstacleGrid2D } from './obstacle_grid.js';
 
 // Shopkeeper palette per kind — body / head / pants / gear tint so
 // each shop's NPC reads as a distinct role in the world. Exported so
@@ -38,6 +39,7 @@ const ROOM_H = 18;
 const WALL_THICK = 1.2;
 const WALL_HEIGHT = 3.0;
 const DOOR_WIDTH = 4;
+const PROJECTILE_OBSTACLE_CELL_SIZE = 5;
 
 export class Level {
   constructor(scene) {
@@ -60,6 +62,12 @@ export class Level {
     // emergency flares) used by lightLevelAt() to evaluate how lit a
     // point is. Stealth math reads from this each frame.
     this.lights = [];
+    this._solidCache = null;
+    this._solidDirty = true;
+    this._visionCache = null;
+    this._visionDirty = true;
+    this._projectileObstacleGrid = null;
+    this._projectileObstacleSource = null;
   }
 
   clear() {
@@ -101,6 +109,12 @@ export class Level {
     this.lights = [];
     this.exitBounds = null;
     this.bossRoomId = -1;
+    this._solidCache = null;
+    this._solidDirty = true;
+    this._visionCache = null;
+    this._visionDirty = true;
+    this._projectileObstacleGrid = null;
+    this._projectileObstacleSource = null;
   }
 
   generate() {
@@ -2561,11 +2575,31 @@ export class Level {
     }
     this._solidCache = out;
     this._solidDirty = false;
+    this._projectileObstacleGrid = null;
+    this._projectileObstacleSource = null;
     return out;
   }
   // Mark the solid-obstacles cache stale. Cheap; no work until the
   // next solidObstacles() call.
-  _dirtySolid() { this._solidDirty = true; this._visionDirty = true; }
+  _dirtySolid() {
+    this._solidDirty = true;
+    this._visionDirty = true;
+    this._projectileObstacleGrid = null;
+    this._projectileObstacleSource = null;
+  }
+
+  projectileObstacleGrid() {
+    const obstacles = this.solidObstacles();
+    if (!this._projectileObstacleGrid) {
+      this._projectileObstacleGrid = new StaticObstacleGrid2D(PROJECTILE_OBSTACLE_CELL_SIZE);
+      this._projectileObstacleGrid.rebuild(obstacles, (o) => o.userData.collisionXZ);
+      this._projectileObstacleSource = obstacles;
+    } else if (this._projectileObstacleSource !== obstacles) {
+      this._projectileObstacleGrid.rebuild(obstacles, (o) => o.userData.collisionXZ);
+      this._projectileObstacleSource = obstacles;
+    }
+    return this._projectileObstacleGrid;
+  }
 
   // Vision blockers — walls + closed doors + elevator panels, but NOT
   // props (bookshelves, couches) since the player can see over them.

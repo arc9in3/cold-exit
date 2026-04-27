@@ -11,7 +11,7 @@ Status legend: `open` (unassigned, ready) · `in-progress` ·
 
 | Task | Owner | Status | Notes |
 |---|---|---|---|
-| BVH for `_hitsObstacle` projectile path | codex | open | Currently O(walls) per projectile step. Read PROJECT.md's pre-edit sequence first. |
+| BVH for `_hitsObstacle` projectile path | codex | in-progress | Cached obstacle index for projectile sweeps on `codex/projectile-bvh`. |
 | Audit: every `geometry.dispose()` callsite for `sharedRigGeom` guard | gemini | open | Past regression; verify no new gaps. Report to `audits/dispose-guard.md`. |
 | Audit: artifact `apply()` mutations vs `BASE_STATS()` field declarations | gemini | open | Catches relics that mutate undefined fields. |
 | Refactor: rename `_baseBody` / `_baseHead` → `_normalBodyColor` / `_normalHeadColor` in gunman.js | gemini | open | Single sweep, single commit. Previous attempt got lost via dirty working tree (no checkout) — must follow REQUIRED pre-edit sequence. |
