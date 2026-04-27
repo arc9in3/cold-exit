@@ -9339,19 +9339,9 @@ function tick() {
   // doorways instead of hitting their flattened mesh.
   const losObstacles = level.solidObstacles();
   const isRoomActive = (roomId) => level.isRoomActive(roomId);
-  // Decoy beacon hijack — when an active decoy exists, present its
-  // position to the AI as the perceived player. Every pathfind /
-  // aim / chase branch reads ctx.playerPos, so rewriting it here
-  // automatically draws gunmen + melees to the beacon without each
-  // archetype having to opt in. Y-coord stays at the real player's
-  // height so vertical aim math doesn't suddenly point at the floor.
-  const _decoyHit = activeDecoy();
-  const _perceivedPlayerPos = _decoyHit
-    ? { x: _decoyHit.x, y: playerInfo.position.y, z: _decoyHit.z }
-    : playerInfo.position;
   gunmen.update({
     dt,
-    playerPos: _perceivedPlayerPos,
+    playerPos: playerInfo.position,
     playerFacing: playerInfo.facing,   // used by Evasive Gunner archetype
     playerCrouched: !!playerInfo.crouched,
     playerRoomId,
@@ -9382,7 +9372,7 @@ function tick() {
   });
   melees.update({
     dt,
-    playerPos: _perceivedPlayerPos,
+    playerPos: playerInfo.position,
     playerRoomId,                   // assassin uncloak trigger
     combat,
     camera,                         // for chatter bubble projection
