@@ -1,5 +1,5 @@
 import { SLOT_IDS, SLOT_POSITIONS, SLOT_ICONS, TYPE_ICONS, inferRarity,
-         SET_DEFS, countEquippedSetPieces } from './inventory.js';
+         SET_DEFS, countEquippedSetPieces, weaponImageMirrorStyle } from './inventory.js';
 import { SKILLS } from './skills.js';
 import { renderItemCell } from './ui_item_cell.js';
 import { thumbnailFor } from './item_thumbnails.js';
@@ -447,7 +447,7 @@ export class InventoryUI {
     const stackBadge = ((entry.item.type === 'consumable' || entry.item.type === 'junk') && count > 1)
       ? `<span class="pkt-stack">×${count}</span>` : '';
     tile.innerHTML = `
-      ${thumb ? `<img class="pkt-thumb" src="${thumb}" alt="" draggable="false">` : `<span class="pkt-glyph">${TYPE_ICONS[entry.item.type] || '◇'}</span>`}
+      ${thumb ? `<img class="pkt-thumb" src="${thumb}" alt="" draggable="false" style="${weaponImageMirrorStyle(entry.item)}">` : `<span class="pkt-glyph">${TYPE_ICONS[entry.item.type] || '◇'}</span>`}
       ${brokenTag}
       ${stackBadge}
       <div class="pkt-name">${label}</div>
@@ -502,7 +502,7 @@ export class InventoryUI {
         ghost.style.left = `${ev.clientX - CELL_PX / 2}px`;
         ghost.style.top  = `${ev.clientY - CELL_PX / 2}px`;
         ghost.innerHTML = `
-          ${thumb ? `<img class="pkt-thumb" src="${thumb}" alt="" draggable="false">` : `<span class="pkt-glyph">${TYPE_ICONS[item.type] || '◇'}</span>`}
+          ${thumb ? `<img class="pkt-thumb" src="${thumb}" alt="" draggable="false" style="${weaponImageMirrorStyle(item)}">` : `<span class="pkt-glyph">${TYPE_ICONS[item.type] || '◇'}</span>`}
           <div class="pkt-name">${(item.name || '').toString()}</div>
         `;
         document.body.appendChild(ghost);

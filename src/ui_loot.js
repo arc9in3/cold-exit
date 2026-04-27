@@ -1286,7 +1286,7 @@ export class LootUI {
       ? `<span class="pkt-ammo">${entry.item.ammo}/${entry.item.magSize ?? '—'}</span>`
       : '';
     tile.innerHTML = `
-      ${thumb ? `<img class="pkt-thumb" src="${thumb}" alt="" draggable="false">` : `<span class="pkt-glyph">${TYPE_ICONS[entry.item.type] || '◇'}</span>`}
+      ${thumb ? `<img class="pkt-thumb" src="${thumb}" alt="" draggable="false" style="${weaponImageMirrorStyle(entry.item)}">` : `<span class="pkt-glyph">${TYPE_ICONS[entry.item.type] || '◇'}</span>`}
       <div class="pkt-name">${label}</div>
       ${durPct >= 0 ? `<div class="pkt-dur"><div class="pkt-dur-fill" style="width:${durPct.toFixed(0)}%;background:${durPct > 60 ? '#6abe8a' : durPct > 30 ? '#e0c040' : '#d24040'}"></div></div>` : ''}
       ${ammoLine}
@@ -1339,7 +1339,7 @@ export class LootUI {
         ghost.style.left = `${ev.clientX - PL_CELL_PX / 2}px`;
         ghost.style.top  = `${ev.clientY - PL_CELL_PX / 2}px`;
         ghost.innerHTML = `
-          ${thumb ? `<img class="pkt-thumb" src="${thumb}" alt="" draggable="false">` : `<span class="pkt-glyph">${TYPE_ICONS[item.type] || '◇'}</span>`}
+          ${thumb ? `<img class="pkt-thumb" src="${thumb}" alt="" draggable="false" style="${weaponImageMirrorStyle(item)}">` : `<span class="pkt-glyph">${TYPE_ICONS[item.type] || '◇'}</span>`}
           <div class="pkt-name">${(item.name || '').toString()}</div>
         `;
         document.body.appendChild(ghost);

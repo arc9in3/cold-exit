@@ -1,6 +1,6 @@
 import * as THREE from 'three';
 import { tunables } from './tunables.js';
-import { modelForItem, gripOffsetForModelPath, rotationOverrideForModelPath, shouldMirrorWeapon } from './model_manifest.js';
+import { modelForItem, gripOffsetForModelPath, rotationOverrideForModelPath, shouldMirrorInHand } from './model_manifest.js';
 import { getCharacterStyle } from './prefs.js';
 import { loadModelClone, fitToRadius } from './gltf_cache.js';
 import { buildRig, initAnim, updateAnim, pokeHit, pokeRecoil, pokeDeath } from './actor_rig.js';
@@ -369,6 +369,10 @@ export function createPlayer(scene) {
         } else {
           clone.rotation.set(0, Math.PI / 2, 0);
         }
+        // In-hand mirror: most MIRROR_X_BY_NAME weapons need it
+        // here too. AS VAL + VSS are excluded — see
+        // IN_HAND_MIRROR_EXCLUDE in model_manifest.
+        if (shouldMirrorInHand(weapon)) clone.scale.x = -clone.scale.x;
         inHandModel.add(clone);
         // Keep inHandModel at the box position (set in setWeapon's
         // branch above) so the FBX lands exactly where the primitive
@@ -1465,6 +1469,7 @@ export function createPlayer(scene) {
       } else {
         clone.rotation.set(0, Math.PI / 2, 0);
       }
+      if (shouldMirrorInHand(weapon)) clone.scale.x = -clone.scale.x;
       const gripOff = gripOffsetForModelPath(modelUrl);
       if (gripOff) clone.position.set(gripOff.x || 0, gripOff.y || 0, gripOff.z || 0);
       else         clone.position.set(0, 0, 0);

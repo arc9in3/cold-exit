@@ -259,12 +259,23 @@ export const MODEL_GRIP_OFFSET = {
 
 export const MODEL_ROTATION_OVERRIDE = {
   // Key -> { x, y, z } in radians. Replaces the default (0, π/2, 0).
-  // Use INVERTED yaw (-π/2) for FBXes authored muzzle-on-+X — the
-  // default yaw +π/2 maps local +X to world -Z (backward); -π/2 maps
-  // it to world +Z (forward). User-confirmed "in hand backwards":
-  'weapons/SM_Assault_Rifle_9x39.fbx':  { x: 0, y: -Math.PI / 2, z: 0 }, // AS VAL
-  'weapons/SM_Police_Sniper_Rifle.fbx': { x: 0, y: -Math.PI / 2, z: 0 }, // VSS Vintorez
 };
+
+// FBX paths whose in-hand orientation is correct under the DEFAULT
+// rotation (no mirror needed). Used as an exclusion list when
+// shouldMirrorInHand consults MIRROR_X_BY_NAME — the user manually
+// flagged these for tool/PNG mirror but in-hand they should NOT be
+// flipped (would put them backwards).
+export const IN_HAND_MIRROR_EXCLUDE = new Set([
+  'weapons/SM_Assault_Rifle_9x39.fbx',   // AS VAL
+  'weapons/SM_Police_Sniper_Rifle.fbx',  // VSS Vintorez
+]);
+export function shouldMirrorInHand(item) {
+  if (!shouldMirrorWeapon(item)) return false;
+  const path = MODEL_BY_WEAPON_NAME[item.baseName || item.name];
+  if (path && IN_HAND_MIRROR_EXCLUDE.has(path)) return false;
+  return true;
+}
 
 export function gripOffsetForModelPath(fullPath) {
   if (!fullPath) return null;
