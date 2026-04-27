@@ -262,7 +262,12 @@ export class CustomizeUI {
         const d = this.getDragState();
         if (!d || !d.item || d.item.type !== 'attachment' || d.item.slot !== slot) return;
         if (d.from === 'backpack') {
-          const moved = this.inventory.takeFromBackpack(d.idx);
+          // Pass the item ref, not the index. `d.idx` is captured at
+          // dragstart against the flat-array view; if the view shifts
+          // between dragstart and drop (re-render, _bump, etc.) the
+          // index can resolve to a sibling item, leaving the original
+          // attachment still in the grid AND on the weapon.
+          const moved = this.inventory.takeFromBackpack(d.item);
           if (moved) {
             const ok = this.inventory.attachToWeapon(w, slot, moved);
             if (!ok) this.inventory.add(moved);
@@ -310,7 +315,10 @@ export class CustomizeUI {
       });
       cell.addEventListener('contextmenu', (e) => {
         e.preventDefault();
-        const moved = this.inventory.takeFromBackpack(i);
+        // Pass the item ref directly — `i` is the flat-array index at
+        // render time; if anything else mutates the view before this
+        // fires the index would resolve to a sibling item.
+        const moved = this.inventory.takeFromBackpack(it);
         if (moved) {
           const ok = this.inventory.attachToWeapon(w, moved.slot, moved);
           if (!ok) this.inventory.add(moved);
