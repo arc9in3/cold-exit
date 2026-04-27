@@ -1114,6 +1114,81 @@ function _buildBiscuits(tint) {
   return g;
 }
 
+// Toy thumbnail — chibi bear silhouette mirroring the 3D loot
+// build in loot.js (_buildBearGroup). Body + over-sized head + ears
+// + snout + cartoon eyes with catchlights. Caller passes the body
+// tint (white for Joke Bear / Beary Doll; red for Demon Bear) and
+// flags for Demon Bear's grey horns + squinty eyes.
+function _buildBearToy(opts = {}) {
+  const g = new THREE.Group();
+  const tint = opts.tint ?? 0xffffff;
+  const bodyMat = _mat(tint, { roughness: 0.85 });
+  const whiteMat = _mat(0xffffff, { roughness: 0.7 });
+  const noseMat = _mat(0x222222, { roughness: 0.5 });
+  // Body — squatter sphere so the head dominates.
+  const body = new THREE.Mesh(new THREE.SphereGeometry(0.42, 14, 10), bodyMat);
+  body.position.y = -0.05;
+  g.add(body);
+  // Head — big chibi sphere sitting low and slightly forward.
+  const head = new THREE.Mesh(new THREE.SphereGeometry(0.48, 14, 10), bodyMat);
+  head.position.set(0, 0.55, 0.08);
+  g.add(head);
+  // Ears — wider apart, sitting high on the dome.
+  const earGeom = new THREE.SphereGeometry(0.13, 10, 8);
+  const earL = new THREE.Mesh(earGeom, bodyMat);
+  earL.position.set(-0.30, 0.92, 0.06);
+  g.add(earL);
+  const earR = new THREE.Mesh(earGeom, bodyMat);
+  earR.position.set(0.30, 0.92, 0.06);
+  g.add(earR);
+  // Snout — small bright wedge pulled flat against the face.
+  const snout = new THREE.Mesh(new THREE.SphereGeometry(0.10, 10, 8), whiteMat);
+  snout.position.set(0, 0.45, 0.42);
+  g.add(snout);
+  const noseDot = new THREE.Mesh(new THREE.SphereGeometry(0.045, 10, 8), noseMat);
+  noseDot.position.set(0, 0.50, 0.50);
+  g.add(noseDot);
+  // Eyes — Demon Bear uses thin slit-like meshes for the squint;
+  // regular bears get full round eyes with catchlights.
+  if (opts.squintyEyes) {
+    const eyeGeom = new THREE.SphereGeometry(0.08, 10, 8);
+    for (const xs of [-1, 1]) {
+      const eye = new THREE.Mesh(eyeGeom, noseMat);
+      eye.scale.set(1.0, 0.30, 0.6);    // squashed → squint
+      eye.position.set(0.16 * xs, 0.62, 0.36);
+      g.add(eye);
+    }
+  } else {
+    const eyeGeom = new THREE.SphereGeometry(0.08, 10, 8);
+    const eyeL = new THREE.Mesh(eyeGeom, noseMat);
+    eyeL.position.set(-0.17, 0.62, 0.36);
+    g.add(eyeL);
+    const eyeR = new THREE.Mesh(eyeGeom, noseMat);
+    eyeR.position.set(0.17, 0.62, 0.36);
+    g.add(eyeR);
+    const catchMat = _mat(0xffffff, { roughness: 0.3 });
+    const catchGeom = new THREE.SphereGeometry(0.025, 6, 4);
+    const catchL = new THREE.Mesh(catchGeom, catchMat);
+    catchL.position.set(-0.15, 0.65, 0.43);
+    g.add(catchL);
+    const catchR = new THREE.Mesh(catchGeom, catchMat);
+    catchR.position.set(0.19, 0.65, 0.43);
+    g.add(catchR);
+  }
+  // Demon Bear horns — a pair of grey conical horns on top of the
+  // head, angled outward.
+  if (opts.horns) {
+    const hornMat = _mat(0x888888, { roughness: 0.6, metalness: 0.2 });
+    for (const xs of [-1, 1]) {
+      const horn = new THREE.Mesh(new THREE.ConeGeometry(0.07, 0.22, 8), hornMat);
+      horn.position.set(0.16 * xs, 1.02, 0.06);
+      horn.rotation.z = -0.35 * xs;
+      g.add(horn);
+    }
+  }
+  return g;
+}
+
 // Per-id dispatch table — items not listed here fall through to the
 // shared pouch silhouette tinted by item.tint. Keep this list short:
 // only items whose name evokes a shape that's worth the pixels.
@@ -1130,6 +1205,14 @@ const _JUNK_BUILDERS = {
   junk_rocket_ticket:  (it) => _buildTicket(it.tint),
   junk_fancy_alcohol:  (it) => _buildBottle(it.tint),
   junk_yummy_biscuits: (it) => _buildBiscuits(it.tint),
+  // Toy bears + ducks — match the 3D loot silhouettes from loot.js
+  // (_buildBearGroup / _buildDuckGroup) so the inventory cell reads
+  // as the same character the player picked up off the floor.
+  toy_joke_bear:       (it) => _buildBearToy({ tint: it.tint || 0xffffff }),
+  toy_beary_doll:      (it) => _buildBearToy({ tint: it.tint || 0xffffff }),
+  toy_demon_bear:      (it) => _buildBearToy({
+    tint: it.tint || 0xc81a1a, horns: true, squintyEyes: true,
+  }),
 };
 
 function buildJunk(item) {
