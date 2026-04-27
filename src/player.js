@@ -1,6 +1,6 @@
 import * as THREE from 'three';
 import { tunables } from './tunables.js';
-import { modelForItem, gripOffsetForModelPath, rotationOverrideForModelPath, shouldMirrorInHand } from './model_manifest.js';
+import { modelForItem, gripOffsetForModelPath, rotationOverrideForModelPath, shouldMirrorInHand, scaleForModelPath } from './model_manifest.js';
 import { getCharacterStyle } from './prefs.js';
 import { loadModelClone, fitToRadius } from './gltf_cache.js';
 import { buildRig, initAnim, updateAnim, pokeHit, pokeRecoil, pokeDeath } from './actor_rig.js';
@@ -354,7 +354,11 @@ export function createPlayer(scene) {
           melee:  0.7,
         };
         const cs = CLASS_SCALE[weapon.class] ?? 0.9;
-        fitToRadius(clone, len * cs);
+        // Pack-based size correction on top of the class fit —
+        // animpic and lowpoly packs were authored at different
+        // baseline scales; per-FBX overrides catch outliers like
+        // Makarov (too big) and P90 (too small).
+        fitToRadius(clone, len * cs * scaleForModelPath(modelUrl));
         // Animpic weapons are authored pointing along -X in their local
         // frame, so a +90° yaw points the barrel along +Z (aim axis).
         // Per-weapon modelRotation on the tunable overrides, then a
@@ -1286,8 +1290,12 @@ export function createPlayer(scene) {
     }
 
     const cls2 = state.equipped?.class;
+    // SMG was missing — fell through to the base pose where recoil
+    // pushes the shoulder UP (the muzzle ends up at chest level
+    // pointing down). Adding it to rifleHold uses the corrected
+    // recoil direction below.
     const rifleHold = cls2 === 'rifle' || cls2 === 'shotgun'
-      || cls2 === 'lmg' || cls2 === 'sniper';
+      || cls2 === 'lmg' || cls2 === 'sniper' || cls2 === 'smg';
     // Aim pitch — vertical angle from the fire origin (chest) to the
     // cursor target. Positive = target above shoulder (looking up),
     // negative = target below (crouched enemy / floor cursor). The
@@ -1459,7 +1467,7 @@ export function createPlayer(scene) {
         lmg: 0.75, flame: 0.7, melee: 0.7,
       };
       const cs = CLASS_SCALE[weapon.class] ?? 0.9;
-      fitToRadius(clone, len * cs);
+      fitToRadius(clone, len * cs * scaleForModelPath(modelUrl));
       const r = weapon.modelRotation;
       const rotOverride = rotationOverrideForModelPath(modelUrl);
       if (rotOverride) {
