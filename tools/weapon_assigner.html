@@ -100,6 +100,27 @@
     border-radius: 2px; pointer-events: none; z-index: 5;
   }
 
+  /* Mirror toggle button — sits on the canvas overlay so it works on
+     mobile. Tap to flip the model along X. Active state stays
+     visible at a glance. */
+  .mirror-btn {
+    position: absolute; top: 4px; right: 4px;
+    z-index: 6;
+    width: 32px; height: 32px;
+    border: 1px solid #4a4030; background: rgba(20, 22, 28, 0.85);
+    color: #c9a87a; font-size: 16px; line-height: 30px; text-align: center;
+    border-radius: 4px; cursor: pointer; user-select: none;
+    -webkit-tap-highlight-color: transparent;
+    transition: background 0.15s, color 0.15s, border-color 0.15s;
+  }
+  .mirror-btn:hover { background: rgba(40, 44, 52, 0.95); }
+  .mirror-btn.active {
+    background: #5a8a4a; color: #fff; border-color: #6aaa5a;
+  }
+  /* Bump up cursor priority on mobile so the mirror button isn't
+     blocked by the canvas tile click handler. */
+  .ftile canvas, .wtile canvas { touch-action: manipulation; }
+
   /* ===== Fullscreen pose-tuning modal ===== */
   .pose-modal { position: fixed; inset: 0; background: rgba(0,0,0,0.92);
                 z-index: 100; display: none; flex-direction: column; }
@@ -167,6 +188,7 @@
   <input id="search" type="search" placeholder="filter by FBX name (regex ok)…" autocomplete="off">
   <button id="export-btn" title="Download all tags + the in-game weapon list as JSON">Export tags</button>
   <button id="render-icons-btn" title="Render side-view PNGs of every in-game weapon's model and zip them. Drop into Assets/UI/weapon_renders/ to drive in-game inventory + attachment-screen icons.">Export side-view PNGs</button>
+  <button id="copy-mirrors-btn" title="Copy the list of mirror-flagged weapons + FBXes to the clipboard so you can paste it back to fix manifest orientations.">Copy mirror list</button>
   <span class="count" id="count">loading…</span>
 </header>
 
@@ -297,6 +319,56 @@ try { fbxDeletions = new Set(JSON.parse(localStorage.getItem(FBX_DEL_KEY) || '[]
 try { weaponDeletions = new Set(JSON.parse(localStorage.getItem(WEAPON_DEL_KEY) || '[]')); } catch {}
 function saveFbxDeletions() { localStorage.setItem(FBX_DEL_KEY, JSON.stringify([...fbxDeletions])); }
 function saveWeaponDeletions() { localStorage.setItem(WEAPON_DEL_KEY, JSON.stringify([...weaponDeletions])); }
+
+// Mirror flags — set of FBX paths whose model should be flipped
+// along the X axis. Use the in-game weapon name when the tile is
+// for an in-game weapon, the FBX path otherwise. The export button
+// dumps a copy-pasteable JSON list to hand back for fixing in the
+// manifest.
+const MIRROR_KEY = 'tacticalrogue.mirror_flags';
+let mirrorFlags = new Set();
+try { mirrorFlags = new Set(JSON.parse(localStorage.getItem(MIRROR_KEY) || '[]')); } catch {}
+function saveMirrorFlags() { localStorage.setItem(MIRROR_KEY, JSON.stringify([...mirrorFlags])); }
+
+// Apply (or undo) X-axis mirror on a tile's loaded mesh group. The
+// auto-flip heuristic in fitAndStage may have already mirrored the
+// model to enforce muzzle-LEFT; this user toggle stacks on top by
+// flipping again. Stored as a multiplier so the live state always
+// reflects whatever the user wants.
+function _applyMirrorToTile(t) {
+  if (!t || !t.obj) return;
+  const key = t.weaponName || t.path;
+  const wantMirror = mirrorFlags.has(key);
+  // Stash whatever scale.x the auto-flip set. We track the user's
+  // intent separately and apply on top.
+  if (t._autoScaleX === undefined) t._autoScaleX = t.obj.scale.x;
+  t.obj.scale.x = wantMirror ? -t._autoScaleX : t._autoScaleX;
+}
+
+function _attachMirrorBtn(tile, t) {
+  const key = t.weaponName || t.path;
+  const btn = document.createElement('button');
+  btn.type = 'button';
+  btn.className = 'mirror-btn';
+  btn.textContent = '⇋';
+  btn.title = 'Mirror this model along X (flip muzzle direction)';
+  if (mirrorFlags.has(key)) btn.classList.add('active');
+  btn.addEventListener('click', (e) => {
+    e.stopPropagation();   // don't open the pose modal
+    if (mirrorFlags.has(key)) mirrorFlags.delete(key);
+    else mirrorFlags.add(key);
+    saveMirrorFlags();
+    btn.classList.toggle('active', mirrorFlags.has(key));
+    _applyMirrorToTile(t);
+  });
+  // Touch handler — explicit so mobile taps don't fall through to
+  // the canvas click handler that opens the pose modal.
+  btn.addEventListener('touchend', (e) => {
+    e.stopPropagation(); e.preventDefault();
+    btn.click();
+  }, { passive: false });
+  tile.appendChild(btn);
+}
 
 function _markDeleted(tile, isDeleted) {
   tile.classList.toggle('deleted', isDeleted);
@@ -494,6 +566,11 @@ function fitAndStage(t) {
   }
 
   t.scene = scene; t.camera = camera;
+  // Apply any user-set mirror flag now that the obj is staged.
+  // _autoScaleX captures whatever the auto-flip already did so the
+  // user toggle cleanly stacks on top of it.
+  t._autoScaleX = t.obj.scale.x;
+  _applyMirrorToTile(t);
 }
 
 // ============================================================
@@ -625,6 +702,14 @@ for (const w of inGameWeapons) {
   if (wTag.value) tile.classList.add('tagged');
   if (weaponDeletions.has(w.name)) _markDeleted(tile, true);
   weaponInputByName[w.name] = { input: wTag, tile };
+  if (modelRel) {
+    // Mirror button — attach AFTER the tile is in the DOM.
+    // weaponTiles is populated below; we look it up by weapon name.
+    setTimeout(() => {
+      const wTile = weaponTiles.find(x => x.weaponName === w.name);
+      if (wTile) _attachMirrorBtn(tile, wTile);
+    }, 0);
+  }
   wTag.addEventListener('blur', () => {
     let v = wTag.value.trim();
     // 'remove' / '#remove' → just clear the tag.
@@ -759,6 +844,12 @@ for (const cat of cats) {
     tagEl.value = tags[path] || '';
     tagEl.dataset.tagged = tagEl.value ? '1' : '0';
     fbxInputByPath[path] = { input: tagEl, tile };
+    // Mirror button for FBX library tiles too — set up after the
+    // tileObj is created (just below).
+    setTimeout(() => {
+      const fTile = fbxTiles.find(x => x.path === path);
+      if (fTile) _attachMirrorBtn(tile, fTile);
+    }, 0);
     if (fbxDeletions.has(path)) _markDeleted(tile, true);
     tagEl.addEventListener('blur', () => {
       let v = tagEl.value.trim();
@@ -899,6 +990,46 @@ exportBtn.addEventListener('click', () => {
 // where iconForItem will be taught to look it up first.
 // ============================================================
 document.getElementById('render-icons-btn').addEventListener('click', renderAllIcons);
+
+// Copy the mirror flag list to the clipboard. Splits into two
+// arrays — in-game weapon names and FBX paths — so the recipient
+// can patch the manifest cleanly. Mobile-friendly: uses the async
+// clipboard API with a textarea fallback for older browsers.
+document.getElementById('copy-mirrors-btn').addEventListener('click', async () => {
+  const weapons = [];
+  const fbxes = [];
+  // Resolve each mirror key back to weapon-vs-fbx by checking the
+  // weaponInputByName map. Anything not in there is an FBX path.
+  for (const key of mirrorFlags) {
+    if (weaponInputByName[key]) weapons.push(key);
+    else fbxes.push(key);
+  }
+  const out = {
+    mirror_in_game_weapons: weapons.sort(),
+    mirror_fbx_paths: fbxes.sort(),
+    count: weapons.length + fbxes.length,
+  };
+  const text = JSON.stringify(out, null, 2);
+  try {
+    await navigator.clipboard.writeText(text);
+    count.textContent = `copied ${out.count} mirror flags to clipboard`;
+  } catch (err) {
+    // Fallback: hidden textarea + execCommand. Works on older mobile.
+    const ta = document.createElement('textarea');
+    ta.value = text;
+    ta.style.position = 'fixed'; ta.style.opacity = '0';
+    document.body.appendChild(ta);
+    ta.select();
+    try {
+      document.execCommand('copy');
+      count.textContent = `copied ${out.count} mirror flags (fallback)`;
+    } catch (e2) {
+      // Last resort — surface the JSON in a prompt for manual copy.
+      window.prompt('Copy this JSON manually:', text);
+    }
+    ta.remove();
+  }
+});
 
 async function renderAllIcons() {
   const targets = weaponTiles;
