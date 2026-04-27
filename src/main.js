@@ -2028,6 +2028,14 @@ function regenerateLevel() {
       // keeps the peaceful path open.
       playerSpeed: lastPlayerInfo ? (lastPlayerInfo.speed || 0) : 0,
       scene, level, room: r,
+      // Modal prompt helpers exposed on every ctx — were previously
+      // monkey-patched onto ctx inside tryInteract before each
+      // interact() call, which meant calling them from tick() or
+      // onItemDropped() would crash. Expose them here so any encounter
+      // hook can drive the prompt UI. Caught by gemini audit
+      // (audits/encounter-ctx.md).
+      showPrompt: showEncounterPrompt,
+      closePrompt: closeEncounterPrompt,
       // 7s minimum on every encounter speech so the player has time
       // to read the line, even if the encounter passed a shorter
       // explicit life value.
@@ -7468,8 +7476,9 @@ function tryInteract({ nearItem, body, npc, container }) {
     if (enc) {
       const ctx = enc.ctxFactory();
       ctx.state = enc.state;
-      ctx.showPrompt = showEncounterPrompt;
-      ctx.closePrompt = closeEncounterPrompt;
+      // showPrompt / closePrompt are now exposed by the ctx factory
+      // itself — the local re-assign here used to be the only path,
+      // which meant tick() and onItemDropped() couldn't call them.
       enc.def.interact(ctx);
       return;
     }
