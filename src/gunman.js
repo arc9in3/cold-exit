@@ -2405,7 +2405,7 @@ export class GunmanManager {
                 shotDir.y,
                 shotDir.x * s + shotDir.z * c,
               );
-              ctx.onFireAt(muzzleWorld, _g_jittered, weapon, g.damageMult);
+              ctx.onFireAt(muzzleWorld, _g_jittered, weapon, g.damageMult, g);
             }
             // Kick the recoil spring once per fire tick (not per pellet
             // so shotguns don't get N× the visible kick).

@@ -5155,7 +5155,26 @@ function maybeDropExtras(enemy) { onEnemyKilled(enemy); }
 // Decay all currently-equipped armor pieces on incoming damage, then apply
 // the damage with the live reduction (which accounts for broken armor).
 // `damageType` may be 'ballistic' | 'fire' | 'melee' — used for resistance.
-function damagePlayer(amount, damageType = 'generic') {
+// Death-recap accumulator. Tracks per-source cumulative damage to
+// the player + the most recent hit's zone / distance, so the death
+// screen can show "Killed by THE BURN — 47 dmg, hit chest at 4.2m".
+// Reset on new run via runStats.reset hook below.
+const _attackerStats = new Map();   // source ref → { name, dmg, zone, distance, type, hits }
+let _lastFatalHit = null;           // { source, name, zone, distance, type, amount }
+function _enemyDisplayName(src) {
+  if (!src) return 'unknown';
+  if (src.majorBoss && src.archetype) return BOSS_NAMES?.[src.archetype] || 'BOSS';
+  if (src.tier === 'subBoss') return 'Sub-Boss';
+  if (src.tier === 'boss')   return 'Elite';
+  if (src.archetype)         return String(src.archetype).toUpperCase();
+  if (src.kind === 'melee')  return 'Melee Enemy';
+  return 'Gunman';
+}
+function _resetDeathRecap() { _attackerStats.clear(); _lastFatalHit = null; }
+const _origRunStatsReset = runStats.reset.bind(runStats);
+runStats.reset = function () { _origRunStatsReset(); _resetDeathRecap(); };
+
+function damagePlayer(amount, damageType = 'generic', srcCtx = null) {
   if (amount <= 0) return;
   // Apply damage-type resistance from skills.
   if (damageType === 'ballistic' && derivedStats.ballisticResist > 0) {
@@ -5194,6 +5213,37 @@ function damagePlayer(amount, damageType = 'generic') {
     return;
   }
   player.takeDamage(amount);
+
+  // Death-recap accounting — credit the source enemy with `amount`
+  // (post-reduction). srcCtx is { source, zone, distance } from the
+  // call site; gas / unknown sources pass null and we still record
+  // a generic entry so the recap can show "Killed by GAS".
+  const _src = srcCtx?.source || null;
+  const _zone = srcCtx?.zone || null;
+  let _dist = srcCtx?.distance;
+  if (_dist == null && _src?.group?.position && player?.mesh?.position) {
+    const sx = _src.group.position.x - player.mesh.position.x;
+    const sz = _src.group.position.z - player.mesh.position.z;
+    _dist = Math.hypot(sx, sz);
+  }
+  const _attackerKey = _src || damageType;
+  const _name = _src ? _enemyDisplayName(_src) : damageType.toUpperCase();
+  const tally = _attackerStats.get(_attackerKey) || { name: _name, dmg: 0, zone: _zone, distance: _dist, type: damageType, hits: 0 };
+  tally.dmg += amount;
+  tally.hits += 1;
+  // Most-recent hit overwrites zone/distance so the recap shows the
+  // killing blow's zone, not the first hit's.
+  if (_zone) tally.zone = _zone;
+  if (_dist != null) tally.distance = _dist;
+  tally.type = damageType;
+  _attackerStats.set(_attackerKey, tally);
+  // If this hit dropped the player, snapshot it as the fatal one.
+  // lastHpRatio is updated post-damage in the player tick, but
+  // playerInfo.health is read on the same frame; checking here means
+  // the kill credit lands on the actual finishing source.
+  if (lastPlayerInfo && lastPlayerInfo.health - amount <= 0) {
+    _lastFatalHit = { source: _src, name: _name, zone: _zone, distance: _dist, type: damageType, amount };
+  }
 
   // Status effects based on the damage source. Ballistic hits occasionally
   // cause a bleed; melee hits are more likely and can also crack bones.
@@ -5960,10 +6010,10 @@ function spawnKillBlast(pos, radius, dmg) {
   pushAll(melees.enemies);
 }
 
-function aiFire(origin, dir, weapon, damageMult = 1) {
+function aiFire(origin, dir, weapon, damageMult = 1, source = null) {
   if (!weapon) return; // defensive: parry redirect can disarm mid-burst
   if (weapon.fireMode === 'flame' || weapon.class === 'flame') {
-    aiFireFlame(origin, dir, weapon, damageMult);
+    aiFireFlame(origin, dir, weapon, damageMult, source);
     return;
   }
   sfx.enemyFire(weapon.class || 'pistol');
@@ -5997,12 +6047,18 @@ function aiFire(origin, dir, weapon, damageMult = 1) {
   }
 
   combat.spawnImpact(endPoint);
-  damagePlayer(weapon.damage * damageMult, 'ballistic');
+  // Hit zone from the raycast (head/torso/limb) feeds the death recap.
+  const _zone = hit?.mesh?.userData?.zone || null;
+  const _dist = source?.group?.position
+    ? Math.hypot(player.mesh.position.x - source.group.position.x,
+                 player.mesh.position.z - source.group.position.z)
+    : null;
+  damagePlayer(weapon.damage * damageMult, 'ballistic', { source, zone: _zone, distance: _dist });
 }
 
 // AI flame tick — mirror of the player's tickFlame but directed at the
 // player only. Called once per flameTickRate tick by the gunman fire loop.
-function aiFireFlame(origin, dir, weapon, damageMult = 1) {
+function aiFireFlame(origin, dir, weapon, damageMult = 1, source = null) {
   const range = weapon.range || 6.5;
   const angleRad = (weapon.flameAngleDeg ?? 35) * Math.PI / 180;
   const halfCos = Math.cos(angleRad * 0.5);
@@ -6056,7 +6112,12 @@ function aiFireFlame(origin, dir, weapon, damageMult = 1) {
     player.consumeStamina(tunables.stamina.deflectCost * 0.5);
     return;
   }
-  damagePlayer((weapon.damage || 5) * damageMult, 'fire');
+  const _flameDist = source?.group?.position
+    ? Math.hypot(player.mesh.position.x - source.group.position.x,
+                 player.mesh.position.z - source.group.position.z)
+    : d;
+  damagePlayer((weapon.damage || 5) * damageMult, 'fire',
+    { source, zone: 'torso', distance: _flameDist });
 }
 
 // Parry redirect: fire a new tracer from the player toward the current aim
@@ -9314,7 +9375,14 @@ function tick() {
         }
         return;
       }
-      damagePlayer(d, 'melee');
+      // Distance for death-recap and the hit-react reuse the same dx/dz.
+      let _meleeDist = null;
+      if (enemy && enemy.group) {
+        const dx = player.mesh.position.x - enemy.group.position.x;
+        const dz = player.mesh.position.z - enemy.group.position.z;
+        _meleeDist = Math.hypot(dx, dz);
+      }
+      damagePlayer(d, 'melee', { source: enemy, zone: 'torso', distance: _meleeDist });
       // Melee-hit feedback — louder than bullet hits so the player
       // feels the impact: rig flinch in the hit direction, heavy
       // camera shake, brief hit-stop, red vignette pulse, audio.
@@ -9488,6 +9556,32 @@ function tick() {
     setDS('death-stat-damage', `${Math.round(runStats.damage || 0)}`);
     setDS('death-stat-credits', `${Math.round(runStats.credits || 0)}c`);
     setDS('death-stat-time', `${mins}m ${secs}s`);
+
+    // Death recap — pick the attacker by largest cumulative damage,
+    // overlay the killing-blow's zone + distance from the fatal-hit
+    // snapshot. Falls back to the fatal hit's source when no tally
+    // entry exists (e.g. one-shot kill from an untracked source).
+    const recapEl = document.getElementById('death-recap');
+    let topAttacker = null;
+    let topDmg = -1;
+    for (const [, stats] of _attackerStats) {
+      if (stats.dmg > topDmg) { topDmg = stats.dmg; topAttacker = stats; }
+    }
+    const fatal = _lastFatalHit;
+    const showRecap = topAttacker || fatal;
+    if (recapEl) recapEl.style.display = showRecap ? 'grid' : 'none';
+    if (showRecap) {
+      const unitName = (topAttacker && topAttacker.name) || (fatal && fatal.name) || 'Unknown';
+      const dmgTotal = topAttacker ? Math.round(topAttacker.dmg) : Math.round(fatal?.amount || 0);
+      const zone = (fatal && fatal.zone) || (topAttacker && topAttacker.zone) || '—';
+      const dist = (fatal && typeof fatal.distance === 'number') ? fatal.distance
+                  : (topAttacker && typeof topAttacker.distance === 'number') ? topAttacker.distance
+                  : null;
+      setDS('death-recap-unit', unitName);
+      setDS('death-recap-dmg', `${dmgTotal}`);
+      setDS('death-recap-zone', zone === '—' ? '—' : `${zone}`);
+      setDS('death-recap-dist', dist != null ? `${dist.toFixed(1)}m` : '—');
+    }
     if (deathRootEl) deathRootEl.style.display = 'flex';
   }
   if (hudStatsEl) {

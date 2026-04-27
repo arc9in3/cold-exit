@@ -3264,6 +3264,24 @@
     }
     .death-stat-label { color: #a88070; }
     .death-stat-val { color: #f2e7c9; font-weight: 700; font-size: 13px; }
+    /* Death-recap card — same shape as #death-summary, separate
+       block so the "killed by" row sits below the run-summary
+       and stays out of the way when no source was tracked. */
+    #death-recap {
+      display: grid;
+      grid-template-columns: 1fr;
+      gap: 4px;
+      padding: 10px 14px;
+      margin: 0 auto 16px;
+      background: rgba(40, 12, 16, 0.7);
+      border: 1px solid rgba(220, 80, 80, 0.55);
+      border-radius: 4px;
+      max-width: 320px;
+    }
+    #death-recap-title { color: #f08080; font-weight: 700; font-size: 12px;
+                         letter-spacing: 1.5px; text-align: center;
+                         padding-bottom: 6px; margin-bottom: 4px;
+                         border-bottom: 1px solid rgba(220,80,80,0.35); }
     #death-btn, #death-menu-btn {
       background: #2a1018;
       border: 1px solid #e04848;
@@ -4110,6 +4128,13 @@
         <div class="death-stat-row"><span class="death-stat-label">Damage dealt</span><span id="death-stat-damage" class="death-stat-val">—</span></div>
         <div class="death-stat-row"><span class="death-stat-label">Credits earned</span><span id="death-stat-credits" class="death-stat-val">—</span></div>
         <div class="death-stat-row"><span class="death-stat-label">Run time</span><span id="death-stat-time" class="death-stat-val">—</span></div>
+      </div>
+      <div id="death-recap" style="display:none">
+        <div id="death-recap-title">KILLED BY</div>
+        <div class="death-stat-row"><span class="death-stat-label">Unit</span><span id="death-recap-unit" class="death-stat-val">—</span></div>
+        <div class="death-stat-row"><span class="death-stat-label">Total damage</span><span id="death-recap-dmg" class="death-stat-val">—</span></div>
+        <div class="death-stat-row"><span class="death-stat-label">Killing blow</span><span id="death-recap-zone" class="death-stat-val">—</span></div>
+        <div class="death-stat-row"><span class="death-stat-label">Distance</span><span id="death-recap-dist" class="death-stat-val">—</span></div>
       </div>
       <div id="death-note">Restarting voids this run on the leaderboard and scales down chip earnings for the rest of the run.</div>
       <button id="death-btn" type="button">Restart Level</button>
