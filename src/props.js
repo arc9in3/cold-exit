@@ -518,7 +518,11 @@ export function buildTV(opts = {}) {
 export function buildRug(opts = {}) {
   const w = opts.w ?? 2.2;
   const d = opts.d ?? 1.4;
-  const color = opts.color ?? 0x6a2018;
+  // Default tint shifted away from the old 0x6a2018 brick-red — that
+  // hue read as a blood pool against the dark floors and made every
+  // rug look like a kill scene. Deep navy-teal reads as a fancy
+  // hotel-lobby rug instead.
+  const color = opts.color ?? 0x243a4a;
   const group = new THREE.Group();
   const rug = box(w, 0.02, d, color, false);
   rug.position.y = 0.01;
