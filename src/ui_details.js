@@ -336,12 +336,18 @@ export function attachmentStatRows(item) {
     // Display raw % delta of the multiplier. Negative deltas read
     // as "−15% Spread" (buff for spread / reload / noise — players
     // intuitively know less is better) and positive as "+10% Damage".
-    // The previous invert-then-flip path was rendering buffs as
-    // positive numbers ("+18% ADS Spread") which read like a nerf.
-    const raw = Math.round((v - 1) * 100);
+    let raw = Math.round((v - 1) * 100);
+    let label = def.label;
+    // ADS Zoom is a foot-gun: smaller adsZoomMult = TIGHTER FOV =
+    // MORE zoom. So 0.65× = +35% zoom power, not −35% zoom. Flip
+    // the displayed sign and rename so the row reads as a buff.
+    if (key === 'adsZoomMult') {
+      raw = -raw;
+      label = 'Zoom Power';
+    }
     if (raw === 0) continue;
     const sign = raw > 0 ? '+' : '−';
-    rows.push([def.label, `${sign}${Math.abs(raw)}`, '+', '%']);
+    rows.push([label, `${sign}${Math.abs(raw)}`, '+', '%']);
   }
   // Sights — adsPeekBonus is metres added to drag distance.
   if (typeof mod.adsPeekBonus === 'number' && mod.adsPeekBonus !== 0) {
