@@ -486,10 +486,19 @@ export class InventoryUI {
     const count = (entry.item.count | 0) || 1;
     const stackBadge = ((entry.item.type === 'consumable' || entry.item.type === 'junk') && count > 1)
       ? `<span class="pkt-stack">×${count}</span>` : '';
+    // Keep / junk markers — small corner badge so the player can see
+    // tagged items at a glance in the grid. Mutually exclusive (the
+    // toggle handlers clear the other field on flip).
+    const markBadge = entry.item.markedKeep
+      ? `<span class="pkt-mark mark-keep" title="Marked to keep">★</span>`
+      : entry.item.markedJunk
+      ? `<span class="pkt-mark mark-junk" title="Marked as junk">✕</span>`
+      : '';
     tile.innerHTML = `
       ${thumb ? `<img class="pkt-thumb" src="${thumb}" alt="" draggable="false" style="${weaponImageMirrorStyle(entry.item)}">` : `<span class="pkt-glyph">${TYPE_ICONS[entry.item.type] || '◇'}</span>`}
       ${brokenTag}
       ${stackBadge}
+      ${markBadge}
       <div class="pkt-name">${label}</div>
       ${durPct >= 0 ? `<div class="pkt-dur"><div class="pkt-dur-fill" style="width:${durPct.toFixed(0)}%;background:${durPct > 60 ? '#6abe8a' : durPct > 30 ? '#e0c040' : '#d24040'}"></div></div>` : ''}
       ${ammoLine}
