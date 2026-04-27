@@ -132,9 +132,11 @@
     </div>
 
     <div class="legend">
-      <div><span class="swatch" style="background:#ff5050"></span>aim/bullet vector</div>
-      <div><span class="swatch" style="background:#50c8ff"></span>fire origin (chest)</div>
-      <div>Drag the canvas to orbit. Scroll to zoom.</div>
+      <div><span class="swatch" style="background:#50c8ff"></span><strong>BULLET ORIGIN</strong> — chest center; bullets fly FROM here in the game (player.js: <code>playerInfo.fireOrigin</code>)</div>
+      <div><span class="swatch" style="background:#ffa040"></span><strong>MUZZLE</strong> — where flash + tracer FX spawn; only the visible effect, not the bullet path</div>
+      <div><span class="swatch" style="background:#ff5050"></span><strong>BULLET TRAJECTORY</strong> — chest → cursor target. This is the actual hitscan path; the gun's geometric facing is irrelevant.</div>
+      <div><span class="swatch" style="background:#ffd040"></span><strong>CURSOR TARGET</strong> — virtual aim point 3m out, driven by aim yaw/pitch sliders</div>
+      <div>Drag canvas to orbit. Scroll to zoom.</div>
     </div>
 
     <h2>Aim direction (preview)</h2>
@@ -262,34 +264,68 @@ const rig = buildRig({ toon: false });
 scene.add(rig.group);
 rig.group.position.y = 0;
 
-// Fire origin viz — matches game: rig.chestMesh.getWorldPosition()
-// is identical to player.js's `body.getWorldPosition()`. Marker is
-// rendered with depthTest off so it punches through the chest mesh
-// and stays visible. Bigger (8cm) than before — was getting buried
-// inside the torso.
-const fireOriginMat = new THREE.MeshBasicMaterial({
-  color: 0x50c8ff, depthTest: false, depthWrite: false,
+// === Combat viz =====================================================
+// All overlay markers render with depthTest=false + renderOrder=999
+// so they're never hidden by the rig/gun mesh.
+const _overlayMat = (color) => new THREE.MeshBasicMaterial({
+  color, depthTest: false, depthWrite: false,
 });
+const _overlayLineMat = (color, dashed = false) => {
+  const opts = { color, depthTest: false, depthWrite: false };
+  return dashed ? new THREE.LineDashedMaterial({ ...opts, dashSize: 0.08, gapSize: 0.06 })
+                : new THREE.LineBasicMaterial(opts);
+};
+
+// (1) BULLET ORIGIN — chest center. Game: rig.chestMesh.getWorldPosition()
+//     identical to player.js fireOrigin/playerInfo.fireOrigin.
 const fireOriginMarker = new THREE.Mesh(
-  new THREE.SphereGeometry(0.06, 16, 10), fireOriginMat,
+  new THREE.SphereGeometry(0.06, 16, 10), _overlayMat(0x50c8ff),
 );
 fireOriginMarker.renderOrder = 999;
 scene.add(fireOriginMarker);
 
-// Aim vector arrow — also rendered on top of the body. Default
-// direction is actor-forward (-Z, since Three.js characters face
-// -Z by default). Earlier (0,0,1) default was wrong: it pointed
-// straight out the actor's BACK at yaw=0/pitch=0.
-const arrowDir = new THREE.Vector3(0, 0, -1);
-const arrowOrigin = new THREE.Vector3(0, 1.4, 0);
-const aimArrow = new THREE.ArrowHelper(arrowDir, arrowOrigin, 2.0, 0xff5050, 0.14, 0.08);
-aimArrow.line.material.depthTest = false;
-aimArrow.cone.material.depthTest = false;
-aimArrow.line.material.depthWrite = false;
-aimArrow.cone.material.depthWrite = false;
-aimArrow.line.renderOrder = 999;
-aimArrow.cone.renderOrder = 999;
-scene.add(aimArrow);
+// (2) MUZZLE — where flash + tracer FX spawn. Game: muzzle Object3D
+//     parented to rightShoulderAnchor (shouldered) or hand (hand-held)
+//     at (0,0,(0.1+len)*ws) or (0,-(0.1+len)*ws,0). Created once;
+//     re-parented + repositioned by the weapon loader.
+const muzzleMarker = new THREE.Mesh(
+  new THREE.SphereGeometry(0.045, 14, 10), _overlayMat(0xffa040),
+);
+muzzleMarker.renderOrder = 999;
+muzzleMarker.visible = false;   // shown only when a weapon is loaded
+scene.add(muzzleMarker);
+
+// (3) BULLET TRAJECTORY — solid red line from chest to virtual cursor.
+//     Three points (start, end) updated each apply. BufferGeometry +
+//     LineSegments so we can mutate positions cheaply.
+const bulletLineGeom = new THREE.BufferGeometry();
+bulletLineGeom.setAttribute('position', new THREE.BufferAttribute(new Float32Array(6), 3));
+const bulletLine = new THREE.Line(bulletLineGeom, _overlayLineMat(0xff5050));
+bulletLine.renderOrder = 999;
+scene.add(bulletLine);
+
+// (3b) TRACER — dashed orange line from muzzle to cursor target. Same
+//      direction as the bullet trajectory (game uses bullet vector for
+//      tracer too); just a different start point. Helps visualize
+//      muzzle/trajectory mismatch — if your gun isn't aligned with the
+//      cursor direction, the tracer crosses the bullet line.
+const tracerLineGeom = new THREE.BufferGeometry();
+tracerLineGeom.setAttribute('position', new THREE.BufferAttribute(new Float32Array(6), 3));
+const tracerLine = new THREE.Line(tracerLineGeom, _overlayLineMat(0xffa040, true));
+tracerLine.renderOrder = 998;
+scene.add(tracerLine);
+
+// (4) CURSOR TARGET — yellow ring at the end of the bullet trajectory,
+//     3m out along the aim direction. Represents where the cursor would
+//     be in 3D space.
+const cursorRingGeom = new THREE.RingGeometry(0.10, 0.13, 24);
+cursorRingGeom.rotateX(-Math.PI / 2);
+const cursorRing = new THREE.Mesh(cursorRingGeom, _overlayMat(0xffd040));
+cursorRing.material.side = THREE.DoubleSide;
+cursorRing.renderOrder = 999;
+scene.add(cursorRing);
+
+const AIM_DISTANCE = 3.0;   // virtual cursor distance, meters
 
 rig.group.traverse(o => {
   if (o.isMesh && o.material) {
@@ -689,22 +725,56 @@ function applyPose() {
                               _baseWeaponRot.z + v.rz);
   }
 
-  // Fire origin matches game: chest center, NOT shoulder. Bullets
-  // come from rig.chestMesh.getWorldPosition() in player.js.
-  const _v = new THREE.Vector3();
-  (rig.chestMesh || rig.chest).getWorldPosition(_v);
-  fireOriginMarker.position.copy(_v);
+  // === Combat viz update ============================================
+  // Game's bullet pipeline: fireOrigin = chest, dir = (cursor - chest).
+  // We synthesize a virtual cursor 3m along the aim slider direction
+  // so the trajectory line is meaningful even without a real cursor.
+  const chestWorld = new THREE.Vector3();
+  (rig.chestMesh || rig.chest).getWorldPosition(chestWorld);
+  fireOriginMarker.position.copy(chestWorld);
 
-  // Aim direction in world space. Actor faces -Z by default, so
-  // yaw=0/pitch=0 must produce (0, 0, -1). Positive yaw rotates the
-  // arrow toward actor's right (+X), positive pitch tilts upward.
+  // Aim direction. Actor faces -Z by default, so yaw=0/pitch=0 →
+  // world (0, 0, -1). Positive yaw rotates toward actor's right (+X);
+  // positive pitch tilts up.
   const yaw   = parseFloat(document.getElementById('aim-yaw').value);
   const pitch = parseFloat(document.getElementById('aim-pitch').value);
-  arrowDir.set( Math.sin(yaw)  * Math.cos(pitch),
-                Math.sin(pitch),
-               -Math.cos(yaw)  * Math.cos(pitch));
-  aimArrow.position.copy(_v);
-  aimArrow.setDirection(arrowDir);
+  const aimDir = new THREE.Vector3(
+     Math.sin(yaw)  * Math.cos(pitch),
+     Math.sin(pitch),
+    -Math.cos(yaw)  * Math.cos(pitch),
+  );
+  const cursorWorld = chestWorld.clone().addScaledVector(aimDir, AIM_DISTANCE);
+
+  // Bullet line: chest → cursor (the actual bullet path in-game).
+  const bp = bulletLine.geometry.attributes.position.array;
+  bp[0] = chestWorld.x; bp[1] = chestWorld.y; bp[2] = chestWorld.z;
+  bp[3] = cursorWorld.x; bp[4] = cursorWorld.y; bp[5] = cursorWorld.z;
+  bulletLine.geometry.attributes.position.needsUpdate = true;
+
+  // Cursor target ring at the far end of the bullet line.
+  cursorRing.position.copy(cursorWorld);
+  cursorRing.lookAt(chestWorld);   // ring faces back along trajectory
+
+  // Muzzle marker — only when a weapon is loaded; player.js parents
+  // the muzzle Object3D to the same anchor as the gun and offsets it
+  // by the weapon's length. We mirror that exactly via _muzzleObj.
+  if (_muzzleObj && _inHandGroup) {
+    _muzzleObj.updateMatrixWorld(true);
+    const muzzleWorld = new THREE.Vector3();
+    _muzzleObj.getWorldPosition(muzzleWorld);
+    muzzleMarker.position.copy(muzzleWorld);
+    muzzleMarker.visible = true;
+    // Tracer = muzzle → cursor (parallel to bullet line in spirit).
+    const tp = tracerLine.geometry.attributes.position.array;
+    tp[0] = muzzleWorld.x; tp[1] = muzzleWorld.y; tp[2] = muzzleWorld.z;
+    tp[3] = cursorWorld.x; tp[4] = cursorWorld.y; tp[5] = cursorWorld.z;
+    tracerLine.geometry.attributes.position.needsUpdate = true;
+    tracerLine.computeLineDistances();   // required for dashed material
+    tracerLine.visible = true;
+  } else {
+    muzzleMarker.visible = false;
+    tracerLine.visible  = false;
+  }
 }
 
 function applyFromUI() {
@@ -913,21 +983,35 @@ function _fitToRadius(obj, target) {
   obj.scale.multiplyScalar(scale);
 }
 
+// Bare Object3D matching player.js's `muzzle` — re-parented + repositioned
+// per weapon swap. We read its world position to place the orange muzzle
+// marker exactly where the game spawns muzzle flash + tracer FX.
+let _muzzleObj = null;
+
 function _makeInHandGroup(cls, len) {
   const ws = 1.0;
   const isShouldered = ['rifle', 'shotgun', 'lmg', 'sniper'].includes(cls);
   const g = new THREE.Group();
+  // Detach the muzzle Object3D from its previous parent so we can
+  // re-parent it to the new anchor (matches player.js setWeapon).
+  if (_muzzleObj?.parent) _muzzleObj.parent.remove(_muzzleObj);
+  if (!_muzzleObj) _muzzleObj = new THREE.Object3D();
+
   if (isShouldered) {
     g.rotation.set(0, 0, 0);
     g.position.set(0, 0, (0.1 + len / 2) * ws);
     rig.rightShoulderAnchor.add(g);
+    // Game: muzzle.position.set(0, 0, (0.1 + len) * ws) on the anchor.
+    rig.rightShoulderAnchor.add(_muzzleObj);
+    _muzzleObj.position.set(0, 0, (0.1 + len) * ws);
   } else {
     g.rotation.set(Math.PI / 2, 0, 0);
     g.position.set(0, -(0.1 + len / 2) * ws, 0);
     rig.rightArm.wrist.add(g);
+    // Game: muzzle.position.set(0, -(0.1 + len) * ws, 0) on the wrist.
+    rig.rightArm.wrist.add(_muzzleObj);
+    _muzzleObj.position.set(0, -(0.1 + len) * ws, 0);
   }
-  // Capture this anchor transform as the weapon-offset baseline so
-  // the "weapon" sliders apply as deltas, not absolutes.
   _baseWeaponPos = { x: g.position.x, y: g.position.y, z: g.position.z };
   _baseWeaponRot = { x: g.rotation.x, y: g.rotation.y, z: g.rotation.z };
   return g;
@@ -977,6 +1061,7 @@ document.getElementById('weapon-pick').addEventListener('change', (e) => {
     _inHandGroup = null;
     _baseWeaponPos = { x: 0, y: 0, z: 0 };
     _baseWeaponRot = { x: 0, y: 0, z: 0 };
+    if (_muzzleObj?.parent) _muzzleObj.parent.remove(_muzzleObj);
   }
   if (!name) { applyPose(); return; }
   const path = MODEL_BY_WEAPON_NAME[name];
