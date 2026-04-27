@@ -6858,11 +6858,19 @@ function _makeGhostMaterial() {
 // Swap an enemy's renderable meshes between original materials and the
 // fresnel ghost. Caches the originals on the mesh's userData the first
 // time we visit it, so re-swaps are a flat reference assignment.
+//
+// Coordinates with the rig instancer: when ghosted, we need the
+// SOURCE meshes to draw (they carry the ghost material) instead of
+// the InstancedMesh — so we flip them visible AND tag the rig's
+// instance slots as hidden so the InstancedMesh writes zero-scale
+// matrices. On exit, the reverse: restore original materials, hide
+// source meshes again, un-flag the instance slots.
 function _setEnemyGhost(e, ghosted) {
   if (!e.group) return;
   const wantGhost = !!ghosted;
   if (e.__ghosted === wantGhost) return;
   if (wantGhost && !e.__ghostMat) e.__ghostMat = _makeGhostMaterial();
+  const _ri = rigInstancer && rigInstancer();
   e.group.traverse((obj) => {
     if (!obj.isMesh) return;
     if (wantGhost) {
@@ -6871,13 +6879,29 @@ function _setEnemyGhost(e, ghosted) {
       obj.castShadow = false;
       obj.userData.__origRenderOrder = obj.renderOrder;
       obj.renderOrder = 5;   // draw on top of darker scene fill
+      // If this mesh was a registered instancer source, restore its
+      // visibility so the ghost material actually paints, and mark
+      // the instance slot hidden so the InstancedMesh stops drawing
+      // it from the instance buffer.
+      if (obj.userData._instSlot !== undefined) {
+        obj.userData.__origVisible = obj.visible;
+        obj.visible = true;
+        obj.userData._instHide = true;
+      }
     } else if (obj.userData.__origMat) {
       obj.material = obj.userData.__origMat;
       obj.castShadow = obj.userData.__origCast !== false;
       if (obj.userData.__origRenderOrder !== undefined) obj.renderOrder = obj.userData.__origRenderOrder;
+      // Re-park instancer source meshes — InstancedMesh takes back over.
+      if (obj.userData._instSlot !== undefined) {
+        obj.visible = obj.userData.__origVisible !== undefined
+          ? obj.userData.__origVisible : false;
+        obj.userData._instHide = false;
+      }
     }
   });
   e.__ghosted = wantGhost;
+  void _ri;     // referenced for clarity in the comment above
 }
 
 // Returns true for enemies currently in an aggressive state that the

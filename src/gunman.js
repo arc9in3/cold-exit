@@ -1139,6 +1139,20 @@ export class GunmanManager {
               // gear which keeps its own material). Each corpse retains
               // its individual tier colours and gear silhouette so
               // bosses still read distinctly.
+              // Bake captures source-mesh world transforms into one
+              // merged corpse mesh — but it skips meshes with
+              // visible=false. Our instancer registered all the rig
+              // source meshes as invisible, so without this restore
+              // the bake would yield nothing and the dead actor would
+              // disappear. Flip them back to visible (except meshes
+              // intentionally hidden by disarm — _instHide stays true
+              // for those, so the disarmed arm doesn't get baked into
+              // the corpse).
+              if (g.rig?.meshes) {
+                for (const m of g.rig.meshes) {
+                  if (m && !m.userData._instHide) m.visible = true;
+                }
+              }
               // Release rig-instancer slots BEFORE the bake replaces
               // the rig group with a static merged mesh — otherwise
               // the dead actor's instance slots would keep rendering
