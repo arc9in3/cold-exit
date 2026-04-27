@@ -1224,6 +1224,18 @@ export const THROWABLE_DEFS = {
     maxCharges: 2, cooldownSec: 60,
     description: 'Pool of fire on impact · 6s burn zone · 2 charges, 60s each',
   },
+  maotai_molotov: {
+    // Glass Maotai bottle filled with accelerant. Bigger pool, longer
+    // burn than the standard molotov but lower DPS — meant for area
+    // denial / herding, not pure damage. Rarer (single charge).
+    id: 'thr_maotai', name: 'Maotai Molotov', type: 'throwable', rarity: 'rare',
+    tint: 0xe8c060,
+    throwKind: 'molotov',
+    aoeRadius: 4.4, fuse: 0.6,
+    fireDuration: 9.0, fireTickDps: 10,
+    maxCharges: 1, cooldownSec: 75,
+    description: 'Wide burn pool · 9s denial zone · 1 charge, 75s',
+  },
   flashbang: {
     id: 'thr_flash', name: 'Flashbang', type: 'throwable', rarity: 'uncommon',
     tint: 0xe0e0a0,

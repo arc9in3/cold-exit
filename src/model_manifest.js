@@ -138,6 +138,7 @@ export const MODEL_BY_ITEM_ID = {
   thr_flash:         'weapons/SM_Stun_Grenade.fbx',     // user-tagged "flashbang"
   thr_stun:          'weapons/SM_Stun_Grenade.fbx',
   thr_molotov:       'weapons/SM_Molotov_02.fbx',
+  thr_maotai:        'weapons/SM_Molotov_01.fbx',     // Maotai-bottle variant
   thr_claymore:      'weapons/SM_Infantry_Mine.fbx',
   thr_elven_knife:   'weapons/SM_Throwing_Knife.fbx',
 
