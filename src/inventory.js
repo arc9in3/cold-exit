@@ -2,14 +2,17 @@ import { tunables } from './tunables.js';
 import { rollPerks, GEAR_PERKS } from './perks.js';
 import { GridContainer, stampItemDims, deriveGridLayout } from './grid_container.js';
 import { renderForWeaponName as _renderForWeaponName, shouldMirrorWeapon as _shouldMirrorWeapon } from './model_manifest.js';
-// Re-export so UI cell templates can ask 'should this weapon's
-// inventory image be CSS-mirrored?'. The render PNGs in
-// Assets/UI/weapon_renders/ predate the mirror manifest and still
-// face whichever direction the FBX was authored on. CSS scaleX(-1)
-// flips them at display time until the user re-exports.
+// Re-exported helper kept for compat with cell templates that import
+// it; returns '' unconditionally now. The render PNGs in
+// Assets/UI/weapon_renders/ are already correctly oriented from the
+// tool's export (auto-flip + user mirror toggle baked into the
+// rendered output). A CSS-side flip on top would double-mirror them
+// back to wrong. MIRROR_X_BY_NAME in model_manifest still drives
+// the in-hand pack rule (shouldMirrorInHand) and the customize-body
+// SVG image transform — those operate on the raw FBX, not the PNG.
 export { _shouldMirrorWeapon as shouldMirrorWeapon };
-export function weaponImageMirrorStyle(item) {
-  return _shouldMirrorWeapon(item) ? 'transform: scaleX(-1);' : '';
+export function weaponImageMirrorStyle(_item) {
+  return '';
 }
 
 // Slot-based inventory aligned to a body silhouette. Each item carries a
