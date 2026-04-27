@@ -4581,9 +4581,12 @@ function fireOneShot(playerInfo, weapon, aimPoint, isADS, aimOwner) {
       // damage to additional enemy intersections in order until either
       // a wall is reached or the penetration budget runs out. Damage
       // falls off per pierce so a 2-pierce shot doesn't 3x damage.
-      if (weapon.class === 'sniper' && (derivedStats.penetration || 0) > 0) {
+      // Apr-26: snipers now pierce 1 enemy by DEFAULT (innate caliber
+      // behaviour) instead of requiring a skill-tree investment to
+      // pierce at all. Skill-tree / class / perk grants stack on top.
+      if (weapon.class === 'sniper') {
+        const cap = Math.max(1, derivedStats.penetration | 0);
         const allHits = combat.raycastAll(fireFrom, dir, hitTargets, effRange);
-        const cap = derivedStats.penetration | 0;
         let pierced = 0;
         const baseDmg = eff.damage * derivedStats.rangedDmgMult;
         for (const ph of allHits) {
