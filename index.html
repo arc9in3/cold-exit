@@ -1648,6 +1648,65 @@
       background: rgba(200, 80, 80, 0.22);
       border: 1px solid rgba(200, 80, 80, 0.8);
     }
+    /* Stack-split modal — replaces the native window.prompt with a
+       game-styled overlay. Outside-click and Escape close. Enter
+       confirms. ±1 buttons step the count. */
+    .split-modal-overlay {
+      position: fixed; inset: 0;
+      background: rgba(0, 0, 0, 0.55);
+      display: flex; align-items: center; justify-content: center;
+      z-index: 4000;
+    }
+    .split-modal-card {
+      background: #1a1c20;
+      border: 1px solid #c9a87a;
+      border-radius: 6px;
+      padding: 18px 22px 16px;
+      min-width: 280px;
+      box-shadow: 0 8px 32px rgba(0, 0, 0, 0.6);
+      color: #ddd;
+      font: 12px/1.4 ui-monospace, Menlo, Consolas, monospace;
+    }
+    .split-modal-title {
+      color: #c9a87a; font-weight: 600; font-size: 12px;
+      letter-spacing: 1.4px; text-align: center;
+      padding-bottom: 8px; margin-bottom: 8px;
+      border-bottom: 1px solid #2a2d34;
+    }
+    .split-modal-name { color: #f2e7c9; font-weight: 700;
+                        text-align: center; font-size: 13px;
+                        padding-bottom: 4px; }
+    .split-modal-count { color: #9aa; text-align: center;
+                         padding-bottom: 12px; }
+    .split-modal-count b { color: #f2e7c9; }
+    .split-modal-row { display: flex; gap: 6px; align-items: center;
+                       justify-content: center; padding: 0 0 14px; }
+    .split-modal-step { background: #2a2d34; color: #f2e7c9;
+                        border: 1px solid #3a3d44; border-radius: 3px;
+                        width: 36px; height: 32px; cursor: pointer;
+                        font-size: 16px; font-weight: 700;
+                        font-family: inherit; }
+    .split-modal-step:hover { background: #3a3d44; }
+    .split-modal-input { width: 100px; height: 32px; text-align: center;
+                         background: #0f1014; color: #f2e7c9;
+                         border: 1px solid #c9a87a; border-radius: 3px;
+                         font: inherit; font-size: 14px; font-weight: 700; }
+    .split-modal-input::-webkit-inner-spin-button,
+    .split-modal-input::-webkit-outer-spin-button {
+      -webkit-appearance: none; margin: 0;
+    }
+    .split-modal-buttons { display: flex; gap: 8px; }
+    .split-modal-buttons button {
+      flex: 1; height: 34px; cursor: pointer;
+      border-radius: 3px; font: inherit; font-size: 12px;
+      letter-spacing: 1.1px; text-transform: uppercase;
+    }
+    .split-modal-cancel { background: #2a2d34; color: #ddd;
+                          border: 1px solid #3a3d44; }
+    .split-modal-cancel:hover { background: #3a3d44; }
+    .split-modal-ok { background: #4a6a3a; color: #fff;
+                      border: 1px solid #5a8a4a; font-weight: 700; }
+    .split-modal-ok:hover { background: #5a8a4a; }
     /* Attachment-on-weapon hover glow — overlays the weapon's full
        footprint when a compatible attachment is being dragged onto it.
        Drop will auto-equip into the matching slot (swap if occupied). */

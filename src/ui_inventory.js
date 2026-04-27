@@ -599,41 +599,29 @@ export class InventoryUI {
       if (gx < 0 || gy < 0 || gx >= grid.w || gy >= grid.h) return;
       const entry = grid.at(gx, gy);
       if (!entry) return;
-      // Shift + right-click on a stack → peel a portion off into the
-      // next available slot. Default split = ceil(count / 2). Prompt
-      // the player so they can dial it in. Falls through to the
-      // standard equip-backpack handler when the modifier isn't held.
+      // Shift + right-click on a stack → custom split modal (replaces
+      // the native window.prompt). Default split = ceil(count / 2).
+      // Falls through to the standard equip-backpack handler when the
+      // modifier isn't held or the entry isn't actually a stack.
       if (e.shiftKey) {
         const count = (entry.item.count | 0) || 1;
         if (count > 1) {
-          const def = Math.ceil(count / 2);
-          const raw = window.prompt(
-            `Split "${entry.item.name}" (${count}). How many to peel off?`,
-            String(def),
-          );
-          if (raw == null) return;
-          const n = Math.max(1, Math.min(count - 1, parseInt(raw, 10) || 0));
-          if (n <= 0 || n >= count) return;
-          entry.item.count = count - n;
-          // Spread to clone so the new stack is a fresh inventory
-          // instance — original entry keeps its grid slot, the peeled
-          // portion lands in the next free slot (pockets first via
-          // allGrids ordering).
-          const peeled = { ...entry.item, count: n };
-          const placed = this.inventory.autoPlaceAnywhere(peeled);
-          if (placed) {
-            this.inventory._bump();
-            this.render();
-          } else {
-            // Backout — restore the original count so nothing is lost.
-            entry.item.count = count;
-            window.__hudMsg?.('No room to split — clear an inventory slot first', 2.5);
-          }
+          this._openSplitModal(entry.item, count, (n) => {
+            entry.item.count = count - n;
+            const peeled = { ...entry.item, count: n };
+            const placed = this.inventory.autoPlaceAnywhere(peeled);
+            if (placed) {
+              this.inventory._bump();
+              this.render();
+            } else {
+              entry.item.count = count;
+              window.__hudMsg?.('No room to split — clear an inventory slot first', 2.5);
+              this.render();
+            }
+          });
           return;
         }
-        // count == 1: nothing to split, fall through to equip behaviour
-        // so the gesture still does something useful (e.g. shift +
-        // right-click a single-item backpack still equips it).
+        // count == 1: nothing to split, fall through to equip.
       }
       const ok = this.inventory.equipBackpack(entry.item);
       if (ok) {
@@ -646,6 +634,69 @@ export class InventoryUI {
           window.__hudMsg?.('Too many items to swap rigs — use the workspace to make room.', 3.0);
         }
       }
+    });
+  }
+
+  // Custom split-stack modal — replaces window.prompt. Resolves to
+  // the peel count via the callback when the user clicks Split, or
+  // does nothing on Cancel / Escape / outside-click. Single-instance:
+  // dismisses any prior modal before opening so back-to-back splits
+  // don't stack overlays.
+  _openSplitModal(item, count, onConfirm) {
+    if (this._splitModalEl) {
+      this._splitModalEl.remove();
+      this._splitModalEl = null;
+    }
+    const def = Math.ceil(count / 2);
+    const overlay = document.createElement('div');
+    overlay.className = 'split-modal-overlay';
+    overlay.innerHTML = `
+      <div class="split-modal-card">
+        <div class="split-modal-title">SPLIT STACK</div>
+        <div class="split-modal-name">${item.name}</div>
+        <div class="split-modal-count">Stack size: <b>${count}</b></div>
+        <div class="split-modal-row">
+          <button type="button" class="split-modal-step" data-step="-1">−</button>
+          <input type="number" class="split-modal-input"
+                 min="1" max="${count - 1}" step="1" value="${def}">
+          <button type="button" class="split-modal-step" data-step="+1">+</button>
+        </div>
+        <div class="split-modal-buttons">
+          <button type="button" class="split-modal-cancel">Cancel</button>
+          <button type="button" class="split-modal-ok">Split</button>
+        </div>
+      </div>
+    `;
+    document.body.appendChild(overlay);
+    this._splitModalEl = overlay;
+    const input = overlay.querySelector('.split-modal-input');
+    input.focus();
+    input.select();
+    const close = () => {
+      if (this._splitModalEl === overlay) this._splitModalEl = null;
+      overlay.remove();
+    };
+    const confirm = () => {
+      const n = Math.max(1, Math.min(count - 1, parseInt(input.value, 10) || 0));
+      close();
+      onConfirm(n);
+    };
+    overlay.querySelector('.split-modal-ok').addEventListener('click', confirm);
+    overlay.querySelector('.split-modal-cancel').addEventListener('click', close);
+    overlay.addEventListener('click', (ev) => {
+      if (ev.target === overlay) close();   // outside-click closes
+    });
+    overlay.querySelectorAll('.split-modal-step').forEach((btn) => {
+      btn.addEventListener('click', () => {
+        const step = parseInt(btn.dataset.step, 10) || 0;
+        const cur = parseInt(input.value, 10) || def;
+        input.value = String(Math.max(1, Math.min(count - 1, cur + step)));
+        input.focus();
+      });
+    });
+    input.addEventListener('keydown', (ev) => {
+      if (ev.key === 'Enter') { ev.preventDefault(); confirm(); }
+      else if (ev.key === 'Escape') { ev.preventDefault(); close(); }
     });
   }
 

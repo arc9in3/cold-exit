@@ -233,15 +233,22 @@ export class ProjectileManager {
   }
 
   _hitsObstacle(level, x, y, z) {
-    // Grenades arc above low cover — skip the check if they're higher
-    // than ~3m so they don't detonate on the invisible ceiling of a
-    // collision box. Walls extend to full WALL_HEIGHT so we still
-    // catch those.
+    // Walls extend full height (~3m); props / cover / containers
+    // are short (~1m). The previous coarse `y > 3` cutoff treated
+    // every obstacle's AABB as if it reached 3m, so grenades and
+    // molotovs arcing over a couch would 'hit' the couch's invisible
+    // ceiling and either bounce or detonate mid-air. Per-obstacle
+    // height threshold: tall walls always block, short props only
+    // block when the projectile is below their plausible top.
     if (y > 3.0) return false;
     const obstacles = level.solidObstacles ? level.solidObstacles() : [];
+    const PROP_TOP = 1.5;     // generous over-approximation of cover height
     for (const o of obstacles) {
       const b = o.userData.collisionXZ;
       if (!b) continue;
+      const ud = o.userData;
+      const isShort = !!(ud.isProp || ud.containerRef);
+      if (isShort && y > PROP_TOP) continue;
       const r = 0.1;
       if (x > b.minX - r && x < b.maxX + r && z > b.minZ - r && z < b.maxZ + r) {
         return true;

@@ -147,6 +147,7 @@ export const ITEM_LORE = {
 
   // Mythic
   'Dragonbreath':      'Pump shotgun loaded with incendiary slug shells. Each shot leaves a lane of fire and apologies.',
+  'Pain':              'A mace made of soft grey felt, seems to emit pure evil.',
 
   // Gear — face / head / ears / hands / belts / pants / boots
   'Combat Helmet':       'Military-issue half-shell, scuffed paint, replaceable padding. Standard issue, standard luck.',
@@ -726,9 +727,12 @@ export class DetailsUI {
     // relic actually does. Special-case both lookups so a left-click on
     // a relic in the shop shows "what does this give me".
     const isArtifact = item.type === 'relic';
+    // ITEM_LORE keyed by base name; wrapWeapon prefixes the live
+    // name with rarity ("Mythic Pain"), so fall back to baseName so
+    // the lore still resolves on rolled weapons.
     const lore = isArtifact
       ? (item.lore || '')
-      : (ITEM_LORE[item.name] || '');
+      : (ITEM_LORE[item.name] || ITEM_LORE[item.baseName] || '');
     const descRaw = (item.description || '').trim();
     let noteText = '';
     if (isArtifact) {
