@@ -510,6 +510,158 @@ function staticHandler(req, res) {
 
 let gameServer = null;
 
+// ===========================================================================
+// CLI launcher — open Claude / Codex / Gemini in their own terminal windows
+// ===========================================================================
+
+const CLI_TARGETS = [
+  { id: 'claude', title: 'Claude Code',  cli: 'claude', greeting: 'Active session — ships to main directly. Read CLAUDE.md.' },
+  { id: 'codex',  title: 'Codex (GPT)',  cli: 'codex',  greeting: 'Algorithm + tooling lane. Read AGENTS.md. ALWAYS git checkout -b before editing.' },
+  { id: 'gemini', title: 'Gemini',       cli: 'gemini', greeting: 'Audits + sweeps lane. Read GEMINI.md. ALWAYS git checkout -b before editing.' },
+];
+
+function launchOneCli(target) {
+  if (process.platform === 'win32') {
+    const greetCmd = `echo === ${target.title} === ^&^& echo. ^&^& echo ${target.greeting} ^&^& echo. ^&^& git status --short ^&^& echo.`;
+    const inner = `${greetCmd} ^&^& ${target.cli}`;
+    return new Promise((resolve, reject) => {
+      exec(`start "${target.title}" cmd /K "${inner}"`, { cwd: REPO_ROOT }, (err) => {
+        if (err) reject(err); else resolve({ id: target.id, launched: true });
+      });
+    });
+  }
+  if (process.platform === 'darwin') {
+    const script = `tell application "Terminal" to do script "cd ${REPO_ROOT.replace(/"/g, '\\"')} && ${target.cli}"`;
+    return new Promise((resolve, reject) => {
+      exec(`osascript -e '${script}'`, (err) => {
+        if (err) reject(err); else resolve({ id: target.id, launched: true });
+      });
+    });
+  }
+  return Promise.resolve({
+    id: target.id, launched: false,
+    hint: `Linux: run manually:  cd ${REPO_ROOT} && ${target.cli}`,
+  });
+}
+
+async function launchAllClis() {
+  const results = [];
+  for (const t of CLI_TARGETS) {
+    try { results.push(await launchOneCli(t)); }
+    catch (e) { results.push({ id: t.id, launched: false, error: e.message }); }
+  }
+  return { results };
+}
+
+// ===========================================================================
+// Dev branch lifecycle — staging area for AI work before promotion to main
+// ===========================================================================
+const DEV_BRANCH = 'dev';
+
+async function devStatus() {
+  const state = await gitState();
+  const hasLocal = state.localBranches.includes(DEV_BRANCH);
+  const hasRemote = state.remoteBranches.includes(`origin/${DEV_BRANCH}`);
+  let aheadOfMain = 0, behindMain = 0;
+  if (hasLocal) {
+    try {
+      const ah = await git(`rev-list --count main..${DEV_BRANCH}`);
+      const be = await git(`rev-list --count ${DEV_BRANCH}..main`);
+      aheadOfMain = parseInt(ah.trim() || '0', 10);
+      behindMain  = parseInt(be.trim() || '0', 10);
+    } catch (_) { /* ignore */ }
+  }
+  return { hasLocal, hasRemote, aheadOfMain, behindMain };
+}
+
+async function setupOrSyncDev() {
+  const state = await gitState();
+  if (state.dirty) throw new Error('working tree is dirty — commit or stash first');
+  const hasLocal = state.localBranches.includes(DEV_BRANCH);
+  const hasRemote = state.remoteBranches.includes(`origin/${DEV_BRANCH}`);
+  if (!hasLocal) {
+    if (hasRemote) await git(`checkout -b ${DEV_BRANCH} origin/${DEV_BRANCH}`);
+    else           await git(`checkout -b ${DEV_BRANCH}`);
+  } else {
+    await git(`checkout ${DEV_BRANCH}`);
+  }
+  await git(`merge main --ff`);
+  await git(`push -u origin ${DEV_BRANCH}`);
+  await git(`checkout main`);
+  return await devStatus();
+}
+
+async function mergeToDev(ref) {
+  const state = await gitState();
+  if (state.dirty) throw new Error('working tree is dirty');
+  if (state.current !== 'main') {
+    throw new Error(`expected to start on main, currently on ${state.current}`);
+  }
+  if (!state.localBranches.includes(DEV_BRANCH)) {
+    throw new Error('dev branch missing — run "Setup dev branch" first');
+  }
+  await git(`checkout ${DEV_BRANCH}`);
+  try {
+    await git(`merge ${ref} --no-ff -m "merge ${ref} into dev (staging)"`);
+    await git(`push origin ${DEV_BRANCH}`);
+    await git(`checkout main`);
+    return { ok: true };
+  } catch (e) {
+    try { await git('merge --abort'); } catch (_) { /* ignore */ }
+    try { await git('checkout main'); } catch (_) { /* ignore */ }
+    throw new Error(`merge into dev failed: ${e.message}`);
+  }
+}
+
+async function promoteToProd(refs) {
+  const state = await gitState();
+  if (state.dirty) throw new Error('working tree is dirty');
+  if (state.current !== 'main') {
+    throw new Error(`must start on main, currently on ${state.current}`);
+  }
+  const merged = [];
+  for (const ref of refs) {
+    try {
+      await git(`merge ${ref} --no-ff -m "merge ${ref} into main (prod)"`);
+      merged.push(ref);
+    } catch (e) {
+      try { await git('merge --abort'); } catch (_) { /* ignore */ }
+      throw new Error(`merge ${ref} failed (after ${merged.length} successful merges): ${e.message}`);
+    }
+  }
+  await git(`push origin main`);
+  return { mergedRefs: merged };
+}
+
+function sanitizeBranchForCF(name) {
+  return name.replace(/[^a-zA-Z0-9-]/g, '-').toLowerCase().slice(0, 28);
+}
+
+async function deployPreview(branch) {
+  const cf = sanitizeBranchForCF(branch);
+  const cmd = `npx wrangler pages deploy . --project-name=cold-exit --branch=${cf} --commit-dirty=true`;
+  return new Promise((resolve, reject) => {
+    exec(cmd, { cwd: REPO_ROOT, maxBuffer: 32 * 1024 * 1024 }, (err, stdout, stderr) => {
+      const out = (stdout || '') + (stderr || '');
+      const urlMatch = out.match(/https?:\/\/[a-z0-9.-]+\.cold-exit\.pages\.dev/i);
+      if (err) return reject(new Error(out.slice(-2000) || err.message));
+      resolve({ ok: true, url: urlMatch ? urlMatch[0] : null, branch: cf, log: out.slice(-2000) });
+    });
+  });
+}
+
+async function deployProd() {
+  const cmd = `npx wrangler pages deploy . --project-name=cold-exit --commit-dirty=true`;
+  return new Promise((resolve, reject) => {
+    exec(cmd, { cwd: REPO_ROOT, maxBuffer: 32 * 1024 * 1024 }, (err, stdout, stderr) => {
+      const out = (stdout || '') + (stderr || '');
+      const urlMatch = out.match(/https?:\/\/[a-z0-9.-]+\.cold-exit\.pages\.dev/i);
+      if (err) return reject(new Error(out.slice(-2000) || err.message));
+      resolve({ ok: true, url: urlMatch ? urlMatch[0] : null, log: out.slice(-2000) });
+    });
+  });
+}
+
 function startGameServer() {
   if (gameServer) return { port: GAME_PORT, alreadyRunning: true };
   gameServer = http.createServer(staticHandler);
@@ -690,6 +842,29 @@ const HTML = `<!DOCTYPE html>
     background: rgba(255,255,255,0.05); color: #888;
   }
   .branch-row.current .pill { background: rgba(60, 200, 130, 0.15); color: #6ce0a0; }
+  .branch-row { gap: 8px; }
+  .row-actions {
+    display: flex; gap: 4px; flex-shrink: 0;
+  }
+  button.row-btn {
+    padding: 3px 8px; font-size: 9px; letter-spacing: 1px;
+    background: rgba(125, 167, 200, 0.10);
+    border: 1px solid rgba(125, 167, 200, 0.35);
+    color: #cbd6e2; border-radius: 2px;
+    text-transform: uppercase; font-weight: 600; cursor: pointer;
+    font-family: inherit;
+  }
+  button.row-btn:hover { background: rgba(125, 167, 200, 0.20); }
+  button.row-btn.primary {
+    background: rgba(201, 168, 122, 0.18);
+    border-color: rgba(201, 168, 122, 0.55);
+    color: #f0d9b0;
+  }
+  button.row-btn.primary:hover { background: rgba(201, 168, 122, 0.30); }
+  input.row-check {
+    margin-right: 4px; transform: scale(0.95); cursor: pointer;
+    accent-color: #c9a87a;
+  }
 
   .game-controls { display: flex; gap: 8px; flex-wrap: wrap; }
 
@@ -751,7 +926,24 @@ const HTML = `<!DOCTYPE html>
 
 <main>
   <aside class="panel left">
-    <h2>Game server</h2>
+    <h2>Orchestration</h2>
+    <div class="game-controls">
+      <button id="btn-launch-all" class="primary" title="Open Claude / Codex / Gemini in three new shell windows, each cd'd into the repo with a clean status check">Launch all 3 CLIs</button>
+    </div>
+    <div class="game-controls" style="margin-top:6px;">
+      <button id="btn-launch-claude">Claude only</button>
+      <button id="btn-launch-codex">Codex only</button>
+      <button id="btn-launch-gemini">Gemini only</button>
+    </div>
+
+    <h2>Dev branch</h2>
+    <div id="dev-status" style="font-size:12px; color:#8a96a8; margin-bottom:8px;">…</div>
+    <div class="game-controls">
+      <button id="btn-dev-setup" class="primary">Setup / sync dev</button>
+      <button id="btn-deploy-dev">Deploy dev preview</button>
+    </div>
+
+    <h2>Game server (local)</h2>
     <div class="game-controls">
       <button id="btn-start" class="primary">Start server</button>
       <button id="btn-stop" class="danger">Stop server</button>
@@ -765,6 +957,10 @@ const HTML = `<!DOCTYPE html>
     </div>
 
     <h2>Branches</h2>
+    <div class="game-controls" style="margin-bottom:8px;">
+      <button id="btn-toggle-select">Multi-select mode</button>
+      <button id="btn-promote-selected" disabled>Promote selected → prod</button>
+    </div>
     <div id="branches"><div class="empty">Loading…</div></div>
 
     <h2>Activity</h2>
@@ -785,6 +981,8 @@ const HTML = `<!DOCTYPE html>
 <script>
 let state = null;
 let selected = null;
+let selectMode = false;
+const selectedRefs = new Set();
 
 const $ = (id) => document.getElementById(id);
 const log = (msg, kind = '') => {
@@ -842,10 +1040,43 @@ async function refreshState() {
     for (const b of list) {
       const row = document.createElement('div');
       const isCurrent = b.name === state.current;
+      const isMain = b.name === 'main' || b.name === 'origin/main';
+      const isDev  = b.name === 'dev'  || b.name === 'origin/dev';
       row.className = 'branch-row' + (isCurrent ? ' current' : '') + (selected === b.name ? ' active' : '');
       const pillText = isCurrent ? 'HEAD' : (b.isLocal ? 'local' : 'remote');
-      row.innerHTML = '<span class="name">' + b.name + '</span><span class="pill">' + pillText + '</span>';
-      row.onclick = () => selectBranch(b.name);
+      // Build the row contents — checkbox (selection mode), name+pill,
+      // and per-branch action buttons for non-main / non-dev branches.
+      const actionBtns = (isMain || isDev) ? ''
+        : '<div class="row-actions">'
+          + '<button class="row-btn" data-act="diff" data-ref="' + b.name + '">Diff</button>'
+          + '<button class="row-btn" data-act="dev" data-ref="' + b.name + '">→ dev</button>'
+          + '<button class="row-btn primary" data-act="prod" data-ref="' + b.name + '">→ prod</button>'
+          + '</div>';
+      const checkbox = selectMode && !isMain && !isDev
+        ? '<input type="checkbox" class="row-check" data-ref="' + b.name + '" ' + (selectedRefs.has(b.name) ? 'checked' : '') + ' onclick="event.stopPropagation()">'
+        : '';
+      row.innerHTML = checkbox
+        + '<span class="name">' + b.name + '</span>'
+        + '<span class="pill">' + pillText + '</span>'
+        + actionBtns;
+      row.onclick = (e) => {
+        if (e.target.closest('button') || e.target.tagName === 'INPUT') return;
+        selectBranch(b.name);
+      };
+      // Wire row action buttons.
+      row.querySelectorAll('button.row-btn').forEach(btn => {
+        btn.onclick = (e) => {
+          e.stopPropagation();
+          const act = btn.dataset.act;
+          const ref = btn.dataset.ref;
+          if (act === 'diff') selectBranch(ref);
+          if (act === 'dev')  rowMergeToDev(ref);
+          if (act === 'prod') rowPromoteToProd(ref);
+        };
+      });
+      // Wire checkboxes for multi-select.
+      const cb = row.querySelector('input.row-check');
+      if (cb) cb.onchange = (e) => toggleSelection(b.name, e.target.checked);
       g.appendChild(row);
     }
     root.appendChild(g);
@@ -1113,8 +1344,144 @@ $('view-tasks').onclick = () => {
   renderTasks();
 };
 
+// Orchestration — launch CLIs, manage dev, promote to prod.
+async function launchAll() {
+  log('launching all 3 CLIs in new windows…');
+  try {
+    const r = await api('/api/clis/launch-all', { method: 'POST' });
+    for (const x of r.results) {
+      if (x.launched) log('  ✓ ' + x.id + ' launched', 'ok');
+      else log('  ✗ ' + x.id + ' — ' + (x.hint || x.error || 'failed'), 'err');
+    }
+  } catch (e) { log('launch-all failed: ' + e.message, 'err'); }
+}
+async function launchOne(id) {
+  log('launching ' + id + '…');
+  try {
+    const r = await api('/api/clis/launch', {
+      method: 'POST', headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ id }),
+    });
+    log(r.launched ? (id + ' launched') : (id + ' — ' + (r.hint || 'failed')), r.launched ? 'ok' : 'err');
+  } catch (e) { log('launch failed: ' + e.message, 'err'); }
+}
+$('btn-launch-all').onclick = launchAll;
+$('btn-launch-claude').onclick = () => launchOne('claude');
+$('btn-launch-codex').onclick = () => launchOne('codex');
+$('btn-launch-gemini').onclick = () => launchOne('gemini');
+
+async function refreshDevStatus() {
+  try {
+    const d = await api('/api/dev/status');
+    const el = $('dev-status');
+    if (!d.hasLocal && !d.hasRemote) {
+      el.innerHTML = '<span style="color:#aab2c0;">Not set up yet.</span>';
+    } else {
+      el.innerHTML = '<b style="color:#aad0f0;">dev</b> '
+        + (d.hasRemote ? '(pushed)' : '(local only)') + ' '
+        + 'ahead of main: ' + d.aheadOfMain
+        + (d.behindMain ? ' · behind: ' + d.behindMain : '');
+    }
+  } catch (_) { /* ignore */ }
+}
+$('btn-dev-setup').onclick = async () => {
+  if (!confirm('Setup or sync the dev branch from main? Requires clean working tree.')) return;
+  log('setup dev…');
+  try {
+    await api('/api/dev/setup', { method: 'POST' });
+    log('dev branch ready', 'ok');
+    await refreshState(); await refreshDevStatus();
+  } catch (e) { log('dev setup failed: ' + e.message, 'err'); alert(e.message); }
+};
+$('btn-deploy-dev').onclick = async () => {
+  if (!confirm('Deploy the dev branch to its Cloudflare preview URL? This will take ~30s.')) return;
+  log('deploying dev preview…');
+  try {
+    // Server picks current branch — we need to be on dev for this to make sense.
+    // Quick check.
+    const s = await api('/api/state');
+    if (s.current !== 'dev') {
+      if (!confirm('You\\'re not on the dev branch (currently: ' + s.current + '). Deploy dev anyway? (Will checkout dev first.)')) return;
+      await api('/api/checkout', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ branch: 'dev' }) });
+    }
+    const r = await api('/api/deploy/preview', {
+      method: 'POST', headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ branch: 'dev' }),
+    });
+    log('dev preview at ' + (r.url || '(see wrangler output)'), 'ok');
+    if (r.url) window.open(r.url, '_blank');
+  } catch (e) { log('dev deploy failed: ' + e.message, 'err'); alert(e.message); }
+};
+
+// Per-branch action buttons.
+async function rowMergeToDev(ref) {
+  const target = ref.startsWith('origin/') ? ref : (state && state.remoteBranches.includes('origin/' + ref) ? 'origin/' + ref : ref);
+  if (!confirm('Merge ' + ref + ' into dev (staging)?')) return;
+  log('merge ' + ref + ' → dev…');
+  try {
+    await api('/api/dev/merge', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ ref: target }) });
+    log(ref + ' merged into dev', 'ok');
+    await refreshState(); await refreshDevStatus();
+  } catch (e) { log('merge → dev failed: ' + e.message, 'err'); alert(e.message); }
+}
+async function rowPromoteToProd(ref) {
+  const target = ref.startsWith('origin/') ? ref : (state && state.remoteBranches.includes('origin/' + ref) ? 'origin/' + ref : ref);
+  if (!confirm('PROMOTE ' + ref + ' to prod (merge into main + deploy live)? This goes to cold-exit.pages.dev.')) return;
+  log('promote ' + ref + ' → prod…');
+  try {
+    await api('/api/prod/promote', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ refs: [target] }) });
+    log(ref + ' merged into main', 'ok');
+    if (confirm('Deploy main to prod now?')) {
+      const r = await api('/api/deploy/prod', { method: 'POST' });
+      log('prod deploy: ' + (r.url || 'done'), 'ok');
+      if (r.url) window.open(r.url, '_blank');
+    }
+    await refreshState();
+  } catch (e) { log('promote failed: ' + e.message, 'err'); alert(e.message); }
+}
+
+// Selection mode for bulk promotion.
+function toggleSelection(ref, checked) {
+  if (checked) selectedRefs.add(ref); else selectedRefs.delete(ref);
+  $('btn-promote-selected').disabled = selectedRefs.size === 0;
+  $('btn-promote-selected').textContent = 'Promote ' + selectedRefs.size + ' → prod';
+}
+$('btn-toggle-select').onclick = () => {
+  selectMode = !selectMode;
+  $('btn-toggle-select').classList.toggle('primary', selectMode);
+  $('btn-toggle-select').textContent = selectMode ? 'Exit select mode' : 'Multi-select mode';
+  if (!selectMode) selectedRefs.clear();
+  $('btn-promote-selected').disabled = selectedRefs.size === 0;
+  $('btn-promote-selected').textContent = selectedRefs.size ? ('Promote ' + selectedRefs.size + ' → prod') : 'Promote selected → prod';
+  refreshState();
+};
+$('btn-promote-selected').onclick = async () => {
+  if (!selectedRefs.size) return;
+  const refs = [...selectedRefs];
+  if (!confirm('PROMOTE ' + refs.length + ' branch(es) to prod?\\n\\n' + refs.join('\\n'))) return;
+  log('promoting ' + refs.length + ' branches → prod…');
+  try {
+    const targets = refs.map(r => r.startsWith('origin/') ? r : ('origin/' + r));
+    await api('/api/prod/promote', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ refs: targets }) });
+    log('all merged into main', 'ok');
+    if (confirm('Deploy main to prod now?')) {
+      const r = await api('/api/deploy/prod', { method: 'POST' });
+      log('prod deploy: ' + (r.url || 'done'), 'ok');
+      if (r.url) window.open(r.url, '_blank');
+    }
+    selectedRefs.clear();
+    selectMode = false;
+    $('btn-toggle-select').textContent = 'Multi-select mode';
+    $('btn-toggle-select').classList.remove('primary');
+    $('btn-promote-selected').disabled = true;
+    $('btn-promote-selected').textContent = 'Promote selected → prod';
+    await refreshState();
+  } catch (e) { log('bulk promote failed: ' + e.message, 'err'); alert(e.message); }
+};
+
 async function init() {
   await refreshState();
+  await refreshDevStatus();
   try {
     const s = await api('/api/server/status');
     setServerStatus(s.running, s.port);
@@ -1254,6 +1621,43 @@ async function dashApi(req, res, parsedUrl) {
     }
     if (parsedUrl.pathname === '/api/server/status' && req.method === 'GET') {
       return send(200, { running: !!gameServer, port: gameServer ? GAME_PORT : null });
+    }
+    if (parsedUrl.pathname === '/api/clis/launch-all' && req.method === 'POST') {
+      return send(200, await launchAllClis());
+    }
+    if (parsedUrl.pathname === '/api/clis/launch' && req.method === 'POST') {
+      const body = await readJsonBody(req);
+      const target = CLI_TARGETS.find(t => t.id === body.id);
+      if (!target) return sendErr(400, 'unknown CLI id');
+      return send(200, await launchOneCli(target));
+    }
+    if (parsedUrl.pathname === '/api/dev/status' && req.method === 'GET') {
+      return send(200, await devStatus());
+    }
+    if (parsedUrl.pathname === '/api/dev/setup' && req.method === 'POST') {
+      return send(200, await setupOrSyncDev());
+    }
+    if (parsedUrl.pathname === '/api/dev/merge' && req.method === 'POST') {
+      const body = await readJsonBody(req);
+      if (!body.ref) return sendErr(400, 'missing ref');
+      return send(200, await mergeToDev(body.ref));
+    }
+    if (parsedUrl.pathname === '/api/prod/promote' && req.method === 'POST') {
+      const body = await readJsonBody(req);
+      const refs = Array.isArray(body.refs) ? body.refs : (body.ref ? [body.ref] : []);
+      if (!refs.length) return sendErr(400, 'missing refs');
+      return send(200, await promoteToProd(refs));
+    }
+    if (parsedUrl.pathname === '/api/deploy/preview' && req.method === 'POST') {
+      const body = await readJsonBody(req);
+      const state = await gitState();
+      const branch = body.branch || state.current;
+      return send(200, await deployPreview(branch));
+    }
+    if (parsedUrl.pathname === '/api/deploy/prod' && req.method === 'POST') {
+      const state = await gitState();
+      if (state.current !== 'main') return sendErr(409, `must be on main to deploy prod (currently on ${state.current})`);
+      return send(200, await deployProd());
     }
     return sendErr(404, 'unknown endpoint');
   } catch (e) {
