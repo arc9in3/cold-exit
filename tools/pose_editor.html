@@ -302,16 +302,12 @@ function applyPose(p) {
   rig.chest.rotation.y = p.chestY;
   rig.head.rotation.x = p.headX;
 
-  // Fire origin — chest height in world space. The game's fire
-  // origin is roughly at chest center (where the rifle stock would
-  // sit on the dominant shoulder). Approximate visually by sampling
-  // the right shoulder anchor's world position.
+  // Fire origin — must match the game EXACTLY. player.js builds
+  // playerInfo.fireOrigin from `body.getWorldPosition()` where
+  // `body = rig.chestMesh`. NOT the shoulder anchor — bullets
+  // come from chest center regardless of which arm holds the gun.
   const _v = new THREE.Vector3();
-  if (rig.rightShoulderAnchor) {
-    rig.rightShoulderAnchor.getWorldPosition(_v);
-  } else {
-    rig.chest.getWorldPosition(_v);
-  }
+  (rig.chestMesh || rig.chest).getWorldPosition(_v);
   fireOriginMarker.position.copy(_v);
 
   // Aim vector — relative to the body. The game computes aim from
@@ -427,25 +423,47 @@ const CLASS_FIT_RADIUS = {
 };
 
 function _fitToRadius(obj, target) {
-  // Mirrors gltf_cache.fitToRadius — center bbox at origin and
-  // scale so the largest dim equals 2 * target.
+  // Match gltf_cache.fitToRadius EXACTLY — instead of moving the
+  // object, shift its CHILDREN by -localCenter and multiply scale.
+  // This matters for rotation: if the parent's origin is the visual
+  // centroid, rotation pivots around the centroid (correct). If the
+  // parent has a non-zero position offset, rotation swings wide.
+  obj.updateMatrixWorld(true);
   const box = new THREE.Box3().setFromObject(obj);
   if (box.isEmpty()) return;
   const size = new THREE.Vector3(); box.getSize(size);
   const center = new THREE.Vector3(); box.getCenter(center);
   const maxDim = Math.max(size.x, size.y, size.z) || 1;
   const scale = (2 * target) / maxDim;
-  obj.scale.setScalar(scale);
-  obj.position.set(-center.x * scale, -center.y * scale, -center.z * scale);
+  const localCenter = obj.worldToLocal(center.clone());
+  for (const child of obj.children) child.position.sub(localCenter);
+  obj.scale.multiplyScalar(scale);
 }
 
-function _attachPointForClass(cls) {
-  // Mirrors player.js: rifleHold (rifle/shotgun/lmg/sniper/smg) —
-  // weapon parents to the dominant shoulder anchor; everything else
-  // parents to the dominant hand. Both work for visual alignment.
-  const rifleHold = ['rifle', 'shotgun', 'lmg', 'sniper', 'smg'].includes(cls);
-  if (rifleHold && rig.rightShoulderAnchor) return rig.rightShoulderAnchor;
-  return rig.rightArm.hand.mesh;
+// Build an in-hand intermediate group that mirrors the game's
+// inHandModel — different rotation + position depending on whether
+// the weapon class is shouldered (rifle/shotgun/lmg/sniper) or
+// hand-held (pistol/smg/melee). The FBX clone is parented INSIDE
+// this group, not directly to the rig anchor.
+function _makeInHandGroup(cls, len) {
+  const ws = 1.0;   // WEAPON_SCALE = rig.scale, default 1.0
+  const isShouldered = ['rifle', 'shotgun', 'lmg', 'sniper'].includes(cls);
+  const g = new THREE.Group();
+  if (isShouldered) {
+    // Stock at the shoulder, barrel forward by `len`. Anchor's
+    // local +Z is forward.
+    g.rotation.set(0, 0, 0);
+    g.position.set(0, 0, (0.1 + len / 2) * ws);
+    rig.rightShoulderAnchor.add(g);
+  } else {
+    // Hand-held — mounted on the wrist (handPivot in player.js).
+    // Hand's local "forward" is -Y after the cumulative arm
+    // rotation chain, so the inHandModel applies a π/2 X-rotation.
+    g.rotation.set(Math.PI / 2, 0, 0);
+    g.position.set(0, -(0.1 + len / 2) * ws, 0);
+    rig.rightArm.wrist.add(g);
+  }
+  return g;
 }
 
 function _populateWeaponPicker() {
@@ -474,9 +492,11 @@ function _findTunable(name) {
   return tunables.weapons.find(w => w.name === name) || null;
 }
 
+let _inHandGroup = null;
 document.getElementById('weapon-pick').addEventListener('change', (e) => {
   const name = e.target.value;
-  // Tear down any previous weapon mesh.
+  // Tear down any previous weapon mesh + intermediate group so the
+  // swap is clean.
   if (_weaponMesh) {
     _weaponMesh.parent?.remove(_weaponMesh);
     _weaponMesh.traverse?.(o => {
@@ -488,21 +508,25 @@ document.getElementById('weapon-pick').addEventListener('change', (e) => {
     });
     _weaponMesh = null;
   }
+  if (_inHandGroup) {
+    _inHandGroup.parent?.remove(_inHandGroup);
+    _inHandGroup = null;
+  }
   if (!name) return;
   const path = MODEL_BY_WEAPON_NAME[name];
   if (!path) return;
   const url = MODEL_BASE + path;
   const w = _findTunable(name) || { class: 'pistol', muzzleLength: 0.5 };
   const cls = w.class || 'pistol';
+  const len = w.muzzleLength ?? 0.5;
   document.getElementById('output').textContent = `loading ${name}…`;
   fbxLoader.load(url, (obj) => {
-    // Same pipeline as src/player.js setWeapon():
-    //   1. Per-class fit radius × per-FBX scale override
-    //   2. Rotation override OR default (0, π/2, 0)
-    //   3. Mirror via scale.x = -1 if the pack rule says so
-    //   4. Grip offset translation
+    // Mirror player.js setWeapon() pipeline EXACTLY so the editor
+    // shows what the game will render. The inHandGroup applies the
+    // shouldered-vs-handheld outer transform; the FBX clone goes
+    // INSIDE it with per-FBX rotation/mirror/grip-offset.
     const cs = CLASS_FIT_RADIUS[cls] ?? 0.9;
-    _fitToRadius(obj, (w.muzzleLength ?? 0.5) * cs * scaleForModelPath(url));
+    _fitToRadius(obj, len * cs * scaleForModelPath(url));
     const rotOverride = rotationOverrideForModelPath(url);
     if (rotOverride) {
       obj.rotation.set(rotOverride.x || 0, rotOverride.y || 0, rotOverride.z || 0);
@@ -514,12 +538,16 @@ document.getElementById('weapon-pick').addEventListener('change', (e) => {
     if (shouldMirrorInHand({ baseName: name })) obj.scale.x *= -1;
     const grip = gripOffsetForModelPath(url);
     if (grip) obj.position.set(grip.x || 0, grip.y || 0, grip.z || 0);
-    // Attach to the same anchor point the in-game system uses.
-    const anchor = _attachPointForClass(cls);
-    anchor.add(obj);
+    // Build the same intermediate group the game uses, parented to
+    // the SAME rig node (shoulder anchor for shouldered, wrist for
+    // hand-held). FBX clone goes inside.
+    _inHandGroup = _makeInHandGroup(cls, len);
+    _inHandGroup.add(obj);
     _weaponMesh = obj;
+    const anchorName = _inHandGroup.parent === rig.rightShoulderAnchor
+      ? 'rightShoulderAnchor' : 'rightArm.wrist';
     document.getElementById('output').textContent =
-      `loaded ${name} → ${path} (cls=${cls}, anchor=${anchor === rig.rightShoulderAnchor ? 'shoulder' : 'hand'})`;
+      `loaded ${name} → ${path}\n  cls=${cls}, anchor=${anchorName}\n  fitR=${(len*cs*scaleForModelPath(url)).toFixed(3)}, mirror=${shouldMirrorInHand({baseName:name})}\n  grip=${grip ? `(${grip.x},${grip.y},${grip.z})` : 'none'}`;
   }, undefined, (err) => {
     document.getElementById('output').textContent =
       `failed to load ${path}: ${err?.message || err}`;
