@@ -525,7 +525,11 @@ export const tunables = {
     {
       name: 'Cheytac Intervention', type: 'ranged', class: 'sniper', rarity: 'epic',
       attachmentSlots: ['muzzle', 'topRail', 'stock', 'trigger', 'underRail'],
-      fireMode: 'semi', fireRate: 0.8, damage: 210, range: 100,
+      // .408 CheyTac is a bolt-action anti-materiel platform. ~0.5/s
+      // = one round every 2s including bolt cycle, which matches the
+      // weight of the round (210 dmg). Was 0.8 — too quick to feel
+      // like the heaviest sniper in the lineup.
+      fireMode: 'semi', fireRate: 0.5, damage: 210, range: 100,
       hipSpread: 0.18, adsSpread: 0.003,
       adsZoom: 0.36, adsPeekDistance: 10.0,
       tracerColor: 0xffe030, muzzleLength: 1.6, muzzleGirth: 0.2,
@@ -1277,7 +1281,10 @@ export const tunables = {
       rarity: 'epic',
       attachmentSlots: ['muzzle', 'topRail', 'stock', 'trigger', 'underRail'],
       fireMode: 'semi',
-      fireRate: 1.0,
+      // .338 Lapua bolt action. Slow on purpose — a magnum-caliber
+      // bolt-action commits to each shot. Was 1.0; 0.65 sits between
+      // the .338 Lapua entry below and the Cheytac above.
+      fireRate: 0.65,
       damage: 145,
       range: 95,
       hipSpread: 0.15,
@@ -1300,7 +1307,9 @@ export const tunables = {
       rarity: 'rare',
       attachmentSlots: ['muzzle', 'barrel', 'sideRail', 'topRail', 'stock', 'grip', 'trigger', 'magazine'],
       fireMode: 'semi',
-      fireRate: 1.4,
+      // Same caliber as AWP but a generic bolt-action chassis. 0.75/s
+      // ≈ one round every 1.3s. Was 1.4 — too snappy for a magnum bolt.
+      fireRate: 0.75,
       damage: 130,
       range: 92,
       hipSpread: 0.14,
