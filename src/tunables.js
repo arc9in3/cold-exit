@@ -351,7 +351,13 @@ export const tunables = {
       reloadTime: 4.8,
     },
     {
-      name: 'Widowmaker Rocket Launcher',
+      // Renamed Apr-26: this entry was mistakenly named "Widowmaker
+      // Rocket Launcher" but its stats are pure flamethrower
+      // (fireMode 'flame', per-tick damage, cone). Renamed to its
+      // actual identity. The flamer boss archetype still finds it
+      // via `tunables.weapons.find(w => w.fireMode === 'flame')`,
+      // so the `name` change is purely cosmetic to the player.
+      name: 'Flamethrower',
       type: 'ranged',
       // Reclassed under the unified 'exotic' mastery family (flame, GL,
       // RL, dart, flare). Gameplay-side flame behaviour (fire spread,
@@ -386,6 +392,42 @@ export const tunables = {
       // present. A roaring flame jet is plainly louder than a pistol;
       // wakes the whole next room.
       noiseRange: 36,
+    },
+    {
+      // Widowmaker Rocket Launcher — actual rocket launcher this time.
+      // Single-shot, slow flat-flying projectile, big AoE on impact.
+      // Reads through the firePlayerProjectile path (main.js:4108)
+      // because fireMode === 'projectile'.
+      name: 'Widowmaker Rocket Launcher',
+      type: 'ranged',
+      class: 'exotic',
+      rarity: 'rare',
+      attachmentSlots: ['underRail', 'sideRail', 'topRail', 'stock'],
+      fireMode: 'projectile',
+      projectile: 'rocket',
+      projectileSpeed: 22,        // slow enough to read in flight
+      projectileGrav: 0,           // straight + level
+      projectileFuse: 4.0,         // self-detonate after 4s if no impact
+      projectileBounce: 0,
+      aoeRadius: 5.5,
+      aoeDamage: 240,
+      aoeShake: 0.75,
+      fireRate: 0.5,               // one rocket every 2s
+      damage: 240,                 // direct-impact damage
+      range: 70,
+      hipSpread: 0.06,
+      adsSpread: 0.02,
+      adsZoom: 0.62,
+      adsPeekDistance: 6.5,
+      tracerColor: 0xff8040,
+      muzzleLength: 1.4,
+      muzzleGirth: 0.22,
+      pelletCount: 1,
+      burstCount: 1,
+      burstInterval: 0,
+      magSize: 1,
+      reloadTime: 3.6,
+      noiseRange: 42,
     },
     // --- Extended pistol lineup ---
     {

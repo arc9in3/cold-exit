@@ -83,6 +83,10 @@ export const MODEL_BY_WEAPON_NAME = {
 
   // Exotic
   'Widowmaker Rocket Launcher': 'weapons/SM_Rocket_Launchers_01.fbx',
+  // Flamethrower — placeholder uses the heavy MG mesh (long tube +
+  // top-mounted feed reads as a fuel-tank shape from the iso angle).
+  // Replace when a real flamethrower FBX is sourced.
+  'Flamethrower':       'weapons/SM_Heavy_Machine_Gun.fbx',
 
   // Legendary artifact pistol.
   "Jessica's Rage":     'weapons/SM_Hunting_Pistol.fbx',
