@@ -12,7 +12,7 @@ import * as THREE from 'three';
 import {
   ALL_GEAR, ALL_ARMOR, ALL_CONSUMABLES, CONSUMABLE_DEFS,
   randomArmor, randomGear, randomConsumable, randomJunk, randomThrowable,
-  withAffixes, wrapWeapon,
+  withAffixes, wrapWeapon, forceMastercraft,
 } from './inventory.js';
 import { ALL_ATTACHMENTS, randomAttachment } from './attachments.js';
 import { tunables } from './tunables.js';
@@ -95,7 +95,12 @@ function rollItemForType(type, levelIdx) {
       !w.artifact && !w.mythic && w.rarity !== 'mythic');
     const wpn = wrapWeapon(pool[Math.floor(Math.random() * pool.length)]);
     wpn.rarity = Math.random() < 0.55 ? 'epic' : 'legendary';
-    wpn.mastercraft = true;
+    // Use forceMastercraft instead of just flipping the flag — it
+    // applies the 1.5× bump to affix values, useEffect numbers, and
+    // the visible MASTERCRAFT name tag. Setting wpn.mastercraft=true
+    // alone shipped a flag-only "mastercraft" weapon with the same
+    // stat numbers as a regular drop.
+    forceMastercraft(wpn);
     return wpn;
   }
   // General — roll across categories with a believable mix.

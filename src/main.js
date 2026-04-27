@@ -5376,11 +5376,16 @@ function onEnemyKilled(enemy, opts = {}) {
     const w = currentWeapon();
     if (w) {
       const drop = JSON.parse(JSON.stringify(w));
-      drop.mastercraft = true;
-      // Bump rarity ladder one tier to read as "this is special".
+      // Bump rarity ladder one tier first so forceMastercraft sees
+      // the upgraded rarity when it stamps the name + bumps stats.
       const ladder = ['common', 'uncommon', 'rare', 'epic', 'legendary'];
       const idx = ladder.indexOf(drop.rarity || 'common');
       if (idx < ladder.length - 1) drop.rarity = ladder[idx + 1];
+      // Use forceMastercraft instead of just flipping the flag — bumps
+      // affix values, useEffect numbers, and stamps the visible
+      // MASTERCRAFT tag. Flag-only assignment shipped "mastercraft"
+      // weapons with the same stat numbers as a regular drop.
+      forceMastercraft(drop);
       // Spawn next to the corpse via loot system.
       loot.spawnItem({ x: enemy.group.position.x + 0.6, y: 0.4, z: enemy.group.position.z }, drop);
     }

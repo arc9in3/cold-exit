@@ -496,6 +496,24 @@ export function forceMastercraft(item) {
       }
     }
   }
+  // Mastercraft also grants +1 perk count when rolled at construction
+  // (see wrapWeapon / withAffixes). Mirror that for the mutation path:
+  // roll one extra perk and append, skipping kinds the item already
+  // has so we don't dupe. Best-effort — if rollPerks returns nothing
+  // new, we just leave the perks list as-is.
+  if (Array.isArray(item.perks)) {
+    const inferred = inferRarity(item) || item.rarity || 'common';
+    const extra = rollPerks(inferred, { mastercraft: true });
+    if (Array.isArray(extra) && extra.length) {
+      const have = new Set(item.perks.map(p => p?.kind || p?.id));
+      for (const p of extra) {
+        const key = p?.kind || p?.id;
+        if (!key || have.has(key)) continue;
+        item.perks.push(p);
+        have.add(key);
+      }
+    }
+  }
   return item;
 }
 
@@ -535,6 +553,22 @@ export function maybeApplyMastercraft(item) {
   // ceiling.
   if (typeof item.maxCharges === 'number' && typeof item.charges === 'number') {
     item.charges = item.maxCharges;
+  }
+  // Affixes get the same 1.5× lift forceMastercraft applies. Without
+  // this, randomly-rolled mastercraft items shipped the same affix
+  // numbers as a non-mastercraft drop — players reported the perk
+  // bonus wasn't actually showing up. Now both promotion paths
+  // (random roll + Tailor force) produce equivalent affix values, and
+  // recomputeStats sees the larger numbers immediately when the item
+  // is equipped.
+  if (Array.isArray(item.affixes)) {
+    for (const aff of item.affixes) {
+      if (typeof aff.value === 'number') {
+        aff.value = Math.round(aff.value * 1.5 * 10) / 10;
+        const def = AFFIX_POOL.find(a => a.kind === aff.kind);
+        if (def) aff.label = def.label(aff.value);
+      }
+    }
   }
   return item;
 }

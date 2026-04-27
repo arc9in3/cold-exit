@@ -2158,7 +2158,13 @@ export const ENCOUNTER_DEFS = {
       if (ladderTypes.has(item.type) && item.rarity !== 'mythic') {
         const out = JSON.parse(JSON.stringify(item));
         out.rarity = 'legendary';
-        if (Math.random() < 0.05) out.mastercraft = true;
+        // 5% chance to also masterwork it. Use the proper helper so
+        // the affix / useEffect / aoe / sellValue numbers actually
+        // bump 1.5× — flipping the flag alone shipped a "mastercraft"
+        // tag with vanilla stat numbers.
+        if (Math.random() < 0.05 && ctx.mendToMastercraft) {
+          ctx.mendToMastercraft(out);
+        }
         ctx.spawnSpeech(new THREE.Vector3(s.disc.cx, 1.8, s.disc.cz),
           'The flames purify.', 4.0);
         ctx.spawnLoot(s.disc.cx, s.disc.cz + 0.6, out);
