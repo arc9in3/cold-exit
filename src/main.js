@@ -5795,9 +5795,11 @@ function onProjectileExplode(pos, explosion, owner, p) {
     return;
   }
   if (kind === 'gas') {
-    // Poison cloud — drains player + enemy HP over time. Damage
-    // ticking handled in _tickThrowableZones below.
-    spawnGasZone(pos, radius, p.gasDuration || 6.0);
+    // Poison cloud — drains HP over time. Damage ticking handled in
+    // _tickThrowableZones below. Owner is forwarded so the tick can
+    // gate friendly fire: enemy-thrown gas only drains the player,
+    // never other enemies (was a self-kill / chain-kill bug).
+    spawnGasZone(pos, radius, p.gasDuration || 6.0, owner);
     if (sfx.explode) sfx.explode();
     return;
   }
@@ -7346,7 +7348,7 @@ const _gasZones = [];
 // Anything inside (player + enemies) takes per-second drains: 5%
 // max HP / 10% stamina for the player, 5% HP for enemies. Visual
 // is a translucent green dome + ground ring matching smoke zones.
-function spawnGasZone(pos, radius, duration) {
+function spawnGasZone(pos, radius, duration, owner = 'player') {
   const baseMat = new THREE.MeshBasicMaterial({
     color: 0x60d040, transparent: true, opacity: 0.40,
     depthWrite: false, side: THREE.DoubleSide,
@@ -7362,7 +7364,7 @@ function spawnGasZone(pos, radius, duration) {
   const dome = new THREE.Mesh(new THREE.SphereGeometry(radius, 16, 8, 0, Math.PI * 2, 0, Math.PI / 2), domeMat);
   dome.position.set(pos.x, 0, pos.z);
   scene.add(dome);
-  _gasZones.push({ x: pos.x, z: pos.z, radius, life: duration, t: 0, ring, dome });
+  _gasZones.push({ x: pos.x, z: pos.z, radius, life: duration, t: 0, ring, dome, owner });
 }
 
 function spawnSmokeZone(pos, radius, duration) {
@@ -7458,25 +7460,30 @@ function _tickThrowableZones(dt) {
         if (player.consumeStamina) player.consumeStamina('gas', stamDrain);
       }
     }
-    // Enemy drain.
-    const sweep = (list) => {
-      for (const c of list) {
-        if (!c.alive) continue;
-        const dx = c.group.position.x - z.x;
-        const dz = c.group.position.z - z.z;
-        if (dx * dx + dz * dz > r2) continue;
-        const maxHp = c.maxHp || c.hp || 30;
-        const tickDmg = maxHp * 0.05 * dt;
-        const wasAlive = c.alive;
-        c.hp -= tickDmg;
-        if (c.hp <= 0) {
-          c.alive = false; c.state = 'dead'; c.deathT = 0;
-          if (wasAlive) onEnemyKilled(c);
+    // Enemy drain — only from PLAYER-owned gas. Enemy-thrown gas
+    // never damages other enemies (was a chain self-kill bug where
+    // an enemy chucked a gas grenade at the player and wiped its
+    // own squad standing behind it).
+    if (z.owner === 'player') {
+      const sweep = (list) => {
+        for (const c of list) {
+          if (!c.alive) continue;
+          const dx = c.group.position.x - z.x;
+          const dz = c.group.position.z - z.z;
+          if (dx * dx + dz * dz > r2) continue;
+          const maxHp = c.maxHp || c.hp || 30;
+          const tickDmg = maxHp * 0.05 * dt;
+          const wasAlive = c.alive;
+          c.hp -= tickDmg;
+          if (c.hp <= 0) {
+            c.alive = false; c.state = 'dead'; c.deathT = 0;
+            if (wasAlive) onEnemyKilled(c);
+          }
         }
-      }
-    };
-    sweep(gunmen.gunmen);
-    sweep(melees.enemies);
+      };
+      sweep(gunmen.gunmen);
+      sweep(melees.enemies);
+    }
     if (z.t >= z.life) {
       scene.remove(z.ring); z.ring.geometry.dispose(); z.ring.material.dispose();
       scene.remove(z.dome); z.dome.geometry.dispose(); z.dome.material.dispose();
