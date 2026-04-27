@@ -74,6 +74,353 @@ function ownerOf(branch) {
   return stripped.slice(0, slash).toLowerCase();
 }
 
+// ===========================================================================
+// Plain-English file purpose mapping — translates `src/*.js` into "what
+// part of the game this file is about" so non-developer reviewers can
+// see at a glance which systems a branch touches.
+// ===========================================================================
+const FILE_PURPOSE_EXACT = {
+  'src/main.js': 'core game logic (the heart of everything)',
+  'src/encounters.js': 'special rooms / NPC interactions (encounters)',
+  'src/gunman.js': 'gunman AI (how ranged enemies behave)',
+  'src/melee_enemy.js': 'melee enemy AI (how melee enemies behave)',
+  'src/player.js': 'player movement, shooting, melee',
+  'src/inventory.js': 'inventory + item / weapon / armor definitions',
+  'src/artifacts.js': 'relics (permanent run buffs)',
+  'src/attachments.js': 'weapon attachments (sights, mags, suppressors)',
+  'src/combat.js': 'shooting / hit-detection / blood / tracers',
+  'src/projectiles.js': 'grenades, molotovs, rockets in flight',
+  'src/level.js': 'level + map generation',
+  'src/loot.js': 'ground loot (items dropped on the floor)',
+  'src/tunables.js': 'balance numbers (damage, speed, drop rates)',
+  'src/skills.js': 'skill tree + derived player stats',
+  'src/skill_tree.js': 'skill tree node definitions',
+  'src/perks.js': 'weapon + gear perks',
+  'src/audio.js': 'sound effects',
+  'src/scene.js': 'lighting / camera / post-processing',
+  'src/actor_rig.js': 'enemy + player body rigging (procedural cylinders+spheres)',
+  'src/rig_instancer.js': 'enemy rig rendering optimization',
+  'src/corpse_bake.js': 'baking dead enemies into static corpse meshes',
+  'src/hud.js': 'in-game HUD (HP, ammo, prompts)',
+  'src/input.js': 'keyboard / mouse / gamepad input',
+  'src/leaderboard.js': 'leaderboard + run-stats tracking',
+  'src/prefs.js': 'persistent preferences (localStorage)',
+  'src/buffs.js': 'temporary buff system',
+  'src/melee_primitives.js': 'melee weapon primitive shapes',
+  'src/model_manifest.js': 'weapon FBX model paths',
+  'src/gltf_cache.js': 'FBX/GLTF model loader + cache',
+  'src/grid_container.js': 'inventory grid math',
+  'src/spatial_hash.js': 'spatial hash for AI proximity queries',
+  'src/dummies.js': 'training-dummy enemies',
+  'src/drones.js': 'drone enemy behaviour',
+  'src/ai_separation.js': 'enemy crowd-avoidance',
+  'src/bvh.js': 'bounding-volume hierarchy for raycasts',
+  'index.html': 'the game webpage + CSS styles',
+  'tasks.md': 'task queue (bookkeeping)',
+  'PROJECT.md': 'shared AI project rules',
+  'CLAUDE.md': "Claude's lane / instructions",
+  'AGENTS.md': "Codex's lane / instructions",
+  'GEMINI.md': "Gemini's lane / instructions",
+};
+const FILE_PURPOSE_PATTERNS = [
+  [/^audits\//, 'audit report (Gemini findings)'],
+  [/^tools\/.*bench\./i, 'performance benchmark script'],
+  [/^tools\//, 'developer tooling / scripts'],
+  [/^src\/ui_(\w+)/, (m) => `UI: ${m[1].replace(/_/g, ' ')}`],
+  [/^\.locks\//, 'AI coordination lock'],
+  [/^\.claude\/skills\//, "Claude skill (slash-command)"],
+  [/^Assets\//, 'game asset (3D model / texture / audio)'],
+  [/\.md$/, 'documentation'],
+  [/^src\/.*\.js$/, 'game module'],
+];
+
+function describeFile(filePath) {
+  if (FILE_PURPOSE_EXACT[filePath]) return FILE_PURPOSE_EXACT[filePath];
+  for (const [pat, desc] of FILE_PURPOSE_PATTERNS) {
+    const m = filePath.match(pat);
+    if (m) return typeof desc === 'function' ? desc(m) : desc;
+  }
+  return 'other';
+}
+
+// Parse the per-file numstat block git outputs with --numstat.
+//   added\tremoved\tpath
+async function getFileStats(ref) {
+  let raw = '';
+  try { raw = await git(`diff main..${ref} --numstat`); } catch (_) { return []; }
+  const lines = raw.trim().split('\n').filter(Boolean);
+  return lines.map(l => {
+    const [add, rem, ...rest] = l.split('\t');
+    const file = rest.join('\t');
+    return {
+      file,
+      added: parseInt(add || '0', 10) || 0,
+      removed: parseInt(rem || '0', 10) || 0,
+      purpose: describeFile(file),
+    };
+  });
+}
+
+// Risk flags — patterns in the filename that warrant a "watch this when
+// you playtest" warning.
+function riskFlagsFor(files, owner) {
+  const flags = [];
+  const has = (re) => files.some(f => re.test(f.file));
+  if (has(/^src\/(actor_rig|rig_instancer|corpse_bake|gunman|melee_enemy)\.js$/)) {
+    flags.push({
+      level: 'high',
+      msg: 'Rig + AI subsystem touched. Verify the InstancedMesh + corpse-bake + ghost-mode interactions: shoot enemies, watch hit flashes, kill one and confirm the corpse appears, walk in/out of fog.',
+    });
+  }
+  if (has(/^src\/main\.js$/)) {
+    flags.push({
+      level: 'high',
+      msg: 'Core game loop touched. Anything could be affected — playtest 2-3 minutes of normal gameplay.',
+    });
+  }
+  if (has(/^src\/projectiles\.js$/)) {
+    flags.push({
+      level: 'medium',
+      msg: 'Throwable physics touched. Throw a grenade, a molotov, and the maotai over a wall — verify they reach where you aimed.',
+    });
+  }
+  if (has(/^src\/encounters\.js$/)) {
+    flags.push({
+      level: 'medium',
+      msg: 'Encounter content changed. Trigger every encounter mentioned in the diff at least once.',
+    });
+  }
+  if (has(/^src\/level\.js$/)) {
+    flags.push({
+      level: 'medium',
+      msg: 'Level generation changed. Regenerate a few levels and check rooms still connect.',
+    });
+  }
+  if (has(/^src\/tunables\.js$/)) {
+    flags.push({
+      level: 'low',
+      msg: 'Balance numbers changed. Numbers are easy to revert — playtest the affected weapons / drops.',
+    });
+  }
+  // Branch-owner-specific extra flags.
+  if (owner === 'codex' && has(/^src\/(encounters|inventory|artifacts|player)\.js$/)) {
+    flags.push({
+      level: 'high',
+      msg: 'Codex edited a file outside its lane (gameplay/content code). This is unusual — read the diff carefully.',
+    });
+  }
+  if (owner === 'gemini' && files.some(f => /^src\//.test(f.file))) {
+    flags.push({
+      level: 'high',
+      msg: 'Gemini edited source code. Audits should ONLY add files in audits/ — verify this is a refactor task, not an audit.',
+    });
+  }
+  return flags;
+}
+
+// Heuristic plain-English summary of a branch. Combines:
+//  - One-sentence headline derived from file count + purpose mix
+//  - Per-file plain-English purpose
+//  - Risk flags
+//  - "What to playtest" guidance
+function generateHeuristicSummary({ files, stats, commits, owner, isPushed }) {
+  const total = files.length;
+  const totalAdded = files.reduce((a, f) => a + f.added, 0);
+  const totalRemoved = files.reduce((a, f) => a + f.removed, 0);
+  const scale = totalAdded + totalRemoved;
+
+  // Headline.
+  let scaleWord;
+  if (scale === 0) scaleWord = 'an empty';
+  else if (scale < 30) scaleWord = 'a small';
+  else if (scale < 200) scaleWord = 'a medium';
+  else if (scale < 800) scaleWord = 'a large';
+  else scaleWord = 'a sprawling';
+
+  const purposeCounts = {};
+  for (const f of files) {
+    purposeCounts[f.purpose] = (purposeCounts[f.purpose] || 0) + 1;
+  }
+  const topPurposes = Object.entries(purposeCounts)
+    .sort((a, b) => b[1] - a[1])
+    .slice(0, 3)
+    .map(([p]) => p);
+
+  const ownerLabel = owner === 'codex' ? 'Codex (algorithm work)'
+                  : owner === 'gemini' ? 'Gemini (audits / sweeps)'
+                  : owner === 'claude' ? 'Claude (gameplay iteration)'
+                  : 'unassigned author';
+
+  let headline;
+  if (total === 0) {
+    headline = `${ownerLabel} created this branch but it has no changes vs main yet.`;
+  } else if (total === 1 && commits.length === 1) {
+    headline = `${ownerLabel} made ${scaleWord} change touching ${files[0].purpose}.`;
+  } else {
+    headline = `${ownerLabel} made ${scaleWord} change across ${total} file${total === 1 ? '' : 's'}, mostly affecting ${topPurposes.join(' + ')}.`;
+  }
+
+  // Bullet "what changed" — group by purpose.
+  const byPurpose = {};
+  for (const f of files) {
+    if (!byPurpose[f.purpose]) byPurpose[f.purpose] = [];
+    byPurpose[f.purpose].push(f);
+  }
+  const whatChanged = Object.entries(byPurpose).map(([purpose, fs]) => {
+    const names = fs.map(f => f.file).join(', ');
+    const sum = fs.reduce((s, f) => s + f.added + f.removed, 0);
+    return { purpose, files: names, lines: sum };
+  });
+
+  // Risk flags.
+  const flags = riskFlagsFor(files, owner);
+
+  // Test guidance — one line based on what was touched.
+  const tests = [];
+  if (files.some(f => /^src\/encounters\.js$/.test(f.file))) {
+    tests.push('Trigger the new/modified encounter (read the diff for the encounter name) and walk through its full path.');
+  }
+  if (files.some(f => /^src\/(gunman|melee_enemy|actor_rig|rig_instancer|corpse_bake)/.test(f.file))) {
+    tests.push('Shoot enemies, watch hit flashes, kill one, walk out of LoS and back in. Confirm corpses + ghost silhouettes work.');
+  }
+  if (files.some(f => /^src\/projectiles/.test(f.file))) {
+    tests.push('Throw a frag, a molotov, and the maotai over a wall — they should all reach the cursor target.');
+  }
+  if (files.some(f => /^src\/inventory|attachments|artifacts/.test(f.file))) {
+    tests.push('Pick up items, drag/drop in the inventory grid, equip a weapon attachment, take a relic from the floor.');
+  }
+  if (files.some(f => /^src\/level\.js$/.test(f.file))) {
+    tests.push('Hit "next level" several times, walk through 3+ rooms, verify doors still open / no stuck spawns.');
+  }
+  if (files.some(f => /^audits\//.test(f.file))) {
+    tests.push('Read the audit report. No code change to test in-game.');
+  }
+  if (files.some(f => /^tools\/.*bench/i.test(f.file))) {
+    tests.push(`Run the benchmark: \`node ${files.find(f => /^tools\/.*bench/i.test(f.file)).file}\`. Compare numbers vs the claim.`);
+  }
+  if (!tests.length && files.length) {
+    tests.push('Read the diff carefully — no auto-suggested test path matches. Branch may be docs-only or tooling.');
+  }
+
+  return {
+    headline,
+    ownerLabel,
+    scale: { added: totalAdded, removed: totalRemoved, files: total, label: scaleWord.replace(/^a /, '') },
+    whatChanged,
+    flags,
+    tests,
+    pushedNote: isPushed ? null : 'NOTE: branch is local-only — push it before merging so the work isn\'t lost.',
+  };
+}
+
+// ===========================================================================
+// Tasks.md parser — turns the markdown table into structured records
+// with plain-English-friendly fields.
+// ===========================================================================
+function parseTasksMd() {
+  const tasksPath = path.join(REPO_ROOT, 'tasks.md');
+  let raw = '';
+  try { raw = fs.readFileSync(tasksPath, 'utf8'); }
+  catch (_) { return { active: [], done: [], error: 'tasks.md not found' }; }
+  const sections = { active: [], done: [] };
+  let mode = null;
+  for (const line of raw.split('\n')) {
+    const heading = line.match(/^##\s+(\w+)/);
+    if (heading) {
+      const h = heading[1].toLowerCase();
+      mode = (h === 'active' || h === 'done') ? h : null;
+      continue;
+    }
+    if (!mode) continue;
+    if (!line.startsWith('|')) continue;
+    if (line.includes('---')) continue;        // separator row
+    const cells = line.split('|').map(c => c.trim());
+    // First and last entries from split('|') are empty — drop them.
+    const fields = cells.slice(1, -1);
+    if (!fields.length) continue;
+    if (fields[0].toLowerCase() === 'task') continue;   // header row
+    if (mode === 'active') {
+      const [task, owner, status, notes] = fields;
+      sections.active.push({ task, owner: owner?.toLowerCase() || 'unassigned', status: status?.toLowerCase() || 'open', notes: notes || '' });
+    } else {
+      const [task, owner, shipped] = fields;
+      sections.done.push({ task, owner: owner?.toLowerCase() || 'unassigned', shipped: shipped || '' });
+    }
+  }
+  return sections;
+}
+
+// ===========================================================================
+// AI summary — optional, requires OPENAI_API_KEY env var.
+// ===========================================================================
+async function aiSummary({ branch, owner, diff, stats, commits, files }) {
+  const key = process.env.OPENAI_API_KEY;
+  if (!key) {
+    return {
+      ok: false,
+      reason: 'OPENAI_API_KEY not set. Run `setx OPENAI_API_KEY "sk-..."` and restart this dashboard to enable AI summaries.',
+    };
+  }
+  // Truncate diff to 12k chars — gpt-4o-mini handles ~128k tokens but
+  // we don't want to pay for huge diffs that the heuristic summary
+  // already covered.
+  const trimmed = diff.length > 12000
+    ? diff.slice(0, 12000) + '\n\n[... diff truncated, ' + (diff.length - 12000) + ' more chars ...]'
+    : diff;
+  const fileList = files.map(f => `${f.file} (+${f.added}/-${f.removed}) — ${f.purpose}`).join('\n');
+  const commitList = commits.map(c => `${c.short}  ${c.subject}`).join('\n');
+
+  const prompt = [
+    { role: 'system', content: 'You are explaining a code change to someone who does not read code. Be concise. Output exactly four bullet points — no preamble, no closing remarks. Use plain English, no jargon. If a technical term is unavoidable, put a quick parenthesized hint after it.' },
+    { role: 'user', content:
+`Branch: ${branch}
+Author: ${owner}
+Files changed (${files.length}, +${stats.added}/-${stats.removed}):
+${fileList || '(none)'}
+
+Commits:
+${commitList || '(none)'}
+
+Diff:
+${trimmed}
+
+Output four bullet points in this exact order:
+
+• What it does — one sentence, plain English, no jargon.
+• What the player will notice (or "nothing user-visible" if it's invisible to the player).
+• Biggest risk if this gets merged.
+• The first thing the reviewer should test.`
+    },
+  ];
+
+  // Direct fetch to OpenAI — node 18+ has global fetch.
+  const res = await fetch('https://api.openai.com/v1/chat/completions', {
+    method: 'POST',
+    headers: {
+      'Content-Type': 'application/json',
+      'Authorization': `Bearer ${key}`,
+    },
+    body: JSON.stringify({
+      model: 'gpt-4o-mini',
+      messages: prompt,
+      max_tokens: 400,
+      temperature: 0.25,
+    }),
+  });
+  if (!res.ok) {
+    const errText = await res.text();
+    return { ok: false, reason: `OpenAI API error ${res.status}: ${errText.slice(0, 300)}` };
+  }
+  const json = await res.json();
+  const text = json.choices?.[0]?.message?.content?.trim() || '';
+  return {
+    ok: true,
+    summary: text,
+    tokens: json.usage,
+    model: json.model,
+  };
+}
+
 // Review checklist text per owner. Hand-written based on AGENTS / GEMINI /
 // CLAUDE markdown files at repo root.
 function checklistFor(owner) {
@@ -226,6 +573,76 @@ const HTML = `<!DOCTYPE html>
     letter-spacing: 3px; text-transform: uppercase;
   }
   h2:not(:first-child) { margin-top: 28px; }
+  h3 { margin: 0 0 8px 0; font-size: 12px; color: #d8dde4; }
+
+  /* Plain-English summary blocks */
+  .pe-card {
+    background: linear-gradient(180deg, rgba(125, 167, 200, 0.08) 0%, rgba(125, 167, 200, 0.03) 100%);
+    border: 1px solid rgba(125, 167, 200, 0.30);
+    border-radius: 4px; padding: 18px 22px; margin-bottom: 18px;
+  }
+  .pe-card h3 {
+    font-size: 11px; color: #6aa3d8;
+    letter-spacing: 2px; text-transform: uppercase; margin-bottom: 12px;
+  }
+  .pe-headline { font-size: 14px; line-height: 1.5; color: #e8edf2; margin-bottom: 10px; }
+  .pe-section { font-size: 12px; line-height: 1.55; margin-top: 12px; }
+  .pe-section ul { margin: 4px 0 0 0; padding-left: 22px; }
+  .pe-section li { margin-bottom: 4px; }
+  .pe-section .lbl { color: #6aa3d8; font-size: 10px; letter-spacing: 1.5px; text-transform: uppercase; display: block; margin-bottom: 4px; }
+  .pe-purpose { color: #c9a87a; }
+  .pe-files { color: #888; font-size: 11px; }
+
+  .flag {
+    padding: 8px 12px; border-radius: 3px; margin-bottom: 6px;
+    font-size: 12px; line-height: 1.45;
+    border-left: 3px solid;
+  }
+  .flag-high { background: rgba(220, 70, 50, 0.10); border-left-color: #ff8a78; color: #ffbab0; }
+  .flag-medium { background: rgba(220, 160, 50, 0.10); border-left-color: #f0c060; color: #ffd99a; }
+  .flag-low { background: rgba(122, 130, 144, 0.10); border-left-color: #aab2c0; color: #c0c8d2; }
+
+  .ai-card {
+    background: rgba(106, 163, 216, 0.06);
+    border: 1px dashed rgba(106, 163, 216, 0.45);
+    border-radius: 4px; padding: 14px 18px; margin-bottom: 18px;
+  }
+  .ai-card.unavailable { opacity: 0.7; }
+  .ai-card pre { white-space: pre-wrap; font-family: inherit; margin: 0; line-height: 1.55; font-size: 12px; color: #d8dde4; }
+
+  /* Tasks panel */
+  .tasks-list { display: flex; flex-direction: column; gap: 10px; }
+  .task-card {
+    background: #11141d; border: 1px solid #2a3340;
+    border-radius: 3px; padding: 14px 16px;
+  }
+  .task-card.in-progress { border-color: rgba(106, 163, 216, 0.55); }
+  .task-card.blocked { border-color: rgba(220, 70, 50, 0.4); }
+  .task-row {
+    display: flex; align-items: center; justify-content: space-between;
+    gap: 10px; flex-wrap: wrap;
+  }
+  .task-title { font-size: 13px; color: #d8dde4; line-height: 1.4; flex: 1; min-width: 250px; }
+  .task-pill {
+    display: inline-block; font-size: 10px; letter-spacing: 1px;
+    padding: 2px 8px; border-radius: 2px; text-transform: uppercase;
+  }
+  .pill-claude { background: rgba(201, 168, 122, 0.18); color: #f0d9b0; }
+  .pill-codex { background: rgba(60, 200, 130, 0.15); color: #6ce0a0; }
+  .pill-gemini { background: rgba(106, 163, 216, 0.18); color: #aad0f0; }
+  .pill-unassigned { background: rgba(122, 130, 144, 0.18); color: #aab2c0; }
+  .pill-status-open { background: rgba(122, 130, 144, 0.18); color: #aab2c0; }
+  .pill-status-in-progress { background: rgba(106, 163, 216, 0.22); color: #aad0f0; }
+  .pill-status-blocked { background: rgba(220, 70, 50, 0.18); color: #ff8a78; }
+  .pill-status-done { background: rgba(60, 200, 130, 0.15); color: #6ce0a0; }
+  .task-notes { font-size: 11px; color: #8a96a8; margin-top: 6px; line-height: 1.5; }
+
+  .view-toggle { display: flex; gap: 4px; margin-bottom: 14px; }
+  .view-toggle button { padding: 6px 12px; font-size: 10px; }
+  .view-toggle button.active {
+    background: rgba(201, 168, 122, 0.30); border-color: rgba(201, 168, 122, 0.7);
+    color: #f0d9b0;
+  }
 
   button {
     background: rgba(125, 167, 200, 0.12);
@@ -355,8 +772,12 @@ const HTML = `<!DOCTYPE html>
   </aside>
 
   <section class="panel right">
+    <div class="view-toggle">
+      <button id="view-branches" class="active">Branch review</button>
+      <button id="view-tasks">Tasks queue</button>
+    </div>
     <div id="diff-view">
-      <div class="empty">Select a branch on the left to review its diff against main.</div>
+      <div class="empty">Select a branch on the left to review it.<br><br>Tip: click "Tasks queue" to see what each AI is currently working on.</div>
     </div>
   </section>
 </main>
@@ -455,6 +876,7 @@ async function renderDiff(branchName) {
     const data = await api('/api/branch?ref=' + encodeURIComponent(target));
     const owner = ownerOf(branchName);
     const checklist = data.checklist || [];
+    const summary = data.summary || {};
 
     let html = '';
 
@@ -463,20 +885,63 @@ async function renderDiff(branchName) {
     html += '<span><b>Owner:</b> ' + owner + '</span>';
     html += '<span><b>Files changed:</b> ' + (data.stats.filesChanged || 0) + '</span>';
     html += '<span><b>+' + (data.stats.added || 0) + ' / -' + (data.stats.removed || 0) + '</b></span>';
-    html += '<span><b>Commits ahead of main:</b> ' + (data.commits.length || 0) + '</span>';
+    html += '<span><b>Commits:</b> ' + (data.commits.length || 0) + '</span>';
     html += '<span><b>Pushed:</b> ' + (data.isPushed ? 'yes' : 'no') + '</span>';
     html += '</div>';
 
+    // Plain-English summary card — heuristic, always-on.
+    html += '<div class="pe-card">';
+    html += '<h3>Plain English</h3>';
+    html += '<div class="pe-headline">' + escape(summary.headline || '(no summary available)') + '</div>';
+    if (summary.pushedNote) {
+      html += '<div class="flag flag-medium">' + escape(summary.pushedNote) + '</div>';
+    }
+    if (summary.whatChanged && summary.whatChanged.length) {
+      html += '<div class="pe-section"><span class="lbl">What changed</span><ul>';
+      for (const w of summary.whatChanged) {
+        html += '<li><span class="pe-purpose">' + escape(w.purpose) + '</span>'
+              + ' <span class="pe-files">(' + escape(w.files) + ', ~' + w.lines + ' lines)</span></li>';
+      }
+      html += '</ul></div>';
+    }
+    if (summary.flags && summary.flags.length) {
+      html += '<div class="pe-section"><span class="lbl">Watch out for</span>';
+      for (const f of summary.flags) {
+        html += '<div class="flag flag-' + f.level + '">' + escape(f.msg) + '</div>';
+      }
+      html += '</div>';
+    }
+    if (summary.tests && summary.tests.length) {
+      html += '<div class="pe-section"><span class="lbl">What to playtest</span><ul>';
+      for (const t of summary.tests) html += '<li>' + escape(t) + '</li>';
+      html += '</ul></div>';
+    }
+    html += '</div>';
+
+    // AI summary — collapsed by default, expandable. Disabled if no key.
+    if (data.aiAvailable) {
+      html += '<div class="ai-card" id="ai-card">';
+      html += '<h3 style="font-size:11px; color:#aad0f0; letter-spacing:2px; text-transform:uppercase; margin: 0 0 8px 0;">AI summary (GPT-4o-mini)</h3>';
+      html += '<div id="ai-body" style="color:#8a96a8; font-size:12px;">Click the button below for an AI-written plain-English explanation. Costs ~$0.001 per branch.</div>';
+      html += '<div style="margin-top:10px;"><button id="btn-ai-summary" data-ref="' + escape(target) + '">Get AI summary</button></div>';
+      html += '</div>';
+    } else {
+      html += '<div class="ai-card unavailable">';
+      html += '<h3 style="font-size:11px; color:#aad0f0; letter-spacing:2px; text-transform:uppercase; margin: 0 0 8px 0;">AI summary (unavailable)</h3>';
+      html += '<div style="color:#8a96a8; font-size:11px;">Set <code>OPENAI_API_KEY</code> in your environment and restart the dashboard to enable a deeper plain-English summary written by GPT-4o-mini.</div>';
+      html += '</div>';
+    }
+
     if (data.commits.length) {
-      html += '<h2>Commits</h2>';
+      html += '<h2>Commits on this branch</h2>';
       html += '<pre class="diff" style="max-height: 200px;">' + escape(data.commits.map(c => c.short + '  ' + c.subject).join('\\n')) + '</pre>';
     }
 
-    html += '<div class="checklist"><h3>Review checklist (' + owner + ')</h3><ul>';
+    html += '<div class="checklist"><h3>Reviewer checklist (' + owner + ')</h3><ul>';
     for (const item of checklist) html += '<li>' + escape(item) + '</li>';
     html += '</ul></div>';
 
-    html += '<h2>Diff vs main</h2>';
+    html += '<h2>Raw diff vs main</h2>';
     html += '<pre class="diff">' + colorDiff(data.diff || '(no diff)') + '</pre>';
 
     html += '<div style="display:flex; gap:8px; margin-top: 16px;">';
@@ -485,9 +950,87 @@ async function renderDiff(branchName) {
     html += '</div>';
 
     view.innerHTML = html;
+    // Wire AI summary button if present.
+    const aiBtn = $('btn-ai-summary');
+    if (aiBtn) aiBtn.onclick = () => fetchAiSummary(target);
   } catch (e) {
     view.innerHTML = '<div class="empty" style="color:#ff8a78">' + escape(e.message) + '</div>';
     log('diff failed: ' + e.message, 'err');
+  }
+}
+
+async function fetchAiSummary(ref) {
+  const body = $('ai-body');
+  const btn = $('btn-ai-summary');
+  if (!body || !btn) return;
+  body.textContent = 'Calling OpenAI…';
+  btn.disabled = true;
+  try {
+    const res = await api('/api/branch/ai-summary?ref=' + encodeURIComponent(ref));
+    if (!res.ok) {
+      body.innerHTML = '<span style="color:#ff8a78">' + escape(res.reason || 'AI summary failed') + '</span>';
+      btn.disabled = false;
+      return;
+    }
+    body.innerHTML = '<pre>' + escape(res.summary) + '</pre>';
+    if (res.tokens) {
+      body.innerHTML += '<div style="color:#6a7280; font-size:10px; margin-top:8px;">'
+        + 'tokens: ' + (res.tokens.total_tokens || 0) + ' (prompt ' + (res.tokens.prompt_tokens || 0)
+        + ' + completion ' + (res.tokens.completion_tokens || 0) + ')</div>';
+    }
+    btn.style.display = 'none';
+    log('AI summary loaded', 'ok');
+  } catch (e) {
+    body.innerHTML = '<span style="color:#ff8a78">' + escape(e.message) + '</span>';
+    btn.disabled = false;
+  }
+}
+
+async function renderTasks() {
+  const view = $('diff-view');
+  view.innerHTML = '<div class="empty">Loading tasks…</div>';
+  try {
+    const t = await api('/api/tasks');
+    let html = '<h2>Active tasks</h2>';
+    html += '<div class="tasks-list">';
+    if (!t.active || !t.active.length) {
+      html += '<div class="empty">No active tasks. Add some to tasks.md.</div>';
+    } else {
+      for (const task of t.active) {
+        const ownerCls = ['claude', 'codex', 'gemini'].includes(task.owner) ? task.owner : 'unassigned';
+        const statusKey = (task.status || 'open').replace(/\\s+/g, '-');
+        html += '<div class="task-card ' + statusKey + '">';
+        html += '<div class="task-row">';
+        html += '<div class="task-title">' + escape(task.task || '') + '</div>';
+        html += '<div style="display:flex;gap:6px;flex-wrap:wrap;">';
+        html += '<span class="task-pill pill-' + ownerCls + '">' + escape(task.owner) + '</span>';
+        html += '<span class="task-pill pill-status-' + statusKey + '">' + escape(task.status) + '</span>';
+        html += '</div></div>';
+        if (task.notes && task.notes.trim()) {
+          html += '<div class="task-notes">' + escape(task.notes) + '</div>';
+        }
+        html += '</div>';
+      }
+    }
+    html += '</div>';
+
+    if (t.done && t.done.length) {
+      html += '<h2 style="margin-top:32px;">Recently shipped</h2>';
+      html += '<div class="tasks-list">';
+      for (const task of t.done) {
+        html += '<div class="task-card" style="opacity:0.7;">';
+        html += '<div class="task-row">';
+        html += '<div class="task-title">' + escape(task.task) + '</div>';
+        html += '<div style="display:flex;gap:6px;flex-wrap:wrap;">';
+        html += '<span class="task-pill pill-' + task.owner + '">' + escape(task.owner) + '</span>';
+        if (task.shipped) html += '<span class="task-pill pill-status-done">' + escape(task.shipped) + '</span>';
+        html += '</div></div></div>';
+      }
+      html += '</div>';
+    }
+    view.innerHTML = html;
+  } catch (e) {
+    view.innerHTML = '<div class="empty" style="color:#ff8a78">' + escape(e.message) + '</div>';
   }
 }
 
@@ -557,6 +1100,18 @@ $('btn-open').onclick = () => {
 };
 $('btn-fetch').onclick = fetchOrigin;
 $('btn-refresh').onclick = refreshState;
+
+$('view-branches').onclick = () => {
+  $('view-branches').classList.add('active');
+  $('view-tasks').classList.remove('active');
+  if (selected) renderDiff(selected);
+  else $('diff-view').innerHTML = '<div class="empty">Select a branch on the left to review it.</div>';
+};
+$('view-tasks').onclick = () => {
+  $('view-tasks').classList.add('active');
+  $('view-branches').classList.remove('active');
+  renderTasks();
+};
 
 async function init() {
   await refreshState();
@@ -642,7 +1197,38 @@ async function dashApi(req, res, parsedUrl) {
       const canCheckout = state.localBranches.includes(localName)
         || state.remoteBranches.includes(remoteName);
 
-      return send(200, { ref, owner, checklist, diff, stats, commits, isPushed, canCheckout });
+      // Heuristic plain-English summary.
+      const files = await getFileStats(ref);
+      const summary = generateHeuristicSummary({ files, stats, commits, owner, isPushed });
+      const aiAvailable = !!process.env.OPENAI_API_KEY;
+
+      return send(200, {
+        ref, owner, checklist, diff, stats, commits, isPushed, canCheckout,
+        files, summary, aiAvailable,
+      });
+    }
+    if (parsedUrl.pathname === '/api/branch/ai-summary' && req.method === 'GET') {
+      const ref = parsedUrl.query.ref;
+      if (!ref) return sendErr(400, 'missing ref');
+      const owner = ownerOf(ref);
+      let diff = '';
+      try { diff = await git(`diff main..${ref} --no-color`); } catch (_) { /* ignore */ }
+      const files = await getFileStats(ref);
+      let commits = [];
+      try {
+        const logRaw = await git(`log main..${ref} --oneline --no-color`);
+        commits = logRaw.trim().split('\n').filter(Boolean).map(line => {
+          const idx = line.indexOf(' ');
+          return { short: line.slice(0, idx), subject: line.slice(idx + 1) };
+        });
+      } catch (_) { commits = []; }
+      let statsObj = { filesChanged: files.length, added: 0, removed: 0 };
+      for (const f of files) { statsObj.added += f.added; statsObj.removed += f.removed; }
+      const result = await aiSummary({ branch: ref, owner, diff, stats: statsObj, commits, files });
+      return send(200, result);
+    }
+    if (parsedUrl.pathname === '/api/tasks' && req.method === 'GET') {
+      return send(200, parseTasksMd());
     }
     if (parsedUrl.pathname === '/api/checkout' && req.method === 'POST') {
       const body = await readJsonBody(req);
