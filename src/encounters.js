@@ -964,7 +964,11 @@ export const ENCOUNTER_DEFS = {
       const label = _makeLabelSprite('CONFESSION BOOTH', '#f0d488');
       label.position.set(disc.cx, 3.2, disc.cz);
       scene.add(label);
-      return { booth, label, disc, complete: false };
+      // Booth is a solid wooden box — block walk-through.
+      const _boothCollider = ctx.level?.addEncounterCollider
+        ? ctx.level.addEncounterCollider(disc.cx, disc.cz, 1.6, 1.4, 2.4)
+        : null;
+      return { booth, label, disc, complete: false, _boothCollider };
     },
     tick(dt, ctx) {
       // No idle barks — booth is silent. Could add a faint glow pulse
@@ -1361,7 +1365,12 @@ export const ENCOUNTER_DEFS = {
       const label = _makeLabelSprite('THE SHRINE', '#f0d480');
       label.position.set(disc.cx, 2.4, disc.cz);
       scene.add(label);
-      return { altar, brazier, flame, label, disc, wobbleT: 0 };
+      // Stone altar + brazier are solid — register a collider so the
+      // player walks around the shrine instead of through the fire.
+      const _shrineCollider = ctx.level?.addEncounterCollider
+        ? ctx.level.addEncounterCollider(disc.cx, disc.cz, 1.4, 1.4, 1.6)
+        : null;
+      return { altar, brazier, flame, label, disc, wobbleT: 0, _shrineCollider };
     },
     tick(dt, ctx) {
       const s = ctx.state;

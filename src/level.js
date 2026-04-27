@@ -472,20 +472,20 @@ export class Level {
       if (room.hasElevator) this._buildElevator(room);
     }
 
+    // Seed keep-out discs BEFORE every spawn pass (cover, container,
+    // theme, sprinkle) so the boss-room exit ring — revealed after
+    // boss death — never lands inside a low-cover block, a chest, a
+    // pillar, or a couch. Exit lands at the boss centroid with r=2.2;
+    // pad to 3.2m so the ring + player interact halo both stay clear.
+    {
+      const boss = rooms[this.bossRoomId];
+      if (boss) this._keepouts.push({ x: boss.cx, z: boss.cz, r: 3.2 });
+    }
+
     // Scatter some cover inside non-start rooms for tactical play.
     for (const room of rooms) {
       if (room.type === 'start') continue;
       this._scatterCover(room);
-    }
-
-    // Seed keep-out discs before container + furniture passes so the
-    // boss-room exit ring (revealed after boss death) never spawns
-    // inside a couch / pillar / chest / desk. Exit lands at the boss
-    // centroid with r=2.2 — pad to 3.2m so the ring + player interact
-    // halo both stay clear.
-    {
-      const boss = rooms[this.bossRoomId];
-      if (boss) this._keepouts.push({ x: boss.cx, z: boss.cz, r: 3.2 });
     }
 
     // Lootable containers — boxes / chests scattered through combat
@@ -1200,6 +1200,17 @@ export class Level {
         const x = b.minX + inset + Math.random() * usableW;
         const z = b.minZ + inset + Math.random() * usableD;
         if (this._collidesAt(x, z, 2.0)) continue;
+        // Honor keep-outs (boss exit ring, encounter spawn discs) so
+        // a low-cover block doesn't sit on top of the future exit
+        // teleporter or block the player's stand-on-this-disc cue.
+        let blocked = false;
+        if (this._keepouts) {
+          for (const k of this._keepouts) {
+            const kx = x - k.x, kz = z - k.z;
+            if (kx * kx + kz * kz < k.r * k.r) { blocked = true; break; }
+          }
+        }
+        if (blocked) continue;
         this._addObstacle(x, 0.4, z, w, 0.8, d, LOW_COVER_COLOR);
         break;
       }
@@ -1537,17 +1548,79 @@ export class Level {
       return true;
     };
 
+    // Pair a chair with the prop just placed (desk, table, coffeeTable).
+    // Tries each of the 4 cardinal sides of the table; first slot that
+    // passes collision + bounds gets the chair. Chair faces the table
+    // (not the room centre — the table IS the focal point). Silent
+    // failure if every side is blocked — pairing is a polish bonus.
+    const _addChairBy = (anchor) => {
+      if (!anchor || !anchor.collision) return false;
+      const ax = anchor.group.position.x;
+      const az = anchor.group.position.z;
+      const yaw = anchor.group.rotation.y || 0;
+      // Anchor's world AABB extents — already swapped for axis yaw.
+      let aw = anchor.collision.w, ad = anchor.collision.d;
+      const yawAbs = Math.abs(yaw) % Math.PI;
+      if (Math.abs(yawAbs - Math.PI / 2) < 0.05) [aw, ad] = [ad, aw];
+      const chair = buildProp('chair');
+      if (!chair) return false;
+      const cw = chair.collision.w, cd = chair.collision.d;
+      // Each entry: { dx, dz, chairYaw } — chair sits one footprint
+      // away from the anchor in that direction, facing back at it.
+      const sides = [
+        { dx:  (aw / 2 + cd / 2 + 0.05), dz: 0,                              chairYaw: -Math.PI / 2 },
+        { dx: -(aw / 2 + cd / 2 + 0.05), dz: 0,                              chairYaw:  Math.PI / 2 },
+        { dx: 0,                              dz:  (ad / 2 + cd / 2 + 0.05), chairYaw:  Math.PI },
+        { dx: 0,                              dz: -(ad / 2 + cd / 2 + 0.05), chairYaw: 0 },
+      ].sort(() => Math.random() - 0.5);
+      for (const s of sides) {
+        const x = ax + s.dx, z = az + s.dz;
+        if (tooCloseToElev(x, z)) continue;
+        if (inKeepOut(x, z)) continue;
+        if (this._collidesAt(x, z, Math.max(cw, cd) * 0.7 + 0.4)) continue;
+        if (!_propFitsInBounds(chair, x, z, s.chairYaw)) continue;
+        if (!_propFootprintFree(x, z, chair, s.chairYaw)) continue;
+        chair.group.position.set(x, 0, z);
+        chair.group.rotation.y = s.chairYaw;
+        return this._registerProp(chair);
+      }
+      // None of the four sides worked — drop the chair group so the
+      // shared geometry isn't leaked into the scene.
+      chair.group.traverse?.((obj) => {
+        if (obj.geometry?.userData?.sharedRigGeom) return;
+        if (obj.geometry?.dispose) obj.geometry.dispose();
+      });
+      return false;
+    };
+
+    // Build a prop, place it via `placer`, then optionally pair a
+    // chair next to it. Returns the placed prop (so the caller can
+    // mark it lootable, etc.) or null on failure.
+    const placeWithChair = (kind, placer, chairChance = 0.6) => {
+      const prop = buildProp(kind);
+      if (!prop) return null;
+      const ok = placer(prop);
+      if (!ok) return null;
+      if (Math.random() < chairChance) _addChairBy(prop);
+      return prop;
+    };
+
     // Per-theme placement scripts. Prop counts intentionally lean low
     // so rooms read as "a space with character" rather than a
     // furniture showroom that chokes every sight-line.
     if (theme === 'library') {
       const shelves = 1 + Math.floor(Math.random() * 2);
       for (let i = 0; i < shelves; i++) placeLootable('bookshelf', placeAlongWall);
-      if (Math.random() < 0.7) placeLootable('desk', placeInterior);
-      if (Math.random() < 0.5) placeInterior(buildProp('chair'));
+      if (Math.random() < 0.7) {
+        const desk = placeWithChair('desk', placeInterior, 0.85);
+        const cfg = LOOT_PROP_CONFIG.desk;
+        if (desk && Math.random() < cfg.p) {
+          this._markPropLootable(desk, cfg.type(), cfg.size);
+        }
+      }
     } else if (theme === 'lobby') {
       placeAlongWall(buildProp('couch'));
-      if (Math.random() < 0.6) placeInterior(buildProp('coffeeTable'));
+      if (Math.random() < 0.6) placeWithChair('coffeeTable', placeInterior, 0.5);
       if (Math.random() < 0.4) placeLootable('desk', placeAlongWall);
     } else if (theme === 'bedroom') {
       placeAlongWall(buildProp('bed'));
@@ -1562,22 +1635,27 @@ export class Level {
       if (Math.random() < 0.6) placeLootable('barrel', placeInterior);
       if (Math.random() < 0.5) placeLootable('pallet', placeInterior);
     } else if (theme === 'office') {
-      // Cubicle / admin floor — desks against the walls, a chair or
-      // two, a filing cabinet for vertical clutter. Keeps the space
-      // walkable but gives the eye structured furniture rather than
-      // bare floor.
-      placeLootable('desk', placeAlongWall);
-      if (Math.random() < 0.6) placeLootable('desk', placeAlongWall);
-      if (Math.random() < 0.7) placeInterior(buildProp('chair'));
+      // Cubicle / admin floor — desks against the walls, EACH paired
+      // with a chair so it reads as "someone worked here." Filing
+      // cabinet for vertical clutter; lamp centerpiece.
+      const cfg = LOOT_PROP_CONFIG.desk;
+      const desk1 = placeWithChair('desk', placeAlongWall, 0.85);
+      if (desk1 && Math.random() < cfg.p) {
+        this._markPropLootable(desk1, cfg.type(), cfg.size);
+      }
+      if (Math.random() < 0.6) {
+        const desk2 = placeWithChair('desk', placeAlongWall, 0.85);
+        if (desk2 && Math.random() < cfg.p) {
+          this._markPropLootable(desk2, cfg.type(), cfg.size);
+        }
+      }
       if (Math.random() < 0.5) placeLootable('cabinet', placeAlongWall);
       if (Math.random() < 0.4) placeInterior(buildProp('lamp'));
     } else if (theme === 'kitchen') {
-      // Break room / mess — a central table with chairs, a cabinet
-      // along the wall. Reads as "people eat here" without needing a
-      // dedicated kitchen prop set.
-      placeInterior(buildProp('table'));
-      if (Math.random() < 0.7) placeInterior(buildProp('chair'));
-      if (Math.random() < 0.5) placeInterior(buildProp('chair'));
+      // Break room / mess — a central table with TWO paired chairs,
+      // a cabinet along the wall. Reads as "people eat here."
+      const table = placeWithChair('table', placeInterior, 1.0);
+      if (table && Math.random() < 0.65) _addChairBy(table);
       if (Math.random() < 0.6) placeLootable('cabinet', placeAlongWall);
     }
 
