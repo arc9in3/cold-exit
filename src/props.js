@@ -436,6 +436,242 @@ export function buildRug(opts = {}) {
   return { group, collision: null };
 }
 
+// --- Phase-1 additions: themed environment props ---------------------
+// Per the Assets/levels1.png reference. Built from the same primitive
+// composition pattern as the props above. Important: the new
+// emissive props (neon stick, window) use MeshBasicMaterial only —
+// NO real PointLight. The light reduction pass (Phase 4) is
+// retroactively converting old per-prop lights to the same pattern;
+// new code shouldn't introduce more dynamic lights.
+
+// Concrete pillar — fat round column with a small base + capital.
+// Common in garage / penthouse / lobby. Strong cover, blocks bullets
+// and movement; placement rules in Phase 3 keep them from clustering
+// across narrow corridors.
+export function buildPillar(opts = {}) {
+  const r = opts.r ?? 0.32;
+  const h = opts.h ?? 3.0;             // floor → ceiling
+  const color = opts.color ?? COL.concrete;
+  const group = new THREE.Group();
+  // Base flange.
+  const base = cyl(r * 1.2, 0.08, COL.metalDark, 16);
+  base.position.y = 0.04;
+  group.add(base);
+  // Shaft.
+  const shaft = cyl(r, h - 0.16, color, 16);
+  shaft.position.y = h / 2;
+  group.add(shaft);
+  // Capital.
+  const cap = cyl(r * 1.15, 0.08, COL.metalDark, 16);
+  cap.position.y = h - 0.04;
+  group.add(cap);
+  return { group, collision: { w: r * 2, d: r * 2 } };
+}
+
+// Long bench — flat seat without a back. Standard for nightclub VIP,
+// hotel lobby, rooftop. Half-height cover.
+export function buildBench(opts = {}) {
+  const w = opts.w ?? 1.8;
+  const d = opts.d ?? 0.45;
+  const h = opts.h ?? 0.45;
+  const seatColor = opts.color ?? COL.fabric;
+  const legColor = opts.legColor ?? COL.metalDark;
+  const group = new THREE.Group();
+  // Seat slab.
+  const seat = box(w, 0.10, d, seatColor);
+  seat.position.y = h - 0.05;
+  group.add(seat);
+  // Two leg blocks running the full depth.
+  for (const sx of [-w / 2 + 0.08, w / 2 - 0.08]) {
+    const leg = box(0.10, h - 0.10, d - 0.04, legColor);
+    leg.position.set(sx, (h - 0.10) / 2, 0);
+    group.add(leg);
+  }
+  return { group, collision: { w, d } };
+}
+
+// Tall narrow locker — single-door employee locker, vent slats on the
+// face. Cleaner silhouette than the filing-cabinet variant for
+// nightclub back-of-house, garage, and locker rooms.
+export function buildLocker(opts = {}) {
+  const w = opts.w ?? 0.55;
+  const d = opts.d ?? 0.45;
+  const h = opts.h ?? 1.85;
+  const color = opts.color ?? COL.metal;
+  const group = new THREE.Group();
+  const body = box(w, h, d, color);
+  body.position.y = h / 2;
+  group.add(body);
+  // Door seam down the middle of the front face.
+  const seam = box(0.02, h - 0.10, 0.02, COL.metalDark);
+  seam.position.set(0, h / 2, d / 2 + 0.005);
+  group.add(seam);
+  // Vent slats — three short horizontal bars at the top of each door.
+  for (let i = 0; i < 3; i++) {
+    const vent = box(w * 0.35, 0.025, 0.02, COL.metalDark);
+    vent.position.set(0, h - 0.18 - i * 0.05, d / 2 + 0.012);
+    group.add(vent);
+  }
+  // Handle.
+  const handle = box(0.04, 0.10, 0.03, COL.metalDark);
+  handle.position.set(w * 0.30, h * 0.5, d / 2 + 0.015);
+  group.add(handle);
+  return { group, collision: { w, d } };
+}
+
+// Vertical neon stick — wall-mounted bar of light for nightclub
+// signage / accent strips. Pure emissive, NO real PointLight (light
+// reduction policy). The colour is read by Phase 2's theme system
+// so a magenta club gets pink sticks, a rooftop gets blue.
+export function buildNeonStick(opts = {}) {
+  const h = opts.h ?? 1.6;
+  const w = opts.w ?? 0.06;
+  const d = opts.d ?? 0.04;
+  const color = opts.color ?? 0xff40a0;
+  const group = new THREE.Group();
+  // Outer "tube" — slightly larger box with low opacity so the inner
+  // core reads as a glow halo around the bar.
+  const halo = new THREE.Mesh(
+    new THREE.BoxGeometry(w + 0.04, h + 0.04, d + 0.04),
+    new THREE.MeshBasicMaterial({
+      color, transparent: true, opacity: 0.25, depthWrite: false,
+    }),
+  );
+  halo.position.y = h / 2 + 0.05;
+  group.add(halo);
+  // Inner emissive core.
+  const core = new THREE.Mesh(
+    new THREE.BoxGeometry(w, h, d),
+    new THREE.MeshBasicMaterial({ color }),
+  );
+  core.position.y = h / 2 + 0.05;
+  group.add(core);
+  // Tiny mount bracket at the bottom.
+  const mount = box(w * 1.5, 0.04, d * 1.5, COL.metalDark);
+  mount.position.y = 0.02;
+  group.add(mount);
+  return { group, collision: null };
+}
+
+// Wall window — frame + translucent glass + faint emissive glow on
+// the glass so the window reads as "lit from outside" without
+// adding a real light source. Caller provides position; rotates so
+// the glass plane faces +Z.
+export function buildWindow(opts = {}) {
+  const w = opts.w ?? 1.2;
+  const h = opts.h ?? 1.4;
+  const frameColor = opts.frameColor ?? COL.metalDark;
+  const glassColor = opts.glassColor ?? 0x6890c0;
+  const group = new THREE.Group();
+  // Frame — thin border around the glass.
+  const t = 0.05;
+  const top = box(w + t * 2, t, 0.06, frameColor);
+  top.position.set(0, h, 0);
+  group.add(top);
+  const bot = box(w + t * 2, t, 0.06, frameColor);
+  bot.position.set(0, 0, 0);
+  group.add(bot);
+  for (const sx of [-(w / 2 + t / 2), (w / 2 + t / 2)]) {
+    const side = box(t, h, 0.06, frameColor);
+    side.position.set(sx, h / 2, 0);
+    group.add(side);
+  }
+  // Glass — slightly smaller than the frame, low-opacity emissive.
+  const glass = new THREE.Mesh(
+    new THREE.BoxGeometry(w, h, 0.02),
+    new THREE.MeshBasicMaterial({
+      color: glassColor, transparent: true, opacity: 0.35,
+      depthWrite: false,
+    }),
+  );
+  glass.position.set(0, h / 2, 0);
+  group.add(glass);
+  // Cross-mullion for the "real window" silhouette.
+  const mullion = box(w, t * 0.6, 0.04, frameColor);
+  mullion.position.set(0, h / 2, 0.01);
+  group.add(mullion);
+  return { group, collision: null };
+}
+
+// Decorative planter — pot + simple foliage. Soft cover (low and
+// passable in some places), used to break up open lobby/penthouse
+// floor without blocking nav.
+export function buildPlanter(opts = {}) {
+  const r = opts.r ?? 0.20;
+  const h = opts.h ?? 0.85;
+  const potColor = opts.potColor ?? 0x3a2418;
+  const leafColor = opts.leafColor ?? 0x2c5a2c;
+  const group = new THREE.Group();
+  // Pot — slightly tapered cylinder.
+  const pot = new THREE.Mesh(
+    new THREE.CylinderGeometry(r, r * 0.85, h * 0.4, 14),
+    mat(potColor),
+  );
+  pot.position.y = h * 0.2;
+  pot.castShadow = true;
+  group.add(pot);
+  // Two stacked spheres for foliage — bigger lower, smaller upper.
+  const lower = new THREE.Mesh(new THREE.SphereGeometry(r * 1.4, 12, 8), mat(leafColor));
+  lower.position.y = h * 0.55;
+  lower.castShadow = true;
+  group.add(lower);
+  const upper = new THREE.Mesh(new THREE.SphereGeometry(r * 1.05, 12, 8), mat(leafColor));
+  upper.position.y = h * 0.85;
+  upper.castShadow = true;
+  group.add(upper);
+  return { group, collision: { w: r * 2, d: r * 2 } };
+}
+
+// Knee-high railing — two posts + a horizontal bar. Blocks walking
+// but not sightlines (collision lives in the bar's footprint).
+// Ideal for rooftop balconies, mezzanines, parking-garage edges.
+export function buildRailing(opts = {}) {
+  const w = opts.w ?? 2.0;
+  const h = opts.h ?? 1.0;
+  const color = opts.color ?? COL.metal;
+  const group = new THREE.Group();
+  // Top rail.
+  const rail = box(w, 0.06, 0.06, color);
+  rail.position.set(0, h - 0.03, 0);
+  group.add(rail);
+  // Mid rail.
+  const mid = box(w, 0.04, 0.04, color);
+  mid.position.set(0, h * 0.55, 0);
+  group.add(mid);
+  // Posts — every 0.7m.
+  const postCount = Math.max(2, Math.ceil(w / 0.7) + 1);
+  for (let i = 0; i < postCount; i++) {
+    const t = (i / (postCount - 1) - 0.5);
+    const post = box(0.06, h, 0.06, color);
+    post.position.set(t * w, h / 2, 0);
+    group.add(post);
+  }
+  // Collision is shallow (the railing is thin) but full width.
+  return { group, collision: { w, d: 0.12 } };
+}
+
+// Decorative door frame — two jambs + a lintel. NOT a real door (no
+// blocking, no opening logic). Visual cue for room-within-room
+// dividers, hallway transitions, encounter staging.
+export function buildDoorFrame(opts = {}) {
+  const w = opts.w ?? 1.6;
+  const h = opts.h ?? 2.4;
+  const color = opts.color ?? COL.woodDark;
+  const group = new THREE.Group();
+  const t = 0.10;
+  // Two side jambs.
+  for (const sx of [-w / 2, w / 2]) {
+    const jamb = box(t, h, t, color);
+    jamb.position.set(sx, h / 2, 0);
+    group.add(jamb);
+  }
+  // Lintel.
+  const lintel = box(w + t, t, t, color);
+  lintel.position.set(0, h - t / 2, 0);
+  group.add(lintel);
+  return { group, collision: null };
+}
+
 // --- Catalog ---------------------------------------------------------
 // Convenience: look up a builder by key. Themed-room code will pick
 // from a curated list per theme instead of hardcoding factory names.
@@ -456,7 +692,97 @@ export const PROP_BUILDERS = {
   nightstand: buildNightstand,
   tv: buildTV,
   rug: buildRug,
+  // Phase-1 additions.
+  pillar: buildPillar,
+  bench: buildBench,
+  locker: buildLocker,
+  neonStick: buildNeonStick,
+  window: buildWindow,
+  planter: buildPlanter,
+  railing: buildRailing,
+  doorFrame: buildDoorFrame,
 };
+
+// --- Theme palettes --------------------------------------------------
+// Per the Assets/levels1.png reference. Each theme defines the floor
+// + wall + accent colours and a propWeights object the room-furnish
+// pass uses to bias which props show up. Phase 2 wires
+// `getLevelTheme(level.index)` to pick a theme per floor.
+//
+// `propWeights` is sparse — only entries present apply. A theme that
+// omits e.g. `bed` simply won't spawn beds. Higher numbers = more
+// frequent.
+export const LEVEL_THEMES = {
+  continental: {
+    name: 'The Continental',
+    floor: 0x4a3a28,
+    wall: 0x6a5840,
+    accent: 0xc9a464,
+    ambientHex: 0xe8d8b0,
+    propWeights: {
+      table: 1.0, chair: 1.2, couch: 0.8, coffeeTable: 0.8,
+      bed: 0.5, nightstand: 0.5, bookshelf: 0.7,
+      lamp: 1.0, planter: 0.7, doorFrame: 0.3,
+      rug: 0.6, vase: 0.5,
+    },
+  },
+  nightclub: {
+    name: 'Nightclub',
+    floor: 0x180814,
+    wall: 0x2a1422,
+    accent: 0xd040a0,
+    ambientHex: 0xb840d8,
+    propWeights: {
+      bench: 1.2, table: 0.4, chair: 0.6, couch: 0.7,
+      neonStick: 1.4, lamp: 0.2,
+      doorFrame: 0.4, locker: 0.4, barrel: 0.4,
+    },
+  },
+  garage: {
+    name: 'Parking Garage',
+    floor: 0x2a2a2e,
+    wall: 0x4a4a4e,
+    accent: 0xc9a020,
+    ambientHex: 0xa8a8a4,
+    propWeights: {
+      pillar: 1.6, locker: 0.9, crate: 0.8, barrel: 0.7,
+      pallet: 0.6, lamp: 0.5, neonStick: 0.4, doorFrame: 0.2,
+    },
+  },
+  penthouse: {
+    name: 'Penthouse',
+    floor: 0x3a2818,
+    wall: 0xb8a874,
+    accent: 0xc9a464,
+    ambientHex: 0xeae0c0,
+    propWeights: {
+      couch: 1.0, table: 1.0, coffeeTable: 0.8, chair: 1.0,
+      bed: 0.4, nightstand: 0.4, lamp: 1.0, tv: 0.5,
+      planter: 0.8, rug: 0.6, window: 0.7, doorFrame: 0.3,
+    },
+  },
+  rooftop: {
+    name: 'Rooftop',
+    floor: 0x1a1a20,
+    wall: 0x2a2a30,
+    accent: 0x4a8aff,
+    ambientHex: 0x8090a8,
+    propWeights: {
+      railing: 1.5, crate: 0.8, barrel: 0.5, pallet: 0.5,
+      neonStick: 0.6, pillar: 0.7, doorFrame: 0.3, lamp: 0.3,
+    },
+  },
+};
+
+// Pick a theme based on level index. 1-3 hotel, 4-6 nightclub, 7-9
+// garage, 10-12 penthouse, 13+ rooftop. Wraps around so a 30-floor
+// run keeps cycling through the five themes.
+export function getLevelTheme(levelIndex) {
+  const slots = ['continental', 'nightclub', 'garage', 'penthouse', 'rooftop'];
+  const idx = Math.max(0, ((levelIndex - 1) | 0));
+  const slot = slots[Math.floor(idx / 3) % slots.length];
+  return LEVEL_THEMES[slot];
+}
 
 export function buildProp(kind, opts) {
   const f = PROP_BUILDERS[kind];
