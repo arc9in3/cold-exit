@@ -129,10 +129,10 @@ export const SKILL_TREE = [
       (s) => { s.ricochetCount = 2; s.ricochetChance = Math.max(s.ricochetChance, 0.60); }),
   ], { requires: [{ id: 'marksman', level: 2 }] }),
   g('reloadOnKill', 'Fast Magazine', '⚙', [
-    lvl('Kills refill 35% of the current mag', 2,
-      (s) => { s.reloadOnKill = Math.max(s.reloadOnKill, 0.35); }),
-    lvl('Kills refill 70% of the current mag', 3,
-      (s) => { s.reloadOnKill = Math.max(s.reloadOnKill, 0.70); }),
+    lvl('Kills refill 7% of the current mag', 2,
+      (s) => { s.reloadOnKill = Math.max(s.reloadOnKill, 0.07); }),
+    lvl('Kills refill 15% of the current mag', 3,
+      (s) => { s.reloadOnKill = Math.max(s.reloadOnKill, 0.15); }),
   ]),
   g('headshotHeal', 'Vampiric Aim', '♥', [
     lvl('Headshots heal 6 HP',  2, (s) => { s.headshotHeal = Math.max(s.headshotHeal, 6); }),

@@ -4813,13 +4813,9 @@ function fireOneShot(playerInfo, weapon, aimPoint, isADS, aimOwner) {
         if (hit.zone === 'head' && weaponHasArtifactPerk(weapon, 'popperHead')) {
           popHead(hit.owner, dir);
         }
-        // Reload-on-kill — partially refill the current mag.
-        if ((derivedStats.reloadOnKill || 0) > 0
-            && typeof weapon.ammo === 'number'
-            && weapon.ammo < eff.magSize) {
-          const add = Math.max(1, Math.round(eff.magSize * derivedStats.reloadOnKill));
-          weapon.ammo = Math.min(eff.magSize, weapon.ammo + add);
-        }
+        // Reload-on-kill is now handled centrally inside onEnemyKilled
+        // so every kind of kill (bullet, projectile, melee, burn DoT,
+        // AoE) refunds ammo, not just hitscan bullet hits.
         // Reaper — heal a chunk of missing HP on kill.
         if ((derivedStats.fatalToFullHealMissing || 0) > 0 && playerInfo) {
           const missing = playerInfo.maxHealth - playerInfo.health;
@@ -5355,6 +5351,22 @@ function onEnemyKilled(enemy, opts = {}) {
   combat.spawnBloodPool(enemy.group.position, 0.75 + Math.random() * 0.25);
   if (artifacts.has('red_string')) {
     buffs.grant('red_string', { damageMult: 1.5 }, 4);
+  }
+  // Fast Magazine — refill a fraction of the active weapon's mag on
+  // ANY kill (bullet, projectile, melee, burn DoT, AoE). Previously
+  // only fired from the bullet-hit callsite which left burn /
+  // explosion / melee kills unrewarded; the player observed the skill
+  // as "not working" because most build-killing hits skipped it.
+  if ((derivedStats.reloadOnKill || 0) > 0) {
+    const w = currentWeapon();
+    if (w && typeof w.ammo === 'number' && !w.infiniteAmmo) {
+      const eff = effectiveWeapon(w);
+      const cap = eff.magSize || w.magSize || 0;
+      if (cap > 0 && w.ammo < cap) {
+        const add = Math.max(1, Math.round(cap * derivedStats.reloadOnKill));
+        w.ammo = Math.min(cap, w.ammo + add);
+      }
+    }
   }
   if (!opts.silent) {
     alertWitnesses(enemy);
