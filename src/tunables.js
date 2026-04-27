@@ -567,16 +567,15 @@ export const tunables = {
     {
       name: 'Cheytac Intervention', type: 'ranged', class: 'sniper', rarity: 'epic',
       attachmentSlots: ['muzzle', 'topRail', 'stock', 'trigger', 'underRail'],
-      // .408 CheyTac is a bolt-action anti-materiel platform. ~0.5/s
-      // = one round every 2s including bolt cycle, which matches the
-      // weight of the round (210 dmg). Was 0.8 — too quick to feel
-      // like the heaviest sniper in the lineup.
-      fireMode: 'semi', fireRate: 0.5, damage: 210, range: 100,
+      // .408 CheyTac is a bolt-action anti-materiel platform. ~0.4/s
+      // = one round every ~2.5s including bolt cycle. Reload bumped
+      // to 4.5s to match the heft of the magazine swap.
+      fireMode: 'semi', fireRate: 0.4, damage: 210, range: 100,
       hipSpread: 0.18, adsSpread: 0.003,
       adsZoom: 0.36, adsPeekDistance: 10.0,
       tracerColor: 0xffe030, muzzleLength: 1.6, muzzleGirth: 0.2,
       pelletCount: 1, burstCount: 1, burstInterval: 0,
-      magSize: 7, reloadTime: 4.0,
+      magSize: 7, reloadTime: 4.5,
     },
 
     // --- Extended rifle lineup ---
@@ -1324,9 +1323,9 @@ export const tunables = {
       attachmentSlots: ['muzzle', 'topRail', 'stock', 'trigger', 'underRail'],
       fireMode: 'semi',
       // .338 Lapua bolt action. Slow on purpose — a magnum-caliber
-      // bolt-action commits to each shot. Was 1.0; 0.65 sits between
-      // the .338 Lapua entry below and the Cheytac above.
-      fireRate: 0.65,
+      // bolt-action commits to each shot. Was 0.65; 0.55 keeps the
+      // tier ordering (Cheytac slowest, AWP next, .338 Lapua then SVD).
+      fireRate: 0.55,
       damage: 145,
       range: 95,
       hipSpread: 0.15,
@@ -1340,7 +1339,7 @@ export const tunables = {
       burstCount: 1,
       burstInterval: 0,
       magSize: 5,
-      reloadTime: 3.4,
+      reloadTime: 3.8,
     },
     {
       name: '.338 Lapua',
@@ -1349,9 +1348,10 @@ export const tunables = {
       rarity: 'rare',
       attachmentSlots: ['muzzle', 'barrel', 'sideRail', 'topRail', 'stock', 'grip', 'trigger', 'magazine'],
       fireMode: 'semi',
-      // Same caliber as AWP but a generic bolt-action chassis. 0.75/s
-      // ≈ one round every 1.3s. Was 1.4 — too snappy for a magnum bolt.
-      fireRate: 0.75,
+      // Same caliber as AWP but a generic bolt-action chassis. 0.65/s
+      // ≈ one round every ~1.5s. Was 0.75 — knocked down another
+      // notch to keep the magnum-bolt commit feel.
+      fireRate: 0.65,
       damage: 130,
       range: 92,
       hipSpread: 0.14,
@@ -1365,7 +1365,7 @@ export const tunables = {
       burstCount: 1,
       burstInterval: 0,
       magSize: 5,
-      reloadTime: 3.0,
+      reloadTime: 3.4,
     },
     {
       name: 'Hunting Rifle',
