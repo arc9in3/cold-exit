@@ -100,6 +100,32 @@ export class InventoryUI {
         }
         return;
       }
+      // K while hovering → toggle markedKeep. Mirrors the details
+      // panel's Mark-to-Keep button so the gesture works without
+      // having to open the inspect overlay first. Mutually exclusive
+      // with markedJunk — flipping one clears the other.
+      if (e.code === 'KeyK' && this._hoveredItem) {
+        const it = this._hoveredItem;
+        it.markedKeep = !it.markedKeep;
+        if (it.markedKeep) it.markedJunk = false;
+        e.preventDefault();
+        e.stopPropagation();
+        this.inventory._bump?.();
+        this.render();
+        return;
+      }
+      // J while hovering → toggle markedJunk. Same gesture as the
+      // details-panel button; mutually exclusive with markedKeep.
+      if (e.code === 'KeyJ' && this._hoveredItem) {
+        const it = this._hoveredItem;
+        it.markedJunk = !it.markedJunk;
+        if (it.markedJunk) it.markedKeep = false;
+        e.preventDefault();
+        e.stopPropagation();
+        this.inventory._bump?.();
+        this.render();
+        return;
+      }
       let slotIdx = -1;
       switch (e.code) {
         case 'Digit1': slotIdx = 0; break;
