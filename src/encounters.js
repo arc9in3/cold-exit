@@ -4164,6 +4164,160 @@ export const ENCOUNTER_DEFS = {
     // a participant. Anything they drop bounces to the floor.
     onItemDropped(_item, _ctx) { return { consume: false }; },
   },
+
+  // -----------------------------------------------------------------
+  // Brian — a man in a grey fedora. Two conversation options:
+  //
+  //   1. "you need to take that hat off"
+  //         → "It's not a distraction" → short delay → sobbing
+  //   2. "how much was that hat?"
+  //         → "ITS ILLEGAL FOR YOU TO ASK ME THAT"
+  //
+  // One-shot per save. The encounter resolves the moment a choice is
+  // picked; the sobbing path keeps the NPC visible (with shoulder
+  // bobs + repeating sob bubbles) until the player leaves the room.
+  // -----------------------------------------------------------------
+  brian: {
+    id: 'brian',
+    name: 'Brian',
+    floorColor: 0x6a6a72,             // muted grey dais
+    oncePerSave: true,
+    condition: (state) => state.levelIndex >= 1,
+    spawn(scene, room, ctx) {
+      const disc = _spawnFloorDisc(scene, room, this.floorColor);
+      // Grey-pants, white-shirt humanoid. Skin tone neutral; hair
+      // hidden under the fedora so we skip the rig's hair cap.
+      const npc = _buildSimpleNpc({
+        bodyColor: 0xf2f2f2,         // white shirt
+        headColor: 0xd8b896,         // skin
+        accentColor: 0x404048,       // muted dark accent
+        pantsColor: 0x6a6a72,        // grey pants
+        bootColor: 0x18181a,
+        height: 1.86,
+        skipHair: true,
+      });
+      // Fedora — a short cylindrical crown + a wider brim disc. Sits
+      // on top of the head; tinted to match pants for the deliberate
+      // grey-on-grey "Brian" look.
+      const fedoraMat = new THREE.MeshStandardMaterial({
+        color: 0x6a6a72, roughness: 0.8,
+      });
+      const head_top_y = npc.userData?.headTopY ?? 1.86 * 0.94;
+      const crown = new THREE.Mesh(
+        new THREE.CylinderGeometry(0.13, 0.13, 0.13, 14),
+        fedoraMat,
+      );
+      crown.position.y = head_top_y + 0.06;
+      crown.castShadow = true;
+      npc.add(crown);
+      const brim = new THREE.Mesh(
+        new THREE.CylinderGeometry(0.21, 0.21, 0.025, 18),
+        fedoraMat,
+      );
+      brim.position.y = head_top_y;
+      brim.castShadow = true;
+      npc.add(brim);
+      // Tiny darker hatband around the base of the crown.
+      const band = new THREE.Mesh(
+        new THREE.CylinderGeometry(0.131, 0.131, 0.025, 14),
+        new THREE.MeshStandardMaterial({ color: 0x2a2a30, roughness: 0.6 }),
+      );
+      band.position.y = head_top_y + 0.015;
+      npc.add(band);
+
+      npc.position.set(disc.cx, 0, disc.cz);
+      // Slight body-angle so the fedora reads in iso silhouette.
+      npc.rotation.y = -Math.PI * 0.18;
+      scene.add(npc);
+
+      const label = _makeLabelSprite('BRIAN', '#d8d8e0');
+      label.position.set(disc.cx, 2.6, disc.cz);
+      scene.add(label);
+      const hint = _makeLabelSprite('press E to talk to Brian', '#a8a8b0');
+      hint.scale.set(3.6, 0.55, 1);
+      hint.position.set(disc.cx, 0.55, disc.cz + 1.4);
+      scene.add(hint);
+      return {
+        npc, label, hint, disc,
+        complete: false,
+        // Sobbing state machine. 'idle' → 'preSob' (short delay
+        // after answering option 1) → 'sobbing' (repeating bubble
+        // + shoulder-bob).
+        phase: 'idle',
+        phaseT: 0,
+        sobBeatT: 0,
+        sobBobT: 0,
+      };
+    },
+    tick(dt, ctx) {
+      const s = ctx.state;
+      if (!s.npc) return;
+      // Idle bob — gentle breath until something happens.
+      if (s.phase === 'idle' || s.phase === 'preSob') {
+        s.phaseT += dt;
+        s.npc.position.y = Math.sin(s.phaseT * 1.1) * 0.02;
+      }
+      if (s.phase === 'preSob') {
+        // Short delay (1.6s) before the first sob, so "It's not a
+        // distraction" lands as flat denial before the breakdown.
+        if (s.phaseT >= 1.6) {
+          s.phase = 'sobbing';
+          s.sobBeatT = 0;
+          if (s.hint) s.hint.visible = false;
+        }
+        return;
+      }
+      if (s.phase === 'sobbing') {
+        // Shoulder-bob — vertical bounce on the body to read as
+        // shaking sobs from iso distance.
+        s.sobBobT += dt;
+        s.npc.position.y = Math.abs(Math.sin(s.sobBobT * 6.0)) * 0.07;
+        // Repeating sob bubble every ~3s.
+        s.sobBeatT -= dt;
+        if (s.sobBeatT <= 0) {
+          s.sobBeatT = 2.8 + Math.random() * 0.6;
+          const lines = ['*sobs*', '*sniffles*', '*sobs harder*'];
+          ctx.spawnSpeech(s.npc.position.clone().setY(2.6),
+            lines[Math.floor(Math.random() * lines.length)],
+            2.4);
+        }
+      }
+    },
+    interact(ctx) {
+      const s = ctx.state;
+      if (s.complete) return;
+      ctx.showPrompt({
+        title: 'Brian',
+        body: 'A man in a grey fedora stares quietly at you.',
+        options: [
+          {
+            text: 'You need to take that hat off',
+            onPick: () => {
+              ctx.spawnSpeech(s.npc.position.clone().setY(2.6),
+                'It\'s not a distraction.', 4.0);
+              s.phase = 'preSob';
+              s.phaseT = 0;
+              s.complete = true;
+              if (s.hint) s.hint.userData.setText('Brian seems unwell.');
+              if (ctx.markEncounterComplete) ctx.markEncounterComplete('brian');
+            },
+          },
+          {
+            text: 'How much was that hat?',
+            onPick: () => {
+              ctx.spawnSpeech(s.npc.position.clone().setY(2.6),
+                'ITS ILLEGAL FOR YOU TO ASK ME THAT',
+                5.5);
+              s.complete = true;
+              if (s.hint) s.hint.visible = false;
+              if (ctx.markEncounterComplete) ctx.markEncounterComplete('brian');
+            },
+          },
+        ],
+      });
+    },
+    onItemDropped(_item, _ctx) { return { consume: false }; },
+  },
 };
 
 // -----------------------------------------------------------------
