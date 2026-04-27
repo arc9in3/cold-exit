@@ -2450,6 +2450,15 @@ export const ENCOUNTER_DEFS = {
       'WHERE ARE YOU?',
       'I WANT TO KNOW RIGHT NOW!',
     ],
+    // Quiet Man's whispered replies. Player yells, he murmurs back —
+    // the asymmetry is the joke. Lines are intentionally non-sequiturs.
+    MAN_BARKS: [
+      'just wait',
+      'just look at it',
+      'shhh',
+      'House, house, house, house, house',
+      'riding a bike',
+    ],
     spawn(scene, room, ctx) {
       const disc = _spawnFloorDisc(scene, room, this.floorColor);
       const npc = _buildSimpleNpc({
@@ -2504,6 +2513,11 @@ export const ENCOUNTER_DEFS = {
       const line = def.BARKS[Math.floor(Math.random() * def.BARKS.length)];
       ctx.spawnSpeech(new THREE.Vector3(ctx.playerPos.x, 2.0, ctx.playerPos.z),
         line, 1.8);
+      // Quiet Man whispers his own cryptic non-sequitur back. Slightly
+      // longer life so the contrast (player shouts → man murmurs) reads.
+      const reply = def.MAN_BARKS[Math.floor(Math.random() * def.MAN_BARKS.length)];
+      ctx.spawnSpeech(new THREE.Vector3(s.disc.cx, 2.4, s.disc.cz),
+        reply, 2.6);
     },
     onItemDropped(_item, _ctx) { return { consume: false }; },
   },
