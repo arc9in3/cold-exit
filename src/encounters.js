@@ -1167,10 +1167,14 @@ export const ENCOUNTER_DEFS = {
         mesh.userData.zone = 'glass';
         mesh.userData.owner = target;
       }
-      // Glass case is solid — register a collider so the player can't
-      // walk into the shooting line.
+      // Glass case collider — PEDESTAL ONLY (0.95x0.95 base, height
+      // 0.50). Critical: the case's whole gameplay is "shoot the glass
+      // walls to break them," so a tall collider that surrounded the
+      // glass would catch every bullet before it reached the panels.
+      // Keeping the collider at floor level blocks movement around the
+      // pedestal but lets shots fly clean over it into the glass.
       const _caseCollider = ctx.level?.addEncounterCollider
-        ? ctx.level.addEncounterCollider(disc.cx, disc.cz, 1.2, 1.2, 1.6)
+        ? ctx.level.addEncounterCollider(disc.cx, disc.cz, 0.95, 0.95, 0.50)
         : null;
       return {
         built, label, disc, reward,
@@ -2466,9 +2470,13 @@ export const ENCOUNTER_DEFS = {
       const label = _makeLabelSprite('THE WISHING WELL', '#a8e0e8');
       label.position.set(disc.cx, 2.2, disc.cz);
       scene.add(label);
-      // Stone well rim is solid — block walk-through.
+      // Stone well rim — kept LOW (height 0.85) because the well's
+      // gameplay watches projectiles landing in the water (coins,
+      // junk). A tall rim collider would intercept the throwable
+      // before it reaches the centre. 0.85m blocks foot traffic
+      // around the rim but throwables clear it cleanly.
       const _wellCollider = ctx.level?.addEncounterCollider
-        ? ctx.level.addEncounterCollider(disc.cx, disc.cz, 1.4, 1.4, 1.0)
+        ? ctx.level.addEncounterCollider(disc.cx, disc.cz, 1.4, 1.4, 0.85)
         : null;
       return { wellGroup, label, disc, complete: false, _wellCollider };
     },
@@ -2620,8 +2628,13 @@ export const ENCOUNTER_DEFS = {
       const label = _makeLabelSprite('PATH OF FIRE', '#ffa080');
       label.position.set(disc.cx, 2.6, disc.cz);
       scene.add(label);
+      // Brazier collider — keep LOW so the player can throw a
+      // molotov INTO the bowl from above without the projectile's
+      // ballistic arc clipping a tall collider. Height 0.85 covers
+      // the bowl base (player walks around) but molotovs drop in
+      // cleanly.
       const _brazierCollider = ctx.level?.addEncounterCollider
-        ? ctx.level.addEncounterCollider(disc.cx, disc.cz, 1.0, 1.0, 1.4)
+        ? ctx.level.addEncounterCollider(disc.cx, disc.cz, 1.0, 1.0, 0.85)
         : null;
       return { brazier, flame, flameLight, label, disc, lit: false, wobbleT: 0,
                complete: false, _brazierCollider };
