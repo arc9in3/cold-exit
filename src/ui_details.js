@@ -333,13 +333,15 @@ export function attachmentStatRows(item) {
   for (const [key, def] of Object.entries(_ATTACH_MOD_LABELS)) {
     const v = mod[key];
     if (typeof v !== 'number' || v === 1) continue;
-    // Convert multiplier → percent delta. invert=true flips so a
-    // 0.85× spread (good) reads as "−15%" not "85%".
+    // Display raw % delta of the multiplier. Negative deltas read
+    // as "−15% Spread" (buff for spread / reload / noise — players
+    // intuitively know less is better) and positive as "+10% Damage".
+    // The previous invert-then-flip path was rendering buffs as
+    // positive numbers ("+18% ADS Spread") which read like a nerf.
     const raw = Math.round((v - 1) * 100);
-    const display = def.invert ? -raw : raw;
-    if (display === 0) continue;
-    const sign = display > 0 ? '+' : '';
-    rows.push([def.label, `${sign}${display}`, '+', '%']);
+    if (raw === 0) continue;
+    const sign = raw > 0 ? '+' : '−';
+    rows.push([def.label, `${sign}${Math.abs(raw)}`, '+', '%']);
   }
   // Sights — adsPeekBonus is metres added to drag distance.
   if (typeof mod.adsPeekBonus === 'number' && mod.adsPeekBonus !== 0) {
