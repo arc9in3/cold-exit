@@ -99,6 +99,8 @@
       <option value="melee">Melee</option>
     </select>
     <button id="reset-class">Reset to current preset defaults</button>
+    <button id="undo">Undo (Ctrl+Z)</button>
+    <button id="flip-view">Flip camera (front ↔ back)</button>
 
     <div class="mode-toggle">
       <button id="mode-hip" class="active">HIP (idle)</button>
@@ -208,7 +210,11 @@ new ResizeObserver(() => resize()).observe(stage);
 const scene = new THREE.Scene();
 scene.background = new THREE.Color(0x16181c);
 const camera = new THREE.PerspectiveCamera(40, 1, 0.05, 50);
-camera.position.set(2.5, 1.6, 3.0);
+// Behind-the-actor angle by default so screen-right == actor's
+// anatomical right (the dominant/trigger arm). Front view mirrored
+// the user's mental model and made "Dom shoulder" look like the left
+// arm was moving. Click "Flip camera" to swap to the front view.
+camera.position.set(-2.5, 1.6, -3.0);
 
 const controls = new OrbitControls(camera, renderer.domElement);
 controls.target.set(0, 1.0, 0);
@@ -265,12 +271,12 @@ const JOINTS = [
   { key: 'chest',       label: 'Chest (upper spine)',    target: () => rig.chest,                yawSign: 1 },
   { key: 'neck',        label: 'Neck',                   target: () => rig.neck,                 yawSign: 1 },
   { key: 'head',        label: 'Head',                   target: () => rig.head,                 yawSign: 1 },
-  { key: 'domShoulder', label: 'Dom shoulder',           target: () => weaponArm.shoulder.pivot, yawSign: dominantYawSign },
-  { key: 'domElbow',    label: 'Dom elbow',              target: () => weaponArm.elbow,          yawSign: 1 },
-  { key: 'domWrist',    label: 'Dom wrist',              target: () => weaponArm.wrist,          yawSign: 1 },
-  { key: 'supShoulder', label: 'Sup shoulder',           target: () => supportArm.shoulder.pivot, yawSign: supportYawSign },
-  { key: 'supElbow',    label: 'Sup elbow',              target: () => supportArm.elbow,         yawSign: 1 },
-  { key: 'supWrist',    label: 'Sup wrist',              target: () => supportArm.wrist,         yawSign: 1 },
+  { key: 'domShoulder', label: 'Dom shoulder (right · trigger)', target: () => weaponArm.shoulder.pivot, yawSign: dominantYawSign },
+  { key: 'domElbow',    label: 'Dom elbow (right)',              target: () => weaponArm.elbow,          yawSign: 1 },
+  { key: 'domWrist',    label: 'Dom wrist (right)',              target: () => weaponArm.wrist,          yawSign: 1 },
+  { key: 'supShoulder', label: 'Sup shoulder (left · foregrip)', target: () => supportArm.shoulder.pivot, yawSign: supportYawSign },
+  { key: 'supElbow',    label: 'Sup elbow (left)',               target: () => supportArm.elbow,         yawSign: 1 },
+  { key: 'supWrist',    label: 'Sup wrist (left)',               target: () => supportArm.wrist,         yawSign: 1 },
 ];
 
 // Capture the rig's authored base position for every joint exactly
@@ -506,16 +512,69 @@ function applyFromUI() {
   _updateValueLabels();
 }
 
-// Wire input events for every slider on the panel.
+// ---------- undo stack -------------------------------------------
+// Snapshot the full pose buffer (both modes) on slider release and
+// other discrete state changes. Ctrl+Z pops one snapshot, restores
+// it, re-syncs the UI. Stack capped at 50 to bound memory.
+const _undoStack = [];
+const UNDO_MAX = 50;
+
+function _snapshot() {
+  return JSON.stringify({ pose, mode });
+}
+function _pushUndo() {
+  const snap = _snapshot();
+  if (_undoStack[_undoStack.length - 1] === snap) return; // no-op edits
+  _undoStack.push(snap);
+  if (_undoStack.length > UNDO_MAX) _undoStack.shift();
+}
+function _undo() {
+  if (_undoStack.length === 0) return;
+  // Top of stack = state BEFORE the most recent edit, so a single pop
+  // restores it. The current state isn't on the stack itself.
+  const snap = _undoStack.pop();
+  const restored = JSON.parse(snap);
+  pose = restored.pose;
+  if (restored.mode !== mode) {
+    mode = restored.mode;
+    btnHip.classList.toggle('active', mode === 'hip');
+    btnAim.classList.toggle('active', mode === 'aim');
+    document.getElementById('joints-heading').textContent = `Joints — ${mode.toUpperCase()}`;
+    document.getElementById('weapon-heading').textContent = `Weapon offset — ${mode.toUpperCase()}`;
+  }
+  writePoseToUI();
+  applyPose();
+}
+// Seed the stack with the boot state so the very first edit is undoable.
+_pushUndo();
+
+window.addEventListener('keydown', (e) => {
+  // Ctrl+Z (or Cmd+Z on macOS). Ignore if focus is in a text input
+  // so future text fields don't get hijacked.
+  const isUndo = (e.ctrlKey || e.metaKey) && !e.shiftKey && e.key.toLowerCase() === 'z';
+  if (!isUndo) return;
+  const tag = (e.target?.tagName || '').toLowerCase();
+  if (tag === 'input' && e.target.type !== 'range') return;
+  e.preventDefault();
+  _undo();
+});
+
+// Wire input events for every slider. `input` fires per-pixel (live
+// preview), `change` fires on release (one undo entry per drag).
 function _wireAllSliders() {
   const ids = [];
   for (const j of JOINTS) for (const f of FIELDS) ids.push(`${j.key}-${f}`);
   for (const f of FIELDS) ids.push(`weapon-${f}`);
   for (const id of ids) {
-    document.getElementById(id).addEventListener('input', applyFromUI);
+    const el = document.getElementById(id);
+    el.addEventListener('input', applyFromUI);
+    el.addEventListener('change', _pushUndo);
   }
-  document.getElementById('aim-yaw').addEventListener('input', applyFromUI);
-  document.getElementById('aim-pitch').addEventListener('input', applyFromUI);
+  for (const id of ['aim-yaw', 'aim-pitch']) {
+    const el = document.getElementById(id);
+    el.addEventListener('input', applyFromUI);
+    el.addEventListener('change', _pushUndo);
+  }
 }
 _wireAllSliders();
 
@@ -530,6 +589,7 @@ document.addEventListener('click', (e) => {
   }
   writePoseToUI();
   applyPose();
+  _pushUndo();
 });
 
 // ---------- preset + mode wiring ----------------------------------
@@ -539,11 +599,20 @@ function loadPreset(name) {
   pose = JSON.parse(JSON.stringify(src));
   writePoseToUI();
   applyPose();
+  _pushUndo();
 }
 document.getElementById('preset').addEventListener('change',
   (e) => loadPreset(e.target.value));
 document.getElementById('reset-class').addEventListener('click',
   () => loadPreset(document.getElementById('preset').value));
+document.getElementById('undo').addEventListener('click', _undo);
+
+document.getElementById('flip-view').addEventListener('click', () => {
+  // Mirror the camera through the actor across both X and Z so the
+  // orbit pivot stays put and the user just sees the opposite side.
+  camera.position.set(-camera.position.x, camera.position.y, -camera.position.z);
+  controls.update();
+});
 
 const btnHip = document.getElementById('mode-hip');
 const btnAim = document.getElementById('mode-aim');
@@ -561,6 +630,7 @@ function setMode(m) {
     `Weapon offset — ${mode.toUpperCase()}`;
   writePoseToUI();
   applyPose();
+  _pushUndo();
 }
 btnHip.addEventListener('click', () => setMode('hip'));
 btnAim.addEventListener('click', () => setMode('aim'));
