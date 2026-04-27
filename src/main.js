@@ -2495,7 +2495,11 @@ const _encounterPromptEl = (() => {
   Object.assign(el.style, {
     position: 'fixed', top: '50%', left: '50%',
     transform: 'translate(-50%, -50%)',
-    minWidth: '360px', maxWidth: '520px',
+    // Wider band + a max-height window so verbose pitches (Sus,
+    // Curse Breaker, etc.) and long button labels don't clip. The
+    // panel scrolls if a future encounter exceeds the cap.
+    minWidth: '380px', maxWidth: 'min(640px, 92vw)',
+    maxHeight: '82vh', overflowY: 'auto', boxSizing: 'border-box',
     background: 'linear-gradient(180deg, #181b21 0%, #0e1018 100%)',
     border: '1px solid #c9a87a', borderRadius: '4px',
     padding: '22px 26px', zIndex: '60',
@@ -2503,9 +2507,12 @@ const _encounterPromptEl = (() => {
     fontFamily: 'ui-monospace, SFMono-Regular, Menlo, Consolas, monospace',
     boxShadow: '0 14px 50px rgba(0,0,0,0.85)',
   });
+  // overflow-wrap on title/body keeps prose flowing inside the box;
+  // letter-spacing + uppercase on the title made long names overhang
+  // the right edge before this rule.
   el.innerHTML = `
-    <div id="enc-prompt-title" style="font-size:18px;font-weight:700;letter-spacing:4px;color:#c9a87a;text-transform:uppercase;margin-bottom:10px;text-align:center;"></div>
-    <div id="enc-prompt-body" style="font-size:13px;color:#bcb8a8;line-height:1.5;margin-bottom:18px;text-align:center;"></div>
+    <div id="enc-prompt-title" style="font-size:18px;font-weight:700;letter-spacing:4px;color:#c9a87a;text-transform:uppercase;margin-bottom:10px;text-align:center;overflow-wrap:break-word;word-break:break-word;"></div>
+    <div id="enc-prompt-body" style="font-size:13px;color:#bcb8a8;line-height:1.5;margin-bottom:18px;text-align:center;overflow-wrap:break-word;word-break:break-word;white-space:pre-wrap;"></div>
     <div id="enc-prompt-options" style="display:flex;flex-direction:column;gap:6px;"></div>
   `;
   document.body.appendChild(el);
@@ -2531,6 +2538,10 @@ function showEncounterPrompt({ title, body, options }) {
       borderRadius: '3px',
       cursor: btn.disabled ? 'default' : 'pointer',
       fontFamily: 'inherit', fontWeight: '700',
+      // Long button labels (e.g. "Buy chest (10,000c) — not enough")
+      // need to wrap inside the panel rather than push the panel wider.
+      whiteSpace: 'normal', overflowWrap: 'break-word', wordBreak: 'break-word',
+      lineHeight: '1.35', textAlign: 'center',
     });
     if (!btn.disabled) {
       btn.addEventListener('click', () => {
