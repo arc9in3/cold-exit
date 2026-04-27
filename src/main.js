@@ -6507,7 +6507,19 @@ function _isEnemyActive(e) {
 const _visFrom = new THREE.Vector3();
 const _visTarget = new THREE.Vector3();
 function updateEnemyVisibility() {
-  const range = GHOST_BASE_RANGE + (derivedStats.hearingRange || 0);
+  let range = GHOST_BASE_RANGE + (derivedStats.hearingRange || 0);
+  // ADS scope vision bonus — peering through a magnified optic lets
+  // the player spot enemies farther out than their ambient hearing
+  // range. Iron sights / red dots (sightZoom ≤ 1.10) grant nothing;
+  // mid/long/sniper scopes scale linearly. Capped at full ADS so a
+  // brief tap doesn't reveal half the level.
+  const _w = currentWeapon();
+  const _eff = _w ? effectiveWeapon(_w) : null;
+  const _ads = lastPlayerInfo?.adsAmount || 0;
+  if (_eff && _ads > 0.05 && _eff.sightZoom > 1.10) {
+    // sightZoom 1.20 (mid scope) → +8m, 1.30 (long scope) → +16m.
+    range += (_eff.sightZoom - 1.10) * 80 * _ads;
+  }
   const nearAlpha = Math.min(0.85, GHOST_NEAR_ALPHA + (derivedStats.hearingAlpha || 0));
   const px = player.mesh.position.x, pz = player.mesh.position.z;
   _visFrom.set(px, 1.2, pz);
