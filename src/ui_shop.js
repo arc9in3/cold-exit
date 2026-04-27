@@ -846,8 +846,12 @@ export class ShopUI {
     // Repair mode swaps the price chip label so the player understands
     // they're paying TO restore the item, not selling it.
     const priceLabel = mode === 'repair' ? `REPAIR ${price}c` : `${price}c`;
+    // Shop cells never show the ⚙ customize button — even on sell /
+    // repair tabs where the item is technically owned. Tinkering with
+    // attachments inside the merchant flow was confusing (the player
+    // can't equip an item that's mid-sale), so kill it across all modes.
     cell.innerHTML = `
-      ${renderItemCell(item, null, { owned: mode === 'sell' || mode === 'repair' })}
+      ${renderItemCell(item, null, { owned: false })}
       <div class="shop-price ${mode}">${priceLabel}</div>
     `;
     return cell;
