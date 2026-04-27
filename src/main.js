@@ -6542,8 +6542,9 @@ function updateEnemyVisibility() {
   const _eff = _w ? effectiveWeapon(_w) : null;
   const _ads = lastPlayerInfo?.adsAmount || 0;
   if (_eff && _ads > 0.05 && _eff.sightZoom > 1.10) {
-    // sightZoom 1.20 (mid scope) → +8m, 1.30 (long scope) → +16m.
-    range += (_eff.sightZoom - 1.10) * 80 * _ads;
+    // sightZoom 1.20 (mid scope) → +10.4m, 1.30 (long scope) → +20.8m.
+    // Multiplier bumped 80 → 104 for an additional +30% scope vision.
+    range += (_eff.sightZoom - 1.10) * 104 * _ads;
   }
   const nearAlpha = Math.min(0.85, GHOST_NEAR_ALPHA + (derivedStats.hearingAlpha || 0));
   const px = player.mesh.position.x, pz = player.mesh.position.z;
