@@ -280,15 +280,19 @@ const PRESETS = {
 };
 
 // ---------- handedness --------------------------------------------
-// Convention: right-handed shooter. weaponArm = right arm, support
-// = left. The sign on shoulder.z flips per side (rotation axis is
-// the same; the inward direction is opposite). supportYawSign for
-// the right-handed setup is +1 for left arm.
+// Match actor_rig.js exactly. For right-handed: weaponArm = rightArm,
+// supportArm = leftArm, and the YAW sign for BOTH arms is +1
+// (supportYawSign in the game). I previously flipped the dominant
+// arm via dominantYawSign = -1 — that was wrong; the game multiplies
+// dominant shoulder.z by supportYawSign too. Result of the bug: the
+// dominant arm crossed inward, both hands wrapped the gun's back
+// instead of one trigger / one foregrip.
 const handed = 'right';
-const weaponArm = handed === 'right' ? rig.rightArm : rig.leftArm;
-const supportArm = handed === 'right' ? rig.leftArm : rig.rightArm;
-const supportYawSign = 1;   // right-handed: +1 for left arm
-const dominantYawSign = -1; // right-handed: -1 for right arm
+const weaponArm  = handed === 'right' ? rig.rightArm : rig.leftArm;
+const supportArm = handed === 'right' ? rig.leftArm  : rig.rightArm;
+const supportYawSign = handed === 'right' ? 1 : -1;
+// Same sign — see actor_rig.js: rifleDomYaw = -0.12 * supportYawSign.
+const dominantYawSign = supportYawSign;
 
 // ---------- pose application --------------------------------------
 function applyPose(p) {
