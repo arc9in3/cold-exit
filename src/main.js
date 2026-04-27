@@ -2656,6 +2656,37 @@ function tickEncounters(dt) {
   for (const r of level.rooms) {
     if (!r._encounter) continue;
     const ent = r._encounter;
+    // Encounter NPC death cleanup. The auto-collider hook in the
+    // spawn pipeline registers state._collider; if the encounter
+    // resolves (state.complete = true) AND the NPC has been hidden
+    // / killed (visible === false OR alive === false), tear down the
+    // collider so the player + AI aren't bumping into an invisible
+    // box where the NPC used to stand. Idempotent — runs every frame
+    // until the proxy is gone, then nulls the ref. Each encounter
+    // can also stash extra colliders under sibling keys (matches
+    // _perchCollider, _benchCollider, _wellCollider, etc.); sweep
+    // those too whenever the encounter is complete.
+    if (ent.state && ent.state.complete === true && !ent.state._collidersCleared) {
+      const npcGone = !ent.state.npc
+        || ent.state.npc.visible === false
+        || ent.state.npc.alive === false;
+      if (npcGone || ent.state._cleanupColliders) {
+        const _drop = (key) => {
+          const c = ent.state[key];
+          if (c && level.removeEncounterCollider) {
+            level.removeEncounterCollider(c);
+            ent.state[key] = null;
+          }
+        };
+        for (const k of Object.keys(ent.state)) {
+          if (typeof k === 'string' && k.endsWith('Collider')) _drop(k);
+        }
+        if (ent.state._collider) _drop('_collider');
+        // One-shot guard so the Object.keys sweep doesn't run every
+        // frame for already-cleared encounters.
+        ent.state._collidersCleared = true;
+      }
+    }
     // Perf early-out: once an encounter has fully resolved, skip
     // tick entirely. Saves ~60 calls/sec/encounter for completed
     // ones and lets us scale the encounter roster without paying

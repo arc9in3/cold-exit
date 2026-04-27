@@ -2864,10 +2864,12 @@ export const ENCOUNTER_DEFS = {
         if (s.npc) s.npc.visible = false;
         if (s.crown) s.crown.visible = false;
         if (s.brim) s.brim.visible = false;
-        // Tear down the auto-collider — the Quiet Man's invisible
-        // 0.65×0.65 proxy was sitting around after the burst because
-        // hiding the visual mesh doesn't touch the obstacles list. The
-        // player + AI would still bump into him post-explosion.
+        // The generic encounter-tick cleanup (main.js tickEncounters)
+        // handles s._collider teardown the next frame because we set
+        // npc.visible = false above. Keeping this explicit call is
+        // belt-and-suspenders — same removeEncounterCollider helper,
+        // idempotent, fires immediately so the player isn't bumping
+        // into an invisible box for one frame after the burst.
         if (s._collider && ctx.level?.removeEncounterCollider) {
           ctx.level.removeEncounterCollider(s._collider);
           s._collider = null;
