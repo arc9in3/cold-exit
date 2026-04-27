@@ -2590,6 +2590,156 @@ export const ENCOUNTER_DEFS = {
   },
 
   // -----------------------------------------------------------------
+  // Hoop Dreams — basketball net + backboard at one end of the room,
+  // a glowing "shoot here" disc at the opposite edge. Player must
+  // stand on the disc and lob TWO frag grenades through the rim.
+  // Two scores → airhorn, screen flooded with MVP! speech bubbles
+  // for ~3s, +2 persistent chips. Repeatable across runs (mythic
+  // achievement that always feels good to revisit).
+  // -----------------------------------------------------------------
+  hoop_dreams: {
+    id: 'hoop_dreams',
+    name: 'Hoop Dreams',
+    floorColor: 0xb05030,             // hardwood orange
+    oncePerSave: false,
+    condition: (state) => state.levelIndex >= 1,
+    spawn(scene, room, ctx) {
+      const disc = _spawnFloorDisc(scene, room, this.floorColor);
+      const cb = ctx.room.bounds;
+      // Backboard / rim against the +Z wall, "stand here" disc at the
+      // -Z edge — gives the player a clear cross-room throw lane.
+      const hoopX = (cb.minX + cb.maxX) / 2;
+      const hoopZ = cb.maxZ - 0.3;
+      const hoopY = 1.55;             // grenade-arcable height
+      const standX = hoopX;
+      const standZ = cb.minZ + 1.4;
+      // Backboard — flat slab.
+      const backboard = new THREE.Mesh(
+        new THREE.BoxGeometry(1.6, 1.0, 0.06),
+        new THREE.MeshStandardMaterial({ color: 0xeeeeee }),
+      );
+      backboard.position.set(hoopX, hoopY + 0.5, hoopZ + 0.04);
+      scene.add(backboard);
+      // Rim — orange torus. Inner radius ~0.40, tube 0.04.
+      const rim = new THREE.Mesh(
+        new THREE.TorusGeometry(0.40, 0.04, 8, 24),
+        new THREE.MeshStandardMaterial({ color: 0xff7020 }),
+      );
+      rim.rotation.x = Math.PI / 2;   // lay flat (axis vertical)
+      rim.position.set(hoopX, hoopY, hoopZ - 0.40);
+      scene.add(rim);
+      // Net — short tapered cone of dim mesh.
+      const net = new THREE.Mesh(
+        new THREE.ConeGeometry(0.40, 0.45, 12, 1, true),
+        new THREE.MeshStandardMaterial({
+          color: 0xeeeeee, transparent: true, opacity: 0.55,
+          wireframe: true,
+        }),
+      );
+      net.position.set(hoopX, hoopY - 0.22, hoopZ - 0.40);
+      net.rotation.x = Math.PI;       // tip down
+      scene.add(net);
+      // Stand-here disc — small glowing pad, gold tint.
+      const standGeom = new THREE.CircleGeometry(0.55, 24);
+      standGeom.rotateX(-Math.PI / 2);
+      const standDisc = new THREE.Mesh(
+        standGeom,
+        new THREE.MeshBasicMaterial({ color: 0xf0c850, transparent: true, opacity: 0.55 }),
+      );
+      standDisc.position.set(standX, 0.02, standZ);
+      scene.add(standDisc);
+      const label = _makeLabelSprite('HOOP DREAMS — STAND ON THE DOT', '#f0c850');
+      label.position.set(disc.cx, 2.4, disc.cz);
+      scene.add(label);
+      return {
+        disc, label, backboard, rim, net, standDisc,
+        hoop: { x: hoopX, y: hoopY, z: hoopZ - 0.40, r: 0.40 },
+        stand: { x: standX, z: standZ, r: 0.95 },
+        prevY: new WeakMap(),         // projectile → y last frame
+        counted: new WeakSet(),       // projectile already scored
+        score: 0,
+        celebrated: false,
+        complete: false,
+        celebrateT: 0,
+        bubbleTimer: 0,
+      };
+    },
+    tick(dt, ctx) {
+      const s = ctx.state;
+      if (!s.rim) return;
+      // Subtle pulse on the stand disc so it reads as interactive.
+      const pulse = 0.45 + 0.20 * Math.sin((performance.now() % 100000) * 0.005);
+      if (s.standDisc.material) s.standDisc.material.opacity = pulse;
+      // Detection: iterate active grenades. Score when a player-owned
+      // frag projectile crosses the rim plane (Y went from above to
+      // below hoop.y) AND the XZ position is inside the rim radius.
+      // Player must ALSO be on the stand disc — "shoot from the line".
+      const px = ctx.playerPos.x, pz = ctx.playerPos.z;
+      const dxs = px - s.stand.x, dzs = pz - s.stand.z;
+      const onStand = (dxs * dxs + dzs * dzs) <= (s.stand.r * s.stand.r);
+      const projs = ctx.activeProjectiles ? ctx.activeProjectiles() : [];
+      for (const p of projs) {
+        if (!p || !p.body || p.dead) continue;
+        if (p.owner !== 'player' || p.throwKind !== 'frag') continue;
+        if (s.counted.has(p)) continue;
+        const y = p.body.position.y;
+        const prevY = s.prevY.get(p);
+        s.prevY.set(p, y);
+        if (prevY === undefined) continue;
+        // Crossed downward through the rim plane this frame?
+        if (prevY > s.hoop.y && y <= s.hoop.y) {
+          const dx = p.body.position.x - s.hoop.x;
+          const dz = p.body.position.z - s.hoop.z;
+          if ((dx * dx + dz * dz) <= s.hoop.r * s.hoop.r) {
+            // Score gating — must be on the stand disc to count.
+            if (!onStand) {
+              ctx.spawnSpeech(new THREE.Vector3(s.hoop.x, s.hoop.y + 0.6, s.hoop.z),
+                'STAND ON THE DOT!', 2.0);
+              s.counted.add(p);
+              continue;
+            }
+            s.counted.add(p);
+            s.score += 1;
+            ctx.spawnSpeech(new THREE.Vector3(s.hoop.x, s.hoop.y + 0.6, s.hoop.z),
+              s.score === 1 ? 'SWISH!' : 'AND ONE!', 2.0);
+          }
+        }
+      }
+      // Win condition — 2 of 2 → celebration.
+      if (s.score >= 2 && !s.celebrated) {
+        s.celebrated = true;
+        if (ctx.airhorn) ctx.airhorn();
+        if (ctx.awardChips) ctx.awardChips(2);
+        s.celebrateT = 3.0;
+        s.bubbleTimer = 0;
+        if (ctx.markEncounterComplete) ctx.markEncounterComplete('hoop_dreams');
+      }
+      // Celebration — spam ~250 MVP! bubbles over the celebrateT
+      // window, scattered in the room's airspace. Throttled per
+      // frame to avoid stalling on bubble alloc.
+      if (s.celebrateT > 0) {
+        s.celebrateT -= dt;
+        s.bubbleTimer -= dt;
+        if (s.bubbleTimer <= 0) {
+          s.bubbleTimer = 0.012;
+          const cb = ctx.room?.bounds;
+          if (cb) {
+            const spawn = ctx.spawnSpeechRaw || ctx.spawnSpeech;
+            for (let i = 0; i < 4; i++) {
+              const rx = cb.minX + Math.random() * (cb.maxX - cb.minX);
+              const rz = cb.minZ + Math.random() * (cb.maxZ - cb.minZ);
+              const ry = 1.0 + Math.random() * 3.0;
+              spawn(new THREE.Vector3(rx, ry, rz), 'MVP!', 1.2);
+            }
+          }
+        }
+        if (s.celebrateT <= 0) s.complete = true;
+      }
+    },
+    onItemDropped(_item, _ctx) { return { consume: false }; },
+  },
+
+  // -----------------------------------------------------------------
   // The Priest — recurring encounter. Stands in the room and asks
   // the player if they want to pray. "Yes" → heals; "No" → flavor
   // line about salvation + increments runStats.priestRefusals.

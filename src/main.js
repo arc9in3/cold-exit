@@ -1898,6 +1898,10 @@ function regenerateLevel() {
       // to read the line, even if the encounter passed a shorter
       // explicit life value.
       spawnSpeech: (worldPos, text, life) => spawnSpeechBubble(worldPos, camera, text, Math.max(life || 0, 7.0)),
+      // Same bubble system but no minimum-life floor — used by Hoop
+      // Dreams' MVP! celebration where ~250 short-lived bubbles
+      // need to fade fast. Lifetime defaults to 1.5s if omitted.
+      spawnSpeechRaw: (worldPos, text, life) => spawnSpeechBubble(worldPos, camera, text, life || 1.5),
       spawnMasterworkChest: (x, z) => _spawnMasterworkChestAt(x, z),
       spawnLoot: (x, z, item) => loot.spawnItem({ x, y: 0.4, z }, item),
         // Reward-roll helpers — encounters call these to keep the
@@ -2077,6 +2081,15 @@ function regenerateLevel() {
           loot.spawnItem({ x, y: 0.4, z }, { ...def });
           return true;
         },
+        // Live in-flight projectile list. Hoop Dreams reads this each
+        // tick to detect grenades passing through the basketball ring.
+        activeProjectiles: () => projectiles.projectiles,
+        // Stadium airhorn — three harsh blasts, ~1.5s total.
+        airhorn: () => sfx.airhorn?.(),
+        // Raw camera handle for spawning a flood of speech bubbles
+        // (Hoop Dreams MVP celebration). Most encounters should use
+        // ctx.spawnSpeech instead, which auto-applies the camera.
+        camera,
         getKillCount: () => runStats.kills | 0,
         markEncounterComplete: (id) => { if (id) _runCompletedEncounters.add(id); },
         // Smoke puff at world XZ — used by Glass Case telegraph.

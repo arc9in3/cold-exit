@@ -198,6 +198,19 @@ export const sfx = {
   uiAccept() {
     tone({ freq: 520, dur: 0.05, type: 'triangle', gain: 0.15, sweep: 120 });
   },
+  // Stadium-style airhorn — triple-blast harsh sawtooth burst.
+  // Used by Hoop Dreams encounter on a successful 2-of-2 score.
+  airhorn() {
+    if (!unlocked || !ensureCtx()) return;
+    const blast = (delay, dur) => setTimeout(() => {
+      tone({ freq: 280, dur, type: 'sawtooth', gain: 0.42 });
+      tone({ freq: 420, dur, type: 'sawtooth', gain: 0.28 });
+      tone({ freq: 560, dur, type: 'square',   gain: 0.18 });
+    }, delay);
+    blast(0,    0.45);
+    blast(550,  0.32);
+    blast(1000, 0.55);
+  },
   death() {
     tone({ freq: 220, dur: 0.5, type: 'sawtooth', gain: 0.35, sweep: -180 });
   },
