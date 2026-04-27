@@ -194,7 +194,12 @@ export class LootManager {
     // texture the player can't see yet — disarm/loot bursts piled
     // a paint per drop. Stash the pending name; update() paints when
     // the sprite first toggles visible.
-    slot.pendingName = item.name || 'item';
+    // Strip any HTML wrappers from the display name before it lands
+    // on the canvas — wrapWeapon prefixes mastercraft items with a
+    // raw `<span class="mastercraft-tag">MASTERCRAFT</span> ` literal
+    // for the inventory cell renderer, but the floor sprite paints
+    // text verbatim and would otherwise show the tags.
+    slot.pendingName = String(item.name || 'item').replace(/<[^>]+>/g, '').trim();
     slot.paintedName = null;
     slot.sprite.visible = false;   // proximity-gated in update()
     slot.group.position.set(position.x, 0.45, position.z);
