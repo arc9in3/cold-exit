@@ -726,7 +726,7 @@ const SMG_POSE_HIP = {
   supShoulder: { rx: -1.16, ry: -0.03, rz:  0.64, px:  0.06, py:  0,    pz:  0.18 },
   supElbow:    { rx: -0.33, ry:  0.72, rz:  0.38, px:  0,    py:  0,    pz:  0    },
   supWrist:    { rx:  0.01, ry: -0.13, rz:  0.15, px:  0,    py:  0,    pz:  0    },
-  weapon:      { rx:  0.38, ry:  0.32, rz:  0.31, px: -0.05, py:  0.50, pz: -0.01 },
+  weapon:      { rx:  0.38, ry:  0.32, rz:  0.31, px:  0.01, py:  0.27, pz: -0.10 },
 };
 const SMG_POSE_AIM = {
   stomach:     { rx:  0,    ry:  0,    rz:  0,    px:  0,    py:  0,    pz:  0    },
@@ -738,7 +738,7 @@ const SMG_POSE_AIM = {
   supShoulder: { rx: -1.88, ry:  0.27, rz:  0.59, px:  0.16, py:  0,    pz:  0.17 },
   supElbow:    { rx: -0.05, ry: -0.04, rz: -0.09, px:  0,    py:  0,    pz:  0    },
   supWrist:    { rx:  0,    ry:  0,    rz:  0,    px:  0,    py:  0,    pz:  0    },
-  weapon:      { rx:  1.11, ry:  0.26, rz:  0.11, px: -0.02, py:  0.46, pz: -0.08 },
+  weapon:      { rx:  1.11, ry:  0.26, rz:  0.11, px:  0.03, py:  0.41, pz: -0.19 },
 };
 export const SMG_WEAPON_HIP = SMG_POSE_HIP.weapon;
 export const SMG_WEAPON_AIM = SMG_POSE_AIM.weapon;
