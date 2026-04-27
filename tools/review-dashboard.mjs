@@ -544,13 +544,47 @@ function launchOneCli(target) {
   });
 }
 
-async function launchAllClis() {
+async function launchAllClis(opts = {}) {
+  const status = await cliRunningStatus();
   const results = [];
   for (const t of CLI_TARGETS) {
+    if (status[t.id]) {
+      results.push({ id: t.id, launched: false, alreadyRunning: true });
+      continue;
+    }
     try { results.push(await launchOneCli(t)); }
     catch (e) { results.push({ id: t.id, launched: false, error: e.message }); }
   }
-  return { results };
+  return { results, status };
+}
+
+// Detect whether each CLI is already running by inspecting open
+// console window titles. We launched them via `start "Title" cmd /K ...`
+// so each window carries the title in CLI_TARGETS — match against it.
+// On non-Windows, fall back to a `ps` command-line scan.
+async function cliRunningStatus() {
+  const out = { claude: false, codex: false, gemini: false };
+  try {
+    if (process.platform === 'win32') {
+      // tasklist /v with CSV output. The last quoted column on each
+      // row is the window title.
+      const { stdout } = await execP('tasklist /v /fo csv /nh');
+      const titles = [];
+      for (const line of stdout.split(/\r?\n/)) {
+        const m = line.match(/"([^"]*)"\s*$/);
+        if (m) titles.push(m[1]);
+      }
+      for (const t of CLI_TARGETS) {
+        if (titles.some(title => title.includes(t.title))) out[t.id] = true;
+      }
+    } else {
+      const { stdout } = await execP('ps -ef');
+      out.claude = /\b(claude)\b/.test(stdout);
+      out.codex  = /\b(codex)\b/.test(stdout);
+      out.gemini = /\b(gemini)\b/.test(stdout);
+    }
+  } catch (_) { /* if the probe fails, assume nothing running */ }
+  return out;
 }
 
 // ===========================================================================
@@ -865,6 +899,16 @@ const HTML = `<!DOCTYPE html>
     margin-right: 4px; transform: scale(0.95); cursor: pointer;
     accent-color: #c9a87a;
   }
+  .cli-row { display: flex; gap: 6px; }
+  .cli-row button { flex: 1; display: flex; align-items: center; justify-content: center; gap: 6px; padding: 7px 8px; }
+  .cli-dot {
+    width: 8px; height: 8px; border-radius: 50%;
+    background: #5a606c; flex-shrink: 0;
+    box-shadow: 0 0 0 2px rgba(0,0,0,0.25);
+    transition: background 0.18s;
+  }
+  .cli-dot.running { background: #6ce0a0; box-shadow: 0 0 6px rgba(108, 224, 160, 0.55), 0 0 0 2px rgba(0,0,0,0.25); }
+  .cli-row button.running { border-color: rgba(108, 224, 160, 0.55); }
 
   .game-controls { display: flex; gap: 8px; flex-wrap: wrap; }
 
@@ -928,12 +972,12 @@ const HTML = `<!DOCTYPE html>
   <aside class="panel left">
     <h2>Orchestration</h2>
     <div class="game-controls">
-      <button id="btn-launch-all" class="primary" title="Open Claude / Codex / Gemini in three new shell windows, each cd'd into the repo with a clean status check">Launch all 3 CLIs</button>
+      <button id="btn-launch-all" class="primary" title="Open any not-running CLIs in new shell windows. Already-running CLIs are skipped.">Launch all 3 CLIs</button>
     </div>
-    <div class="game-controls" style="margin-top:6px;">
-      <button id="btn-launch-claude">Claude only</button>
-      <button id="btn-launch-codex">Codex only</button>
-      <button id="btn-launch-gemini">Gemini only</button>
+    <div class="cli-row" style="margin-top:8px;">
+      <button id="btn-launch-claude" data-id="claude"><span class="cli-dot" id="dot-claude"></span>Claude</button>
+      <button id="btn-launch-codex"  data-id="codex"><span class="cli-dot" id="dot-codex"></span>Codex</button>
+      <button id="btn-launch-gemini" data-id="gemini"><span class="cli-dot" id="dot-gemini"></span>Gemini</button>
     </div>
 
     <h2>Dev branch</h2>
@@ -1345,24 +1389,76 @@ $('view-tasks').onclick = () => {
 };
 
 // Orchestration — launch CLIs, manage dev, promote to prod.
+let cliStatusCache = { claude: false, codex: false, gemini: false };
+
+async function refreshCliStatus() {
+  try {
+    const s = await api('/api/clis/status');
+    cliStatusCache = s;
+    paintCliStatus();
+  } catch (_) { /* ignore */ }
+}
+function paintCliStatus() {
+  const ids = ['claude', 'codex', 'gemini'];
+  let runningCount = 0;
+  for (const id of ids) {
+    const dot = $('dot-' + id);
+    const btn = $('btn-launch-' + id);
+    const running = !!cliStatusCache[id];
+    if (running) runningCount++;
+    if (dot) dot.classList.toggle('running', running);
+    if (btn) {
+      btn.classList.toggle('running', running);
+      btn.title = running ? (id + ' is already running — click to launch another window anyway')
+                          : ('launch ' + id + ' in a new shell window');
+    }
+  }
+  const allBtn = $('btn-launch-all');
+  if (allBtn) {
+    if (runningCount === 3) {
+      allBtn.textContent = 'All 3 CLIs running';
+      allBtn.disabled = true;
+    } else if (runningCount > 0) {
+      allBtn.textContent = 'Launch missing ' + (3 - runningCount) + ' CLI' + (3 - runningCount === 1 ? '' : 's');
+      allBtn.disabled = false;
+    } else {
+      allBtn.textContent = 'Launch all 3 CLIs';
+      allBtn.disabled = false;
+    }
+  }
+}
+
 async function launchAll() {
-  log('launching all 3 CLIs in new windows…');
+  log('checking which CLIs are running…');
   try {
     const r = await api('/api/clis/launch-all', { method: 'POST' });
+    let launched = 0, skipped = 0;
     for (const x of r.results) {
-      if (x.launched) log('  ✓ ' + x.id + ' launched', 'ok');
+      if (x.launched) { log('  ✓ ' + x.id + ' launched', 'ok'); launched++; }
+      else if (x.alreadyRunning) { log('  · ' + x.id + ' already running — skipped'); skipped++; }
       else log('  ✗ ' + x.id + ' — ' + (x.hint || x.error || 'failed'), 'err');
     }
+    if (launched === 0 && skipped > 0) log('all running CLIs were already open. nothing to do.', 'ok');
+    setTimeout(refreshCliStatus, 1500);
   } catch (e) { log('launch-all failed: ' + e.message, 'err'); }
 }
 async function launchOne(id) {
+  // If already running, ask whether to spawn another window anyway.
+  if (cliStatusCache[id]) {
+    if (!confirm(id + ' looks like it\\'s already running. Launch another window anyway?')) return;
+  }
   log('launching ' + id + '…');
   try {
     const r = await api('/api/clis/launch', {
       method: 'POST', headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ id }),
+      body: JSON.stringify({ id, force: cliStatusCache[id] }),
     });
-    log(r.launched ? (id + ' launched') : (id + ' — ' + (r.hint || 'failed')), r.launched ? 'ok' : 'err');
+    if (r.alreadyRunning && !r.launched) {
+      log(id + ' already running — skipped (status flag mismatch?)');
+    } else {
+      log(r.launched ? (id + ' launched') : (id + ' — ' + (r.hint || 'failed')), r.launched ? 'ok' : 'err');
+    }
+    setTimeout(refreshCliStatus, 1500);
   } catch (e) { log('launch failed: ' + e.message, 'err'); }
 }
 $('btn-launch-all').onclick = launchAll;
@@ -1482,10 +1578,14 @@ $('btn-promote-selected').onclick = async () => {
 async function init() {
   await refreshState();
   await refreshDevStatus();
+  await refreshCliStatus();
   try {
     const s = await api('/api/server/status');
     setServerStatus(s.running, s.port);
   } catch (e) { /* ignore */ }
+  // Poll CLI status every 6 seconds so the dots reflect reality
+  // when the user opens / closes terminal windows outside the dashboard.
+  setInterval(refreshCliStatus, 6000);
 }
 init();
 </script>
@@ -1629,7 +1729,14 @@ async function dashApi(req, res, parsedUrl) {
       const body = await readJsonBody(req);
       const target = CLI_TARGETS.find(t => t.id === body.id);
       if (!target) return sendErr(400, 'unknown CLI id');
+      const running = await cliRunningStatus();
+      if (running[target.id] && !body.force) {
+        return send(200, { id: target.id, launched: false, alreadyRunning: true });
+      }
       return send(200, await launchOneCli(target));
+    }
+    if (parsedUrl.pathname === '/api/clis/status' && req.method === 'GET') {
+      return send(200, await cliRunningStatus());
     }
     if (parsedUrl.pathname === '/api/dev/status' && req.method === 'GET') {
       return send(200, await devStatus());
