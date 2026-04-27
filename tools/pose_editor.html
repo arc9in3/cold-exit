@@ -47,7 +47,10 @@
   .slider-row .val  { color: #f1d9a8; font-size: 10px; text-align: right;
                       font-variant-numeric: tabular-nums; }
   .joint-block { margin-bottom: 8px; padding: 6px; background: #15171b;
-                 border: 1px solid #20232a; border-radius: 3px; }
+                 border: 1px solid #20232a; border-radius: 3px;
+                 transition: border-color 0.15s, background 0.15s; }
+  .joint-block.selected { border-color: #c9a87a; background: #1f1d18;
+                          box-shadow: 0 0 0 1px #c9a87a55; }
   .joint-block .title { display: flex; justify-content: space-between;
                         align-items: baseline; margin-bottom: 4px; }
   .joint-block .title .name { color: #b0c0d0; font-size: 11px; font-weight: 500; }
@@ -210,11 +213,12 @@ new ResizeObserver(() => resize()).observe(stage);
 const scene = new THREE.Scene();
 scene.background = new THREE.Color(0x16181c);
 const camera = new THREE.PerspectiveCamera(40, 1, 0.05, 50);
-// Behind-the-actor angle by default so screen-right == actor's
-// anatomical right (the dominant/trigger arm). Front view mirrored
-// the user's mental model and made "Dom shoulder" look like the left
-// arm was moving. Click "Flip camera" to swap to the front view.
-camera.position.set(-2.5, 1.6, -3.0);
+// Three.js characters face -Z by default, so rig.rightArm (at world
+// +X) is the actor's anatomical RIGHT. Camera at +Z puts world +X
+// on screen-RIGHT — the dom/trigger arm visually matches the slider
+// labelled "Dom (right)". Front-view at -Z would mirror the body
+// (right arm appears screen-left) and was the bug the user hit.
+camera.position.set(0, 1.6, 3.5);
 
 const controls = new OrbitControls(camera, renderer.domElement);
 controls.target.set(0, 1.0, 0);
@@ -421,6 +425,99 @@ function _buildJointBlock(id, label) {
 
 for (const j of JOINTS) jointsWrap.appendChild(_buildJointBlock(j.key, j.label));
 weaponWrap.appendChild(_buildJointBlock('weapon', 'Weapon (FBX in-hand offset)'));
+
+// ---------- click-to-select --------------------------------------
+// Tag every descendant mesh of a joint pivot with that joint's key.
+// On canvas click, raycast → hit object → walk up parents until we
+// find a tagged ancestor → highlight + scroll its slider block.
+function _tagDescendants(root, key) {
+  if (!root) return;
+  root.traverse(o => {
+    // Don't overwrite a deeper-joint tag set by a child mkArm call
+    // (shoulder pivot owns the elbow, but elbow owns its own child
+    // meshes — those should resolve to elbow, not shoulder).
+    if (o.userData && o.userData.jointKey === undefined) {
+      o.userData.jointKey = key;
+    }
+  });
+}
+// Tag in reverse order — distal joints first so proximal pivots don't
+// claim their descendants. Wrist owns hand meshes; elbow owns
+// forearm + wristCuff up to (not including) wrist; shoulder owns
+// upper arm + shoulderBulge up to (not including) elbow.
+function _tagArm(arm, shoulderKey, elbowKey, wristKey) {
+  _tagDescendants(arm.hand?.pivot, wristKey);
+  _tagDescendants(arm.wrist, wristKey);
+  _tagDescendants(arm.forearm?.pivot, elbowKey);
+  _tagDescendants(arm.elbow, elbowKey);
+  _tagDescendants(arm.shoulder?.pivot, shoulderKey);
+}
+_tagArm(weaponArm,  'domShoulder', 'domElbow', 'domWrist');
+_tagArm(supportArm, 'supShoulder', 'supElbow', 'supWrist');
+// Spine — tag innermost first so chest descendants resolve to chest,
+// stomach descendants resolve to stomach, etc.
+_tagDescendants(rig.head,    'head');
+_tagDescendants(rig.neck,    'neck');
+_tagDescendants(rig.chest,   'chest');
+_tagDescendants(rig.stomach, 'stomach');
+_tagDescendants(rig.hips,    'hips');
+
+let _selectedKey = null;
+function selectJoint(key) {
+  if (_selectedKey === key) return;
+  _selectedKey = key;
+  // Clear all highlights, then mark the selected block.
+  for (const el of document.querySelectorAll('.joint-block.selected')) {
+    el.classList.remove('selected');
+  }
+  if (!key) return;
+  // Find the slider block whose reset link carries this key.
+  const reset = document.querySelector(`[data-reset="${key}"]`);
+  const block = reset?.closest('.joint-block');
+  if (block) {
+    block.classList.add('selected');
+    block.scrollIntoView({ behavior: 'smooth', block: 'center' });
+  }
+}
+
+const _raycaster = new THREE.Raycaster();
+const _mouse = new THREE.Vector2();
+let _dragMoved = false;
+let _downX = 0, _downY = 0;
+renderer.domElement.addEventListener('pointerdown', (e) => {
+  _dragMoved = false;
+  _downX = e.clientX; _downY = e.clientY;
+});
+renderer.domElement.addEventListener('pointermove', (e) => {
+  if (!e.buttons) return;
+  const dx = e.clientX - _downX, dy = e.clientY - _downY;
+  if (dx * dx + dy * dy > 25) _dragMoved = true;   // 5px threshold
+});
+renderer.domElement.addEventListener('click', (e) => {
+  // Suppress click after an orbit-drag — OrbitControls already
+  // consumed the gesture; we don't want a stray click selecting.
+  if (_dragMoved) return;
+  const rect = renderer.domElement.getBoundingClientRect();
+  _mouse.x =  ((e.clientX - rect.left) / rect.width)  * 2 - 1;
+  _mouse.y = -((e.clientY - rect.top)  / rect.height) * 2 + 1;
+  _raycaster.setFromCamera(_mouse, camera);
+  // Test rig + weapon mesh (if loaded). Use rig.group so all rig
+  // meshes are in scope; the weapon FBX lives inside rig.group too
+  // via _inHandGroup, so a single root covers everything.
+  const hits = _raycaster.intersectObject(rig.group, true);
+  if (!hits.length) { selectJoint(null); return; }
+  // Walk up the parent chain on the first hit until we find a tag.
+  // Weapon FBX meshes are untagged → they resolve to no key → fall
+  // through to selecting "weapon" since they live under _inHandGroup.
+  let o = hits[0].object;
+  let key = null;
+  while (o) {
+    if (o.userData?.jointKey) { key = o.userData.jointKey; break; }
+    if (o === _inHandGroup) { key = 'weapon'; break; }
+    o = o.parent;
+  }
+  selectJoint(key);
+});
 
 // ---------- pose <-> UI sync --------------------------------------
 function writePoseToUI() {
