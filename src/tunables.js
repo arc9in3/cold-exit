@@ -363,7 +363,11 @@ export const tunables = {
       fireMode: 'flame',
       fireRate: 0.6,
       damage: 5,                  // per tick
-      range: 80,
+      // 8m effective range — realistic flamethrower, also matches the
+      // aiFireFlame fallback (6.5m). The previous 80m value made the
+      // visible flame cone cover half the arena and let "The Burn"
+      // boss reach across rooms (compounded by the missing LOS check).
+      range: 8,
       hipSpread: 0,
       adsSpread: 0,
       adsZoom: 0.95,
