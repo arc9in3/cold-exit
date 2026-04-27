@@ -180,11 +180,12 @@ export const tunables = {
     bobAmplitude: 0.08,
   },
   camera: {
-    // Iso ortho frustum height in world units. Bumped 16 → 20 to widen
-    // the on-screen view alongside the LoS-mask range bump (los_mask.js
-    // RAY_RANGE 32 → 48). Player now sees adjacent rooms before
-    // crossing the threshold.
-    viewHeight: 20,
+    // Iso ortho frustum height in world units. Held at 16 — the wider
+    // LoS RAY_RANGE (los_mask.js, 48m) is reached via ADS edge-pan
+    // and the optic frustum push-in. The default zoom stays tight so
+    // the moment-to-moment combat read is the same; ADS rewards you
+    // with extra reach that the new LoS budget can actually fill.
+    viewHeight: 16,
     followLerp: 9,
   },
   xp: {
