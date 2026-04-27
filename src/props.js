@@ -11,6 +11,7 @@
 // — props always sit on the floor).
 
 import * as THREE from 'three';
+import { RoundedBoxGeometry } from 'three/addons/geometries/RoundedBoxGeometry.js';
 
 // Global prop scale. With the rig now at ~1.85m (realistic human
 // scale), props authored at real-world sizes land at the right
@@ -49,6 +50,72 @@ function cyl(radius, h, color, segments = 14) {
     new THREE.CylinderGeometry(radius, radius, h, segments),
     mat(color),
   );
+  m.castShadow = true;
+  m.receiveShadow = true;
+  return m;
+}
+
+// =====================================================================
+// Polish primitives — softer silhouettes per the Assets/levels1.png
+// reference. Three helpers + a shared geometry cache so the visual
+// upgrade doesn't cost extra GPU buffers when the same prop dims
+// repeat across rooms.
+//
+// Buffers are cached by hash of constructor args. With one shared
+// buffer per (w, h, d, radius) tuple, a level full of similar
+// couches / tables / lockers reuses the same RoundedBoxGeometry
+// across every instance.
+//
+// Same dispose-guard pattern as actor_rig: mesh.userData.shared = true
+// so any traversal-based dispose loop can skip these buffers.
+// =====================================================================
+const _propGeomCache = new Map();
+function _stamp(g) {
+  g.userData = g.userData || {};
+  g.userData.sharedRigGeom = true;
+  return g;
+}
+
+function _roundedBoxGeom(w, h, d, radius, segments = 2) {
+  const key = `rbox|${w}|${h}|${d}|${radius}|${segments}`;
+  let g = _propGeomCache.get(key);
+  if (!g) {
+    // RoundedBoxGeometry's segments param controls bevel quality.
+    // 2 is the sweet spot — soft enough to read as "designed," cheap
+    // enough not to bloat vertex counts (~96 verts vs 8 for a Box).
+    g = _stamp(new RoundedBoxGeometry(w, h, d, segments, radius));
+    _propGeomCache.set(key, g);
+  }
+  return g;
+}
+
+function _taperedCylGeom(topR, botR, h, segs = 12) {
+  const key = `tcyl|${topR}|${botR}|${h}|${segs}`;
+  let g = _propGeomCache.get(key);
+  if (!g) {
+    g = _stamp(new THREE.CylinderGeometry(topR, botR, h, segs));
+    _propGeomCache.set(key, g);
+  }
+  return g;
+}
+
+// Soft chamfered box — looks like a real piece of furniture, not a
+// programmer-art cube. Default radius is 5% of the smallest
+// dimension so small props (vase, planter) get a subtle bevel and
+// big props (couch, locker) get a more visible one.
+function roundedBox(w, h, d, color, opts = {}) {
+  const minDim = Math.min(w, h, d);
+  const radius = opts.radius ?? Math.min(0.06, minDim * 0.18);
+  const m = new THREE.Mesh(_roundedBoxGeom(w, h, d, radius, opts.segments || 2), mat(color));
+  m.castShadow = opts.cast !== false;
+  m.receiveShadow = true;
+  return m;
+}
+
+// Tapered cylinder — for chair legs, lamp stems, classical pillars.
+// `topR` and `botR` differ; reads as "designed" rather than "pipe."
+function tapered(topR, botR, h, color, segs = 12) {
+  const m = new THREE.Mesh(_taperedCylGeom(topR, botR, h, segs), mat(color));
   m.castShadow = true;
   m.receiveShadow = true;
   return m;
@@ -99,19 +166,27 @@ export function buildTable(opts = {}) {
   const h = opts.h ?? 0.75;
   const wood = opts.color ?? COL.woodMid;
   const group = new THREE.Group();
-  // Top slab.
-  const top = box(w, 0.08, d, wood);
+  // Top slab — chamfered so the corners read as a real edge profile.
+  const top = roundedBox(w, 0.08, d, wood, { radius: 0.025 });
   top.position.y = h - 0.04;
   group.add(top);
-  // Four legs near the corners.
-  const legW = 0.08;
-  const legH = h - 0.08;
+  // Apron — the rim under the top connecting the legs. Reads as a
+  // proper piece of furniture rather than a slab on stilts.
+  const apronH = 0.06;
+  const apron = roundedBox(w * 0.92, apronH, d * 0.92, COL.woodDark, { radius: 0.02 });
+  apron.position.y = h - 0.08 - apronH / 2;
+  group.add(apron);
+  // Four legs — slightly tapered (top wider than bottom = sturdy
+  // craftsman feel). Square section, gentle taper.
+  const legTopR = 0.04;
+  const legBotR = 0.034;
+  const legH = h - 0.14;
   const legY = legH / 2;
-  const dx = (w - legW) * 0.46;
-  const dz = (d - legW) * 0.46;
+  const dx = (w * 0.92 - legTopR * 2) * 0.5;
+  const dz = (d * 0.92 - legTopR * 2) * 0.5;
   for (const sx of [-dx, dx]) {
     for (const sz of [-dz, dz]) {
-      const leg = box(legW, legH, legW, COL.woodDark);
+      const leg = tapered(legTopR, legBotR, legH, COL.woodDark, 6);
       leg.position.set(sx, legY, sz);
       group.add(leg);
     }
@@ -151,23 +226,24 @@ export function buildChair(opts = {}) {
   const backH = opts.backH ?? 0.55;
   const wood = opts.color ?? COL.woodMid;
   const group = new THREE.Group();
-  // Seat.
-  const seat = box(w, 0.06, d, wood);
+  // Seat — soft chamfer.
+  const seat = roundedBox(w, 0.06, d, wood, { radius: 0.02 });
   seat.position.y = seatH - 0.03;
   group.add(seat);
-  // Back rest — vertical slab behind the seat.
-  const back = box(w * 0.9, backH, 0.05, wood);
+  // Back rest — softer with a rounded top.
+  const back = roundedBox(w * 0.9, backH, 0.05, wood, { radius: 0.03 });
   back.position.set(0, seatH + backH / 2, -d / 2 + 0.025);
   group.add(back);
-  // Four legs.
-  const legW = 0.05;
+  // Four tapered legs — top wider than bottom for stability silhouette.
+  const legTopR = 0.027;
+  const legBotR = 0.022;
   const legH = seatH - 0.06;
   const legY = legH / 2;
-  const dx = (w - legW) * 0.46;
-  const dz = (d - legW) * 0.46;
+  const dx = (w - 0.06) * 0.46;
+  const dz = (d - 0.06) * 0.46;
   for (const sx of [-dx, dx]) {
     for (const sz of [-dz, dz]) {
-      const leg = box(legW, legH, legW, COL.woodDark);
+      const leg = tapered(legTopR, legBotR, legH, COL.woodDark, 6);
       leg.position.set(sx, legY, sz);
       group.add(leg);
     }
@@ -229,22 +305,22 @@ export function buildBed(opts = {}) {
   const frameH = opts.frameH ?? 0.3;
   const wood = opts.color ?? COL.woodDark;
   const group = new THREE.Group();
-  // Frame.
-  const frame = box(w, frameH, d, wood);
+  // Frame — chamfered for a softer wooden feel.
+  const frame = roundedBox(w, frameH, d, wood, { radius: 0.04 });
   frame.position.y = frameH / 2;
   group.add(frame);
-  // Mattress.
+  // Mattress — round the corners so it reads as foam, not a slab.
   const matH = 0.18;
-  const mat_ = box(w - 0.06, matH, d - 0.06, COL.linen);
+  const mat_ = roundedBox(w - 0.06, matH, d - 0.06, COL.linen, { radius: 0.05 });
   mat_.position.y = frameH + matH / 2;
   group.add(mat_);
-  // Pillow at head of bed.
-  const pillow = box(w * 0.5, 0.1, 0.3, COL.paper);
+  // Pillow — soft pad with rounded edges.
+  const pillow = roundedBox(w * 0.5, 0.1, 0.3, COL.paper, { radius: 0.04 });
   pillow.position.set(0, frameH + matH + 0.06, -d / 2 + 0.22);
   group.add(pillow);
-  // Headboard.
-  const head = box(w + 0.06, 0.5, 0.08, wood);
-  head.position.set(0, frameH + 0.25, -d / 2 + 0.04);
+  // Headboard — taller, with a softer top edge.
+  const head = roundedBox(w + 0.06, 0.6, 0.08, wood, { radius: 0.06 });
+  head.position.set(0, frameH + 0.30, -d / 2 + 0.04);
   group.add(head);
   return { group, collision: { w, d } };
 }
@@ -254,30 +330,30 @@ export function buildCouch(opts = {}) {
   const d = opts.d ?? 0.85;
   const fabric = opts.color ?? COL.fabric;
   const group = new THREE.Group();
-  // Base.
+  // Base — chamfered slab so the couch reads as upholstered, not boxy.
   const baseH = 0.38;
-  const base = box(w, baseH, d, fabric);
+  const base = roundedBox(w, baseH, d, fabric, { radius: 0.06 });
   base.position.y = baseH / 2;
   group.add(base);
-  // Back.
-  const backH = 0.55;
-  const back = box(w, backH, 0.22, fabric);
+  // Back — slightly thicker than before so the silhouette has weight.
+  const backH = 0.58;
+  const back = roundedBox(w, backH, 0.22, fabric, { radius: 0.05 });
   back.position.set(0, baseH + backH / 2, -d / 2 + 0.11);
   group.add(back);
-  // Arms (left + right).
+  // Arms — taller than the back rest by a hair (real couches do this),
+  // with a soft rounded top.
+  const armH = backH + 0.06;
   for (const sx of [-w / 2 + 0.12, w / 2 - 0.12]) {
-    const arm = box(0.22, backH, d, fabric);
-    arm.position.set(sx, baseH + backH / 2, 0);
+    const arm = roundedBox(0.22, armH, d, fabric, { radius: 0.08 });
+    arm.position.set(sx, baseH + armH / 2, 0);
     group.add(arm);
   }
-  // Seat cushions (stylized, two pads).
-  const cushionGap = 0.02;
+  // Seat cushions — soft rounded pads, slightly proud of the base.
   for (const sx of [-w / 4, w / 4]) {
-    const cush = box(w / 2 - 0.2, 0.14, d - 0.3, COL.linen);
+    const cush = roundedBox(w / 2 - 0.22, 0.14, d - 0.32, COL.linen, { radius: 0.05 });
     cush.position.set(sx, baseH + 0.07, 0.05);
     group.add(cush);
   }
-  void cushionGap;
   return { group, collision: { w, d } };
 }
 
@@ -391,15 +467,15 @@ export function buildNightstand(opts = {}) {
   const h = opts.h ?? 0.55;
   const wood = opts.color ?? COL.woodDark;
   const group = new THREE.Group();
-  const body = box(w, h, d, wood);
+  const body = roundedBox(w, h, d, wood, { radius: 0.03 });
   body.position.y = h / 2;
   group.add(body);
-  // Drawer face.
-  const face = box(w - 0.06, 0.2, 0.02, COL.woodLight);
+  // Drawer face — rounded so it pops as a recessed panel.
+  const face = roundedBox(w - 0.06, 0.2, 0.02, COL.woodLight, { radius: 0.015 });
   face.position.set(0, h * 0.7, d / 2 + 0.01);
   group.add(face);
-  // Handle.
-  const handle = box(0.08, 0.025, 0.04, COL.metalDark);
+  // Handle — small rounded pill.
+  const handle = roundedBox(0.08, 0.025, 0.04, COL.metalDark, { radius: 0.012 });
   handle.position.set(0, h * 0.7, d / 2 + 0.03);
   group.add(handle);
   return { group, collision: { w, d } };
@@ -445,25 +521,28 @@ export function buildRug(opts = {}) {
 // new code shouldn't introduce more dynamic lights.
 
 // Concrete pillar — fat round column with a small base + capital.
-// Common in garage / penthouse / lobby. Strong cover, blocks bullets
-// and movement; placement rules in Phase 3 keep them from clustering
-// across narrow corridors.
+// Common in garage / penthouse / lobby. Subtle entasis (gentle
+// barrel-shape) reads as a real architectural column instead of a
+// pipe.
 export function buildPillar(opts = {}) {
   const r = opts.r ?? 0.32;
-  const h = opts.h ?? 3.0;             // floor → ceiling
+  const h = opts.h ?? 3.0;
   const color = opts.color ?? COL.concrete;
   const group = new THREE.Group();
-  // Base flange.
-  const base = cyl(r * 1.2, 0.08, COL.metalDark, 16);
-  base.position.y = 0.04;
+  // Base flange — wider plinth.
+  const baseH = 0.10;
+  const base = tapered(r * 1.30, r * 1.30, baseH, COL.metalDark, 16);
+  base.position.y = baseH / 2;
   group.add(base);
-  // Shaft.
-  const shaft = cyl(r, h - 0.16, color, 16);
-  shaft.position.y = h / 2;
+  // Lower shaft — slightly wider at the base than mid-shaft (entasis).
+  const shaftH = h - baseH - 0.10;
+  const shaft = tapered(r * 0.94, r * 1.04, shaftH, color, 16);
+  shaft.position.y = baseH + shaftH / 2;
   group.add(shaft);
-  // Capital.
-  const cap = cyl(r * 1.15, 0.08, COL.metalDark, 16);
-  cap.position.y = h - 0.04;
+  // Capital — wider abacus at the top.
+  const capH = 0.10;
+  const cap = tapered(r * 1.22, r * 1.10, capH, COL.metalDark, 16);
+  cap.position.y = h - capH / 2;
   group.add(cap);
   return { group, collision: { w: r * 2, d: r * 2 } };
 }
@@ -477,13 +556,14 @@ export function buildBench(opts = {}) {
   const seatColor = opts.color ?? COL.fabric;
   const legColor = opts.legColor ?? COL.metalDark;
   const group = new THREE.Group();
-  // Seat slab.
-  const seat = box(w, 0.10, d, seatColor);
+  // Seat slab — soft rounded edges, reads as upholstered.
+  const seat = roundedBox(w, 0.10, d, seatColor, { radius: 0.04 });
   seat.position.y = h - 0.05;
   group.add(seat);
-  // Two leg blocks running the full depth.
+  // Two leg blocks — rounded so they look like turned wood / cast
+  // metal, not raw 2x4s.
   for (const sx of [-w / 2 + 0.08, w / 2 - 0.08]) {
-    const leg = box(0.10, h - 0.10, d - 0.04, legColor);
+    const leg = roundedBox(0.10, h - 0.10, d - 0.04, legColor, { radius: 0.025 });
     leg.position.set(sx, (h - 0.10) / 2, 0);
     group.add(leg);
   }
@@ -499,21 +579,22 @@ export function buildLocker(opts = {}) {
   const h = opts.h ?? 1.85;
   const color = opts.color ?? COL.metal;
   const group = new THREE.Group();
-  const body = box(w, h, d, color);
+  // Body — rounded so the silhouette has manufactured-product feel.
+  const body = roundedBox(w, h, d, color, { radius: 0.035 });
   body.position.y = h / 2;
   group.add(body);
-  // Door seam down the middle of the front face.
+  // Door seam.
   const seam = box(0.02, h - 0.10, 0.02, COL.metalDark);
   seam.position.set(0, h / 2, d / 2 + 0.005);
   group.add(seam);
-  // Vent slats — three short horizontal bars at the top of each door.
+  // Vent slats.
   for (let i = 0; i < 3; i++) {
     const vent = box(w * 0.35, 0.025, 0.02, COL.metalDark);
     vent.position.set(0, h - 0.18 - i * 0.05, d / 2 + 0.012);
     group.add(vent);
   }
-  // Handle.
-  const handle = box(0.04, 0.10, 0.03, COL.metalDark);
+  // Handle — rounded grip pill.
+  const handle = roundedBox(0.04, 0.10, 0.03, COL.metalDark, { radius: 0.012 });
   handle.position.set(w * 0.30, h * 0.5, d / 2 + 0.015);
   group.add(handle);
   return { group, collision: { w, d } };
