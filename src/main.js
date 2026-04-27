@@ -4600,6 +4600,16 @@ function fireOneShot(playerInfo, weapon, aimPoint, isADS, aimOwner) {
       && Math.random() < derivedStats.instantReloadChance) {
     weapon.ammo = eff.magSize;
   }
+  // Auto-reload on emptying the magazine. Without this the player has
+  // to release the trigger and re-press to start a reload — held-trigger
+  // auto-fire (the most common play pattern) gets stuck on dry-clicks
+  // until they let go. tryReload is a no-op if a reload is already in
+  // flight or the mag is already full, so calling it unconditionally
+  // when ammo hits 0 is safe.
+  if (typeof weapon.ammo === 'number' && weapon.ammo <= 0
+      && !weapon.infiniteAmmo) {
+    tryReload(weapon);
+  }
   sfx.fire(weapon.class || 'pistol');
   alertEnemiesFromShot(tracerFrom);
   // Player recoil spring — animation layer reads this via the rig's

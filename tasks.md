@@ -23,6 +23,9 @@ Status legend: `open` (unassigned, ready) · `in-progress` ·
 
 | Task | Owner | Shipped |
 |---|---|---|
+| Phase 3 — Smart placement rules (keepouts, corner avoidance, perimeter bias, inward yaw, chair pairing, prop-loot, kiosk colliders, encounter colliders) | claude | 2026-04-27 |
+| Loot-area pile prompt + grunt drop nerf, elite drop buff | claude | 2026-04-27 |
+| Auto-reload on emptying the magazine | claude | 2026-04-27 |
 | BVH/grid for `_hitsObstacle` (5.9x at current scale, 25x stress-scale) | codex | 2026-04-27 |
 | Weapon FBX audit script (`tools/audit_weapon_fbx.py`) | codex | 2026-04-27 |
 | Plain-English summary + tasks view + AI summary on review dashboard | claude | 2026-04-27 |

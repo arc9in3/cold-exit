@@ -1152,6 +1152,11 @@ export const ENCOUNTER_DEFS = {
         mesh.userData.zone = 'glass';
         mesh.userData.owner = target;
       }
+      // Glass case is solid — register a collider so the player can't
+      // walk into the shooting line.
+      const _caseCollider = ctx.level?.addEncounterCollider
+        ? ctx.level.addEncounterCollider(disc.cx, disc.cz, 1.2, 1.2, 1.6)
+        : null;
       return {
         built, label, disc, reward,
         target,
@@ -1161,6 +1166,7 @@ export const ENCOUNTER_DEFS = {
         phase: 'idle',
         telegraphT: 0,
         complete: false,
+        _caseCollider,
       };
     },
     tick(dt, ctx) {
@@ -2379,7 +2385,11 @@ export const ENCOUNTER_DEFS = {
       hint.scale.set(4.6, 0.65, 1);
       hint.position.set(disc.cx, 0.55, disc.cz + 1.8);
       scene.add(hint);
-      return { houseGroup, label, hint, disc, complete: false };
+      // Tiny settlement — the cluster spans ~2m wide.
+      const _settlementCollider = ctx.level?.addEncounterCollider
+        ? ctx.level.addEncounterCollider(disc.cx, disc.cz, 2.0, 1.4, 1.0)
+        : null;
+      return { houseGroup, label, hint, disc, complete: false, _settlementCollider };
     },
     tick(_dt, _ctx) { /* purely decorative; no per-frame state */ },
     onItemDropped(item, ctx) {
@@ -2667,7 +2677,10 @@ export const ENCOUNTER_DEFS = {
       const label = _makeLabelSprite('THE TOME', '#c8b8ff');
       label.position.set(disc.cx, 2.4, disc.cz);
       scene.add(label);
-      return { group, label, disc, complete: false };
+      const _tomeCollider = ctx.level?.addEncounterCollider
+        ? ctx.level.addEncounterCollider(disc.cx, disc.cz, 0.9, 0.9, 1.4)
+        : null;
+      return { group, label, disc, complete: false, _tomeCollider };
     },
     tick(_dt, _ctx) { /* purely interactive */ },
     interact(ctx) {
