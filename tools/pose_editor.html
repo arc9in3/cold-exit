@@ -226,12 +226,12 @@ new ResizeObserver(() => resize()).observe(stage);
 const scene = new THREE.Scene();
 scene.background = new THREE.Color(0x16181c);
 const camera = new THREE.PerspectiveCamera(40, 1, 0.05, 50);
-// Three.js characters face -Z by default, so rig.rightArm (at world
-// +X) is the actor's anatomical RIGHT. Camera at +Z puts world +X
-// on screen-RIGHT — the dom/trigger arm visually matches the slider
-// labelled "Dom (right)". Front-view at -Z would mirror the body
-// (right arm appears screen-left) and was the bug the user hit.
-camera.position.set(0, 1.6, 3.5);
+// Rig forward = +Z (gun extends from rightShoulderAnchor toward +Z;
+// muzzle Object3D placed at +Z offset). So actor faces +Z. Camera at
+// -Z puts us BEHIND the actor: screen-right then matches actor's
+// anatomical right (rig.rightArm at world +X). +Z camera would be a
+// front mirror view where Dom appears on screen-left.
+camera.position.set(0, 1.6, -3.5);
 
 const controls = new OrbitControls(camera, renderer.domElement);
 controls.target.set(0, 1.0, 0);
@@ -733,15 +733,17 @@ function applyPose() {
   (rig.chestMesh || rig.chest).getWorldPosition(chestWorld);
   fireOriginMarker.position.copy(chestWorld);
 
-  // Aim direction. Actor faces -Z by default, so yaw=0/pitch=0 →
-  // world (0, 0, -1). Positive yaw rotates toward actor's right (+X);
-  // positive pitch tilts up.
+  // Aim direction. Actor faces +Z in this rig — the shoulder-anchor
+  // forward offset (0, 0, +len) places the gun barrel toward +Z, and
+  // the in-game muzzle Object3D sits at the same +Z offset. So
+  // yaw=0/pitch=0 must produce world (0, 0, +1). Positive yaw
+  // rotates toward actor's right (+X); positive pitch tilts up.
   const yaw   = parseFloat(document.getElementById('aim-yaw').value);
   const pitch = parseFloat(document.getElementById('aim-pitch').value);
   const aimDir = new THREE.Vector3(
-     Math.sin(yaw)  * Math.cos(pitch),
-     Math.sin(pitch),
-    -Math.cos(yaw)  * Math.cos(pitch),
+    Math.sin(yaw)  * Math.cos(pitch),
+    Math.sin(pitch),
+    Math.cos(yaw)  * Math.cos(pitch),
   );
   const cursorWorld = chestWorld.clone().addScaledVector(aimDir, AIM_DISTANCE);
 
