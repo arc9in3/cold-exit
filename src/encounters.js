@@ -2721,7 +2721,10 @@ export const ENCOUNTER_DEFS = {
         s.celebrateT -= dt;
         s.bubbleTimer -= dt;
         if (s.bubbleTimer <= 0) {
-          s.bubbleTimer = 0.012;
+          // ~50 bubbles/sec — fast enough to feel like a flood, slow
+          // enough that the 24-slot bubble pool isn't churning
+          // setTimeout/clearTimeout pairs every frame.
+          s.bubbleTimer = 0.080;
           const cb = ctx.room?.bounds;
           if (cb) {
             const spawn = ctx.spawnSpeechRaw || ctx.spawnSpeech;

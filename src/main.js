@@ -1077,10 +1077,14 @@ function setWeaponIndex(i) {
 }
 function onInventoryChanged() {
   const rotation = getRotation();
-  if (rotation.length === 0) { currentWeaponIndex = 0; return; }
+  if (rotation.length === 0) { currentWeaponIndex = 0; recomputeStats(); return; }
   if (currentWeaponIndex >= rotation.length) currentWeaponIndex = 0;
   const w = currentWeapon();
   if (w) { player.setWeapon(w); setCursorForWeapon(w); }
+  // Inventory mutations can drop the equipped weapon out of the
+  // rotation entirely (e.g. dropping Pain). Without a recompute the
+  // last weapon's `equipMods` (Pain's −50% max HP) would persist.
+  recomputeStats();
 }
 
 // Shared drag-state so both InventoryUI and CustomizeUI can see what's being
@@ -1239,7 +1243,12 @@ const shopUI = new ShopUI({
       // equipMods (66% melee lifesteal + 0.5× max HP).
       const painDef = tunables.weapons.find(w => w.name === 'Pain');
       if (!painDef) return false;
-      const pain = wrapWeapon(painDef);
+      // Force mythic — wrapWeapon would otherwise call rollWeaponRarity
+      // and might roll Pain down to common/uncommon, losing the mythic
+      // visual tier. equipMods are spread from the def either way.
+      const pain = wrapWeapon(painDef, { rarity: 'mythic' });
+      pain.rarity = 'mythic';
+      pain.mythic = true;
       if (!inventory.add(pain)) {
         // Backpack full — refuse so the toy stays in inventory and
         // the player can clear space.

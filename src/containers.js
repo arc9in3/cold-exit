@@ -79,6 +79,10 @@ function rollItemForType(type, levelIdx) {
       : withAffixes(_withDur(randomGear()));
   }
   if (type === 'medical') {
+    // Encounter-only consumables (e.g. cheesecake) ARE allowed in
+    // medical chests — they're themed-source loot. Just excluded
+    // from the generic randomConsumable() pool. Keeps Sleepy Beauty
+    // discoverable without diluting backpack drops.
     const heals = ALL_CONSUMABLES.filter(c =>
       c.useEffect?.kind === 'heal' || c.useEffect?.kind === 'buff');
     const pool = heals.length ? heals : ALL_CONSUMABLES;

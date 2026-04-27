@@ -1175,12 +1175,16 @@ export const CONSUMABLE_DEFS = {
     tint: 0x80e0ff,
     useEffect: { kind: 'buff', id: 'energy', mods: { staminaRegenMult: 1.5 }, life: 18 },
     description: '+50% stamina regen for 18s' },
-  // Apr-26 — encounter trigger item. Drop near "Sleepy Beauty" to wake
+  // Apr-26 — encounter-only item. Drop near "Sleepy Beauty" to wake
   // her and claim a random reward. Doubles as a small heal if eaten.
+  // _encounter flag keeps it OUT of randomConsumable, healer shops
+  // and medical chests so the only legitimate way to acquire one
+  // is through the broken_vendor → quest line (or future hooks).
   cheesecake: { id: 'cons_cheesecake', name: 'Cheesecake', type: 'consumable', rarity: 'rare',
     tint: 0xeac98a,
     useEffect: { kind: 'heal', amount: 25 },
-    description: 'A slice of dessert · heals 25 HP · they say a sleeping princess loves these' },
+    description: 'A slice of dessert · heals 25 HP · they say a sleeping princess loves these',
+    _encounter: true },
 
   // --- Extended medical kit (new tiers + buff injectors) ---
   tourniquet: { id: 'cons_tourniquet', name: 'Tourniquet', type: 'consumable', rarity: 'common',
@@ -1428,8 +1432,12 @@ export function randomGear() {
   const src = pool.length ? pool : ALL_GEAR;
   return rollActionSlotBonus(withAffixes(clone(src[Math.floor(Math.random() * src.length)])));
 }
+// Encounter-only consumables (cheesecake, etc.) are excluded from
+// the random pool so they only appear via their dedicated quest hook.
+const _RANDOM_CONSUMABLE_POOL = ALL_CONSUMABLES.filter(c => !c._encounter);
 export function randomConsumable() {
-  return maybeApplyMastercraft(stampItemDims(clone(ALL_CONSUMABLES[Math.floor(Math.random() * ALL_CONSUMABLES.length)])));
+  const pool = _RANDOM_CONSUMABLE_POOL.length ? _RANDOM_CONSUMABLE_POOL : ALL_CONSUMABLES;
+  return maybeApplyMastercraft(stampItemDims(clone(pool[Math.floor(Math.random() * pool.length)])));
 }
 
 // Wraps a weapon tunable into an inventory item with per-instance state
