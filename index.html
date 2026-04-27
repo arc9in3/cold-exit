@@ -1707,6 +1707,14 @@
     .split-modal-ok { background: #4a6a3a; color: #fff;
                       border: 1px solid #5a8a4a; font-weight: 700; }
     .split-modal-ok:hover { background: #5a8a4a; }
+    /* Attachment hover glow on a paperdoll equipment slot — same
+       gold treatment as the in-grid attach-glow preview overlay so
+       the affordance reads identically wherever the weapon lives. */
+    .inv-slot.attach-glow {
+      border-color: rgba(240, 200, 80, 0.95) !important;
+      box-shadow: 0 0 14px rgba(240, 200, 80, 0.85),
+                  inset 0 0 12px rgba(240, 200, 80, 0.45) !important;
+    }
     /* Attachment-on-weapon hover glow — overlays the weapon's full
        footprint when a compatible attachment is being dragged onto it.
        Drop will auto-equip into the matching slot (swap if occupied). */

@@ -753,6 +753,7 @@ export class InventoryUI {
   _updateCustomDropPreview(clientX, clientY) {
     this._clearCellPreview();
     this.gridEl.querySelectorAll('.inv-slot.drop-ok').forEach(el => el.classList.remove('drop-ok'));
+    this.gridEl.querySelectorAll('.inv-slot.attach-glow').forEach(el => el.classList.remove('attach-glow'));
     document.querySelectorAll('.action-slot.drop-ok, .weapon-slot.drop-ok')
       .forEach(el => el.classList.remove('drop-ok'));
     const target = document.elementFromPoint(clientX, clientY);
@@ -773,6 +774,17 @@ export class InventoryUI {
     if (slot) {
       const slotId = slot.dataset.slot;
       const d = this.getDragState();
+      // Attachment-on-equipped-weapon hover: gold glow class on the
+      // paperdoll cell to mirror the in-grid attach-glow preview.
+      if (d && d.item && d.item.type === 'attachment') {
+        const equippedItem = this.inventory.equipment[slotId];
+        if (equippedItem
+            && (equippedItem.type === 'ranged' || equippedItem.type === 'melee')
+            && equippedItem.attachments && (d.item.slot in equippedItem.attachments)) {
+          slot.classList.add('attach-glow');
+          return;
+        }
+      }
       if (d && d.item && this.inventory.canSlotHold(slotId, d.item)) {
         slot.classList.add('drop-ok');
       }
@@ -846,6 +858,22 @@ export class InventoryUI {
     const slot = this._closest(target, '.inv-slot');
     if (slot) {
       const slotId = slot.dataset.slot;
+      // Attachment dropped on an equipped weapon (paperdoll) → equip
+      // into the matching slot on that weapon. Mirrors the grid-cell
+      // intercept above so the gesture works whether the weapon is in
+      // a bag or already worn.
+      if (item.type === 'attachment') {
+        const equippedItem = this.inventory.equipment[slotId];
+        if (equippedItem
+            && (equippedItem.type === 'ranged' || equippedItem.type === 'melee')
+            && equippedItem.attachments && (item.slot in equippedItem.attachments)) {
+          srcGrid.remove(item);
+          const ok = this.inventory.attachToWeapon(equippedItem, item.slot, item);
+          if (!ok) this.inventory.add(item);
+          this.render();
+          return;
+        }
+      }
       if (!this.inventory.canSlotHold(slotId, item)) return;
       const prev = this.inventory.equipment[slotId];
       srcGrid.remove(item);
