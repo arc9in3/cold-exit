@@ -3,7 +3,9 @@ import { tunables } from './tunables.js';
 import { buildRig, initAnim, updateAnim, pokeHit, pokeRecoil, pokeDeath } from './actor_rig.js';
 import { spawnSpeechBubble } from './hud.js';
 import { loadModelClone, fitToRadius } from './gltf_cache.js';
-import { modelForItem } from './model_manifest.js';
+import { modelForItem, shouldMirrorInHand,
+         rotationOverrideForModelPath, scaleForModelPath,
+         gripOffsetForModelPath } from './model_manifest.js';
 import { buildMeleePrimitive } from './melee_primitives.js';
 import { swapInBakedCorpse } from './corpse_bake.js';
 
@@ -605,11 +607,26 @@ export class GunmanManager {
             lmg: 0.75, flame: 0.7, melee: 0.7, sniper: 0.75,
           };
           const cs = CLASS_SCALE[chosen.class] ?? 0.7;
-          fitToRadius(clone, chosen.muzzleLength * cs);
+          // Mirror the player's setWeapon FBX-prep pipeline
+          // (player.js ~360+): pack-scale on the fit radius,
+          // rotation-override > tunable rotation > default,
+          // mirror flag for lowpolyguns, and grip offset. Without
+          // these, lowpoly weapons (AK, Spectre, SPC*) showed up
+          // backwards in enemy hands.
+          fitToRadius(clone, chosen.muzzleLength * cs * scaleForModelPath(modelUrl));
           const r = chosen.modelRotation;
-          if (r) clone.rotation.set(r.x || 0, r.y || 0, r.z || 0);
-          else   clone.rotation.set(0, Math.PI / 2, 0);
+          const rotOverride = rotationOverrideForModelPath(modelUrl);
+          if (rotOverride) {
+            clone.rotation.set(rotOverride.x || 0, rotOverride.y || 0, rotOverride.z || 0);
+          } else if (r) {
+            clone.rotation.set(r.x || 0, r.y || 0, r.z || 0);
+          } else {
+            clone.rotation.set(0, Math.PI / 2, 0);
+          }
+          if (shouldMirrorInHand(chosen)) clone.scale.x = -clone.scale.x;
           clone.position.set(0, 0, 0);
+          const gripOff = gripOffsetForModelPath(modelUrl);
+          if (gripOff) clone.position.set(gripOff.x || 0, gripOff.y || 0, gripOff.z || 0);
           weaponModel.add(clone);
           weaponModel.visible = true;
           gun.visible = false;
