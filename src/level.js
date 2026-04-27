@@ -2281,16 +2281,25 @@ export class Level {
     light.position.set(0, 1.8, -0.3);
     group.add(light);
 
-    // Pick a placement slot: pressed against a random wall so shops don't
-    // always sit in the exact centre of the room. The kiosk's +Z is its
-    // back, so we rotate the group so the back faces the chosen wall.
+    // Pick a placement slot. Iso camera sits at (+X, +Y, +Z) offset
+    // looking back at the player, so a shop pressed against the
+    // EAST wall or SOUTH wall has its back to the camera and the
+    // player can't read what kind of shop it is. Keep only the
+    // walls / centre placements that face the camera (or at worst,
+    // sideways) so the displays + signage are readable.
     const b = room.bounds;
     const spots = [
-      { x: b.minX + 2.2, z: (b.minZ + b.maxZ) / 2, rot: Math.PI / 2 },  // west wall, face east
-      { x: b.maxX - 2.2, z: (b.minZ + b.maxZ) / 2, rot: -Math.PI / 2 }, // east wall, face west
-      { x: (b.minX + b.maxX) / 2, z: b.minZ + 2.2, rot: 0 },            // north wall, face south
-      { x: (b.minX + b.maxX) / 2, z: b.maxZ - 2.2, rot: Math.PI },      // south wall, face north
-      { x: room.cx, z: room.cz, rot: Math.random() * Math.PI * 2 },     // classic center
+      // West wall, face east — camera sees the front in 3/4 from the right.
+      { x: b.minX + 2.2, z: (b.minZ + b.maxZ) / 2, rot: Math.PI / 2 },
+      // North wall, face south — camera sees the front straight on
+      // (this is the "top of screen" placement).
+      { x: (b.minX + b.maxX) / 2, z: b.minZ + 2.2, rot: 0 },
+      // Centre — rotation biased toward the camera (front pointed at
+      // +X+Z corner). ±15° wobble so it doesn't look perfectly canned.
+      {
+        x: room.cx, z: room.cz,
+        rot: Math.PI / 4 + (Math.random() - 0.5) * (Math.PI / 6),
+      },
     ];
     const spot = spots[Math.floor(Math.random() * spots.length)];
     group.position.set(spot.x, 0, spot.z);

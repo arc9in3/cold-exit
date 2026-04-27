@@ -195,8 +195,15 @@ export class ProjectileManager {
         continue;
       }
 
-      // Obstacle contact — AABB check against solid walls.
-      const hitWall = this._hitsObstacle(level, nx, ny, nz);
+      // Obstacle contact — AABB check against solid walls. Molotovs
+      // skip this check entirely: they're glass bottles arcing high
+      // over walls and the only thing that matters is the floor
+      // contact (which spawns the fire pool). The previous bounce-
+      // off-walls behaviour was confusing — throws looked like they
+      // were destroyed mid-air or ricocheted off invisible geometry.
+      const hitWall = p.throwKind === 'molotov'
+        ? false
+        : this._hitsObstacle(level, nx, ny, nz);
       if (hitWall) {
         if (p.type === 'rocket') {
           this._detPos.set(nx, Math.max(0.08, ny), nz);

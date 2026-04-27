@@ -114,11 +114,29 @@ function _spawnFloorDisc(scene, room, color) {
 // `texture.image` text via canvas for prompt updates.
 function _makeLabelSprite(text, color = '#e8dfc8') {
   const canvas = document.createElement('canvas');
-  canvas.width = 512; canvas.height = 96;
+  // Canvas grows with text length so longer hint lines (e.g. the
+  // Tailor's "drop a broken piece, she'll mend it") don't get clipped
+  // by a fixed 512px width. Sprite.scale.x scales proportionally so
+  // the world-space width matches the canvas aspect.
+  const FONT = 'bold 36px ui-monospace, monospace';
+  const PAD_X = 32;     // bg pill horizontal padding (px)
+  const HEIGHT = 96;    // canvas height stays fixed (single line)
+  // Measure first to size the canvas.
+  const m = canvas.getContext('2d');
+  m.font = FONT;
+  let lastText = text;
+  const baseWorldH = 0.78;
   const ctx = canvas.getContext('2d');
   const draw = (str) => {
+    lastText = str;
+    const measured = Math.ceil(ctx.measureText(str).width);
+    const w = Math.max(512, measured + PAD_X * 2);
+    if (canvas.width !== w || canvas.height !== HEIGHT) {
+      canvas.width = w;
+      canvas.height = HEIGHT;
+    }
+    ctx.font = FONT;
     ctx.clearRect(0, 0, canvas.width, canvas.height);
-    ctx.font = 'bold 36px ui-monospace, monospace';
     ctx.textAlign = 'center';
     ctx.textBaseline = 'middle';
     ctx.fillStyle = 'rgba(0,0,0,0.78)';
@@ -126,6 +144,8 @@ function _makeLabelSprite(text, color = '#e8dfc8') {
     ctx.fillStyle = color;
     ctx.fillText(str, canvas.width / 2, canvas.height / 2);
   };
+  // Initial sizing pass so canvas dimensions match the first text.
+  ctx.font = FONT;
   draw(text);
   const tex = new THREE.CanvasTexture(canvas);
   tex.minFilter = THREE.LinearFilter;
@@ -133,8 +153,19 @@ function _makeLabelSprite(text, color = '#e8dfc8') {
   const sprite = new THREE.Sprite(new THREE.SpriteMaterial({
     map: tex, transparent: true, depthWrite: false,
   }));
-  sprite.scale.set(4.2, 0.78, 1);
-  sprite.userData.setText = (str) => { draw(str); tex.needsUpdate = true; };
+  // Scale x in proportion to the canvas's aspect ratio so world-space
+  // width grows with text length but height stays the same.
+  const setScaleFromCanvas = () => {
+    const aspect = canvas.width / canvas.height;
+    sprite.scale.set(baseWorldH * aspect, baseWorldH, 1);
+  };
+  setScaleFromCanvas();
+  sprite.userData.setText = (str) => {
+    if (str === lastText) return;
+    draw(str);
+    setScaleFromCanvas();
+    tex.needsUpdate = true;
+  };
   return sprite;
 }
 
@@ -2805,29 +2836,36 @@ export const ENCOUNTER_DEFS = {
     spawn(scene, room, ctx) {
       const disc = _spawnFloorDisc(scene, room, this.floorColor);
       const cb = ctx.room.bounds;
-      // Backboard / rim against the +Z wall, "stand here" disc at the
-      // -Z edge — gives the player a clear cross-room throw lane.
+      // Iso camera sits at (+X, +Y, +Z) offset, so world -Z is the
+      // TOP of the screen. Place the hoop at the -Z (north) wall so
+      // the player always sees the rim across the room without their
+      // own character body or the camera angle blocking it. Stand
+      // disc goes on the opposite (+Z, bottom of screen) wall — the
+      // throw lane runs from camera-near to camera-far.
       const hoopX = (cb.minX + cb.maxX) / 2;
-      const hoopZ = cb.maxZ - 0.3;
+      const hoopZ = cb.minZ + 0.3;
       const hoopY = 1.55;             // grenade-arcable height
       const standX = hoopX;
-      const standZ = cb.minZ + 1.4;
-      // Backboard — flat slab.
+      const standZ = cb.maxZ - 1.4;
+      // Backboard sits BEHIND the rim relative to the shooter. With
+      // the hoop now at -Z (top of screen) and shooter at +Z, behind
+      // = farther -Z, so backboard is at hoopZ - 0.04.
       const backboard = new THREE.Mesh(
         new THREE.BoxGeometry(1.6, 1.0, 0.06),
         new THREE.MeshStandardMaterial({ color: 0xeeeeee }),
       );
-      backboard.position.set(hoopX, hoopY + 0.5, hoopZ + 0.04);
+      backboard.position.set(hoopX, hoopY + 0.5, hoopZ - 0.04);
       scene.add(backboard);
-      // Rim — orange torus. Inner radius ~0.40, tube 0.04.
+      // Rim — orange torus. Inner radius ~0.40, tube 0.04. Sits in
+      // front of the backboard (toward the shooter at +Z).
       const rim = new THREE.Mesh(
         new THREE.TorusGeometry(0.40, 0.04, 8, 24),
         new THREE.MeshStandardMaterial({ color: 0xff7020 }),
       );
       rim.rotation.x = Math.PI / 2;   // lay flat (axis vertical)
-      rim.position.set(hoopX, hoopY, hoopZ - 0.40);
+      rim.position.set(hoopX, hoopY, hoopZ + 0.40);
       scene.add(rim);
-      // Net — short tapered cone of dim mesh.
+      // Net — short tapered cone of dim mesh, hanging under the rim.
       const net = new THREE.Mesh(
         new THREE.ConeGeometry(0.40, 0.45, 12, 1, true),
         new THREE.MeshStandardMaterial({
@@ -2835,7 +2873,7 @@ export const ENCOUNTER_DEFS = {
           wireframe: true,
         }),
       );
-      net.position.set(hoopX, hoopY - 0.22, hoopZ - 0.40);
+      net.position.set(hoopX, hoopY - 0.22, hoopZ + 0.40);
       net.rotation.x = Math.PI;       // tip down
       scene.add(net);
       // Stand-here disc — small glowing pad, gold tint.
@@ -2852,7 +2890,7 @@ export const ENCOUNTER_DEFS = {
       scene.add(label);
       return {
         disc, label, backboard, rim, net, standDisc,
-        hoop: { x: hoopX, y: hoopY, z: hoopZ - 0.40, r: 0.40 },
+        hoop: { x: hoopX, y: hoopY, z: hoopZ + 0.40, r: 0.40 },
         stand: { x: standX, z: standZ, r: 0.95 },
         prevY: new WeakMap(),         // projectile → y last frame
         counted: new WeakSet(),       // projectile already scored

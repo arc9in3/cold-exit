@@ -6012,6 +6012,75 @@ function spawnFireOrbBurst(pos, radius, count = 18) {
     _spawnEmber(pos.x + Math.cos(a) * r, pos.z + Math.sin(a) * r);
   }
 }
+// Single ballistic fire glob — used by the molotov shatter to fling a
+// red/orange orb outward in a short ballistic arc. When it lands it
+// seeds a small persistent burn zone at the touchdown point so the
+// splash leaves a real fire pattern instead of a single circle.
+function _spawnFlungFireOrb(pos, dirX, dirZ, speed, fireDuration, fireDps) {
+  const sz = 0.13 + Math.random() * 0.06;
+  const mesh = new THREE.Mesh(
+    new THREE.SphereGeometry(sz, 6, 5),
+    new THREE.MeshBasicMaterial({
+      color: 0xff8030,
+      transparent: true, opacity: 0.95,
+      depthWrite: false, blending: THREE.AdditiveBlending,
+    }),
+  );
+  mesh.position.set(pos.x, 0.30 + Math.random() * 0.15, pos.z);
+  scene.add(mesh);
+  _fireOrbs.push({
+    kind: 'flung',
+    mesh,
+    vx: dirX * speed,
+    vy: 2.4 + Math.random() * 1.1,
+    vz: dirZ * speed,
+    life: 1.10 + Math.random() * 0.30,    // longer than air time so post-land fade reads
+    t: 0,
+    landed: false,
+    fireDuration: Math.max(0.5, fireDuration || 3.0),
+    fireDps: Math.max(1, fireDps || 8),
+  });
+}
+// Molotov shatter — replaces the old single-radius circle with a
+// ballistic spray. Center pool forms immediately; 6 fiery orbs fling
+// outward and seed small individual burn pools where they land. The
+// total set of overlapping pools approximates the original radius
+// while looking like an actual splash pattern.
+function spawnMolotovShatter(pos, radius, fireDuration, fireDps) {
+  // Immediate central pool — smaller than the legacy single zone.
+  spawnFireZone(pos, radius * 0.55, fireDuration * 0.85, fireDps * 0.85);
+  // Splash flame cluster at the impact point.
+  for (let i = 0; i < 4; i++) {
+    const a = Math.random() * Math.PI * 2;
+    const r = Math.random() * radius * 0.32;
+    _spawnFlameTongue(
+      pos.x + Math.cos(a) * r,
+      0.12 + Math.random() * 0.22,
+      pos.z + Math.sin(a) * r,
+    );
+  }
+  for (let i = 0; i < 5; i++) {
+    const a = Math.random() * Math.PI * 2;
+    const r = Math.random() * radius * 0.45;
+    _spawnEmber(pos.x + Math.cos(a) * r, pos.z + Math.sin(a) * r);
+  }
+  // 6 ballistic fire orbs flung outward at evenly-spaced angles with
+  // jitter, each carrying enough horizontal velocity to land within
+  // ~0.7..1.1 × radius. A short fuseDuration on each landing pool so
+  // the satellite zones decay before the central one to keep the
+  // overall area trending inward over time.
+  const N = 6;
+  for (let i = 0; i < N; i++) {
+    const a = (i / N) * Math.PI * 2 + (Math.random() - 0.5) * 0.6;
+    const dx = Math.cos(a), dz = Math.sin(a);
+    const speed = radius * (1.35 + Math.random() * 0.55);
+    _spawnFlungFireOrb(
+      pos, dx, dz, speed,
+      fireDuration * (0.55 + Math.random() * 0.20),
+      fireDps * (0.45 + Math.random() * 0.15),
+    );
+  }
+}
 function _tickFireOrbs(dt) {
   for (let i = _fireOrbs.length - 1; i >= 0; i--) {
     const o = _fireOrbs[i];
@@ -6058,6 +6127,42 @@ function _tickFireOrbs(dt) {
       o.mesh.material.opacity = 0.35 * Math.max(0, 1 - k);
       o.mesh.scale.setScalar(1 + k * 1.6);
       o.vy *= 1 - dt * 0.4;
+    } else if (o.kind === 'flung') {
+      // Ballistic flame — gravity pulls down, drag slows horizontal.
+      // On floor contact, seed a small burn zone and shorten life so
+      // the orb visually fades as the persistent pool takes over.
+      if (!o.landed) {
+        o.mesh.position.x += o.vx * dt;
+        o.mesh.position.z += o.vz * dt;
+        o.vy -= 9.8 * dt;
+        o.mesh.position.y += o.vy * dt;
+        o.vx *= 1 - dt * 0.6;
+        o.vz *= 1 - dt * 0.6;
+        if (o.mesh.position.y <= 0.06) {
+          o.landed = true;
+          o.mesh.position.y = 0.06;
+          // Seed a small persistent burn zone at touchdown.
+          spawnFireZone(
+            o.mesh.position.clone(),
+            0.55 + Math.random() * 0.25,
+            o.fireDuration,
+            o.fireDps,
+          );
+          // Cut life so the orb fades within ~0.20s after landing.
+          o.life = Math.min(o.life, o.t + 0.22);
+        }
+      }
+      // Color shift orange → red over life (matches the falling
+      // flame tip cooling as it loses energy).
+      const t = Math.min(1, k);
+      if (t < 0.6) {
+        _FIRE_TMP_COL.copy(_FIRE_HOT).lerp(_FIRE_MID, t / 0.6);
+      } else {
+        _FIRE_TMP_COL.copy(_FIRE_MID).lerp(_FIRE_TIP, (t - 0.6) / 0.4);
+      }
+      o.mesh.material.color.copy(_FIRE_TMP_COL);
+      o.mesh.material.opacity = Math.max(0, 0.95 * (1 - k * k));
+      o.mesh.scale.setScalar(1 - k * 0.35);
     }
     if (o.t >= o.life) {
       scene.remove(o.mesh);
@@ -6136,12 +6241,11 @@ function onProjectileExplode(pos, explosion, owner, p) {
   // return early after spawning their own landing effect.
   const kind = p?.throwKind;
   if (kind === 'molotov') {
-    // Shatter — a burst of rising fiery orbs plus the persistent
-    // fire zone. No firey explosion sphere (reads as "pool of fire
-    // starting", not "boom"). Orbs floating upward sell the initial
-    // splash; the zone below handles the ongoing DoT.
-    spawnFireOrbBurst(pos, radius, 22);
-    spawnFireZone(pos, radius, p.fireDuration || 6.0, p.fireTickDps || 14);
+    // Shatter pattern — central pool + 6 ballistic orbs flung outward
+    // that each seed their own smaller burn zone where they land.
+    // Reads as a real Molotov splash (multiple overlapping fire pools
+    // along the trajectory) rather than a single perfect circle.
+    spawnMolotovShatter(pos, radius, p.fireDuration || 6.0, p.fireTickDps || 14);
     if (sfx.explode) sfx.explode();
     triggerShake(0.18, 0.15);
     return;
