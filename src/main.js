@@ -39,7 +39,7 @@ import { tunables } from './tunables.js';
 import {
   Inventory, SLOT_IDS,
   ALL_GEAR, ALL_ARMOR, ALL_CONSUMABLES, CONSUMABLE_DEFS, ALL_JUNK, ALL_TOYS, ARMOR_DEFS,
-  JUNK_DEFS,
+  JUNK_DEFS, TOY_DEFS,
   wrapWeapon, withAffixes, randomArmor, randomGear, randomConsumable, randomJunk, randomToy, setLootLevel,
   randomThrowable, THROWABLE_DEFS, makeThrowable,
 } from './inventory.js';
@@ -1067,6 +1067,12 @@ function setWeaponIndex(i) {
   playerFireCooldown = 0;
   playerBurstRemaining = 0;
   playerBurstTimer = 0;
+  // Equip-time stat re-roll — needed for weapons that ship with
+  // `equipMods` (e.g. Pain mace's 66% lifesteal + 0.5× max HP).
+  // Cheap; recomputeStats already runs on inventory close + many
+  // other paths. Without this, swapping to/from Pain wouldn't
+  // update max HP until the next inventory close.
+  recomputeStats();
   if (typeof renderWeaponBar === 'function') renderWeaponBar();
 }
 function onInventoryChanged() {
@@ -1224,6 +1230,31 @@ const shopUI = new ShopUI({
       recomputeStats();
       sfx.uiAccept?.();
       transientHudMsg('RELIC ACQUIRED: Rocket Shoes — Double dash distance', 5.0);
+      return true;
+    }
+    if (item.id === 'toy_demon_bear') {
+      // Demon Bear → Pain (mythic mace). The bear sells the toy for
+      // a pact weapon, not credits. Wrap the tunable as an inventory
+      // item so the equip + recomputeStats path picks up its
+      // equipMods (66% melee lifesteal + 0.5× max HP).
+      const painDef = tunables.weapons.find(w => w.name === 'Pain');
+      if (!painDef) return false;
+      const pain = wrapWeapon(painDef);
+      if (!inventory.add(pain)) {
+        // Backpack full — refuse so the toy stays in inventory and
+        // the player can clear space.
+        transientHudMsg('Backpack full — make space first.', 3.0);
+        return false;
+      }
+      const bear2 = level?.npcs?.find?.(n => n.kind === 'bearMerchant');
+      if (bear2?.group) {
+        const pos = bear2.group.position.clone().setY(2.2);
+        spawnSpeechBubble(pos, camera,
+          'Oh… him? Take this. Don\'t come back.', 7.0);
+      }
+      recomputeStats();
+      sfx.uiAccept?.();
+      transientHudMsg('MYTHIC ACQUIRED: Pain — 666 dmg · 66% lifesteal · −50% max HP', 6.0);
       return true;
     }
     return false;
@@ -1844,7 +1875,7 @@ function regenerateLevel() {
     // pickEncounterForLevel returned null because everything was
     // already completed). _runCompletedEncounters resets in
     // _resetEncounterCompletionForRun on every new run.
-    const def = pickEncounterForLevel(level.index | 0, _runCompletedEncounters);
+    const def = pickEncounterForLevel(level.index | 0, _runCompletedEncounters, runStats);
     if (!def) {
       r.type = 'combat';   // demote — main UI stays consistent
       continue;
@@ -2028,6 +2059,24 @@ function regenerateLevel() {
         // Item gold-value lookup — Brethren encounter uses this to
         // convert a dropped weapon's sale price into chip payout.
         sellPriceFor: (item) => sellPriceFor(item),
+        // Direct player heal — Priest encounter calls this on "yes".
+        // No bleed/broken cures, since the priest's prayer is just HP.
+        playerHeal: (amount) => { try { player.heal(Math.max(1, amount | 0)); } catch (_) {} },
+        // Run-state read/write for cross-encounter counters. The
+        // Priest encounter increments priestRefusals on each "no",
+        // and flips hasDemonBear after the third refusal so the
+        // priest stops respawning + the bear merchant can take the
+        // toy. Survives across rooms; reset on run reset.
+        runStats,
+        // Spawn a fresh Demon Bear toy at world XZ. Wraps the toy
+        // def with stampItemDims so it lays out correctly in the
+        // inventory grid like any other loot pickup.
+        spawnDemonBear: (x, z) => {
+          const def = TOY_DEFS && TOY_DEFS.demonBear;
+          if (!def) return false;
+          loot.spawnItem({ x, y: 0.4, z }, { ...def });
+          return true;
+        },
         getKillCount: () => runStats.kills | 0,
         markEncounterComplete: (id) => { if (id) _runCompletedEncounters.add(id); },
         // Smoke puff at world XZ — used by Glass Case telegraph.
@@ -3157,6 +3206,26 @@ function recomputeStats() {
   // Melee damage multiplier ceiling — Reaper / Berserker / class-tree
   // stacks were producing ~2.8×. Cap at 2.5×.
   if (derivedStats.meleeDmgMult > 2.5) derivedStats.meleeDmgMult = 2.5;
+  // Equipped-weapon `equipMods` — mythic-tier "Pain" mace uses this
+  // to grant 66% melee lifesteal + 0.5× max HP. lifestealMeleePercent
+  // adds to whatever skills/perks already contribute. maxHealthMult
+  // applies as a final-pass scalar AFTER all maxHealthBonus sources
+  // have rolled up, so a 0.5× equip-mod halves the player's actual
+  // working max HP instead of just the base.
+  const _eqW = currentWeapon();
+  const _em = _eqW && _eqW.equipMods;
+  if (_em) {
+    if (typeof _em.lifestealMeleePercent === 'number') {
+      derivedStats.lifestealMeleePercent =
+        (derivedStats.lifestealMeleePercent || 0) + _em.lifestealMeleePercent;
+    }
+    if (typeof _em.maxHealthMult === 'number' && _em.maxHealthMult !== 1) {
+      const baseMax2 = tunables.player.maxHealth;
+      const finalMax = baseMax2 + (derivedStats.maxHealthBonus || 0);
+      const target = Math.max(1, Math.round(finalMax * _em.maxHealthMult));
+      derivedStats.maxHealthBonus = target - baseMax2;
+    }
+  }
 }
 
 // XP / level. Crossing threshold queues a mid-run skill pick.

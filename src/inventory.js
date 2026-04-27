@@ -1124,10 +1124,21 @@ export const TOY_DEFS = {
   bearyDoll:  { id: 'toy_beary_doll',  name: 'Beary Doll',  type: 'junk', shape: 'bear', tint: 0xffffff, sellValue: 1900,  rarity: 'legendary', description: 'Plush bear · glows faintly' },
   sleepDuck:  { id: 'toy_sleep_duck',  name: 'Sleep Duck',  type: 'junk', shape: 'duck', tint: 0xffe040, sellValue: 1800,  rarity: 'legendary', description: 'A duck with a dreamy look' },
   duckStatue: { id: 'toy_duck_statue', name: 'Duck Statue', type: 'junk', shape: 'duck', tint: 0xffe040, sellValue: 2000,  rarity: 'legendary', description: 'Polished ornamental duck' },
+  // Awarded by the Priest after the player refuses prayer 3 times.
+  // Sells to the Great Bear merchant for the mythic mace "Pain"
+  // (special trade in onSpecialBearTrade — not the listed sellValue).
+  // Also wakes Sleepy Beauty if dropped near her — she falls in love
+  // with him and gives a random toy in trade.
+  // _encounter flag keeps it out of the random toy / loot pools so
+  // the only legitimate way to get one is the priest chain.
+  demonBear:  { id: 'toy_demon_bear',  name: 'Demon Bear',  type: 'junk', shape: 'bear', tint: 0xc81a1a, sellValue: 1, rarity: 'mythic', description: 'A little red bear with grey devil horns and squinty black eyes. When looking at his little face you swear you can hear him giggling.', _encounter: true },
 };
 export const ALL_TOYS = Object.values(TOY_DEFS);
+// Encounter-only toys (e.g. Demon Bear) are filtered out of the
+// random pool so they can't dupe-drop from Sleepy Beauty etc.
+const _RANDOM_TOY_POOL = ALL_TOYS.filter(t => !t._encounter);
 export function randomToy() {
-  return maybeApplyMastercraft(stampItemDims({ ...ALL_TOYS[Math.floor(Math.random() * ALL_TOYS.length)] }));
+  return maybeApplyMastercraft(stampItemDims({ ..._RANDOM_TOY_POOL[Math.floor(Math.random() * _RANDOM_TOY_POOL.length)] }));
 }
 
 // Consumables (live in backpack only).

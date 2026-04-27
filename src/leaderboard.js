@@ -31,6 +31,11 @@ export class RunStats {
     this.deathLevel = null;  // level index when the player died
     this.deathAt = null;     // timestamp of death
     this.mythicRun = false;  // started via mythic-run unlock — leaderboard tag
+    // Priest encounter — repeats until you've refused 3 times and
+    // earned the demon bear. hasDemonBear gates re-spawning the
+    // priest AND the special bear-merchant trade for the Pain mace.
+    this.priestRefusals = 0;
+    this.hasDemonBear = false;
   }
 
   markTainted() { this.tainted = true; }

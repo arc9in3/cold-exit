@@ -337,7 +337,9 @@ export class ShopUI {
     // false if the trade can't fire (e.g. relic already owned), in
     // which case we fall through to the normal sell path.
     const isBearSpecial = this.merchant?.kind === 'bearMerchant'
-      && (item.id === 'thr_the_gift' || item.id === 'junk_rocket_ticket');
+      && (item.id === 'thr_the_gift'
+          || item.id === 'junk_rocket_ticket'
+          || item.id === 'toy_demon_bear');
     if (isBearSpecial) {
       if (this.onSpecialBearTrade(item)) {
         this.inventory.takeFromBackpack(idx);

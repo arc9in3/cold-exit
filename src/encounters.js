@@ -2550,32 +2550,123 @@ export const ENCOUNTER_DEFS = {
     },
     onItemDropped(item, ctx) {
       const s = ctx.state;
-      if (s.complete) return { consume: false };
-      // Trigger ONLY on cheesecake. Anything else gets ignored — the
-      // item bounces to the floor as normal loot.
-      if (!item || item.id !== 'cons_cheesecake') return { consume: false };
+      if (s.complete || !item) return { consume: false };
+      // Two valid wake triggers — cheesecake (the canonical one) or
+      // the Demon Bear toy (she falls for him on sight). Anything
+      // else bounces to the floor as normal loot.
+      const isCheesecake = item.id === 'cons_cheesecake';
+      const isDemonBear  = item.id === 'toy_demon_bear';
+      if (!isCheesecake && !isDemonBear) return { consume: false };
       s.awake = true;
       s.complete = true;
       // Sit her upright as the wake-up animation.
       s.npc.rotation.x = 0;
       s.npc.position.y = 0;
-      ctx.spawnSpeech(s.npc.position.clone().setY(2.0),
-        'Mmm... cheesecake! Take this — I owe you one.', 5.0);
-      // Random reward — pulls from the same pool as broken_vendor /
-      // sleeping_boss so it scales with how the rest of the encounter
-      // economy already feels.
-      const rolls = [
-        () => ctx.rollEpicWeapon && ctx.rollEpicWeapon(),
-        () => ctx.rollLowTierWeapon && ctx.rollLowTierWeapon(),
-        () => ctx.rollRareGear && ctx.rollRareGear(),
-        () => ctx.rollRandomToy && ctx.rollRandomToy(),
-      ];
-      const pickReward = rolls[Math.floor(Math.random() * rolls.length)];
-      const reward = pickReward && pickReward();
+      let reward = null;
+      if (isDemonBear) {
+        // Demon Bear path — she's smitten. Always drops a random
+        // toy, never the bear itself (randomToy filters _encounter
+        // items so the demon bear can't dupe).
+        ctx.spawnSpeech(s.npc.position.clone().setY(2.0),
+          'I love him!!!', 5.0);
+        reward = ctx.rollRandomToy && ctx.rollRandomToy();
+      } else {
+        // Cheesecake path — random reward from the standard mix.
+        ctx.spawnSpeech(s.npc.position.clone().setY(2.0),
+          'Mmm... cheesecake! Take this — I owe you one.', 5.0);
+        const rolls = [
+          () => ctx.rollEpicWeapon && ctx.rollEpicWeapon(),
+          () => ctx.rollLowTierWeapon && ctx.rollLowTierWeapon(),
+          () => ctx.rollRareGear && ctx.rollRareGear(),
+          () => ctx.rollRandomToy && ctx.rollRandomToy(),
+        ];
+        const pickReward = rolls[Math.floor(Math.random() * rolls.length)];
+        reward = pickReward && pickReward();
+      }
       if (reward) ctx.spawnLoot(s.disc.cx + 1.0, s.disc.cz, reward);
       if (ctx.markEncounterComplete) ctx.markEncounterComplete('sleepy_beauty');
       return { consume: true, complete: true };
     },
+  },
+
+  // -----------------------------------------------------------------
+  // The Priest — recurring encounter. Stands in the room and asks
+  // the player if they want to pray. "Yes" → heals; "No" → flavor
+  // line about salvation + increments runStats.priestRefusals.
+  // The third "no" drops a Demon Bear toy and flips
+  // runStats.hasDemonBear, which (a) blocks the priest from
+  // re-spawning and (b) unlocks the Great Bear's "Pain" trade.
+  // -----------------------------------------------------------------
+  priest: {
+    id: 'priest',
+    name: 'The Priest',
+    floorColor: 0xe8d8a8,             // candle-warm dais
+    oncePerSave: false,
+    condition: (state) => state.levelIndex >= 1 && !(state.runStats?.hasDemonBear),
+    SALVATION_LINES: [
+      'Then I shall pray for your soul, traveler.',
+      'Salvation does not wait forever, my friend.',
+      'I have nothing left to offer you. Take this.',
+    ],
+    spawn(scene, room, ctx) {
+      const disc = _spawnFloorDisc(scene, room, this.floorColor);
+      const npc = _buildSimpleNpc({
+        bodyColor: 0x202028, headColor: 0xc8a888,
+        accentColor: 0xd0b070, height: 2.0,
+      });
+      npc.position.set(disc.cx, 0, disc.cz);
+      scene.add(npc);
+      const label = _makeLabelSprite('THE PRIEST', '#f0d488');
+      label.position.set(disc.cx, 2.4, disc.cz);
+      scene.add(label);
+      return { npc, label, disc, complete: false };
+    },
+    tick(_dt, _ctx) { /* purely interactive */ },
+    interact(ctx) {
+      const s = ctx.state;
+      if (s.complete) return;
+      const refused = ctx.runStats?.priestRefusals | 0;
+      const def = ENCOUNTER_DEFS.priest;
+      ctx.showPrompt({
+        title: 'The Priest',
+        body: refused === 0
+          ? 'Will you pray with me?'
+          : refused === 1
+            ? 'Once more, will you bow your head?'
+            : 'A final chance, traveler. Will you pray?',
+        options: [
+          {
+            text: 'Yes',
+            onPick: () => {
+              ctx.spawnSpeech(s.npc.position.clone().setY(2.4),
+                'Bless you. Walk lighter.', 4.0);
+              if (ctx.playerHeal) ctx.playerHeal(60);
+              s.complete = true;
+              if (ctx.markEncounterComplete) ctx.markEncounterComplete('priest');
+            },
+          },
+          {
+            text: 'No',
+            onPick: () => {
+              const idx = Math.min(refused, def.SALVATION_LINES.length - 1);
+              ctx.spawnSpeech(s.npc.position.clone().setY(2.4),
+                def.SALVATION_LINES[idx], 4.0);
+              if (ctx.runStats) ctx.runStats.priestRefusals = refused + 1;
+              s.complete = true;
+              if (ctx.markEncounterComplete) ctx.markEncounterComplete('priest');
+              // Third "no" — drop the Demon Bear toy and flip the
+              // run flag so the priest stops respawning + the Great
+              // Bear merchant unlocks the Pain trade.
+              if ((refused + 1) >= 3 && !ctx.runStats?.hasDemonBear) {
+                if (ctx.runStats) ctx.runStats.hasDemonBear = true;
+                if (ctx.spawnDemonBear) ctx.spawnDemonBear(s.disc.cx + 0.8, s.disc.cz);
+              }
+            },
+          },
+        ],
+      });
+    },
+    onItemDropped(_item, _ctx) { return { consume: false }; },
   },
 
   // -----------------------------------------------------------------
@@ -2633,10 +2724,10 @@ export const ENCOUNTER_DEFS = {
 
 // Helper — pick one valid encounter for the given level state, or null.
 // Caller handles the "no encounter this level" outcome.
-export function pickEncounterForLevel(levelIndex, completedSet) {
+export function pickEncounterForLevel(levelIndex, completedSet, runStats = null) {
   const candidates = Object.values(ENCOUNTER_DEFS).filter((def) => {
     if (def.oncePerSave && completedSet.has(def.id)) return false;
-    if (def.condition && !def.condition({ levelIndex, completed: completedSet })) return false;
+    if (def.condition && !def.condition({ levelIndex, completed: completedSet, runStats })) return false;
     return true;
   });
   if (!candidates.length) return null;

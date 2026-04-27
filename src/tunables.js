@@ -1557,5 +1557,48 @@ export const tunables = {
       pelletCount: 1, burstCount: 1, burstInterval: 0,
       magSize: 25, reloadTime: 1.7,
     },
+
+    // -----------------------------------------------------------------
+    // Pain — mythic mace. Pact reward from selling the Demon Bear toy
+    // to the Great Bear merchant. Every swing — close OR far, opener
+    // OR finisher — deals exactly 666 damage. Equip-time `equipMods`
+    // grant 66% melee lifesteal AND multiply max HP by 0.5; main.js
+    // recomputeStats reads equipMods off the equipped weapon and
+    // routes them into derivedStats.
+    // -----------------------------------------------------------------
+    {
+      name: 'Pain', mythic: true,
+      type: 'melee', class: 'melee', rarity: 'mythic',
+      meleeThreshold: 3.3,
+      tracerColor: 0x806878,
+      muzzleLength: 0.95, muzzleGirth: 0.18,
+      adsZoom: 0.78, adsPeekDistance: 2.6,
+      // equipMods are applied in recomputeStats from the currently
+      // equipped weapon. lifesteal stacks onto derivedStats.lifesteal-
+      // MeleePercent (already consumed by the on-hit heal at main.js
+      // ~4704). maxHealthMult is applied as a final-pass scalar so
+      // it composes with gear bonuses cleanly.
+      equipMods: {
+        lifestealMeleePercent: 66,
+        maxHealthMult: 0.5,
+      },
+      combo: [
+        { close: { damage: 666, range: 2.4, angleDeg: 100, advance: 0.5,
+                   startup: 0.10, active: 0.14, recovery: 0.28, window: 0.36, knockback: 3.6 },
+          far:   { damage: 666, range: 3.1, angleDeg: 55, advance: 2.1,
+                   startup: 0.14, active: 0.15, recovery: 0.32, window: 0.38, knockback: 4.2 } },
+        { close: { damage: 666, range: 2.5, angleDeg: 105, advance: 0.55,
+                   startup: 0.11, active: 0.15, recovery: 0.30, window: 0.38, knockback: 4.2 },
+          far:   { damage: 666, range: 3.2, angleDeg: 58, advance: 2.3,
+                   startup: 0.15, active: 0.15, recovery: 0.32, window: 0.38, knockback: 4.8 } },
+        { close: { damage: 666, range: 2.7, angleDeg: 150, advance: 0.3,
+                   startup: 0.18, active: 0.20, recovery: 0.50, window: 0.12, knockback: 7.5,
+                   shockwaveRadius: 3.4, shockwaveDamage: 222, shockwaveKnockback: 6 },
+          far:   { damage: 666, range: 3.5, angleDeg: 62, advance: 2.7,
+                   startup: 0.20, active: 0.16, recovery: 0.52, window: 0.12, knockback: 8.0,
+                   shockwaveRadius: 4.0, shockwaveDamage: 200, shockwaveKnockback: 6 } },
+      ],
+      description: 'A mace made of soft grey felt, seems to emit pure evil.',
+    },
   ],
 };
