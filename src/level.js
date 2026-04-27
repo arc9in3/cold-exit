@@ -1917,13 +1917,14 @@ export class Level {
         const PERIMETER_KINDS = new Set([
           'pillar', 'railing', 'window', 'doorFrame', 'neonStick',
         ]);
-        // Decorative interior-friendly kinds — small, low-impact,
-        // can sit on the floor without blocking. `lamp` is NOT in
-        // this list anymore: lamps go through the symmetric corner
-        // pass (_decorateRoomLamps) so they read as a designed
-        // lighting grid. `vase` is gone too — it read as a random
-        // bottle on the floor.
-        const INTERIOR_OK = new Set(['rug']);
+        // No interior-friendly random kinds remain. Lamps go through
+        // _decorateRoomLamps (symmetric corners). Vases were "bottles
+        // on the floor." Rugs were "red carpet tiles, randomly
+        // placed" — they need anchored placement (under a kiosk /
+        // encounter disc) to read deliberate, so for now they only
+        // come from the per-room theme branches that explicitly call
+        // for them.
+        const INTERIOR_OK = new Set();
         // Loot ambience — wall-first, but crates / barrels are OK
         // free-standing if the wall is full.
         const LOOT_AMBIENCE = new Set(['locker', 'crate', 'barrel', 'pallet']);

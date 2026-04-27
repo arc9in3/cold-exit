@@ -5409,6 +5409,22 @@ function onEnemyKilled(enemy, opts = {}) {
   }
   runStats.addKill();
   if (enemy.tier === 'subBoss') playerSkillPoints += 1;
+  // Corpse position fix-up — if the body's last position landed inside
+  // a wall / pillar / prop AABB, push it out so the loot prompt can
+  // actually see it. Bosses ragdolling at the moment of death sometimes
+  // settled with their centroid clipped into a column; level.unstickFrom
+  // shoves the position out of the nearest collider face.
+  if (enemy.group && level && typeof level.unstickFrom === 'function') {
+    const ep = enemy.group.position;
+    const fixed = level.unstickFrom(ep.x, ep.z, 0.45);
+    // Run a second pass — overlapping obstacles can mean the first
+    // pop-out lands in a neighbour. Two iterations cover the corner
+    // case without risking infinite loops.
+    const fixed2 = level.unstickFrom(fixed.x, fixed.z, 0.45);
+    if (fixed2.x !== ep.x || fixed2.z !== ep.z) {
+      ep.x = fixed2.x; ep.z = fixed2.z;
+    }
+  }
   combat.spawnBloodPool(enemy.group.position, 0.75 + Math.random() * 0.25);
   if (artifacts.has('red_string')) {
     buffs.grant('red_string', { damageMult: 1.5 }, 4);
@@ -6456,14 +6472,25 @@ function onProjectileExplode(pos, explosion, owner, p) {
     return;
   }
 
-  // --- default (frag / rocket / grenade-launcher) path ---
-  // Visual pop — expanding fireball + scorched-ring shock wave
-  // so the detonation reads even at low camera angles. Auto-animates
-  // via combat's particle tick (scales up then fades).
-  spawnExplosionFx(pos, radius);
-  if (sfx.explode) sfx.explode(); else sfx.hit();
-  triggerShake(explosion.shake || 0.4, 0.35);
-  triggerHitStop?.(0.05);
+  // Impact-kill projectiles (Elven Knife) — single-target damage with
+  // NO fireball, NO shake, NO hitstop. Just an impact spark on the
+  // contacted enemy. Damage is still resolved through the same
+  // applyTo loop below (radius is small, ~0.6m, so it lands on the
+  // single enemy the projectile touched), but we skip the heavy VFX
+  // so the throw reads as "blade impacts and disappears."
+  if (p?.impactKill) {
+    if (combat.spawnImpact) combat.spawnImpact(pos);
+    if (sfx.hit) sfx.hit();
+  } else {
+    // --- default (frag / rocket / grenade-launcher) path ---
+    // Visual pop — expanding fireball + scorched-ring shock wave
+    // so the detonation reads even at low camera angles. Auto-animates
+    // via combat's particle tick (scales up then fades).
+    spawnExplosionFx(pos, radius);
+    if (sfx.explode) sfx.explode(); else sfx.hit();
+    triggerShake(explosion.shake || 0.4, 0.35);
+    triggerHitStop?.(0.05);
+  }
 
   const applyTo = (list, friendlyFilter) => {
     for (const c of list) {
@@ -6502,24 +6529,36 @@ function onProjectileExplode(pos, explosion, owner, p) {
   // Radial damage to the player from enemy-owned explosions + self-
   // damage bleed on player rockets (only at very close range — 40% of
   // blast radius — so point-blank shots actually hurt).
+  //
+  // LoS GATE: previously a grenade detonating around a corner would
+  // damage the player anyway because the explosion sweep didn't check
+  // for walls. Now we shoot a single LoS ray from the detonation
+  // point to the player's chest; if a wall blocks it, no damage. The
+  // throughWalls flag (The Gift sacrifice) bypasses this check so its
+  // gameplay still works.
+  const _explosionEye = new THREE.Vector3(player.mesh.position.x, 1.0, player.mesh.position.z);
+  const _explosionFrom = new THREE.Vector3(pos.x, 1.0, pos.z);
+  const losToPlayer = !!p?.throughWalls
+    || (combat.hasLineOfSight
+      ? combat.hasLineOfSight(_explosionFrom, _explosionEye, level.obstacles)
+      : true);
   if (owner === 'enemy') {
     const dx = player.mesh.position.x - pos.x;
     const dz = player.mesh.position.z - pos.z;
     const d2 = dx * dx + dz * dz;
-    if (d2 < rSq) {
+    if (d2 < rSq && losToPlayer) {
       const d = Math.sqrt(d2);
       const falloff = 1 - 0.75 * (d / radius);
       player.takeDamage(explosion.damage * Math.max(0.25, falloff));
     }
   } else if (owner === 'player') {
-    // Player's own grenades / rockets / frag rounds now hurt them when
-    // caught in the blast. Full radius (not 0.4×) with the same falloff
-    // as enemies, but scaled to 60% damage so a sensible mid-range
-    // detonation chips hp instead of instant-kill.
+    // Player's own grenades / rockets / frag rounds hurt them when
+    // caught in the blast. Same LoS gate — a wall between the player
+    // and their own explosion blocks the self-damage.
     const dx = player.mesh.position.x - pos.x;
     const dz = player.mesh.position.z - pos.z;
     const d2 = dx * dx + dz * dz;
-    if (d2 < rSq) {
+    if (d2 < rSq && losToPlayer) {
       const d = Math.sqrt(d2);
       const falloff = 1 - 0.75 * (d / radius);
       player.takeDamage(explosion.damage * 0.6 * Math.max(0.25, falloff));
@@ -7928,6 +7967,42 @@ function tickThrowAimPreview(item) {
   const dz = aimZ - muzzle.z;
   const throwDist = Math.hypot(dx, dz);
   if (throwDist < 0.05) { hideThrowPreview(); return; }
+
+  // Flat-throw items (Elven Knife) — chest-height straight line, no
+  // arc. Stop the line at the first wall hit; otherwise extend to
+  // the cursor.
+  if (item && item.flatThrow) {
+    const FLAT_Y = 1.0;
+    const segs = _THROW_PREVIEW_SEGMENTS;
+    const positions = pv.positions;
+    let usedVerts = segs + 1;
+    let blocked = false;
+    let endX = aimX, endZ = aimZ;
+    for (let i = 0; i <= segs; i++) {
+      const t = i / segs;
+      const px = muzzle.x + dx * t;
+      const pz = muzzle.z + dz * t;
+      positions[i * 3 + 0] = px;
+      positions[i * 3 + 1] = FLAT_Y;
+      positions[i * 3 + 2] = pz;
+      if (i > 0 && _hitsThrowObstacle(px, FLAT_Y, pz)) {
+        endX = px; endZ = pz;
+        usedVerts = i + 1;
+        blocked = true;
+        break;
+      }
+      endX = px; endZ = pz;
+    }
+    pv.lineGeom.attributes.position.needsUpdate = true;
+    pv.lineGeom.setDrawRange(0, usedVerts);
+    pv.lineMat.color.setHex(blocked ? _THROW_BAD_COLOR : _THROW_OK_COLOR);
+    pv.line.visible = true;
+    pv.ring.position.set(endX, 0.05, endZ);
+    pv.ringMat.color.setHex(blocked ? _THROW_BAD_COLOR : _THROW_OK_COLOR);
+    pv.ring.visible = true;
+    return;
+  }
+
   const MIN_APEX = 0.35;
   const MAX_APEX = 2.7;
   const apex = MIN_APEX + (MAX_APEX - MIN_APEX) * Math.min(1, throwDist / 14);

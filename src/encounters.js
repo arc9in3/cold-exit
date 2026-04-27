@@ -3005,15 +3005,22 @@ export const ENCOUNTER_DEFS = {
       scene.add(label);
       return {
         disc, label, backboard, rim, net, standDisc,
-        hoop: { x: hoopX, y: hoopY, z: hoopZ + 0.40, r: 0.40 },
+        // Rim radius widened 0.40 → 0.55 so a grenade-sized body
+        // brushing the inner edge counts. Miss radius (1.4) gives
+        // close-but-no-cigar feedback so the player knows they're
+        // actually being scored.
+        hoop: { x: hoopX, y: hoopY, z: hoopZ + 0.40, r: 0.55, missR: 1.4 },
         stand: { x: standX, z: standZ, r: 0.95 },
         prevY: new WeakMap(),         // projectile → y last frame
-        counted: new WeakSet(),       // projectile already scored
+        counted: new WeakSet(),       // projectile already scored / missed
+        seen: new WeakSet(),          // tracked at least once
         score: 0,
         celebrated: false,
         complete: false,
         celebrateT: 0,
         bubbleTimer: 0,
+        scoreLabel: null,             // mutable score counter sprite
+        standHintT: 0,                // throttle for the stand-on-dot reminder
       };
     },
     tick(dt, ctx) {
@@ -3029,11 +3036,27 @@ export const ENCOUNTER_DEFS = {
       const px = ctx.playerPos.x, pz = ctx.playerPos.z;
       const dxs = px - s.stand.x, dzs = pz - s.stand.z;
       const onStand = (dxs * dxs + dzs * dzs) <= (s.stand.r * s.stand.r);
+
+      // Stand-on-dot hint: when the player is in the encounter room
+      // but NOT on the stand and they have at least one frag in the
+      // pouch, surface the hint every ~5s so they know they need to
+      // step onto the dot before throwing.
+      s.standHintT -= dt;
+      if (!onStand && !s.celebrated && s.standHintT <= 0) {
+        const dToStand2 = dxs * dxs + dzs * dzs;
+        if (dToStand2 < 12 * 12) {
+          s.standHintT = 5.0;
+          ctx.spawnSpeech(new THREE.Vector3(s.stand.x, 1.2, s.stand.z),
+            'STAND HERE TO SCORE', 3.0);
+        }
+      }
+
       const projs = ctx.activeProjectiles ? ctx.activeProjectiles() : [];
       for (const p of projs) {
         if (!p || !p.body || p.dead) continue;
         if (p.owner !== 'player' || p.throwKind !== 'frag') continue;
         if (s.counted.has(p)) continue;
+        s.seen.add(p);
         const y = p.body.position.y;
         const prevY = s.prevY.get(p);
         s.prevY.set(p, y);
@@ -3042,7 +3065,9 @@ export const ENCOUNTER_DEFS = {
         if (prevY > s.hoop.y && y <= s.hoop.y) {
           const dx = p.body.position.x - s.hoop.x;
           const dz = p.body.position.z - s.hoop.z;
-          if ((dx * dx + dz * dz) <= s.hoop.r * s.hoop.r) {
+          const dist2 = dx * dx + dz * dz;
+          // Inside the score circle?
+          if (dist2 <= s.hoop.r * s.hoop.r) {
             // Score gating — must be on the stand disc to count.
             if (!onStand) {
               ctx.spawnSpeech(new THREE.Vector3(s.hoop.x, s.hoop.y + 0.6, s.hoop.z),
@@ -3053,12 +3078,26 @@ export const ENCOUNTER_DEFS = {
             s.counted.add(p);
             s.score += 1;
             ctx.spawnSpeech(new THREE.Vector3(s.hoop.x, s.hoop.y + 0.6, s.hoop.z),
-              s.score === 1 ? 'SWISH!' : 'AND ONE!', 2.0);
+              'SWISH!', 2.4);
+            continue;
+          }
+          // Close but missed — give "BRICK!" / "RIM OUT!" feedback so
+          // the player knows the throw was tracked. Different lines for
+          // off-stand to clarify why a near-rim shot didn't count.
+          if (dist2 <= s.hoop.missR * s.hoop.missR) {
+            s.counted.add(p);
+            const line = !onStand
+              ? 'OFF THE LINE!'
+              : (Math.random() < 0.5 ? 'RIM OUT!' : 'BRICK!');
+            ctx.spawnSpeech(new THREE.Vector3(s.hoop.x, s.hoop.y + 0.6, s.hoop.z),
+              line, 2.0);
           }
         }
       }
-      // Win condition — 2 of 2 → celebration.
-      if (s.score >= 2 && !s.celebrated) {
+      // Win condition — 1 of 1 → celebration. (Was 2/2 originally;
+      // user shortened to 1-and-done so the encounter resolves
+      // quickly when the player nails it.)
+      if (s.score >= 1 && !s.celebrated) {
         s.celebrated = true;
         if (ctx.airhorn) ctx.airhorn();
         if (ctx.awardChips) ctx.awardChips(2);

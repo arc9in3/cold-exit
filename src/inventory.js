@@ -1584,7 +1584,13 @@ export const THROWABLE_DEFS = {
     tint: 0xe0f0d0, encounterOnly: true,
     throwKind: 'elvenKnife',
     flatThrow: true,                     // straight chest-height line, gravity 0
-    aoeRadius: 0.7, aoeDamage: 99999, aoeShake: 0.20, fuse: 1.5,
+    // Single-target impact only — radius is tight so the on-impact
+    // handler hits exactly the enemy the knife touched, no fireball,
+    // no shake. impactKill flag tells onProjectileExplode to skip the
+    // explosion VFX path entirely (just an impact spark + sfx).
+    aoeRadius: 0.6, aoeDamage: 99999, aoeShake: 0,
+    impactKill: true,
+    fuse: 1.5,
     maxCharges: 1, cooldownSec: 60,
     description: 'A blade so thin you can barely see it. Always finds its mark.',
   },

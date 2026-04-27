@@ -827,12 +827,10 @@ export const LEVEL_THEMES = {
     accent: 0xc9a464,
     ambientHex: 0xe8d8b0,
     propWeights: {
-      // Hotel / classical lobby ambience. No `lamp` — lamps are
-      // placed by the dedicated _decorateRoomLamps symmetric pass
-      // (4-corner per room) so they read as a designed lighting
-      // grid instead of randomly-strewn floor lights. No `vase` —
-      // they read as random bottles on the ground.
-      pillar: 0.6, planter: 1.0, rug: 0.5, doorFrame: 0.4,
+      // Hotel / classical lobby ambience. No `lamp` (symmetric pass),
+      // no `vase` (read as bottles on floor), no `rug` (random rugs
+      // looked silly — only deliberate placement now).
+      pillar: 0.6, planter: 1.0, doorFrame: 0.4,
     },
   },
   nightclub: {
@@ -864,9 +862,9 @@ export const LEVEL_THEMES = {
     accent: 0xc9a464,
     ambientHex: 0xeae0c0,
     propWeights: {
-      // Refined skyrise — planters + windows; no random couches /
-      // vases / lamps.
-      planter: 1.2, window: 0.8, rug: 0.5, doorFrame: 0.4, pillar: 0.3,
+      // Refined skyrise — planters + windows. No random couches /
+      // vases / lamps / rugs.
+      planter: 1.2, window: 0.8, doorFrame: 0.4, pillar: 0.3,
     },
   },
   rooftop: {
