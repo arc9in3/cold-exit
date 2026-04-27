@@ -10,7 +10,16 @@ build/
 # Local editor / tool state
 .vscode/
 .idea/
-.claude/
+# Skills are shared tooling — track them so every machine + teammate
+# gets /new-relic and /new-encounter etc. Personal settings stay
+# ignored via the more specific rules below.
+!.claude/
+!.claude/skills/
+!.claude/skills/**
+.claude/settings.local.json
+.claude/settings.json
+.claude/agents/
+.claude/commands/
 
 # OS noise
 .DS_Store
