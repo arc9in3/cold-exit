@@ -725,6 +725,83 @@ window.__rerenderInventory = () => {
   try { if (shopUI?.isOpen?.()) shopUI.render?.(); } catch (_) {}
 };
 
+// Console spawn helper — `__give('m4')`, `__give('medkit', 3)`,
+// `__give('Fancy Alcohol')`. Case-insensitive match against every
+// item pool: weapons (wrapped with rarity roll), armor, gear,
+// attachments, throwables, consumables, junk, toys, relics, encounter
+// keys. Logs what it placed (or "no match") so the dev console
+// reads the result without opening the inventory. Returns the item.
+window.__give = (query, count = 1) => {
+  if (!query) { console.warn('[give] usage: __give("m4") or __give("medkit", 3)'); return null; }
+  const q = String(query).toLowerCase();
+  const matches = (def) => {
+    if (!def) return false;
+    const id = (def.id || '').toLowerCase();
+    const name = (def.name || '').toLowerCase().replace(/<[^>]+>/g, '').trim();
+    return id === q || name === q || id.includes(q) || name.includes(q);
+  };
+  const lookups = [
+    { kind: 'weapon', list: tunables.weapons,
+      build: (d) => wrapWeapon(d) },
+    { kind: 'armor', list: ALL_ARMOR,
+      build: (d) => withAffixes({ ...d, durability: { ...(d.durability || {}) } }) },
+    { kind: 'gear', list: ALL_GEAR,
+      build: (d) => withAffixes({ ...d, durability: { ...(d.durability || {}) } }) },
+    { kind: 'attachment', list: ALL_ATTACHMENTS,
+      build: (d) => ({ ...d, modifier: { ...(d.modifier || {}) } }) },
+    { kind: 'consumable', list: Object.values(CONSUMABLE_DEFS || {}),
+      build: (d) => ({ ...d }) },
+    { kind: 'throwable', list: Object.values(THROWABLE_DEFS || {}),
+      build: (d) => makeThrowable(d) },
+    { kind: 'junk', list: Object.values(JUNK_DEFS || {}),
+      build: (d) => ({ ...d }) },
+    { kind: 'toy', list: Object.values(TOY_DEFS || {}),
+      build: (d) => ({ ...d }) },
+    { kind: 'relic', list: ALL_ARTIFACTS,
+      build: (d) => relicFor(d.id) },
+  ];
+  for (const { kind, list, build } of lookups) {
+    const def = (list || []).find(matches);
+    if (!def) continue;
+    let last = null;
+    for (let i = 0; i < Math.max(1, count | 0); i++) {
+      const item = build(def);
+      if (!item) continue;
+      inventory.add(item);
+      last = item;
+    }
+    onInventoryChanged?.();
+    inventoryUI.render();
+    console.log(`[give] +${count} ${kind}: ${def.name || def.id}`);
+    return last;
+  }
+  console.warn(`[give] no match for "${query}"`);
+  return null;
+};
+// Convenience: list every spawnable id grouped by kind. `__list()`
+// or `__list('belt')` to filter.
+window.__list = (filter) => {
+  const f = filter ? String(filter).toLowerCase() : null;
+  const groups = {
+    weapons: tunables.weapons.map(d => d.name),
+    armor: ALL_ARMOR.map(d => d.name),
+    gear: ALL_GEAR.map(d => d.name),
+    attachments: ALL_ATTACHMENTS.map(d => d.name),
+    consumables: Object.values(CONSUMABLE_DEFS || {}).map(d => d.name),
+    throwables: Object.values(THROWABLE_DEFS || {}).map(d => d.name),
+    junk: Object.values(JUNK_DEFS || {}).map(d => d.name),
+    toys: Object.values(TOY_DEFS || {}).map(d => d.name),
+    relics: ALL_ARTIFACTS.map(d => d.name),
+  };
+  if (!f) return groups;
+  const out = {};
+  for (const [k, list] of Object.entries(groups)) {
+    const hits = list.filter(n => (n || '').toLowerCase().includes(f));
+    if (hits.length) out[k] = hits;
+  }
+  return out;
+};
+
 const gameMenuUI = new GameMenuUI({
   getVolume: getMasterVolume,
   setVolume: setMasterVolume,
