@@ -2507,6 +2507,128 @@ export const ENCOUNTER_DEFS = {
     },
     onItemDropped(_item, _ctx) { return { consume: false }; },
   },
+
+  // -----------------------------------------------------------------
+  // Sleepy Beauty — A girl asleep in the centre of the room. The only
+  // thing that wakes her is the smell of cheesecake; drop one (the
+  // cons_cheesecake consumable) anywhere in the room and she stirs,
+  // then drops a random reward as a thank-you. Walking past, shooting,
+  // or any other interaction does nothing.
+  // -----------------------------------------------------------------
+  sleepy_beauty: {
+    id: 'sleepy_beauty',
+    name: 'Sleepy Beauty',
+    floorColor: 0xf2c8d8,             // soft pink dais
+    oncePerSave: true,
+    condition: (state) => state.levelIndex >= 2,
+    spawn(scene, room, ctx) {
+      const disc = _spawnFloorDisc(scene, room, this.floorColor);
+      // Lay her on her side on the disc.
+      const npc = _buildSimpleNpc({
+        bodyColor: 0xb060a0, headColor: 0xe8c8a8,
+        accentColor: 0xf0a0c0, height: 1.7,
+      });
+      npc.rotation.x = -Math.PI / 2;
+      npc.position.set(disc.cx, 0.20, disc.cz);
+      scene.add(npc);
+      const label = _makeLabelSprite('SLEEPY BEAUTY', '#f0c8d8');
+      label.position.set(disc.cx, 1.6, disc.cz);
+      scene.add(label);
+      return {
+        npc, label, disc,
+        snoreT: Math.random() * Math.PI * 2,
+        awake: false,
+        complete: false,
+      };
+    },
+    tick(dt, ctx) {
+      const s = ctx.state;
+      if (!s.npc || s.awake) return;
+      // Gentle breathing while asleep — same trick as sleeping_boss.
+      s.snoreT += dt;
+      s.npc.position.y = 0.20 + Math.abs(Math.sin(s.snoreT * 1.1)) * 0.03;
+    },
+    onItemDropped(item, ctx) {
+      const s = ctx.state;
+      if (s.complete) return { consume: false };
+      // Trigger ONLY on cheesecake. Anything else gets ignored — the
+      // item bounces to the floor as normal loot.
+      if (!item || item.id !== 'cons_cheesecake') return { consume: false };
+      s.awake = true;
+      s.complete = true;
+      // Sit her upright as the wake-up animation.
+      s.npc.rotation.x = 0;
+      s.npc.position.y = 0;
+      ctx.spawnSpeech(s.npc.position.clone().setY(2.0),
+        'Mmm... cheesecake! Take this — I owe you one.', 5.0);
+      // Random reward — pulls from the same pool as broken_vendor /
+      // sleeping_boss so it scales with how the rest of the encounter
+      // economy already feels.
+      const rolls = [
+        () => ctx.rollEpicWeapon && ctx.rollEpicWeapon(),
+        () => ctx.rollLowTierWeapon && ctx.rollLowTierWeapon(),
+        () => ctx.rollRareGear && ctx.rollRareGear(),
+        () => ctx.rollRandomToy && ctx.rollRandomToy(),
+      ];
+      const pickReward = rolls[Math.floor(Math.random() * rolls.length)];
+      const reward = pickReward && pickReward();
+      if (reward) ctx.spawnLoot(s.disc.cx + 1.0, s.disc.cz, reward);
+      if (ctx.markEncounterComplete) ctx.markEncounterComplete('sleepy_beauty');
+      return { consume: true, complete: true };
+    },
+  },
+
+  // -----------------------------------------------------------------
+  // Brethren — High Council assassin standing in the centre of the
+  // room. He's a fence for chips: drop any weapon at his feet and he
+  // pays you persistent meta-chips proportional to the weapon's gold
+  // value (~1 chip per 1000 gold of sell price, floored at 1). Each
+  // weapon is consumed; you can keep feeding him until you leave or
+  // run out of weapons. NOT once-per-save — the Council always pays.
+  // -----------------------------------------------------------------
+  brethren: {
+    id: 'brethren',
+    name: 'Brethren',
+    floorColor: 0x2c2230,             // council-purple flagstone
+    oncePerSave: false,
+    condition: (state) => state.levelIndex >= 2,
+    spawn(scene, room, ctx) {
+      const disc = _spawnFloorDisc(scene, room, this.floorColor);
+      // Standing assassin — long dark-robe palette, hood-tan head.
+      const npc = _buildSimpleNpc({
+        bodyColor: 0x2a2030, headColor: 0xc8a888,
+        accentColor: 0x6a3070, height: 2.0,
+      });
+      npc.position.set(disc.cx, 0, disc.cz);
+      scene.add(npc);
+      const label = _makeLabelSprite('BRETHREN', '#c890f0');
+      label.position.set(disc.cx, 2.4, disc.cz);
+      scene.add(label);
+      return { npc, label, disc, traded: 0 };
+    },
+    tick(_dt, _ctx) { /* purely reactive — no per-frame work */ },
+    onItemDropped(item, ctx) {
+      const s = ctx.state;
+      if (!item) return { consume: false };
+      const isWeapon = item.type === 'ranged' || item.type === 'melee';
+      if (!isWeapon) return { consume: false };
+      // Compute chip payout from the weapon's sell value. ~1 chip per
+      // 1000 gold, floor 1 so even a common weapon trades for something.
+      const gold = ctx.sellPriceFor ? Math.max(1, ctx.sellPriceFor(item) | 0) : 100;
+      const chips = Math.max(1, Math.round(gold / 1000));
+      if (ctx.awardChips) ctx.awardChips(chips);
+      s.traded += 1;
+      const flavor = chips >= 20
+        ? 'A worthy blade. The Council thanks you.'
+        : chips >= 5
+          ? 'Acceptable. Your debt grows lighter.'
+          : 'Hmm. The Council pays for what it pays for.';
+      ctx.spawnSpeech(s.npc.position.clone().setY(2.4),
+        `${flavor}  +${chips}◆`, 4.0);
+      // Never marks complete — the Council keeps buying.
+      return { consume: true };
+    },
+  },
 };
 
 // Helper — pick one valid encounter for the given level state, or null.

@@ -46,7 +46,7 @@ import {
 import { ALL_ATTACHMENTS, ATTACHMENT_DEFS, effectiveWeapon, randomAttachment, rollAttachmentRarity } from './attachments.js';
 import { CustomizeUI } from './ui_customize.js';
 import { LootUI } from './ui_loot.js';
-import { ShopUI, priceFor } from './ui_shop.js';
+import { ShopUI, priceFor, sellPriceFor } from './ui_shop.js';
 import { PerkUI } from './ui_perks.js';
 import { InventoryUI } from './ui_inventory.js';
 import { SkillLoadout, BASE_STATS } from './skills.js';
@@ -2021,6 +2021,13 @@ function regenerateLevel() {
           runStats.addCredits(amount);
           transientHudMsg(`+${amount}c`, 2.4);
         },
+        // Persistent meta currency. Brethren encounter calls this to
+        // pay out chips proportional to the gold value of a weapon
+        // dropped at his feet. Restart penalty already applied inside.
+        awardChips: (n) => awardPersistentChips(n),
+        // Item gold-value lookup — Brethren encounter uses this to
+        // convert a dropped weapon's sale price into chip payout.
+        sellPriceFor: (item) => sellPriceFor(item),
         getKillCount: () => runStats.kills | 0,
         markEncounterComplete: (id) => { if (id) _runCompletedEncounters.add(id); },
         // Smoke puff at world XZ — used by Glass Case telegraph.

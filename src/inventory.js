@@ -1164,6 +1164,12 @@ export const CONSUMABLE_DEFS = {
     tint: 0x80e0ff,
     useEffect: { kind: 'buff', id: 'energy', mods: { staminaRegenMult: 1.5 }, life: 18 },
     description: '+50% stamina regen for 18s' },
+  // Apr-26 — encounter trigger item. Drop near "Sleepy Beauty" to wake
+  // her and claim a random reward. Doubles as a small heal if eaten.
+  cheesecake: { id: 'cons_cheesecake', name: 'Cheesecake', type: 'consumable', rarity: 'rare',
+    tint: 0xeac98a,
+    useEffect: { kind: 'heal', amount: 25 },
+    description: 'A slice of dessert · heals 25 HP · they say a sleeping princess loves these' },
 
   // --- Extended medical kit (new tiers + buff injectors) ---
   tourniquet: { id: 'cons_tourniquet', name: 'Tourniquet', type: 'consumable', rarity: 'common',
