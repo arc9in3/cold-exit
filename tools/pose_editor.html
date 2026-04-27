@@ -1,0 +1,509 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<title>tacticalrogue — pose editor</title>
+<style>
+  html, body { margin: 0; padding: 0; background: #16181c; color: #ddd;
+               font: 12px/1.4 ui-monospace, Menlo, Consolas, monospace;
+               overflow: hidden; }
+  #root { display: flex; width: 100vw; height: 100vh; }
+  #stage { flex: 1 1 auto; position: relative; background:
+    linear-gradient(45deg, #0c0d10 25%, transparent 25%) -10px 0 / 20px 20px,
+    linear-gradient(-45deg, #0c0d10 25%, transparent 25%) -10px 0 / 20px 20px,
+    linear-gradient(45deg, transparent 75%, #0c0d10 75%) -10px 0 / 20px 20px,
+    linear-gradient(-45deg, transparent 75%, #0c0d10 75%) -10px 0 / 20px 20px,
+    #16181c; }
+  #stage canvas { display: block; }
+  #panel {
+    flex: 0 0 360px; background: #1b1d22; border-left: 1px solid #2a2d34;
+    padding: 12px; overflow-y: auto; box-sizing: border-box;
+  }
+  h1 { margin: 0 0 12px 0; color: #c9a87a; font-size: 14px; font-weight: 600; }
+  h2 { margin: 14px 0 6px 0; color: #c9a87a; font-size: 12px;
+       border-bottom: 1px solid #2a2d34; padding-bottom: 4px; font-weight: 500; }
+  label { display: block; margin: 6px 0 2px; color: #9aa; font-size: 11px; }
+  select, input[type=range] {
+    width: 100%; box-sizing: border-box;
+    background: #0f1014; color: #ddd; border: 1px solid #2a2d34;
+    padding: 4px 8px; border-radius: 3px; font: inherit;
+  }
+  .row { display: flex; gap: 6px; align-items: center; }
+  .row span { color: #f1d9a8; font-size: 11px; min-width: 50px; text-align: right; }
+  button { background: #2a2d34; color: #ddd; border: 1px solid #3a3d44;
+           padding: 6px 12px; border-radius: 3px; font: inherit;
+           cursor: pointer; margin-top: 8px; width: 100%; }
+  button:hover { background: #3a3d44; }
+  button.primary { background: #4a6a3a; border-color: #5a8a4a; color: #fff; }
+  button.primary:hover { background: #5a8a4a; }
+  pre { background: #0c0d10; border: 1px solid #2a2d34; padding: 8px;
+        font-size: 10px; white-space: pre-wrap; word-break: break-all;
+        max-height: 200px; overflow-y: auto; color: #9aa; }
+  .legend { background: #0f1014; padding: 6px 8px; margin: 8px 0;
+            border: 1px solid #2a2d34; border-radius: 3px; font-size: 11px;
+            color: #9aa; line-height: 1.6; }
+  .legend .swatch { display: inline-block; width: 10px; height: 10px;
+                    margin-right: 4px; vertical-align: middle; }
+</style>
+</head>
+<body>
+<div id="root">
+  <div id="stage"></div>
+  <div id="panel">
+    <h1>Pose Editor</h1>
+
+    <label>Weapon class preset</label>
+    <select id="preset">
+      <option value="pistol">Pistol</option>
+      <option value="smg">SMG</option>
+      <option value="rifle" selected>Rifle</option>
+      <option value="shotgun">Shotgun</option>
+      <option value="sniper">Sniper</option>
+      <option value="lmg">LMG</option>
+      <option value="melee">Melee</option>
+    </select>
+    <button id="reset-class">Reset to current preset defaults</button>
+
+    <label style="margin-top:10px">Optional: load a real weapon FBX</label>
+    <select id="weapon-pick">
+      <option value="">— none —</option>
+    </select>
+    <div class="legend" style="font-size:10px">
+      Loads the chosen weapon's FBX with the SAME transforms it gets
+      in-game (per-class scale, pack-scale, mirror, rotation override,
+      grip offset). Helps you align the hand to the actual gun.
+    </div>
+
+    <div class="legend">
+      <div><span class="swatch" style="background:#ff5050"></span>aim/bullet vector</div>
+      <div><span class="swatch" style="background:#50c8ff"></span>fire origin (chest)</div>
+      <div>Drag the canvas to orbit. Scroll to zoom.</div>
+    </div>
+
+    <h2>Dominant arm (trigger)</h2>
+    <label>Shoulder pitch (X) <span id="dom-shoulder-x-v">-1.05</span></label>
+    <input type="range" id="dom-shoulder-x" min="-3.14" max="0" step="0.01" value="-1.05">
+    <label>Shoulder yaw (Z) <span id="dom-shoulder-z-v">-0.12</span></label>
+    <input type="range" id="dom-shoulder-z" min="-1.5" max="1.5" step="0.01" value="-0.12">
+    <label>Elbow bend (X) <span id="dom-elbow-x-v">-1.70</span></label>
+    <input type="range" id="dom-elbow-x" min="-3.14" max="0" step="0.01" value="-1.70">
+
+    <h2>Support arm</h2>
+    <label>Shoulder pitch (X) <span id="sup-shoulder-x-v">-1.55</span></label>
+    <input type="range" id="sup-shoulder-x" min="-3.14" max="0" step="0.01" value="-1.55">
+    <label>Shoulder yaw (Z) <span id="sup-shoulder-z-v">0.55</span></label>
+    <input type="range" id="sup-shoulder-z" min="-1.5" max="1.5" step="0.01" value="0.55">
+    <label>Elbow bend (X) <span id="sup-elbow-x-v">-0.20</span></label>
+    <input type="range" id="sup-elbow-x" min="-3.14" max="0" step="0.01" value="-0.20">
+
+    <h2>Body</h2>
+    <label>Chest pitch (X) <span id="chest-x-v">0</span></label>
+    <input type="range" id="chest-x" min="-1" max="1" step="0.01" value="0">
+    <label>Chest yaw (Y) — body blade <span id="chest-y-v">-0.30</span></label>
+    <input type="range" id="chest-y" min="-1" max="1" step="0.01" value="-0.30">
+    <label>Head pitch (X) <span id="head-x-v">0</span></label>
+    <input type="range" id="head-x" min="-1" max="1" step="0.01" value="0">
+
+    <h2>Aim direction (drives bullet vector)</h2>
+    <label>Aim yaw (Y) <span id="aim-yaw-v">0</span></label>
+    <input type="range" id="aim-yaw" min="-1.57" max="1.57" step="0.01" value="0">
+    <label>Aim pitch (X) <span id="aim-pitch-v">0</span></label>
+    <input type="range" id="aim-pitch" min="-0.6" max="0.6" step="0.01" value="0">
+
+    <h2>Save</h2>
+    <button id="save" class="primary">Download pose JSON</button>
+    <button id="copy">Copy pose JSON to clipboard</button>
+    <div class="legend">
+      <strong>Workflow:</strong> click Download → file lands in your
+      Downloads folder named <code>pose_&lt;class&gt;.json</code>.
+      Drop it into <code>Assets/poses/</code> in the repo and commit
+      &amp; push. Tell me you're done — I'll pull the file(s) from
+      <code>Assets/poses/</code> and update <code>actor_rig.js</code>
+      with the new defaults.
+    </div>
+    <pre id="output">// Click Download or Copy to dump current values.</pre>
+  </div>
+</div>
+
+<script type="importmap">
+{
+  "imports": {
+    "three": "https://unpkg.com/three@0.161.0/build/three.module.js",
+    "three/addons/": "https://unpkg.com/three@0.161.0/examples/jsm/"
+  }
+}
+</script>
+
+<script type="module">
+import * as THREE from 'three';
+import { OrbitControls } from 'three/addons/controls/OrbitControls.js';
+import { FBXLoader } from 'three/addons/loaders/FBXLoader.js';
+import { buildRig } from '../src/actor_rig.js';
+import { MODEL_BY_WEAPON_NAME, gripOffsetForModelPath,
+         rotationOverrideForModelPath, scaleForModelPath,
+         shouldMirrorInHand } from '../src/model_manifest.js';
+import { tunables } from '../src/tunables.js';
+
+// ---------- scene + renderer ---------------------------------------
+const stage = document.getElementById('stage');
+const renderer = new THREE.WebGLRenderer({ antialias: true });
+renderer.setPixelRatio(window.devicePixelRatio);
+const resize = () => {
+  const w = stage.clientWidth, h = stage.clientHeight;
+  renderer.setSize(w, h, false);
+  camera.aspect = w / h;
+  camera.updateProjectionMatrix();
+};
+stage.appendChild(renderer.domElement);
+
+const scene = new THREE.Scene();
+scene.background = new THREE.Color(0x16181c);
+const camera = new THREE.PerspectiveCamera(40, 1, 0.05, 50);
+camera.position.set(2.5, 1.6, 3.0);
+
+const controls = new OrbitControls(camera, renderer.domElement);
+controls.target.set(0, 1.0, 0);
+controls.update();
+
+scene.add(new THREE.AmbientLight(0xffffff, 0.55));
+const key = new THREE.DirectionalLight(0xffffff, 1.1); key.position.set(3, 5, 2); scene.add(key);
+const fill = new THREE.DirectionalLight(0x8fbaff, 0.35); fill.position.set(-3, 2, -1); scene.add(fill);
+
+// Ground reference grid + circle so the user can read the floor.
+const grid = new THREE.GridHelper(6, 12, 0x2a2d34, 0x222428);
+scene.add(grid);
+const axes = new THREE.AxesHelper(0.5);
+scene.add(axes);
+
+// ---------- rig ---------------------------------------------------
+// Build a rig WITHOUT the animation system — we'll drive joint
+// rotations manually from the sliders. Skip initAnim entirely.
+const rig = buildRig({ toon: false });
+scene.add(rig.group);
+rig.group.position.y = 0;
+
+// Bullet origin marker (fire origin sphere) + aim direction arrow.
+const fireOriginMat = new THREE.MeshBasicMaterial({ color: 0x50c8ff });
+const fireOriginMarker = new THREE.Mesh(
+  new THREE.SphereGeometry(0.04, 12, 8), fireOriginMat,
+);
+scene.add(fireOriginMarker);
+
+const arrowDir = new THREE.Vector3(0, 0, 1);
+const arrowOrigin = new THREE.Vector3(0, 1.4, 0);
+const aimArrow = new THREE.ArrowHelper(arrowDir, arrowOrigin, 2.0, 0xff5050, 0.10, 0.06);
+scene.add(aimArrow);
+
+// Tag every visible primitive in the rig with shadow-friendly mats so
+// the body reads cleanly under the directional lights.
+rig.group.traverse(o => {
+  if (o.isMesh && o.material) {
+    o.material.flatShading = false;
+    o.material.needsUpdate = true;
+  }
+});
+
+// ---------- presets -----------------------------------------------
+// Class-default poses pulled from actor_rig.js's rifleHold block +
+// per-class sub-variants. Pistol uses a derived two-handed stance
+// that doesn't currently exist in actor_rig as its own branch — the
+// editor lets us author one.
+const PRESETS = {
+  pistol: {
+    domShoulderX: -1.20, domShoulderZ: -0.10, domElbowX: -1.20,
+    supShoulderX: -1.20, supShoulderZ:  0.40, supElbowX: -1.20,
+    chestX: 0, chestY: -0.20, headX: 0,
+  },
+  smg: {
+    domShoulderX: -1.05, domShoulderZ: -0.12, domElbowX: -1.70,
+    supShoulderX: -1.45, supShoulderZ:  0.18, supElbowX: -0.85,
+    chestX: 0, chestY: -0.30, headX: 0,
+  },
+  rifle: {
+    domShoulderX: -1.05, domShoulderZ: -0.12, domElbowX: -1.70,
+    supShoulderX: -1.55, supShoulderZ:  0.55, supElbowX: -0.20,
+    chestX: 0, chestY: -0.30, headX: 0,
+  },
+  shotgun: {
+    domShoulderX: -1.05, domShoulderZ: -0.12, domElbowX: -1.70,
+    supShoulderX: -1.45, supShoulderZ:  0.18, supElbowX: -0.85,
+    chestX: 0, chestY: -0.30, headX: 0,
+  },
+  sniper: {
+    domShoulderX: -1.05, domShoulderZ: -0.12, domElbowX: -1.70,
+    supShoulderX: -1.45, supShoulderZ:  0.18, supElbowX: -0.85,
+    chestX: 0, chestY: -0.30, headX: 0,
+  },
+  lmg: {
+    domShoulderX: -1.05, domShoulderZ: -0.12, domElbowX: -1.70,
+    supShoulderX: -1.45, supShoulderZ:  0.18, supElbowX: -0.85,
+    chestX: 0, chestY: -0.30, headX: 0,
+  },
+  melee: {
+    domShoulderX: -1.40, domShoulderZ:  0.15, domElbowX: -1.10,
+    supShoulderX: -0.40, supShoulderZ: -0.10, supElbowX: -0.40,
+    chestX: 0.05, chestY: -0.10, headX: 0,
+  },
+};
+
+// ---------- handedness --------------------------------------------
+// Convention: right-handed shooter. weaponArm = right arm, support
+// = left. The sign on shoulder.z flips per side (rotation axis is
+// the same; the inward direction is opposite). supportYawSign for
+// the right-handed setup is +1 for left arm.
+const handed = 'right';
+const weaponArm = handed === 'right' ? rig.rightArm : rig.leftArm;
+const supportArm = handed === 'right' ? rig.leftArm : rig.rightArm;
+const supportYawSign = 1;   // right-handed: +1 for left arm
+const dominantYawSign = -1; // right-handed: -1 for right arm
+
+// ---------- pose application --------------------------------------
+function applyPose(p) {
+  weaponArm.shoulder.pivot.rotation.x = p.domShoulderX;
+  weaponArm.shoulder.pivot.rotation.z = p.domShoulderZ * dominantYawSign;
+  weaponArm.elbow.rotation.x = p.domElbowX;
+  supportArm.shoulder.pivot.rotation.x = p.supShoulderX;
+  supportArm.shoulder.pivot.rotation.z = p.supShoulderZ * supportYawSign;
+  supportArm.elbow.rotation.x = p.supElbowX;
+  rig.chest.rotation.x = p.chestX;
+  rig.chest.rotation.y = p.chestY;
+  rig.head.rotation.x = p.headX;
+
+  // Fire origin — chest height in world space. The game's fire
+  // origin is roughly at chest center (where the rifle stock would
+  // sit on the dominant shoulder). Approximate visually by sampling
+  // the right shoulder anchor's world position.
+  const _v = new THREE.Vector3();
+  if (rig.rightShoulderAnchor) {
+    rig.rightShoulderAnchor.getWorldPosition(_v);
+  } else {
+    rig.chest.getWorldPosition(_v);
+  }
+  fireOriginMarker.position.copy(_v);
+
+  // Aim vector — relative to the body. The game computes aim from
+  // cursor → muzzle each frame; here we drive yaw + pitch from
+  // sliders so the user can see how the arrow lines up with the
+  // weapon hand.
+  const yaw = parseFloat(document.getElementById('aim-yaw').value);
+  const pitch = parseFloat(document.getElementById('aim-pitch').value);
+  arrowDir.set(Math.sin(yaw) * Math.cos(pitch), Math.sin(pitch), Math.cos(yaw) * Math.cos(pitch));
+  aimArrow.position.copy(_v);
+  aimArrow.setDirection(arrowDir);
+}
+
+// ---------- UI wiring ---------------------------------------------
+const fields = [
+  ['dom-shoulder-x', 'domShoulderX'],
+  ['dom-shoulder-z', 'domShoulderZ'],
+  ['dom-elbow-x',    'domElbowX'],
+  ['sup-shoulder-x', 'supShoulderX'],
+  ['sup-shoulder-z', 'supShoulderZ'],
+  ['sup-elbow-x',    'supElbowX'],
+  ['chest-x',        'chestX'],
+  ['chest-y',        'chestY'],
+  ['head-x',         'headX'],
+];
+const aimFields = [['aim-yaw', 'aimYaw'], ['aim-pitch', 'aimPitch']];
+
+function readPose() {
+  const p = {};
+  for (const [id, key] of fields) {
+    p[key] = parseFloat(document.getElementById(id).value);
+  }
+  return p;
+}
+
+function applyFromUI() {
+  applyPose(readPose());
+  for (const [id] of [...fields, ...aimFields]) {
+    const lbl = document.getElementById(id + '-v');
+    if (lbl) lbl.textContent = parseFloat(document.getElementById(id).value).toFixed(2);
+  }
+}
+
+for (const [id] of [...fields, ...aimFields]) {
+  document.getElementById(id).addEventListener('input', applyFromUI);
+}
+
+function loadPreset(name) {
+  const p = PRESETS[name];
+  if (!p) return;
+  for (const [id, key] of fields) {
+    document.getElementById(id).value = p[key];
+  }
+  applyFromUI();
+}
+document.getElementById('preset').addEventListener('change', (e) => loadPreset(e.target.value));
+document.getElementById('reset-class').addEventListener('click', () => {
+  loadPreset(document.getElementById('preset').value);
+});
+
+// ---------- save --------------------------------------------------
+function _buildPoseJson() {
+  const cls = document.getElementById('preset').value;
+  const pose = readPose();
+  return {
+    weapon_class: cls,
+    handedness: handed,
+    pose,
+    note: 'Apply via actor_rig.js rifleHold block (or matching pose branch). Multiply shoulder.z by supportYawSign for support arm and dominantYawSign for dominant arm.',
+    saved_at: new Date().toISOString(),
+  };
+}
+
+document.getElementById('save').addEventListener('click', () => {
+  const out = _buildPoseJson();
+  const text = JSON.stringify(out, null, 2);
+  document.getElementById('output').textContent =
+    `// Saved pose_${out.weapon_class}.json — commit it under Assets/poses/\n` + text;
+  // Trigger a browser download — file lands in the user's Downloads
+  // folder. Filename includes the weapon class so multiple presets
+  // produce distinct files when the user iterates.
+  const blob = new Blob([text], { type: 'application/json' });
+  const a = document.createElement('a');
+  a.href = URL.createObjectURL(blob);
+  a.download = `pose_${out.weapon_class}.json`;
+  document.body.appendChild(a);
+  a.click();
+  a.remove();
+});
+
+document.getElementById('copy').addEventListener('click', async () => {
+  const out = _buildPoseJson();
+  const text = JSON.stringify(out, null, 2);
+  document.getElementById('output').textContent = text;
+  try {
+    await navigator.clipboard.writeText(text);
+    document.getElementById('output').textContent = '// Copied to clipboard.\n' + text;
+  } catch (_) { /* fallback: just show in pre */ }
+});
+
+// ---------- weapon FBX loader ------------------------------------
+// Load the FBX with the same transform pipeline the game uses, so
+// the user can align hand position against the actual gun.
+const MODEL_BASE = '../Assets/models/';
+const fbxLoader = new FBXLoader();
+let _weaponMesh = null;        // currently loaded weapon
+let _weaponPivot = new THREE.Group();
+scene.add(_weaponPivot);
+
+const CLASS_FIT_RADIUS = {
+  pistol: 0.45, smg: 0.65, rifle: 0.75, shotgun: 0.75,
+  lmg: 0.75, sniper: 0.75, flame: 0.7, melee: 0.7,
+};
+
+function _fitToRadius(obj, target) {
+  // Mirrors gltf_cache.fitToRadius — center bbox at origin and
+  // scale so the largest dim equals 2 * target.
+  const box = new THREE.Box3().setFromObject(obj);
+  if (box.isEmpty()) return;
+  const size = new THREE.Vector3(); box.getSize(size);
+  const center = new THREE.Vector3(); box.getCenter(center);
+  const maxDim = Math.max(size.x, size.y, size.z) || 1;
+  const scale = (2 * target) / maxDim;
+  obj.scale.setScalar(scale);
+  obj.position.set(-center.x * scale, -center.y * scale, -center.z * scale);
+}
+
+function _attachPointForClass(cls) {
+  // Mirrors player.js: rifleHold (rifle/shotgun/lmg/sniper/smg) —
+  // weapon parents to the dominant shoulder anchor; everything else
+  // parents to the dominant hand. Both work for visual alignment.
+  const rifleHold = ['rifle', 'shotgun', 'lmg', 'sniper', 'smg'].includes(cls);
+  if (rifleHold && rig.rightShoulderAnchor) return rig.rightShoulderAnchor;
+  return rig.rightArm.hand.mesh;
+}
+
+function _populateWeaponPicker() {
+  const sel = document.getElementById('weapon-pick');
+  // Group entries by source pack so the dropdown is browsable.
+  const groups = {};
+  for (const [name, path] of Object.entries(MODEL_BY_WEAPON_NAME)) {
+    const folder = path.split('/')[0];
+    (groups[folder] = groups[folder] || []).push({ name, path });
+  }
+  for (const folder of Object.keys(groups).sort()) {
+    const grp = document.createElement('optgroup');
+    grp.label = folder;
+    for (const { name } of groups[folder].sort((a, b) => a.name.localeCompare(b.name))) {
+      const opt = document.createElement('option');
+      opt.value = name;
+      opt.textContent = name;
+      grp.appendChild(opt);
+    }
+    sel.appendChild(grp);
+  }
+}
+_populateWeaponPicker();
+
+function _findTunable(name) {
+  return tunables.weapons.find(w => w.name === name) || null;
+}
+
+document.getElementById('weapon-pick').addEventListener('change', (e) => {
+  const name = e.target.value;
+  // Tear down any previous weapon mesh.
+  if (_weaponMesh) {
+    _weaponMesh.parent?.remove(_weaponMesh);
+    _weaponMesh.traverse?.(o => {
+      if (o.geometry) o.geometry.dispose();
+      if (o.material) {
+        if (Array.isArray(o.material)) o.material.forEach(m => m.dispose?.());
+        else o.material.dispose?.();
+      }
+    });
+    _weaponMesh = null;
+  }
+  if (!name) return;
+  const path = MODEL_BY_WEAPON_NAME[name];
+  if (!path) return;
+  const url = MODEL_BASE + path;
+  const w = _findTunable(name) || { class: 'pistol', muzzleLength: 0.5 };
+  const cls = w.class || 'pistol';
+  document.getElementById('output').textContent = `loading ${name}…`;
+  fbxLoader.load(url, (obj) => {
+    // Same pipeline as src/player.js setWeapon():
+    //   1. Per-class fit radius × per-FBX scale override
+    //   2. Rotation override OR default (0, π/2, 0)
+    //   3. Mirror via scale.x = -1 if the pack rule says so
+    //   4. Grip offset translation
+    const cs = CLASS_FIT_RADIUS[cls] ?? 0.9;
+    _fitToRadius(obj, (w.muzzleLength ?? 0.5) * cs * scaleForModelPath(url));
+    const rotOverride = rotationOverrideForModelPath(url);
+    if (rotOverride) {
+      obj.rotation.set(rotOverride.x || 0, rotOverride.y || 0, rotOverride.z || 0);
+    } else if (w.modelRotation) {
+      obj.rotation.set(w.modelRotation.x || 0, w.modelRotation.y || 0, w.modelRotation.z || 0);
+    } else {
+      obj.rotation.set(0, Math.PI / 2, 0);
+    }
+    if (shouldMirrorInHand({ baseName: name })) obj.scale.x *= -1;
+    const grip = gripOffsetForModelPath(url);
+    if (grip) obj.position.set(grip.x || 0, grip.y || 0, grip.z || 0);
+    // Attach to the same anchor point the in-game system uses.
+    const anchor = _attachPointForClass(cls);
+    anchor.add(obj);
+    _weaponMesh = obj;
+    document.getElementById('output').textContent =
+      `loaded ${name} → ${path} (cls=${cls}, anchor=${anchor === rig.rightShoulderAnchor ? 'shoulder' : 'hand'})`;
+  }, undefined, (err) => {
+    document.getElementById('output').textContent =
+      `failed to load ${path}: ${err?.message || err}`;
+  });
+});
+
+// ---------- boot --------------------------------------------------
+loadPreset('rifle');
+window.addEventListener('resize', resize);
+resize();
+
+function tick() {
+  controls.update();
+  renderer.render(scene, camera);
+  requestAnimationFrame(tick);
+}
+tick();
+</script>
+</body>
+</html>
