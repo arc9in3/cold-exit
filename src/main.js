@@ -1696,6 +1696,9 @@ function regenerateLevel() {
   // persist into the next floor — they were spawned via
   // projectiles.spawn but level.clear didn't know about them.
   if (projectiles.removeAll) projectiles.removeAll();
+  // Placed claymores live in their own _claymores list (not in the
+  // projectile manager), so they need a separate sweep on regen.
+  _removeAllClaymores();
   playerKeys.clear();
   // Pre-warm the FBX clone for every weapon currently in the player's
   // rotation. The clone+fit+rotate pass takes a few frames per
@@ -7852,6 +7855,26 @@ function placeClaymore(pos, dirX, dirZ, opts) {
     blink: Math.random() * Math.PI * 2,
     alive: true,
   });
+}
+// Tear down every placed claymore — meshes + materials disposed,
+// list cleared. Called from regenerateLevel so mines from the
+// previous floor don't persist (they were spawned through
+// placeClaymore which sits outside the projectile manager, so
+// projectiles.removeAll didn't reach them).
+function _removeAllClaymores() {
+  for (const c of _claymores) {
+    if (c.group) {
+      if (c.group.parent) c.group.parent.remove(c.group);
+      c.group.traverse?.((o) => {
+        if (o.geometry) o.geometry.dispose?.();
+        if (o.material) {
+          if (Array.isArray(o.material)) o.material.forEach(m => m?.dispose?.());
+          else o.material.dispose?.();
+        }
+      });
+    }
+  }
+  _claymores.length = 0;
 }
 function _tickClaymores(dt) {
   for (let i = _claymores.length - 1; i >= 0; i--) {
