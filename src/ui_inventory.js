@@ -486,13 +486,14 @@ export class InventoryUI {
     const count = (entry.item.count | 0) || 1;
     const stackBadge = ((entry.item.type === 'consumable' || entry.item.type === 'junk') && count > 1)
       ? `<span class="pkt-stack">×${count}</span>` : '';
-    // Keep / junk markers — small corner badge so the player can see
-    // tagged items at a glance in the grid. Mutually exclusive (the
-    // toggle handlers clear the other field on flip).
-    const markBadge = entry.item.markedKeep
-      ? `<span class="pkt-mark mark-keep" title="Marked to keep">★</span>`
-      : entry.item.markedJunk
-      ? `<span class="pkt-mark mark-junk" title="Marked as junk">✕</span>`
+    // Keep / junk markers — text tags consistent with the
+    // equipment-cell + loot-cell renderer (.cell-mark-tag). Reuses
+    // the same class so styling stays in sync; the per-tile size
+    // override below scales the tag down to fit the smaller grid cell.
+    const markBadge = entry.item.markedJunk
+      ? `<div class="cell-mark-tag mark-junk pkt-mark-tag" title="Marked as Junk — included in Sell All Junk">JUNK</div>`
+      : entry.item.markedKeep
+      ? `<div class="cell-mark-tag mark-keep pkt-mark-tag" title="Marked to Keep — locked from sell + drop">KEEP</div>`
       : '';
     tile.innerHTML = `
       ${thumb ? `<img class="pkt-thumb" src="${thumb}" alt="" draggable="false" style="${weaponImageMirrorStyle(entry.item)}">` : `<span class="pkt-glyph">${TYPE_ICONS[entry.item.type] || '◇'}</span>`}

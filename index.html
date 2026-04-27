@@ -4101,27 +4101,16 @@
       z-index: 4;
       text-shadow: 0 1px 2px rgba(0,0,0,0.9);
     }
-    /* Keep / junk markers — small corner dot on pockets/rig/backpack
-       tiles. Sits at the top-LEFT so it doesn't fight the stack count
-       badge in the top-right. */
-    .pocket-item .pkt-mark {
-      position: absolute;
-      top: 3px; left: 3px;
-      width: 16px; height: 16px;
-      display: inline-flex; align-items: center; justify-content: center;
-      font-size: 11px; font-weight: 800; line-height: 1;
-      border-radius: 50%;
+    /* In-grid keep / junk text tags — reuse the .cell-mark-tag styling
+       from the equipment / loot cells but scaled smaller to fit the
+       tighter pocket tile. Sits top-LEFT so it doesn't fight the
+       stack-count badge in the top-right. */
+    .pocket-item .pkt-mark-tag {
+      top: 3px; left: 3px; right: auto;
+      font-size: 8px; padding: 1px 4px; letter-spacing: 0.5px;
+      line-height: 1.1;
       pointer-events: none;
       z-index: 5;
-      box-shadow: 0 1px 2px rgba(0,0,0,0.65);
-    }
-    .pocket-item .pkt-mark.mark-keep {
-      background: #d4a948; color: #1a1410;
-      border: 1px solid #f0d488;
-    }
-    .pocket-item .pkt-mark.mark-junk {
-      background: #4a2828; color: #f0a0a0;
-      border: 1px solid #a04040;
     }
     #prompt {
       position: fixed;
