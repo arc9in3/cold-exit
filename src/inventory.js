@@ -1,18 +1,21 @@
 import { tunables } from './tunables.js';
 import { rollPerks, GEAR_PERKS } from './perks.js';
 import { GridContainer, stampItemDims, deriveGridLayout } from './grid_container.js';
-import { renderForWeaponName as _renderForWeaponName, shouldMirrorWeapon as _shouldMirrorWeapon } from './model_manifest.js';
-// Re-exported helper kept for compat with cell templates that import
-// it; returns '' unconditionally now. The render PNGs in
-// Assets/UI/weapon_renders/ are already correctly oriented from the
-// tool's export (auto-flip + user mirror toggle baked into the
-// rendered output). A CSS-side flip on top would double-mirror them
-// back to wrong. MIRROR_X_BY_NAME in model_manifest still drives
-// the in-hand pack rule (shouldMirrorInHand) and the customize-body
-// SVG image transform — those operate on the raw FBX, not the PNG.
+import { renderForWeaponName as _renderForWeaponName,
+         shouldMirrorWeapon as _shouldMirrorWeapon,
+         shouldMirrorInHand as _shouldMirrorInHand } from './model_manifest.js';
 export { _shouldMirrorWeapon as shouldMirrorWeapon };
-export function weaponImageMirrorStyle(_item) {
-  return '';
+// PNG / image mirror by source pack. Inspecting raw renders:
+//   Desert_Eagle_50.png (weapons/*)   muzzle LEFT (correct)
+//   AK47.png            (lowpolyguns/*) muzzle RIGHT (wrong)
+// The animpic export pipeline produced correctly-oriented PNGs; the
+// lowpolyguns PNGs exported facing right because the tool's
+// auto-flip didn't detect their muzzle axis. Applying CSS scaleX(-1)
+// only to the lowpoly pack (same condition as the in-hand mirror)
+// flips them to muzzle-LEFT in every UI surface without
+// double-mirroring the animpic ones.
+export function weaponImageMirrorStyle(item) {
+  return _shouldMirrorInHand(item) ? 'transform: scaleX(-1);' : '';
 }
 
 // Slot-based inventory aligned to a body silhouette. Each item carries a
