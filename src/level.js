@@ -516,6 +516,17 @@ export class Level {
       this._addCeilingLamp(room);
     }
 
+    // Symmetric floor-lamp pass — drops 2-4 floor lamps in a
+    // designed configuration (corners + optional centre) per non-
+    // start room. Replaces the old random `placeInterior(lamp)`
+    // sprinkle, which produced lamps strewn at unpredictable
+    // positions. Skips any slot that overlaps walls / props /
+    // keepouts so a lamp never spawns inside a couch.
+    for (const room of rooms) {
+      if (room.type === 'start') continue;
+      this._decorateRoomLamps(room);
+    }
+
     // Safety pass — any obstacle (interior wall, column, stray cover) that
     // overlaps a doorway centre gets its collision nulled. Outer walls
     // already have door-sized gaps by construction, so they're untouched;
@@ -1849,7 +1860,8 @@ export class Level {
       _workstation();
       if (Math.random() < 0.55) _workstation();
       if (Math.random() < 0.55) _placeAndLoot('cabinet', placeAlongWall);
-      if (Math.random() < 0.35) placeInterior(buildProp('lamp'));
+      // Lamps come from the dedicated symmetric corner pass
+      // (_decorateRoomLamps) — no random interior drop here.
     } else if (theme === 'kitchen') {
       // Dining set: central table + chairs anchored on each of its
       // 4 sides (2-4 per room; dropped if a side is blocked). Cabinet
@@ -1905,8 +1917,13 @@ export class Level {
         const PERIMETER_KINDS = new Set([
           'pillar', 'railing', 'window', 'doorFrame', 'neonStick',
         ]);
-        // Decorative interior-friendly kinds (small, low-impact).
-        const INTERIOR_OK = new Set(['lamp', 'vase', 'rug']);
+        // Decorative interior-friendly kinds — small, low-impact,
+        // can sit on the floor without blocking. `lamp` is NOT in
+        // this list anymore: lamps go through the symmetric corner
+        // pass (_decorateRoomLamps) so they read as a designed
+        // lighting grid. `vase` is gone too — it read as a random
+        // bottle on the floor.
+        const INTERIOR_OK = new Set(['rug']);
         // Loot ambience — wall-first, but crates / barrels are OK
         // free-standing if the wall is full.
         const LOOT_AMBIENCE = new Set(['locker', 'crate', 'barrel', 'pallet']);
@@ -2048,6 +2065,74 @@ export class Level {
   //   3) The door-corridor clear pass can hide the whole prop group
   //      by flipping `propGroup.visible = false` when it touches a
   //      doorway strip.
+  // Symmetric floor-lamp configuration. Tries each of the 4 inset
+  // corners (1.4m off both walls) plus, for big rooms, two midpoints
+  // along the long axis. Skips any slot blocked by walls, props,
+  // elevators, or registered keep-outs. Lamps are visual-only
+  // (collision: null) so they never affect movement; we still skip
+  // overlapping slots so a lamp doesn't clip into a couch arm.
+  //
+  // Decorations[] tracks the visual group so a level regen tears
+  // down the lamp meshes cleanly — buildProp returns a Group not
+  // an obstacle proxy for collision-null props, so without this
+  // tracking the lamps would leak across regens.
+  _decorateRoomLamps(room) {
+    const b = room.bounds;
+    const w = b.maxX - b.minX;
+    const d = b.maxZ - b.minZ;
+    const inset = 1.4;
+    // Skip rooms too small to fit four corner lamps (smaller than
+    // 2*inset+1m on either axis would clip the lamps into each other
+    // or the elevator capsule).
+    if (w < 2 * inset + 1 || d < 2 * inset + 1) return;
+    const slots = [
+      { x: b.minX + inset, z: b.minZ + inset },
+      { x: b.maxX - inset, z: b.minZ + inset },
+      { x: b.minX + inset, z: b.maxZ - inset },
+      { x: b.maxX - inset, z: b.maxZ - inset },
+    ];
+    // Big rooms add 2 midpoint lamps along the longer axis to keep
+    // the centre lit without breaking symmetry.
+    if (w >= 14 && d >= 8) {
+      slots.push(
+        { x: (b.minX + b.maxX) / 2, z: b.minZ + inset },
+        { x: (b.minX + b.maxX) / 2, z: b.maxZ - inset },
+      );
+    } else if (d >= 14 && w >= 8) {
+      slots.push(
+        { x: b.minX + inset, z: (b.minZ + b.maxZ) / 2 },
+        { x: b.maxX - inset, z: (b.minZ + b.maxZ) / 2 },
+      );
+    }
+    const elev = room.elevatorCenter;
+    const ELEV_R2 = 4 * 4;
+    for (const s of slots) {
+      // Skip if too close to the elevator capsule.
+      if (elev) {
+        const ex = s.x - elev.x, ez = s.z - elev.z;
+        if (ex * ex + ez * ez < ELEV_R2) continue;
+      }
+      // Skip keep-outs (boss exit ring, encounter spawn).
+      let blocked = false;
+      if (this._keepouts) {
+        for (const k of this._keepouts) {
+          const kx = s.x - k.x, kz = s.z - k.z;
+          if (kx * kx + kz * kz < k.r * k.r) { blocked = true; break; }
+        }
+      }
+      if (blocked) continue;
+      // Skip slots overlapping walls / cover / props. 0.45m radius
+      // covers the lamp base + a margin so the prop never visually
+      // bites into a couch arm.
+      if (this._collidesAt(s.x, s.z, 0.45)) continue;
+      const lamp = buildProp('lamp');
+      if (!lamp) continue;
+      lamp.group.position.set(s.x, 0, s.z);
+      this.scene.add(lamp.group);
+      this.decorations.push(lamp.group);
+    }
+  }
+
   // Drop a simple ceiling lamp in the room — a thin disc for the
   // fixture plus a warm PointLight and a registered light source for
   // the stealth system. Placed near room centre and offset a bit

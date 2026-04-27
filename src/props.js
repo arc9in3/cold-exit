@@ -827,9 +827,12 @@ export const LEVEL_THEMES = {
     accent: 0xc9a464,
     ambientHex: 0xe8d8b0,
     propWeights: {
-      // Hotel / classical lobby ambience — no random furniture.
-      pillar: 0.6, planter: 1.0, lamp: 0.6,
-      vase: 0.5, rug: 0.5, doorFrame: 0.4,
+      // Hotel / classical lobby ambience. No `lamp` — lamps are
+      // placed by the dedicated _decorateRoomLamps symmetric pass
+      // (4-corner per room) so they read as a designed lighting
+      // grid instead of randomly-strewn floor lights. No `vase` —
+      // they read as random bottles on the ground.
+      pillar: 0.6, planter: 1.0, rug: 0.5, doorFrame: 0.4,
     },
   },
   nightclub: {
@@ -840,7 +843,7 @@ export const LEVEL_THEMES = {
     ambientHex: 0xb840d8,
     propWeights: {
       neonStick: 1.4, locker: 0.5, barrel: 0.5,
-      doorFrame: 0.4, lamp: 0.2, planter: 0.3,
+      doorFrame: 0.4, planter: 0.3,
     },
   },
   garage: {
@@ -851,7 +854,7 @@ export const LEVEL_THEMES = {
     ambientHex: 0xa8a8a4,
     propWeights: {
       pillar: 1.6, locker: 0.9, crate: 0.8, barrel: 0.7,
-      pallet: 0.6, lamp: 0.5, neonStick: 0.4, doorFrame: 0.2,
+      pallet: 0.6, neonStick: 0.4, doorFrame: 0.2,
     },
   },
   penthouse: {
@@ -861,10 +864,9 @@ export const LEVEL_THEMES = {
     accent: 0xc9a464,
     ambientHex: 0xeae0c0,
     propWeights: {
-      // Refined skyrise — planters + windows + lamps; no random
-      // couches.
-      planter: 1.2, lamp: 0.9, window: 0.8,
-      rug: 0.5, vase: 0.4, doorFrame: 0.4, pillar: 0.3,
+      // Refined skyrise — planters + windows; no random couches /
+      // vases / lamps.
+      planter: 1.2, window: 0.8, rug: 0.5, doorFrame: 0.4, pillar: 0.3,
     },
   },
   rooftop: {
@@ -875,7 +877,7 @@ export const LEVEL_THEMES = {
     ambientHex: 0x8090a8,
     propWeights: {
       railing: 1.5, crate: 0.8, barrel: 0.5, pallet: 0.5,
-      neonStick: 0.6, pillar: 0.7, doorFrame: 0.3, lamp: 0.3,
+      neonStick: 0.6, pillar: 0.7, doorFrame: 0.3,
     },
   },
 };
