@@ -11,7 +11,7 @@ Status legend: `open` (unassigned, ready) · `in-progress` ·
 
 | Task | Owner | Status | Notes |
 |---|---|---|---|
-| Spatial hash for AI proximity queries (gunman.update LoS / shield-bearer scan) | codex | done | Big perf swing. `5×5m` grid, recompute once/frame. See `AGENTS.md`. |
+| Spatial hash for AI proximity queries (gunman.update LoS / shield-bearer scan) | codex | blocked | Benchmark shows Map-backed hash slower than naive iteration at current and stress-scale counts. Revisit with flatter index or different approach. |
 | BVH for `_hitsObstacle` projectile path | codex | open | Currently O(walls) per projectile step. |
 | Audit: every encounter that calls a ctx helper not exposed in `_ctxFactory` | gemini | open | High-recall pass. Report to `audits/encounter-ctx.md`. |
 | Audit: every `geometry.dispose()` callsite for `sharedRigGeom` guard | gemini | open | Past regression; verify no new gaps. Report to `audits/dispose-guard.md`. |
