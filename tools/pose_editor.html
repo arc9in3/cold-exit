@@ -8,13 +8,23 @@
                font: 12px/1.4 ui-monospace, Menlo, Consolas, monospace;
                overflow: hidden; }
   #root { display: flex; width: 100vw; height: 100vh; }
-  #stage { flex: 1 1 auto; position: relative; background:
+  #stage { flex: 1 1 auto; position: relative; min-width: 0;
+    overflow: hidden; background:
     linear-gradient(45deg, #0c0d10 25%, transparent 25%) -10px 0 / 20px 20px,
     linear-gradient(-45deg, #0c0d10 25%, transparent 25%) -10px 0 / 20px 20px,
     linear-gradient(45deg, transparent 75%, #0c0d10 75%) -10px 0 / 20px 20px,
     linear-gradient(-45deg, transparent 75%, #0c0d10 75%) -10px 0 / 20px 20px,
     #16181c; }
-  #stage canvas { display: block; }
+  /* Force the renderer canvas to fill its parent — Three.js's
+     setSize(w,h,false) leaves CSS at default 300x150 which would
+     otherwise push the side panel off-screen on mobile / narrow
+     viewports. */
+  #stage canvas { display: block; position: absolute; inset: 0;
+                  width: 100% !important; height: 100% !important; }
+  #boot-error { position: fixed; top: 8px; left: 8px;
+                background: #4a2a2a; color: #ffcaca; padding: 8px 12px;
+                border-radius: 4px; font-size: 11px; max-width: 60vw;
+                display: none; z-index: 1000; }
   #panel {
     flex: 0 0 360px; background: #1b1d22; border-left: 1px solid #2a2d34;
     padding: 12px; overflow-y: auto; box-sizing: border-box;
@@ -47,6 +57,7 @@
 </style>
 </head>
 <body>
+<div id="boot-error"></div>
 <div id="root">
   <div id="stage"></div>
   <div id="panel">
@@ -135,6 +146,21 @@
 </script>
 
 <script type="module">
+window.addEventListener('error', (e) => {
+  const el = document.getElementById('boot-error');
+  if (el) {
+    el.style.display = 'block';
+    el.textContent = `JS error: ${e.message} (${e.filename}:${e.lineno})`;
+  }
+});
+window.addEventListener('unhandledrejection', (e) => {
+  const el = document.getElementById('boot-error');
+  if (el) {
+    el.style.display = 'block';
+    el.textContent = `Promise rejection: ${e.reason?.message || e.reason}`;
+  }
+});
+
 import * as THREE from 'three';
 import { OrbitControls } from 'three/addons/controls/OrbitControls.js';
 import { FBXLoader } from 'three/addons/loaders/FBXLoader.js';
@@ -149,12 +175,19 @@ const stage = document.getElementById('stage');
 const renderer = new THREE.WebGLRenderer({ antialias: true });
 renderer.setPixelRatio(window.devicePixelRatio);
 const resize = () => {
-  const w = stage.clientWidth, h = stage.clientHeight;
+  const w = Math.max(1, stage.clientWidth);
+  const h = Math.max(1, stage.clientHeight);
   renderer.setSize(w, h, false);
-  camera.aspect = w / h;
-  camera.updateProjectionMatrix();
+  if (camera) {
+    camera.aspect = w / h;
+    camera.updateProjectionMatrix();
+  }
 };
 stage.appendChild(renderer.domElement);
+// Keep the renderer locked to the actual stage size — covers initial
+// layout settle, panel-toggle, mobile rotation, and any flex
+// reflow that would otherwise leave the canvas at the wrong size.
+new ResizeObserver(() => resize()).observe(stage);
 
 const scene = new THREE.Scene();
 scene.background = new THREE.Color(0x16181c);
