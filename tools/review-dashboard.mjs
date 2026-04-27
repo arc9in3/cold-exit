@@ -1,0 +1,712 @@
+#!/usr/bin/env node
+// Review dashboard — local web UI for reviewing AI-authored branches
+// and launching the game's static server in one place.
+//
+// Run with:   node tools/review-dashboard.mjs
+// Or use the launcher script: review.bat (Win) / ./review.sh (Unix)
+//
+// What it does:
+//  - Spawns two HTTP servers:
+//      port 8765  — this dashboard's UI + JSON API
+//      port 8080  — static file server for the game (refresh-on-checkout)
+//  - Drives git operations (fetch, branches, diff, log, checkout) via
+//    child_process; streams output back to the dashboard.
+//  - Generates a review checklist per branch (rules vary by owner —
+//    claude / codex / gemini / unknown).
+//  - One-click "Open Game" button to launch the game on localhost:8080
+//    against whatever branch is currently checked out.
+//
+// No npm dependencies — pure Node stdlib + ES modules.
+
+import http from 'node:http';
+import url from 'node:url';
+import path from 'node:path';
+import fs from 'node:fs';
+import { exec, spawn } from 'node:child_process';
+import { promisify } from 'node:util';
+import { fileURLToPath } from 'node:url';
+
+const execP = promisify(exec);
+const __dirname = path.dirname(fileURLToPath(import.meta.url));
+const REPO_ROOT = path.resolve(__dirname, '..');
+
+const DASH_PORT = parseInt(process.env.REVIEW_DASH_PORT || '8765', 10);
+const GAME_PORT = parseInt(process.env.REVIEW_GAME_PORT || '8080', 10);
+
+// ===========================================================================
+// Helpers — git + shell
+// ===========================================================================
+
+async function git(args, opts = {}) {
+  // Run a git command; return stdout. Errors throw with stderr attached.
+  const cmd = `git ${args}`;
+  try {
+    const { stdout } = await execP(cmd, { cwd: REPO_ROOT, ...opts });
+    return stdout;
+  } catch (e) {
+    const wrapped = new Error(`git ${args}: ${e.stderr || e.message}`);
+    wrapped.stderr = e.stderr;
+    wrapped.stdout = e.stdout;
+    throw wrapped;
+  }
+}
+
+async function gitState() {
+  const [current, status, allBranches, remoteBranches] = await Promise.all([
+    git('rev-parse --abbrev-ref HEAD').then(s => s.trim()),
+    git('status --porcelain').then(s => s.trim()),
+    git('branch --format=%(refname:short)').then(s => s.split('\n').filter(Boolean)),
+    git('branch -r --format=%(refname:short)').then(s => s.split('\n').filter(Boolean)),
+  ]);
+  return {
+    current,
+    dirty: status.length > 0,
+    statusText: status,
+    localBranches: allBranches,
+    remoteBranches: remoteBranches.filter(b => !b.endsWith('/HEAD')),
+  };
+}
+
+function ownerOf(branch) {
+  const stripped = branch.replace(/^origin\//, '');
+  const slash = stripped.indexOf('/');
+  if (slash === -1) return stripped === 'main' ? 'main' : 'unknown';
+  return stripped.slice(0, slash).toLowerCase();
+}
+
+// Review checklist text per owner. Hand-written based on AGENTS / GEMINI /
+// CLAUDE markdown files at repo root.
+function checklistFor(owner) {
+  if (owner === 'codex') {
+    return [
+      'Files touched stay in lane (no edits to encounters / inventory / rig / ui)',
+      'For perf claims: a benchmark exists in tools/ AND the diff includes wall-time numbers',
+      'No new npm dependencies (no package.json changes)',
+      'Co-author trailer: "Co-Authored-By: GPT (Codex) <noreply@openai.com>"',
+      'Branch is pushed (visible under remotes)',
+      'If the algorithm regresses vs naive, branch should be CLOSED with a closure commit, not merged',
+      'Critical interactions in PROJECT.md not violated (rig instancer + corpse-bake + ghost mode triangle)',
+    ];
+  }
+  if (owner === 'gemini') {
+    return [
+      'Audit branches: ONLY changes to audits/<topic>.md (no code edits in same branch)',
+      'Refactor branches: scope matches what the user asked for, no opportunistic rewrites',
+      'Co-author trailer: "Co-Authored-By: Gemini <noreply@google.com>"',
+      'Audit format follows audits/README.md (severity grouping, file:line references)',
+      'Branch is pushed (visible under remotes)',
+      'Findings are actionable — no "this could be improved" without specifics',
+    ];
+  }
+  if (owner === 'claude') {
+    return [
+      'Reviewed by user or /ultrareview — Claude does not self-review',
+      'Co-author trailer: "Co-Authored-By: Claude Opus 4.7 (1M context) <noreply@anthropic.com>"',
+      'Critical interactions in PROJECT.md respected (rig + corpse + ghost)',
+      'Playtested in browser before merge',
+      'One change per commit',
+    ];
+  }
+  return [
+    'Owner could not be inferred from branch name. Verify via git log.',
+    'Branch follows <owner>/<task> convention before merging',
+  ];
+}
+
+// ===========================================================================
+// Static file server — serves the game on its own port
+// ===========================================================================
+
+const MIME = {
+  '.html': 'text/html; charset=utf-8',
+  '.css': 'text/css; charset=utf-8',
+  '.js': 'application/javascript; charset=utf-8',
+  '.mjs': 'application/javascript; charset=utf-8',
+  '.json': 'application/json; charset=utf-8',
+  '.png': 'image/png',
+  '.jpg': 'image/jpeg',
+  '.jpeg': 'image/jpeg',
+  '.svg': 'image/svg+xml',
+  '.ico': 'image/x-icon',
+  '.fbx': 'application/octet-stream',
+  '.glb': 'model/gltf-binary',
+  '.gltf': 'model/gltf+json',
+  '.wav': 'audio/wav',
+  '.mp3': 'audio/mpeg',
+  '.ogg': 'audio/ogg',
+  '.txt': 'text/plain; charset=utf-8',
+  '.md': 'text/markdown; charset=utf-8',
+};
+
+function staticHandler(req, res) {
+  // Resolve to repo root, prevent path traversal.
+  const parsed = url.parse(req.url);
+  let pathname = decodeURIComponent(parsed.pathname || '/');
+  if (pathname === '/' || pathname === '') pathname = '/index.html';
+  const safePath = path.normalize(pathname).replace(/^[\\/]+/, '');
+  const fullPath = path.join(REPO_ROOT, safePath);
+  if (!fullPath.startsWith(REPO_ROOT)) {
+    res.writeHead(403); res.end('forbidden'); return;
+  }
+  fs.stat(fullPath, (err, stat) => {
+    if (err || !stat.isFile()) {
+      res.writeHead(404); res.end('not found'); return;
+    }
+    const ext = path.extname(fullPath).toLowerCase();
+    res.writeHead(200, {
+      'Content-Type': MIME[ext] || 'application/octet-stream',
+      'Cache-Control': 'no-store',     // always serve fresh during review
+    });
+    fs.createReadStream(fullPath).pipe(res);
+  });
+}
+
+let gameServer = null;
+
+function startGameServer() {
+  if (gameServer) return { port: GAME_PORT, alreadyRunning: true };
+  gameServer = http.createServer(staticHandler);
+  return new Promise((resolve, reject) => {
+    gameServer.listen(GAME_PORT, '127.0.0.1', () => {
+      resolve({ port: GAME_PORT, alreadyRunning: false });
+    });
+    gameServer.on('error', (err) => {
+      gameServer = null;
+      reject(err);
+    });
+  });
+}
+
+function stopGameServer() {
+  if (!gameServer) return false;
+  gameServer.close();
+  gameServer = null;
+  return true;
+}
+
+// ===========================================================================
+// Dashboard UI — single HTML file inlined
+// ===========================================================================
+
+const HTML = `<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<title>Cold Exit — Review Dashboard</title>
+<style>
+  * { box-sizing: border-box; }
+  body {
+    margin: 0; font-family: ui-monospace, "Cascadia Code", Menlo, Consolas, monospace;
+    background: #0e1018; color: #d8dde4; min-height: 100vh;
+  }
+  header {
+    background: linear-gradient(180deg, #1a1f29 0%, #0e1018 100%);
+    padding: 14px 22px; border-bottom: 1px solid #2a3340;
+    display: flex; align-items: center; justify-content: space-between;
+    position: sticky; top: 0; z-index: 10;
+  }
+  header h1 { margin: 0; font-size: 16px; letter-spacing: 4px; color: #c9a87a; text-transform: uppercase; }
+  .state-row { display: flex; align-items: center; gap: 18px; font-size: 12px; }
+  .state-row b { color: #c9a87a; letter-spacing: 1px; }
+  .badge {
+    display: inline-block; padding: 3px 9px; border-radius: 3px;
+    font-size: 11px; letter-spacing: 1px;
+  }
+  .badge-clean { background: rgba(60, 200, 130, 0.15); color: #6ce0a0; }
+  .badge-dirty { background: rgba(220, 70, 50, 0.18); color: #ff8a78; }
+  main { display: grid; grid-template-columns: 320px 1fr; gap: 0; min-height: calc(100vh - 60px); }
+  .panel { padding: 20px; }
+  .panel.left {
+    border-right: 1px solid #2a3340; background: #11141d;
+    overflow-y: auto; max-height: calc(100vh - 60px);
+  }
+  .panel.right { background: #0e1018; }
+  h2 {
+    margin: 0 0 14px 0; font-size: 12px; color: #c9a87a;
+    letter-spacing: 3px; text-transform: uppercase;
+  }
+  h2:not(:first-child) { margin-top: 28px; }
+
+  button {
+    background: rgba(125, 167, 200, 0.12);
+    color: #cbd6e2;
+    border: 1px solid rgba(125, 167, 200, 0.45);
+    padding: 8px 14px; cursor: pointer;
+    font-family: inherit; font-size: 11px; letter-spacing: 2px;
+    text-transform: uppercase; font-weight: 600;
+    border-radius: 3px; transition: all 0.12s;
+  }
+  button:hover:not(:disabled) {
+    background: rgba(125, 167, 200, 0.22);
+    border-color: rgba(125, 167, 200, 0.7);
+  }
+  button:disabled { opacity: 0.45; cursor: not-allowed; }
+  button.primary {
+    background: rgba(201, 168, 122, 0.18); border-color: rgba(201, 168, 122, 0.55);
+    color: #f0d9b0;
+  }
+  button.primary:hover:not(:disabled) {
+    background: rgba(201, 168, 122, 0.30); border-color: rgba(201, 168, 122, 0.8);
+  }
+  button.danger { border-color: rgba(220, 70, 50, 0.5); color: #ff8a78; }
+  button.danger:hover:not(:disabled) {
+    background: rgba(220, 70, 50, 0.18); border-color: rgba(220, 70, 50, 0.8);
+  }
+
+  .branch-group { margin-bottom: 18px; }
+  .branch-group .label {
+    font-size: 10px; color: #6a7280; letter-spacing: 2px;
+    text-transform: uppercase; margin-bottom: 6px;
+  }
+  .branch-row {
+    padding: 10px 12px; margin-bottom: 6px; cursor: pointer;
+    background: rgba(255, 255, 255, 0.02);
+    border: 1px solid transparent; border-radius: 3px;
+    display: flex; align-items: center; justify-content: space-between;
+    transition: background 0.12s;
+  }
+  .branch-row:hover { background: rgba(125, 167, 200, 0.08); }
+  .branch-row.active { background: rgba(201, 168, 122, 0.14); border-color: rgba(201, 168, 122, 0.5); }
+  .branch-row .name { font-size: 12px; }
+  .branch-row .pill {
+    font-size: 10px; padding: 2px 6px; border-radius: 2px;
+    background: rgba(255,255,255,0.05); color: #888;
+  }
+  .branch-row.current .pill { background: rgba(60, 200, 130, 0.15); color: #6ce0a0; }
+
+  .game-controls { display: flex; gap: 8px; flex-wrap: wrap; }
+
+  pre.diff {
+    background: #11141d; border: 1px solid #2a3340; border-radius: 3px;
+    padding: 14px; overflow: auto; font-size: 12px; line-height: 1.45;
+    max-height: 60vh; white-space: pre; color: #c0c8d2;
+  }
+  pre.diff .add { color: #6ce0a0; background: rgba(60, 200, 130, 0.08); }
+  pre.diff .del { color: #ff8a78; background: rgba(220, 70, 50, 0.08); }
+  pre.diff .meta { color: #c9a87a; }
+  pre.diff .hunk { color: #6aa3d8; }
+
+  .checklist {
+    background: rgba(201, 168, 122, 0.06);
+    border-left: 3px solid #c9a87a; padding: 14px 18px;
+    margin-bottom: 18px; border-radius: 0 3px 3px 0;
+  }
+  .checklist h3 {
+    margin: 0 0 10px 0; font-size: 11px; color: #c9a87a;
+    letter-spacing: 2px; text-transform: uppercase;
+  }
+  .checklist ul { margin: 0; padding-left: 20px; font-size: 12px; line-height: 1.6; }
+  .checklist li { margin-bottom: 4px; }
+
+  .empty {
+    color: #6a7280; font-size: 12px; padding: 30px 0; text-align: center;
+  }
+
+  #server-status {
+    font-size: 11px; padding: 5px 10px; border-radius: 3px;
+    display: inline-block; letter-spacing: 1px;
+  }
+  #server-status.running { background: rgba(60, 200, 130, 0.18); color: #6ce0a0; }
+  #server-status.stopped { background: rgba(122, 130, 144, 0.18); color: #aab2c0; }
+
+  #log {
+    background: #08090e; padding: 10px 14px; border-radius: 3px;
+    border: 1px solid #2a3340;
+    font-size: 11px; max-height: 180px; overflow-y: auto;
+    white-space: pre-wrap; line-height: 1.5; color: #8a96a8;
+  }
+  #log .ok { color: #6ce0a0; }
+  #log .err { color: #ff8a78; }
+
+  .stats-row { display: flex; gap: 18px; flex-wrap: wrap; font-size: 11px; color: #6a7280; }
+  .stats-row b { color: #d8dde4; }
+</style>
+</head>
+<body>
+<header>
+  <h1>Cold Exit — Review Dashboard</h1>
+  <div class="state-row">
+    <span><b>HEAD:</b> <span id="state-current">…</span></span>
+    <span id="state-dirty"></span>
+    <span><b>SERVER:</b> <span id="server-status" class="stopped">stopped</span></span>
+  </div>
+</header>
+
+<main>
+  <aside class="panel left">
+    <h2>Game server</h2>
+    <div class="game-controls">
+      <button id="btn-start" class="primary">Start server</button>
+      <button id="btn-stop" class="danger">Stop server</button>
+      <button id="btn-open" disabled>Open in browser</button>
+    </div>
+
+    <h2>Repo state</h2>
+    <div class="game-controls">
+      <button id="btn-fetch">Fetch origin</button>
+      <button id="btn-refresh">Refresh state</button>
+    </div>
+
+    <h2>Branches</h2>
+    <div id="branches"><div class="empty">Loading…</div></div>
+
+    <h2>Activity</h2>
+    <div id="log">Ready.</div>
+  </aside>
+
+  <section class="panel right">
+    <div id="diff-view">
+      <div class="empty">Select a branch on the left to review its diff against main.</div>
+    </div>
+  </section>
+</main>
+
+<script>
+let state = null;
+let selected = null;
+
+const $ = (id) => document.getElementById(id);
+const log = (msg, kind = '') => {
+  const el = $('log');
+  const line = document.createElement('div');
+  if (kind) line.className = kind;
+  line.textContent = '[' + new Date().toTimeString().slice(0,8) + '] ' + msg;
+  el.appendChild(line);
+  el.scrollTop = el.scrollHeight;
+};
+
+async function api(path, opts = {}) {
+  const r = await fetch(path, opts);
+  const data = r.headers.get('content-type')?.includes('application/json')
+    ? await r.json()
+    : await r.text();
+  if (!r.ok) throw new Error((data && data.error) || ('HTTP ' + r.status));
+  return data;
+}
+
+async function refreshState() {
+  state = await api('/api/state');
+  $('state-current').textContent = state.current;
+  const dirty = $('state-dirty');
+  dirty.innerHTML = state.dirty
+    ? '<span class="badge badge-dirty">Dirty</span>'
+    : '<span class="badge badge-clean">Clean</span>';
+
+  // Group branches by owner.
+  const groups = { main: [], claude: [], codex: [], gemini: [], unknown: [] };
+  const seen = new Set();
+  for (const b of state.localBranches) {
+    const own = ownerOf(b);
+    if (!groups[own]) groups[own] = [];
+    groups[own].push({ name: b, isLocal: true, isRemote: state.remoteBranches.includes('origin/' + b) });
+    seen.add(b);
+  }
+  for (const r of state.remoteBranches) {
+    const local = r.replace(/^origin\\//, '');
+    if (seen.has(local)) continue;
+    const own = ownerOf(r);
+    if (!groups[own]) groups[own] = [];
+    groups[own].push({ name: r, isLocal: false, isRemote: true });
+  }
+
+  const root = $('branches');
+  root.innerHTML = '';
+  const order = ['main', 'claude', 'codex', 'gemini', 'unknown'];
+  for (const owner of order) {
+    const list = groups[owner];
+    if (!list || !list.length) continue;
+    const g = document.createElement('div');
+    g.className = 'branch-group';
+    g.innerHTML = '<div class="label">' + owner + '</div>';
+    for (const b of list) {
+      const row = document.createElement('div');
+      const isCurrent = b.name === state.current;
+      row.className = 'branch-row' + (isCurrent ? ' current' : '') + (selected === b.name ? ' active' : '');
+      const pillText = isCurrent ? 'HEAD' : (b.isLocal ? 'local' : 'remote');
+      row.innerHTML = '<span class="name">' + b.name + '</span><span class="pill">' + pillText + '</span>';
+      row.onclick = () => selectBranch(b.name);
+      g.appendChild(row);
+    }
+    root.appendChild(g);
+  }
+}
+
+function ownerOf(branch) {
+  const s = branch.replace(/^origin\\//, '');
+  const slash = s.indexOf('/');
+  if (slash === -1) return s === 'main' ? 'main' : 'unknown';
+  return s.slice(0, slash).toLowerCase();
+}
+
+async function selectBranch(name) {
+  selected = name;
+  document.querySelectorAll('.branch-row').forEach(r => r.classList.remove('active'));
+  document.querySelectorAll('.branch-row').forEach(r => {
+    if (r.querySelector('.name').textContent === name) r.classList.add('active');
+  });
+  await renderDiff(name);
+}
+
+async function renderDiff(branchName) {
+  const view = $('diff-view');
+  view.innerHTML = '<div class="empty">Loading diff…</div>';
+  try {
+    const target = branchName.startsWith('origin/') ? branchName : (state.remoteBranches.includes('origin/' + branchName) ? 'origin/' + branchName : branchName);
+    const data = await api('/api/branch?ref=' + encodeURIComponent(target));
+    const owner = ownerOf(branchName);
+    const checklist = data.checklist || [];
+
+    let html = '';
+
+    html += '<h2>' + branchName + '</h2>';
+    html += '<div class="stats-row" style="margin-bottom: 16px;">';
+    html += '<span><b>Owner:</b> ' + owner + '</span>';
+    html += '<span><b>Files changed:</b> ' + (data.stats.filesChanged || 0) + '</span>';
+    html += '<span><b>+' + (data.stats.added || 0) + ' / -' + (data.stats.removed || 0) + '</b></span>';
+    html += '<span><b>Commits ahead of main:</b> ' + (data.commits.length || 0) + '</span>';
+    html += '<span><b>Pushed:</b> ' + (data.isPushed ? 'yes' : 'no') + '</span>';
+    html += '</div>';
+
+    if (data.commits.length) {
+      html += '<h2>Commits</h2>';
+      html += '<pre class="diff" style="max-height: 200px;">' + escape(data.commits.map(c => c.short + '  ' + c.subject).join('\\n')) + '</pre>';
+    }
+
+    html += '<div class="checklist"><h3>Review checklist (' + owner + ')</h3><ul>';
+    for (const item of checklist) html += '<li>' + escape(item) + '</li>';
+    html += '</ul></div>';
+
+    html += '<h2>Diff vs main</h2>';
+    html += '<pre class="diff">' + colorDiff(data.diff || '(no diff)') + '</pre>';
+
+    html += '<div style="display:flex; gap:8px; margin-top: 16px;">';
+    if (data.canCheckout) html += '<button class="primary" onclick="checkoutBranch(\\'' + branchName.replace(/^origin\\//, '') + '\\')">Checkout this branch</button>';
+    html += '<button onclick="copyText(\\'' + escape(target).replace(/'/g, '\\\\\\'') + '\\')">Copy ref</button>';
+    html += '</div>';
+
+    view.innerHTML = html;
+  } catch (e) {
+    view.innerHTML = '<div class="empty" style="color:#ff8a78">' + escape(e.message) + '</div>';
+    log('diff failed: ' + e.message, 'err');
+  }
+}
+
+function escape(s) { return String(s).replace(/[&<>"']/g, c => ({ '&':'&amp;', '<':'&lt;', '>':'&gt;', '"':'&quot;', "'":'&#39;' }[c])); }
+function colorDiff(s) {
+  return escape(s).split('\\n').map(line => {
+    if (line.startsWith('+++') || line.startsWith('---') || line.startsWith('diff ') || line.startsWith('index ')) return '<span class="meta">' + line + '</span>';
+    if (line.startsWith('@@')) return '<span class="hunk">' + line + '</span>';
+    if (line.startsWith('+')) return '<span class="add">' + line + '</span>';
+    if (line.startsWith('-')) return '<span class="del">' + line + '</span>';
+    return line;
+  }).join('\\n');
+}
+
+async function checkoutBranch(name) {
+  if (!confirm('Checkout ' + name + '? Working tree must be clean.')) return;
+  log('checkout ' + name + '…');
+  try {
+    await api('/api/checkout', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ branch: name }) });
+    log('checkout ' + name + ' ok', 'ok');
+    await refreshState();
+    await renderDiff(name);
+  } catch (e) { log('checkout failed: ' + e.message, 'err'); alert(e.message); }
+}
+
+async function fetchOrigin() {
+  log('git fetch origin…');
+  try {
+    await api('/api/fetch', { method: 'POST' });
+    log('fetch ok', 'ok');
+    await refreshState();
+  } catch (e) { log('fetch failed: ' + e.message, 'err'); }
+}
+
+async function startServer() {
+  log('starting game server…');
+  try {
+    const r = await api('/api/server/start', { method: 'POST' });
+    log('game server on http://localhost:' + r.port, 'ok');
+    setServerStatus(true, r.port);
+  } catch (e) { log('start failed: ' + e.message, 'err'); }
+}
+
+async function stopServer() {
+  try {
+    await api('/api/server/stop', { method: 'POST' });
+    log('game server stopped', 'ok');
+    setServerStatus(false);
+  } catch (e) { log('stop failed: ' + e.message, 'err'); }
+}
+
+function setServerStatus(running, port) {
+  const el = $('server-status');
+  el.className = running ? 'running' : 'stopped';
+  el.textContent = running ? ('running :' + port) : 'stopped';
+  $('btn-open').disabled = !running;
+  $('btn-open').dataset.port = port || '';
+}
+
+function copyText(t) { navigator.clipboard.writeText(t); log('copied: ' + t); }
+
+$('btn-start').onclick = startServer;
+$('btn-stop').onclick = stopServer;
+$('btn-open').onclick = () => {
+  const p = $('btn-open').dataset.port;
+  if (p) window.open('http://localhost:' + p, '_blank');
+};
+$('btn-fetch').onclick = fetchOrigin;
+$('btn-refresh').onclick = refreshState;
+
+async function init() {
+  await refreshState();
+  try {
+    const s = await api('/api/server/status');
+    setServerStatus(s.running, s.port);
+  } catch (e) { /* ignore */ }
+}
+init();
+</script>
+</body>
+</html>
+`;
+
+// ===========================================================================
+// Dashboard HTTP server — UI + API
+// ===========================================================================
+
+async function dashApi(req, res, parsedUrl) {
+  const send = (code, obj) => {
+    res.writeHead(code, { 'Content-Type': 'application/json' });
+    res.end(JSON.stringify(obj));
+  };
+  const sendErr = (code, msg) => send(code, { error: msg });
+
+  try {
+    if (parsedUrl.pathname === '/api/state' && req.method === 'GET') {
+      return send(200, await gitState());
+    }
+    if (parsedUrl.pathname === '/api/fetch' && req.method === 'POST') {
+      await git('fetch origin --prune');
+      return send(200, { ok: true });
+    }
+    if (parsedUrl.pathname === '/api/branch' && req.method === 'GET') {
+      const ref = parsedUrl.query.ref;
+      if (!ref) return sendErr(400, 'missing ref');
+
+      const owner = ownerOf(ref);
+      const checklist = checklistFor(owner);
+
+      // Diff vs main, log of commits unique to this branch.
+      let diff = '';
+      let commits = [];
+      let stats = { filesChanged: 0, added: 0, removed: 0 };
+      let isPushed = true;
+
+      const localName = ref.replace(/^origin\//, '');
+      const remoteName = ref.startsWith('origin/') ? ref : `origin/${localName}`;
+
+      try {
+        diff = await git(`diff main..${ref} --no-color`);
+      } catch (_) {
+        diff = '';
+      }
+
+      try {
+        const statRaw = await git(`diff main..${ref} --shortstat`);
+        const m = statRaw.match(/(\d+) files? changed(?:, (\d+) insertions?\(\+\))?(?:, (\d+) deletions?\(-\))?/);
+        if (m) {
+          stats.filesChanged = parseInt(m[1] || '0', 10);
+          stats.added = parseInt(m[2] || '0', 10);
+          stats.removed = parseInt(m[3] || '0', 10);
+        }
+      } catch (_) { /* ignore */ }
+
+      try {
+        const logRaw = await git(`log main..${ref} --oneline --no-color`);
+        commits = logRaw.trim().split('\n').filter(Boolean).map(line => {
+          const idx = line.indexOf(' ');
+          return { short: line.slice(0, idx), subject: line.slice(idx + 1) };
+        });
+      } catch (_) { commits = []; }
+
+      try {
+        await git(`rev-parse --verify ${remoteName}`);
+        isPushed = true;
+      } catch (_) {
+        isPushed = false;
+      }
+
+      // Can checkout if the branch exists locally OR can be tracked from remote.
+      const state = await gitState();
+      const canCheckout = state.localBranches.includes(localName)
+        || state.remoteBranches.includes(remoteName);
+
+      return send(200, { ref, owner, checklist, diff, stats, commits, isPushed, canCheckout });
+    }
+    if (parsedUrl.pathname === '/api/checkout' && req.method === 'POST') {
+      const body = await readJsonBody(req);
+      if (!body.branch) return sendErr(400, 'missing branch');
+      const name = String(body.branch).replace(/^origin\//, '');
+      const state = await gitState();
+      if (state.dirty) return sendErr(409, 'working tree is dirty — commit or stash first');
+      // If local branch exists, just checkout. Otherwise track from remote.
+      if (state.localBranches.includes(name)) {
+        await git(`checkout ${name}`);
+      } else {
+        await git(`checkout -b ${name} origin/${name}`);
+      }
+      return send(200, { ok: true });
+    }
+    if (parsedUrl.pathname === '/api/server/start' && req.method === 'POST') {
+      const r = await startGameServer();
+      return send(200, r);
+    }
+    if (parsedUrl.pathname === '/api/server/stop' && req.method === 'POST') {
+      const stopped = stopGameServer();
+      return send(200, { stopped });
+    }
+    if (parsedUrl.pathname === '/api/server/status' && req.method === 'GET') {
+      return send(200, { running: !!gameServer, port: gameServer ? GAME_PORT : null });
+    }
+    return sendErr(404, 'unknown endpoint');
+  } catch (e) {
+    return sendErr(500, e.message || String(e));
+  }
+}
+
+function readJsonBody(req) {
+  return new Promise((resolve, reject) => {
+    let buf = '';
+    req.on('data', c => { buf += c; });
+    req.on('end', () => {
+      if (!buf) return resolve({});
+      try { resolve(JSON.parse(buf)); }
+      catch (e) { reject(e); }
+    });
+    req.on('error', reject);
+  });
+}
+
+const dashServer = http.createServer(async (req, res) => {
+  const parsed = url.parse(req.url, true);
+  if (parsed.pathname.startsWith('/api/')) return dashApi(req, res, parsed);
+  if (parsed.pathname === '/' || parsed.pathname === '/index.html') {
+    res.writeHead(200, { 'Content-Type': 'text/html; charset=utf-8' });
+    return res.end(HTML);
+  }
+  res.writeHead(404); res.end('not found');
+});
+
+dashServer.listen(DASH_PORT, '127.0.0.1', () => {
+  console.log(`Cold Exit review dashboard:`);
+  console.log(`  Dashboard:   http://localhost:${DASH_PORT}/`);
+  console.log(`  Game server: http://localhost:${GAME_PORT}/  (start from dashboard)`);
+  console.log(`Press Ctrl+C to stop.`);
+});
+
+process.on('SIGINT', () => {
+  if (gameServer) gameServer.close();
+  dashServer.close();
+  process.exit(0);
+});
