@@ -2840,6 +2840,249 @@ export const ENCOUNTER_DEFS = {
   // and your bag bounces to the floor as normal loot.
   // -----------------------------------------------------------------
   // -----------------------------------------------------------------
+  // The Lamp — golden lamp on a pedestal. E to interact summons three
+  // chests in a small arc: two masterwork, one cursed. The cursed
+  // chest is visually distinct (darker, bloody tint) so the player
+  // CAN tell after a peek — but the choice of which to open first
+  // is theirs. Once-per-run; opening the cursed chest grants the
+  // Brass Prisoner relic, which the Curse Breaker encounter can
+  // later lift for a fee.
+  // -----------------------------------------------------------------
+  the_lamp: {
+    id: 'the_lamp',
+    name: 'The Lamp',
+    floorColor: 0xc89048,             // warm pedestal disc
+    oncePerSave: true,
+    condition: (state) => state.levelIndex >= 1,
+    spawn(scene, room, ctx) {
+      const disc = _spawnFloorDisc(scene, room, this.floorColor);
+      const group = new THREE.Group();
+      // Stone pedestal — short cylinder with a thin trim band.
+      const stoneMat = new THREE.MeshStandardMaterial({ color: 0x4a4042, roughness: 0.85 });
+      const trimMat  = new THREE.MeshStandardMaterial({
+        color: 0x9a7430, roughness: 0.45, metalness: 0.6,
+      });
+      const pedestal = new THREE.Mesh(
+        new THREE.CylinderGeometry(0.42, 0.50, 0.85, 14),
+        stoneMat,
+      );
+      pedestal.position.y = 0.425;
+      pedestal.castShadow = true;
+      group.add(pedestal);
+      const trim = new THREE.Mesh(
+        new THREE.CylinderGeometry(0.44, 0.44, 0.06, 14),
+        trimMat,
+      );
+      trim.position.y = 0.82;
+      group.add(trim);
+      // Lamp — fat squashed sphere body + short conical spout + a
+      // half-disc handle on the back. Emissive so it reads as warm
+      // gold under the iso lights.
+      const lampMat = new THREE.MeshStandardMaterial({
+        color: 0xffd070, roughness: 0.30, metalness: 0.85,
+        emissive: 0xa06020, emissiveIntensity: 0.55,
+      });
+      const body = new THREE.Mesh(new THREE.SphereGeometry(0.22, 18, 12), lampMat);
+      body.scale.set(1.25, 0.65, 0.85);
+      body.position.y = 1.02;
+      body.castShadow = true;
+      group.add(body);
+      const lid = new THREE.Mesh(new THREE.ConeGeometry(0.06, 0.10, 10), lampMat);
+      lid.position.y = 1.18;
+      group.add(lid);
+      // Spout — long narrow cone tilted forward.
+      const spout = new THREE.Mesh(new THREE.ConeGeometry(0.045, 0.30, 10), lampMat);
+      spout.position.set(0.28, 1.05, 0.05);
+      spout.rotation.z = -Math.PI / 2.2;
+      group.add(spout);
+      // Handle — torus arc on the back.
+      const handle = new THREE.Mesh(
+        new THREE.TorusGeometry(0.12, 0.03, 8, 14, Math.PI),
+        lampMat,
+      );
+      handle.position.set(-0.20, 1.04, 0);
+      handle.rotation.set(Math.PI / 2, Math.PI / 2, 0);
+      group.add(handle);
+      // Soft glow point light — gold cast on the pedestal stone.
+      const glow = new THREE.PointLight(0xffc060, 0.85, 4.5);
+      glow.position.set(0, 1.1, 0);
+      group.add(glow);
+      group.position.set(disc.cx, 0, disc.cz);
+      group.rotation.y = -Math.PI * 0.18;
+      scene.add(group);
+      const label = _makeLabelSprite('THE LAMP', '#f0c080');
+      label.position.set(disc.cx, 1.9, disc.cz);
+      scene.add(label);
+      return { group, label, disc, complete: false, lampBodyMat: lampMat, glow };
+    },
+    tick(dt, ctx) {
+      // Subtle emissive pulse so the lamp looks alive even before the
+      // player triggers it. Stops once the encounter completes — chests
+      // are the focal point afterward.
+      const s = ctx.state;
+      if (s.complete) return;
+      s._t = (s._t || 0) + dt;
+      if (s.lampBodyMat) {
+        s.lampBodyMat.emissiveIntensity = 0.45 + 0.15 * Math.sin(s._t * 2.0);
+      }
+      if (s.glow) {
+        s.glow.intensity = 0.75 + 0.25 * Math.sin(s._t * 2.0);
+      }
+    },
+    interact(ctx) {
+      const s = ctx.state;
+      if (s.complete) return;
+      ctx.showPrompt({
+        title: 'The Lamp',
+        body: 'A small golden lamp sits on a pedestal. Three chests, three offerings. Two are gifts. One is a debt. Will you rub the lamp?',
+        options: [
+          {
+            text: 'Rub the lamp',
+            onPick: () => {
+              s.complete = true;
+              if (s.glow) s.glow.intensity = 0;
+              if (s.lampBodyMat) s.lampBodyMat.emissiveIntensity = 0.2;
+              const speakAt = new THREE.Vector3(s.disc.cx, 1.9, s.disc.cz);
+              ctx.spawnSpeech(speakAt, 'Three chests rise from the dust.', 4.0);
+              // Three chests in a shallow arc in front of the pedestal.
+              // Cursed chest position is randomised so the player can't
+              // memorise "the middle one is the trap."
+              const offsets = [
+                [-1.8,  1.6],
+                [ 0.0,  2.0],
+                [ 1.8,  1.6],
+              ];
+              const cursedIdx = Math.floor(Math.random() * 3);
+              for (let i = 0; i < offsets.length; i++) {
+                const [dx, dz] = offsets[i];
+                const cx = s.disc.cx + dx;
+                const cz = s.disc.cz + dz;
+                if (ctx.level && ctx.level._collidesAt && ctx.level._collidesAt(cx, cz, 0.6)) continue;
+                if (i === cursedIdx) {
+                  if (ctx.spawnCursedChest) ctx.spawnCursedChest(cx, cz, 'brass_prisoner');
+                } else {
+                  if (ctx.spawnMasterworkChest) ctx.spawnMasterworkChest(cx, cz);
+                }
+              }
+              if (ctx.markEncounterComplete) ctx.markEncounterComplete('the_lamp');
+            },
+          },
+          { text: 'Walk away', onPick: () => {} },
+        ],
+      });
+    },
+    onItemDropped(_item, _ctx) { return { consume: false }; },
+  },
+
+  // -----------------------------------------------------------------
+  // Curse Breaker — old gypsy in a colourful shawl. Only spawns when
+  // the player has at least one curse relic (currently just Brass
+  // Prisoner). Pay 8000c to break the curse — relic is stripped from
+  // the owned set, recomputeStats fires, the next shot doesn't drain
+  // the magazine. Recurring (NOT oncePerSave) — every curse needs a
+  // fresh visit, and the Lamp only grants one per run anyway.
+  // -----------------------------------------------------------------
+  curse_breaker: {
+    id: 'curse_breaker',
+    name: 'Curse Breaker',
+    floorColor: 0x6a3060,             // mystic violet dais
+    oncePerSave: false,
+    condition: (state) => !!(state.artifacts && state.artifacts.has('brass_prisoner')),
+    spawn(scene, room, ctx) {
+      const disc = _spawnFloorDisc(scene, room, this.floorColor);
+      const npc = new THREE.Group();
+      const shawlMat = new THREE.MeshStandardMaterial({ color: 0x6a2030, roughness: 0.85 });
+      const trimMat  = new THREE.MeshStandardMaterial({
+        color: 0xc8a040, roughness: 0.5, metalness: 0.4,
+      });
+      const skinMat = new THREE.MeshStandardMaterial({ color: 0xa07050, roughness: 0.7 });
+      const headMat = new THREE.MeshStandardMaterial({ color: 0x7a3a52, roughness: 0.85 });
+      // Layered shawl — wider at base, narrower up top so the
+      // silhouette reads as a draped figure.
+      const skirt = new THREE.Mesh(new THREE.ConeGeometry(0.65, 1.4, 14, 1, true), shawlMat);
+      skirt.position.y = 0.7;
+      skirt.castShadow = true;
+      npc.add(skirt);
+      // Gold trim band around the hem.
+      const hem = new THREE.Mesh(new THREE.TorusGeometry(0.62, 0.04, 6, 18), trimMat);
+      hem.position.y = 0.05;
+      hem.rotation.x = Math.PI / 2;
+      npc.add(hem);
+      const upper = new THREE.Mesh(new THREE.SphereGeometry(0.36, 14, 10), shawlMat);
+      upper.scale.set(1.0, 0.85, 0.9);
+      upper.position.y = 1.45;
+      npc.add(upper);
+      // Headscarf + face.
+      const scarf = new THREE.Mesh(new THREE.SphereGeometry(0.25, 14, 10), headMat);
+      scarf.position.y = 1.85;
+      scarf.castShadow = true;
+      npc.add(scarf);
+      const face = new THREE.Mesh(new THREE.SphereGeometry(0.18, 14, 10), skinMat);
+      face.position.set(0, 1.84, 0.10);
+      npc.add(face);
+      // Crystal ball she's holding — small glowing sphere in front of chest.
+      const ballMat = new THREE.MeshStandardMaterial({
+        color: 0x80c0e8, roughness: 0.2, metalness: 0.1,
+        emissive: 0x4080c0, emissiveIntensity: 0.7,
+        transparent: true, opacity: 0.85,
+      });
+      const ball = new THREE.Mesh(new THREE.SphereGeometry(0.15, 14, 10), ballMat);
+      ball.position.set(0, 1.30, 0.42);
+      npc.add(ball);
+      const ballLight = new THREE.PointLight(0x60a0e0, 0.7, 3.5);
+      ballLight.position.set(0, 1.30, 0.42);
+      npc.add(ballLight);
+      npc.position.set(disc.cx, 0, disc.cz);
+      npc.rotation.y = -Math.PI * 0.20;
+      scene.add(npc);
+      const label = _makeLabelSprite('CURSE BREAKER', '#d8a0d8');
+      label.position.set(disc.cx, 2.5, disc.cz);
+      scene.add(label);
+      return { npc, label, disc, ballMat, complete: false };
+    },
+    tick(dt, ctx) {
+      const s = ctx.state;
+      if (!s.ballMat) return;
+      s._t = (s._t || 0) + dt;
+      s.ballMat.emissiveIntensity = 0.55 + 0.25 * Math.sin(s._t * 3.0);
+    },
+    interact(ctx) {
+      const s = ctx.state;
+      if (s.complete) return;
+      const COST = 8000;
+      const credits = ctx.getPlayerCredits ? ctx.getPlayerCredits() : 0;
+      const hasCurse = !!(ctx.artifacts && ctx.artifacts.has('brass_prisoner'));
+      ctx.showPrompt({
+        title: 'Curse Breaker',
+        body: hasCurse
+          ? '"I see brass on you, traveler. A small man, curled inside lead. For 8,000c I can pull him loose."'
+          : '"You wear no curse today. Save your coin."',
+        options: [
+          {
+            text: hasCurse ? `Break the curse (8,000c)${credits < COST ? ' — not enough' : ''}` : 'Nothing to break',
+            enabled: hasCurse && credits >= COST,
+            onPick: () => {
+              if (!hasCurse) return;
+              if (!ctx.spendCredits || !ctx.spendCredits(COST)) return;
+              const ok = ctx.removeRelic && ctx.removeRelic('brass_prisoner');
+              const speakAt = s.npc.position.clone().setY(2.5);
+              if (ok) {
+                ctx.spawnSpeech(speakAt, 'He fights — but he goes. Walk lighter.', 4.5);
+                s.complete = true;
+                if (ctx.markEncounterComplete) ctx.markEncounterComplete('curse_breaker');
+              } else {
+                ctx.spawnSpeech(speakAt, 'The curse slips my grasp. Try again.', 3.5);
+              }
+            },
+          },
+          { text: 'Walk away', onPick: () => {} },
+        ],
+      });
+    },
+    onItemDropped(_item, _ctx) { return { consume: false }; },
+  },
+
+  // -----------------------------------------------------------------
   // Sus — shady trench-coat man hawks a "premium" chest for 10000c.
   // Pay him and he vanishes; a chest spawns full of junk (and a small
   // chance of a random toy as a consolation prize). Recurring (NOT
@@ -3175,10 +3418,10 @@ export const ENCOUNTER_DEFS = {
 
 // Helper — pick one valid encounter for the given level state, or null.
 // Caller handles the "no encounter this level" outcome.
-export function pickEncounterForLevel(levelIndex, completedSet, runStats = null) {
+export function pickEncounterForLevel(levelIndex, completedSet, runStats = null, artifacts = null) {
   const candidates = Object.values(ENCOUNTER_DEFS).filter((def) => {
     if (def.oncePerSave && completedSet.has(def.id)) return false;
-    if (def.condition && !def.condition({ levelIndex, completed: completedSet, runStats })) return false;
+    if (def.condition && !def.condition({ levelIndex, completed: completedSet, runStats, artifacts })) return false;
     return true;
   });
   if (!candidates.length) return null;

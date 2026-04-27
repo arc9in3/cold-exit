@@ -1923,7 +1923,7 @@ function regenerateLevel() {
     // pickEncounterForLevel returned null because everything was
     // already completed). _runCompletedEncounters resets in
     // _resetEncounterCompletionForRun on every new run.
-    const def = pickEncounterForLevel(level.index | 0, _runCompletedEncounters, runStats);
+    const def = pickEncounterForLevel(level.index | 0, _runCompletedEncounters, runStats, artifacts);
     if (!def) {
       r.type = 'combat';   // demote — main UI stays consistent
       continue;
@@ -2120,6 +2120,10 @@ function regenerateLevel() {
         // priest stops respawning + the bear merchant can take the
         // toy. Survives across rooms; reset on run reset.
         runStats,
+        // Live artifact collection — Curse Breaker reads this to gate
+        // its dialog ("you wear no curse today") + decide whether the
+        // 8000c spend actually does anything.
+        artifacts,
         // Spawn a fresh Demon Bear toy at world XZ. Wraps the toy
         // def with stampItemDims so it lays out correctly in the
         // inventory grid like any other loot pickup.
@@ -2173,6 +2177,18 @@ function regenerateLevel() {
         // Sus — chest dressed up as a premium drop that's actually
         // junk-stuffed (with a small toy chance). See _spawnSusChestAt.
         spawnSusChest: (x, z) => _spawnSusChestAt(x, z),
+        // The Lamp — cursed chest containing a single relic. The
+        // player opens it like any other chest; auto-acquire on
+        // pickup grants the relic + flags the curse.
+        spawnCursedChest: (x, z, relicId) => _spawnCursedChestAt(x, z, relicId),
+        // Curse Breaker — strip a relic from the player's owned set
+        // (e.g. brass_prisoner). Returns true if it was present and
+        // removed; false otherwise.
+        removeRelic: (id) => {
+          const ok = artifacts.remove?.(id);
+          if (ok) recomputeStats();
+          return !!ok;
+        },
         // The Button alarm — spawn one summoned minion at XZ.
         spawnSummonedMinion: (x, z, room2) => _spawnSummonedMinionAt(x, z, room2),
         // Duck — drops the Unused Rocket Ticket as a junk pickup
@@ -2310,6 +2326,42 @@ function _spawnSusChestAt(x, z) {
   if (Math.random() < 0.25) {
     const toy = randomToy();
     if (toy) container.loot.push(toy);
+  }
+  const group = buildContainerMesh(container, x, 0, z);
+  scene.add(group);
+  const { w, d } = container.geo;
+  const proxy = new THREE.Mesh(
+    new THREE.BoxGeometry(w, container.geo.h, d),
+    new THREE.MeshBasicMaterial({ transparent: true, opacity: 0, depthWrite: false }),
+  );
+  proxy.position.set(x, container.geo.h / 2, z);
+  proxy.userData.collisionXZ = {
+    minX: x - w / 2, maxX: x + w / 2,
+    minZ: z - d / 2, maxZ: z + d / 2,
+  };
+  proxy.userData.isProp = true;
+  proxy.userData.containerRef = container;
+  scene.add(proxy);
+  level.obstacles.push(proxy);
+  level.containers.push({ container, group, x, z, r: 1.8 });
+}
+
+// The Lamp encounter — chest stuffed with a single relic. Used to
+// deliver the Brass Prisoner curse via a chest open instead of a
+// floor pickup so the moment reads as "you opened the wrong one."
+// Visually a general 'm' chest with darker tint; loot list is just
+// the relic.
+function _spawnCursedChestAt(x, z, relicId) {
+  const container = makeContainer('general', 'm', level?.index | 0);
+  container.loot.length = 0;
+  const relic = relicFor(relicId);
+  if (relic) container.loot.push(relic);
+  // Repaint the chest in cursed tones so the player can tell it apart
+  // from the masterworks once it's been searched.
+  if (container.colors) {
+    container.colors.body = 0x32242a;
+    container.colors.trim = 0x6a4030;
+    container.colors.glow = 0x602030;
   }
   const group = buildContainerMesh(container, x, 0, z);
   scene.add(group);
@@ -4000,6 +4052,10 @@ function tickFlame(dt, playerInfo, weapon, inputState, aimInfo) {
   weapon.flameTickT = tickInterval;
 
   weapon.ammo -= 1;
+  // Brass Prisoner curse — flame ticks also pay the toll. Floored at 0.
+  if (artifacts && artifacts.has('brass_prisoner')) {
+    weapon.ammo = Math.max(0, weapon.ammo - 2);
+  }
   if (weapon.durability) {
     weapon.durability.current = Math.max(
       0, weapon.durability.current - tunables.durability.weaponDecayPerShot * 0.4,
@@ -4202,6 +4258,11 @@ function spawnSniperShot(g) {
 
 function firePlayerProjectile(playerInfo, weapon, aimPoint) {
   if (typeof weapon.ammo === 'number' && !weapon.infiniteAmmo) weapon.ammo -= 1;
+  // Brass Prisoner curse — projectile launchers pay the same toll.
+  if (typeof weapon.ammo === 'number' && !weapon.infiniteAmmo
+      && artifacts && artifacts.has('brass_prisoner')) {
+    weapon.ammo = Math.max(0, weapon.ammo - 2);
+  }
   sfx.fire(weapon.class || 'shotgun');
   alertEnemiesFromShot(playerInfo.muzzleWorld);
   if (player.kickRecoil) player.kickRecoil();
@@ -4407,6 +4468,15 @@ function fireOneShot(playerInfo, weapon, aimPoint, isADS, aimOwner) {
   // === eff.magSize before decrement = first round; ammo === 1 = last.
   const _ammoBefore = (typeof weapon.ammo === 'number') ? weapon.ammo : -1;
   if (typeof weapon.ammo === 'number' && !weapon.infiniteAmmo && !freeShot) weapon.ammo -= 1;
+  // Brass Prisoner curse — every shot eats 2 EXTRA bullets from the
+  // magazine on top of the round we just fired. Floored at 0 so the
+  // last bullet still fires; the next trigger pull clicks empty.
+  // Skipped on freeShot so Scavenger's Eye still feels like a perk
+  // even under the curse.
+  if (typeof weapon.ammo === 'number' && !weapon.infiniteAmmo && !freeShot
+      && artifacts && artifacts.has('brass_prisoner')) {
+    weapon.ammo = Math.max(0, weapon.ammo - 2);
+  }
   if ((derivedStats.instantReloadChance || 0) > 0
       && typeof weapon.ammo === 'number' && !weapon.infiniteAmmo
       && weapon.ammo < eff.magSize

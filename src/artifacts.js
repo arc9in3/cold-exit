@@ -283,6 +283,24 @@ export const ARTIFACT_DEFS = {
       s.mythicDropChanceFloor = Math.max(s.mythicDropChanceFloor || 0, 0.06);
     },
   },
+  // -------------------------------------------------------------
+  // The Lamp curse — granted from the cursed chest of the three.
+  // Every shot drains 3 ammo from the magazine (the bullet you fire
+  // plus 2 more). Floored at 0 — a near-empty mag still fires the
+  // last round. Tagged `curse: true` so the Curse Breaker encounter
+  // can detect + remove it; `synthetic: true` keeps it out of shops
+  // and random pools (only path is the cursed chest).
+  // -------------------------------------------------------------
+  brass_prisoner: {
+    id: 'brass_prisoner', name: 'Brass Prisoner',
+    lore: 'A small brass figure curled inside a bullet casing. He pays your debts in lead.',
+    short: 'CURSED — every shot drains 3 bullets',
+    tint: 0x8a6028,
+    price: 0,
+    curse: true,
+    synthetic: true,
+    apply(_s) { /* effect is at the fire callsite — see tickShooting */ },
+  },
 };
 
 export const ALL_ARTIFACTS = Object.values(ARTIFACT_DEFS);
@@ -302,6 +320,14 @@ export class ArtifactCollection {
         && !this.owned.has('magnum_opus')) {
       this.owned.add('magnum_opus');
     }
+    return true;
+  }
+  // Remove a single relic from the owned set. Used by the Curse
+  // Breaker encounter to lift Brass Prisoner. Returns true if the
+  // relic was present and removed; false otherwise.
+  remove(id) {
+    if (!this.owned.has(id)) return false;
+    this.owned.delete(id);
     return true;
   }
   reset() { this.owned.clear(); }
