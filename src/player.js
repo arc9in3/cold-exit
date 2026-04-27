@@ -510,12 +510,16 @@ export function createPlayer(scene) {
   function consumeStamina(amount, kind) {
     // Battle Trance / mastery rebates lower the cost of melee attacks
     // and parries. `kind` is an optional tag — 'melee' covers swings,
-    // combos, parry, deflect; other kinds bypass the multiplier so
-    // movement (dodge) stays full-cost.
+    // combos, parry, deflect; other kinds bypass the melee multiplier.
+    // Carbon Cycle (relic) applies a flat multiplier to every kind.
     let cost = amount;
     if (kind === 'melee' && (state.meleeStaminaMult ?? 1) < 1) {
-      cost = Math.max(1, Math.round(amount * state.meleeStaminaMult));
+      cost = cost * state.meleeStaminaMult;
     }
+    if ((state.staminaCostMult ?? 1) !== 1) {
+      cost = cost * state.staminaCostMult;
+    }
+    cost = Math.max(1, Math.round(cost));
     if (state.stamina < cost) return false;
     state.stamina -= cost;
     state.staminaRegenT = tunables.stamina.regenDelay;
@@ -775,6 +779,9 @@ export function createPlayer(scene) {
     // Battle Trance — feeds consumeStamina('melee', ...) to halve the
     // cost of swings, parries, and quick-melee.
     state.meleeStaminaMult = s.meleeStaminaMult ?? 1;
+    // Carbon Cycle relic — flat multiplier on EVERY stamina drain
+    // (dodge, block, melee). Stacks multiplicatively with melee mult.
+    state.staminaCostMult = s.staminaCostMult ?? 1;
     // Sniper Lung Drag — speeds up ADS easing.
     state.adsSpeedMult = s.adsSpeedMult ?? 1;
     // Sway dampener (currently consumed by AI sway emulation when the
@@ -900,7 +907,8 @@ export function createPlayer(scene) {
       state.parryT = 0;
     }
     if (state.blocking) {
-      const drain = tunables.stamina.blockDrainRate * dt;
+      // Carbon Cycle relic — block drain pays the same staminaCostMult.
+      const drain = tunables.stamina.blockDrainRate * (state.staminaCostMult ?? 1) * dt;
       state.stamina = Math.max(0, state.stamina - drain);
       state.staminaRegenT = tunables.stamina.regenDelay;
       if (state.stamina <= 0) state.blocking = false;

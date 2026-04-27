@@ -284,6 +284,19 @@ export const ARTIFACT_DEFS = {
     },
   },
   // -------------------------------------------------------------
+  // Duck reward — every stamina drain (dodge, block, melee) pays
+  // half. Pairs naturally with the dodge / parry-counter playstyle
+  // the duck encounter ends up rewarding.
+  // -------------------------------------------------------------
+  carbon_cycle: {
+    id: 'carbon_cycle', name: 'Carbon Cycle',
+    lore: 'A small green sprig in a bullet casing. Breath in, breath out.',
+    short: 'All stamina costs halved',
+    tint: 0x60c070,
+    price: 5200,
+    apply(s) { s.staminaCostMult = (s.staminaCostMult || 1) * 0.5; },
+  },
+  // -------------------------------------------------------------
   // The Lamp curse — granted from the cursed chest of the three.
   // Every shot drains 3 ammo from the magazine (the bullet you fire
   // plus 2 more). Floored at 0 — a near-empty mag still fires the

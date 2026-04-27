@@ -486,16 +486,17 @@ export const ENCOUNTER_DEFS = {
     id: 'duck',
     name: 'The Duck',
     floorColor: 0xfff080,             // sunny yellow
-    // Two-shot per run so the player can get BOTH rewards (Innocent
-    // Heart relic + Unused Rocket Ticket → Rocket Shoes via the
-    // Bear Merchant). pickEncounterForLevel still filters out the
-    // encounter once `_completionsThisRun >= 2` via the condition
-    // check below — we mark it run-complete inside onItemDropped at
-    // that point so the level-gen filter respects the cap.
+    // Three-shot per run so the player can chase ALL rewards
+    // (Innocent Heart relic, Carbon Cycle relic, and the Unused
+    // Rocket Ticket → Rocket Shoes via the Bear Merchant).
+    // pickEncounterForLevel still filters the encounter out once
+    // `_completionsThisRun >= 3` via the condition check below — we
+    // mark it run-complete inside onItemDropped at that point so the
+    // level-gen filter respects the cap.
     oncePerSave: false,
     _completionsThisRun: 0,
     condition: (state) => state.levelIndex >= 1
-      && (ENCOUNTER_DEFS?.duck?._completionsThisRun ?? 0) < 2,
+      && (ENCOUNTER_DEFS?.duck?._completionsThisRun ?? 0) < 3,
     quacks: ['Quack.', 'Quack quack.', 'Quack?', 'QUACK.'],
     spawn(scene, room, ctx) {
       const disc = _spawnFloorDisc(scene, room, this.floorColor);
@@ -541,27 +542,31 @@ export const ENCOUNTER_DEFS = {
       s.complete = true;
       ctx.spawnSpeech(s.duck.position.clone().setY(1.4),
         'DID SOMEONE SAY PEAS?!', 7.0);
-      // Reward: 50/50 between the Innocent Heart relic (auto-
-      // grants on pickup) and the Unused Rocket Ticket — which is now
-      // a piece of junk. Selling the ticket to the Bear Merchant
-      // converts it into the Rocket Shoes relic. Innocent Heart is
-      // skipped if the player already owns it (it's a one-shot
-      // artifact) so re-running the trick still rewards.
-      const dropTicket = !ctx.filterUnownedArtifactIds
-        || !ctx.filterUnownedArtifactIds(['innocent_heart']).length
-        || Math.random() < 0.5;
-      if (dropTicket && ctx.spawnRocketTicketJunk) {
+      // Reward pool: Innocent Heart relic, Carbon Cycle relic, OR the
+      // Unused Rocket Ticket (junk → Rocket Shoes via Bear Merchant).
+      // Already-owned relics drop out of the pool so re-running the
+      // trick still rewards. Picks uniformly among whatever's left.
+      const candidates = ['ticket'];
+      const unownedRelics = ctx.filterUnownedArtifactIds
+        ? ctx.filterUnownedArtifactIds(['innocent_heart', 'carbon_cycle'])
+        : ['innocent_heart', 'carbon_cycle'];
+      for (const id of unownedRelics) candidates.push(id);
+      const pick = candidates[Math.floor(Math.random() * candidates.length)];
+      if (pick === 'ticket' && ctx.spawnRocketTicketJunk) {
         ctx.spawnRocketTicketJunk(s.disc.cx + 0.8, s.disc.cz);
-      } else {
-        const relic = ctx.relicFor && ctx.relicFor('innocent_heart');
+      } else if (pick !== 'ticket' && ctx.relicFor) {
+        const relic = ctx.relicFor(pick);
         if (relic) ctx.spawnLoot(s.disc.cx + 0.8, s.disc.cz, relic);
+      } else if (ctx.spawnRocketTicketJunk) {
+        // Fallback if relicFor is unavailable for some reason.
+        ctx.spawnRocketTicketJunk(s.disc.cx + 0.8, s.disc.cz);
       }
       // Bump the per-run completion counter. Only mark the encounter
-      // run-complete after the SECOND successful peas-drop so the
-      // duck can re-roll on a later level for the other reward.
+      // run-complete after the THIRD successful peas-drop so the
+      // duck can re-roll on later levels for the remaining rewards.
       const def = ENCOUNTER_DEFS.duck;
       def._completionsThisRun = (def._completionsThisRun || 0) + 1;
-      const exhausted = def._completionsThisRun >= 2;
+      const exhausted = def._completionsThisRun >= 3;
       if (exhausted && ctx.markEncounterComplete) ctx.markEncounterComplete('duck');
       return { consume: true, complete: exhausted };
     },

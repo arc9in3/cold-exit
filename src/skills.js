@@ -246,6 +246,9 @@ export const BASE_STATS = () => ({
   // Melee stamina — Battle Trance halves attack costs and refunds on kill.
   meleeStaminaMult: 1,
   meleeStaminaRefundOnKill: 0,
+  // Carbon Cycle relic — flat multiplier on every stamina drain
+  // (dodge, block, melee). 1.0 = baseline; 0.5 = costs halved.
+  staminaCostMult: 1,
   // Backpedal — when a player shoots in one direction and moves in the
   // opposite, ground movement collapses to a slow backpedal and dash
   // distance halves. Pistol-class skills raise `backpedalRelief` from
