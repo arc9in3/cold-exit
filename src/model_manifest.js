@@ -35,24 +35,36 @@ export const MODEL_BY_WEAPON_NAME = {
   'Spectre':            'lowpolyguns/SubmachineGun_2.fbx',
   'Spectre CQB':        'lowpolyguns/SubmachineGun_1.fbx',
   'SPC9':               'lowpolyguns/SubmachineGun_3.fbx',
+  'SPCA3':              'lowpolyguns/SubmachineGun_4.fbx',          // SIG SPC AR-style 9mm
+  'SPC223':             'lowpolyguns/SubmachineGun_5.fbx',          // SIG SPC .223 carbine
 
   // Rifles
   'AK47':               'lowpolyguns/AssaultRifle_2.fbx',
+  'AKS-47':             'lowpolyguns/AssaultRifle_3.fbx',         // folding-stock AK47 sibling
   'AKS-74':             'lowpolyguns/AssaultRifle_4.fbx',
   'AK104':              'lowpolyguns/AssaultRifle_5.fbx',
+  'Draco NAK9':         'lowpolyguns/AssaultRifle_1.fbx',         // 9mm AK-pattern compact
   'AS VAL':             'weapons/SM_Assault_Rifle_9x39.fbx',
   'VSS':                'weapons/SM_Police_Sniper_Rifle.fbx',     // user-tagged FBX = "VSS vintorez"
   'M16':                'weapons/Assault_Rifle_5_56_Prototype.fbx',
+  'M4':                 'lowpolyguns/AssaultRifle2_2.fbx',         // Apr-26: re-introduced with proper FBX
+  'AR-15 SBR':          'lowpolyguns/AssaultRifle2_4.fbx',         // short-barrel AR-15
+  'AR-15 Pistol':       'lowpolyguns/AssaultRifle2_3.fbx',         // AR pistol — pistol class for size
   'AUG A3-CQC':         'weapons/SM_Bulpam_Assault_Rifle.fbx',
   'CAR-15':             'lowpolyguns/AssaultRifle2_1.fbx',
   'JARD J67':           'lowpolyguns/Bullpup_2.fbx',
+  'JARD J68':           'lowpolyguns/Bullpup_1.fbx',
+  'JARD J56':           'lowpolyguns/Bullpup_3.fbx',
 
   // LMGs
   'Type 80 LMG':        'weapons/SM_Heavy_Machine_Gun.fbx',
   'M249':               'weapons/SM_Light_Machine_Gun.fbx',
 
   // Snipers
-  'Remington 700':      'weapons/SM_Hunting_Sniper_Rifle.fbx',
+  // Apr-26: Remington 700's art swapped to the user-tagged
+  // SniperRifle_1 FBX. Tactical chassis variant added as a sibling.
+  'Remington 700':      'lowpolyguns/SniperRifle_1.fbx',
+  'Remington 700 Tactical': 'lowpolyguns/SniperRifle_2.fbx',
   'SVD Dragunov':       'weapons/SM_Army_Sniper_Rifle.fbx',
   'Cheytac Intervention':'weapons/SM_High_Precision_Sniper_Rifle.fbx',
   'AWP':                'lowpolyguns/SniperRifle_3.fbx',
@@ -66,6 +78,8 @@ export const MODEL_BY_WEAPON_NAME = {
   'Remington 870':      'lowpolyguns/Shotgun_3.fbx',
   'Sawed-Off Shotgun':  'lowpolyguns/Shotgun_SawedOff.fbx',
   'KSG-12':             'weapons/Modern_Pump_Action_Shotgun.fbx',
+  // Henry single-shot 12-gauge slug rifle. Class: shotgun (slug).
+  'Henry Slug Rifle':   'lowpolyguns/Shotgun_4.fbx',
 
   // Exotic
   'Widowmaker Rocket Launcher': 'weapons/SM_Rocket_Launchers_01.fbx',

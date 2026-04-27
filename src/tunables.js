@@ -1410,5 +1410,152 @@ export const tunables = {
                    startup: 0.12, active: 0.12, recovery: 0.32, window: 0.14, knockback: 3.8 } },
       ],
     },
+
+    // ================================================================
+    // Apr-26 lineup expansion — turning all the tagged-but-unused
+    // FBXes from weapon_assignments.json into spawnable items. Stats
+    // are real-world inspired (caliber → damage curve, barrel length
+    // → range, action → fireRate). Slots match the existing rifle /
+    // SMG / sniper / shotgun templates so attachments work uniformly.
+    // ================================================================
+    {
+      // 14.5" 5.56 NATO M4 carbine — bread-and-butter US service
+      // weapon. Common-uncommon spawn so it's the rifle the player
+      // sees most often early. Balanced fire rate, average range.
+      name: 'M4', type: 'ranged', class: 'rifle', rarity: 'uncommon',
+      attachmentSlots: ['muzzle', 'barrel', 'underRail', 'sideRail', 'topRail', 'stock', 'grip', 'trigger', 'magazine'],
+      fireMode: 'auto', fireRate: 12, damage: 26, range: 56,
+      hipSpread: 0.11, adsSpread: 0.016,
+      adsZoom: 0.58, adsPeekDistance: 7.2,
+      tracerColor: 0xf0a84a, muzzleLength: 0.92, muzzleGirth: 0.13,
+      pelletCount: 1, burstCount: 1, burstInterval: 0,
+      magSize: 30, reloadTime: 1.7,
+    },
+    {
+      // 10.5" SBR — same platform, shorter barrel. Less range, more
+      // hip-fire spread, faster reload from compact handling.
+      name: 'AR-15 SBR', type: 'ranged', class: 'rifle', rarity: 'uncommon',
+      attachmentSlots: ['muzzle', 'barrel', 'underRail', 'sideRail', 'topRail', 'stock', 'grip', 'trigger', 'magazine'],
+      fireMode: 'auto', fireRate: 13, damage: 24, range: 46,
+      hipSpread: 0.13, adsSpread: 0.020,
+      adsZoom: 0.62, adsPeekDistance: 6.4,
+      tracerColor: 0xf0a84a, muzzleLength: 0.78, muzzleGirth: 0.13,
+      pelletCount: 1, burstCount: 1, burstInterval: 0,
+      magSize: 30, reloadTime: 1.5,
+    },
+    {
+      // 7.5" AR pistol with no stock. Treated as a pistol-class for
+      // its size + brace-only ergos. Bigger mag than other pistols
+      // (30) since it takes AR mags; weaker damage from short barrel.
+      name: 'AR-15 Pistol', type: 'ranged', class: 'pistol', rarity: 'rare',
+      attachmentSlots: ['muzzle', 'underRail', 'sideRail', 'topRail', 'grip', 'trigger', 'magazine'],
+      fireMode: 'auto', fireRate: 13, damage: 22, range: 36,
+      hipSpread: 0.16, adsSpread: 0.028,
+      adsZoom: 0.70, adsPeekDistance: 5.0,
+      tracerColor: 0xf0a84a, muzzleLength: 0.62, muzzleGirth: 0.12,
+      pelletCount: 1, burstCount: 1, burstInterval: 0,
+      magSize: 30, reloadTime: 1.6,
+    },
+    {
+      // Romanian Draco NAK9 — 9×19 AK-pattern pistol. AK furniture
+      // on a pistol-caliber platform. Higher mag than typical pistols,
+      // poor accuracy at range, decent close-quarters chaos.
+      name: 'Draco NAK9', type: 'ranged', class: 'pistol', rarity: 'uncommon',
+      attachmentSlots: ['muzzle', 'underRail', 'sideRail', 'topRail', 'grip', 'trigger', 'magazine'],
+      fireMode: 'auto', fireRate: 14, damage: 20, range: 32,
+      hipSpread: 0.18, adsSpread: 0.030,
+      adsZoom: 0.72, adsPeekDistance: 4.6,
+      tracerColor: 0xe89040, muzzleLength: 0.58, muzzleGirth: 0.13,
+      pelletCount: 1, burstCount: 1, burstInterval: 0,
+      magSize: 33, reloadTime: 1.7,
+    },
+    {
+      // AKS-47 — folding-stock variant of the AK47. Same ballistics,
+      // slightly bumpier hip-fire because of the lighter stock when
+      // folded out, marginally faster handling.
+      name: 'AKS-47', type: 'ranged', class: 'rifle', rarity: 'uncommon',
+      attachmentSlots: ['muzzle', 'barrel', 'underRail', 'sideRail', 'topRail', 'stock', 'grip', 'trigger', 'magazine'],
+      fireMode: 'auto', fireRate: 9, damage: 32, range: 56,
+      hipSpread: 0.13, adsSpread: 0.019,
+      adsZoom: 0.58, adsPeekDistance: 7.0,
+      tracerColor: 0xe08030, muzzleLength: 0.94, muzzleGirth: 0.15,
+      pelletCount: 1, burstCount: 1, burstInterval: 0,
+      magSize: 30, reloadTime: 1.6,
+    },
+    {
+      // JARD J68 — bullpup chambered in 5.56. Compact, integral rail.
+      name: 'JARD J68', type: 'ranged', class: 'rifle', rarity: 'uncommon',
+      attachmentSlots: ['muzzle', 'barrel', 'underRail', 'sideRail', 'topRail', 'grip', 'trigger', 'magazine'],
+      fireMode: 'auto', fireRate: 11, damage: 28, range: 60,
+      hipSpread: 0.10, adsSpread: 0.014,
+      adsZoom: 0.56, adsPeekDistance: 7.5,
+      tracerColor: 0xeaa050, muzzleLength: 0.84, muzzleGirth: 0.13,
+      pelletCount: 1, burstCount: 1, burstInterval: 0,
+      magSize: 30, reloadTime: 1.7,
+    },
+    {
+      // JARD J56 — heavier-caliber bullpup variant (.308 platform).
+      // Slower fire, more damage, longer range, smaller mag.
+      name: 'JARD J56', type: 'ranged', class: 'rifle', rarity: 'rare',
+      attachmentSlots: ['muzzle', 'barrel', 'underRail', 'sideRail', 'topRail', 'grip', 'trigger', 'magazine'],
+      fireMode: 'auto', fireRate: 8, damage: 42, range: 72,
+      hipSpread: 0.10, adsSpread: 0.012,
+      adsZoom: 0.52, adsPeekDistance: 8.4,
+      tracerColor: 0xf0b060, muzzleLength: 0.88, muzzleGirth: 0.14,
+      pelletCount: 1, burstCount: 1, burstInterval: 0,
+      magSize: 25, reloadTime: 1.9,
+    },
+    {
+      // Henry single-shot 12-gauge slug — break-action, one round at
+      // a time, slug round (single high-damage projectile, not pellets
+      // like a regular shotgun). Long reload, very high per-shot dmg.
+      name: 'Henry Slug Rifle', type: 'ranged', class: 'shotgun', rarity: 'uncommon',
+      attachmentSlots: ['muzzle', 'topRail', 'stock', 'trigger'],
+      fireMode: 'semi', fireRate: 1.0, damage: 110, range: 60,
+      hipSpread: 0.05, adsSpread: 0.005,
+      adsZoom: 0.50, adsPeekDistance: 7.0,
+      tracerColor: 0xd28040, muzzleLength: 1.10, muzzleGirth: 0.14,
+      pelletCount: 1, burstCount: 1, burstInterval: 0,
+      magSize: 1, reloadTime: 2.4,
+    },
+    {
+      // Remington 700 in tactical chassis — same action as base 700,
+      // but with the lowpoly tactical-furniture FBX. Slightly faster
+      // fire and tighter ADS spread thanks to chassis ergonomics.
+      name: 'Remington 700 Tactical', type: 'ranged', class: 'sniper', rarity: 'rare',
+      attachmentSlots: ['muzzle', 'barrel', 'underRail', 'sideRail', 'topRail', 'stock', 'grip', 'trigger', 'magazine'],
+      fireMode: 'semi', fireRate: 1.6, damage: 92, range: 110,
+      hipSpread: 0.09, adsSpread: 0.005,
+      adsZoom: 0.42, adsPeekDistance: 12.0,
+      tracerColor: 0xe0c070, muzzleLength: 1.18, muzzleGirth: 0.13,
+      pelletCount: 1, burstCount: 1, burstInterval: 0,
+      magSize: 5, reloadTime: 2.6,
+    },
+    {
+      // SIG SPCA3 — 9mm AR-style carbine. Treated as SMG class for
+      // its caliber + role (close-quarters PCC). Decent fire rate,
+      // larger mag than typical pistols.
+      name: 'SPCA3', type: 'ranged', class: 'smg', rarity: 'common',
+      attachmentSlots: ['muzzle', 'barrel', 'underRail', 'sideRail', 'topRail', 'stock', 'grip', 'trigger', 'magazine'],
+      fireMode: 'auto', fireRate: 13, damage: 18, range: 38,
+      hipSpread: 0.14, adsSpread: 0.022,
+      adsZoom: 0.66, adsPeekDistance: 5.6,
+      tracerColor: 0xd8c060, muzzleLength: 0.78, muzzleGirth: 0.12,
+      pelletCount: 1, burstCount: 1, burstInterval: 0,
+      magSize: 30, reloadTime: 1.6,
+    },
+    {
+      // SIG SPC chambered in .223 — rifle round in an SMG-form-factor
+      // body. Higher damage than the 9mm SPCA3, faster bullet, smaller
+      // mag. Still SMG class for the ergonomics.
+      name: 'SPC223', type: 'ranged', class: 'smg', rarity: 'uncommon',
+      attachmentSlots: ['muzzle', 'barrel', 'underRail', 'sideRail', 'topRail', 'stock', 'grip', 'trigger', 'magazine'],
+      fireMode: 'auto', fireRate: 12, damage: 22, range: 48,
+      hipSpread: 0.13, adsSpread: 0.018,
+      adsZoom: 0.62, adsPeekDistance: 6.2,
+      tracerColor: 0xeacb70, muzzleLength: 0.84, muzzleGirth: 0.12,
+      pelletCount: 1, burstCount: 1, burstInterval: 0,
+      magSize: 25, reloadTime: 1.7,
+    },
   ],
 };
