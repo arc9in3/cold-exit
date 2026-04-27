@@ -257,12 +257,14 @@ import { FBXLoader } from 'three/addons/loaders/FBXLoader.js';
 // Pull the live manifest + the live weapon list so the tool always
 // matches what the game actually loads.
 let MODEL_BY_WEAPON_NAME = {}, MODEL_BY_ITEM_ID = {}, MODEL_GRIP_OFFSET = {};
+let MIRROR_X_BY_NAME = new Set();
 let TUNABLES = null;
 try {
   const m = await import('../src/model_manifest.js');
   MODEL_BY_WEAPON_NAME = m.MODEL_BY_WEAPON_NAME || {};
   MODEL_BY_ITEM_ID    = m.MODEL_BY_ITEM_ID    || {};
   MODEL_GRIP_OFFSET   = m.MODEL_GRIP_OFFSET   || {};
+  MIRROR_X_BY_NAME    = m.MIRROR_X_BY_NAME    || new Set();
 } catch (e) {
   console.warn('manifest import failed', e);
 }
@@ -331,18 +333,25 @@ try { mirrorFlags = new Set(JSON.parse(localStorage.getItem(MIRROR_KEY) || '[]')
 function saveMirrorFlags() { localStorage.setItem(MIRROR_KEY, JSON.stringify([...mirrorFlags])); }
 
 // Apply (or undo) X-axis mirror on a tile's loaded mesh group. The
-// auto-flip heuristic in fitAndStage may have already mirrored the
-// model to enforce muzzle-LEFT; this user toggle stacks on top by
-// flipping again. Stored as a multiplier so the live state always
-// reflects whatever the user wants.
+// effective mirror state is `manifest XOR userToggle`, so weapons
+// already flagged in the manifest start mirrored (the in-game state)
+// and the user toggle flips relative to that baseline.
 function _applyMirrorToTile(t) {
   if (!t || !t.obj) return;
   const key = t.weaponName || t.path;
-  const wantMirror = mirrorFlags.has(key);
-  // Stash whatever scale.x the auto-flip set. We track the user's
-  // intent separately and apply on top.
+  const inManifest = !!(t.weaponName && MIRROR_X_BY_NAME.has(t.weaponName));
+  const userToggled = mirrorFlags.has(key);
+  const effectiveMirror = inManifest !== userToggled;   // XOR
   if (t._autoScaleX === undefined) t._autoScaleX = t.obj.scale.x;
-  t.obj.scale.x = wantMirror ? -t._autoScaleX : t._autoScaleX;
+  t.obj.scale.x = effectiveMirror ? -t._autoScaleX : t._autoScaleX;
+}
+
+function _isTileEffectivelyMirrored(t) {
+  if (!t) return false;
+  const key = t.weaponName || t.path;
+  const inManifest = !!(t.weaponName && MIRROR_X_BY_NAME.has(t.weaponName));
+  const userToggled = mirrorFlags.has(key);
+  return inManifest !== userToggled;
 }
 
 function _attachMirrorBtn(tile, t) {
@@ -352,13 +361,14 @@ function _attachMirrorBtn(tile, t) {
   btn.className = 'mirror-btn';
   btn.textContent = '⇋';
   btn.title = 'Mirror this model along X (flip muzzle direction)';
-  if (mirrorFlags.has(key)) btn.classList.add('active');
+  const refresh = () => btn.classList.toggle('active', _isTileEffectivelyMirrored(t));
+  refresh();
   btn.addEventListener('click', (e) => {
     e.stopPropagation();   // don't open the pose modal
     if (mirrorFlags.has(key)) mirrorFlags.delete(key);
     else mirrorFlags.add(key);
     saveMirrorFlags();
-    btn.classList.toggle('active', mirrorFlags.has(key));
+    refresh();
     _applyMirrorToTile(t);
   });
   // Touch handler — explicit so mobile taps don't fall through to
@@ -996,13 +1006,17 @@ document.getElementById('render-icons-btn').addEventListener('click', renderAllI
 // can patch the manifest cleanly. Mobile-friendly: uses the async
 // clipboard API with a textarea fallback for older browsers.
 document.getElementById('copy-mirrors-btn').addEventListener('click', async () => {
+  // Effective mirror state per tile = manifest XOR userToggle.
+  // Export the FULL effective list so the recipient can patch
+  // MIRROR_X_BY_NAME to exactly this set (not a diff).
   const weapons = [];
   const fbxes = [];
-  // Resolve each mirror key back to weapon-vs-fbx by checking the
-  // weaponInputByName map. Anything not in there is an FBX path.
-  for (const key of mirrorFlags) {
-    if (weaponInputByName[key]) weapons.push(key);
-    else fbxes.push(key);
+  for (const t of weaponTiles) {
+    if (_isTileEffectivelyMirrored(t)) weapons.push(t.weaponName);
+  }
+  for (const t of fbxTiles) {
+    const key = t.path;
+    if (mirrorFlags.has(key)) fbxes.push(key);
   }
   const out = {
     mirror_in_game_weapons: weapons.sort(),

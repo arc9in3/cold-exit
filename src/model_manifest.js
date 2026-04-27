@@ -411,6 +411,29 @@ export function poseForWeapon(weapon) {
   return POSE_BY_CLASS[klass] || POSE_BY_CLASS.pistol;
 }
 
+// Weapons whose FBX is authored with the muzzle on +X — these need
+// scale.x = -1 to render correctly muzzle-LEFT in side-view exports
+// AND to point muzzle FORWARD when held in-game (the default in-hand
+// yaw of π/2 assumes muzzle-on-(-X)). Populated from the user's
+// 'Copy mirror list' export from tools/weapon_assigner.html. 43/56
+// weapons after the Apr-26 batch — the tool's vertex-count heuristic
+// guesses wrong on most lowpoly + animpic FBXes.
+export const MIRROR_X_BY_NAME = new Set([
+  '.338 Lapua', '.38 Special', 'AA-12', 'AK104', 'AK47', 'AKS-74',
+  'AS VAL', 'AUG A3-CQC', 'AWP', 'Benelli M4', 'CAR-15', 'Chainsaw',
+  'Cheytac Intervention', 'Colt 357', 'Colt Anaconda .44',
+  'Colt Python', 'Colt Six Shooter', 'Combat Knife', 'Desert Eagle .50',
+  'Dragonbreath', 'Glock 17', 'Hunting Rifle', 'JARD J67',
+  "Jessica's Rage", 'KSG-12', 'Kriss Vector', 'Kukri', 'M16', 'M1911',
+  'M249', 'Mossberg 500', 'PDW', 'Remington 700', 'Remington 870',
+  'SPC9', 'Sawed-Off Shotgun', 'Spectre', 'Spectre CQB',
+  'Survival Knife', 'Tomahawk', 'Type 80 LMG', 'UMP45', 'VSS',
+]);
+export function shouldMirrorWeapon(item) {
+  if (!item) return false;
+  return MIRROR_X_BY_NAME.has(item.baseName || item.name);
+}
+
 export function modelForItem(item) {
   if (!item) return null;
   if (item.model) return item.model;  // callers can override inline
