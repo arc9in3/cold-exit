@@ -160,8 +160,12 @@ export class ProjectileManager {
       }
       // Grenades also detonate on a direct torso hit — otherwise
       // players see the round tumble off an enemy's shoulder and
-      // bounce into a corner.
-      if (armed && p.type === 'grenade' && p.owner === 'player') {
+      // bounce into a corner. SKIPPED for fuseAfterLand throwables
+      // until the first ground contact: those are designed to arc,
+      // bounce, then explode. Mid-air pop on a chest-height enemy
+      // contradicted the bounce-and-settle intent and felt buggy.
+      if (armed && p.type === 'grenade' && p.owner === 'player'
+          && !(p.fuseAfterLand && p.fuseStartT < 0)) {
         const close = this._nearbyEnemy(p.pos, 0.7);
         if (close) {
           this._detPos.copy(p.pos); this._detonate(p, this._detPos, onExplode);

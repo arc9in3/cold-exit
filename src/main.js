@@ -932,7 +932,7 @@ function rollStoreOffers(n, tier) {
   // run into mythic mode + lvl-20 difficulty.
   if (getMythicRunUnlocked()) {
     const mythicPool = tunables.weapons.filter(w =>
-      w.mythic && w.name !== "Jessica's Rage");
+      w.mythic && !w.pactReward && w.name !== "Jessica's Rage");
     if (mythicPool.length) {
       const mw = mythicPool[Math.floor(Math.random() * mythicPool.length)];
       offers.push({ ...mw, rarity: 'mythic', _mythicRunOffer: true });
@@ -1896,9 +1896,11 @@ function regenerateLevel() {
   // its visuals, and stash the per-encounter runtime state on the room.
   // Skip if the player has cleared every available encounter — the room
   // just stays empty.
-  // Track whether ANY encounter actually spawns this level so we can
-  // reset / bump the pity timer below.
-  let _spawnedEncounterThisLevel = false;
+  // Pity-timer accounting — capture whether the level GEN rolled an
+  // encounter room, regardless of whether a def was assignable. This
+  // resets the bonus to 0 (next floor base 30%) even on demote-to-combat
+  // outcomes, so once-per-save drain doesn't pin the timer at 95%.
+  const _rolledEncounterThisLevel = level.rooms.some(r => r.type === 'encounter');
   for (const r of level.rooms) {
     if (r.type !== 'encounter' || !r._encounterPlaceholder) continue;
     r._encounterPlaceholder = false;
@@ -2149,16 +2151,18 @@ function regenerateLevel() {
       state: def.spawn(scene, r, _ctxFactory()) || {},
       ctxFactory: _ctxFactory,
     };
-    _spawnedEncounterThisLevel = true;
   }
-  // Pity-timer roll — reset the bonus when an encounter actually
-  // landed, otherwise +10% for next level (capped via the Math.min
-  // at the read site). Fires regardless of whether the player ever
-  // triggers it; the spawn IS the event.
-  if (_spawnedEncounterThisLevel) {
+  // Pity-timer roll — reset the bonus the moment an encounter ROOM
+  // was rolled this level (even if no def was assignable and it got
+  // demoted to combat). Player perceives "got an encounter chance" so
+  // the next floor restarts at the 30% base.
+  if (_rolledEncounterThisLevel) {
     runStats.encounterChanceBonus = 0;
   } else {
-    runStats.encounterChanceBonus = Math.min(0.65, (runStats.encounterChanceBonus || 0) + 0.10);
+    // +20% per encounter-less floor, capped so total chance stays
+    // under 95%. Floor 1 = 30%, 2 = 50%, 3 = 70%, 4 = 90%, then
+    // pinned at the 95% ceiling until an encounter rolls.
+    runStats.encounterChanceBonus = Math.min(0.65, (runStats.encounterChanceBonus || 0) + 0.20);
   }
   // After encounter visuals (which add fresh material variants —
   // braziers, fountains, dummies, tomes, etc.) land in scene, run
@@ -3328,7 +3332,9 @@ function awardPersistentChips(amount) {
 // pool, so a full-run hunt is needed to get the panicking-flame
 // shotgun.
 function rollMythicDrop() {
-  const pool = tunables.weapons.filter(w => w.rarity === 'mythic' && !w.artifact);
+  // Exclude pactReward weapons (Pain) — those are quest-locked rewards
+  // and shouldn't drop from boss-kill mythic rolls.
+  const pool = tunables.weapons.filter(w => w.rarity === 'mythic' && !w.artifact && !w.pactReward);
   if (!pool.length) return null;
   const dragon = pool.find(w => w.name === 'Dragonbreath');
   const others = pool.filter(w => w.name !== 'Dragonbreath');

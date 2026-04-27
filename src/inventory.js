@@ -1493,9 +1493,15 @@ export function wrapWeapon(w, opts = {}) {
     magSize: newMag,
     headBonus: sc.headBonus,          // added to head zone multiplier in main
     combo: scaledCombo || w.combo,
-    description: w.type === 'melee'
-      ? `Melee · ${rolledRarity}`
-      : `${w.fireMode} · ${newFireRate ? newFireRate + '/s' : 'continuous'} · ${rolledRarity}`,
+    // Preserve the def's authored description (flavor text) when it
+    // exists — Pain's "A mace made of soft grey felt..." was getting
+    // clobbered by the auto-generated stat string. Auto-string still
+    // wins for plain randomly-rolled weapons that ship without prose.
+    description: w.description
+      ? w.description
+      : (w.type === 'melee'
+          ? `Melee · ${rolledRarity}`
+          : `${w.fireMode} · ${newFireRate ? newFireRate + '/s' : 'continuous'} · ${rolledRarity}`),
     ammo: newMag,
     reloadingT: 0,
     durability: dur(200, 0.95),

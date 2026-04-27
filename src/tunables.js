@@ -1622,7 +1622,11 @@ export const tunables = {
     // routes them into derivedStats.
     // -----------------------------------------------------------------
     {
-      name: 'Pain', mythic: true,
+      // pactReward flag keeps Pain out of the random mythic-drop pool
+      // (rollMythicDrop in main.js) and the mythic-run starter offer.
+      // The only legitimate way to acquire it is the Demon Bear →
+      // Great Bear trade chain set up by the Priest encounter.
+      name: 'Pain', mythic: true, pactReward: true,
       type: 'melee', class: 'melee', rarity: 'mythic',
       meleeThreshold: 3.3,
       tracerColor: 0x806878,
