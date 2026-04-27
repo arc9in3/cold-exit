@@ -2170,6 +2170,9 @@ function regenerateLevel() {
         spawnEliteAt: (x, z, room) => _spawnEliteAtPos(x, z, room),
         // The Button — spawn a real random-rolled container at XZ.
         spawnRandomContainerAt: (x, z) => _spawnRandomContainerAt(x, z),
+        // Sus — chest dressed up as a premium drop that's actually
+        // junk-stuffed (with a small toy chance). See _spawnSusChestAt.
+        spawnSusChest: (x, z) => _spawnSusChestAt(x, z),
         // The Button alarm — spawn one summoned minion at XZ.
         spawnSummonedMinion: (x, z, room2) => _spawnSummonedMinionAt(x, z, room2),
         // Duck — drops the Unused Rocket Ticket as a junk pickup
@@ -2285,6 +2288,46 @@ function _spawnSummonedMinionAt(x, z, room) {
     minion.noXp = true;
   }
   return minion;
+}
+
+// Sus encounter — spawns a "premium" container that's actually full
+// of junk, with a small chance of a single toy mixed in. Visually a
+// general 'm' chest so the silhouette looks legit; loot list is
+// overwritten so the player gets the rugpull experience the encounter
+// is built around.
+function _spawnSusChestAt(x, z) {
+  const container = makeContainer('general', 'm', level?.index | 0);
+  // Wipe the rolled loot and replace with a junk pile. 4-6 junk items
+  // so the chest still looks fat when you open it. ~25% chance to
+  // sneak a single random toy in among the junk (the only "real"
+  // payout from the trade).
+  container.loot.length = 0;
+  const junkCount = 4 + Math.floor(Math.random() * 3);
+  for (let i = 0; i < junkCount; i++) {
+    const j = randomJunk();
+    if (j) container.loot.push(j);
+  }
+  if (Math.random() < 0.25) {
+    const toy = randomToy();
+    if (toy) container.loot.push(toy);
+  }
+  const group = buildContainerMesh(container, x, 0, z);
+  scene.add(group);
+  const { w, d } = container.geo;
+  const proxy = new THREE.Mesh(
+    new THREE.BoxGeometry(w, container.geo.h, d),
+    new THREE.MeshBasicMaterial({ transparent: true, opacity: 0, depthWrite: false }),
+  );
+  proxy.position.set(x, container.geo.h / 2, z);
+  proxy.userData.collisionXZ = {
+    minX: x - w / 2, maxX: x + w / 2,
+    minZ: z - d / 2, maxZ: z + d / 2,
+  };
+  proxy.userData.isProp = true;
+  proxy.userData.containerRef = container;
+  scene.add(proxy);
+  level.obstacles.push(proxy);
+  level.containers.push({ container, group, x, z, r: 1.8 });
 }
 
 function _spawnMasterworkChestAt(x, z) {

@@ -2839,6 +2839,115 @@ export const ENCOUNTER_DEFS = {
   // non-magical bag (or somehow drop the magical one), he refuses
   // and your bag bounces to the floor as normal loot.
   // -----------------------------------------------------------------
+  // -----------------------------------------------------------------
+  // Sus — shady trench-coat man hawks a "premium" chest for 10000c.
+  // Pay him and he vanishes; a chest spawns full of junk (and a small
+  // chance of a random toy as a consolation prize). Recurring (NOT
+  // oncePerSave) so the player can keep getting scammed if they want.
+  // -----------------------------------------------------------------
+  sus: {
+    id: 'sus',
+    name: 'Sus',
+    floorColor: 0x2a221c,             // dim alley brown
+    oncePerSave: false,
+    condition: (state) => state.levelIndex >= 1,
+    spawn(scene, room, ctx) {
+      const disc = _spawnFloorDisc(scene, room, this.floorColor);
+      // Build the trench-coat NPC. Body is a dark vertical box; head is
+      // a slightly hooded sphere; brim hat sits on top so the
+      // silhouette reads as "shady stranger" from iso angle.
+      const npc = new THREE.Group();
+      const coatMat = new THREE.MeshStandardMaterial({ color: 0x1a1812, roughness: 0.85 });
+      const skinMat = new THREE.MeshStandardMaterial({ color: 0xa07050, roughness: 0.7 });
+      const hatMat  = new THREE.MeshStandardMaterial({ color: 0x0a0806, roughness: 0.85 });
+      const accentMat = new THREE.MeshStandardMaterial({
+        color: 0x6a4a20, roughness: 0.7, emissive: 0x301a08, emissiveIntensity: 0.4,
+      });
+      // Coat — wide tall box, slight forward lean read.
+      const coat = new THREE.Mesh(new THREE.BoxGeometry(0.9, 1.5, 0.55), coatMat);
+      coat.position.y = 0.95;
+      coat.castShadow = true;
+      npc.add(coat);
+      // Coat lapel V — a brighter accent strip down the front so the
+      // trench-coat reads as buttoned, not a slab.
+      const lapel = new THREE.Mesh(new THREE.BoxGeometry(0.06, 0.9, 0.04), accentMat);
+      lapel.position.set(0, 1.0, 0.29);
+      npc.add(lapel);
+      // Head + neck.
+      const neck = new THREE.Mesh(new THREE.CylinderGeometry(0.10, 0.12, 0.12, 8), skinMat);
+      neck.position.y = 1.78;
+      npc.add(neck);
+      const head = new THREE.Mesh(new THREE.SphereGeometry(0.22, 14, 10), skinMat);
+      head.position.y = 1.96;
+      head.castShadow = true;
+      npc.add(head);
+      // Wide-brim hat — disc + low cylinder cap.
+      const brim = new THREE.Mesh(new THREE.CylinderGeometry(0.36, 0.36, 0.04, 18), hatMat);
+      brim.position.y = 2.10;
+      npc.add(brim);
+      const cap = new THREE.Mesh(new THREE.CylinderGeometry(0.18, 0.20, 0.18, 14), hatMat);
+      cap.position.y = 2.21;
+      npc.add(cap);
+      // Suspicious glow under the brim — two small emissive dots where
+      // eyes would be. Sells "what's he hiding under there?"
+      const eyeMat = new THREE.MeshStandardMaterial({
+        color: 0xff8030, emissive: 0xff5010, emissiveIntensity: 1.0, roughness: 0.4,
+      });
+      for (const xs of [-1, 1]) {
+        const eye = new THREE.Mesh(new THREE.SphereGeometry(0.025, 8, 6), eyeMat);
+        eye.position.set(0.06 * xs, 1.99, 0.20);
+        npc.add(eye);
+      }
+      npc.position.set(disc.cx, 0, disc.cz);
+      // Slight twist toward the room centre so the iso camera catches
+      // the lapel + brim shadow.
+      npc.rotation.y = -Math.PI * 0.15;
+      scene.add(npc);
+      const label = _makeLabelSprite('SUS', '#d8a060');
+      label.position.set(disc.cx, 2.6, disc.cz);
+      scene.add(label);
+      return { npc, label, disc, complete: false };
+    },
+    tick(_dt, _ctx) { /* purely interactive */ },
+    interact(ctx) {
+      const s = ctx.state;
+      if (s.complete) return;
+      const COST = 10000;
+      const credits = ctx.getPlayerCredits ? ctx.getPlayerCredits() : 0;
+      ctx.showPrompt({
+        title: 'Sus',
+        body: '"Psst. You. Yeah, you. Got somethin\' real special. Premium chest. The BEST bro. The BEST. 10,000c. Whaddya say?"',
+        options: [
+          {
+            text: `Buy chest (10,000c)${credits < COST ? ' — not enough' : ''}`,
+            enabled: credits >= COST,
+            onPick: () => {
+              if (!ctx.spendCredits || !ctx.spendCredits(COST)) return;
+              s.complete = true;
+              const speakAt = s.npc.position.clone().setY(2.6);
+              ctx.spawnSpeech(speakAt, 'Pleasure doin\' business.', 2.4);
+              // The man vanishes — hide the NPC + label so the room
+              // empties out behind him. A short delay makes the
+              // disappearance read as "he ducked out" instead of
+              // popping mid-sentence.
+              setTimeout(() => {
+                if (s.npc) s.npc.visible = false;
+                if (s.label) s.label.visible = false;
+              }, 800);
+              // Spawn the "premium" chest in front of where he stood.
+              if (ctx.spawnSusChest) {
+                ctx.spawnSusChest(s.disc.cx + 1.2, s.disc.cz);
+              }
+              if (ctx.markEncounterComplete) ctx.markEncounterComplete('sus');
+            },
+          },
+          { text: 'Walk away', onPick: () => {} },
+        ],
+      });
+    },
+    onItemDropped(_item, _ctx) { return { consume: false }; },
+  },
+
   the_crow: {
     id: 'the_crow',
     name: 'The Crow',
