@@ -16,7 +16,8 @@
 import * as THREE from 'three';
 
 const RAY_COUNT = 48;       // halved from 96 — finisher smoothstep + 4-tap blur hide edge faceting
-const RAY_RANGE = 32;       // meters — beyond this we hard-cut to occluded
+const RAY_RANGE = 48;       // meters — bumped 32 → 48 so the player sees rooms ahead before
+                            // entering them; was reading as a tight, claustrophobic LoS bubble
 const MASK_SCALE = 0.35;    // quarter-ish-res mask cuts GPU mask render to ~30%; smoothstep masks the resolution loss
 const FAN_HEIGHT = 0.04;    // sits a hair above the floor so it doesn't z-fight
 // Update cadence — every other frame is plenty for player-vision

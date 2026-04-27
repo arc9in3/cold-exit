@@ -180,7 +180,11 @@ export const tunables = {
     bobAmplitude: 0.08,
   },
   camera: {
-    viewHeight: 16,
+    // Iso ortho frustum height in world units. Bumped 16 → 20 to widen
+    // the on-screen view alongside the LoS-mask range bump (los_mask.js
+    // RAY_RANGE 32 → 48). Player now sees adjacent rooms before
+    // crossing the threshold.
+    viewHeight: 20,
     followLerp: 9,
   },
   xp: {

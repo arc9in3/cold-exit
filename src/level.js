@@ -1939,14 +1939,18 @@ export class Level {
       cx += (cx - room.elevatorCenter.x) * 0.2;
       cz += (cz - room.elevatorCenter.z) * 0.2;
     }
-    // Phase 4 light reduction — every non-start room used to spawn
-    // its own real SpotLight (8+ per level after the first few floors,
-    // each forcing a per-light shader path on every nearby surface).
-    // Replaced with an emissive disc + a faint additive cone mesh; the
-    // hemi+key directionals from scene.js carry the actual shading and
-    // bloom in postfx pulls the warm glow back. Stealth math still
-    // reads a radial light entry so detection / cover gameplay is
-    // unchanged.
+    // Bright per-room SpotLight pointing straight down at the floor.
+    // The earlier additive-cone mesh approach (Phase 4) read as a
+    // hazy fog cone instead of a lit room and was scrapped at
+    // playtest. A real SpotLight is the right tool here — it gives
+    // the "pool of warm light on the floor" read that anchors the
+    // room visually. Cost is bounded by light reduction work
+    // elsewhere in the pass: we kept the per-prop PointLight cuts,
+    // dropped 6+ encounter PointLights, and dropped the per-drone
+    // PointLight, so the budget for one bright per-room SpotLight is
+    // comfortable. Shadow casting OFF — walls already don't cast
+    // shadows in this project (see _addObstacle), and shadow-map
+    // updates per SpotLight × per room would dwarf the win.
     const fixtureMat = new THREE.MeshStandardMaterial({
       color: 0xffcf80,
       emissive: 0xffcf80,
@@ -1961,21 +1965,28 @@ export class Level {
     fixture.position.set(cx, WALL_HEIGHT - 0.05, cz);
     this.scene.add(fixture);
     this.decorations.push(fixture);
-    // Soft additive cone mesh — sells the "pool of light below"
-    // silhouette without a real cone-light.
-    const cone = new THREE.Mesh(
-      new THREE.ConeGeometry(2.4, WALL_HEIGHT, 18, 1, true),
-      new THREE.MeshBasicMaterial({
-        color: 0xffcf80, transparent: true, opacity: 0.10,
-        depthWrite: false, blending: THREE.AdditiveBlending,
-        side: THREE.DoubleSide,
-      }),
+    // SpotLight — wider cone (Math.PI * 0.45 ≈ 81° full angle), high
+    // intensity, soft penumbra so the edge doesn't read as a hard
+    // ring. Distance comfortably covers an 18×18m room from ceiling
+    // height. No shadows.
+    const light = new THREE.SpotLight(
+      0xffe6b0,         // warmer cream than the old 0xffcf80
+      9.0,              // intensity — bright enough to compete with the
+                        // hemi+key directionals
+      14.0,             // distance
+      Math.PI * 0.45,   // angle
+      0.55,             // penumbra (soft edge)
+      1.2,              // decay
     );
-    cone.position.set(cx, (WALL_HEIGHT - 0.05) * 0.5, cz);
-    this.scene.add(cone);
-    this.decorations.push(cone);
-    // Stealth sampling keeps the old radial model — good enough for
-    // gameplay detection math even though the visual is now emissive.
+    light.position.set(cx, WALL_HEIGHT - 0.2, cz);
+    light.target.position.set(cx, 0, cz);
+    light.castShadow = false;
+    this.scene.add(light);
+    this.scene.add(light.target);
+    this.decorations.push(light);
+    this.decorations.push(light.target);
+    // Stealth sampling keeps the radial light entry so detection +
+    // cover gameplay tracks the visible pool of light.
     this.lights.push({ x: cx, z: cz, radius: 8.0, intensity: 1.8 });
   }
 
