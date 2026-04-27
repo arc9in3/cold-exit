@@ -599,6 +599,42 @@ export class InventoryUI {
       if (gx < 0 || gy < 0 || gx >= grid.w || gy >= grid.h) return;
       const entry = grid.at(gx, gy);
       if (!entry) return;
+      // Shift + right-click on a stack → peel a portion off into the
+      // next available slot. Default split = ceil(count / 2). Prompt
+      // the player so they can dial it in. Falls through to the
+      // standard equip-backpack handler when the modifier isn't held.
+      if (e.shiftKey) {
+        const count = (entry.item.count | 0) || 1;
+        if (count > 1) {
+          const def = Math.ceil(count / 2);
+          const raw = window.prompt(
+            `Split "${entry.item.name}" (${count}). How many to peel off?`,
+            String(def),
+          );
+          if (raw == null) return;
+          const n = Math.max(1, Math.min(count - 1, parseInt(raw, 10) || 0));
+          if (n <= 0 || n >= count) return;
+          entry.item.count = count - n;
+          // Spread to clone so the new stack is a fresh inventory
+          // instance — original entry keeps its grid slot, the peeled
+          // portion lands in the next free slot (pockets first via
+          // allGrids ordering).
+          const peeled = { ...entry.item, count: n };
+          const placed = this.inventory.autoPlaceAnywhere(peeled);
+          if (placed) {
+            this.inventory._bump();
+            this.render();
+          } else {
+            // Backout — restore the original count so nothing is lost.
+            entry.item.count = count;
+            window.__hudMsg?.('No room to split — clear an inventory slot first', 2.5);
+          }
+          return;
+        }
+        // count == 1: nothing to split, fall through to equip behaviour
+        // so the gesture still does something useful (e.g. shift +
+        // right-click a single-item backpack still equips it).
+      }
       const ok = this.inventory.equipBackpack(entry.item);
       if (ok) {
         this.render();
