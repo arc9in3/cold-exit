@@ -299,9 +299,88 @@ function applyDrivenStats(item) {
 }
 
 // Readable list of (key,value) stat rows. `item` is any inventory entry.
+// Translate an attachment def's `modifier` bag + ancillary fields
+// (sightZoom, lightCone, blindDuration, laserRange, etc.) into compact
+// stat rows. Rendered both in the details panel and in the customize-
+// weapon slot summary so there's a single source of truth for "what
+// does this attachment do" — descriptions stay as prose flavour, the
+// numbers come from the actual modifier object.
+//
+// Multiplier convention:
+//   spread / reload / zoom / noise → less is better, displayed as
+//     "−X% Spread"
+//   move / damage / range / mag / fireRate → more is better, "+X% Damage"
+//   adsZoomMult is 0..1 representing zoom-in (smaller fov), so we flip
+//     the sign in display so the player reads "more zoom" as positive.
+const _ATTACH_MOD_LABELS = {
+  hipSpreadMult:  { label: 'Hip Spread',    invert: true  },
+  adsSpreadMult:  { label: 'ADS Spread',    invert: true  },
+  moveSpeedMult:  { label: 'Move Speed',    invert: false },
+  reloadTimeMult: { label: 'Reload Time',   invert: true  },
+  magSizeMult:    { label: 'Mag Size',      invert: false },
+  fireRateMult:   { label: 'Fire Rate',     invert: false },
+  damageMult:     { label: 'Damage',        invert: false },
+  rangeMult:      { label: 'Range',         invert: false },
+  noiseRangeMult: { label: 'Noise Range',   invert: true  },
+  // ADS zoom mult is a divisor on FOV — smaller value = bigger zoom.
+  // Flip the displayed sign so the row reads as a player-facing buff.
+  adsZoomMult:    { label: 'ADS Zoom',      invert: true  },
+};
+export function attachmentStatRows(item) {
+  const rows = [];
+  if (!item || item.type !== 'attachment') return rows;
+  const mod = item.modifier || {};
+  for (const [key, def] of Object.entries(_ATTACH_MOD_LABELS)) {
+    const v = mod[key];
+    if (typeof v !== 'number' || v === 1) continue;
+    // Convert multiplier → percent delta. invert=true flips so a
+    // 0.85× spread (good) reads as "−15%" not "85%".
+    const raw = Math.round((v - 1) * 100);
+    const display = def.invert ? -raw : raw;
+    if (display === 0) continue;
+    const sign = display > 0 ? '+' : '';
+    rows.push([def.label, `${sign}${display}`, '+', '%']);
+  }
+  // Sights — adsPeekBonus is metres added to drag distance.
+  if (typeof mod.adsPeekBonus === 'number' && mod.adsPeekBonus !== 0) {
+    rows.push(['Drag', `+${mod.adsPeekBonus}`, '+', 'm']);
+  }
+  // Sight zoom — the sightZoom field on the def, not modifier. >1 = zoom in.
+  if (typeof item.sightZoom === 'number' && item.sightZoom !== 1) {
+    rows.push(['Sight Zoom', `${item.sightZoom.toFixed(2)}×`, '+']);
+  }
+  // Lasers — kind:'laser' carries laserRange (metres of beam).
+  if (item.kind === 'laser' && typeof item.laserRange === 'number') {
+    rows.push(['Laser Range', `${item.laserRange}`, '+', 'm']);
+  }
+  // Lights — lightCone.{range, angleDeg} for the visible cone.
+  if (item.lightCone) {
+    if (typeof item.lightCone.range === 'number') {
+      rows.push(['Light Range', `${item.lightCone.range}`, '+', 'm']);
+    }
+  }
+  // Blind / dazzle windows (tactical lights / strobes).
+  if (typeof item.blindDuration === 'number') {
+    rows.push(['Blind', `${item.blindDuration}`, '+', 's']);
+  }
+  if (typeof item.blindSpreadMul === 'number') {
+    rows.push(['Blind Spread×', `${item.blindSpreadMul}`, '+', '×']);
+  }
+  if (typeof item.dazzleDuration === 'number') {
+    rows.push(['Dazzle', `${item.dazzleDuration}`, '+', 's']);
+  }
+  if (typeof item.dazzleSpreadMul === 'number') {
+    rows.push(['Dazzle Spread×', `${item.dazzleSpreadMul}`, '+', '×']);
+  }
+  return rows;
+}
+
 function collectStats(item) {
   const rows = [];
   if (!item) return rows;
+  if (item.type === 'attachment') {
+    return attachmentStatRows(item);
+  }
   if (item.type === 'ranged') {
     rows.push(['Damage', item.damage, '+']);
     rows.push(['Fire Rate', item.fireRate, '+', '/s']);

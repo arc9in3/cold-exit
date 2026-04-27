@@ -3,6 +3,7 @@ import { layoutForWeapon } from './weapon_layouts.js';
 import { renderItemCell } from './ui_item_cell.js';
 import { thumbnailFor } from './item_thumbnails.js';
 import { rarityColor, weaponImageMirrorStyle } from './inventory.js';
+import { attachmentStatRows } from './ui_details.js';
 
 // Canonical slot presentation order so the legend + schematic labels
 // always read the same way across weapon classes — muzzle first, then
@@ -189,13 +190,23 @@ export class CustomizeUI {
         const tStr = `#${t.toString(16).padStart(6, '0')}`;
         cell.classList.add('filled');
         cell.setAttribute('draggable', 'true');
+        // Effect list — same rows the details panel renders, so the
+        // slotted view shows "−15% Spread, +5% Move" instead of the
+        // long prose description. Falls back to the description only
+        // when there's nothing structural to summarise.
+        const _rows = attachmentStatRows(current);
+        const effectsHtml = _rows.length
+          ? _rows.map(([k, v, , unit]) =>
+              `<span class="attach-effect">${k} <b>${v}${unit || ''}</b></span>`
+            ).join('')
+          : `<span class="attach-effect-prose">${current.description || ''}</span>`;
         cell.innerHTML = `
           <div class="cust-slot-label">${slot}</div>
           <div class="cust-slot-row">
             <span class="attach-swatch" style="background:${tStr}"></span>
             <span class="attach-name">${current.name}</span>
           </div>
-          <div class="attach-desc">${current.description || ''}</div>
+          <div class="attach-effects">${effectsHtml}</div>
         `;
         cell.addEventListener('dragstart', (e) => {
           this.setDragState({ from: 'attachment', slot, weapon: w, item: current });
