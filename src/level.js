@@ -1,6 +1,6 @@
 import * as THREE from 'three';
 import { tunables } from './tunables.js';
-import { buildProp, getLevelTheme } from './props.js';
+import { buildProp, getLevelTheme, INWARD_FACING_KINDS } from './props.js';
 import { buildRig, initAnim, updateAnim } from './actor_rig.js';
 import { makeContainer, pickContainerType, pickContainerSize, buildContainerMesh } from './containers.js';
 import { StaticObstacleGrid2D } from './obstacle_grid.js';
@@ -1462,9 +1462,33 @@ export class Level {
       return false;
     };
 
+    // Pick a yaw that points the prop's local +Z (its "front") toward
+    // the room centre. Snapped to 0 / 90 / 180 / 270 so the prop stays
+    // axis-aligned with walls and the AABB collision proxy works
+    // cleanly. Centre is room.cx/cz; whichever axis has the bigger
+    // delta picks the snap angle.
+    const cxC = (b.minX + b.maxX) / 2;
+    const czC = (b.minZ + b.maxZ) / 2;
+    const yawTowardCenter = (x, z) => {
+      const dx = cxC - x;
+      const dz = czC - z;
+      // Pick the dominant axis so a chair on the east wall faces
+      // west (toward centre) instead of north/south.
+      if (Math.abs(dx) > Math.abs(dz)) {
+        return dx > 0 ? Math.PI / 2 : -Math.PI / 2;
+      }
+      return dz > 0 ? 0 : Math.PI;
+    };
+
     const placeInterior = (prop) => {
       const col = prop.collision;
       const radius = col ? Math.max(col.w, col.d) * 0.7 + 0.6 : 1.2;
+      // Directional props (chair, couch, desk, tv, bed) face the room
+      // centre. Non-directional kinds (vase, lamp, planter, crate,
+      // barrel, table, coffeeTable) still get a random yaw — they
+      // read the same from every angle and a 4-way variety reads as
+      // less canned.
+      const facesInward = prop.kind && INWARD_FACING_KINDS.has(prop.kind);
       for (let tries = 0; tries < 25; tries++) {
         const x = b.minX + INTERIOR_CLEAR + Math.random() * (roomW - INTERIOR_CLEAR * 2);
         const z = b.minZ + INTERIOR_CLEAR + Math.random() * (roomD - INTERIOR_CLEAR * 2);
@@ -1472,7 +1496,9 @@ export class Level {
         if (inKeepOut(x, z)) continue;
         if (inCorner(x, z)) continue;
         if (this._collidesAt(x, z, radius)) continue;
-        const yaw = (Math.floor(Math.random() * 4)) * Math.PI / 2;
+        const yaw = facesInward
+          ? yawTowardCenter(x, z)
+          : (Math.floor(Math.random() * 4)) * Math.PI / 2;
         if (!_propFitsInBounds(prop, x, z, yaw)) continue;
         if (!_propFootprintFree(x, z, prop, yaw)) continue;
         prop.group.position.set(x, 0, z);
@@ -1810,8 +1836,9 @@ export class Level {
       barrel:      'Barrel',
       pallet:      'Supply Pallet',
     };
-    if (prop._lootKind && PROP_LOOT_NAMES[prop._lootKind]) {
-      container.name = PROP_LOOT_NAMES[prop._lootKind];
+    const propKind = prop.kind || prop._lootKind;
+    if (propKind && PROP_LOOT_NAMES[propKind]) {
+      container.name = PROP_LOOT_NAMES[propKind];
     }
     // Use the prop's own world position + a generous interact radius
     // so the player can trigger from any side without pixel-hunting.
@@ -2603,6 +2630,26 @@ export class Level {
     group.position.set(spot.x, 0, spot.z);
     group.rotation.y = spot.rot;
     this.scene.add(group);
+
+    // Kiosk collider — counter (2.4×1.0) + back panel (2.4×0.1) + the
+    // NPC standing behind. Local footprint spans x: ±1.2,
+    // z: -0.65 (back of panel) to +1.2 (front of counter), centered
+    // at local (0, 0, 0.275). Rotate the offset and the bounding
+    // dimensions by spot.rot so kiosks pressed against any wall
+    // get a properly-aligned blocker. Without this the player could
+    // walk straight through the counter onto the merchant.
+    {
+      const localCx = 0, localCz = 0.275;
+      const localW = 2.55;     // padded a hair past visual width
+      const localD = 1.95;     // -0.65 → +1.2 plus a small margin
+      const cosY = Math.cos(spot.rot), sinY = Math.sin(spot.rot);
+      const offX = localCx * cosY + localCz * sinY;
+      const offZ = -localCx * sinY + localCz * cosY;
+      const worldW = Math.abs(localW * cosY) + Math.abs(localD * sinY);
+      const worldD = Math.abs(localW * sinY) + Math.abs(localD * cosY);
+      this.addEncounterCollider(spot.x + offX, spot.z + offZ, worldW, worldD, 1.8);
+    }
+
     this.npcs.push({
       kind, group, room,
       pos: new THREE.Vector3(spot.x, 0, spot.z),
@@ -2762,6 +2809,11 @@ export class Level {
 
     group.position.set(room.cx, 0, room.cz);
     this.scene.add(group);
+    // Bear silhouette is roughly a 3m sphere — register a chunky
+    // collider so the player + AI walk around the great bear instead
+    // of through him.
+    this.addEncounterCollider(room.cx, room.cz, 3.0, 3.0, 4.5);
+
     this.npcs.push({
       kind: 'bearMerchant', group, room,
       pos: new THREE.Vector3(room.cx, 0, room.cz),

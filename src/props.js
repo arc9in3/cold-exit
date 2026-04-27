@@ -868,11 +868,25 @@ export function getLevelTheme(levelIndex) {
   return LEVEL_THEMES[slot];
 }
 
+// Props whose local +Z axis is the "front" the player should be
+// looking at (chair seat front, couch cushions, desk drawer face, TV
+// screen, bed pillow side). Used by placeInterior in level.js to
+// orient them toward the room centre instead of leaving them with a
+// random yaw that often left the chair facing a wall.
+export const INWARD_FACING_KINDS = new Set([
+  'chair', 'couch', 'bed', 'desk', 'tv', 'nightstand', 'cabinet',
+  'bookshelf', 'locker',
+]);
+
 export function buildProp(kind, opts) {
   const f = PROP_BUILDERS[kind];
   if (!f) return null;
   const result = f(opts);
   if (!result) return null;
+  // Tag the kind so placement helpers can introspect (inward-facing
+  // bias, per-kind footprint padding, etc.) without re-checking every
+  // builder against a pile of `instanceof`-style branches.
+  result.kind = kind;
   // Upscale the whole prop uniformly and the collision footprint so
   // movement/raycast obstacles match what the player sees.
   result.group.scale.setScalar(PROP_SCALE);
