@@ -96,41 +96,152 @@ function _makeLabelSprite(text, color = '#e8dfc8') {
 // Build a primitive-styled NPC body — same cylinder + sphere stack the
 // shopkeeper/Bear use, but tinted per encounter and stripped down to
 // a single static pose (no animation needed).
-function _buildSimpleNpc({ bodyColor = 0x4a5060, headColor = 0xd8c8a8,
-                          accentColor = 0xc9a87a, height = 1.8 } = {}) {
-  // Three meshes total — single tapered body (torso + legs combined),
-  // head sphere, optional thin accent ring at chest height. Cuts from
-  // 5 meshes → 3 and drops separate leg geometries entirely. Encounter
-  // NPCs aren't rigged; they're stationary props that just need to
-  // read as "person" at iso distance.
+function _buildSimpleNpc({
+  bodyColor = 0x4a5060, headColor = 0xd8c8a8, accentColor = 0xc9a87a,
+  pantsColor, hairColor, bootColor, height = 1.8,
+} = {}) {
+  // Humanoid silhouette built from primitives — boots, legs, torso,
+  // shoulders, arms, hands, neck, head, eyes, hair cap, belt, accent
+  // strip. ~16 meshes; cheap enough that encounter rooms don't notice
+  // it but readable as "a person" at iso distance instead of the old
+  // tapered-cylinder-with-a-head abstraction. Anchored at the feet
+  // (y=0) so encounters that rotate the group to lay an NPC down
+  // (Sleepy Beauty, kneelers) still flop forward correctly.
   const group = new THREE.Group();
-  const bodyMat = new THREE.MeshStandardMaterial({ color: bodyColor, roughness: 0.85 });
-  const headMat = new THREE.MeshStandardMaterial({ color: headColor, roughness: 0.7 });
+  const PANTS = pantsColor ?? 0x2a2a30;
+  const SKIN = headColor;
+  const HAIR = hairColor ?? 0x2a1810;
+  const BOOT = bootColor ?? 0x18181a;
+  const BELT = 0x2a2218;
+
+  const skinMat  = new THREE.MeshStandardMaterial({ color: SKIN,  roughness: 0.7 });
+  const bodyMat  = new THREE.MeshStandardMaterial({ color: bodyColor, roughness: 0.85 });
+  const pantsMat = new THREE.MeshStandardMaterial({ color: PANTS, roughness: 0.85 });
+  const hairMat  = new THREE.MeshStandardMaterial({ color: HAIR,  roughness: 0.85 });
+  const bootMat  = new THREE.MeshStandardMaterial({ color: BOOT,  roughness: 0.65 });
+  const beltMat  = new THREE.MeshStandardMaterial({ color: BELT,  roughness: 0.6, metalness: 0.3 });
   const accentMat = new THREE.MeshStandardMaterial({
     color: accentColor, roughness: 0.5, metalness: 0.3,
     emissive: accentColor, emissiveIntensity: 0.18,
   });
-  // Body — tapered cylinder from boots up to shoulders.
-  const bodyHeight = height * 0.85;
-  const body = new THREE.Mesh(
-    new THREE.CylinderGeometry(0.18, 0.22, bodyHeight, 8),
+  const eyeMat = new THREE.MeshStandardMaterial({ color: 0x0a0a0a, roughness: 0.4 });
+
+  // Vertical anatomy in fractions of total height. Head sits on top
+  // at ~85-100%; everything else stacks down from there.
+  const FOOT_TOP    = height * 0.06;
+  const LEG_TOP     = height * 0.46;
+  const TORSO_TOP   = height * 0.84;
+  const NECK_TOP    = height * 0.88;
+  const HEAD_R      = height * 0.085;
+  const HIP_X       = height * 0.06;     // half hip width
+  const SHOULDER_X  = height * 0.115;    // half shoulder width
+  const SHOULDER_Y  = TORSO_TOP - height * 0.04;
+
+  // Boots — slightly forward so they look like feet, not blocks.
+  for (const xs of [-1, 1]) {
+    const boot = new THREE.Mesh(new THREE.BoxGeometry(0.13, 0.08, 0.20), bootMat);
+    boot.position.set(HIP_X * xs, FOOT_TOP / 2, 0.03);
+    boot.castShadow = true;
+    group.add(boot);
+  }
+
+  // Legs — stout cylinders. Slight inward taper at the knee feels
+  // more like a body than rigid pipes.
+  const legLen = LEG_TOP - FOOT_TOP;
+  for (const xs of [-1, 1]) {
+    const leg = new THREE.Mesh(
+      new THREE.CylinderGeometry(0.07, 0.075, legLen, 8),
+      pantsMat,
+    );
+    leg.position.set(HIP_X * xs, FOOT_TOP + legLen / 2, 0);
+    leg.castShadow = true;
+    group.add(leg);
+  }
+
+  // Torso — wider at shoulders than at the waist.
+  const torsoLen = TORSO_TOP - LEG_TOP;
+  const torso = new THREE.Mesh(
+    new THREE.CylinderGeometry(0.20, 0.16, torsoLen, 10),
     bodyMat,
   );
-  body.position.y = bodyHeight / 2;
-  body.castShadow = true;
-  group.add(body);
-  // Head — single sphere on top.
-  const head = new THREE.Mesh(new THREE.SphereGeometry(0.16, 8, 6), headMat);
-  head.position.y = bodyHeight + 0.16;
-  head.castShadow = true;
-  group.add(head);
-  // Accent ring — thin band that picks up the role colour.
+  torso.position.set(0, LEG_TOP + torsoLen / 2, 0);
+  torso.castShadow = true;
+  group.add(torso);
+
+  // Shoulder caps — small spheres so the arms attach onto a rounded
+  // shoulder rather than poking out of the cylinder side.
+  for (const xs of [-1, 1]) {
+    const shoulder = new THREE.Mesh(new THREE.SphereGeometry(0.085, 8, 6), bodyMat);
+    shoulder.position.set(SHOULDER_X * xs, SHOULDER_Y, 0);
+    group.add(shoulder);
+  }
+
+  // Arms — hanging straight down with a slight outward splay.
+  const armLen = height * 0.36;
+  for (const xs of [-1, 1]) {
+    const arm = new THREE.Mesh(
+      new THREE.CylinderGeometry(0.05, 0.05, armLen, 8),
+      bodyMat,
+    );
+    arm.position.set(SHOULDER_X * xs, SHOULDER_Y - armLen / 2, 0);
+    arm.castShadow = true;
+    group.add(arm);
+    const hand = new THREE.Mesh(new THREE.SphereGeometry(0.058, 8, 6), skinMat);
+    hand.position.set(SHOULDER_X * xs, SHOULDER_Y - armLen, 0);
+    group.add(hand);
+  }
+
+  // Belt — short flat cylinder at the waist seam.
+  const belt = new THREE.Mesh(
+    new THREE.CylinderGeometry(0.18, 0.18, 0.04, 12),
+    beltMat,
+  );
+  belt.position.y = LEG_TOP;
+  group.add(belt);
+
+  // Accent strip — thin band on the chest carrying the role colour.
+  // Old single-mesh NPC used this same field, so existing per-encounter
+  // tints (priest's gold, gypsy's gold, etc.) still read.
   const accent = new THREE.Mesh(
-    new THREE.CylinderGeometry(0.21, 0.21, 0.05, 8),
+    new THREE.CylinderGeometry(0.205, 0.205, 0.06, 12),
     accentMat,
   );
-  accent.position.y = bodyHeight * 0.78;
+  accent.position.y = LEG_TOP + torsoLen * 0.62;
   group.add(accent);
+
+  // Neck.
+  const neck = new THREE.Mesh(
+    new THREE.CylinderGeometry(0.055, 0.065, NECK_TOP - TORSO_TOP, 8),
+    skinMat,
+  );
+  neck.position.y = (TORSO_TOP + NECK_TOP) / 2;
+  group.add(neck);
+
+  // Head.
+  const head = new THREE.Mesh(new THREE.SphereGeometry(HEAD_R, 12, 10), skinMat);
+  head.position.y = NECK_TOP + HEAD_R;
+  head.castShadow = true;
+  group.add(head);
+
+  // Eyes — two tiny dark dots near the front of the face.
+  for (const xs of [-1, 1]) {
+    const eye = new THREE.Mesh(new THREE.SphereGeometry(0.014, 6, 4), eyeMat);
+    eye.position.set(HEAD_R * 0.38 * xs, NECK_TOP + HEAD_R * 1.10, HEAD_R * 0.88);
+    group.add(eye);
+  }
+
+  // Hair cap — top hemisphere over the head, tilted slightly back so
+  // it doesn't cover the eyes. Skipped if hairColor is explicitly null
+  // (lets the priest stay bald-headed if a caller wants).
+  if (HAIR !== null) {
+    const hair = new THREE.Mesh(
+      new THREE.SphereGeometry(HEAD_R * 1.04, 12, 8, 0, Math.PI * 2, 0, Math.PI * 0.55),
+      hairMat,
+    );
+    hair.position.set(0, NECK_TOP + HEAD_R * 0.95, -HEAD_R * 0.06);
+    group.add(hair);
+  }
+
   return group;
 }
 
@@ -2484,13 +2595,16 @@ export const ENCOUNTER_DEFS = {
       });
       npc.position.set(disc.cx, 0, disc.cz);
       scene.add(npc);
+      // Hat sits on top of the NPC's head (head top ≈ y=1.94 at
+      // height=1.85 in _buildSimpleNpc). Brim rides at head top, crown
+      // stacks above it.
       const hatMat = new THREE.MeshStandardMaterial({ color: 0x18181c, roughness: 0.7 });
-      const crown = new THREE.Mesh(new THREE.CylinderGeometry(0.18, 0.18, 0.18, 14), hatMat);
-      crown.position.set(disc.cx, 1.78, disc.cz);
-      scene.add(crown);
       const brim = new THREE.Mesh(new THREE.CylinderGeometry(0.30, 0.30, 0.03, 18), hatMat);
-      brim.position.set(disc.cx, 1.69, disc.cz);
+      brim.position.set(disc.cx, 1.94, disc.cz);
       scene.add(brim);
+      const crown = new THREE.Mesh(new THREE.CylinderGeometry(0.18, 0.18, 0.18, 14), hatMat);
+      crown.position.set(disc.cx, 2.05, disc.cz);
+      scene.add(crown);
       const label = _makeLabelSprite('THE QUIET MAN', '#c8c8d8');
       label.position.set(disc.cx, 2.4, disc.cz);
       scene.add(label);
