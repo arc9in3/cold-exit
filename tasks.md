@@ -16,6 +16,8 @@ Status legend: `open` (unassigned, ready) · `in-progress` ·
 | Refactor: rename `_baseBody` / `_baseHead` → `_normalBodyColor` / `_normalHeadColor` in gunman.js | gemini | open | Single sweep, single commit. Previous attempt got lost via dirty working tree (no checkout) — must follow REQUIRED pre-edit sequence. |
 | Web Worker AI tick (perf plan #4) | unassigned | open | Wait for BVH first. |
 | Melee enemy InstancedMesh integration | claude | open | Mirror the gunman hooks. Lower priority — most floors are gunman-heavy. |
+| Encounter audit: ambience props for remaining encounters | unassigned | open | royal_emissary, duck, sleeping_boss, fortune_teller, confession, sus, hoop_dreams, etc. Hook is `_placeAmbience(scene, ctx, disc, kind, ox, oz, yaw)` in encounters.js. |
+| Shop NPC collision audit | unassigned | open | Verify merchant/healer/gunsmith/armorer/relicSeller/blackMarket NPCs register colliders. Pattern: `level.addEncounterCollider(x, z, w, d)` after spawn. |
 
 ## Done (last 7 days)
 

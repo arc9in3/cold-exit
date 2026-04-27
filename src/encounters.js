@@ -28,6 +28,7 @@
 // through it.
 
 import * as THREE from 'three';
+import { buildProp } from './props.js';
 
 // Shared frozen empty list — every hittables() call that has nothing
 // to expose returns this reference instead of allocating [] per frame.
@@ -106,6 +107,33 @@ function _spawnFloorDisc(scene, room, color) {
   scene.add(light);
   group.position.set(cx, 0, cz);
   return { disc: inner, light, cx, cz, root: group };
+}
+
+// Build a single themed ambience prop near an encounter disc and
+// register its collision so the player + AI walk around it. Returns
+// the placed prop group (or null on failure) so the caller can add it
+// to its state for cleanup.
+//
+// `disc.cx/cz` is the encounter centre; `kind` is a buildProp key;
+// `offsetX/Z` positions the prop relative to the disc; `yaw` rotates
+// it. `register` (default true) attaches a collision proxy via the
+// level. Use `register: false` for tiny decoratives (vases) that the
+// player should be able to step over.
+function _placeAmbience(scene, ctx, disc, kind, offsetX, offsetZ, yaw = 0, register = true) {
+  const prop = buildProp(kind);
+  if (!prop) return null;
+  const x = disc.cx + offsetX;
+  const z = disc.cz + offsetZ;
+  prop.group.position.set(x, 0, z);
+  prop.group.rotation.y = yaw;
+  scene.add(prop.group);
+  if (register && prop.collision && ctx.level?.addEncounterCollider) {
+    let w = prop.collision.w, d = prop.collision.d;
+    const yawAbs = Math.abs(yaw) % Math.PI;
+    if (Math.abs(yawAbs - Math.PI / 2) < 0.05) [w, d] = [d, w];
+    ctx.level.addEncounterCollider(x, z, w, d, 1.6);
+  }
+  return prop.group;
 }
 
 // Floating speech-bubble helper — the level builds a sprite-style
@@ -2769,6 +2797,10 @@ export const ENCOUNTER_DEFS = {
         snoreT: Math.random() * Math.PI * 2,
         awake: false,
         complete: false,
+        // Sleepy Beauty is laid out flat on the dais — skip the
+        // default actor collider so the player can walk past her at
+        // any angle. The dais ring is what reads as the boundary.
+        _noCollider: true,
       };
     },
     tick(dt, ctx) {
@@ -3154,7 +3186,15 @@ export const ENCOUNTER_DEFS = {
       hint.scale.set(4.2, 0.6, 1);
       hint.position.set(disc.cx, 0.5, disc.cz + 1.6);
       scene.add(hint);
-      return { npc, bench, label, hint, disc, complete: false };
+      // Workbench is solid — block the player from walking through it.
+      const _benchCollider = ctx.level?.addEncounterCollider
+        ? ctx.level.addEncounterCollider(disc.cx + 0.35, disc.cz, 1.0, 0.6, 1.0)
+        : null;
+      // A nightstand off to the side reads as "the rest of her shop."
+      // Falls back gracefully if buildProp is unavailable.
+      const _shopProp = _placeAmbience(scene, ctx, disc, 'nightstand', -1.8, -1.4, Math.PI * 0.25);
+      return { npc, bench, label, hint, disc, complete: false,
+               _benchCollider, _shopProp };
     },
     tick(_dt, _ctx) { /* purely interactive */ },
     onItemDropped(item, ctx) {
@@ -3262,7 +3302,12 @@ export const ENCOUNTER_DEFS = {
       const label = _makeLabelSprite('THE LAMP', '#f0c080');
       label.position.set(disc.cx, 1.9, disc.cz);
       scene.add(label);
-      return { group, label, disc, complete: false, lampBodyMat: lampMat, glow };
+      // Pedestal is solid — small collider so the player walks around it.
+      const _pedCollider = ctx.level?.addEncounterCollider
+        ? ctx.level.addEncounterCollider(disc.cx, disc.cz, 1.0, 1.0, 1.4)
+        : null;
+      return { group, label, disc, complete: false, lampBodyMat: lampMat, glow,
+               _pedCollider };
     },
     tick(dt, ctx) {
       // Subtle emissive pulse so the lamp looks alive even before the
@@ -3676,7 +3721,13 @@ export const ENCOUNTER_DEFS = {
       const label = _makeLabelSprite('THE CROW', '#a8a0c0');
       label.position.set(disc.cx, 1.6, disc.cz);
       scene.add(label);
-      return { bird, label, disc, complete: false, bobT: Math.random() * Math.PI * 2 };
+      // Stone perch is solid — register a small collider matching the
+      // perch base so the player + AI walk around it instead of through.
+      const _perchCollider = ctx.level?.addEncounterCollider
+        ? ctx.level.addEncounterCollider(disc.cx, disc.cz, 0.8, 0.8, 1.4)
+        : null;
+      return { bird, label, disc, complete: false, bobT: Math.random() * Math.PI * 2,
+               _perchCollider };
     },
     tick(dt, ctx) {
       // Idle bob — head dip + slight body sway so he reads as alive.

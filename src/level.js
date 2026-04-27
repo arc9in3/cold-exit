@@ -79,6 +79,11 @@ export class Level {
     // where `r` is the proximity-radius the player must be inside to
     // interact. Cleared every regenerate.
     this.containers = [];
+    // Keep-out discs that prop placement must avoid. Pushed by the
+    // generator (boss exit, encounter spawn) and by encounters.js
+    // (NPC podiums, ritual centers). Each entry: { x, z, r }. Cleared
+    // every regenerate.
+    this._keepouts = [];
     this.index = 0;
     this.bossRoomId = -1;
     // Registered ambient light sources (ceiling lamps, prop lamps,
@@ -123,6 +128,7 @@ export class Level {
     this.decorations = [];
     this.npcs = [];
     this.containers = [];
+    this._keepouts = [];
     if (this.exitGroup) {
       this.scene.remove(this.exitGroup);
       this.exitGroup = null;
@@ -470,6 +476,16 @@ export class Level {
     for (const room of rooms) {
       if (room.type === 'start') continue;
       this._scatterCover(room);
+    }
+
+    // Seed keep-out discs before container + furniture passes so the
+    // boss-room exit ring (revealed after boss death) never spawns
+    // inside a couch / pillar / chest / desk. Exit lands at the boss
+    // centroid with r=2.2 — pad to 3.2m so the ring + player interact
+    // halo both stay clear.
+    {
+      const boss = rooms[this.bossRoomId];
+      if (boss) this._keepouts.push({ x: boss.cx, z: boss.cz, r: 3.2 });
     }
 
     // Lootable containers — boxes / chests scattered through combat
@@ -1190,10 +1206,14 @@ export class Level {
   _scatterContainers(room) {
     const b = room.bounds;
     const area = (b.maxX - b.minX) * (b.maxZ - b.minZ);
-    // Per-room roll: most rooms get nothing.
-    const spawnChance = room.type === 'boss' ? 0.55
-      : room.type === 'subBoss' ? 0.45
-      : 0.30;
+    // Per-room roll. Boss rooms still favour a real chest (boss room
+    // furniture tends toward sparse warehouse/lobby props), but combat
+    // / sub-boss rates are cut roughly in half because lootable props
+    // (desks, lockers, cabinets) now cover the same loot-discovery
+    // role inside themed rooms. Net loot density stays roughly even.
+    const spawnChance = room.type === 'boss' ? 0.50
+      : room.type === 'subBoss' ? 0.25
+      : 0.16;
     if (Math.random() > spawnChance) return;
     // When a box does spawn, almost always exactly one. Big rooms +
     // boss/sub-boss tier occasionally roll a second.
@@ -1217,6 +1237,16 @@ export class Level {
         const x = b.minX + inset + Math.random() * usableW;
         const z = b.minZ + inset + Math.random() * usableD;
         if (this._collidesAt(x, z, 1.6)) continue;
+        // Honor keep-outs (boss exit, encounter spawn) so the chest
+        // doesn't materialise where the exit ring will appear.
+        let blocked = false;
+        if (this._keepouts) {
+          for (const k of this._keepouts) {
+            const kx = x - k.x, kz = z - k.z;
+            if (kx * kx + kz * kz < k.r * k.r) { blocked = true; break; }
+          }
+        }
+        if (blocked) continue;
         const group = buildContainerMesh(container, x, 0, z);
         this.scene.add(group);
         // Collision proxy — invisible AABB matching the lid footprint
@@ -1251,6 +1281,9 @@ export class Level {
     let bestD = Infinity;
     for (const c of this.containers) {
       if (c.container.looted) continue;
+      // Lootable props hidden by the door-corridor sweep should not
+      // surface a "Search ___" prompt for an empty patch of floor.
+      if (c.group && c.group.visible === false) continue;
       const dx = playerPos.x - c.x;
       const dz = playerPos.z - c.z;
       const d = dx * dx + dz * dz;
@@ -1286,14 +1319,48 @@ export class Level {
 
     // Helpers — `placeAlongWall` hugs an outer wall; `placeInterior`
     // picks a random interior point that doesn't already collide.
-    const EDGE_CLEAR = 1.4;
-    const INTERIOR_CLEAR = 2.2;
+    // EDGE_CLEAR bumped 1.4 → 1.7 because pillars/lockers with widened
+    // collision footprints + tight axis-rotated couches were leaking
+    // their visual base flange past the wall. 1.7 gives ~0.4m breathing
+    // room even for the widest perimeter prop.
+    const EDGE_CLEAR = 1.7;
+    const INTERIOR_CLEAR = 2.4;
     const elev = room.elevatorCenter;
 
     const tooCloseToElev = (x, z) => {
       if (!elev) return false;
       const dx = x - elev.x, dz = z - elev.z;
       return dx * dx + dz * dz < 4 * 4;  // 4m exclusion around elevator
+    };
+
+    // Honor every disc registered in this._keepouts (boss exit, encounter
+    // spawn). Cheap linear scan — typical keepouts list is 1-3 entries.
+    const inKeepOut = (x, z) => {
+      for (const k of this._keepouts) {
+        const dx = x - k.x, dz = z - k.z;
+        if (dx * dx + dz * dz < k.r * k.r) return true;
+      }
+      return false;
+    };
+
+    // Corner keep-out — AI struggles to clear interior corners (it gets
+    // pinned against orthogonal walls trying to path around chunky
+    // furniture). 1.6m radius from each room corner gives the navmesh
+    // enough breathing room that grunts can hug the corner without
+    // wedging on a couch arm.
+    const CORNER_CLEAR = 1.6;
+    const corners = [
+      { x: b.minX, z: b.minZ },
+      { x: b.maxX, z: b.minZ },
+      { x: b.minX, z: b.maxZ },
+      { x: b.maxX, z: b.maxZ },
+    ];
+    const inCorner = (x, z) => {
+      for (const c of corners) {
+        const dx = x - c.x, dz = z - c.z;
+        if (dx * dx + dz * dz < CORNER_CLEAR * CORNER_CLEAR) return true;
+      }
+      return false;
     };
 
     // True when a prop's full footprint fits inside the room's bbox
@@ -1314,7 +1381,12 @@ export class Level {
       } else if (Math.abs(yawAbs - Math.PI / 2) < 0.05) {
         [w, d] = [d, w];
       }
-      const PAD = 0.05;        // tight margin so the proxy never kisses the wall
+      // PAD widened 0.05 → 0.30 so the visible mesh stays well off the
+      // wall — many props (pillar base flanges, couch back rests, bed
+      // headboards) extend a few cm past their declared collision AABB,
+      // and the old 5cm margin was letting those visual extensions
+      // poke past room perimeters.
+      const PAD = 0.30;
       return (x - w / 2) >= b.minX + PAD && (x + w / 2) <= b.maxX - PAD
           && (z - d / 2) >= b.minZ + PAD && (z + d / 2) <= b.maxZ - PAD;
     };
@@ -1358,13 +1430,18 @@ export class Level {
       const radius = col ? Math.max(col.w, col.d) * 0.7 + 0.6 : 1.2;
       for (let tries = 0; tries < 25; tries++) {
         const side = Math.floor(Math.random() * 4);
-        const t = 0.15 + Math.random() * 0.7;
+        // Bias t away from corners (0.22 → 0.78 instead of 0.15 → 0.85)
+        // so wall-hugging props don't stack into the corner bay where
+        // AI has trouble pathing around them.
+        const t = 0.22 + Math.random() * 0.56;
         let x, z, facing;
         if (side === 0)      { x = b.minX + t * roomW; z = b.minZ + EDGE_CLEAR; facing = 0; }
         else if (side === 1) { x = b.maxX - EDGE_CLEAR; z = b.minZ + t * roomD; facing = -Math.PI / 2; }
         else if (side === 2) { x = b.minX + t * roomW; z = b.maxZ - EDGE_CLEAR; facing = Math.PI; }
         else                 { x = b.minX + EDGE_CLEAR; z = b.minZ + t * roomD; facing = Math.PI / 2; }
         if (tooCloseToElev(x, z)) continue;
+        if (inKeepOut(x, z)) continue;
+        if (inCorner(x, z)) continue;
         if (this._collidesAt(x, z, radius)) continue;
         const finalYaw = yaw ?? facing;
         if (!_propFitsInBounds(prop, x, z, finalYaw)) continue;
@@ -1383,6 +1460,8 @@ export class Level {
         const x = b.minX + INTERIOR_CLEAR + Math.random() * (roomW - INTERIOR_CLEAR * 2);
         const z = b.minZ + INTERIOR_CLEAR + Math.random() * (roomD - INTERIOR_CLEAR * 2);
         if (tooCloseToElev(x, z)) continue;
+        if (inKeepOut(x, z)) continue;
+        if (inCorner(x, z)) continue;
         if (this._collidesAt(x, z, radius)) continue;
         const yaw = (Math.floor(Math.random() * 4)) * Math.PI / 2;
         if (!_propFitsInBounds(prop, x, z, yaw)) continue;
@@ -1394,43 +1473,68 @@ export class Level {
       return false;
     };
 
+    // Lootable-prop integration. Some prop kinds *read* as places loot
+    // would live — desks, lockers, bookshelves, cabinets, nightstands,
+    // crates, barrels. After they're placed, roll a chance to mark them
+    // as containers (the visible mesh stays; the player gets a "Search
+    // <prop>" prompt instead of a separate chest). Cuts visual chest
+    // clutter without losing loot density.
+    const LOOT_PROP_CONFIG = {
+      desk:       { p: 0.45, type: () => Math.random() < 0.4 ? 'weapon' : 'general',  size: 'm' },
+      bookshelf:  { p: 0.30, type: () => Math.random() < 0.5 ? 'medical' : 'general', size: 'm' },
+      cabinet:    { p: 0.45, type: () => Math.random() < 0.4 ? 'medical' : 'general', size: 'm' },
+      locker:     { p: 0.55, type: () => Math.random() < 0.5 ? 'armor' : 'weapon',    size: 'm' },
+      nightstand: { p: 0.35, type: () => Math.random() < 0.6 ? 'medical' : 'general', size: 's' },
+      crate:      { p: 0.50, type: () => Math.random() < 0.4 ? 'weapon' : 'general',  size: 'm' },
+      barrel:     { p: 0.35, type: () => 'general',                                    size: 's' },
+      pallet:     { p: 0.40, type: () => 'general',                                    size: 'm' },
+    };
+    const placeLootable = (kind, placer) => {
+      const prop = buildProp(kind);
+      if (!prop) return false;
+      prop._lootKind = kind;
+      const ok = placer(prop);
+      if (!ok) return false;
+      const cfg = LOOT_PROP_CONFIG[kind];
+      if (cfg && Math.random() < cfg.p) {
+        this._markPropLootable(prop, cfg.type(), cfg.size);
+      }
+      return true;
+    };
+
     // Per-theme placement scripts. Prop counts intentionally lean low
     // so rooms read as "a space with character" rather than a
     // furniture showroom that chokes every sight-line.
-    // Prop counts intentionally low — the rooms were reading as
-    // "furniture showroom" with 6-8 pieces overlapping each other.
-    // A handful of signature pieces per theme is enough to sell the
-    // space; the AI, combat, and scatter cover fill the rest.
     if (theme === 'library') {
       const shelves = 1 + Math.floor(Math.random() * 2);
-      for (let i = 0; i < shelves; i++) placeAlongWall(buildProp('bookshelf'));
-      if (Math.random() < 0.7) placeInterior(buildProp('desk'));
+      for (let i = 0; i < shelves; i++) placeLootable('bookshelf', placeAlongWall);
+      if (Math.random() < 0.7) placeLootable('desk', placeInterior);
       if (Math.random() < 0.5) placeInterior(buildProp('chair'));
     } else if (theme === 'lobby') {
       placeAlongWall(buildProp('couch'));
       if (Math.random() < 0.6) placeInterior(buildProp('coffeeTable'));
-      if (Math.random() < 0.4) placeAlongWall(buildProp('desk'));
+      if (Math.random() < 0.4) placeLootable('desk', placeAlongWall);
     } else if (theme === 'bedroom') {
       placeAlongWall(buildProp('bed'));
-      if (Math.random() < 0.6) placeAlongWall(buildProp('nightstand'));
+      if (Math.random() < 0.6) placeLootable('nightstand', placeAlongWall);
     } else if (theme === 'livingRoom') {
       placeAlongWall(buildProp('couch'));
       if (Math.random() < 0.7) placeInterior(buildProp('coffeeTable'));
       if (Math.random() < 0.7) placeAlongWall(buildProp('tv'));
     } else if (theme === 'warehouse') {
       const crates = 1 + Math.floor(Math.random() * 2);
-      for (let i = 0; i < crates; i++) placeInterior(buildProp('crate'));
-      if (Math.random() < 0.6) placeInterior(buildProp('barrel'));
-      if (Math.random() < 0.5) placeInterior(buildProp('pallet'));
+      for (let i = 0; i < crates; i++) placeLootable('crate', placeInterior);
+      if (Math.random() < 0.6) placeLootable('barrel', placeInterior);
+      if (Math.random() < 0.5) placeLootable('pallet', placeInterior);
     } else if (theme === 'office') {
       // Cubicle / admin floor — desks against the walls, a chair or
       // two, a filing cabinet for vertical clutter. Keeps the space
       // walkable but gives the eye structured furniture rather than
       // bare floor.
-      placeAlongWall(buildProp('desk'));
-      if (Math.random() < 0.6) placeAlongWall(buildProp('desk'));
+      placeLootable('desk', placeAlongWall);
+      if (Math.random() < 0.6) placeLootable('desk', placeAlongWall);
       if (Math.random() < 0.7) placeInterior(buildProp('chair'));
-      if (Math.random() < 0.5) placeAlongWall(buildProp('cabinet'));
+      if (Math.random() < 0.5) placeLootable('cabinet', placeAlongWall);
       if (Math.random() < 0.4) placeInterior(buildProp('lamp'));
     } else if (theme === 'kitchen') {
       // Break room / mess — a central table with chairs, a cabinet
@@ -1439,7 +1543,7 @@ export class Level {
       placeInterior(buildProp('table'));
       if (Math.random() < 0.7) placeInterior(buildProp('chair'));
       if (Math.random() < 0.5) placeInterior(buildProp('chair'));
-      if (Math.random() < 0.6) placeAlongWall(buildProp('cabinet'));
+      if (Math.random() < 0.6) placeLootable('cabinet', placeAlongWall);
     }
 
     // -----------------------------------------------------------------
@@ -1471,14 +1575,43 @@ export class Level {
                       + (Math.random() < 0.4 ? 1 : 0);
           for (let i = 0; i < count; i++) {
             const kind = pickThemed();
+            // Pillars + railings + windows + neon sticks ALWAYS hug
+            // the perimeter (architectural logic). Living props (couch,
+            // table, planter, lamp, etc.) bias 70% toward the wall
+            // facing inward — leaves the room center clear for combat
+            // movement and AI pathing. Falls back to interior if the
+            // wall slot is full.
+            const wallOnly = (kind === 'pillar' || kind === 'railing'
+                          || kind === 'window' || kind === 'doorFrame'
+                          || kind === 'neonStick');
+            const tryWall = wallOnly || Math.random() < 0.70;
+            // Theme-sprinkle props that read as loot containers
+            // (lockers, crates, barrels, cabinets) get the same
+            // lootable roll as the room-theme pass. Everything else
+            // falls through to a plain placement.
+            const loot = LOOT_PROP_CONFIG[kind];
+            if (loot) {
+              if (tryWall) {
+                if (!placeLootable(kind, placeAlongWall) && !wallOnly) {
+                  placeLootable(kind, placeInterior);
+                }
+              } else {
+                if (!placeLootable(kind, placeInterior)) {
+                  placeLootable(kind, placeAlongWall);
+                }
+              }
+              continue;
+            }
             const prop = buildProp(kind);
             if (!prop) continue;
-            // Pillars + railings + windows lean against the perimeter
-            // (visual logic). Neon sticks, planters, lamps,
-            // door frames sit in the interior.
-            const wallish = (kind === 'pillar' || kind === 'railing'
-                          || kind === 'window' || kind === 'doorFrame');
-            const placed = wallish ? placeAlongWall(prop) : placeInterior(prop);
+            let placed = false;
+            if (tryWall) {
+              placed = placeAlongWall(prop);
+              if (!placed && !wallOnly) placed = placeInterior(prop);
+            } else {
+              placed = placeInterior(prop);
+              if (!placed) placed = placeAlongWall(prop);
+            }
             void placed;
           }
         }
@@ -1613,6 +1746,69 @@ export class Level {
     proxy.userData.propGroup = prop.group;
     this.scene.add(proxy);
     this.obstacles.push(proxy);
+    return true;
+  }
+
+  // Public — register a keep-out disc so prop placement avoids the area.
+  // Used by encounters.js to claim space around an NPC / podium / disc
+  // before the level finishes furnishing. No-op once furnishing is done
+  // (the keepouts list is consulted only inside _themeRoom).
+  addKeepOut(x, z, r = 2.5) {
+    if (!this._keepouts) this._keepouts = [];
+    this._keepouts.push({ x, z, r });
+  }
+
+  // Public — register an invisible collision AABB at runtime. Returns the
+  // proxy mesh so callers can stash a ref for cleanup. Used for encounter
+  // NPCs / shop kiosks that should block both player + AI movement
+  // without needing a visible prop attached.
+  addEncounterCollider(x, z, w, d, h = 1.6) {
+    const proxy = new THREE.Mesh(
+      new THREE.BoxGeometry(w, h, d),
+      new THREE.MeshBasicMaterial({
+        transparent: true, opacity: 0, depthWrite: false,
+      }),
+    );
+    proxy.position.set(x, h / 2, z);
+    proxy.userData.collisionXZ = {
+      minX: x - w / 2, maxX: x + w / 2,
+      minZ: z - d / 2, maxZ: z + d / 2,
+    };
+    proxy.userData.isProp = true;
+    proxy.userData.isEncounterCollider = true;
+    this.scene.add(proxy);
+    this.obstacles.push(proxy);
+    if (typeof this._dirtySolid === 'function') this._dirtySolid();
+    return proxy;
+  }
+
+  // Convert a placed prop into a lootable container. The prop visual
+  // stays as-is; the player just gets a "Search desk" prompt instead
+  // of "Open chest." Helps eliminate redundant chest clutter — a
+  // bookshelf / desk / locker reads as a place loot would live, so we
+  // skip dropping a separate box on top of it.
+  _markPropLootable(prop, type, size) {
+    if (!prop || !prop.group) return false;
+    const container = makeContainer(type, size, this.index);
+    // Override the default container name with one that matches the prop.
+    const PROP_LOOT_NAMES = {
+      desk:        'Desk Drawers',
+      bookshelf:   'Bookshelf',
+      cabinet:     'Filing Cabinet',
+      locker:      'Locker',
+      nightstand:  'Nightstand',
+      crate:       'Crate',
+      barrel:      'Barrel',
+      pallet:      'Supply Pallet',
+    };
+    if (prop._lootKind && PROP_LOOT_NAMES[prop._lootKind]) {
+      container.name = PROP_LOOT_NAMES[prop._lootKind];
+    }
+    // Use the prop's own world position + a generous interact radius
+    // so the player can trigger from any side without pixel-hunting.
+    const x = prop.group.position.x;
+    const z = prop.group.position.z;
+    this.containers.push({ container, group: prop.group, x, z, r: 1.8 });
     return true;
   }
 

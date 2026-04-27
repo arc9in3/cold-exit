@@ -544,7 +544,10 @@ export function buildPillar(opts = {}) {
   const cap = tapered(r * 1.22, r * 1.10, capH, COL.metalDark, 16);
   cap.position.y = h - capH / 2;
   group.add(cap);
-  return { group, collision: { w: r * 2, d: r * 2 } };
+  // Collision matches the WIDEST visible silhouette (base flange at
+  // 1.30r). Prior collision used the shaft radius, which let the base
+  // poke ~0.1m past walls when placed on a tight EDGE_CLEAR.
+  return { group, collision: { w: r * 2.6, d: r * 2.6 } };
 }
 
 // Long bench — flat seat without a back. Standard for nightclub VIP,

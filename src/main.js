@@ -2297,9 +2297,18 @@ function regenerateLevel() {
           return true;
         },
     });
+    const _state = def.spawn(scene, r, _ctxFactory()) || {};
+    // Default actor-collision policy — every encounter NPC blocks player
+    // + AI movement unless the encounter explicitly opts out via
+    // `state._noCollider = true` (Duck bobs around the disc, Crow is
+    // perched, Sleepy Beauty lies on the floor — those skip).
+    if (_state.npc && _state.npc.position && !_state._noCollider) {
+      const np = _state.npc.position;
+      _state._collider = level.addEncounterCollider(np.x, np.z, 0.65, 0.65, 1.6);
+    }
     r._encounter = {
       def,
-      state: def.spawn(scene, r, _ctxFactory()) || {},
+      state: _state,
       ctxFactory: _ctxFactory,
     };
   }
