@@ -1750,9 +1750,33 @@ export class Inventory {
     this.version += 1;
     this._recomputeCapacity();
     this._syncBackpackView();
-    // Persist the pouch whenever anything changes so a page reload
-    // mid-run keeps pouched items safe.
-    this.savePouch();
+    // Persist the pouch — but defer the actual JSON.stringify +
+    // localStorage.setItem to idle. Synchronous serialization on
+    // every mutation was the hitch when dropping bursts of items
+    // (each drop = full pouch JSON walk). beforeunload flushes
+    // any pending save so a tab close doesn't drop the last delta.
+    this._schedulePouchSave();
+  }
+  _schedulePouchSave() {
+    if (this._pouchSavePending) return;
+    this._pouchSavePending = true;
+    const fn = () => {
+      this._pouchSavePending = false;
+      this.savePouch();
+    };
+    if (typeof requestIdleCallback === 'function') {
+      requestIdleCallback(fn, { timeout: 1500 });
+    } else {
+      setTimeout(fn, 200);
+    }
+  }
+  // Synchronous flush — call from beforeunload so a pending save
+  // lands before the tab dies.
+  flushPouchSave() {
+    if (this._pouchSavePending) {
+      this._pouchSavePending = false;
+      this.savePouch();
+    }
   }
   // Rebuild the legacy `backpack` array view from ALL grids. Order:
   // pockets → rig → backpack, insertion order within each. Legacy

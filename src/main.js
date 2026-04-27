@@ -595,6 +595,12 @@ window.__debug = {
 };
 
 const inventory = new Inventory();
+// Flush any deferred pouch-save on tab close so the last item
+// move/drop persists. _bump now schedules saves on idle to avoid
+// per-mutation hitches; this is the last-chance commit point.
+window.addEventListener('beforeunload', () => {
+  try { inventory.flushPouchSave(); } catch (_) {}
+});
 // Resize the pouch to whatever slot count the player has bought
 // BEFORE restoring contents — otherwise items fall outside the 1×1
 // starting grid and get autoPlaced into a later slot instead of
