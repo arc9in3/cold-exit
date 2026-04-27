@@ -6084,6 +6084,14 @@ function _spawnFlungFireOrb(pos, dirX, dirZ, speed, fireDuration, fireDps) {
     vx: dirX * speed,
     vy: 2.4 + Math.random() * 1.1,
     vz: dirZ * speed,
+    // The shared tick at the top reads `o.drift.x/z` for every kind
+    // before branching by kind. Flung orbs do their own ballistic
+    // motion below using vx/vz, so drift stays {0,0} — but it MUST
+    // be present, not undefined, or the unconditional read at the
+    // top crashes the whole frame loop and freezes the game on a
+    // black screen (reported when a molotov was thrown at the
+    // wishing well).
+    drift: { x: 0, z: 0 },
     life: 1.10 + Math.random() * 0.30,    // longer than air time so post-land fade reads
     t: 0,
     landed: false,
