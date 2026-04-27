@@ -3194,7 +3194,7 @@ export const ENCOUNTER_DEFS = {
             enabled: hasCurse && credits >= COST,
             onPick: () => {
               if (!hasCurse) return;
-              if (!ctx.spendCredits || !ctx.spendCredits(COST)) return;
+              if (!ctx.spendPlayerCredits || !ctx.spendPlayerCredits(COST)) return;
               const ok = ctx.removeRelic && ctx.removeRelic('brass_prisoner');
               const speakAt = s.npc.position.clone().setY(2.5);
               if (ok) {
@@ -3296,7 +3296,7 @@ export const ENCOUNTER_DEFS = {
             text: `Buy chest (10,000c)${credits < COST ? ' — not enough' : ''}`,
             enabled: credits >= COST,
             onPick: () => {
-              if (!ctx.spendCredits || !ctx.spendCredits(COST)) return;
+              if (!ctx.spendPlayerCredits || !ctx.spendPlayerCredits(COST)) return;
               s.complete = true;
               const speakAt = s.npc.position.clone().setY(2.6);
               ctx.spawnSpeech(speakAt, 'Pleasure doin\' business.', 2.4);
