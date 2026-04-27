@@ -525,15 +525,23 @@ weaponWrap.appendChild(_buildJointBlock('weapon', 'Weapon (FBX in-hand offset)')
 // On canvas click, raycast → hit object → walk up parents until we
 // find a tagged ancestor → highlight + scroll its slider block.
 function _tagDescendants(root, key) {
+  // Manual recursion (instead of traverse) so we can prune subtrees:
+  // the gun + muzzle live under the rig (parented to a shoulder
+  // anchor) and would otherwise get tagged as the spine joint that
+  // owns the anchor. That broke click-to-select on the gun after
+  // the swap-handedness retag.
   if (!root) return;
-  root.traverse(o => {
+  const _walk = (o) => {
+    if (o === _inHandGroup || o === _muzzleObj) return;
     // Don't overwrite a deeper-joint tag set by a child mkArm call
     // (shoulder pivot owns the elbow, but elbow owns its own child
     // meshes — those should resolve to elbow, not shoulder).
     if (o.userData && o.userData.jointKey === undefined) {
       o.userData.jointKey = key;
     }
-  });
+    for (const c of o.children) _walk(c);
+  };
+  _walk(root);
 }
 // Tag in reverse order — distal joints first so proximal pivots don't
 // claim their descendants. Wrist owns hand meshes; elbow owns
