@@ -262,15 +262,33 @@ const rig = buildRig({ toon: false });
 scene.add(rig.group);
 rig.group.position.y = 0;
 
-const fireOriginMat = new THREE.MeshBasicMaterial({ color: 0x50c8ff });
+// Fire origin viz — matches game: rig.chestMesh.getWorldPosition()
+// is identical to player.js's `body.getWorldPosition()`. Marker is
+// rendered with depthTest off so it punches through the chest mesh
+// and stays visible. Bigger (8cm) than before — was getting buried
+// inside the torso.
+const fireOriginMat = new THREE.MeshBasicMaterial({
+  color: 0x50c8ff, depthTest: false, depthWrite: false,
+});
 const fireOriginMarker = new THREE.Mesh(
-  new THREE.SphereGeometry(0.04, 12, 8), fireOriginMat,
+  new THREE.SphereGeometry(0.06, 16, 10), fireOriginMat,
 );
+fireOriginMarker.renderOrder = 999;
 scene.add(fireOriginMarker);
 
-const arrowDir = new THREE.Vector3(0, 0, 1);
+// Aim vector arrow — also rendered on top of the body. Default
+// direction is actor-forward (-Z, since Three.js characters face
+// -Z by default). Earlier (0,0,1) default was wrong: it pointed
+// straight out the actor's BACK at yaw=0/pitch=0.
+const arrowDir = new THREE.Vector3(0, 0, -1);
 const arrowOrigin = new THREE.Vector3(0, 1.4, 0);
-const aimArrow = new THREE.ArrowHelper(arrowDir, arrowOrigin, 2.0, 0xff5050, 0.10, 0.06);
+const aimArrow = new THREE.ArrowHelper(arrowDir, arrowOrigin, 2.0, 0xff5050, 0.14, 0.08);
+aimArrow.line.material.depthTest = false;
+aimArrow.cone.material.depthTest = false;
+aimArrow.line.material.depthWrite = false;
+aimArrow.cone.material.depthWrite = false;
+aimArrow.line.renderOrder = 999;
+aimArrow.cone.renderOrder = 999;
 scene.add(aimArrow);
 
 rig.group.traverse(o => {
@@ -677,11 +695,14 @@ function applyPose() {
   (rig.chestMesh || rig.chest).getWorldPosition(_v);
   fireOriginMarker.position.copy(_v);
 
+  // Aim direction in world space. Actor faces -Z by default, so
+  // yaw=0/pitch=0 must produce (0, 0, -1). Positive yaw rotates the
+  // arrow toward actor's right (+X), positive pitch tilts upward.
   const yaw   = parseFloat(document.getElementById('aim-yaw').value);
   const pitch = parseFloat(document.getElementById('aim-pitch').value);
-  arrowDir.set(Math.sin(yaw) * Math.cos(pitch),
-               Math.sin(pitch),
-               Math.cos(yaw) * Math.cos(pitch));
+  arrowDir.set( Math.sin(yaw)  * Math.cos(pitch),
+                Math.sin(pitch),
+               -Math.cos(yaw)  * Math.cos(pitch));
   aimArrow.position.copy(_v);
   aimArrow.setDirection(arrowDir);
 }
