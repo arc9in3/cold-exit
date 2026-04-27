@@ -523,19 +523,43 @@ const CLI_TARGETS = [
 
 function launchOneCli(target) {
   if (process.platform === 'win32') {
-    const greetCmd = `echo === ${target.title} === ^&^& echo. ^&^& echo ${target.greeting} ^&^& echo. ^&^& git status --short ^&^& echo.`;
-    const inner = `${greetCmd} ^&^& ${target.cli}`;
+    // Reliable Windows pattern:
+    //   cmd /c start "Title" /D "<cwd>" cmd /K "<cli>"
+    //
+    // - The outer `cmd /c` runs the `start` builtin (which spawns a
+    //   new console window).
+    // - "Title" sets the window title (for our running-detection
+    //   match in cliRunningStatus).
+    // - /D sets the new shell's working directory directly via
+    //   start, instead of relying on exec's cwd option propagating
+    //   through two layers of cmd.
+    // - Inner `cmd /K "<cli>"` runs the CLI and keeps the window
+    //   open after it exits.
+    //
+    // The previous version chained `^&^&` to print a greeting
+    // message before launching the CLI; the escapes parsed
+    // inconsistently through nested cmd layers and the launch
+    // silently no-op'd. Greeting dropped — the CLI prints its own
+    // intro anyway.
+    const dir = REPO_ROOT.replace(/"/g, '""');
+    const command = `start "${target.title}" /D "${dir}" cmd /K "${target.cli}"`;
     return new Promise((resolve, reject) => {
-      exec(`start "${target.title}" cmd /K "${inner}"`, { cwd: REPO_ROOT }, (err) => {
-        if (err) reject(err); else resolve({ id: target.id, launched: true });
+      exec(command, (err, stdout, stderr) => {
+        if (err) {
+          const msg = (stderr && stderr.trim()) || err.message || 'unknown error';
+          return reject(new Error(`launch failed: ${msg} | tried: ${command}`));
+        }
+        resolve({ id: target.id, launched: true });
       });
     });
   }
   if (process.platform === 'darwin') {
-    const script = `tell application "Terminal" to do script "cd ${REPO_ROOT.replace(/"/g, '\\"')} && ${target.cli}"`;
+    const dir = REPO_ROOT.replace(/"/g, '\\"');
+    const script = `tell application "Terminal" to do script "cd \\"${dir}\\" && ${target.cli}"`;
     return new Promise((resolve, reject) => {
-      exec(`osascript -e '${script}'`, (err) => {
-        if (err) reject(err); else resolve({ id: target.id, launched: true });
+      exec(`osascript -e '${script}'`, (err, stdout, stderr) => {
+        if (err) return reject(new Error(stderr || err.message));
+        resolve({ id: target.id, launched: true });
       });
     });
   }
