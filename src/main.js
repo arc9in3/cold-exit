@@ -1824,6 +1824,16 @@ function regenerateLevel() {
             const idx = level.keycardColors.indexOf(col);
             if (idx >= 0) level.keycardColors.splice(idx, 1);
           }
+          // Strip the matching keyDrop from any spawned enemy so the
+          // player doesn't pick up an orphan keycard for a door that
+          // no longer exists. Was the cause of "got a blue keycard
+          // but no blue door" on auto-unlocked layouts.
+          for (const g of gunmen.gunmen) {
+            if (g.keyDrop === col) g.keyDrop = null;
+          }
+          for (const e of melees.enemies) {
+            if (e.keyDrop === col) e.keyDrop = null;
+          }
         }
         cur = step.from;
       }
