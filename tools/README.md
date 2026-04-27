@@ -8,6 +8,8 @@ manifest accurate.
 - [`unity_to_gltf.py`](#unity_to_gltfpy) — extract .fbx + atlas from POLY packs
 - [`weapon_assigner.html`](#weapon_assignerhtml) — tag every weapon FBX,
   render side-view PNGs, drag-place hand pose markers and attachment slots
+- [`audit_weapon_fbx.py`](#audit_weapon_fbxpy) — print weapon FBX bbox sizes,
+  control-point counts, and file sizes
 - [`model_viewer.html`](#model_viewerhtml) — generic per-model annotation grid
 - [`_apply_weapon_assignments.py`](#one-shot-scripts) — one-shot: applies a
   tag-export JSON (deletions + renames + new entries) to `tunables.js`
@@ -152,6 +154,39 @@ out = {c: sorted(f for f in os.listdir(root/c) if f.lower().endswith('.fbx'))
 (root / '_index.js').write_text('window.MODEL_INDEX = ' + json.dumps(out, indent=2) + ';\n')
 "
 ```
+
+---
+
+## audit_weapon_fbx.py
+
+Pure-Python FBX audit for the weapon folders. Walks the repo's weapon-like
+model categories, reads each FBX's `Geometry -> Vertices` arrays, computes
+an overall bounding-box size, and prints:
+
+- file size
+- control-point count (`len(Vertices) / 3`)
+- bbox dimensions (`x`, `y`, `z`)
+- relative path
+
+Default categories:
+
+- `Assets/models/weapons`
+- `Assets/models/melee`
+- `Assets/models/lowpolyguns`
+- `Assets/models/lowpolyguns_accessories`
+
+Sorted largest-file-first so oversized assets float to the top.
+
+### Commands
+
+```
+python tools/audit_weapon_fbx.py
+python tools/audit_weapon_fbx.py --csv
+python tools/audit_weapon_fbx.py --category weapons --category melee
+python tools/audit_weapon_fbx.py --limit 25
+```
+
+No external deps. Handles the binary FBX files already checked into this repo.
 
 ---
 
