@@ -1017,7 +1017,24 @@ export class InventoryUI {
 
   // ——— render ———————————————————————————————————————————————
 
+  // Coalesced render — multiple back-to-back drops / mutations now
+  // collapse to a single rebuild on the next animation frame instead
+  // of running a full UI rewrite per call. Was a hitch source when
+  // shift-dropping a stack or auto-distributing pickups: each step
+  // was triggering a full equipment/grid/skill/progression rebuild
+  // synchronously. Existing call sites stay synchronous-looking;
+  // they just fan into one rAF-scheduled render.
   render() {
+    if (this._renderScheduled) return;
+    this._renderScheduled = true;
+    const fn = () => {
+      this._renderScheduled = false;
+      this._renderNow();
+    };
+    if (typeof requestAnimationFrame === 'function') requestAnimationFrame(fn);
+    else fn();
+  }
+  _renderNow() {
     if (!this.visible && this.inventory.version === this._lastVersion) return;
     this._lastVersion = this.inventory.version;
 
