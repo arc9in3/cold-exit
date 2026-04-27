@@ -6016,9 +6016,40 @@ function aiFireFlame(origin, dir, weapon, damageMult = 1) {
     const nx = dx / d, nz = dz / d;
     if (nx * dir.x + nz * dir.z >= halfCos) hitsPlayer = true;
   }
-
-  combat.spawnFlameParticles(origin, dir, range, angleRad);
-
+  // Line-of-sight gate — was missing, which let "The Burn" boss
+  // torch the player from offscreen / through walls the moment they
+  // came within range + cone. Mirrors the bullet aiFire raycast at
+  // line ~5970 against level.obstacles. Also clamps the visual to
+  // the wall so the flame cone doesn't render past the obstruction.
+  let drawRange = range;
+  if (hitsPlayer) {
+    const _flameLosFrom = new THREE.Vector3(origin.x, 1.1, origin.z);
+    const _flameLosTo   = new THREE.Vector3(ppos.x, 1.1, ppos.z);
+    if (!combat.hasLineOfSight(_flameLosFrom, _flameLosTo, level.obstacles)) {
+      hitsPlayer = false;
+    }
+  }
+  if (!hitsPlayer) {
+    // Also LOS-clip the visible cone so the player doesn't see a
+    // flame sheet leaking through walls when the boss is in the
+    // adjacent room. Cheap raycast straight along `dir`.
+    const _coneFrom = new THREE.Vector3(origin.x, 1.1, origin.z);
+    const _coneTo   = new THREE.Vector3(origin.x + dir.x * range, 1.1, origin.z + dir.z * range);
+    if (!combat.hasLineOfSight(_coneFrom, _coneTo, level.obstacles)) {
+      // Find approximate wall distance via a half-step probe — cheap
+      // bisection at quarter / half so the cone doesn't punch through.
+      // 3 quick samples is enough for the visual; misses close-up
+      // partial obstructions but those are visually close enough.
+      for (const t of [0.25, 0.5, 0.75]) {
+        const pt = new THREE.Vector3(origin.x + dir.x * range * t, 1.1, origin.z + dir.z * range * t);
+        if (!combat.hasLineOfSight(_coneFrom, pt, level.obstacles)) {
+          drawRange = range * t;
+          break;
+        }
+      }
+    }
+  }
+  combat.spawnFlameParticles(origin, dir, drawRange, angleRad);
   if (!hitsPlayer) return;
   if (player.isBlocking()) {
     combat.spawnDeflectFlash(new THREE.Vector3(ppos.x, 1.0, ppos.z), 0xffd07a);
