@@ -1000,17 +1000,26 @@ export class GunmanManager {
           if (dx * dx + dz * dz > farSq && odd) continue;
         }
       }
-      // Animation LOD — skip updateAnim entirely for entities that
-      // either (a) finished their death fall (settled corpse) or
-      // (b) are far from the player and we're on the odd frame. Per-
-      // bone animation math is one of the heaviest per-enemy costs;
-      // dropping it for off-screen and corpse cases recovers most of
-      // the savings the user noticed when AI is fully disabled.
+      // Animation LOD — drop updateAnim outright in the cases where
+      // the per-bone math is wasted work. Per-bone animation is the
+      // single heaviest per-enemy cost; tighter LOD here is the
+      // biggest cheap win once shadow + geometry pooling are in place.
+      //
+      //   1. Dead + past the death-fall settle (1.0s) — corpse pose
+      //      is already final, no further joint work needed.
+      //   2. Alive + IDLE/SLEEP + past 18m — patrol enemies in
+      //      adjacent rooms can hold their pose; the player won't
+      //      perceive their idle bob from that distance anyway.
+      //   3. Active (alerted/firing) but past 30m + odd frame — half-
+      //      rate animation. Rare since active enemies are usually
+      //      in the same room as the player.
       const _gdx = g.group.position.x - px;
       const _gdz = g.group.position.z - pz;
       const _gCamD2 = _gdx * _gdx + _gdz * _gdz;
-      g._animSkip = (!g.alive && (g.deathT || 0) > 2.5)
-        || (_gCamD2 > 35 * 35 && odd);
+      const _isIdle = g.state === STATE.IDLE || g.state === STATE.SLEEP;
+      g._animSkip = (!g.alive && (g.deathT || 0) > 1.0)
+        || (g.alive && _isIdle && _gCamD2 > 18 * 18)
+        || (g.alive && !_isIdle && _gCamD2 > 30 * 30 && odd);
       if (g.flashT > 0) {
         g.flashT = Math.max(0, g.flashT - dt);
         const k = g.flashT / tunables.enemy.hitFlashTime;

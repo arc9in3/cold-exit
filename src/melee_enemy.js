@@ -483,17 +483,23 @@ export class MeleeEnemyManager {
         const dz = e.group.position.z - pz;
         if (dx * dx + dz * dz > farSq && odd) continue;
       }
-      // Animation LOD — skip updateAnim entirely for entities that
-      // either (a) finished their death fall (settled corpse) or
-      // (b) are very far from the player and we're on the odd frame.
-      // Cuts the per-frame bone-pose math for enemies the player
-      // can't read in detail anyway. Death-fall completes inside
-      // ~1.8 dt seconds, so 2.5s buffer is generous.
+      // Animation LOD — drop updateAnim outright for entities the
+      // player can't read in detail. Per-bone math is the heaviest
+      // per-enemy cost, so tighter LOD compounds with the shadow +
+      // geometry-pool cuts on the rendering side. Mirrors the gunman
+      // tier'd policy.
+      //
+      //   1. Dead + past 1.0s — corpse is settled.
+      //   2. Alive + IDLE + past 18m — patrol stays in pose.
+      //   3. Alive + active (chase / windup / swing) + past 30m
+      //      + odd frame — half-rate animation.
       const _ddx = e.group.position.x - px;
       const _ddz = e.group.position.z - pz;
       const _camD2 = _ddx * _ddx + _ddz * _ddz;
-      e._animSkip = (!e.alive && (e.deathT || 0) > 2.5)
-        || (_camD2 > 35 * 35 && odd);
+      const _isIdle = e.state === STATE.IDLE;
+      e._animSkip = (!e.alive && (e.deathT || 0) > 1.0)
+        || (e.alive && _isIdle && _camD2 > 18 * 18)
+        || (e.alive && !_isIdle && _camD2 > 30 * 30 && odd);
       if (e.flashT > 0) {
         e.flashT = Math.max(0, e.flashT - dt);
         const k = e.flashT / tunables.enemy.hitFlashTime;
