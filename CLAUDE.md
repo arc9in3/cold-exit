@@ -75,18 +75,21 @@ flow for in-session iterative work — that's faster and matches how
 the user runs the project. Background Claude (e.g. `/loop`) still
 branches per PROJECT.md.
 
-## Backlog items go to Discord, not local files
+## Backlog + ideas + design chat all go to Discord
 
-When the user defers something — "shelf this", "backlog this", "park
-it", "save for later" — post it to the project's Discord backlog
-channel via mission-control instead of just appending to BACKLOG.md.
+`#cold-exit-ideas` is the canonical home for **backlog items, design
+ideas, and conversations**. When the user defers something
+("shelf this", "backlog this", "park it", "save for later") OR sketches
+out an idea OR has a design conversation worth preserving, post it to
+`#cold-exit-ideas` via mission-control instead of relying on local
+files. `#cold-exit-backlog` is deprecated — old content stays for
+reference but new entries do not land there.
 
-- Cold Exit's backlog channel is **`#cold-exit-backlog`** (env var
-  `CHAN_COLD_EXIT_BACKLOG`).
+- Channel name: **`#cold-exit-ideas`** (env var `CHAN_COLD_EXIT_IDEAS`).
 - Use the helper:
   ```bash
   node ../../mission-control/scripts/post-backlog.mjs \
-    --channel=cold-exit-backlog \
+    --channel=cold-exit-ideas \
     --title="..." \
     --why="..." \
     --effort="..." \
@@ -108,11 +111,11 @@ out a previously-deferred item.
 
 ```bash
 # 1. List open items
-node ../../mission-control/scripts/list-backlog.mjs --channel=cold-exit-backlog
+node ../../mission-control/scripts/list-backlog.mjs --channel=cold-exit-ideas
 
 # 2. If a match: mark it complete in place (edits the original message)
 node ../../mission-control/scripts/complete-backlog.mjs \
-  --channel=cold-exit-backlog \
+  --channel=cold-exit-ideas \
   --message-id=<snowflake from step 1> \
   --reason="..." \
   --commit=<short sha>
