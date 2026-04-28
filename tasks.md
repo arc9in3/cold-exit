@@ -11,9 +11,6 @@ Status legend: `open` (unassigned, ready) · `in-progress` ·
 
 | Task | Owner | Status | Notes |
 |---|---|---|---|
-| Audit: every `geometry.dispose()` callsite for `sharedRigGeom` guard | gemini | open | Past regression; verify no new gaps. Report to `audits/dispose-guard.md`. |
-| Audit: artifact `apply()` mutations vs `BASE_STATS()` field declarations | gemini | open | Catches relics that mutate undefined fields. |
-| Refactor: rename `_baseBody` / `_baseHead` → `_normalBodyColor` / `_normalHeadColor` in gunman.js | gemini | open | Single sweep, single commit. Previous attempt got lost via dirty working tree (no checkout) — must follow REQUIRED pre-edit sequence. |
 | Web Worker AI tick (perf plan #4) | unassigned | open | Wait for BVH first. |
 | Melee enemy InstancedMesh integration | claude | open | Mirror the gunman hooks. Lower priority — most floors are gunman-heavy. |
 | Encounter audit: ambience props for remaining encounters | unassigned | open | royal_emissary, duck, sleeping_boss, fortune_teller, confession, sus, hoop_dreams, etc. Hook is `_placeAmbience(scene, ctx, disc, kind, ox, oz, yaw)` in encounters.js. |
@@ -23,6 +20,10 @@ Status legend: `open` (unassigned, ready) · `in-progress` ·
 
 | Task | Owner | Shipped |
 |---|---|---|
+| Audit: `geometry.dispose()` sharedRigGeom guard (drones flagged ungoverned, safe today) | local-r1 | 2026-04-27 |
+| Audit: artifact `apply()` mutations vs `BASE_STATS()` (7 undeclared fields surfaced) | local-r1 | 2026-04-27 |
+| Refactor: rename `_baseBody` / `_baseHead` → `_normalBodyColor` / `_normalHeadColor` in gunman.js | local-qwen + claude | 2026-04-27 |
+| Local AI integration — Ollama provider in dashboard + `tools/local-ai.mjs` runner | claude | 2026-04-27 |
 | Phase 3 — Smart placement rules (keepouts, corner avoidance, perimeter bias, inward yaw, chair pairing, prop-loot, kiosk colliders, encounter colliders) | claude | 2026-04-27 |
 | Loot-area pile prompt + grunt drop nerf, elite drop buff | claude | 2026-04-27 |
 | Auto-reload on emptying the magazine | claude | 2026-04-27 |
