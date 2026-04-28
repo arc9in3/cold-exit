@@ -188,7 +188,11 @@ const FinisherShader = {
     uTime:     { value: 0.0 },
     uStrength: { value: 0.22 },    // vignette darkness at corners
     uGrain:    { value: 0.0 },     // grain disabled — read as static noise in play
-    uChroma:   { value: 0.0015 },  // chromatic edge split (in UV units)
+    // Chromatic aberration zeroed out — the corner fringe was the
+    // single biggest 'this looks fuzzy' contributor on UI / silhouette
+    // edges. Kept the uniform exposed so a future Settings toggle
+    // could restore it for players who want the cinematic feel.
+    uChroma:   { value: 0.0 },     // chromatic edge split (in UV units)
     // Outline params — merged from the standalone OutlinePass to save
     // one fullscreen draw + a render-target ping-pong. Sobel is run
     // on the (already bloomed) diffuse so the lines stay crisp on
@@ -258,13 +262,19 @@ const FinisherShader = {
       vec2 uv = vUv;
       vec2 c = uv - 0.5;
       float r2 = dot(c, c);
-      // Edge-biased chromatic split — stronger aberration at the
-      // corners, near zero in the middle.
-      vec2 off = c * uChroma * (0.4 + r2 * 3.0);
-      float colR = texture2D(tDiffuse, uv + off).r;
-      float colG = texture2D(tDiffuse, uv).g;
-      float colB = texture2D(tDiffuse, uv - off).b;
-      vec3 col = vec3(colR, colG, colB);
+      vec3 col;
+      if (uChroma > 0.00001) {
+        // Edge-biased chromatic split — stronger aberration at the
+        // corners, near zero in the middle. 3 texture reads.
+        vec2 off = c * uChroma * (0.4 + r2 * 3.0);
+        float colR = texture2D(tDiffuse, uv + off).r;
+        float colG = texture2D(tDiffuse, uv).g;
+        float colB = texture2D(tDiffuse, uv - off).b;
+        col = vec3(colR, colG, colB);
+      } else {
+        // Fast path — chroma off (default in 'crisp' mode). 1 read.
+        col = texture2D(tDiffuse, uv).rgb;
+      }
 
       // ----- Inlined outline (sobel on luminance) ------------------
       // Was a separate ShaderPass before bloom; merged here saves one
@@ -334,10 +344,14 @@ const FinisherShader = {
 // Internal resolution scale for the postFX chain. The composer renders
 // the scene + bloom + finisher to a render target at (canvas × scale),
 // and the final OutputPass blits to the canvas with bilinear upscale.
-// On a 1080p canvas at scale 0.75 the chain runs at 810p — fragment
-// cost drops ~44% with a barely-perceptible softness on the cel-shaded
-// look. Lower → cheaper but softer; 0.65-0.85 is the practical band.
-let _postFxScale = 0.75;
+// Was 0.75 — bilinear upscale produced visible softness on the
+// cel-shaded silhouettes + sobel outline lines. Bumped to 1.0 (full
+// canvas) so the sharpness matches the look of LOW mode (which
+// bypasses postFX entirely). The fragment-cost saving is restored
+// elsewhere: chromatic aberration is now near-zero (~0 reads/pixel
+// past the base sample), and bloom strength is dialled back so
+// emissive bleed isn't a softness contributor.
+let _postFxScale = 1.0;
 export function setPostFxScale(s) {
   _postFxScale = Math.max(0.4, Math.min(1.0, s));
 }
@@ -356,7 +370,11 @@ export function createPostFx(renderer, scene, camera) {
   // Bloom — Kawase / dual-filter, half-res relative to its input.
   // Input is the postFx-scaled buffer (0.75× canvas), so bloom RTs
   // land at ~0.375× canvas — comfortably cheap.
-  const bloom = new KawaseBloomPass(sw, sh, 0.75, 0.85);
+  // Bloom — strength dialled back from 0.75 → 0.40 so emissive
+  // surfaces don't bleed white into adjacent pixels. The cel-shaded
+  // look reads cleaner without heavy bloom; the highlights still
+  // glow but they no longer wash out outlines + UI edges nearby.
+  const bloom = new KawaseBloomPass(sw, sh, 0.40, 0.90);
   composer.addPass(bloom);
 
   const finisher = new ShaderPass(FinisherShader);

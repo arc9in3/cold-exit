@@ -68,11 +68,12 @@ export function applyQuality(mode, ctx = {}) {
 
   if (ctx.renderer) {
     ctx.renderer.shadowMap.enabled = !low;
-    // High mode caps pixel ratio at 1.5 (down from 2). On a 4K display
-    // the postFx chain (Kawase 4 fullscreen draws + finisher + output)
-    // runs at width*height*dpr^2 — dropping 2.0 → 1.5 cuts that ~44%
-    // for a barely-perceptible visual delta on the cel-shaded look.
-    ctx.renderer.setPixelRatio(low ? 1 : Math.min(window.devicePixelRatio, 1.5));
+    // High-mode pixel ratio dropped 1.5 → 1.25 to compensate for the
+    // postFx scale moving back to 1.0 (full canvas). Net fragment
+    // cost is roughly equivalent to the previous 1.5 DPR × 0.75
+    // postFx scale, but the output is sharper because there's no
+    // bilinear upscale step on the postFx chain.
+    ctx.renderer.setPixelRatio(low ? 1 : Math.min(window.devicePixelRatio, 1.25));
   }
   if (ctx.fillLight) ctx.fillLight.visible = !low;
   if (ctx.rimLight)  ctx.rimLight.visible  = !low;
