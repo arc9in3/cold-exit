@@ -22,6 +22,7 @@ import { ENCOUNTER_DEFS, pickEncounterForLevel } from './encounters.js';
 import { spawnSpeechBubble } from './hud.js';
 import { makeContainer, buildContainerMesh, pickContainerType, pickContainerSize } from './containers.js';
 import { Level } from './level.js';
+import { MegaBoss, isMegaBossLevel, buildMegaBossLoot } from './megaboss.js';
 import { ProjectileManager } from './projectiles.js';
 import { spawnDamageNumber } from './hud.js';
 import { initDebugPanel, setDebugPanelVisible } from './debug.js';
@@ -1759,7 +1760,20 @@ function regenerateLevel() {
   // and want fast feedback. Restore the pity-timer formula
   // (Math.max(0.30, Math.min(0.95, 0.30 + bonus))) when shipping.
   level._encounterChance = 1.0;
-  level.generate();
+  // Mega-boss milestone floors get a custom generator: a single open
+  // arena, no random walk, no encounter rolls, no AI spawns. The boss
+  // itself is allocated below after BVHs build. Detect by the index
+  // that WILL result from generate() — generate() bumps level.index by
+  // 1, so we test (current + 1).
+  const isMegaFloor = isMegaBossLevel((level.index | 0) + 1);
+  // Tear down any prior boss instance — previous-floor leftovers
+  // would dangle their HUD bar + scene meshes otherwise.
+  if (megaBoss) { megaBoss.destroy(); megaBoss = null; }
+  if (isMegaFloor) {
+    level.generateMegaArena();
+  } else {
+    level.generate();
+  }
   // Loot scaling context — every random armor/gear/weapon roll reads
   // this to gate slot drops, scale affix ranges, and weight rarity
   // probabilities. Set BEFORE buildBodyLoot etc. fire below.
@@ -1793,6 +1807,66 @@ function regenerateLevel() {
   }
   const diff = difficultyScale();
   const gearLevel = level.index || 0;
+  // Mega-boss spawn — at arena center. Boss handles its own visuals,
+  // attack FSM, hazards, and HUD bar. The dormant intro ritual runs
+  // first, leaving the player free to position before combat starts.
+  if (isMegaFloor) {
+    megaBoss = new MegaBoss({
+      scene, camera,
+      combat, loot, sfx, projectiles,
+      damagePlayer,
+      getPlayerPos: () => player.mesh.position,
+      playerHasIFrames: () => (lastPlayerInfo?.iFrames | 0) > 0,
+      knockbackPlayer: (dx, dz) => {
+        // Best-effort displacement — bypass collision. Player physics
+        // smooths the next tick.
+        if (player?.mesh) {
+          player.mesh.position.x += dx * 0.5;
+          player.mesh.position.z += dz * 0.5;
+        }
+      },
+      shake: (m, d) => triggerShake(m, d),
+      onMegaBossDead: (boss) => {
+        // Reveal the exit zone — already staged by generateMegaArena.
+        if (level.revealExit) level.revealExit();
+        if (sfx?.roomClear) sfx.roomClear();
+      },
+      lootRolls: (encIdx) => buildMegaBossLoot({
+        randomWeapon: (rarity) => {
+          // Pull from the existing weapon roll pipeline. randomWeapon
+          // doesn't exist here; we synthesize via wrapWeapon over the
+          // tunables pool, biased to the requested rarity.
+          const pool = tunables.weapons.filter(w => w.rarity !== 'mythic');
+          const candidates = pool.filter(w => w.rarity === rarity);
+          const pick = (candidates.length ? candidates : pool)[Math.floor(Math.random() * (candidates.length ? candidates.length : pool.length))];
+          if (!pick) return null;
+          // Force the requested rarity on the wrapped clone so a
+          // common-rarity base in `tunables.weapons` lands as e.g. epic.
+          const w = wrapWeapon({ ...pick, rarity });
+          return w;
+        },
+        randomArmor: (rarity) => {
+          const a = randomArmor();
+          if (a && rarity) a.rarity = rarity;
+          return a;
+        },
+        pickHealConsumable: () => {
+          const heals = ALL_CONSUMABLES.filter(c => c.useEffect?.kind === 'heal');
+          if (!heals.length) return null;
+          const item = heals[Math.floor(Math.random() * heals.length)];
+          return JSON.parse(JSON.stringify(item));
+        },
+        pickJunk: () => {
+          // Use the project's existing junk roller — same pool the
+          // body-loot pipeline uses for grunt drops.
+          if (typeof randomJunk === 'function') return randomJunk();
+          return null;
+        },
+      }, encIdx),
+    });
+    megaBoss.spawn(level.megaArenaCenter || new THREE.Vector3(0, 0, 0));
+  }
+
   // Keycard assignment — hand each level.keycardColors entry to a
   // random sub-boss or major-boss spawn. Level generation caps key
   // count by holder count, so the pool shouldn't exhaust; if it
@@ -3418,6 +3492,10 @@ let lastAimZone = null;       // 'head' / 'torso' / 'leg' / 'arm' / null
 let paused = false;    // true while a modal (skill pick) is open
 let extractPending = false;
 
+// Mega-boss handle — non-null only on milestone floors (10, 15, 20, …).
+// Allocated in regenerateLevel after `level.generateMegaArena()` runs.
+let megaBoss = null;
+
 let derivedStats = BASE_STATS();
 let lastHpRatio = 1;  // updated each tick for perks that need mid-callback HP
 // Per-run shrine HP bonus (cleared on death). The first shrine tier
@@ -3738,6 +3816,12 @@ let _hittablesFrame = -1;
 function allHittables() {
   if (_hittablesFrame === frameCounter && _hittablesCache) return _hittablesCache;
   _hittablesCache = [...dummies.hittables(), ...gunmen.hittables(), ...melees.hittables(), ...drones.hittables()];
+  // Mega boss meshes — only present on mega-boss floors. The boss tags
+  // every hit mesh with userData.owner = the boss instance + a
+  // megaBoss flag so the player fire path can branch on it.
+  if (megaBoss && megaBoss.alive) {
+    _hittablesCache.push(...megaBoss.hittables());
+  }
   // Fold in encounter hittables (e.g. glass-case panels). Each one
   // already carries userData.owner pointing to the encounter target,
   // and target.manager.applyHit dispatches the encounter trigger.
@@ -4734,6 +4818,39 @@ function fireOneShot(playerInfo, weapon, aimPoint, isADS, aimOwner) {
     // once before the loop so we pass flash:false here.
     combat.spawnShot(tracerFrom, endPoint, eff.tracerColor,
       { light: qualityFlags.muzzleLights, flash: false });
+
+    // Mega-boss hits go through a parallel path — boss owns its own
+    // HP + applyHit + visual flash. Damage computation reuses the
+    // same zone + crit + falloff pipeline as normal enemies.
+    if (hit && hit.mesh?.userData?.megaBoss && hit.owner) {
+      const zoneCfg = tunables.zones[hit.zone];
+      let mult = zoneCfg ? zoneCfg.damageMult : 1.0;
+      if (hit.zone === 'head') {
+        mult += (derivedStats.headMultBonus || 0) + (weapon.headBonus || 0);
+      }
+      let dmg = eff.damage * mult * derivedStats.rangedDmgMult;
+      if (derivedStats.openingActActive && _ammoBefore === eff.magSize) dmg *= 2;
+      if (derivedStats.closingActActive && _ammoBefore === 1) dmg *= 2;
+      // Falloff applies even at boss range — sniper beats shotgun.
+      if (_falloffShape !== 'none') {
+        const _fdx = hit.point.x - fireFrom.x;
+        const _fdy = hit.point.y - fireFrom.y;
+        const _fdz = hit.point.z - fireFrom.z;
+        const _fd = Math.sqrt(_fdx * _fdx + _fdy * _fdy + _fdz * _fdz);
+        const _ratio = Math.min(1, _fd / Math.max(0.001, _classMaxRange));
+        const _falloff = _falloffShape === 'quad'
+          ? (1 - 0.35 * _ratio * _ratio)
+          : (1 - 0.35 * _ratio);
+        dmg *= _falloff;
+      }
+      hit.owner.applyHit(dmg);
+      runStats.addDamage(dmg);
+      spawnDamageNumber(hit.point, camera, dmg, hit.zone);
+      // Visual hit feedback piggybacks the existing impact pool.
+      combat.spawnImpact(hit.point);
+      if (sfx?.hit) sfx.hit();
+      continue;     // skip normal-enemy applyHit branch
+    }
 
     if (hit && hit.owner && hit.owner.manager) {
       const zoneCfg = tunables.zones[hit.zone];
@@ -10292,6 +10409,14 @@ function tick() {
       onProjectileExplode(pos, explosion, 'enemy', { throwKind: null });
     },
   });
+
+  // Mega-boss tick — runs only on milestone floors. Self-contained
+  // FSM, hazard tick, and HUD bar render. Player position is needed
+  // for facing + body-collision damage; we pass the live position
+  // (not snapshot) so charge attack tracking is correct.
+  if (megaBoss) {
+    megaBoss.update(dt, player.mesh.position);
+  }
 
   // Keep enemies from stacking so crowd counts read at a glance.
   // Walls-only resolver (separate push + player-repel compounds badly at

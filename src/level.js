@@ -3990,6 +3990,58 @@ export class Level {
     return dx * dx + dz * dz < this.exitBounds.r * this.exitBounds.r;
   }
 
+  // Single open arena for the milestone mega-boss floors. Replaces
+  // the normal random-walk generator. Called by main.js when
+  // `isMegaBossLevel(level.index + 1)` would be true at the next
+  // generate(). Bumps level.index like the regular generator and
+  // produces a 44×44m square room with a single virtual room entry
+  // so roomAt() / vision blockers / lighting still work. No enemy
+  // spawns, no doors, no encounters — main.js handles boss spawn
+  // separately.
+  generateMegaArena() {
+    this.clear();
+    this.index += 1;
+    this.theme = getLevelTheme(this.index);
+    if (this.theme) {
+      FULL_WALL_COLOR  = this.theme.wall;
+      OUTER_WALL_COLOR = _darkenHex(this.theme.wall, 0.55);
+      LOW_COVER_COLOR  = _darkenHex(this.theme.wall, 0.30);
+      if (this.ground && this.ground.material && this.ground.material.color) {
+        this.ground.material.color.setHex(this.theme.floor);
+      }
+    }
+    const HALF = 22;     // arena is 44m × 44m
+    const W = HALF * 2 + WALL_THICK * 2;
+    // Perimeter walls — four boxes thick enough that bullets stop here.
+    this._addObstacle(0, WALL_HEIGHT / 2, -HALF - WALL_THICK / 2, W, WALL_HEIGHT, WALL_THICK, OUTER_WALL_COLOR);
+    this._addObstacle(0, WALL_HEIGHT / 2,  HALF + WALL_THICK / 2, W, WALL_HEIGHT, WALL_THICK, OUTER_WALL_COLOR);
+    this._addObstacle(-HALF - WALL_THICK / 2, WALL_HEIGHT / 2, 0, WALL_THICK, WALL_HEIGHT, HALF * 2, OUTER_WALL_COLOR);
+    this._addObstacle( HALF + WALL_THICK / 2, WALL_HEIGHT / 2, 0, WALL_THICK, WALL_HEIGHT, HALF * 2, OUTER_WALL_COLOR);
+    // Player spawns near the south-west corner; boss center is the
+    // arena origin, so the player has a clear line to dash into.
+    this.playerSpawn.set(-HALF + 4, 0, -HALF + 4);
+    this.megaArenaCenter = new THREE.Vector3(0, 0, 0);
+    // Stage the exit zone — main.js calls revealExit() when the boss
+    // dies. Place it near the opposite corner so the player has to
+    // cross the arena to leave (visible reward beat).
+    this._exitPendingBounds = { cx: HALF - 4, cz: HALF - 4, r: 1.6 };
+    // Single virtual room covering the whole arena — keeps roomAt()
+    // happy for any per-frame system that walks rooms.
+    this.rooms = [{
+      id: 0,
+      type: 'megaArena',
+      layout: 'megaArena',
+      bounds: { minX: -HALF, maxX: HALF, minZ: -HALF, maxZ: HALF },
+      cx: 0, cz: 0,
+      cellX: 0, cellZ: 0,
+      neighbors: [],
+      cleared: false,
+      entered: true,
+      hasElevator: false,
+    }];
+    this._dirtySolid();
+  }
+
   roomAt(x, z) {
     for (const r of this.rooms) {
       const b = r.bounds;
