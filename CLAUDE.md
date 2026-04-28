@@ -100,6 +100,28 @@ channel via mission-control instead of just appending to BACKLOG.md.
 - BACKLOG.md is for permanent / shipping-blocker scope. Discord is the
   primary surface for in-flight deferrals.
 
+### Cross-reference the backlog after every meaningful ship
+
+Before declaring work "done" on a non-trivial commit (perf pass,
+feature, fix that touches a system), check whether the work knocked
+out a previously-deferred item.
+
+```bash
+# 1. List open items
+node ../../mission-control/scripts/list-backlog.mjs --channel=cold-exit-backlog
+
+# 2. If a match: mark it complete in place (edits the original message)
+node ../../mission-control/scripts/complete-backlog.mjs \
+  --channel=cold-exit-backlog \
+  --message-id=<snowflake from step 1> \
+  --reason="..." \
+  --commit=<short sha>
+```
+
+Mention closures in the end-of-turn summary so the user sees them. The
+bar for cross-referencing is "did this commit touch a system that has
+a backlog item?" — skip for typo fixes / single-line tweaks.
+
 ## Task delegation to local workers
 
 When you identify a contained piece of work in this codebase — a perf
