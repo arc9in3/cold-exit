@@ -11,6 +11,7 @@ import { createLosMask } from './los_mask.js';
 import { accelerateAll, disposeMesh } from './bvh.js';
 import { createPlayer } from './player.js';
 import { Input } from './input.js';
+import { ACTIONS, getKeyboardBinding, displayKeyboard } from './keybinds.js';
 import { Combat } from './combat.js';
 import { DummyManager } from './enemy.js';
 import { GunmanManager } from './gunman.js';
@@ -8054,49 +8055,66 @@ function updateLootPrompt() {
     // through the cache check at the bottom. Was thrashing
     // promptEl.style.display + textContent every frame even when the
     // player stood still in front of the same prompt.
+    // Resolve the player's current INTERACT keybind once per call so
+    // every prompt below can label with the rebound key. Falls back
+    // to 'E' if the binding is empty or unrecognized.
+    const _eKey = displayKeyboard(getKeyboardBinding(ACTIONS.INTERACT)) || 'E';
     let txt = '';
     let hint = null;
     if (near) {
       const pile = loot.allWithin(player.mesh.position, tunables.loot.pickupRadius);
       txt = pile.length >= 2
-        ? `[E] examine ${pile.length} items on the ground`
-        : `[E] pick up ${near.item.name}`;
+        ? `[${_eKey}] examine ${pile.length} items on the ground`
+        : `[${_eKey}] pick up ${near.item.name}`;
       hint = 'pickup';
     } else if (bodies.length >= 2) {
       const totalItems = bodies.reduce((n, b) => n + (b.loot?.length || 0), 0);
-      txt = `[E] loot area (${bodies.length} bodies · ${totalItems} items)`;
+      txt = `[${_eKey}] loot area (${bodies.length} bodies · ${totalItems} items)`;
       hint = 'searchBody';
     } else if (body && !body.looted && body.loot && body.loot.length) {
-      txt = `[E] search body`;
+      txt = `[${_eKey}] search body`;
       hint = 'searchBody';
     } else if (body && body.looted) {
       txt = `(body looted)`;
     } else if (containerHit) {
-      txt = `[E] open ${containerHit.container.name}`;
+      txt = `[${_eKey}] open ${containerHit.container.name}`;
       hint = 'openContainer';
     } else if (npc && npc.kind === 'merchant') {
-      txt = `[E] trade with merchant`;
+      txt = `[${_eKey}] trade with merchant`;
       hint = 'shop';
     } else if (npc && npc.kind === 'bearMerchant') {
-      txt = `[E] speak with the Great Bear`;
+      txt = `[${_eKey}] speak with the Great Bear`;
     } else if (npc && npc.kind === 'healer') {
-      txt = `[E] speak with the healer`;
+      txt = `[${_eKey}] speak with the healer`;
     } else if (npc && npc.kind === 'gunsmith') {
-      txt = `[E] visit the gunsmith`;
+      txt = `[${_eKey}] visit the gunsmith`;
     } else if (npc && npc.kind === 'armorer') {
-      txt = `[E] visit the armorer`;
+      txt = `[${_eKey}] visit the armorer`;
     } else if (npc && npc.kind === 'tailor') {
-      txt = `[E] visit the tailor`;
+      txt = `[${_eKey}] visit the tailor`;
     } else if (npc && npc.kind === 'relicSeller') {
-      txt = `[E] browse relics`;
+      txt = `[${_eKey}] browse relics`;
     } else if (npc && npc.kind === 'blackMarket') {
-      txt = `[E] enter the black market`;
+      txt = `[${_eKey}] enter the black market`;
     } else if (level.nearElevatorDoor(player.mesh.position)) {
-      txt = `[E] open elevator door`;
+      txt = `[${_eKey}] open elevator door`;
     } else if (findExecuteTarget()) {
-      txt = `[F] execute`;
+      const _fKey = displayKeyboard(getKeyboardBinding(ACTIONS.MELEE)) || 'F';
+      txt = `[${_fKey}] execute`;
     } else if (level.isPlayerInExit(player.mesh.position) && exitCooldown <= 0) {
-      txt = `[E] extract (level ${level.index + 1})`;
+      txt = `[${_eKey}] extract (level ${level.index + 1})`;
+    } else {
+      // No nearby pickup / body / container / NPC / elevator / extract.
+      // Surface the encounter interaction prompt if the player is
+      // standing within an interactable encounter's anchor radius.
+      // Uses the same `nearestInteractableEncounter()` helper that
+      // tryInteract dispatches against, so prompt + action stay in
+      // lockstep.
+      const enc = nearestInteractableEncounter();
+      if (enc && enc.def) {
+        const name = enc.def.name || enc.def.id || 'this';
+        txt = `[${_eKey}] interact with ${name}`;
+      }
     }
     const wantDisplay = txt ? 'block' : 'none';
     if (promptEl._lastDisplay !== wantDisplay) {
