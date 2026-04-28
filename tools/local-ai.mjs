@@ -91,10 +91,14 @@ async function collectFiles() {
 
 // ---------- file packaging --------------------------------------------
 // Each file becomes a fenced block tagged with its repo-relative path.
-// Truncate per-file at 60k chars; total budget at ~400k chars (a 32B
-// model with 128k context handles this comfortably as Q4_K_M on a 5090).
-const PER_FILE_CHARS = 60000;
-const TOTAL_BUDGET   = 400000;
+// Per-file 30k chars; total 90k chars. Calibrated for num_ctx = 32768
+// in callOllama — 4 chars per token roughly, so 90k chars ≈ 22k tokens
+// of source, leaving 10k for system+user wrapper + the response. Going
+// over silently truncates the prompt FROM THE START, which makes the
+// model answer the wrong question entirely. If you need bigger scope,
+// split the audit into multiple --task=*-part-N runs.
+const PER_FILE_CHARS = 30000;
+const TOTAL_BUDGET   = 90000;
 
 async function packFiles(files) {
   const blocks = [];
@@ -127,6 +131,14 @@ async function packFiles(files) {
 
 // ---------- ollama call -----------------------------------------------
 async function callOllama(messages) {
+  // CRITICAL: Ollama defaults num_ctx to 2048 / 4096 even when the model
+  // declares 128k. Without an explicit override the prompt gets silently
+  // TRUNCATED FROM THE START, which shows up as the model ignoring the
+  // question and answering about whatever survived in the tail of the
+  // context. We push num_ctx high enough to fit the packed source plus
+  // the system + user wrapper. 32B Q4 on a 5090 holds 32k cleanly with
+  // headroom; 64k starts swapping to system RAM. Cap at 32k.
+  const numCtx = 32768;
   const res = await fetch(`${HOST}/v1/chat/completions`, {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
@@ -138,6 +150,9 @@ async function callOllama(messages) {
       max_tokens: /r1|reasoner/i.test(model) ? 4096 : 1500,
       temperature: auditish ? 0.20 : 0.30,
       stream: false,
+      // Ollama-specific tuning passed through the OpenAI-compat shim.
+      // num_ctx is the magic knob — without this the prompt is cut.
+      options: { num_ctx: numCtx },
     }),
   });
   if (!res.ok) {
@@ -160,7 +175,11 @@ async function callOllama(messages) {
     console.warn('[local-ai] no files matched. Continuing with prompt-only context.');
   }
   const packed = await packFiles(files);
-  console.log(`[local-ai] context bytes=${packed.bytes}`);
+  console.log(`[local-ai] context bytes=${packed.bytes} (budget=${TOTAL_BUDGET})`);
+  if (packed.bytes >= TOTAL_BUDGET * 0.95) {
+    console.warn(`[local-ai] WARNING: context near or at budget — some files may have been skipped or truncated.`);
+    console.warn(`[local-ai] Narrow the file scope or split into smaller --task=* runs to avoid silent context truncation.`);
+  }
 
   const systemPrompt = auditish
     ? `You are a careful senior engineer doing a code audit of an existing JavaScript codebase. The user's prompt asks a specific question. Answer it by walking the provided source. Cite file:line for every claim. List concrete findings as a numbered list. End with a "Risk" line (none / low / medium / high) and a "Suggested fix" line (or "no action" if the code is correct). Be concise — every line should carry information.`
