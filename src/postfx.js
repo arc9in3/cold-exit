@@ -169,8 +169,14 @@ class KawaseBloomPass extends Pass {
   }
 }
 
-// Combined vignette + film-grain + subtle chromatic edge tint. Cheap
-// one-pass finisher that runs after the bloom composite.
+// Combined vignette + film-grain + subtle chromatic edge tint + ASC-CDL
+// style color grade. Cheap one-pass finisher that runs after the bloom
+// composite.
+//
+// Color grade tunables — push for the Continental-noir aesthetic the
+// splash art is selling. Crushed blacks + warm highlights + slight
+// desaturation. All of it is per-pixel arithmetic; the cost is one
+// extra block of math in a shader that's already running.
 const FinisherShader = {
   uniforms: {
     tDiffuse:  { value: null },
@@ -178,6 +184,11 @@ const FinisherShader = {
     uStrength: { value: 0.22 },    // vignette darkness at corners
     uGrain:    { value: 0.0 },     // grain disabled — read as static noise in play
     uChroma:   { value: 0.0015 },  // chromatic edge split (in UV units)
+    uContrast:    { value: 1.12 }, // 1.0 = no change. >1 crushes blacks + lifts highlights
+    uSaturation:  { value: 0.92 }, // 1.0 = no change. <1 desaturates toward gray
+    uShadowTint:  { value: new THREE.Color(0xa8b4c4) },  // cool steel into the shadows
+    uHighlightTint: { value: new THREE.Color(0xffe2b8) },// warm tungsten into the highlights
+    uGradeStrength: { value: 0.55 }, // overall grade mix — 0 = bypass, 1 = full
     // LoS mask — texture written by los_mask.js each frame. UVs match
     // the main camera's screen so we sample by vUv directly. Mask is
     // 1.0 where the player can see, 0.0 where occluded.
@@ -204,6 +215,11 @@ const FinisherShader = {
     uniform float uLosOn;
     uniform float uLosDark;
     uniform float uLosSoft;
+    uniform float uContrast;
+    uniform float uSaturation;
+    uniform vec3  uShadowTint;
+    uniform vec3  uHighlightTint;
+    uniform float uGradeStrength;
 
     // Classic hash for per-pixel noise; the per-frame time shift
     // animates the grain so it reads as film instead of a static
@@ -223,6 +239,23 @@ const FinisherShader = {
       float colG = texture2D(tDiffuse, uv).g;
       float colB = texture2D(tDiffuse, uv - off).b;
       vec3 col = vec3(colR, colG, colB);
+
+      // ----- Color grade (ASC-CDL-ish) ---------------------------------
+      // 1) Tonal split: tint shadows toward a cool steel, highlights
+      //    toward warm tungsten. luma drives the blend so midtones
+      //    don't get pushed.
+      // 2) Contrast around 0.5 mid-gray — crushes blacks, lifts whites.
+      // 3) Saturation toward luma — desaturates a touch for the noir
+      //    feel without going monochrome.
+      vec3 graded = col;
+      float luma = dot(graded, vec3(0.2126, 0.7152, 0.0722));
+      vec3 tint = mix(uShadowTint, uHighlightTint, smoothstep(0.0, 1.0, luma));
+      graded *= tint;
+      graded = (graded - 0.5) * uContrast + 0.5;
+      float gLuma = dot(graded, vec3(0.2126, 0.7152, 0.0722));
+      graded = mix(vec3(gLuma), graded, uSaturation);
+      graded = max(graded, vec3(0.0));
+      col = mix(col, graded, uGradeStrength);
 
       // Vignette — smooth falloff so the darkening doesn't band.
       float vig = smoothstep(0.75, 0.2, length(c));

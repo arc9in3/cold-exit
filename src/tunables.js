@@ -27,8 +27,13 @@ export const tunables = {
     sprintSpeed: 10,
     crouchSpeed: 3,
     crouchSprintSpeed: 5.5,  // held crouch + sprint — faster than sneak, noisier
-    accel: 50,
-    friction: 20,
+    // Accel + friction softened from 50/20 → 32/14 so direction changes
+    // and stops have a small carry. Snap-stop arcade feel was reading
+    // weightless and undermining the cel-shooter aesthetic. The hit-stop
+    // and impact frames also read cleaner when the character isn't
+    // already moving the next frame.
+    accel: 32,
+    friction: 14,
     standMuzzleY: 1.18,
     crouchMuzzleY: 0.78,
   },

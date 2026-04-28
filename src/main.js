@@ -4682,6 +4682,13 @@ function fireOneShot(playerInfo, weapon, aimPoint, isADS, aimOwner) {
   // which dropped frames hard. The tracer per pellet is fine — they
   // diverge, so the visual still reads as multiple shots.
   combat.spawnFlash(tracerFrom, eff.tracerColor, qualityFlags.muzzleLights);
+  // Combat juice — eject brass + puff muzzle smoke. Both pooled. Skip
+  // for melee weapons. _tmpDir is the normalized fire direction, set
+  // up above for the spread / raycast loop.
+  if (eff?.class && eff.class !== 'melee') {
+    combat.spawnBrass(tracerFrom, _tmpDir);
+    combat.spawnMuzzleSmoke(tracerFrom, _tmpDir);
+  }
 
   // Bump per-shot bloom — once per trigger pull, not per pellet.
   // Class-rooted: shotgun / sniper add a lot per shot (heavy round,
@@ -6639,6 +6646,12 @@ function aiFire(origin, dir, weapon, damageMult = 1, source = null) {
   const _afdz = origin.z - player.mesh.position.z;
   const _afDist = Math.sqrt(_afdx * _afdx + _afdz * _afdz);
   sfx.enemyFire(weapon.class || 'pistol', _afDist);
+  // Brass + smoke for AI fire — same distance gate as the SFX so
+  // off-screen volleys don't pay the particle cost.
+  if (_afDist < 30 && weapon.class && weapon.class !== 'melee') {
+    combat.spawnBrass(origin, dir);
+    combat.spawnMuzzleSmoke(origin, dir);
+  }
   const targets = [...level.obstacles, player.body];
   const hit = combat.raycast(origin, dir, targets, weapon.range);
   let endPoint;

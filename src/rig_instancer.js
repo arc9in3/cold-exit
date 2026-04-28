@@ -30,6 +30,47 @@ const _outColor  = new THREE.Color();
 const _flashColor = new THREE.Color(0xff4a4a);
 const INITIAL_CAP = 96;
 
+// Inject a fresnel rim term into a MeshToonMaterial via onBeforeCompile.
+// The rim brightens edges that face away from the camera, which makes
+// silhouettes pop against dark walls and out-of-light areas. Cost is
+// per-pixel — a normalize, dot, pow, mix in the fragment shader.
+//
+// Three values are exposed as material.userData.* getters so the
+// debug GUI / future tunable plumbing can adjust them without
+// recompiling the shader (uniforms are mutable).
+function _attachRim(mat, opts = {}) {
+  const rimColor   = new THREE.Color(opts.color ?? 0xfff0c8);
+  const rimStrength = { value: opts.strength ?? 0.55 };
+  const rimPower    = { value: opts.power    ?? 2.6 };
+  mat.userData = mat.userData || {};
+  mat.userData.rim = { rimColor, rimStrength, rimPower };
+  mat.onBeforeCompile = (shader) => {
+    shader.uniforms.uRimColor    = { value: rimColor };
+    shader.uniforms.uRimStrength = rimStrength;
+    shader.uniforms.uRimPower    = rimPower;
+    shader.fragmentShader = shader.fragmentShader
+      .replace(
+        '#include <common>',
+        `#include <common>
+        uniform vec3  uRimColor;
+        uniform float uRimStrength;
+        uniform float uRimPower;`
+      )
+      .replace(
+        '#include <dithering_fragment>',
+        `// Rim term — vNormal and vViewPosition are in view space; the
+        // view direction is the normalized vector from the fragment
+        // toward the camera origin (== normalize(vViewPosition)).
+        float rimNdotV = max(dot(normalize(vNormal), normalize(vViewPosition)), 0.0);
+        float rim = pow(1.0 - rimNdotV, uRimPower);
+        gl_FragColor.rgb += uRimColor * rim * uRimStrength;
+        #include <dithering_fragment>`
+      );
+  };
+  // Bumping needsUpdate ensures three.js re-runs onBeforeCompile.
+  mat.needsUpdate = true;
+}
+
 class RigInstancer {
   constructor(scene, opts = {}) {
     this.scene = scene;
@@ -57,6 +98,18 @@ class RigInstancer {
       } else {
         m = new THREE.MeshStandardMaterial({ ...matOpts, roughness: 0.78 });
       }
+      // Per-role rim — head reads the brightest because that's what the
+      // player tracks for the headshot. Body / arm / leg use a quieter
+      // rim so the silhouette holds without going neon. Hand / boot
+      // are small enough that any rim reads as buzz at distance.
+      const rimOpts = (role === 'head')
+          ? { color: 0xfff4cc, strength: 0.85, power: 2.2 }
+        : (role === 'gear')
+          ? { color: 0xfff0c8, strength: 0.65, power: 2.4 }
+        : (role === 'hand' || role === 'boot')
+          ? { color: 0xfff0c8, strength: 0.30, power: 3.0 }
+          : { color: 0xfff0c8, strength: 0.50, power: 2.6 };
+      _attachRim(m, rimOpts);
       this._roleMats.set(role, m);
     }
     return m;

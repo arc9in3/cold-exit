@@ -113,6 +113,30 @@ function _rateOk(key) {
   return true;
 }
 
+// Duck the ambient bed when combat fires. The room tone gain ramps to
+// `_DUCK_LO` over `_DUCK_DOWN` seconds, holds while shots keep coming,
+// and ramps back to its baseline over `_DUCK_UP` after the last shot.
+// Audio scheduling lives on the audio thread — once we set the target,
+// the gain follows it without per-frame work.
+const _DUCK_LO = 0.025;       // ducked ambient gain (baseline is 0.11)
+const _DUCK_HI = 0.11;
+const _DUCK_DOWN = 0.04;      // ramp-down (snappy on first shot)
+const _DUCK_UP   = 0.85;      // ramp-up (slow restore — silence after a fight reads as relief)
+let _duckHoldUntil = 0;
+function _duckAmbient() {
+  if (!ambientNodes || !ctx) return;
+  const now = ctx.currentTime;
+  ambientNodes.g1.gain.cancelScheduledValues(now);
+  // Hold ducked level for 350ms past the last shot. Restoring sooner
+  // makes a sustained burst pulse with the rate-limit, which reads as
+  // the audio mixer flapping rather than a cohesive duck.
+  ambientNodes.g1.gain.setTargetAtTime(_DUCK_LO, now, _DUCK_DOWN);
+  _duckHoldUntil = now + 0.35;
+  // Schedule the restore. setTargetAtTime is exponential, so we just
+  // queue the un-duck after the hold window.
+  ambientNodes.g1.gain.setTargetAtTime(_DUCK_HI, _duckHoldUntil, _DUCK_UP);
+}
+
 // Unlock on first user gesture so play() works for real after that.
 // Listens on `document` (not just the renderer canvas) so main-menu
 // button clicks warm the AudioContext + noise/IR buffers BEFORE the
@@ -168,6 +192,7 @@ function tone({ freq, dur = 0.12, type = 'square', gain = 0.25, sweep = 0 } = {}
 
 export const sfx = {
   fire(weaponClass = 'pistol') {
+    _duckAmbient();
     // Different spectral character per class.
     if (weaponClass === 'shotgun') {
       burstNoise({ dur: 0.16, lp: 900, gain: 0.9, lpDecay: true });
@@ -261,6 +286,9 @@ export const sfx = {
     if (!unlocked || !ensureCtx()) return;
     if (distance > 30) return;
     if (!_rateOk('enemyFire')) return;
+    // Ducks too — even a distant volley should drop the room tone,
+    // which makes the player tuning into "where are they" easier.
+    _duckAmbient();
     // Linear gain falloff 0m → 1.0, 30m → 0.0.
     const distAtten = distance > 0 ? Math.max(0, 1 - distance / 30) : 1;
     if (weaponClass === 'shotgun') {

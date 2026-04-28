@@ -16,6 +16,9 @@ export class Combat {
     this.gore = [];     // detached body parts (heads on execute)
     this.explosions = []; // expanding fireball + scorch ring
     this.flameParticles = [];   // per-shot flamethrower primitives
+    this.brass = [];            // active ejected casings (pooled)
+    this.smokes = [];           // active muzzle smoke puffs (pooled)
+    this.dusts = [];             // active impact dust puffs (pooled)
     this.raycaster = new THREE.Raycaster();
     this._bloodCap = 140;
     this._poolCap = 30;
@@ -521,6 +524,75 @@ export class Combat {
     entry.mesh.scale.setScalar(1);
     entry.mesh.visible = true;
     this.impacts.push({ entry, t: 0, life: tunables.attack.impactLife });
+    // Companion dust puff — same point, larger and softer than the
+    // hot spark. Sells the "hard surface impact" beat.
+    let de = this._dustPool.find(e => !e.inUse);
+    if (!de) de = this._dustPool[0];
+    de.inUse = true;
+    de.mesh.position.copy(point);
+    de.mesh.scale.setScalar(0.6);
+    de.mesh.material.opacity = 0.55;
+    de.mesh.visible = true;
+    this.dusts.push({ entry: de, t: 0, life: 0.22 });
+  }
+
+  // Eject a brass casing to the side of the muzzle. `dir` is the shot
+  // direction (used to compute a perpendicular eject vector). `up` is
+  // the world-up of the firing rig — passing it lets crouched / leaned
+  // ejection still arc upward relative to the gun frame. Pooled; no
+  // alloc per call.
+  spawnBrass(origin, dir, up = null) {
+    this._ensurePools();
+    let entry = this._brassPool.find(e => !e.inUse);
+    if (!entry) entry = this._brassPool[0];
+    entry.inUse = true;
+    const m = entry.mesh;
+    m.position.copy(origin);
+    // Eject perpendicular to the shot direction, biased to the right
+    // and slightly upward. `right = dir × up`, then bias.
+    const upY = (up && typeof up.y === 'number') ? up : { x: 0, y: 1, z: 0 };
+    const rx = dir.y * upY.z - dir.z * upY.y;
+    const rz = dir.x * upY.y - dir.y * upY.x;
+    const rl = Math.hypot(rx, rz) || 1;
+    const ejectSpeed = 2.6 + Math.random() * 0.7;
+    entry.vel.set(
+      (rx / rl) * ejectSpeed + dir.x * -0.4,
+      2.8 + Math.random() * 0.6,
+      (rz / rl) * ejectSpeed + dir.z * -0.4,
+    );
+    entry.spin.set(
+      (Math.random() - 0.5) * 18,
+      (Math.random() - 0.5) * 18,
+      (Math.random() - 0.5) * 18,
+    );
+    m.rotation.set(0, 0, 0);
+    m.material.opacity = 1.0;
+    m.visible = true;
+    this.brass.push({ entry, t: 0, life: 1.6, settled: false });
+  }
+
+  // Pooled additive smoke puff at the muzzle. Drifts up, expands, fades.
+  spawnMuzzleSmoke(origin, dir) {
+    this._ensurePools();
+    let entry = this._smokePool.find(e => !e.inUse);
+    if (!entry) entry = this._smokePool[0];
+    entry.inUse = true;
+    const m = entry.mesh;
+    // Place the puff slightly past the muzzle along the shot direction.
+    m.position.set(
+      origin.x + (dir?.x || 0) * 0.18,
+      origin.y + 0.05,
+      origin.z + (dir?.z || 0) * 0.18,
+    );
+    // Random small offset so two consecutive shots' puffs don't z-fight.
+    m.position.x += (Math.random() - 0.5) * 0.08;
+    m.position.z += (Math.random() - 0.5) * 0.08;
+    m.scale.setScalar(0.55);
+    // Random spin so successive puffs read as distinct.
+    m.rotation.z = Math.random() * Math.PI * 2;
+    entry.mat.opacity = 0.65;
+    m.visible = true;
+    this.smokes.push({ entry, t: 0, life: 0.42 });
   }
 
   // Wipe every transient effect — blood pools, gore, impacts,
@@ -556,6 +628,13 @@ export class Combat {
       }
     }
     this.impacts.length = 0;
+    // Brass / smoke / dust — pool-backed, hide + release.
+    for (const b of this.brass) { b.entry.mesh.visible = false; b.entry.inUse = false; }
+    this.brass.length = 0;
+    for (const s of this.smokes) { s.entry.mesh.visible = false; s.entry.inUse = false; }
+    this.smokes.length = 0;
+    for (const d of this.dusts) { d.entry.mesh.visible = false; d.entry.inUse = false; }
+    this.dusts.length = 0;
     dispose(this.arcs);
     // Bloods are pool-backed — hide + release each slot, no dispose.
     for (const b of this.bloods) {
@@ -652,6 +731,85 @@ export class Combat {
           fl.lightEntry.inUse = false;
         }
         this.flashes.splice(i, 1);
+      }
+    }
+    // Brass casings — ballistic arc + bounce + spin + fade.
+    for (let i = this.brass.length - 1; i >= 0; i--) {
+      const b = this.brass[i];
+      b.t += dt;
+      const e = b.entry;
+      if (!b.settled) {
+        e.vel.y -= 16 * dt;
+        e.mesh.position.x += e.vel.x * dt;
+        e.mesh.position.y += e.vel.y * dt;
+        e.mesh.position.z += e.vel.z * dt;
+        e.mesh.rotation.x += e.spin.x * dt;
+        e.mesh.rotation.y += e.spin.y * dt;
+        e.mesh.rotation.z += e.spin.z * dt;
+        if (e.mesh.position.y <= 0.06) {
+          e.mesh.position.y = 0.06;
+          // First bounce — kill horizontal speed, reverse + dampen vertical.
+          if (Math.abs(e.vel.y) > 0.6) {
+            e.vel.y = -e.vel.y * 0.32;
+            e.vel.x *= 0.55;
+            e.vel.z *= 0.55;
+            e.spin.multiplyScalar(0.5);
+          } else {
+            // Settled.
+            e.vel.set(0, 0, 0);
+            e.spin.set(0, 0, 0);
+            // Lay flat — random heading kept from spin so casings
+            // settle at varied angles.
+            e.mesh.rotation.x = Math.PI / 2;
+            b.settled = true;
+          }
+        }
+      }
+      // Final 0.5s of life fades out so settled casings clear the
+      // floor without a hard pop.
+      const fadeStart = b.life - 0.5;
+      if (b.t > fadeStart) {
+        e.mesh.material.opacity = Math.max(0, 1 - (b.t - fadeStart) / 0.5);
+      }
+      if (b.t >= b.life) {
+        e.mesh.visible = false;
+        e.inUse = false;
+        this.brass.splice(i, 1);
+      }
+    }
+    // Muzzle smoke puffs — billboard the camera, drift up, fade.
+    for (let i = this.smokes.length - 1; i >= 0; i--) {
+      const s = this.smokes[i];
+      s.t += dt;
+      const k = s.t / s.life;
+      const m = s.entry.mesh;
+      m.position.y += 0.7 * dt;
+      m.scale.setScalar(0.55 + k * 0.6);
+      // Quadratic-out fade so most of life is bright, then a quick drop.
+      s.entry.mat.opacity = Math.max(0, 0.65 * (1 - k * k));
+      // Cheap camera-facing — Three.js's lookAt would force a matrix
+      // update; rotate Y to match camera-vs-puff azimuth instead.
+      // (The plane's quad already sits perpendicular to the world Y;
+      // for the iso camera that reads as a puff. Skipping per-frame
+      // billboard yaw reduces work.)
+      if (s.t >= s.life) {
+        m.visible = false;
+        s.entry.inUse = false;
+        this.smokes.splice(i, 1);
+      }
+    }
+    // Impact dust puffs — quick expand + fade.
+    for (let i = this.dusts.length - 1; i >= 0; i--) {
+      const d = this.dusts[i];
+      d.t += dt;
+      const k = d.t / d.life;
+      const m = d.entry.mesh;
+      m.scale.setScalar(0.6 + k * 1.6);
+      m.material.opacity = Math.max(0, 0.55 * (1 - k));
+      if (d.t >= d.life) {
+        m.visible = false;
+        d.entry.inUse = false;
+        this.dusts.splice(i, 1);
       }
     }
     for (let i = this.impacts.length - 1; i >= 0; i--) {
@@ -990,6 +1148,90 @@ export class Combat {
       this.scene.add(ring);
       this._explosionPool.push({ fireball, ring, inUse: false });
     }
+    // --- Brass casing pool ----------------------------------------------
+    // Small cylinder ejected to the right of the muzzle on each player
+    // fire. Bouncy physics arc + ground rest + fade. Pool 24 — at
+    // typical RPMs (8-12 shots/s) and a 1.4s life that's plenty of
+    // headroom. Shotgun/pistol/rifle all share the same brass model;
+    // visual is small enough that real shell-style differentiation
+    // wouldn't read at the isometric distance.
+    const BRASS_POOL = 24;
+    this._brassPool = [];
+    const brassGeom = new THREE.CylinderGeometry(0.035, 0.035, 0.12, 6);
+    const brassMat = new THREE.MeshStandardMaterial({
+      color: 0xd9a550, roughness: 0.45, metalness: 0.85,
+    });
+    for (let i = 0; i < BRASS_POOL; i++) {
+      // Per-slot material clone so per-casing fade-out doesn't ghost
+      // every other live casing.
+      const m = new THREE.Mesh(brassGeom, brassMat.clone());
+      m.material.transparent = true;
+      m.material.opacity = 0;
+      m.visible = false;
+      m.castShadow = false;
+      m.frustumCulled = false;
+      this.scene.add(m);
+      this._brassPool.push({
+        mesh: m, vel: new THREE.Vector3(), spin: new THREE.Vector3(),
+        inUse: false,
+      });
+    }
+    // --- Muzzle smoke pool ----------------------------------------------
+    // Pooled additive billboard quads that puff and fade upward over
+    // ~0.4s. Pool 16 — at 12 shots/s × 0.4s life that's ~5 active
+    // worst case, so 16 is safe headroom even with double bursts.
+    const SMOKE_POOL = 16;
+    this._smokePool = [];
+    const smokeGeom = new THREE.PlaneGeometry(0.55, 0.55);
+    const smokeTex = this._buildSmokeTexture();
+    for (let i = 0; i < SMOKE_POOL; i++) {
+      const mat = new THREE.MeshBasicMaterial({
+        map: smokeTex, color: 0xddccaa,
+        transparent: true, opacity: 0,
+        depthWrite: false, blending: THREE.AdditiveBlending,
+      });
+      const m = new THREE.Mesh(smokeGeom, mat);
+      m.visible = false;
+      m.frustumCulled = false;
+      this.scene.add(m);
+      this._smokePool.push({ mesh: m, mat, inUse: false });
+    }
+    // --- Impact dust puff pool ------------------------------------------
+    // Larger, softer companion to the existing impactPool spark. Spawns
+    // alongside it on wall/prop hits — adds the "puff of dust" beat
+    // that sells a hard surface impact. Pool 24.
+    const DUST_POOL = 24;
+    this._dustPool = [];
+    const dustGeom = new THREE.SphereGeometry(0.22, 8, 6);
+    for (let i = 0; i < DUST_POOL; i++) {
+      const mat = new THREE.MeshBasicMaterial({
+        color: 0xb9a98a, transparent: true, opacity: 0,
+        depthWrite: false, blending: THREE.AdditiveBlending,
+      });
+      const m = new THREE.Mesh(dustGeom, mat);
+      m.visible = false;
+      m.frustumCulled = false;
+      this.scene.add(m);
+      this._dustPool.push({ mesh: m, inUse: false });
+    }
+  }
+
+  // Procedural soft-falloff smoke texture — built once, shared across
+  // every smoke pool material. 64×64 canvas with a radial gradient
+  // gives the puff a soft edge without an external asset.
+  _buildSmokeTexture() {
+    if (this._smokeTex) return this._smokeTex;
+    const c = document.createElement('canvas');
+    c.width = c.height = 64;
+    const g = c.getContext('2d');
+    const grad = g.createRadialGradient(32, 32, 4, 32, 32, 30);
+    grad.addColorStop(0, 'rgba(255,255,255,0.95)');
+    grad.addColorStop(0.5, 'rgba(255,255,255,0.35)');
+    grad.addColorStop(1, 'rgba(255,255,255,0.0)');
+    g.fillStyle = grad;
+    g.fillRect(0, 0, 64, 64);
+    this._smokeTex = new THREE.CanvasTexture(c);
+    return this._smokeTex;
   }
 
   _spawnTracer(a, b, color) {
