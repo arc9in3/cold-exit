@@ -91,6 +91,28 @@ function connectToWet(src, send = 0.25) {
   src.connect(sg).connect(wet._input);
 }
 
+// Per-key rate limit for high-rate SFX. Each `burstNoise` / `tone` call
+// allocates 3-4 AudioNodes; under heavy combat (8+ AI firing autos +
+// player rifle + impacts), the GC churn from short-lived nodes was
+// piling up into perceptible main-thread hitches between frames. Cap
+// each key at 1 play per `minGap` seconds — overlapping calls in the
+// same window are silently dropped. The audio mix doesn't degrade
+// because layered identical samples below the gap are already a wash.
+const _sfxRate = {
+  enemyFire:  { last: 0, minGap: 0.045 },   // ~22/sec global cap
+  hit:        { last: 0, minGap: 0.040 },
+  headshot:   { last: 0, minGap: 0.080 },
+  bulletImpact: { last: 0, minGap: 0.045 },
+};
+function _rateOk(key) {
+  const r = _sfxRate[key];
+  if (!r || !ctx) return true;
+  const now = ctx.currentTime;
+  if (now - r.last < r.minGap) return false;
+  r.last = now;
+  return true;
+}
+
 // Unlock on first user gesture so play() works for real after that.
 // Listens on `document` (not just the renderer canvas) so main-menu
 // button clicks warm the AudioContext + noise/IR buffers BEFORE the
@@ -182,9 +204,11 @@ export const sfx = {
     setTimeout(() => tone({ freq: 300, dur: 0.06, type: 'square', gain: 0.18 }), 140);
   },
   hit() {
+    if (!_rateOk('hit')) return;
     burstNoise({ dur: 0.05, lp: 600, gain: 0.35 });
   },
   headshot() {
+    if (!_rateOk('headshot')) return;
     burstNoise({ dur: 0.12, lp: 500, gain: 0.6, lpDecay: true });
     tone({ freq: 80, dur: 0.1, type: 'sine', gain: 0.3, sweep: -30 });
   },
@@ -229,21 +253,25 @@ export const sfx = {
   },
   // AI fire — softer than the player's fire so a gun battle layers
   // cleanly without drowning out the player's own shots.
-  enemyFire(weaponClass = 'pistol') {
+  // `distance` (optional, meters from listener) drives a hard cull at
+  // 30m and a gain falloff inside that. Off-screen volleys pay zero
+  // SFX cost. Rate-limited globally to ~22/sec so a swarm of autos
+  // doesn't churn AudioNodes faster than the GC can clean them up.
+  enemyFire(weaponClass = 'pistol', distance = 0) {
     if (!unlocked || !ensureCtx()) return;
-    const prev = masterVolume;
-    // Temporary gain duck via direct-to-master routing would be
-    // heavier to plumb; instead, play softer noise + tone profiles.
+    if (distance > 30) return;
+    if (!_rateOk('enemyFire')) return;
+    // Linear gain falloff 0m → 1.0, 30m → 0.0.
+    const distAtten = distance > 0 ? Math.max(0, 1 - distance / 30) : 1;
     if (weaponClass === 'shotgun') {
-      burstNoise({ dur: 0.12, lp: 900, gain: 0.55, lpDecay: true });
+      burstNoise({ dur: 0.12, lp: 900, gain: 0.55 * distAtten, lpDecay: true });
     } else if (weaponClass === 'smg' || weaponClass === 'rifle') {
-      burstNoise({ dur: 0.04, lp: 3000, gain: 0.26 });
+      burstNoise({ dur: 0.04, lp: 3000, gain: 0.26 * distAtten });
     } else if (weaponClass === 'lmg') {
-      burstNoise({ dur: 0.06, lp: 1800, gain: 0.38 });
+      burstNoise({ dur: 0.06, lp: 1800, gain: 0.38 * distAtten });
     } else {
-      burstNoise({ dur: 0.05, lp: 2400, gain: 0.30 });
+      burstNoise({ dur: 0.05, lp: 2400, gain: 0.30 * distAtten });
     }
-    void prev;
   },
   // Enemy death — downward sweep, shorter + quieter than player death.
   enemyDeath() {
@@ -263,6 +291,7 @@ export const sfx = {
   },
   // Bullet impact on solid (wall/prop). Short tick, dry.
   bulletImpact() {
+    if (!_rateOk('bulletImpact')) return;
     burstNoise({ dur: 0.05, lp: 2000, gain: 0.22 });
   },
   // Explosion — low thump layered over filtered noise for the "whumpf".

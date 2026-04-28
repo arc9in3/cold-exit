@@ -6631,7 +6631,14 @@ function aiFire(origin, dir, weapon, damageMult = 1, source = null) {
     aiFireFlame(origin, dir, weapon, damageMult, source);
     return;
   }
-  sfx.enemyFire(weapon.class || 'pistol');
+  // Distance-cull AI fire SFX — off-screen volleys skip the audio
+  // pipeline entirely. Saves the WebAudio node alloc + connect work
+  // that piles up under heavy combat (the GC churn from short-lived
+  // BufferSource/Filter/Gain nodes was correlating with frame hitches).
+  const _afdx = origin.x - player.mesh.position.x;
+  const _afdz = origin.z - player.mesh.position.z;
+  const _afDist = Math.sqrt(_afdx * _afdx + _afdz * _afdz);
+  sfx.enemyFire(weapon.class || 'pistol', _afDist);
   const targets = [...level.obstacles, player.body];
   const hit = combat.raycast(origin, dir, targets, weapon.range);
   let endPoint;
