@@ -13,10 +13,19 @@ import { fileURLToPath } from 'node:url';
 import { ollamaChat } from '../util/ollama.mjs';
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
-// Audits land in the COLD-EXIT repo's audits/ folder, not inside
-// mission-control. The whole point is the user's project gets the
-// reports next to its source.
-const REPO_ROOT = path.resolve(__dirname, '..', '..', '..', '..');
+// PROJECT_ROOT is the root of the active codebase mission-control is
+// working ON (e.g. C:\work\Personal\tacticalrogue). Audits land in
+// PROJECT_ROOT/audits/ — next to the source the worker analysed.
+//
+// Resolution order:
+//   1. MC_PROJECT_ROOT env var (set in .env after the directory move)
+//   2. Fallback: assume mission-control is nested under tools/ inside
+//      the project (legacy layout — pre-extract). Lets the same
+//      checkout work in both locations during the migration window.
+const PROJECT_ROOT = process.env.MC_PROJECT_ROOT
+  ? path.resolve(process.env.MC_PROJECT_ROOT)
+  : path.resolve(__dirname, '..', '..', '..', '..');
+const REPO_ROOT = PROJECT_ROOT;     // alias kept for clarity in the rest of the file
 
 // Per-file 30k chars; total 90k. Mirrors the lessons from local-ai.mjs:
 // going over silently truncates the prompt FROM THE START.

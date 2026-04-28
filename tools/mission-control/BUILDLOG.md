@@ -4,6 +4,28 @@ Persistent record of what's built, what's next, and why decisions were
 made the way they were. Future-Claude (and you) reads this at the
 start of any new session to pick up without losing context.
 
+## DIRECTORY EXTRACT (mid-session decision)
+
+Mission Control is moving OUT of `cold-exit/tools/mission-control/`
+into its own peer repo at `C:\work\mission-control\`. Reason:
+mission-control is project-agnostic; it manages projects, it isn't
+PART of one. New projects (DesertEdge, NightGarden) should be able
+to point mission-control at them via `MC_PROJECT_ROOT` env var
+without touching the bot's location.
+
+Code already supports the new layout — `MC_PROJECT_ROOT` env var was
+added to `local_runner.mjs` + `dashboard/server.mjs`. Falls back to
+the legacy nested path resolution if the env var is unset, so the
+same checkout works in both locations during the migration window.
+
+User runs the move per `MIGRATE-OUT.md` in this directory:
+1. Stop bot (Ctrl+C)
+2. `Move-Item ... C:\work\mission-control`
+3. `git init` at new location
+4. Confirm `.env` has `MC_PROJECT_ROOT=C:/work/Personal/tacticalrogue`
+5. Restart bot from new location
+6. `git rm -r tools/mission-control` from cold-exit + commit
+
 ## Active state
 
 **Project under development:** Cold Exit (browser isometric extraction shooter)

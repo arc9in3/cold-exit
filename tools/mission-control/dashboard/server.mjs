@@ -23,7 +23,12 @@ import { PERSONAS, BG_WORKERS } from '../src/personas.mjs';
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const ROOT = path.resolve(__dirname, '..');
-const REPO_ROOT = path.resolve(__dirname, '..', '..', '..');
+// Active project root — see comment in src/workers/local_runner.mjs.
+// Set MC_PROJECT_ROOT in .env to point at the project mission-control
+// should manage (e.g. C:/work/Personal/tacticalrogue).
+const REPO_ROOT = process.env.MC_PROJECT_ROOT
+  ? path.resolve(process.env.MC_PROJECT_ROOT)
+  : path.resolve(__dirname, '..', '..', '..');
 
 const PORT = 3001;
 
