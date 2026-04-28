@@ -75,6 +75,31 @@ flow for in-session iterative work — that's faster and matches how
 the user runs the project. Background Claude (e.g. `/loop`) still
 branches per PROJECT.md.
 
+## Backlog items go to Discord, not local files
+
+When the user defers something — "shelf this", "backlog this", "park
+it", "save for later" — post it to the project's Discord backlog
+channel via mission-control instead of just appending to BACKLOG.md.
+
+- Cold Exit's backlog channel is **`#cold-exit-backlog`** (env var
+  `CHAN_COLD_EXIT_BACKLOG`).
+- Use the helper:
+  ```bash
+  node ../../mission-control/scripts/post-backlog.mjs \
+    --channel=cold-exit-backlog \
+    --title="..." \
+    --why="..." \
+    --effort="..." \
+    --prereqs="..." \
+    --tags="..."
+  ```
+- For longer write-ups, pass `--body-file=<path>` instead of structured
+  flags.
+- After posting, mention the channel + a one-line summary back to the
+  user so they can see it landed.
+- BACKLOG.md is for permanent / shipping-blocker scope. Discord is the
+  primary surface for in-flight deferrals.
+
 ## Task delegation to local workers
 
 When you identify a contained piece of work in this codebase — a perf
