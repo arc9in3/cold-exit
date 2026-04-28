@@ -4714,12 +4714,22 @@ function firePlayerGrapple(playerInfo, weapon, aimPoint) {
       });
     }
   } else {
-    // Pull the PLAYER to the hit point. Player's movement is gated
-    // via _playerGrappleT in the player tick (set below).
+    // Pull the PLAYER to the hit point. The raycast hit is BY
+    // DEFINITION on the wall surface, so dragging directly to it
+    // would clip the player into geometry. Back the target off
+    // along the ray by (player collision radius + small buffer)
+    // so we aim at a safe stop-point in front of the wall.
+    const playerR = (tunables.player?.collisionRadius ?? 0.4);
+    const stopOff = playerR + 0.25;
+    const safeDst = new THREE.Vector3(
+      hit.point.x - dir.x * stopOff,
+      hit.point.y,
+      hit.point.z - dir.z * stopOff,
+    );
     _activeGrapples.push({
       target: player, towardEnemy: true,
       srcPos: player.mesh.position,
-      dstPos: hit.point.clone(),
+      dstPos: safeDst,
       cable, t: 0, life,
     });
     _playerGrappleT = life;
@@ -4744,11 +4754,33 @@ function _tickGrapples(dt) {
     // Ease-out — fast start, settle at the end.
     const ease = 1 - (1 - k) * (1 - k);
     if (g.towardEnemy) {
-      // Pulling player toward dstPos.
+      // Pulling player toward dstPos. Route through level.resolveCollision
+      // so the player stops AT the wall instead of clipping into it.
+      // Without this, fast pulls into a corner planted the player inside
+      // the collision volume and the next physics step couldn't recover.
       const sx = player.mesh.position.x;
       const sz = player.mesh.position.z;
-      player.mesh.position.x = sx + (g.dstPos.x - sx) * (ease * 0.55);
-      player.mesh.position.z = sz + (g.dstPos.z - sz) * (ease * 0.55);
+      const targetX = sx + (g.dstPos.x - sx) * (ease * 0.55);
+      const targetZ = sz + (g.dstPos.z - sz) * (ease * 0.55);
+      const playerR = (tunables.player?.collisionRadius ?? 0.4);
+      if (level && level.resolveCollision) {
+        const res = level.resolveCollision(sx, sz, targetX, targetZ, playerR);
+        player.mesh.position.x = res.x;
+        player.mesh.position.z = res.z;
+        // If we got clamped (wall in the way), end the pull early —
+        // continuing to push against the wall just looks like a
+        // stuck animation.
+        const movedSq = (res.x - sx) * (res.x - sx) + (res.z - sz) * (res.z - sz);
+        const wantedSq = (targetX - sx) * (targetX - sx) + (targetZ - sz) * (targetZ - sz);
+        if (wantedSq > 0.0004 && movedSq < wantedSq * 0.10) {
+          // Less than 10% of intended motion landed — wall blocking;
+          // terminate the grapple this frame.
+          g.t = g.life;
+        }
+      } else {
+        player.mesh.position.x = targetX;
+        player.mesh.position.z = targetZ;
+      }
     } else {
       // Pulling enemy toward player.
       const e = g.target;
