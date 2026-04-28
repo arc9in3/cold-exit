@@ -875,7 +875,9 @@ export class MeleeEnemyManager {
           e.pathCache = e.pathCache || { t: 0, toId: -1, nextDoor: null };
           e.pathCache.t -= dt;
           if (e.pathCache.t <= 0 || e.pathCache.toId !== there.id) {
-            e.pathCache.t = 0.45 + Math.random() * 0.25;
+            // Committed routing — see gunman.js note. 0.45-0.70s
+            // bumped to 1.5-2.0s so the AI sees through its decision.
+            e.pathCache.t = 1.5 + Math.random() * 0.5;
             e.pathCache.toId = there.id;
             const doors = ctx.level.pathDoorsFrom(here.id, there.id);
             e.pathCache.nextDoor = (doors && doors.length) ? doors[0] : null;
@@ -933,16 +935,22 @@ export class MeleeEnemyManager {
       }
 
       const beforeX = e.group.position.x, beforeZ = e.group.position.z;
-      // Proactive steering — before we commit to the desired heading,
-      // ask the level to whisker-test for an obstacle ahead. Run
-      // every-other-frame per enemy and cache the deflection so the
-      // off-frame still uses the corrected heading; halves the cost
-      // when many adds are chasing.
+      // Proactive steering — committed every ~12 frames (~5Hz).
+      // Was every other frame which read as constant heading twitch.
+      // Stuck-check at the end forces a re-steer if the actor hasn't
+      // moved much, so wall-pinned melees recover.
       e._steerPhase = (e._steerPhase || 0) + 1;
-      // Read approach into local scalars so we don't mutate the
-      // module-scope dir2d when the default branch was taken.
       let apX = approach.x, apZ = approach.z;
-      if ((e._steerPhase & 1) === 0 && ctx.level && ctx.level.steerAround) {
+      const _stuckPos = e._steerLastPos || (e._steerLastPos = { x: beforeX, z: beforeZ });
+      const _stuckDx = beforeX - _stuckPos.x;
+      const _stuckDz = beforeZ - _stuckPos.z;
+      const _stuckMoved = (_stuckDx * _stuckDx + _stuckDz * _stuckDz) > 0.01;
+      const _steerDue = (e._steerPhase % 12) === 0 || !_stuckMoved;
+      if (_steerDue) {
+        _stuckPos.x = beforeX;
+        _stuckPos.z = beforeZ;
+      }
+      if (_steerDue && ctx.level && ctx.level.steerAround) {
         const lookAhead = Math.max(0.8, moveSpeed * 0.35);
         const steered = ctx.level.steerAround(beforeX, beforeZ,
           apX, apZ,

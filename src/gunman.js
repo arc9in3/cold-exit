@@ -1822,7 +1822,11 @@ export class GunmanManager {
         g.pathCache = g.pathCache || { t: 0, toId: -1, nextDoor: null };
         g.pathCache.t -= dt;
         if (g.pathCache.t <= 0 || g.pathCache.toId !== ctx.playerRoomId) {
-          g.pathCache.t = 0.4 + Math.random() * 0.3;
+          // Committed routing — was 0.4-0.7s (twitchy re-evaluation
+          // every ~half-second). Now 1.5-2.0s so the AI sees through
+          // its initial decision before reassessing. Reads as
+          // intentional movement instead of constant indecision.
+          g.pathCache.t = 1.5 + Math.random() * 0.5;
           g.pathCache.toId = ctx.playerRoomId;
           const doors = ctx.level.pathDoorsFrom(hereId, ctx.playerRoomId);
           g.pathCache.nextDoor = (doors && doors.length) ? doors[0] : null;
@@ -2340,15 +2344,24 @@ export class GunmanManager {
         + strafeVec.z * slowK
         + (g.dashT > 0 ? g.dashVz : 0)
         + (g.repositionT > 0 ? g.repositionDirZ * moveSpeed * 0.9 * slowK : 0);
-      // Whisker steering — re-aim the velocity vector around props
-      // the gunman is about to walk into. Bosses + dashers especially
-      // were getting wedged against couches when chasing. Skipped
-      // during a dash burst (intentional commit) and for tanks (which
-      // are designed to just plow forward). Run every-other-frame per
-      // gunman (each carries its own phase) so 30+ enemies don't all
-      // pay the look-ahead probes on the same frame.
+      // Whisker steering — re-aim the velocity vector around props.
+      // Was every 2 frames (~30Hz), which produced visible heading
+      // twitch as the AI re-deflected on every probe. Bumped to
+      // every ~12 frames (~5Hz at 60fps) so the AI commits to a
+      // chosen heading and sees it through. Stuck-check at the end
+      // forces an immediate re-steer if the actor hasn't moved much
+      // since the last check, so wall-pinned enemies recover fast.
       g._steerPhase = (g._steerPhase || 0) + 1;
-      if ((g._steerPhase & 1) === 0 && ctx.level && ctx.level.steerAround
+      const _stuckPos = g._steerLastPos || (g._steerLastPos = { x: g.group.position.x, z: g.group.position.z });
+      const _stuckDx = g.group.position.x - _stuckPos.x;
+      const _stuckDz = g.group.position.z - _stuckPos.z;
+      const _stuckMoved = (_stuckDx * _stuckDx + _stuckDz * _stuckDz) > 0.01;     // >0.1m
+      const _steerDue = (g._steerPhase % 12) === 0 || !_stuckMoved;
+      if (_steerDue) {
+        _stuckPos.x = g.group.position.x;
+        _stuckPos.z = g.group.position.z;
+      }
+      if (_steerDue && ctx.level && ctx.level.steerAround
           && g.dashT <= 0 && g.variant !== 'tank') {
         const speed = Math.hypot(vx, vz);
         if (speed > 0.05) {
@@ -2356,8 +2369,8 @@ export class GunmanManager {
           const steered = ctx.level.steerAround(g.group.position.x, g.group.position.z,
             vx / speed, vz / speed,
             tunables.ai.collisionRadius + 0.15, lookAhead);
-          // Cache the steered direction so the off-frame still uses
-          // the deflected heading (avoids visible 30Hz jitter).
+          // Cache the steered direction; the off-frames reuse it so
+          // the heading stays committed for ~200ms.
           g._steerDirX = steered.x;
           g._steerDirZ = steered.z;
           vx = steered.x * speed;
