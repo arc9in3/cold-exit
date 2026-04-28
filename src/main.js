@@ -1065,7 +1065,7 @@ function rollStoreOffers(n, tier) {
   // run into mythic mode + lvl-20 difficulty.
   if (getMythicRunUnlocked()) {
     const mythicPool = tunables.weapons.filter(w =>
-      w.mythic && !w.pactReward && w.name !== "Jessica's Rage");
+      w.mythic && !w.pactReward && !w.encounterOnly && w.name !== "Jessica's Rage");
     if (mythicPool.length) {
       const mw = mythicPool[Math.floor(Math.random() * mythicPool.length)];
       offers.push({ ...mw, rarity: 'mythic', _mythicRunOffer: true });
@@ -1799,6 +1799,12 @@ function regenerateLevel() {
   // blood pools, gore, impacts, explosions, etc. These persisted
   // across level transitions and accumulated across a long run.
   if (combat.clearAll) combat.clearAll();
+  // Pre-warm combat pools — on first level the lazy _ensurePools()
+  // ran on the first shot, allocating ~270 meshes mid-frame and
+  // producing the visible 'first shot hitch.' Forcing pool creation
+  // here moves it into the level-transition window where the
+  // player's already paying for regen + asset loads.
+  if (combat._ensurePools) combat._ensurePools();
   // Encounter chance temporarily pinned to 100% so every level rolls
   // an encounter — used while we're iterating on the encounter pool
   // and want fast feedback. Restore the pity-timer formula
@@ -3776,9 +3782,11 @@ function awardPersistentChips(amount) {
 // pool, so a full-run hunt is needed to get the panicking-flame
 // shotgun.
 function rollMythicDrop() {
-  // Exclude pactReward weapons (Pain) — those are quest-locked rewards
-  // and shouldn't drop from boss-kill mythic rolls.
-  const pool = tunables.weapons.filter(w => w.rarity === 'mythic' && !w.artifact && !w.pactReward);
+  // Exclude pactReward weapons (Pain) and encounterOnly weapons
+  // (Zipline Gun) — those are quest/encounter-locked and shouldn't
+  // drop from boss-kill mythic rolls.
+  const pool = tunables.weapons.filter(w => w.rarity === 'mythic'
+    && !w.artifact && !w.pactReward && !w.encounterOnly);
   if (!pool.length) return null;
   const dragon = pool.find(w => w.name === 'Dragonbreath');
   const others = pool.filter(w => w.name !== 'Dragonbreath');
@@ -4648,6 +4656,130 @@ function firePlayerProjectile(playerInfo, weapon, aimPoint) {
   });
 }
 
+// --- Grapple state -------------------------------------------------
+// Zipline Gun fires a hitscan ray. Two outcomes:
+//   * enemy hit → reel the enemy to the player over ~0.45s
+//   * terrain hit → reel the player to the impact point over ~0.45s
+// During the reel, the player or enemy is in 'grappleT > 0' state and
+// has movement gated; a thin gold cable mesh visualizes the line
+// between the muzzle and target. Cleared when t hits 0.
+let _activeGrapples = [];        // {target, towardEnemy, srcPos, dstPos, t, life, cable, cableMat}
+const _grappleCableMat = new THREE.LineBasicMaterial({
+  color: 0xffd040, transparent: true, opacity: 0.95, depthWrite: false,
+});
+
+function firePlayerGrapple(playerInfo, weapon, aimPoint) {
+  const range = weapon.grappleRange || weapon.range || 14;
+  const origin = playerInfo.muzzleWorld.clone();
+  const dir = new THREE.Vector3(
+    aimPoint.x - origin.x, 0, aimPoint.z - origin.z,
+  );
+  if (dir.lengthSq() < 0.0001) return;
+  dir.normalize();
+  weapon.ammo = Math.max(0, (weapon.ammo | 0) - 1);
+  if (weapon.ammo <= 0) tryReload(weapon);
+  // Combined hit list — enemies + walls/props. First-hit wins.
+  const hitTargets = [...allHittables(), ...level.solidObstacles()];
+  const hit = combat.raycast(origin, dir, hitTargets, range);
+  // Tracer beam to wherever we landed (or max range if nothing).
+  const endPoint = hit
+    ? hit.point
+    : origin.clone().addScaledVector(dir, range);
+  combat.spawnShot(origin, endPoint, weapon.tracerColor || 0xffd040,
+    { light: false, flash: true });
+  if (sfx.fire) sfx.fire('exotic');
+  alertEnemiesFromShot(origin);
+  if (!hit) return;
+  // Did we hit an enemy? Owner.manager + alive flag distinguishes
+  // an actor hit from a wall hit.
+  const isEnemy = !!(hit.owner && hit.owner.manager && hit.owner.alive);
+  const cable = _spawnGrappleCable();
+  const life = 0.45;
+  if (isEnemy) {
+    // Pull the enemy toward the player. Damage applies once on
+    // start so the gun feels like a hit. Stagger so the enemy can't
+    // immediately chase out of the pull.
+    const enemy = hit.owner;
+    const dmg = (weapon.grappleEnemyDamage || 35) * (derivedStats.rangedDmgMult || 1);
+    runStats.addDamage(dmg);
+    enemy.manager.applyHit(enemy, dmg, hit.zone || 'torso', dir, { weaponClass: 'exotic' });
+    if (enemy.alive) {
+      enemy.staggerT = Math.max(enemy.staggerT || 0, life + 0.2);
+      _activeGrapples.push({
+        target: enemy, towardEnemy: false,
+        srcPos: enemy.group.position,
+        dstPos: player.mesh.position,
+        cable, t: 0, life,
+      });
+    }
+  } else {
+    // Pull the PLAYER to the hit point. Player's movement is gated
+    // via _playerGrappleT in the player tick (set below).
+    _activeGrapples.push({
+      target: player, towardEnemy: true,
+      srcPos: player.mesh.position,
+      dstPos: hit.point.clone(),
+      cable, t: 0, life,
+    });
+    _playerGrappleT = life;
+  }
+}
+
+function _spawnGrappleCable() {
+  const geom = new THREE.BufferGeometry();
+  const pts = new Float32Array(6);
+  geom.setAttribute('position', new THREE.BufferAttribute(pts, 3).setUsage(THREE.DynamicDrawUsage));
+  const line = new THREE.Line(geom, _grappleCableMat);
+  line.frustumCulled = false;
+  scene.add(line);
+  return { line, pts };
+}
+
+function _tickGrapples(dt) {
+  for (let i = _activeGrapples.length - 1; i >= 0; i--) {
+    const g = _activeGrapples[i];
+    g.t += dt;
+    const k = Math.min(1, g.t / g.life);
+    // Ease-out — fast start, settle at the end.
+    const ease = 1 - (1 - k) * (1 - k);
+    if (g.towardEnemy) {
+      // Pulling player toward dstPos.
+      const sx = player.mesh.position.x;
+      const sz = player.mesh.position.z;
+      player.mesh.position.x = sx + (g.dstPos.x - sx) * (ease * 0.55);
+      player.mesh.position.z = sz + (g.dstPos.z - sz) * (ease * 0.55);
+    } else {
+      // Pulling enemy toward player.
+      const e = g.target;
+      if (!e || !e.alive || !e.group) { g.t = g.life; continue; }
+      const sx = e.group.position.x;
+      const sz = e.group.position.z;
+      const px = player.mesh.position.x;
+      const pz = player.mesh.position.z;
+      e.group.position.x = sx + (px - sx) * (ease * 0.55);
+      e.group.position.z = sz + (pz - sz) * (ease * 0.55);
+    }
+    // Update cable endpoints (muzzle → target).
+    const muzzle = lastPlayerInfo?.muzzleWorld || player.mesh.position;
+    const tgt = g.towardEnemy ? g.dstPos : g.target.group.position;
+    g.cable.pts[0] = muzzle.x;
+    g.cable.pts[1] = (muzzle.y || 1.2);
+    g.cable.pts[2] = muzzle.z;
+    g.cable.pts[3] = tgt.x;
+    g.cable.pts[4] = (tgt.y || 1.0) + (g.towardEnemy ? 0 : 1.2);
+    g.cable.pts[5] = tgt.z;
+    g.cable.line.geometry.attributes.position.needsUpdate = true;
+    g.cable.line.material.opacity = 0.95 * (1 - k * 0.5);
+    if (g.t >= g.life) {
+      scene.remove(g.cable.line);
+      g.cable.line.geometry.dispose();
+      _activeGrapples.splice(i, 1);
+    }
+  }
+  if (_playerGrappleT > 0) _playerGrappleT = Math.max(0, _playerGrappleT - dt);
+}
+let _playerGrappleT = 0;
+
 function fireOneShot(playerInfo, weapon, aimPoint, isADS, aimOwner) {
   // Magnum Opus override — full-auto weapons may fire past empty if
   // the relic is owned. Cost is paid in tickShooting (3 HP/s drain).
@@ -4674,6 +4806,12 @@ function fireOneShot(playerInfo, weapon, aimPoint, isADS, aimOwner) {
   // tracer — routes through the projectile manager.
   if (weapon.fireMode === 'projectile') {
     firePlayerProjectile(playerInfo, weapon, aimPoint);
+    return;
+  }
+  // Grapple — Zipline Gun. Hitscan ray; on enemy hit, reel them to
+  // the player; on terrain hit, reel the player to the impact point.
+  if (weapon.fireMode === 'grapple') {
+    firePlayerGrapple(playerInfo, weapon, aimPoint);
     return;
   }
 
@@ -10480,6 +10618,7 @@ function tick() {
   _tickBurnFlames(dt);
   tickAmbushDrops(dt);
   _tickStunStars(dt);
+  _tickGrapples(dt);
   tickCorpseDespawn(dt);
   tickEncounters(dt);
   _tickSmokePuffs(dt);

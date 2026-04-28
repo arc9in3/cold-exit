@@ -1674,5 +1674,35 @@ export const tunables = {
       ],
       description: 'A mace made of soft grey felt, seems to emit pure evil.',
     },
+    {
+      // Zipline Gun — exotic grappling hook. Pulls enemies to the
+      // player on hit, OR pulls the player to terrain on miss-into-
+      // wall. Single shot, 5s reload, medium-short range. mythic +
+      // encounterOnly tags keep it out of every random pool — the
+      // ONLY way to acquire it is the 'love_actually' encounter.
+      name: 'Zipline Gun', mythic: true, encounterOnly: true,
+      type: 'ranged', class: 'exotic', rarity: 'mythic',
+      fireMode: 'grapple',
+      grappleRange: 14,
+      grappleEnemyDamage: 35,
+      grappleSpeed: 32,        // pull travel speed (m/s) — 14m crossed in ~0.45s
+      fireRate: 0.2,           // single-shot pacing (one shot per ~5s incl. reload)
+      damage: 35,
+      range: 14,
+      hipSpread: 0.0,
+      adsSpread: 0.0,
+      adsZoom: 0.78,
+      adsPeekDistance: 5.0,
+      tracerColor: 0xffd040,
+      muzzleLength: 0.85,
+      muzzleGirth: 0.20,
+      pelletCount: 1,
+      burstCount: 1,
+      burstInterval: 0,
+      magSize: 1,
+      reloadTime: 5.0,
+      attachmentSlots: ['topRail', 'sideRail', 'underRail', 'stock'],
+      description: 'Adventure 360° prototype. Hits an enemy → reels them in. Hits a wall → reels you to it. One shot, long reload.',
+    },
   ],
 };

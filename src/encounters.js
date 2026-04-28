@@ -31,6 +31,7 @@ import * as THREE from 'three';
 import { buildProp } from './props.js';
 import { getCompletedEncounters, markEncounterDone } from './prefs.js';
 import { TOY_DEFS } from './inventory.js';
+import { tunables } from './tunables.js';
 
 // Shared frozen empty list — every hittables() call that has nothing
 // to expose returns this reference instead of allocating [] per frame.
@@ -4440,6 +4441,226 @@ export const ENCOUNTER_DEFS = {
           },
         ],
       });
+    },
+    onItemDropped(_item, _ctx) { return { consume: false }; },
+  },
+
+  // -----------------------------------------------------------------
+  // Love Actually — a small zipline + Mike, a man whose livelihood
+  // is the "Adventure 360° Zipline." Riding it 4 times breaks it;
+  // the chest that drops contains the Zipline Gun (mythic exotic,
+  // encounter-only). Prize-gated — see tunables.weapons 'Zipline
+  // Gun' (mythic + encounterOnly).
+  // -----------------------------------------------------------------
+  love_actually: {
+    id: 'love_actually',
+    name: 'Love Actually',
+    floorColor: 0xe06aa8,
+    oncePerSave: true,
+    condition: (state) => state.levelIndex >= 1,
+    spawn(scene, room, ctx) {
+      const disc = _spawnFloorDisc(scene, room, this.floorColor);
+      // Zipline geometry — two poles + a horizontal cable + a small
+      // hanging pulley. Poles at ±5m on the X axis from the disc
+      // centre; cable at ground-level-ish (y=1.7) so the player
+      // visually rides under it.
+      const POLE_OFFSET = 5.0;
+      const CABLE_Y = 1.8;
+      const stoneMat = new THREE.MeshStandardMaterial({ color: 0x4a4e58, roughness: 0.7, metalness: 0.3 });
+      const cableMat = new THREE.MeshStandardMaterial({ color: 0x8a7858, roughness: 0.6, metalness: 0.4 });
+      const pulleyMat = new THREE.MeshStandardMaterial({ color: 0xc9a87a, roughness: 0.5, metalness: 0.6 });
+      const signMat = new THREE.MeshStandardMaterial({
+        color: 0xffd070, emissive: 0xa07020, emissiveIntensity: 0.35, roughness: 0.45,
+      });
+      const wellGroup = new THREE.Group();
+      // Two zipline poles + a base disc.
+      const mkPole = (xOff) => {
+        const pole = new THREE.Mesh(new THREE.CylinderGeometry(0.10, 0.13, 2.2, 10), stoneMat);
+        pole.position.set(xOff, 1.1, 0);
+        pole.castShadow = true;
+        wellGroup.add(pole);
+        const base = new THREE.Mesh(new THREE.CylinderGeometry(0.30, 0.40, 0.10, 14), stoneMat);
+        base.position.set(xOff, 0.05, 0);
+        wellGroup.add(base);
+      };
+      mkPole(-POLE_OFFSET);
+      mkPole(POLE_OFFSET);
+      // Cable mesh — thin stretched cylinder along X.
+      const cableLen = POLE_OFFSET * 2;
+      const cable = new THREE.Mesh(
+        new THREE.CylinderGeometry(0.025, 0.025, cableLen, 6),
+        cableMat,
+      );
+      cable.rotation.z = Math.PI / 2;
+      cable.position.set(0, CABLE_Y, 0);
+      wellGroup.add(cable);
+      // Pulley — a small box that slides along the cable. Initialized
+      // at the left pole; tick() animates its X position during a
+      // ride so the cable + pulley read as one moving thing.
+      const pulley = new THREE.Mesh(new THREE.BoxGeometry(0.22, 0.18, 0.18), pulleyMat);
+      pulley.position.set(-POLE_OFFSET, CABLE_Y - 0.05, 0);
+      wellGroup.add(pulley);
+      // Sign — "ADVENTURE 360°" billboard mounted on the left pole.
+      const sign = new THREE.Mesh(new THREE.BoxGeometry(1.6, 0.5, 0.05), signMat);
+      sign.position.set(-POLE_OFFSET, 2.55, 0);
+      wellGroup.add(sign);
+      const signLabel = _makeLabelSprite('ADVENTURE 360°', '#ffe080');
+      signLabel.position.set(-POLE_OFFSET, 3.0, 0);
+      wellGroup.add(signLabel);
+      wellGroup.position.set(disc.cx, 0, disc.cz);
+      scene.add(wellGroup);
+      // Mike — stands at the front-left corner of the disc, watching.
+      const mike = _buildSimpleNpc({
+        bodyColor: 0x6a4a30, headColor: 0xc8a880,
+        accentColor: 0xc9a87a, pantsColor: 0x2a2218,
+        hairColor: 0x3a2010, height: 1.78,
+      });
+      mike.position.set(disc.cx + 3.5, 0, disc.cz - 3.0);
+      mike.rotation.y = -Math.PI / 4;
+      scene.add(mike);
+      const mikeLabel = _makeLabelSprite('MIKE', '#e8d090');
+      mikeLabel.position.set(disc.cx + 3.5, 2.1, disc.cz - 3.0);
+      scene.add(mikeLabel);
+      // Encounter colliders — block player walking through the poles.
+      const _leftCollider = ctx.level?.addEncounterCollider
+        ? ctx.level.addEncounterCollider(disc.cx - POLE_OFFSET, disc.cz, 0.6, 0.6, 2.0)
+        : null;
+      const _rightCollider = ctx.level?.addEncounterCollider
+        ? ctx.level.addEncounterCollider(disc.cx + POLE_OFFSET, disc.cz, 0.6, 0.6, 2.0)
+        : null;
+      return {
+        wellGroup, mike, mikeLabel, disc,
+        cable, pulley, sign, signLabel,
+        rideCount: 0,
+        riding: false,
+        rideT: 0,
+        rideDur: 0.55,
+        rideFrom: null, rideTo: null,
+        cooldown: 0,
+        broken: false,
+        complete: false,
+        chestSpawned: false,
+        _leftCollider, _rightCollider,
+        POLE_OFFSET, CABLE_Y,
+      };
+    },
+    tick(dt, ctx) {
+      const s = ctx.state;
+      if (s.complete) return;
+      // Tick the ride animation if one is in progress.
+      if (s.riding) {
+        s.rideT = Math.min(s.rideDur, s.rideT + dt);
+        const k = s.rideT / s.rideDur;
+        const ease = 1 - (1 - k) * (1 - k);
+        const px = s.rideFrom.x + (s.rideTo.x - s.rideFrom.x) * ease;
+        const pz = s.rideFrom.z + (s.rideTo.z - s.rideFrom.z) * ease;
+        ctx.playerPos.x = px;
+        ctx.playerPos.z = pz;
+        // Pulley tracks player X (relative to disc).
+        if (s.pulley) s.pulley.position.x = px - s.disc.cx;
+        if (s.rideT >= s.rideDur) {
+          s.riding = false;
+          s.cooldown = 0.6;        // beat before another ride can trigger
+          s.rideCount += 1;
+          // Mike's bark per ride.
+          const lines = [
+            "you're being too rough with it",
+            "you're pulling it too hard",
+            "you must think this is yours",
+          ];
+          const idx = Math.min(lines.length - 1, s.rideCount - 1);
+          if (s.mike && s.rideCount <= 3) {
+            const wp = new THREE.Vector3();
+            s.mike.getWorldPosition(wp);
+            wp.y += 1.95;
+            ctx.spawnSpeech(wp, lines[idx], 3.5);
+          }
+          // 4th ride — zipline breaks. Drop the cable, sad-Mike beat,
+          // chest spawns at the disc centre with the Zipline Gun.
+          if (s.rideCount >= 4 && !s.broken) {
+            s.broken = true;
+            // Cable visually snaps — rotate / drop it so it dangles.
+            if (s.cable) {
+              s.cable.rotation.z = Math.PI / 2 + 0.6;
+              s.cable.position.y = 0.4;
+              s.cable.position.x = -1.2;
+            }
+            if (s.pulley) s.pulley.position.y = 0.3;
+            if (s.sign && s.sign.material) {
+              s.sign.material.emissiveIntensity = 0;
+              s.sign.material.color.setHex(0x6a5430);
+            }
+            // Mike's grief — speak two lines staggered.
+            const wp = new THREE.Vector3();
+            s.mike.getWorldPosition(wp);
+            wp.y += 1.95;
+            ctx.spawnSpeech(wp, 'NO! MY LIVELIHOOD!', 4.5);
+            const followUps = [
+              "i don't know what i'm gonna do…",
+              "this was everything to me",
+              "i'm gonna lose the cabin",
+              "tell my wife i tried",
+              "the children…",
+            ];
+            const fu = followUps[Math.floor(Math.random() * followUps.length)];
+            setTimeout(() => {
+              if (s.mike && s.mike.parent) {
+                const wp2 = new THREE.Vector3();
+                s.mike.getWorldPosition(wp2);
+                wp2.y += 1.95;
+                ctx.spawnSpeech(wp2, fu, 5.0);
+              }
+            }, 2200);
+            // Spawn the chest — Zipline Gun (mythic, encounter-only).
+            if (!s.chestSpawned && ctx.spawnEncounterChest) {
+              const ziplineDef = ctx.tunables?.weapons?.find?.(w => w.name === 'Zipline Gun')
+                || (typeof tunables !== 'undefined'
+                    ? tunables.weapons.find(w => w.name === 'Zipline Gun')
+                    : null);
+              if (ziplineDef) {
+                ctx.spawnEncounterChest(s.disc.cx, s.disc.cz, [
+                  { ...ziplineDef, rarity: 'mythic' },
+                ]);
+                s.chestSpawned = true;
+              }
+            }
+            if (ctx.markEncounterComplete) ctx.markEncounterComplete('love_actually');
+            s.complete = true;
+          }
+        }
+        return;
+      }
+      // Cooldown — prevents the player auto-triggering the other end
+      // the moment they land.
+      if (s.cooldown > 0) {
+        s.cooldown = Math.max(0, s.cooldown - dt);
+        return;
+      }
+      // Detect player at either pole. Trigger zone is a small circle
+      // around the pole's base. Whichever pole the player is closest
+      // to, ride to the OTHER one.
+      const px = ctx.playerPos.x - s.disc.cx;
+      const pz = ctx.playerPos.z - s.disc.cz;
+      const TRIG_R2 = 1.3 * 1.3;
+      const dxL = px - (-s.POLE_OFFSET);
+      const dxR = px - s.POLE_OFFSET;
+      const distL2 = dxL * dxL + pz * pz;
+      const distR2 = dxR * dxR + pz * pz;
+      let from = null, to = null;
+      if (distL2 < TRIG_R2 && distR2 > TRIG_R2) {
+        from = { x: s.disc.cx - s.POLE_OFFSET, z: s.disc.cz };
+        to   = { x: s.disc.cx + s.POLE_OFFSET, z: s.disc.cz };
+      } else if (distR2 < TRIG_R2 && distL2 > TRIG_R2) {
+        from = { x: s.disc.cx + s.POLE_OFFSET, z: s.disc.cz };
+        to   = { x: s.disc.cx - s.POLE_OFFSET, z: s.disc.cz };
+      }
+      if (from && to && !s.broken) {
+        s.riding = true;
+        s.rideT = 0;
+        s.rideFrom = from;
+        s.rideTo = to;
+        if (ctx.sfx?.uiAccept) ctx.sfx.uiAccept();
+      }
     },
     onItemDropped(_item, _ctx) { return { consume: false }; },
   },
