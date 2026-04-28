@@ -226,8 +226,8 @@ export class GunmanManager {
   constructor(scene) {
     this.scene = scene;
     this.gunmen = [];
-    this._baseBody = new THREE.Color(0x3a2530);
-    this._baseHead = new THREE.Color(0x2a1820);
+    this._normalBodyColor = new THREE.Color(0x3a2530);
+    this._normalHeadColor = new THREE.Color(0x2a1820);
     this._hurt = new THREE.Color(0xff4a4a);
   }
 
@@ -458,8 +458,8 @@ export class GunmanManager {
     const scaleXZ = Math.min(MAX_SCALE, tierScale * profile.scale);
     const scaleY  = Math.min(MAX_SCALE, tierScale * (profile.scaleY ?? profile.scale));
 
-    const baseBodyHex = profile.tint ?? this._baseBody.getHex();
-    const baseHeadHex = profile.tint ? (profile.tint & 0x555555) : this._baseHead.getHex();
+    const baseBodyHex = profile.tint ?? this._normalBodyColor.getHex();
+    const baseHeadHex = profile.tint ? (profile.tint & 0x555555) : this._normalHeadColor.getHex();
     const bodyHex = tier === 'boss' ? 0x5a1a1a : (tier === 'subBoss' ? 0x3a1e58 : baseBodyHex);
     const headHex = tier === 'boss' ? 0x3a0f10 : (tier === 'subBoss' ? 0x22103e : baseHeadHex);
     // Per-tier gear accent — bosses get bronze kit, sub-bosses red,
@@ -1049,8 +1049,8 @@ export class GunmanManager {
         } else {
           // Fallback for any path that bypassed the instancer (baked
           // corpse, headless tests).
-          g.bodyMat.color.copy(this._baseBody).lerp(this._hurt, k);
-          g.headMat.color.copy(this._baseHead).lerp(this._hurt, k);
+          g.bodyMat.color.copy(this._normalBodyColor).lerp(this._hurt, k);
+          g.headMat.color.copy(this._normalHeadColor).lerp(this._hurt, k);
         }
       }
       g.slowT = Math.max(0, g.slowT - dt);

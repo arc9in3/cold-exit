@@ -91,14 +91,19 @@ async function collectFiles() {
 
 // ---------- file packaging --------------------------------------------
 // Each file becomes a fenced block tagged with its repo-relative path.
-// Per-file 30k chars; total 90k chars. Calibrated for num_ctx = 32768
-// in callOllama — 4 chars per token roughly, so 90k chars ≈ 22k tokens
-// of source, leaving 10k for system+user wrapper + the response. Going
-// over silently truncates the prompt FROM THE START, which makes the
-// model answer the wrong question entirely. If you need bigger scope,
-// split the audit into multiple --task=*-part-N runs.
-const PER_FILE_CHARS = 30000;
-const TOTAL_BUDGET   = 90000;
+// Defaults: per-file 30k chars; total 90k chars. Calibrated for the
+// default num_ctx = 32768 — at ~4 chars/token that's ~22k tokens of
+// source plus headroom. Going over silently truncates the prompt
+// FROM THE START, which makes the model answer the wrong question.
+//
+// CLI overrides (use sparingly, both push VRAM):
+//   --max-bytes=130000   bump file budget for one-off large refactors
+//   --num-ctx=49152      bump Ollama context window to match
+// 49k context on a 32B Q4 still fits a 5090 (28GB usable VRAM after
+// model load) but gets close to swap; profile if you push higher.
+const PER_FILE_CHARS = +(args['per-file-bytes']) || 30000;
+const TOTAL_BUDGET   = +(args['max-bytes'])     || 90000;
+const NUM_CTX        = +(args['num-ctx'])       || 32768;
 
 async function packFiles(files) {
   const blocks = [];
@@ -133,12 +138,9 @@ async function packFiles(files) {
 async function callOllama(messages) {
   // CRITICAL: Ollama defaults num_ctx to 2048 / 4096 even when the model
   // declares 128k. Without an explicit override the prompt gets silently
-  // TRUNCATED FROM THE START, which shows up as the model ignoring the
-  // question and answering about whatever survived in the tail of the
-  // context. We push num_ctx high enough to fit the packed source plus
-  // the system + user wrapper. 32B Q4 on a 5090 holds 32k cleanly with
-  // headroom; 64k starts swapping to system RAM. Cap at 32k.
-  const numCtx = 32768;
+  // TRUNCATED FROM THE START. NUM_CTX is module-level so the user can
+  // bump it via --num-ctx for big-scope tasks (alongside --max-bytes).
+  const numCtx = NUM_CTX;
   const res = await fetch(`${HOST}/v1/chat/completions`, {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
