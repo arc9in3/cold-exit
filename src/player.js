@@ -493,7 +493,15 @@ export function createPlayer(scene) {
     parryT: 0,            // remaining parry-active time
   };
 
-  const baseBodyColor = new THREE.Color(0xbfa77a);
+  // Hit-flash baseline. Was hardcoded to 0xbfa77a (tan), which the
+  // per-frame flash lerp at the bottom of update() copies onto the
+  // body material every tick — overwriting the dark operator color
+  // set in buildRig. That's why playtest reports of 'body looks
+  // bright tan' kept coming back even after the noir grade was
+  // dialled. Now reads the actual current bodyMat color so the lerp
+  // restores TO whatever color the rig is configured with (handles
+  // operator/marine style toggles too).
+  const baseBodyColor = rig.materials.bodyMat.color.clone();
   const hurtColor = new THREE.Color(0xff5050);
 
   function cancelCombo() {
@@ -1257,10 +1265,15 @@ export function createPlayer(scene) {
     void state.blocking;  // kept in scope for future hand-based poses
 
     // Hit flash: blend body color toward red. The rig's shared body
-    // material tints the whole torso chain (chest + stomach + neck) in
-    // one lerp.
-    const k = state.hitFlashT / Math.max(0.0001, tunables.player.hitFlashTime);
-    rig.materials.bodyMat.color.copy(baseBodyColor).lerp(hurtColor, k);
+    // material tints the whole torso chain (chest + stomach + neck)
+    // in one lerp. Gate on hitFlashT > 0 so on idle frames we don't
+    // overwrite whatever color applyCharacterStyle set — that
+    // overwrite is what made the body read tan even after the rig
+    // was configured all-dark.
+    if (state.hitFlashT > 0) {
+      const k = state.hitFlashT / Math.max(0.0001, tunables.player.hitFlashTime);
+      rig.materials.bodyMat.color.copy(baseBodyColor).lerp(hurtColor, k);
+    }
 
     // Procedural animation — pose legs/arms/torso on top of the
     // movement resolver. The baseline pose now always holds the gun

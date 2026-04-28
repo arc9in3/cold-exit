@@ -220,14 +220,21 @@ export class LootManager {
     // text verbatim and would otherwise show the tags.
     slot.pendingName = String(item.name || 'item').replace(/<[^>]+>/g, '').trim();
     slot.paintedName = null;
-    slot.sprite.visible = false;   // proximity-gated in update()
+    // Floating nametag sprites have been removed from gameplay — the
+    // pickup prompt at the bottom of the screen + the cell tooltip
+    // surface item names cleanly enough that the floor labels were
+    // just visual noise. Sprite + canvas stay allocated on the pool
+    // slot (so we don't re-introduce alloc cost if turned back on)
+    // but always hidden, and `nameTag: null` skips the per-frame
+    // proximity check + lazy paint.
+    slot.sprite.visible = false;
     slot.group.position.set(position.x, 0.45, position.z);
     slot.group.visible = true;
 
     const entry = {
       slot,
       group: slot.group, box: slot.mesh, light: slot.light,
-      nameTag: slot.sprite,
+      nameTag: null,
       item,
       age: Math.random() * Math.PI * 2,
       isToy: false,
