@@ -394,7 +394,12 @@ export const tunables = {
       pelletCount: 1,
       burstCount: 1,
       burstInterval: 0,
-      magSize: 2,
+      // tickFlame deducts 1 ammo per tick at flameTickRate. magSize was
+      // accidentally carried over from the Widowmaker entry this slot
+      // used to hold (which was a single-shot rocket — magSize: 1 → 2);
+      // for flame the comment's "5s of held fire" intent at tickRate 20
+      // requires a 100-tick mag.
+      magSize: 100,
       reloadTime: 4.0,            // long swap-tank reload — flamer is a commit
       flameAngleDeg: 36,
       flameTickRate: 20,          // 5s of held fire before dry; was 12 (~8s)
