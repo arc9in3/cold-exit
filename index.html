@@ -1458,7 +1458,7 @@
       align-items: center;
     }
     .inv-slot .cell-art { width: 52px; height: 52px; }
-    .inv-slot .cell-art-img { width: 86%; height: 86%; }
+    .inv-slot .cell-art-img { width: 100%; height: 100%; }
     .inv-slot .cell-name-overlay { font-size: 9px; padding: 8px 3px 1px; }
     .inv-slot .cell-stats { font-size: 9px; }
     .inv-slot .cell-stat { font-size: 9px; }
@@ -1569,21 +1569,22 @@
     .pocket-item.rarity-mythic    { border-color: #e04040; box-shadow: 0 0 8px rgba(224,64,64,0.35); }
     .pocket-item .pkt-thumb {
       position: absolute;
-      /* Pattern lifted from the footprint-grid body tiles: absolute
-         positioning with inset + auto width/height + max-w/h + margin
-         auto is the one reliable recipe for TRUE centering (both axes)
-         of an image inside a rect. Inset values scaled with the new
-         96px cell so the thumb + name tag keep their proportions. */
-      inset: 6px 6px 22px 6px;
-      width: auto; height: auto;
-      max-width: 100%; max-height: 100%;
-      margin: auto;
+      /* Fill the slot edge-to-edge. The name tag sits on a gradient
+         backdrop OVER the image (see .pocket-item .pkt-name), so we
+         no longer reserve 22px at the bottom. inset 2px keeps a thin
+         border so the image doesn't kiss the slot rim and read as
+         clipped. Combined with the +1.08× scale below, the visible
+         silhouette fills the slot the way the user expects.
+         object-fit: contain still preserves aspect. */
+      inset: 2px;
+      width: calc(100% - 4px); height: calc(100% - 4px);
       object-fit: contain;
       object-position: center center;
+      transform: scale(1.08);
       pointer-events: none;
       transition: transform 0.1s ease;
       /* Most asset thumbs ship dark-on-dark; brighten in-place so they
-         read against the slot's gradient background. */
+         read against the slot's neutral background. */
       filter: brightness(1.25) contrast(1.05);
     }
     /* Rotated items: spin the thumb 90° so a wide weapon icon reads
@@ -2677,7 +2678,7 @@
       padding: 3px;
     }
     .loot-quickbar .quickbar-slot .cell-art { width: 42px; height: 42px; }
-    .loot-quickbar .quickbar-slot .cell-art-img { width: 85%; height: 85%; }
+    .loot-quickbar .quickbar-slot .cell-art-img { width: 100%; height: 100%; }
     .loot-quickbar .quickbar-slot .cell-name-overlay { font-size: 8px; padding: 6px 3px 1px; }
     .loot-quickbar .quickbar-slot .cell-stats { font-size: 9px; }
     .loot-quickbar .quickbar-slot.filled { border-color: #c9a87a; }
@@ -3138,7 +3139,7 @@
     .shop-item:hover { border-color: #6a7588; box-shadow: 0 0 8px rgba(201,168,122,0.2); }
     .shop-item.unaffordable { opacity: 0.45; cursor: not-allowed; }
     .shop-item .cell-art { width: 74px; height: 74px; }
-    .shop-item .cell-art-img { width: 86%; height: 86%; }
+    .shop-item .cell-art-img { width: 100%; height: 100%; }
     .shop-item .cell-name-overlay { font-size: 9px; padding: 8px 3px 1px; }
     .shop-item .cell-stats { font-size: 9px; }
     .shop-item .cell-stat { font-size: 9px; }

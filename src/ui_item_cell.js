@@ -17,10 +17,15 @@ export function renderItemCell(item, slotId = null, opts = {}) {
     const lbl = slotLabel ? `<div class="cell-label">${slotLabel}</div>` : '';
     return `${lbl}<div class="cell-empty-ico">${icon}</div>`;
   }
-  // Cell background = RARITY color, not item.tint. Was producing the
-  // orange-on-orange-background read for items whose tint matches
-  // the rendered weapon's accent (Benelli M4 shotgun, AK47, etc.).
-  const tintStr = rarityColor(item);
+  // Cell tile background — was the rarity color directly, which
+  // washed out item silhouettes (especially gen-2d images that have
+  // their own warm/cool palettes — the colored backdrop competed
+  // with the image content). Now use a neutral dark slot color and
+  // surface rarity via a glow / inset border instead. The rarity
+  // hex is still stamped on `data-rarity-color` so future styling
+  // hooks (border tint, glow, name color) can read it.
+  const rarityHex = rarityColor(item);
+  const tintStr = '#1a1e26';
   const thumbUrl = thumbnailFor(item);
 
   // Primary item art — 3D-rendered thumbnail of the item's category
@@ -104,7 +109,7 @@ export function renderItemCell(item, slotId = null, opts = {}) {
       : '';
 
   return `
-    <div class="cell-art ${isBroken ? 'cell-art-broken' : ''}" style="background:${tintStr}">
+    <div class="cell-art ${isBroken ? 'cell-art-broken' : ''}" style="background:${tintStr};box-shadow:inset 0 0 0 2px ${rarityHex},inset 0 0 0 3px rgba(0,0,0,0.5),0 0 8px ${rarityHex}66">
       ${artInner}
       ${brokenTag}
       ${markTag}
