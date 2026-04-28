@@ -1844,16 +1844,22 @@
     .cell-name-overlay {
       position: absolute;
       left: 0; right: 0; bottom: 0;
-      padding: 10px 5px 2px;
+      padding: 12px 5px 3px;
       font-size: 10px;
       font-weight: 700;
       color: #f2e7c9;
-      background: linear-gradient(to top, rgba(0,0,0,0.9) 0%, rgba(0,0,0,0.5) 60%, rgba(0,0,0,0) 100%);
-      white-space: nowrap;
+      background: linear-gradient(to top, rgba(0,0,0,0.92) 0%, rgba(0,0,0,0.55) 70%, rgba(0,0,0,0) 100%);
+      /* Allow up to 2 lines so weapon names like 'Mossberg 500 Pump'
+         and 'Combat Knife (mastercraft)' don't get truncated mid-word.
+         Line-clamp keeps the gradient backdrop from running long. */
+      display: -webkit-box;
+      -webkit-line-clamp: 2;
+      -webkit-box-orient: vertical;
       overflow: hidden;
-      text-overflow: ellipsis;
-      text-shadow: 0 1px 2px rgba(0,0,0,0.9);
-      line-height: 1.1;
+      word-break: break-word;
+      overflow-wrap: anywhere;
+      text-shadow: 0 1px 2px rgba(0,0,0,0.95);
+      line-height: 1.15;
     }
     /* Stat column to the right of the art tile. */
     .cell-stats {
@@ -1958,9 +1964,19 @@
     }
     .cell-affixes, .cell-perks {
       overflow: hidden;
-      max-height: 16px;
+      /* Was max-height: 16px which clipped any 2-line perk to a half
+         line. Bump to 32px so a single wrapped line shows fully. */
+      max-height: 32px;
+      line-height: 1.25;
     }
-    .cell-affixes { white-space: nowrap; text-overflow: ellipsis; }
+    .cell-affixes {
+      /* Allow wrap to 2 lines so longer affix labels read fully. */
+      display: -webkit-box;
+      -webkit-line-clamp: 2;
+      -webkit-box-orient: vertical;
+      word-break: break-word;
+      overflow-wrap: anywhere;
+    }
     .cell-perks .perk {
       display: block;
       white-space: nowrap;
