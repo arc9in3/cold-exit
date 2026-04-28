@@ -180,8 +180,13 @@ export class MegaBoss {
     this.phaseTransitionUntil = 0;
     this.phase2Threshold = 0.75;
     this.phase3Threshold = 0.25;
-    this._smokeMeshes = [];
-    this._flameMeshes = [];
+    // Damage-emitter pools are lazy-allocated inside _addSmokeEffect
+    // and _addFireEffect when phase 2/3 transitions fire.
+    this._smokePuffPool = null;
+    this._firePatchPool = null;
+    this._emberPool = null;
+    this._smokeEnabled = false;
+    this._fireEnabled = false;
 
     // Action FSM
     this.state = 'spawn';
@@ -414,56 +419,166 @@ export class MegaBoss {
   }
 
   _addSmokeEffect() {
-    // Three smoke billboards on the chassis, fading in over the
-    // transition window. They wobble + drift via _tickPhaseEffects.
-    for (let i = 0; i < 4; i++) {
-      const m = new THREE.Mesh(new THREE.PlaneGeometry(2.2, 2.2), _smokeMat.clone());
-      m.material.opacity = 0;
-      m.position.set(
-        (Math.random() - 0.5) * 2.4,
-        2.0 + Math.random() * 1.8,
-        (Math.random() - 0.5) * 1.6,
-      );
-      m.userData.driftPhase = Math.random() * Math.PI * 2;
-      m.userData.targetOpacity = 0.55;
-      this.boss.add(m);
-      this._smokeMeshes.push(m);
+    // Phase 2 damage signal — emit dark smoke puffs from the chassis
+    // continuously. Rising + fading particles read as "this thing is
+    // damaged" much better than static planes. Pool 14 puffs; emitter
+    // grabs the next idle slot every _smokeEmitInterval seconds.
+    if (!this._smokePuffPool) {
+      this._smokePuffPool = [];
+      for (let i = 0; i < 14; i++) {
+        const m = new THREE.Mesh(new THREE.SphereGeometry(0.5, 8, 6), _smokeMat.clone());
+        m.material.opacity = 0;
+        m.material.color.setHex(0x141414);
+        m.visible = false;
+        m.frustumCulled = false;
+        this.boss.add(m);
+        this._smokePuffPool.push({ mesh: m, t: 0, life: 1.2, inUse: false });
+      }
     }
+    this._smokeEmitT = 0;
+    this._smokeEmitInterval = 0.18;     // ~5 puffs/sec
+    this._smokeEnabled = true;
   }
 
   _addFireEffect() {
-    // Add fire billboards on top of smoke. Brighter, animated.
-    for (let i = 0; i < 5; i++) {
-      const m = new THREE.Mesh(new THREE.PlaneGeometry(1.6, 2.0), _flameMat.clone());
-      m.material.opacity = 0;
-      m.position.set(
-        (Math.random() - 0.5) * 2.6,
-        1.6 + Math.random() * 2.4,
-        (Math.random() - 0.5) * 1.8,
-      );
-      m.userData.driftPhase = Math.random() * Math.PI * 2;
-      m.userData.targetOpacity = 0.75;
-      this.boss.add(m);
-      this._flameMeshes.push(m);
+    // Phase 3 damage signal — molotov-style fire pools attached to
+    // chassis hot spots + bright orange embers. Pool 6 fire patches
+    // (small, persistent, additive-blend) and 16 ember sparks
+    // (transient, animated). Together they read as a burning robot.
+    if (!this._firePatchPool) {
+      this._firePatchPool = [];
+      const patchPositions = [
+        // Chassis hot spots — shoulders, head, treads.
+        { x:  1.6, y: 2.7, z:  0.5 },
+        { x: -1.6, y: 2.7, z:  0.5 },
+        { x:  0.0, y: 4.1, z:  0.4 },
+        { x:  1.4, y: 1.0, z: -1.5 },
+        { x: -1.4, y: 1.0, z: -1.5 },
+        { x:  0.0, y: 1.8, z: -1.6 },
+      ];
+      for (const p of patchPositions) {
+        const m = new THREE.Mesh(new THREE.SphereGeometry(0.55, 10, 6), _flameMat.clone());
+        m.material.color.setHex(0xff4020);
+        m.material.opacity = 0;
+        m.position.set(p.x, p.y, p.z);
+        m.scale.set(1, 1.4, 1);          // taller-than-wide reads as flame
+        m.frustumCulled = false;
+        this.boss.add(m);
+        this._firePatchPool.push({ mesh: m, basePhase: Math.random() * Math.PI * 2 });
+      }
     }
-    // Eye color shifts to white-hot.
+    if (!this._emberPool) {
+      this._emberPool = [];
+      const emberMat = new THREE.MeshBasicMaterial({
+        color: 0xffa040, transparent: true, opacity: 0,
+        depthWrite: false, blending: THREE.AdditiveBlending,
+      });
+      for (let i = 0; i < 16; i++) {
+        const m = new THREE.Mesh(new THREE.SphereGeometry(0.12, 6, 4), emberMat.clone());
+        m.visible = false;
+        m.frustumCulled = false;
+        this.boss.add(m);
+        this._emberPool.push({ mesh: m, t: 0, life: 0.8, inUse: false, vy: 0 });
+      }
+    }
+    this._emberEmitT = 0;
+    this._emberEmitInterval = 0.12;
+    this._fireEnabled = true;
     if (this.eye) this.eye.material.color.setHex(0xffe080);
   }
 
+  _emitSmokePuff() {
+    if (!this._smokePuffPool) return;
+    let slot = null;
+    for (const s of this._smokePuffPool) { if (!s.inUse) { slot = s; break; } }
+    if (!slot) return;
+    slot.inUse = true;
+    slot.t = 0;
+    slot.life = 1.0 + Math.random() * 0.6;
+    // Spawn at a random chassis point — shoulders / head / mid-torso.
+    const px = (Math.random() - 0.5) * 2.6;
+    const py = 1.8 + Math.random() * 2.6;
+    const pz = (Math.random() - 0.5) * 1.6;
+    slot.mesh.position.set(px, py, pz);
+    slot.mesh.scale.setScalar(0.6 + Math.random() * 0.4);
+    slot.mesh.material.opacity = 0.55;
+    slot.mesh.visible = true;
+    slot.driftX = (Math.random() - 0.5) * 0.4;
+    slot.driftZ = (Math.random() - 0.5) * 0.4;
+  }
+
+  _emitEmber() {
+    if (!this._emberPool) return;
+    let slot = null;
+    for (const s of this._emberPool) { if (!s.inUse) { slot = s; break; } }
+    if (!slot) return;
+    slot.inUse = true;
+    slot.t = 0;
+    slot.life = 0.7 + Math.random() * 0.4;
+    slot.vy = 0.8 + Math.random() * 0.7;
+    const px = (Math.random() - 0.5) * 2.6;
+    const py = 1.8 + Math.random() * 2.4;
+    const pz = (Math.random() - 0.5) * 1.6;
+    slot.mesh.position.set(px, py, pz);
+    slot.mesh.material.opacity = 0.95;
+    slot.mesh.visible = true;
+    slot.driftX = (Math.random() - 0.5) * 0.6;
+    slot.driftZ = (Math.random() - 0.5) * 0.6;
+  }
+
   _tickPhaseEffects(dt) {
-    // Fade in smoke/fire to target opacity, billboard them at camera,
-    // and add small jitter so they read as alive.
-    const cam = this.ctx.camera;
-    for (const m of this._smokeMeshes) {
-      m.material.opacity += (m.userData.targetOpacity - m.material.opacity) * dt * 1.4;
-      m.userData.driftPhase += dt * 0.7;
-      m.position.y += Math.sin(m.userData.driftPhase) * dt * 0.15;
-      if (cam) m.lookAt(cam.position);
+    // Phase 2 smoke — emit + tick rising particles.
+    if (this._smokeEnabled && this._smokePuffPool) {
+      this._smokeEmitT += dt;
+      while (this._smokeEmitT >= this._smokeEmitInterval) {
+        this._smokeEmitT -= this._smokeEmitInterval;
+        this._emitSmokePuff();
+      }
+      for (const s of this._smokePuffPool) {
+        if (!s.inUse) continue;
+        s.t += dt;
+        const k = s.t / s.life;
+        s.mesh.position.x += (s.driftX || 0) * dt;
+        s.mesh.position.z += (s.driftZ || 0) * dt;
+        s.mesh.position.y += (1.4 - k * 0.6) * dt;
+        s.mesh.scale.setScalar((0.6 + k * 1.0));
+        s.mesh.material.opacity = 0.55 * (1 - k);
+        if (s.t >= s.life) {
+          s.inUse = false;
+          s.mesh.visible = false;
+        }
+      }
     }
-    for (const m of this._flameMeshes) {
-      m.material.opacity = m.userData.targetOpacity * (0.7 + 0.3 * Math.abs(Math.sin(this._t * 6 + m.userData.driftPhase)));
-      m.userData.driftPhase += dt * 1.4;
-      if (cam) m.lookAt(cam.position);
+    // Phase 3 fire patches — pulse opacity + scale at random phases.
+    if (this._fireEnabled && this._firePatchPool) {
+      for (const f of this._firePatchPool) {
+        const pulse = 0.6 + 0.4 * Math.abs(Math.sin(this._t * 6 + f.basePhase));
+        f.mesh.material.opacity = 0.85 * pulse;
+        const sc = 0.85 + 0.25 * Math.sin(this._t * 4 + f.basePhase);
+        f.mesh.scale.set(sc, sc * 1.4, sc);
+      }
+    }
+    // Phase 3 embers — emit + tick rising sparks.
+    if (this._fireEnabled && this._emberPool) {
+      this._emberEmitT += dt;
+      while (this._emberEmitT >= this._emberEmitInterval) {
+        this._emberEmitT -= this._emberEmitInterval;
+        this._emitEmber();
+      }
+      for (const s of this._emberPool) {
+        if (!s.inUse) continue;
+        s.t += dt;
+        const k = s.t / s.life;
+        s.mesh.position.x += (s.driftX || 0) * dt;
+        s.mesh.position.z += (s.driftZ || 0) * dt;
+        s.mesh.position.y += s.vy * dt;
+        s.vy = (s.vy || 0) - 1.2 * dt;        // slight gravity for arc
+        s.mesh.material.opacity = 0.95 * (1 - k);
+        if (s.t >= s.life) {
+          s.inUse = false;
+          s.mesh.visible = false;
+        }
+      }
     }
   }
 
@@ -515,7 +630,11 @@ export class MegaBoss {
           if (this.stateT >= this.stateUntil) {
             this.state = 'idle';
             this.stateT = 0;
-            this.stateUntil = 0.5 * this.freqScale + 0.2;
+            // Idle gap halved per playtest: (0.5*freq + 0.2) →
+            // (0.25*freq + 0.1). Combined with the shorter recover
+            // duration set in _endAttack, total downtime between
+            // attacks drops ~40%.
+            this.stateUntil = 0.25 * this.freqScale + 0.1;
             // Occasional idle bark.
             if (Math.random() < 0.35 && this._t - this._lastBarkT > 4.0) {
               this._bark(pickBark());
@@ -609,16 +728,36 @@ export class MegaBoss {
   }
 
   _buildSweepTelegraph() {
+    // Two-layer wedge: a wide red fill + a brighter edge ring on top.
+    // Bright + saturated = unmissable. Earlier single-layer at low
+    // opacity faded into the floor; player report was "wedge missing."
     const radius = 14;
-    const geom = new THREE.RingGeometry(2.5, radius, 24, 1, -Math.PI / 2, Math.PI);
-    const mat = _telegraphMat.clone();
-    mat.opacity = 0;
-    const m = new THREE.Mesh(geom, mat);
-    m.rotation.x = -Math.PI / 2;
-    m.position.set(this.boss.position.x, 0.05, this.boss.position.z);
-    m.rotation.z = this.facing;
-    this.scene.add(m);
-    this._sweepTelegraphMesh = m;
+    const group = new THREE.Group();
+    group.position.set(this.boss.position.x, 0.05, this.boss.position.z);
+    group.rotation.y = this.facing;
+    // Floor fill — solid red wedge.
+    const fillGeom = new THREE.RingGeometry(2.0, radius, 28, 1, -Math.PI / 2, Math.PI);
+    const fillMat = new THREE.MeshBasicMaterial({
+      color: 0xff2030, transparent: true, opacity: 0,
+      depthWrite: false, side: THREE.DoubleSide,
+    });
+    const fill = new THREE.Mesh(fillGeom, fillMat);
+    fill.rotation.x = -Math.PI / 2;
+    group.add(fill);
+    // Outer edge ring — thinner, brighter, draws the eye to the sweep arc.
+    const edgeGeom = new THREE.RingGeometry(radius - 0.6, radius, 28, 1, -Math.PI / 2, Math.PI);
+    const edgeMat = new THREE.MeshBasicMaterial({
+      color: 0xffffff, transparent: true, opacity: 0,
+      depthWrite: false, side: THREE.DoubleSide, blending: THREE.AdditiveBlending,
+    });
+    const edge = new THREE.Mesh(edgeGeom, edgeMat);
+    edge.rotation.x = -Math.PI / 2;
+    edge.position.y = 0.01;
+    group.add(edge);
+    this.scene.add(group);
+    this._sweepTelegraphMesh = group;
+    this._sweepTelegraphFill = fillMat;
+    this._sweepTelegraphEdge = edgeMat;
   }
 
   _buildSlamTelegraph() {
@@ -675,9 +814,13 @@ export class MegaBoss {
   _tickTelegraph(dt, playerPos) {
     const k = Math.min(1, this.stateT / this.stateUntil);
     if (this.currentAttack === 'sweep' && this._sweepTelegraphMesh) {
-      const pulse = 0.4 + 0.3 * Math.abs(Math.sin(this.stateT * 8));
-      this._sweepTelegraphMesh.material.opacity = k * pulse;
-      this._sweepTelegraphMesh.rotation.z = this.facing;
+      // Fast fade-in over first 250ms then hold high; pulse the edge
+      // ring on top so the player sees it brighten + the arc twitch.
+      const fadeIn = Math.min(1, this.stateT / 0.25);
+      const pulse = 0.85 + 0.15 * Math.abs(Math.sin(this.stateT * 10));
+      this._sweepTelegraphFill.opacity = fadeIn * 0.55 * pulse;
+      this._sweepTelegraphEdge.opacity = fadeIn * 1.0 * pulse;
+      this._sweepTelegraphMesh.rotation.y = this.facing;
       this._sweepTelegraphMesh.position.set(this.boss.position.x, 0.05, this.boss.position.z);
     }
     if (this.currentAttack === 'slam' && this._slamTelegraphMesh) {
@@ -979,7 +1122,9 @@ export class MegaBoss {
     }
     this.state = 'recover';
     this.stateT = 0;
-    this.stateUntil = 0.55 * this.freqScale + 0.2;
+    // Recover phase shortened per playtest: (0.55*freq + 0.2) →
+    // (0.30*freq + 0.1). Pairs with the idle-gap trim above.
+    this.stateUntil = 0.30 * this.freqScale + 0.1;
     this.currentAttack = null;
   }
 
@@ -1168,8 +1313,13 @@ export class MegaBoss {
     this._cleanupHazards();
     if (this.eye) this.eye.material.color.setHex(0x303030);
     if (this.boss) {
-      this.boss.rotation.x = 0.25;
-      this.boss.position.y -= 0.4;
+      // Sink + tilt the corpse harder so it doesn't sit upright over
+      // the loot drop. Was -0.4y / 0.25 rad — looked like the boss
+      // was just bowing slightly. Now -1.6y / 0.55 rad reads as a
+      // collapsed wreck. Combined with the wider loot drop radius
+      // below, the items land in clear space outside the chassis.
+      this.boss.rotation.x = 0.55;
+      this.boss.position.y -= 1.6;
     }
     this._bark('REGRET. NOT INSTALLED. SHUTTING DOWN.');
     if (this.ctx.sfx?.execute) this.ctx.sfx.execute();
@@ -1199,15 +1349,22 @@ export class MegaBoss {
 
   _dropLoot() {
     if (!this.ctx.loot || !this.ctx.lootRolls) return;
-    const center = this.boss.position;
+    // Boss center, but use the PRE-death position (we just shifted it
+    // -1.6y for the corpse tilt). Drops should land on the floor at
+    // boss xz, not under the sunken wreck.
+    const cx = this.boss.position.x;
+    const cz = this.boss.position.z;
     const items = this.ctx.lootRolls(this.encounterIndex);
+    // Wider ring — boss chassis is 4×5m. Drops at 1.5-2.7m landed
+    // INSIDE the body geometry; player couldn't see / pick them up.
+    // 5.5-8m radius puts everything in clear floor space.
     let i = 0;
     for (const item of items) {
-      const ang = (i / items.length) * Math.PI * 2 + Math.random() * 0.4;
-      const r = 1.5 + Math.random() * 1.2;
+      const ang = (i / items.length) * Math.PI * 2 + Math.random() * 0.5;
+      const r = 5.5 + Math.random() * 2.5;
       const dx = Math.cos(ang) * r;
       const dz = Math.sin(ang) * r;
-      this.ctx.loot.spawnItem({ x: center.x + dx, y: 0.4, z: center.z + dz }, item);
+      this.ctx.loot.spawnItem({ x: cx + dx, y: 0.4, z: cz + dz }, item);
       i += 1;
     }
   }
