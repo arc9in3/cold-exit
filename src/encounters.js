@@ -2522,15 +2522,12 @@ export const ENCOUNTER_DEFS = {
       const label = _makeLabelSprite('THE WISHING WELL', '#a8e0e8');
       label.position.set(disc.cx, 2.2, disc.cz);
       scene.add(label);
-      // Stone well rim — kept LOW (height 0.85) because the well's
-      // gameplay watches projectiles landing in the water (coins,
-      // junk). A tall rim collider would intercept the throwable
-      // before it reaches the centre. 0.85m blocks foot traffic
-      // around the rim but throwables clear it cleanly.
-      const _wellCollider = ctx.level?.addEncounterCollider
-        ? ctx.level.addEncounterCollider(disc.cx, disc.cz, 1.4, 1.4, 0.85)
-        : null;
-      return { wellGroup, label, disc, complete: false, _wellCollider };
+      // No collider — the previous 0.85m-tall rim was intercepting
+      // thrown projectiles before they reached the water disc, which
+      // broke the throw-into-the-well gameplay. Visual rim still
+      // reads but the player can walk through it (acceptable visual
+      // tradeoff for the encounter actually being completable).
+      return { wellGroup, label, disc, complete: false };
     },
     tick(_dt, ctx) {
       const s = ctx.state;
@@ -2556,7 +2553,37 @@ export const ENCOUNTER_DEFS = {
         return;
       }
     },
-    onItemDropped(_item, _ctx) { return { consume: false }; },
+    // Dropping a Silver Coin (or any coin-tagged junk) inside the
+    // well disc grants a random container. Cheaper alternative path
+    // to the throw-it-in mechanic — pour the contents of your
+    // pocket directly. Disc radius matches the projectile catch
+    // (RADIUS = 0.7m).
+    onItemDropped(item, ctx) {
+      const s = ctx.state;
+      if (s.complete) return { consume: false };
+      if (!item) return { consume: false };
+      // Match the silver coin specifically — other junk doesn't grant
+      // wishes. Could expand to gold/copper coins if those are added.
+      const isCoin = item.id === 'junk_silver' || item.name === 'Silver Coin';
+      if (!isCoin) return { consume: false };
+      // Drop position passed via ctx.dropPos — gate on disc radius.
+      const dp = ctx.dropPos;
+      if (!dp) return { consume: false };
+      const dx = dp.x - s.disc.cx;
+      const dz = dp.z - s.disc.cz;
+      const RADIUS = 0.7;
+      if (dx * dx + dz * dz > RADIUS * RADIUS) return { consume: false };
+      s.complete = true;
+      ctx.spawnSpeech(new THREE.Vector3(s.disc.cx, 1.4, s.disc.cz),
+        'The coin tinks the dark. Something stirs.', 4.5);
+      // Random container as the wish reward — could be a crate / safe
+      // / footlocker / etc. depending on the random roll.
+      if (ctx.spawnRandomContainerAt) {
+        ctx.spawnRandomContainerAt(s.disc.cx + 1.6, s.disc.cz);
+      }
+      if (ctx.markEncounterComplete) ctx.markEncounterComplete('wishing_well');
+      return { consume: true, complete: true };
+    },
   },
 
   // -----------------------------------------------------------------

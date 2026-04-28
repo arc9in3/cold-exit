@@ -2103,6 +2103,12 @@ function regenerateLevel() {
       if (!c || !c.group) return;
       c.group.visible = false;
       c.hidden = true;
+      // CRITICAL: rig instancer renders via InstancedMesh slots
+      // independent of c.group.visible. Without this, hidden ambush
+      // actors still draw via the instance pool and the player sees
+      // them standing in place before the trigger. Park the slots
+      // at zero-scale until the reveal flips the flag back.
+      _setEnemyInstHidden(c, true);
       // Kill alertness while hidden so they don't shoot through walls.
       if (c.state && c.state !== 'dead') c.state = 'idle';
     };
@@ -2829,6 +2835,9 @@ function tryEncounterItemDrop(item, x, z) {
   if (!ent.def.onItemDropped) return false;
   const ctx = ent.ctxFactory();
   ctx.state = ent.state;
+  // Drop position — encounters that gate on a sub-region (wishing
+  // well disc, etc.) read this. World XZ at the drop point.
+  ctx.dropPos = { x, z };
   const result = ent.def.onItemDropped(item, ctx);
   if (!result) return false;
   if (result.complete && ent.def.oncePerSave) {
@@ -7441,6 +7450,15 @@ function updateEnemyVisibility() {
       e.group.visible = false;
       continue;
     }
+    // Hidden ambush — the per-frame visibility pass would otherwise
+    // un-hide them via the LoS branch. Keep them parked at zero-
+    // scale until revealHiddenAmbush flips e.hidden back to false.
+    if (e.hidden) {
+      _setEnemyGhost(e, false);
+      _setEnemyInstHidden(e, true);
+      e.group.visible = false;
+      continue;
+    }
     // Cheap distance pre-filter — enemies further than (range + 4m)
     // can't possibly become visible this frame. Skips the LoS
     // raycast entirely for far-room enemies, which is the dominant
@@ -9731,6 +9749,10 @@ function revealHiddenAmbush(room) {
     c.group.position.y = 6.5;
     c._ambushDropT = 1.4;
     c.hidden = false;
+    // Re-show instance slots — they were parked at zero-scale by
+    // hideOne(). Without this, the actor's group goes visible but
+    // the InstancedMesh stays hidden so nothing drops in.
+    _setEnemyInstHidden(c, false);
     // Boss + minions can't shoot or swing during the drop OR for a
     // brief recovery window after landing. Gunmen honour `surpriseT`
     // (clamps fire / movement); melees honour `staggerT` (skips
