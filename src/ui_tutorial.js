@@ -85,7 +85,52 @@ export class TutorialUI {
     if (!STEPS.some(s => s.id === id)) return;
     if (this._done.has(id)) return;
     this._done.add(id);
+    this._lastTickedId = id;
+    this._lastTickedAt = performance.now();
     this._render();
+    // Flash + transient toast so the player gets unmissable feedback.
+    // The overlay flashes green and a centred toast names the step.
+    if (this.root) {
+      this.root.style.boxShadow = '0 0 28px rgba(106,190,90,0.85), 0 6px 24px rgba(0,0,0,0.7)';
+      this.root.style.borderColor = '#6abe5a';
+      setTimeout(() => {
+        if (!this.root) return;
+        this.root.style.boxShadow = '0 0 18px rgba(201,168,122,0.30), 0 6px 24px rgba(0,0,0,0.7)';
+        this.root.style.borderColor = '#c9a87a';
+      }, 320);
+      this._showToast(id);
+    }
+  }
+
+  // Centred bottom toast announcing the just-ticked step. Pooled in a
+  // single element to avoid DOM thrash on rapid ticks.
+  _showToast(id) {
+    if (!this._toastEl) {
+      const el = document.createElement('div');
+      Object.assign(el.style, {
+        position: 'fixed', left: '50%', bottom: '110px',
+        transform: 'translateX(-50%)',
+        padding: '8px 18px',
+        background: 'rgba(20,28,18,0.92)',
+        border: '1px solid #6abe5a',
+        borderRadius: '4px',
+        color: '#bfe9a8', fontSize: '12px',
+        fontFamily: 'ui-monospace, SFMono-Regular, Menlo, Consolas, monospace',
+        letterSpacing: '2px', textTransform: 'uppercase',
+        opacity: '0', transition: 'opacity 0.18s',
+        zIndex: '61', pointerEvents: 'none',
+      });
+      document.body.appendChild(el);
+      this._toastEl = el;
+    }
+    const step = STEPS.find(s => s.id === id);
+    const label = step ? step.label.split(' — ')[0] : id;
+    this._toastEl.textContent = `✓ ${label}`;
+    this._toastEl.style.opacity = '0.95';
+    if (this._toastT) clearTimeout(this._toastT);
+    this._toastT = setTimeout(() => {
+      if (this._toastEl) this._toastEl.style.opacity = '0';
+    }, 1400);
   }
 
   isComplete() {

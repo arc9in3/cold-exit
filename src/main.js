@@ -1931,11 +1931,13 @@ function regenerateLevel() {
       archetype: s.archetype,
       majorBoss: !!s.majorBoss,
     };
-    // Tutorial dummies — passive, never alert, low HP for easy
-    // practice kills. The stealth target gets even lower aggression
-    // so the player can close on it without dying mid-lesson.
+    // Tutorial dummies — passive, never alert, but VERY tanky so the
+    // player can land headshot + leg + disarm + melee lessons without
+    // killing the dummy mid-curriculum. Original hpMult=0.4 made
+    // pistol-headshot one-shot the dummy, blocking every later combat
+    // step. 12.0 ≈ 1200-1800 HP — well clear of typical pistol burst.
     if (s.tutorialDummy) {
-      opts.hpMult = 0.4;
+      opts.hpMult = 12.0;
       opts.aggression = 0;
       opts.aimSpreadMult = 99;       // can't aim well even if it tries
     }
@@ -1964,7 +1966,14 @@ function regenerateLevel() {
       // Tutorial flags — flow back onto the spawned actor so the
       // tutorial-step ticking can address them by name.
       if (g && s.tutorialDummy) g.tutorialDummy = true;
-      if (g && s.stealthTarget) g.stealthTarget = true;
+      if (g && s.stealthTarget) {
+        g.stealthTarget = true;
+        // Face the dummy AWAY from the player spawn so "approach from
+        // behind while crouched" reads as the lesson. Player spawns
+        // around (0, -10); stealth dummy at (~+12, -9). Yaw +π/2 puts
+        // its forward toward +X — facing east, away from the player.
+        if (g.group) g.group.rotation.y = Math.PI / 2;
+      }
     }
   }
   // Tutorial-only setup: pre-spawn a pickup target near the player so
