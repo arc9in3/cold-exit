@@ -213,8 +213,13 @@ function renderBossBar() {
       if (m.alive && m.majorBoss && !m.hidden) { boss = m; break; }
     }
   }
+  // Cached display state — only touch DOM on transitions / value
+  // changes. Identical string assignments still force style recompute.
   if (!boss) {
-    bossBarRoot.root.style.display = 'none';
+    if (bossBarRoot._lastDisplay !== 'none') {
+      bossBarRoot.root.style.display = 'none';
+      bossBarRoot._lastDisplay = 'none';
+    }
     return;
   }
   // Show whenever the player has entered the boss room OR the boss is
@@ -226,21 +231,48 @@ function renderBossBar() {
   const aggroState = boss.state && boss.state !== 'idle'
     && boss.state !== 'sleep' && boss.state !== 'dead';
   if (!inBossRoom && !aggroState) {
-    bossBarRoot.root.style.display = 'none';
+    if (bossBarRoot._lastDisplay !== 'none') {
+      bossBarRoot.root.style.display = 'none';
+      bossBarRoot._lastDisplay = 'none';
+    }
     return;
   }
-  bossBarRoot.root.style.display = 'block';
-  bossBarRoot.name.textContent = BOSS_NAMES[boss.archetype] || 'BOSS';
+  if (bossBarRoot._lastDisplay !== 'block') {
+    bossBarRoot.root.style.display = 'block';
+    bossBarRoot._lastDisplay = 'block';
+  }
+  const nm = BOSS_NAMES[boss.archetype] || 'BOSS';
+  if (bossBarRoot._lastName !== nm) {
+    bossBarRoot.name.textContent = nm;
+    bossBarRoot._lastName = nm;
+  }
+  // HP fill width — quantize to 0.1% so frame-by-frame trickle damage
+  // doesn't paint every frame.
   const pct = Math.max(0, Math.min(1, boss.hp / boss.maxHp));
-  bossBarRoot.fill.style.width = `${pct * 100}%`;
+  const w = Math.round(pct * 1000);
+  if (bossBarRoot._lastW !== w) {
+    bossBarRoot.fill.style.width = `${pct * 100}%`;
+    bossBarRoot._lastW = w;
+  }
 }
 const KEY_COLOR_HEX = {
   red: '#d04040', blue: '#4a88e0', green: '#50c060', yellow: '#e0c040',
 };
+// Cached signature of the last-rendered key set — keys change rarely
+// (pickup / use), so we should only rebuild the panel on a real
+// change. Was clearing + re-creating divs every frame.
+let _keyHudSig = '';
 function renderKeycardHud() {
   if (!keyHudEl || !keyPanelEl) return;
+  // Build a stable signature of the current key set. Keys are colour
+  // strings; sort + join so the order is canonical.
+  const sig = playerKeys && playerKeys.size > 0
+    ? Array.from(playerKeys).sort().join(',')
+    : '';
+  if (sig === _keyHudSig) return;     // no change since last frame
+  _keyHudSig = sig;
   while (keyHudEl.firstChild) keyHudEl.removeChild(keyHudEl.firstChild);
-  if (!playerKeys || playerKeys.size === 0) {
+  if (!sig) {
     keyPanelEl.style.display = 'none';
     return;
   }
@@ -7271,8 +7303,18 @@ function updateStealthStatus(playerInfo) {
   else if (seen)       { cls = 'seen';     txt = 'SPOTTED'; }
   else if (crouching)  { cls = 'hidden';   txt = 'HIDDEN'; }
   else                 { cls = 'undetected'; txt = 'UNDETECTED'; }
-  stealthStatusEl.className = cls;
-  stealthStatusEl.textContent = txt;
+  // Stealth state stays the same most frames; only touch DOM on
+  // transitions. textContent + className assignment forces style
+  // recompute on the element if we set the same value, even though
+  // the DOM string didn't change.
+  if (stealthStatusEl._lastCls !== cls) {
+    stealthStatusEl.className = cls;
+    stealthStatusEl._lastCls = cls;
+  }
+  if (stealthStatusEl._lastTxt !== txt) {
+    stealthStatusEl.textContent = txt;
+    stealthStatusEl._lastTxt = txt;
+  }
 }
 
 // Fog-of-war render. Three modes per enemy:
@@ -7768,61 +7810,93 @@ const weaponInfoClassEl = document.getElementById('weapon-info-class');
 const weaponInfoAmmoEl = document.getElementById('weapon-info-ammo');
 function updateWeaponInfoHud(weapon, effWeapon) {
   if (!weaponInfoNameEl) return;
+  // Cache last-written values per element. Weapon name + class change
+  // only on weapon swap; ammo only changes per shot / reload tick.
+  // Most frames everything is identical — touch DOM only on change.
+  let nm, cls, ammo;
   if (!weapon) {
-    weaponInfoNameEl.textContent = '—';
-    weaponInfoClassEl.textContent = 'no weapon';
-    weaponInfoAmmoEl.textContent = '—';
-    return;
-  }
-  weaponInfoNameEl.textContent = weapon.name || weapon.class || weapon.type || '—';
-  const cls = weapon.class || weapon.type || '';
-  weaponInfoClassEl.textContent = cls.toUpperCase();
-  if (weapon.type === 'ranged' && typeof weapon.ammo === 'number') {
-    const magSize = (effWeapon && effWeapon.magSize) || weapon.magSize || '—';
-    weaponInfoAmmoEl.textContent = weapon.infiniteAmmo ? '∞' : `${weapon.ammo} / ${magSize}`;
-  } else if (weapon.type === 'melee') {
-    weaponInfoAmmoEl.textContent = 'MELEE';
+    nm = '—'; cls = 'no weapon'; ammo = '—';
   } else {
-    weaponInfoAmmoEl.textContent = '—';
+    nm = weapon.name || weapon.class || weapon.type || '—';
+    cls = (weapon.class || weapon.type || '').toUpperCase();
+    if (weapon.type === 'ranged' && typeof weapon.ammo === 'number') {
+      const magSize = (effWeapon && effWeapon.magSize) || weapon.magSize || '—';
+      ammo = weapon.infiniteAmmo ? '∞' : `${weapon.ammo} / ${magSize}`;
+    } else if (weapon.type === 'melee') {
+      ammo = 'MELEE';
+    } else {
+      ammo = '—';
+    }
+  }
+  if (weaponInfoNameEl._lastTxt !== nm) {
+    weaponInfoNameEl.textContent = nm;
+    weaponInfoNameEl._lastTxt = nm;
+  }
+  if (weaponInfoClassEl._lastTxt !== cls) {
+    weaponInfoClassEl.textContent = cls;
+    weaponInfoClassEl._lastTxt = cls;
+  }
+  if (weaponInfoAmmoEl._lastTxt !== ammo) {
+    weaponInfoAmmoEl.textContent = ammo;
+    weaponInfoAmmoEl._lastTxt = ammo;
   }
 }
 
 function updateReloadHud(weapon, effWeapon) {
   if (!reloadFillEl) return;
+  // Compute every value first, then conditionally write — so the only
+  // DOM thrash is during an actual reload tick (where reloadingT
+  // changes per-frame). Otherwise the panel's static state holds.
+  let widthPct, fillActive, labelActive, label, text, labelColor;
   if (!weapon || weapon.type !== 'ranged' || typeof weapon.ammo !== 'number') {
-    reloadFillEl.style.width = '100%';
-    reloadFillEl.classList.remove('active');
-    reloadLabelEl.classList.remove('active');
-    reloadLabelEl.textContent = 'READY';
-    reloadTextEl.textContent = '';
-    return;
-  }
-  const total = (effWeapon && effWeapon.reloadTime) || weapon.reloadTime || 1.5;
-  if (weapon.reloadingT > 0) {
-    const pct = 1 - weapon.reloadingT / total;
-    reloadFillEl.style.width = `${Math.max(0, pct * 100)}%`;
-    reloadFillEl.classList.add('active');
-    reloadLabelEl.classList.add('active');
-    reloadLabelEl.textContent = 'RELOADING';
-    reloadTextEl.textContent = `${weapon.reloadingT.toFixed(1)}s`;
+    widthPct = 100; fillActive = false; labelActive = false;
+    label = 'READY'; text = ''; labelColor = '';
   } else {
-    const magSize = (effWeapon && effWeapon.magSize) || weapon.magSize;
-    reloadFillEl.style.width = '100%';
-    reloadFillEl.classList.remove('active');
-    reloadLabelEl.classList.remove('active');
-    if (weapon.infiniteAmmo) {
-      reloadLabelEl.textContent = 'READY';
-      reloadLabelEl.style.color = '';
-      reloadTextEl.textContent = '∞';
-    } else if (weapon.ammo === 0) {
-      reloadLabelEl.textContent = 'EMPTY';
-      reloadLabelEl.style.color = '#c94a3a';
-      reloadTextEl.textContent = `${weapon.ammo}/${magSize}`;
+    const total = (effWeapon && effWeapon.reloadTime) || weapon.reloadTime || 1.5;
+    if (weapon.reloadingT > 0) {
+      const pct = 1 - weapon.reloadingT / total;
+      widthPct = Math.max(0, pct * 100);
+      fillActive = true; labelActive = true;
+      label = 'RELOADING';
+      text = `${weapon.reloadingT.toFixed(1)}s`;
+      labelColor = '';
     } else {
-      reloadLabelEl.textContent = 'READY';
-      reloadLabelEl.style.color = '';
-      reloadTextEl.textContent = `${weapon.ammo}/${magSize}`;
+      const magSize = (effWeapon && effWeapon.magSize) || weapon.magSize;
+      widthPct = 100; fillActive = false; labelActive = false;
+      if (weapon.infiniteAmmo) {
+        label = 'READY'; text = '∞'; labelColor = '';
+      } else if (weapon.ammo === 0) {
+        label = 'EMPTY'; text = `${weapon.ammo}/${magSize}`; labelColor = '#c94a3a';
+      } else {
+        label = 'READY'; text = `${weapon.ammo}/${magSize}`; labelColor = '';
+      }
     }
+  }
+  // Width — quantize to 0.1% so trickle reload doesn't re-paint every frame.
+  const wq = Math.round(widthPct * 10);
+  if (reloadFillEl._lastW !== wq) {
+    reloadFillEl.style.width = `${widthPct}%`;
+    reloadFillEl._lastW = wq;
+  }
+  if (reloadFillEl._lastActive !== fillActive) {
+    reloadFillEl.classList.toggle('active', fillActive);
+    reloadFillEl._lastActive = fillActive;
+  }
+  if (reloadLabelEl._lastActive !== labelActive) {
+    reloadLabelEl.classList.toggle('active', labelActive);
+    reloadLabelEl._lastActive = labelActive;
+  }
+  if (reloadLabelEl._lastTxt !== label) {
+    reloadLabelEl.textContent = label;
+    reloadLabelEl._lastTxt = label;
+  }
+  if (reloadLabelEl._lastColor !== labelColor) {
+    reloadLabelEl.style.color = labelColor;
+    reloadLabelEl._lastColor = labelColor;
+  }
+  if (reloadTextEl._lastTxt !== text) {
+    reloadTextEl.textContent = text;
+    reloadTextEl._lastTxt = text;
   }
 }
 
@@ -7838,66 +7912,64 @@ function updateLootPrompt() {
   const containerHit = (!near && !body) ? level.nearestContainer(player.mesh.position, 1.8) : null;
   const npc = (!near && !body && !containerHit) ? level.nearestNPC(player.mesh.position, 2.5) : null;
   if (promptEl) {
+    // Resolve to a single (display, text, hint) tuple, then write once
+    // through the cache check at the bottom. Was thrashing
+    // promptEl.style.display + textContent every frame even when the
+    // player stood still in front of the same prompt.
+    let txt = '';
+    let hint = null;
     if (near) {
       const pile = loot.allWithin(player.mesh.position, tunables.loot.pickupRadius);
-      promptEl.style.display = 'block';
-      promptEl.textContent = pile.length >= 2
+      txt = pile.length >= 2
         ? `[E] examine ${pile.length} items on the ground`
         : `[E] pick up ${near.item.name}`;
-      fireHint('pickup');
+      hint = 'pickup';
     } else if (bodies.length >= 2) {
-      promptEl.style.display = 'block';
       const totalItems = bodies.reduce((n, b) => n + (b.loot?.length || 0), 0);
-      promptEl.textContent = `[E] loot area (${bodies.length} bodies · ${totalItems} items)`;
-      fireHint('searchBody');
+      txt = `[E] loot area (${bodies.length} bodies · ${totalItems} items)`;
+      hint = 'searchBody';
     } else if (body && !body.looted && body.loot && body.loot.length) {
-      promptEl.style.display = 'block';
-      promptEl.textContent = `[E] search body`;
-      fireHint('searchBody');
+      txt = `[E] search body`;
+      hint = 'searchBody';
     } else if (body && body.looted) {
-      promptEl.style.display = 'block';
-      promptEl.textContent = `(body looted)`;
+      txt = `(body looted)`;
     } else if (containerHit) {
-      promptEl.style.display = 'block';
-      promptEl.textContent = `[E] open ${containerHit.container.name}`;
-      fireHint('openContainer');
+      txt = `[E] open ${containerHit.container.name}`;
+      hint = 'openContainer';
     } else if (npc && npc.kind === 'merchant') {
-      promptEl.style.display = 'block';
-      promptEl.textContent = `[E] trade with merchant`;
-      fireHint('shop');
+      txt = `[E] trade with merchant`;
+      hint = 'shop';
     } else if (npc && npc.kind === 'bearMerchant') {
-      promptEl.style.display = 'block';
-      promptEl.textContent = `[E] speak with the Great Bear`;
+      txt = `[E] speak with the Great Bear`;
     } else if (npc && npc.kind === 'healer') {
-      promptEl.style.display = 'block';
-      promptEl.textContent = `[E] speak with the healer`;
+      txt = `[E] speak with the healer`;
     } else if (npc && npc.kind === 'gunsmith') {
-      promptEl.style.display = 'block';
-      promptEl.textContent = `[E] visit the gunsmith`;
+      txt = `[E] visit the gunsmith`;
     } else if (npc && npc.kind === 'armorer') {
-      promptEl.style.display = 'block';
-      promptEl.textContent = `[E] visit the armorer`;
+      txt = `[E] visit the armorer`;
     } else if (npc && npc.kind === 'tailor') {
-      promptEl.style.display = 'block';
-      promptEl.textContent = `[E] visit the tailor`;
+      txt = `[E] visit the tailor`;
     } else if (npc && npc.kind === 'relicSeller') {
-      promptEl.style.display = 'block';
-      promptEl.textContent = `[E] browse relics`;
+      txt = `[E] browse relics`;
     } else if (npc && npc.kind === 'blackMarket') {
-      promptEl.style.display = 'block';
-      promptEl.textContent = `[E] enter the black market`;
+      txt = `[E] enter the black market`;
     } else if (level.nearElevatorDoor(player.mesh.position)) {
-      promptEl.style.display = 'block';
-      promptEl.textContent = `[E] open elevator door`;
+      txt = `[E] open elevator door`;
     } else if (findExecuteTarget()) {
-      promptEl.style.display = 'block';
-      promptEl.textContent = `[F] execute`;
+      txt = `[F] execute`;
     } else if (level.isPlayerInExit(player.mesh.position) && exitCooldown <= 0) {
-      promptEl.style.display = 'block';
-      promptEl.textContent = `[E] extract (level ${level.index + 1})`;
-    } else {
-      promptEl.style.display = 'none';
+      txt = `[E] extract (level ${level.index + 1})`;
     }
+    const wantDisplay = txt ? 'block' : 'none';
+    if (promptEl._lastDisplay !== wantDisplay) {
+      promptEl.style.display = wantDisplay;
+      promptEl._lastDisplay = wantDisplay;
+    }
+    if (txt && promptEl._lastTxt !== txt) {
+      promptEl.textContent = txt;
+      promptEl._lastTxt = txt;
+    }
+    if (hint) fireHint(hint);
   }
   return { nearItem: near, body, bodies, npc, container: containerHit };
 }
@@ -10695,17 +10767,49 @@ function tick() {
   if (level.updateDecorationCulling && player?.mesh) {
     level.updateDecorationCulling(player.mesh.position.x, player.mesh.position.z);
   }
+  // Per-frame HUD text writes — cached on the element so we only
+  // touch the DOM when the displayed value actually changes. textContent
+  // assignment is cheap individually but adds up to ~6 dirty marks per
+  // frame across these elements when the values stay identical (which
+  // they do most frames). _lastTxt / _lastDisplay scratch on the elem
+  // itself avoids module-level state.
   if (creditTextEl) {
-    // Include persistent chips alongside run credits so the meta
-    // currency is always visible. Format: "credits • chips⚫"
-    creditTextEl.textContent = persistentChips > 0
+    const t = persistentChips > 0
       ? `${playerCredits}c · ${persistentChips}◆`
       : String(playerCredits);
+    if (creditTextEl._lastTxt !== t) {
+      creditTextEl.textContent = t;
+      creditTextEl._lastTxt = t;
+    }
   }
-  if (levelTextEl) levelTextEl.textContent = String((level?.index | 0) || 1);
-  if (xpTextEl) xpTextEl.textContent = `${playerXp}/${xpToNextLevel()}`;
-  if (spRowEl) spRowEl.style.display = playerSkillPoints > 0 ? 'flex' : 'none';
-  if (spTextEl) spTextEl.textContent = String(playerSkillPoints);
+  if (levelTextEl) {
+    const t = String((level?.index | 0) || 1);
+    if (levelTextEl._lastTxt !== t) {
+      levelTextEl.textContent = t;
+      levelTextEl._lastTxt = t;
+    }
+  }
+  if (xpTextEl) {
+    const t = `${playerXp}/${xpToNextLevel()}`;
+    if (xpTextEl._lastTxt !== t) {
+      xpTextEl.textContent = t;
+      xpTextEl._lastTxt = t;
+    }
+  }
+  if (spRowEl) {
+    const d = playerSkillPoints > 0 ? 'flex' : 'none';
+    if (spRowEl._lastDisplay !== d) {
+      spRowEl.style.display = d;
+      spRowEl._lastDisplay = d;
+    }
+  }
+  if (spTextEl) {
+    const t = String(playerSkillPoints);
+    if (spTextEl._lastTxt !== t) {
+      spTextEl.textContent = t;
+      spTextEl._lastTxt = t;
+    }
+  }
 
   if (!playerDead && playerInfo.health <= 0) {
     playerDead = true;
@@ -10785,10 +10889,13 @@ function tick() {
       const xp = classMastery.xpFor(cls);
       classLabel = `  ${cls} L${lv}` + (next !== null ? ` (${xp}/${next})` : ' max');
     }
-    hudStatsEl.textContent =
-      `level ${level.index}  char ${playerLevel}  ` +
-      `[${currentWeaponIndex + 1}/${rotation.length}] ${weaponLabel}${ammoLabel}${classLabel}  ` +
-      `aim ${zoneLabel}  ${playerInfo.iFrames ? 'i-frames' : ''}`;
+    const t = `level ${level.index}  char ${playerLevel}  `
+      + `[${currentWeaponIndex + 1}/${rotation.length}] ${weaponLabel}${ammoLabel}${classLabel}  `
+      + `aim ${zoneLabel}  ${playerInfo.iFrames ? 'i-frames' : ''}`;
+    if (hudStatsEl._lastTxt !== t) {
+      hudStatsEl.textContent = t;
+      hudStatsEl._lastTxt = t;
+    }
   }
 
   // Keycard HUD + transient toast fade + major-boss bar.
