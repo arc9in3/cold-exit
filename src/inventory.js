@@ -90,6 +90,61 @@ export const TYPE_ICONS = {
 const ICON_BASE = 'Assets/UI/Icons/';
 const MIL_BASE  = 'Assets/UI/Military/';
 
+// Curated gear PNG overrides — full paths into Assets/generated/ for
+// hand-authored AI-rendered art. When a gear id is in this table, both
+// iconForItem and thumbnailFor short-circuit to the PNG (same pattern
+// weapons use via WEAPON_RENDER_BY_NAME). Lets us drop in a polished
+// render and skip the procedural primitive without touching the build
+// system.
+export const GEAR_RENDER_BY_ID = {
+  helmet_kevlar:   'Assets/generated/helmet-kevlar.png',
+  helmet_tactical: 'Assets/generated/armor-helmet.png',
+  helmet_tac_nvg:  'Assets/generated/tactical-helmet.png',
+  chest_light:     'Assets/generated/chest-light-r2.png',
+  chest_med:       'Assets/generated/chest-med-r2.png',
+  chest_heavy:     'Assets/generated/chest-heavy.png',
+  gloves_tac:      'Assets/generated/gloves-tac.png',
+  hands_trigger:   'Assets/generated/hands-trigger-r2.png',
+  hands_climber:   'Assets/generated/hands-climber.png',
+  mask_gas:        'Assets/generated/mask-gas.png',
+  mask_respirator: 'Assets/generated/mask-respirator-r2.png',
+  ears_trinket:    'Assets/generated/ears-trinket.png',
+  ears_comtacs:    'Assets/generated/ears-comtacs-r2.png',
+  ears_amp:        'Assets/generated/ears-amp.png',
+  ears_surveil:    'Assets/generated/ears-surveil.png',
+  ears_plugs:      'Assets/generated/ears-plugs.png',
+  belt_ammo:       'Assets/generated/belt-ammo-r2.png',
+  belt_mag_pouch:  'Assets/generated/belt-mag-pouch.png',
+  belt_grenade_pouch: 'Assets/generated/belt-grenade-pouch.png',
+  belt_coinpouch:  'Assets/generated/belt-coinpouch.png',
+  pants_runner:    'Assets/generated/pants-runner.png',
+  boots_light:     'Assets/generated/boots-light-r2.png',
+  boots_heavy:     'Assets/generated/boots-heavy.png',
+  backpack_satchel: 'Assets/generated/backpack-satchel.png',
+  backpack_med:    'Assets/generated/backpack-med.png',
+  backpack_large:  'Assets/generated/backpack-large.png',
+};
+
+// Curated junk PNG overrides — same idea as GEAR_RENDER_BY_ID, but for
+// the type === 'junk' branch in iconForItem / thumbnailFor. Junk has a
+// big procedural-builder library in item_thumbnails.js, but a polished
+// PNG reads better at 96px cell size than the primitive cylinders.
+export const JUNK_RENDER_BY_ID = {
+  junk_watch:  'Assets/generated/junk-watch.png',
+  junk_silver: 'Assets/generated/junk-silver-coin.png',
+};
+
+// Curated consumable PNG overrides — same idea as the gear / junk
+// tables. Wins over CONSUMABLE_ICON_BY_ID and the FBX async upgrade in
+// thumbnailFor, so a hand-authored stim / medkit / bandage render
+// shows in the inventory grid instead of the generic Healing/Attack
+// category icon.
+export const CONSUMABLE_RENDER_BY_ID = {
+  cons_combat_stim: 'Assets/generated/consum-stim.png',
+  cons_medkit:      'Assets/generated/consum-medkit.png',
+  cons_bandage:     'Assets/generated/consum-bandage.png',
+};
+
 // Per-weapon-name overrides — uses the SM_Wep_* BattleRoyale/Military art
 // so each weapon has a distinct silhouette in the inventory grid. The
 // cell renderer prefers the Clean (color) sibling of whatever path we
@@ -357,6 +412,8 @@ export function iconForItem(item) {
     return MIL_BASE + (byName || 'ICON_SM_Wep_Knife_Kukri_01_Military_Underlay.png');
   }
   if (item.type === 'consumable') {
+    const render = CONSUMABLE_RENDER_BY_ID[item.id];
+    if (render) return render;
     const byId = CONSUMABLE_ICON_BY_ID[item.id];
     if (byId) return MIL_BASE + byId;
     return ICON_BASE + 'ICON_MilitaryCombat_Inventory_Healing_01_Underlay.png';
@@ -367,6 +424,8 @@ export function iconForItem(item) {
     return ICON_BASE + 'ICON_MilitaryCombat_Inventory_Minerals_01_Underlay.png';
   }
   if (item.type === 'junk') {
+    const render = JUNK_RENDER_BY_ID[item.id];
+    if (render) return render;
     const byId = JUNK_ICON_BY_ID[item.id];
     if (byId) return MIL_BASE + byId;
     return ICON_BASE + 'ICON_MilitaryCombat_Inventory_Minerals_01_Underlay.png';
@@ -376,8 +435,14 @@ export function iconForItem(item) {
     if (byId) return MIL_BASE + byId;
     return MIL_BASE + 'ICON_MilitaryCombat_Inventory_Ammo_Bullets_02_Underlay.png';
   }
-  if (item.slot === 'backpack') return ICON_BASE + 'ICON_MilitaryCombat_Inventory_Backpack_01_Underlay.png';
+  if (item.slot === 'backpack') {
+    const render = GEAR_RENDER_BY_ID[item.id];
+    if (render) return render;
+    return ICON_BASE + 'ICON_MilitaryCombat_Inventory_Backpack_01_Underlay.png';
+  }
   if (item.type === 'armor' || item.type === 'gear') {
+    const render = GEAR_RENDER_BY_ID[item.id];
+    if (render) return render;
     const byId = ARMOR_GEAR_ICON_BY_ID[item.id];
     if (byId) return MIL_BASE + byId;
     const bySlot = ARMOR_ICON_BY_SLOT[item.slot];
@@ -436,10 +501,13 @@ function _affixLevelScale() {
   const lv = _lootLevel;
   return Math.min(2.2, 1 + 0.06 * Math.max(0, lv - 1));
 }
-// Mastercraft: 0.5% chance per loot roll. Tagged with mastercraft:true
+// Mastercraft: 0.1% chance per loot roll. Tagged with mastercraft:true
 // so the cell renderer can render the rainbow-glow border, and every
-// affix value / numeric perk roll bumps by 1.5×.
-const MASTERCRAFT_CHANCE = 0.005;
+// affix value / numeric perk roll bumps by 1.5×. Was 0.5% — but with
+// 3–6 rolls per kill across weapons/gear/junk/throwables, players were
+// seeing mastercraft drops every run or two; the tier is supposed to
+// be a multi-run "did you SEE that?" event, so dropped 5×.
+const MASTERCRAFT_CHANCE = 0.001;
 export function rollMastercraft() { return Math.random() < MASTERCRAFT_CHANCE; }
 // Backwards-compatible internal alias used by withAffixes / wrapWeapon.
 function _rollMastercraft() { return rollMastercraft(); }
@@ -867,24 +935,26 @@ export function rollWeaponRarity() {
     return 'common';
   }
   if (lv <= 5) {
-    if (r < 0.005) return 'legendary';
-    if (r < 0.04)  return 'epic';
-    if (r < 0.16)  return 'rare';
-    if (r < 0.50)  return 'uncommon';
+    if (r < 0.002) return 'legendary';
+    if (r < 0.025) return 'epic';
+    if (r < 0.12)  return 'rare';
+    if (r < 0.45)  return 'uncommon';
     return 'common';
   }
   if (lv <= 8) {
-    if (r < 0.015) return 'legendary';
-    if (r < 0.07)  return 'epic';
-    if (r < 0.24)  return 'rare';
-    if (r < 0.58)  return 'uncommon';
+    if (r < 0.006) return 'legendary';
+    if (r < 0.045) return 'epic';
+    if (r < 0.18)  return 'rare';
+    if (r < 0.52)  return 'uncommon';
     return 'common';
   }
-  // L9+: original-ish distribution as the late-game baseline.
-  if (r < 0.03) return 'legendary';
-  if (r < 0.11) return 'epic';
-  if (r < 0.30) return 'rare';
-  if (r < 0.62) return 'uncommon';
+  // L9+: late-game baseline. Legendary stays a real surprise even
+  // when leveled — pulled 3%→1.2% and epic 11%→7% so the ramp
+  // levels off without flooding the high tiers.
+  if (r < 0.012) return 'legendary';
+  if (r < 0.07)  return 'epic';
+  if (r < 0.26)  return 'rare';
+  if (r < 0.58)  return 'uncommon';
   return 'common';
 }
 

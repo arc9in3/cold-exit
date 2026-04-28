@@ -13,6 +13,7 @@ import * as THREE from 'three';
 import { loadModelClone } from './gltf_cache.js';
 import { modelForItem, renderForWeaponName } from './model_manifest.js';
 import { snapshotToDataURL } from './snapshot_renderer.js';
+import { GEAR_RENDER_BY_ID, JUNK_RENDER_BY_ID, CONSUMABLE_RENDER_BY_ID } from './inventory.js';
 
 const SIZE = 96;                    // thumbnail resolution (px)
 const BG = 0x1a1e24;                // matches inventory card bg
@@ -1414,6 +1415,32 @@ export function thumbnailFor(item) {
   // via layoutForWeapon). No procedural primitive, no FBX overwrite.
   if (item.type === 'ranged' || item.type === 'melee') {
     const render = renderForWeaponName(item.baseName || item.name);
+    if (render) {
+      _cache.set(key, render);
+      return render;
+    }
+  }
+
+  // Armor / gear with a curated PNG render in Assets/generated/ also
+  // short-circuit — same idea as the weapon renders, but keyed by id
+  // instead of weapon name. Lets a hand-authored helmet/chest piece
+  // override the procedural primitive without rebuilding the cache.
+  if (item.type === 'armor' || item.type === 'gear' || item.type === 'backpack') {
+    const render = GEAR_RENDER_BY_ID[item.id];
+    if (render) {
+      _cache.set(key, render);
+      return render;
+    }
+  }
+  if (item.type === 'junk') {
+    const render = JUNK_RENDER_BY_ID[item.id];
+    if (render) {
+      _cache.set(key, render);
+      return render;
+    }
+  }
+  if (item.type === 'consumable') {
+    const render = CONSUMABLE_RENDER_BY_ID[item.id];
     if (render) {
       _cache.set(key, render);
       return render;
