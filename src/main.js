@@ -83,6 +83,10 @@ window.__resetHints = resetHints;
 let tutorialMode = false;
 const tutorialUI = new TutorialUI();
 window.__tutorialMode = () => tutorialMode;
+// Stealth-step accumulator — counts seconds the player has been
+// crouched within 6m of the stealth dummy while it's still idle.
+// Reset on tutorial start (mainMenu.onTutorial).
+let _tutorialStealthT = 0;
 
 const appEl = document.getElementById('app');
 const hudStatsEl = document.getElementById('hud-stats');
@@ -1114,6 +1118,7 @@ const mainMenuUI = new MainMenuUI({
       document.activeElement.blur();
     }
     tutorialMode = true;
+    _tutorialStealthT = 0;
     tutorialUI.reset();
     tutorialUI.show();
     resetHints();
@@ -1927,7 +1932,8 @@ function regenerateLevel() {
       majorBoss: !!s.majorBoss,
     };
     // Tutorial dummies — passive, never alert, low HP for easy
-    // practice kills.
+    // practice kills. The stealth target gets even lower aggression
+    // so the player can close on it without dying mid-lesson.
     if (s.tutorialDummy) {
       opts.hpMult = 0.4;
       opts.aggression = 0;
@@ -1955,7 +1961,24 @@ function regenerateLevel() {
       const g = gunmen.spawn(s.x, s.z, bossWeapon, opts);
       const colour = keyAssignments.get(s);
       if (colour && g) g.keyDrop = colour;
+      // Tutorial flags — flow back onto the spawned actor so the
+      // tutorial-step ticking can address them by name.
+      if (g && s.tutorialDummy) g.tutorialDummy = true;
+      if (g && s.stealthTarget) g.stealthTarget = true;
     }
+  }
+  // Tutorial-only setup: pre-spawn a pickup target near the player so
+  // the 'pickup' step has something to walk over before any kills
+  // happen. Prevents the chicken-and-egg of "pick up loot before
+  // anything has dropped."
+  if (tutorialMode) {
+    loot.spawnItem(
+      { x: level.playerSpawn.x + 2.5, y: 0.4, z: level.playerSpawn.z + 1.5 },
+      {
+        id: 'cons_bandage', name: 'Bandage', type: 'consumable', rarity: 'common',
+        useEffect: { kind: 'heal', amount: 30 },
+      },
+    );
   }
 
   // Softlock safety net — BFS from the start room through doors that
@@ -4965,6 +4988,26 @@ function fireOneShot(playerInfo, weapon, aimPoint, isADS, aimOwner) {
       runStats.addDamage(dmg);
       const result = hit.owner.manager.applyHit(hit.owner, dmg, hit.zone, dir, { weaponClass: weapon.class });
       for (const drop of result.drops) loot.spawnItem(drop.position, wrapWeapon(drop.weapon));
+      // Tutorial step ticks on hit-zone — landing the right zone on a
+      // tutorial dummy proves the lesson. The arm zone has a random
+      // disarm roll; if the dummy isn't disarmed yet, count arm hits
+      // and force-disarm on the 2nd to guarantee the lesson completes.
+      if (tutorialMode && hit.owner.tutorialDummy) {
+        if (hit.zone === 'head') tutorialUI.markStep('shoot_head');
+        if (hit.zone === 'leg' || hit.zone === 'legs') tutorialUI.markStep('shoot_leg');
+        if (hit.zone === 'arm') {
+          if (hit.owner.disarmed) {
+            tutorialUI.markStep('disarm');
+          } else {
+            hit.owner._tutorialArmHits = (hit.owner._tutorialArmHits || 0) + 1;
+            if (hit.owner._tutorialArmHits >= 2 && hit.owner.weapon
+                && typeof hit.owner.manager.forceDisarm === 'function') {
+              hit.owner.manager.forceDisarm(hit.owner);
+              tutorialUI.markStep('disarm');
+            }
+          }
+        }
+      }
       // Dragonbreath / other igniteOnHit weapons — set normal-tier
       // enemies ablaze + panicking. Sub-bosses and bosses only take
       // burn DoT without the panic flag (they keep attacking).
@@ -9903,19 +9946,37 @@ function tick() {
   if (tutorialMode) {
     const move = inputState.move;
     if (move && (move.x !== 0 || move.y !== 0)) tutorialUI.markStep('move');
-    // Aim-heavy step — completes only when the player is BOTH holding
-    // RMB and has the cursor over an enemy body zone. Teaches the
-    // quadrant-based aim mechanic, not just "hold the button".
-    if (inputState.adsHeld && lastAimZone) {
-      tutorialUI.markStep('aimZone');
-    }
-    if (inputState.attackPressed) tutorialUI.markStep('fire');
+    // ADS step — just holding RMB qualifies. Cursor doesn't need to
+    // be on the dummy here; the shoot_head / shoot_leg / disarm
+    // steps prove the player can aim at zones independently.
+    if (inputState.adsHeld) tutorialUI.markStep('ads');
     if (inputState.reloadPressed) tutorialUI.markStep('reload');
     if (inputState.meleePressed) tutorialUI.markStep('melee');
     if (inputState.crouchPressed) tutorialUI.markStep('crouch');
     if (inputState.spacePressed || inputState.spaceDoublePressed) tutorialUI.markStep('dash');
     if (inputState.inventoryToggled) tutorialUI.markStep('inventory');
     if (inputState.healPressed) tutorialUI.markStep('heal');
+    // Stealth step — find the stealth-flagged dummy and accumulate
+    // proximity time while the player is crouched within 6m. Marks
+    // complete after 1.5s of qualifying time, so a quick dash-by
+    // doesn't count. Dummy must still be alive + idle (won't tick if
+    // the player went and shot it).
+    let stealthDummy = null;
+    for (const g of gunmen.gunmen) {
+      if (g.alive && g.stealthTarget) { stealthDummy = g; break; }
+    }
+    if (stealthDummy && lastPlayerInfo) {
+      const sdx = stealthDummy.group.position.x - lastPlayerInfo.position.x;
+      const sdz = stealthDummy.group.position.z - lastPlayerInfo.position.z;
+      const sd = Math.hypot(sdx, sdz);
+      const crouched = !!(lastPlayerInfo.crouched || lastPlayerInfo.crouchSprinting);
+      if (sd < 6 && crouched) {
+        _tutorialStealthT = (_tutorialStealthT || 0) + dt;
+        if (_tutorialStealthT >= 1.5) tutorialUI.markStep('stealth');
+      } else {
+        _tutorialStealthT = Math.max(0, (_tutorialStealthT || 0) - dt * 0.5);
+      }
+    }
     // Extract step is marked when the player walks into the exit
     // zone — handled in the extract handler below.
   }

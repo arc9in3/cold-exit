@@ -236,6 +236,25 @@ export class GunmanManager {
     return ws[Math.floor(Math.random() * ws.length)];
   }
 
+  // Force a gunman into the disarmed state — used by the tutorial
+  // tick to guarantee the disarm lesson completes after 2 arm hits.
+  // Mirrors the natural disarm path inside applyHit so visual +
+  // behavioural side-effects stay consistent.
+  forceDisarm(g) {
+    if (!g || g.disarmed || !g.weapon) return;
+    g.disarmed = true;
+    if (g.rightArmGroup) g.rightArmGroup.visible = false;
+    else if (g.rightArm) g.rightArm.visible = false;
+    if (g.gun) g.gun.visible = false;
+    const _ri = rigInstancer && rigInstancer();
+    if (_ri && g.rig?.rightArmMeshes) {
+      _ri.hideMeshes(g.rig.rightArmMeshes, true);
+    }
+    g.weapon = null;
+    g.burstLeft = 0;
+    g.fireT = 0.8;
+  }
+
   // Attach a front shield. `opts.full` = true for the impenetrable
   // riot-shield melee variant; otherwise it's the partial pistol-
   // rusher tactical shield.

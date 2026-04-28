@@ -1168,6 +1168,12 @@ export class Level {
         id: 'cons_medkit', name: 'Medkit', type: 'consumable', rarity: 'common',
         useEffect: { kind: 'heal', amount: 60 },
       });
+      // Frag grenade so the throwable step has a target. Filled-in
+      // charges (3) so the player gets multiple practice tosses.
+      container.loot.push({
+        id: 'throw_frag', name: 'Frag Grenade', type: 'throwable', rarity: 'common',
+        throwKind: 'frag', maxCharges: 3, charges: 3,
+      });
       const cx2 = cx - 6, cz2 = cz + 4;
       const group = buildContainerMesh(container, cx2, 0, cz2);
       this.scene.add(group);
@@ -1192,14 +1198,22 @@ export class Level {
     this.revealExit();
     // Player spawn at the opposite end of the room.
     this.playerSpawn.set(cx, 0, bounds.minZ + 3);
-    // Single dummy enemy spawn so the fire / melee / reload steps
-    // have a target. Marked low-aggression via opts the spawner
-    // honours; passive AI tuning happens in main.js when these
-    // spawn slots are consumed.
-    this.enemySpawns = [{
-      x: cx + 4, z: cz + 5, roomId: 0, tier: 'normal',
-      tutorialDummy: true,
-    }];
+    // Two dummy spawns:
+    //   * Combat dummy — close to the player, target for headshot /
+    //     leg shot / disarm / melee practice. Aggression=0 so it
+    //     never fires back.
+    //   * Stealth dummy — far corner, isolated from cover. Player
+    //     must crouch + close distance to mark the stealth step.
+    this.enemySpawns = [
+      {
+        x: cx + 5, z: cz + 5, roomId: 0, tier: 'normal',
+        tutorialDummy: true,
+      },
+      {
+        x: bounds.maxX - 3, z: bounds.minZ + 4, roomId: 0, tier: 'normal',
+        tutorialDummy: true, stealthTarget: true,
+      },
+    ];
     // Drop a ceiling lamp so the room is visibly lit — without this
     // the tutorial reads as a dark void since the procedural lamp
     // pass only runs for room.type !== 'start'.

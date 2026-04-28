@@ -16,20 +16,26 @@
 // Visual is pure DOM — no canvas redraws so the overlay cost is one
 // re-render per step transition.
 
+// Tutorial curriculum — ordered roughly easy → advanced. The focus
+// arrow points to the first unticked step, so a slow learner can do
+// them in order; a power user can complete them in any order.
 const STEPS = [
   { id: 'move',       label: 'Move (WASD)' },
-  { id: 'aimZone',    label: 'AIM HEAVY: Hold RMB + put cursor on the dummy\'s body parts' },
-  { id: 'fire',       label: 'Fire (LMB) — landing on a body part is bonus accuracy' },
-  { id: 'reload',     label: 'Reload (R)' },
-  { id: 'melee',      label: 'Quick Melee (F)' },
-  { id: 'crouch',     label: 'Crouch (C)' },
-  { id: 'dash',       label: 'Dash (Space)' },
-  { id: 'inventory',  label: 'Open Inventory (Tab)' },
-  { id: 'pickup',     label: 'Pick up loot (E)' },
-  { id: 'container',  label: 'Open the supply crate (E)' },
-  { id: 'throwable',  label: 'Use a throwable (5-8)' },
-  { id: 'heal',       label: 'Quick heal (H)' },
-  { id: 'extract',    label: 'Walk into the green extract' },
+  { id: 'crouch',     label: 'Crouch (C) — quieter footsteps, harder to detect' },
+  { id: 'dash',       label: 'Dash to dodge (Space) — i-frames mid-dash' },
+  { id: 'ads',        label: 'Aim Down Sights — hold RMB to focus + cursor anywhere on the dummy' },
+  { id: 'shoot_head', label: 'Headshot — aim at the dummy\'s head and fire (massive bonus damage)' },
+  { id: 'shoot_leg',  label: 'Leg shot — hit the dummy\'s leg to slow them' },
+  { id: 'disarm',     label: 'Disarm — shoot the dummy\'s GUN ARM to make them drop their weapon' },
+  { id: 'melee',      label: 'Quick Melee (F) — close-range knife strike' },
+  { id: 'reload',     label: 'Reload (R) — top up the magazine' },
+  { id: 'inventory',  label: 'Open Inventory (Tab) — manage gear, pockets, attachments' },
+  { id: 'pickup',     label: 'Pick up loot (E) — walk over the dropped item near you' },
+  { id: 'container',  label: 'Open the supply crate (E) — grab consumables + a grenade' },
+  { id: 'heal',       label: 'Quick heal (H) — uses a bandage / medkit from your kit' },
+  { id: 'throwable',  label: 'Throw a grenade (5-8 hotbar) — area damage from the kit' },
+  { id: 'stealth',    label: 'Stealth — crouch + close to the FAR dummy without being detected' },
+  { id: 'extract',    label: 'Walk into the green extract zone' },
 ];
 
 export class TutorialUI {
