@@ -864,7 +864,10 @@ export function updateAnim(rig, state, dt) {
   // from the previous values — was running too fast for actual ground
   // speed, feet sliding. Each cycle covers ONE left+right step pair.
   let freq = 0.9 + a.blendWalk * 0.7 + a.blendRun * 0.9;
-  freq *= 1 - (a.crouchBlend || 0) * 0.20;
+  // Crouch slows the gait cadence noticeably — sneaking should read
+  // as deliberate, not just "running while squatted." Bumped 0.20 →
+  // 0.40 so a full crouch cuts step frequency by ~40%.
+  freq *= 1 - (a.crouchBlend || 0) * 0.40;
   a.cycle += dt * freq * Math.PI * 2;
   const s = Math.sin(a.cycle);
   const s2 = Math.sin(a.cycle * 2);
@@ -1004,15 +1007,14 @@ export function updateAnim(rig, state, dt) {
   // kneelBlend factor.
   const crouch = a.crouchBlend;
   const kneel = a.kneelBlend;
-  // Crouch-walk pose — deeper than before per user feedback.
-  const crouchThigh = -crouch * 0.55;
-  const crouchKnee  =  crouch * 1.10;
+  // Crouch-walk pose — deeper squat for the slick sneak silhouette.
+  const crouchThigh = -crouch * 0.70;
+  const crouchKnee  =  crouch * 1.30;
   const crouchAnkle = -(crouchThigh + crouchKnee);
-  // Crouch stride bumped from 70% → 90% of standing so the legs
-  // visibly cycle while sneaking instead of mincing in place. The
-  // old 0.30 stride-shrink combined with the asymmetric-front-leg
-  // bias to lock the gait into a stiff limp; both are relaxed here.
-  const strideScale = 1 - crouch * 0.10;
+  // Sneak stride — short + deliberate. 1 - crouch*0.10 = 90% read
+  // as "running while squatted." Now 1 - crouch*0.32 = 68% gives
+  // proper short steps that read as careful footing.
+  const strideScale = 1 - crouch * 0.32;
   // How much the static "leading leg" offset survives when actively
   // moving. At full crouch-stand (crouchMoveDamp ≈ 1) the front-leg
   // bias dominates so the character reads as poised on one knee.
@@ -1184,7 +1186,9 @@ export function updateAnim(rig, state, dt) {
   // the kneel — the front leg's near-horizontal thigh means the hip
   // has to be ~0.43m lower than standing for the front foot to plant.
   // Re-tuned for hipY=1.1 / thighH=0.42 / calfH=0.59 (long-leg proportions).
-  const crouchHipDrop = (crouch * 0.16 + kneel * 0.27) * rs;
+  // Deeper hip drop so the crouched silhouette reads as a real squat,
+  // not a half-bend. 0.16 → 0.26 (~16cm extra drop at full scale).
+  const crouchHipDrop = (crouch * 0.26 + kneel * 0.32) * rs;
   // Foot-plant impact dip — at heel-strike (cos(cycle) ≈ ±1) the hip
   // drops a couple cm to sell weight transfer onto the planted leg.
   // cos² peaks at both heel strikes per cycle (left foot at 0, right
@@ -1207,7 +1211,12 @@ export function updateAnim(rig, state, dt) {
   // enemies pass 0 since their body already faces the player.
   const chestAimYaw = state.aimYaw || 0;
   const chestFlinch = flinchK * -0.22;
-  const crouchLean = crouch * 0.18 + kneel * 0.12;
+  // Crouch chest hunch — deeper forward fold so the actor reads as
+  // settling weight low + forward, the classic stalker silhouette.
+  // Extra fold during a crouch-walk (not just static crouch) so
+  // sneaking has a deliberate "creeping in" shape vs standing crouch.
+  const crouchMoveLean = crouch * gaitT * 0.10;
+  const crouchLean = crouch * 0.30 + kneel * 0.18 + crouchMoveLean;
   const dashLean = a.dashBlend * 0.28;
   // Run lean is suppressed while crouched — the crouch pose is
   // already hunched forward, so stacking the full run lean on top
@@ -1225,7 +1234,10 @@ export function updateAnim(rig, state, dt) {
   const meleeWaistBend = meleeActive ? 0.08 : 0;
   rig.chest.rotation.y = chestAimYaw;
   rig.chest.rotation.x = chestFlinch - recK * 0.06 + crouchLean + dashLean + runLean + breathPitch + meleeWaistBend;
-  rig.hips.rotation.x = crouch * 0.18 + kneel * 0.10 + a.dashBlend * 0.22;
+  // Hip pitch matches the chest hunch so the spine doesn't break — a
+  // deeper crouch chest fold without matching hip pitch reads as a
+  // bent torso rather than a settled squat.
+  rig.hips.rotation.x = crouch * 0.26 + kneel * 0.16 + a.dashBlend * 0.22;
 
   // Head follows aim pitch/yaw with a bit of extra snap. A small
   // counter-pitch during crouch/kneel keeps the head level-ish

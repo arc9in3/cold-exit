@@ -38,15 +38,11 @@ export const tunables = {
     crouchMuzzleY: 0.78,
   },
   dash: {
-    // Bumped per ARBOTER playtest — old dash (3m / 0.2s) couldn't clear
-    // the boss's bullet sweep with the ~0.12s i-frames. New: 5.5m / 0.24s
-    // / 0.18s i-frames. Cooldown trimmed slightly so chained dodges feel
-    // viable. Distance = speed × duration.
-    speed: 23,
-    duration: 0.24,
-    cooldown: 0.20,
+    speed: 15,
+    duration: 0.2,
+    cooldown: 0.25,
     doubleTapWindow: 0.22,
-    iFrames: 0.18,
+    iFrames: 0.12,
   },
   roll: {
     speed: 15,
