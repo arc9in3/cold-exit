@@ -1759,13 +1759,17 @@
       overflow: hidden;
     }
     .cell-art-img {
-      width: 96%;
-      height: 96%;
+      width: 100%;
+      height: 100%;
       object-fit: contain;
       image-rendering: auto;
+      /* gen-2d source images often have heavy transparent padding
+         around the centered content. Apply a small scale-up so the
+         visible silhouette fills the slot more aggressively. The
+         padding is what was cropping the perceived image small. */
+      transform: scale(1.08);
       /* Brighten + slight contrast bump so the gear / consumable
-         icons read clearly inside dark slot tiles. Original
-         drop-shadow stays for depth. */
+         icons read clearly inside dark slot tiles. */
       filter: brightness(1.30) contrast(1.05) drop-shadow(0 1px 2px rgba(0, 0, 0, 0.55));
     }
     /* Broken gear visual — desaturate the art and stamp a red BROKEN

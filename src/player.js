@@ -1554,9 +1554,14 @@ export function createPlayer(scene) {
     body: 0x1e3a82, head: 0xdad2b0, leg: 0x1e3a82, arm: 0x1e3a82,
     hand: 0x0e1020, gear: 0xc89a3a, boot: 0x0e182a,
   };
+  // Cache the active style baseline. applyArmorTint reads from this
+  // when an armor slot is empty, so the body falls back to the
+  // operator/marine palette instead of staying tinted.
+  let _styleBase = OPERATOR_COLORS;
   function applyCharacterStyle(style) {
     const isMarine = style === 'marine';
     const p = isMarine ? MARINE_COLORS : OPERATOR_COLORS;
+    _styleBase = p;
     rig.materials.bodyMat.color.setHex(p.body);
     rig.materials.headMat.color.setHex(p.head);
     rig.materials.legMat.color.setHex(p.leg);
@@ -1565,8 +1570,61 @@ export function createPlayer(scene) {
     rig.materials.gearMat.color.setHex(p.gear);
     rig.materials.bootMat.color.setHex(p.boot);
     marineDecor.setVisible(isMarine);
+    // Re-capture baseBodyColor after a style change so the hit-flash
+    // lerp restores TO the new base (matters for operator↔marine
+    // toggles mid-run).
+    if (typeof baseBodyColor !== 'undefined' && rig.materials?.bodyMat) {
+      baseBodyColor.copy(rig.materials.bodyMat.color);
+    }
   }
   applyCharacterStyle(getCharacterStyle());
+
+  // Apply equipped-armor tints to the rig material chain. Each armor
+  // slot maps to a rig material; equipped items override the style
+  // baseline with their own item.tint (or item.bodyTint if specified).
+  // Slots without an equipped item fall back to the style base. Called
+  // from main.js per frame after applyDerivedStats — cheap (just
+  // material color writes), only writes when the cached value differs.
+  function applyArmorTint(equipment) {
+    if (!equipment) return;
+    const set = (mat, hex, last) => {
+      if (mat.color._lastHex !== hex) {
+        mat.color.setHex(hex);
+        mat.color._lastHex = hex;
+      }
+    };
+    // chest → body + arms (top covers shoulders too)
+    const chest = equipment.chest;
+    const chestHex = chest && typeof chest.tint === 'number' ? chest.tint : _styleBase.body;
+    set(rig.materials.bodyMat, chestHex);
+    set(rig.materials.armMat, chestHex);
+    // pants → legs
+    const pants = equipment.pants;
+    const pantsHex = pants && typeof pants.tint === 'number' ? pants.tint : _styleBase.leg;
+    set(rig.materials.legMat, pantsHex);
+    // boots
+    const boots = equipment.boots;
+    const bootsHex = boots && typeof boots.tint === 'number' ? boots.tint : _styleBase.boot;
+    set(rig.materials.bootMat, bootsHex);
+    // gloves → hands
+    const hands = equipment.hands;
+    const handsHex = hands && typeof hands.tint === 'number' ? hands.tint : _styleBase.hand;
+    set(rig.materials.handMat, handsHex);
+    // helmet (head) — visibility toggle handled separately. If a
+    // helmet is equipped, head reads as gear (helmet shell color);
+    // otherwise it stays the style head colour.
+    const head = equipment.head;
+    const headHex = head && typeof head.tint === 'number' ? head.tint : _styleBase.head;
+    set(rig.materials.headMat, headHex);
+    // belt + chest secondary gear — both feed gearMat. Belt wins
+    // since it's smaller / more specific; chest takes over if no
+    // belt is equipped.
+    const belt = equipment.belt;
+    const gearHex = (belt && typeof belt.tint === 'number') ? belt.tint
+      : (chest && typeof chest.gearTint === 'number') ? chest.gearTint
+      : _styleBase.gear;
+    set(rig.materials.gearMat, gearHex);
+  }
 
   // ----- Equipped-backpack visual swap ------------------------------
   // A primitive backpack mesh sits on the chest pivot; size + tint
@@ -1674,6 +1732,7 @@ export function createPlayer(scene) {
     getHandedness: () => state.handedness,
     applyCharacterStyle,
     setBackpackVisual,
+    applyArmorTint,
   };
 }
 

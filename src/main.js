@@ -10421,6 +10421,13 @@ function tick() {
   if (player.setBackpackVisual) {
     player.setBackpackVisual(inventory.equipment.backpack);
   }
+  // Body part tints follow equipped armor — chest tints torso/arms,
+  // pants tints legs, boots tints feet, gloves tints hands, helmet
+  // tints head. Cached on each rig material so we only touch GPU
+  // when an item.tint actually differs from last frame.
+  if (player.applyArmorTint) {
+    player.applyArmorTint(inventory.equipment);
+  }
   lastPlayerInfo = null; // will be set just after player.update
 
   // Muzzle scratch — reused every frame instead of clone()-ing
