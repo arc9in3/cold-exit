@@ -5,15 +5,25 @@ One-time setup. Walk through this once; everything after is just
 
 ## 1. Create a Discord application + bot user (5 minutes)
 
+NOTE: Discord removed the old "Add Bot" button. Every new application
+auto-provisions a bot user — you just configure it on the Bot tab.
+
 1. Go to https://discord.com/developers/applications
 2. Click **"New Application"** in the top right.
-3. Name it whatever you want (e.g. `mission-control`). Accept the ToS, click Create.
-4. Left sidebar → **"Bot"** → click **"Add Bot"** → confirm.
-5. Under "Token" click **"Reset Token"** then **"Copy"**. **THIS IS A SECRET.** Treat it like a password. We'll paste it into a local `.env` file in step 4 — never share it in chat or commit it to git.
-6. Scroll down to **"Privileged Gateway Intents"** and enable:
+3. Name it (e.g. `mission-control`). Accept the ToS, click **Create**.
+4. Left sidebar → **"Bot"**. The bot user is already provisioned —
+   no "Add Bot" click required. You'll see Username / Public Bot /
+   Token / Privileged Gateway Intents / Bot Permissions on this page.
+5. Under **"Token"** click **"Reset Token"** → confirm → **"Copy"**.
+   The token only shows ONCE; paste it straight into `.env` (step 4)
+   so you don't lose it. **THIS IS A SECRET.** Treat it like a
+   password. Never commit it to git.
+6. Scroll to **"Privileged Gateway Intents"** and enable:
    - ✅ Server Members Intent
    - ✅ Message Content Intent
-7. Scroll down to **"Bot Permissions"** and tick:
+   (Presence Intent can stay off — not needed.)
+7. Scroll to **"Bot Permissions"** at the bottom of the same page and
+   tick the same set you'll grant in the OAuth invite (step 2):
    - ✅ Send Messages
    - ✅ Embed Links
    - ✅ Attach Files
@@ -21,16 +31,28 @@ One-time setup. Walk through this once; everything after is just
    - ✅ Read Message History
    - ✅ Add Reactions
    - ✅ Use Slash Commands
-8. Save changes.
+8. Click **"Save Changes"** (button at the bottom).
 
 ## 2. Invite the bot to your server (1 minute)
 
-1. Left sidebar → **"OAuth2"** → **"URL Generator"**.
-2. Scopes — tick `bot` AND `applications.commands`.
-3. Bot Permissions — same checks as step 1.7.
-4. Copy the generated URL at the bottom, paste into your browser.
-5. Pick your server from the dropdown, click Authorize.
-6. The bot now appears in your server's member list (offline until we start it).
+1. Left sidebar → **"OAuth2"**. The URL Generator UI is on this page
+   (in some account skins it's a tab at the top labeled
+   "URL Generator"; in others the scope/permission checkboxes are
+   directly on the OAuth2 page itself).
+2. Under **Scopes**, tick `bot` AND `applications.commands`.
+3. A **Bot Permissions** section appears once `bot` is ticked. Tick:
+   - ✅ Send Messages
+   - ✅ Embed Links
+   - ✅ Attach Files
+   - ✅ Manage Webhooks
+   - ✅ Read Message History
+   - ✅ Add Reactions
+   - ✅ Use Slash Commands
+4. Copy the **Generated URL** at the bottom of the page, paste into
+   your browser, pick your server from the dropdown, click
+   **Authorize**.
+5. The bot now appears in your server's member list (offline until we
+   start `node src/bot.mjs` in step 7).
 
 ## 3. Create the channel structure in Discord (10 minutes)
 
