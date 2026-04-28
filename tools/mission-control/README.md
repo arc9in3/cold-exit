@@ -27,10 +27,17 @@ Ollama hosts local models, a Discord bot orchestrates 4 personas
 
 ```
 cd tools/mission-control
-npm install                # one time
-node src/db.mjs --init     # one time
-node src/bot.mjs           # always
+npm install                                 # one time
+copy .env.example .env                      # then fill in DISCORD_BOT_TOKEN + DISCORD_GUILD_ID
+node src/db.mjs --init                      # one time
+node scripts/setup-channels.mjs             # creates channels + writes their IDs to .env
+node scripts/seed-backlog.mjs               # seeds initial tasks so /status has work to show
+node scripts/import-history.mjs --file=SESSION-HISTORY.md --channel=mission-control
+node src/bot.mjs                            # always
 ```
+
+After the bot is running, type `/status` in `#mission-control` to see
+the seeded backlog. Use `/audit` and `/refactor` to queue new work.
 
 ## Design rules (don't break)
 
