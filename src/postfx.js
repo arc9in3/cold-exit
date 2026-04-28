@@ -169,6 +169,62 @@ class KawaseBloomPass extends Pass {
   }
 }
 
+// Screen-space outline pass — 3x3 sobel on the luminance of the
+// rendered scene. Picks up object silhouettes (high luma gradient at
+// the silhouette edge against background) AND cel-shading band edges
+// (hard luma cliff at the N·L step), which together give a comic-book
+// line density on every lit surface. Cost: one fullscreen ShaderPass
+// at the postFx scale (~0.2-0.4ms). Inserted before bloom so the
+// lines bloom alongside the scene rather than getting blurred over.
+const OutlineShader = {
+  uniforms: {
+    tDiffuse:    { value: null },
+    uPx:         { value: new THREE.Vector2(1 / 1280, 1 / 720) },
+    uColor:      { value: new THREE.Color(0x080812) },
+    uStrength:   { value: 0.78 },
+    uThreshold:  { value: 0.20 },
+    uSoftness:   { value: 0.10 },
+  },
+  vertexShader: /* glsl */`
+    varying vec2 vUv;
+    void main() {
+      vUv = uv;
+      gl_Position = projectionMatrix * modelViewMatrix * vec4(position, 1.0);
+    }
+  `,
+  fragmentShader: /* glsl */`
+    uniform sampler2D tDiffuse;
+    uniform vec2 uPx;
+    uniform vec3 uColor;
+    uniform float uStrength;
+    uniform float uThreshold;
+    uniform float uSoftness;
+    varying vec2 vUv;
+
+    float lum(vec3 c) { return dot(c, vec3(0.2126, 0.7152, 0.0722)); }
+
+    void main() {
+      float tl = lum(texture2D(tDiffuse, vUv + vec2(-uPx.x,  uPx.y)).rgb);
+      float t  = lum(texture2D(tDiffuse, vUv + vec2(0.0,     uPx.y)).rgb);
+      float tr = lum(texture2D(tDiffuse, vUv + vec2( uPx.x,  uPx.y)).rgb);
+      float l  = lum(texture2D(tDiffuse, vUv + vec2(-uPx.x,  0.0)).rgb);
+      float r  = lum(texture2D(tDiffuse, vUv + vec2( uPx.x,  0.0)).rgb);
+      float bl = lum(texture2D(tDiffuse, vUv + vec2(-uPx.x, -uPx.y)).rgb);
+      float b  = lum(texture2D(tDiffuse, vUv + vec2(0.0,    -uPx.y)).rgb);
+      float br = lum(texture2D(tDiffuse, vUv + vec2( uPx.x, -uPx.y)).rgb);
+
+      float gx = -tl - 2.0*l - bl + tr + 2.0*r + br;
+      float gy = -tl - 2.0*t - tr + bl + 2.0*b + br;
+      float g = sqrt(gx*gx + gy*gy);
+
+      vec3 col = texture2D(tDiffuse, vUv).rgb;
+      float edge = smoothstep(uThreshold, uThreshold + uSoftness, g);
+      col = mix(col, uColor, edge * uStrength);
+      gl_FragColor = vec4(col, 1.0);
+    }
+  `,
+};
+
 // Combined vignette + film-grain + subtle chromatic edge tint + ASC-CDL
 // style color grade. Cheap one-pass finisher that runs after the bloom
 // composite.
@@ -309,6 +365,13 @@ export function createPostFx(renderer, scene, camera) {
   const renderPass = new RenderPass(scene, camera);
   composer.addPass(renderPass);
 
+  // Outline — sobel on luminance, runs at the postFx scale. Inserted
+  // before bloom so the lines bloom along with the scene instead of
+  // getting smeared by it.
+  const outline = new ShaderPass(OutlineShader);
+  outline.material.uniforms.uPx.value.set(1 / sw, 1 / sh);
+  composer.addPass(outline);
+
   // Bloom — Kawase / dual-filter, half-res relative to its input.
   // Input is the postFx-scaled buffer (0.75× canvas), so bloom RTs
   // land at ~0.375× canvas — comfortably cheap.
@@ -329,6 +392,7 @@ export function createPostFx(renderer, scene, camera) {
     const scaled_h = Math.max(1, Math.floor(h * _postFxScale));
     composer.setSize(scaled_w, scaled_h);
     bloom.setSize(scaled_w, scaled_h);
+    outline.material.uniforms.uPx.value.set(1 / scaled_w, 1 / scaled_h);
   }
 
   function render(dt) {
@@ -344,5 +408,5 @@ export function createPostFx(renderer, scene, camera) {
     finisher.uniforms.uLosOn.value = enabled && texture ? 1.0 : 0.0;
   }
 
-  return { composer, bloom, finisher, render, resize, setLosMask };
+  return { composer, bloom, finisher, outline, render, resize, setLosMask };
 }
