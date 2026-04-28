@@ -1211,6 +1211,18 @@ export class GunmanManager {
         continue;
       }
 
+      // Stun grenade lockdown — fully frozen for a random 1-5s window.
+      // Blocks movement + fire + AI advancement. Visual stars (added
+      // by main.js when stunT crosses 0→positive) keep ticking to
+      // rotate above the head.
+      if ((g.stunT || 0) > 0) {
+        g.stunT = Math.max(0, g.stunT - dt);
+        if (g.rig && !g._animSkip) {
+          updateAnim(g.rig, { speed: 0, aiming: false, aimYaw: 0, aimPitch: 0 }, dt);
+        }
+        continue;
+      }
+
       // Spawner boss — high HP, minimal direct damage. Periodically
       // teleports to a random point in the boss room and spawns 4-6
       // melee adds at its new position. Ticks UNCONDITIONALLY so the

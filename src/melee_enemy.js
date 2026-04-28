@@ -606,6 +606,14 @@ export class MeleeEnemyManager {
         continue;
       }
 
+      // Stun grenade lockdown — fully frozen for the stunT window.
+      if ((e.stunT || 0) > 0) {
+        e.stunT = Math.max(0, e.stunT - dt);
+        e.telMat.opacity = THREE.MathUtils.lerp(e.telMat.opacity, 0, Math.min(1, dt * 12));
+        if (e.rig && !e._animSkip) updateAnim(e.rig, { speed: 0, meleeStance: false }, dt);
+        continue;
+      }
+
       this._updateAI(e, ctx, dt);
 
       // --- idle chatter ---------------------------------------------

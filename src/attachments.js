@@ -199,10 +199,12 @@ export const ATTACHMENT_DEFS = {
   side_strobe: {
     id: 'att_strobe', name: 'Strobe Light', type: 'attachment',
     slot: 'sideRail', tint: 0xffffff,
-    description: 'Pulsed strobe disorients beyond just blinding — enemies in the cone briefly cannot fire. Rarity scales the dazzle window AND the blind aim penalty.',
+    description: 'Pulsed strobe paralyzes enemies caught in the cone — they cannot fire while you keep them lit. The moment you sweep off them they recover. Tighter cone, shorter range than a tactical light.',
     modifier: {},
     lightTier: 'strobe',
-    lightCone: { range: 9, angleDeg: 38 },
+    // Tighter + shorter than tac light per playtest. Strobe is meant
+    // to be a precise active-track tool, not a wide-area suppressor.
+    lightCone: { range: 6, angleDeg: 25 },
     blindDuration: 1.8,
     blindSpreadMul: 2.4,
     dazzleDuration: 0.9,

@@ -4310,17 +4310,29 @@ function tickLight(playerInfo, aimInfo) {
     if (d > range) return;
     const nx = dx / Math.max(0.0001, d);
     const nz = dz / Math.max(0.0001, d);
-    if (nx * _lightDir.x + nz * _lightDir.z < halfCos) return;
+    const dot = nx * _lightDir.x + nz * _lightDir.z;
+    if (dot < halfCos) return;
+    // Centerness — 0 at the cone edge, 1 at the exact center. Drives
+    // the blind-spread scaling so flashlight aim degrades harder when
+    // the player keeps the beam dead-on.
+    const centerness = (dot - halfCos) / Math.max(0.0001, 1 - halfCos);
     enemy.blindT = Math.max(enemy.blindT || 0, lightAtt.blindDuration || 1.2);
-    // Magnitude — how much the blind degrades the enemy's spread
-    // while it's active. Rarity-scaled by rollAttachmentRarity, so
-    // a legendary tac light pushes spread harder than a common one.
-    enemy.blindSpreadMul = Math.max(enemy.blindSpreadMul || 1.0,
-      lightAtt.blindSpreadMul || 2.0);
+    // Spread multiplier scales with centerness — base value at edge,
+    // up to 2× base at the cone center. A legendary tac light's 2.4×
+    // base hits 4.8× spread when the player keeps the beam locked
+    // on the enemy's body, dropping back as they sweep off-axis.
+    const baseBlindMul = lightAtt.blindSpreadMul || 2.0;
+    const centerScaledBlind = baseBlindMul * (1 + centerness * 1.0);
+    enemy.blindSpreadMul = Math.max(enemy.blindSpreadMul || 1.0, centerScaledBlind);
     if (lightAtt.lightTier === 'strobe') {
-      enemy.dazzleT = Math.max(enemy.dazzleT || 0, lightAtt.dazzleDuration || 0.8);
+      // Strobe dazzle is TRANSIENT — only active while the cone is on
+      // the enemy. Refresh to a tiny window each frame; the moment
+      // the cone sweeps off, it decays out within a couple frames and
+      // the enemy can fire again. Player report: 'as soon as they
+      // leave the cone enemies can attack again.'
+      enemy.dazzleT = Math.max(enemy.dazzleT || 0, 0.10);
       enemy.dazzleSpreadMul = Math.max(enemy.dazzleSpreadMul || 1.0,
-        lightAtt.dazzleSpreadMul || 3.0);
+        (lightAtt.dazzleSpreadMul || 3.0) * (1 + centerness * 0.5));
     }
   };
   for (const g of gunmen.gunmen) if (g.alive) apply(g);
@@ -6602,17 +6614,19 @@ function onProjectileExplode(pos, explosion, owner, p) {
     return;
   }
   if (kind === 'stun') {
-    // Dazzle pulse — shorter than flash but hits through walls (it's
-    // a concussive stun, not a light-blind). Uses dazzleT which
-    // enemies already honour in their aim/AI code.
-    const stunDur = p.stunDuration || 2.5;
+    // Stun lockdown — random 1-5s per victim, separate from dazzle.
+    // Sets stunT (gunman + melee tick check this) which fully
+    // freezes movement + fire while active. Spawns a star ring
+    // above the victim's head; the stars rotate while stunT > 0.
     const victims = [...gunmen.gunmen, ...melees.enemies];
     for (const c of victims) {
       if (!c.alive) continue;
       const dx = c.group.position.x - pos.x;
       const dz = c.group.position.z - pos.z;
       if (dx * dx + dz * dz > rSq) continue;
-      c.dazzleT = Math.max(c.dazzleT || 0, stunDur);
+      const dur = 1 + Math.random() * 4;
+      c.stunT = Math.max(c.stunT || 0, dur);
+      _attachStunStars(c);
     }
     // Pale-blue tint on the white dome so the stun reads distinctly
     // from the flashbang at a glance.
@@ -7382,6 +7396,53 @@ function _isEnemyActive(e) {
   const s = e.state;
   return s === 'firing' || s === 'alerted' || s === 'chase'
     || s === 'windup' || s === 'swing' || s === 'recovery';
+}
+
+// --- Stun grenade visual: rotating star ring above the victim's head.
+// Built on demand when stunT goes positive; ticked + cleaned up by
+// _tickStunStars below. Pooled isn't worth it — stun is a rare event
+// and 4 small primitive meshes per victim is cheap.
+const _stunStarMat = new THREE.MeshBasicMaterial({
+  color: 0xffe060, transparent: true, opacity: 0.95,
+  depthWrite: false, blending: THREE.AdditiveBlending,
+});
+function _attachStunStars(enemy) {
+  if (!enemy || !enemy.group || enemy._stunStars) return;
+  const group = new THREE.Group();
+  group.position.y = 2.05;       // above head
+  // 4 small "stars" — quad-sphere primitives at 90° offsets.
+  for (let i = 0; i < 4; i++) {
+    const star = new THREE.Mesh(new THREE.SphereGeometry(0.07, 6, 4), _stunStarMat);
+    const ang = (i / 4) * Math.PI * 2;
+    star.position.set(Math.cos(ang) * 0.32, 0, Math.sin(ang) * 0.32);
+    group.add(star);
+  }
+  enemy.group.add(group);
+  enemy._stunStars = group;
+}
+function _detachStunStars(enemy) {
+  if (!enemy || !enemy._stunStars) return;
+  if (enemy._stunStars.parent) enemy._stunStars.parent.remove(enemy._stunStars);
+  enemy._stunStars.traverse((o) => {
+    if (o.geometry?.dispose) o.geometry.dispose();
+  });
+  enemy._stunStars = null;
+}
+const _stunStarsList = [];     // scratch
+function _tickStunStars(dt) {
+  _stunStarsList.length = 0;
+  for (const g of gunmen.gunmen) if (g._stunStars) _stunStarsList.push(g);
+  for (const m of melees.enemies) if (m._stunStars) _stunStarsList.push(m);
+  for (const c of _stunStarsList) {
+    if (!c.alive || (c.stunT || 0) <= 0) {
+      _detachStunStars(c);
+      continue;
+    }
+    c._stunStars.rotation.y += dt * 4.0;     // ~0.6Hz spin
+    // Subtle bob.
+    const bob = Math.sin(performance.now() * 0.005) * 0.04;
+    c._stunStars.position.y = 2.05 + bob;
+  }
 }
 
 // Tag every rig source mesh's _instHide flag — drives whether the
@@ -10346,6 +10407,7 @@ function tick() {
   _tickCamping(dt);
   _tickBurnFlames(dt);
   tickAmbushDrops(dt);
+  _tickStunStars(dt);
   tickCorpseDespawn(dt);
   tickEncounters(dt);
   _tickSmokePuffs(dt);
