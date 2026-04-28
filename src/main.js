@@ -1083,6 +1083,13 @@ const mainMenuUI = new MainMenuUI({
     input.clearMouseState();
     storeRollUI.show(offers, { slots, tier: rarityTier });
   },
+  onQuickStart: () => {
+    // Opens the classic class picker — bypasses the rolled-store
+    // flow. Player picks a class; startUI.onPick handler boots a run
+    // with that class's basic loadout.
+    input.clearMouseState();
+    startUI.show();
+  },
   onOpenStore: () => { mainMenuUI.hide(); storeUpgradeUI.show(); },
   onTutorial: () => {
     // Tutorial mode — pistol-class run on a single fixed practice
@@ -10027,6 +10034,12 @@ function tick() {
   if (buffs.buffs.length !== _buffCountBefore) _statsDirty = true;
   recomputeStatsIfDirty();
   player.applyDerivedStats(derivedStats);
+  // Backpack silhouette — reflects whatever's in the backpack slot.
+  // Cheap (just a visibility toggle + scale set on a pre-built mesh)
+  // so we can hit it every frame; no need for a dirty flag.
+  if (player.setBackpackVisual) {
+    player.setBackpackVisual(inventory.equipment.backpack);
+  }
   lastPlayerInfo = null; // will be set just after player.update
 
   // Muzzle scratch — reused every frame instead of clone()-ing

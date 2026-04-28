@@ -481,10 +481,14 @@ function buildChest(item) {
     frame.position.set(0, 0.18, 0.34);
     g.add(frame);
     // MOLLE pouches stitched to the front panel under the plate.
+    // Capsules (hemisphere caps) read as soft fabric pouches — the
+    // previous flat boxes felt brittle and toy-like. Capsule oriented
+    // vertically (length on Y), then squashed slightly on Z.
     const pouchMat = { roughness: 0.85 };
     for (let i = 0; i < 3; i++) {
       const x = -0.18 + i * 0.18;
-      const pouch = _box(0.14, 0.16, 0.09, NEUTRAL.fabric, pouchMat);
+      const pouch = _cap(0.06, 0.07, NEUTRAL.fabric, 4, 10, pouchMat);
+      pouch.scale.set(1.15, 1.0, 0.75);
       pouch.position.set(x, -0.18, 0.30);
       g.add(pouch);
       const buckle = _box(0.04, 0.04, 0.02, NEUTRAL.metalDark,
@@ -579,9 +583,11 @@ function buildBelt(item) {
   const buckle = _box(0.22, 0.28, 0.06, tint, { metalness: 0.6, roughness: 0.3 });
   buckle.position.set(0, 0, 0.08);
   g.add(buckle);
-  // Pouches — neutral.
+  // Pouches — capsule silhouette so they read as soft leather rather
+  // than rigid boxes.
   for (const sx of [-0.5, 0.5]) {
-    const pouch = _box(0.22, 0.22, 0.14, NEUTRAL.leather);
+    const pouch = _cap(0.10, 0.10, NEUTRAL.leather, 4, 10);
+    pouch.scale.set(1.1, 1.0, 0.7);
     pouch.position.set(sx, -0.15, 0.04);
     g.add(pouch);
   }

@@ -1555,6 +1555,64 @@ export function createPlayer(scene) {
   }
   applyCharacterStyle(getCharacterStyle());
 
+  // ----- Equipped-backpack visual swap ------------------------------
+  // A primitive backpack mesh sits on the chest pivot; size + tint
+  // reflect the equipped backpack item. setBackpackVisual(item) is
+  // called from main.js on every inventory change so the silhouette
+  // reads the player's current load. Pre-built once with three slots
+  // (a body, a top flap, two strap loops); swap = re-tint + re-scale.
+  const backpackGroup = new THREE.Group();
+  const backpackMat = new THREE.MeshToonMaterial({ color: 0x6a5530 });
+  const backpackStrapMat = new THREE.MeshToonMaterial({ color: 0x2a2218 });
+  const _backpackBody = new THREE.Mesh(new THREE.BoxGeometry(1, 1, 1), backpackMat);
+  _backpackBody.castShadow = true;
+  backpackGroup.add(_backpackBody);
+  const _backpackTop = new THREE.Mesh(new THREE.BoxGeometry(1, 1, 1), backpackStrapMat);
+  backpackGroup.add(_backpackTop);
+  // Two shoulder straps coming up over the chest.
+  for (const sx of [-1, 1]) {
+    const strap = new THREE.Mesh(new THREE.BoxGeometry(0.05, 0.55, 0.04), backpackStrapMat);
+    strap.position.set(sx * 0.13, 0.05, 0.18);
+    strap.rotation.x = -0.18;
+    backpackGroup.add(strap);
+  }
+  backpackGroup.visible = false;
+  rig.chest.add(backpackGroup);
+
+  // Pack profiles by item id. (w, h, d) are world-units sizes; the
+  // box geometry is unit-cube and gets scaled per profile so we never
+  // re-allocate geometry on swap. Values calibrated to read at iso
+  // distance — small profile sits flat on the back, large rucksack
+  // bulges noticeably above the shoulders.
+  const PACK_PROFILES = {
+    backpack_small:   { w: 0.36, h: 0.40, d: 0.18, topH: 0.08, yOff: 0.10 },
+    backpack_satchel: { w: 0.42, h: 0.38, d: 0.15, topH: 0.06, yOff: 0.08 },
+    backpack_med:     { w: 0.46, h: 0.50, d: 0.22, topH: 0.10, yOff: 0.13 },
+    backpack_assault: { w: 0.46, h: 0.55, d: 0.24, topH: 0.10, yOff: 0.16 },
+    backpack_large:   { w: 0.52, h: 0.65, d: 0.28, topH: 0.12, yOff: 0.20 },
+    backpack_ranger:  { w: 0.50, h: 0.62, d: 0.26, topH: 0.12, yOff: 0.19 },
+  };
+  const PACK_DEFAULT = PACK_PROFILES.backpack_small;
+
+  function setBackpackVisual(item) {
+    if (!item) {
+      backpackGroup.visible = false;
+      return;
+    }
+    const prof = PACK_PROFILES[item.id] || PACK_DEFAULT;
+    const s = rig.scale || 1;
+    _backpackBody.scale.set(prof.w * s, prof.h * s, prof.d * s);
+    _backpackBody.position.set(0, prof.yOff * s, -prof.d * s * 0.5 - 0.18 * s);
+    _backpackTop.scale.set((prof.w + 0.03) * s, prof.topH * s, (prof.d + 0.04) * s);
+    _backpackTop.position.set(0, (prof.yOff + prof.h * 0.5 + prof.topH * 0.5 - 0.02) * s, -prof.d * s * 0.5 - 0.18 * s);
+    if (typeof item.tint === 'number') {
+      backpackMat.color.setHex(item.tint);
+    } else {
+      backpackMat.color.setHex(0x6a5530);
+    }
+    backpackGroup.visible = true;
+  }
+
   // Pre-load + clone + cache a weapon's FBX without changing the
   // currently-equipped weapon. Used by main.regenerateLevel to warm
   // every weapon in the player's rotation during level-transition,
@@ -1602,6 +1660,7 @@ export function createPlayer(scene) {
     swapHandedness,
     getHandedness: () => state.handedness,
     applyCharacterStyle,
+    setBackpackVisual,
   };
 }
 

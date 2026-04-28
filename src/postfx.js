@@ -240,11 +240,17 @@ const FinisherShader = {
     uStrength: { value: 0.22 },    // vignette darkness at corners
     uGrain:    { value: 0.0 },     // grain disabled — read as static noise in play
     uChroma:   { value: 0.0015 },  // chromatic edge split (in UV units)
-    uContrast:    { value: 1.12 }, // 1.0 = no change. >1 crushes blacks + lifts highlights
-    uSaturation:  { value: 0.92 }, // 1.0 = no change. <1 desaturates toward gray
-    uShadowTint:  { value: new THREE.Color(0xa8b4c4) },  // cool steel into the shadows
-    uHighlightTint: { value: new THREE.Color(0xffe2b8) },// warm tungsten into the highlights
-    uGradeStrength: { value: 0.55 }, // overall grade mix — 0 = bypass, 1 = full
+    uContrast:    { value: 1.08 }, // 1.0 = no change. >1 crushes blacks + lifts highlights
+    uSaturation:  { value: 0.94 }, // 1.0 = no change. <1 desaturates toward gray
+    // Tints applied to shadows / highlights via luma-band blend. Earlier
+    // values (steel-blue shadows + cream highlights) pushed dark bodies
+    // toward warm tan because the smoothstep started at 0 — even very
+    // dark surfaces picked up some highlight tint. Tightened the
+    // smoothstep range in the shader so only true highlights warm,
+    // and flattened the highlight tint to a near-neutral cream.
+    uShadowTint:  { value: new THREE.Color(0xc0c8d4) },
+    uHighlightTint: { value: new THREE.Color(0xfff4e0) },
+    uGradeStrength: { value: 0.40 }, // overall grade mix — 0 = bypass, 1 = full
     // LoS mask — texture written by los_mask.js each frame. UVs match
     // the main camera's screen so we sample by vUv directly. Mask is
     // 1.0 where the player can see, 0.0 where occluded.
@@ -305,7 +311,11 @@ const FinisherShader = {
       //    feel without going monochrome.
       vec3 graded = col;
       float luma = dot(graded, vec3(0.2126, 0.7152, 0.0722));
-      vec3 tint = mix(uShadowTint, uHighlightTint, smoothstep(0.0, 1.0, luma));
+      // Tighter smoothstep band — shadow tint stays in shadows
+      // (luma < 0.35), highlight tint engages only above 0.65. Mid
+      // tones interpolate but won't run away into warm-tan territory
+      // for a near-black body.
+      vec3 tint = mix(uShadowTint, uHighlightTint, smoothstep(0.35, 0.85, luma));
       graded *= tint;
       graded = (graded - 0.5) * uContrast + 0.5;
       float gLuma = dot(graded, vec3(0.2126, 0.7152, 0.0722));

@@ -8,11 +8,12 @@
 // Esc pause / save / load flow during a run.
 
 export class MainMenuUI {
-  constructor({ onPlay, onTutorial, onOpenStore, getLeaderboard, getVolume, setVolume,
+  constructor({ onPlay, onQuickStart, onTutorial, onOpenStore, getLeaderboard, getVolume, setVolume,
                 getQuality, setQuality, getDevTools, setDevTools,
                 getPlayerName, setPlayerName,
                 getCharacterStyle, setCharacterStyle }) {
     this.onPlay = onPlay;
+    this.onQuickStart = onQuickStart;
     this.onTutorial = onTutorial;
     this.onOpenStore = onOpenStore;
     this.getLeaderboard = getLeaderboard || (() => null);
@@ -96,12 +97,17 @@ export class MainMenuUI {
       this.hide();
       this.onPlay?.();
     }));
-    // Tutorial button temporarily disabled — flow is broken; re-enable
-    // once the tutorial-mode regressions are fixed.
-    // this.bodyEl.appendChild(this._btn('Tutorial', () => {
-    //   this.hide();
-    //   this.onTutorial?.();
-    // }));
+    // Quick Start — bypass the rolled-store flow and pick a starting
+    // weapon class directly. Useful when the player wants a clean
+    // pistol / sniper / melee run without rolling for an upgrade.
+    this.bodyEl.appendChild(this._btn('Quick Start (pick class)', () => {
+      this.hide();
+      this.onQuickStart?.();
+    }));
+    this.bodyEl.appendChild(this._btn('Tutorial', () => {
+      this.hide();
+      this.onTutorial?.();
+    }));
     this.bodyEl.appendChild(this._btn('Upgrades', () => {
       this.onOpenStore?.();
     }));

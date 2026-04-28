@@ -203,13 +203,16 @@ export const DEFAULT_DIMS = {
   torso: {
     segs: 16,
     depthRatio: 0.72,
-    pelvisH: 0.17, pelvisTopR: 0.19, pelvisBotR: 0.22, pelvisY: 0.12,
-    stomachH: 0.235, stomachTopR: 0.24, stomachBotR: 0.20, stomachY: 0.22,
-    chestH: 0.345, chestTopR: 0.28, chestBotR: 0.24,
-    collarH: 0.055, collarTopR: 0.11, collarBotR: 0.28, collarDY: 0.057,
-    chestPlateTopR: 0.31, chestPlateBotR: 0.26,
+    // V-taper silhouette — wider top, narrower waist. Bumped chestTopR
+    // and slimmed chestBotR so the cylinder reads with shoulders-out
+    // and a defined waistline. Hip cylinder slightly slimmed to match.
+    pelvisH: 0.17, pelvisTopR: 0.18, pelvisBotR: 0.21, pelvisY: 0.12,
+    stomachH: 0.235, stomachTopR: 0.24, stomachBotR: 0.18, stomachY: 0.22,
+    chestH: 0.345, chestTopR: 0.32, chestBotR: 0.22,
+    collarH: 0.055, collarTopR: 0.11, collarBotR: 0.32, collarDY: 0.057,
+    chestPlateTopR: 0.34, chestPlateBotR: 0.22,
     chestPlateH: 0.34, chestPlateYK: 0.55, // * chestH
-    beltR: 0.25, beltH: 0.09, beltY: 0.015,
+    beltR: 0.24, beltH: 0.09, beltY: 0.015,
   },
   legs: {
     hipX: 0.18, hipJointY: 0.002,
@@ -224,12 +227,14 @@ export const DEFAULT_DIMS = {
     bootTopR: 0.10, bootTopH: 0.08, bootTopYK: -0.9, // * calfH
   },
   arms: {
-    shoulderInset: 0.29, shoulderYK: 0.78, // * chestH
-    upperArmH: 0.35, upperArmTopR: 0.10, upperArmBotR: 0.075,
+    // Shoulders pushed outboard for the V-silhouette. Bigger
+    // shoulderBulge + shoulderPad reads as muscled / armored.
+    shoulderInset: 0.34, shoulderYK: 0.80, // * chestH
+    upperArmH: 0.35, upperArmTopR: 0.105, upperArmBotR: 0.08,
     forearmH: 0.30, forearmTopR: 0.09, forearmBotR: 0.065,
-    shoulderBulgeR: 0.12,
+    shoulderBulgeR: 0.15,
     elbowBulgeR: 0.08,
-    shoulderPadR: 0.14,
+    shoulderPadR: 0.18,
     wristCuffR: 0.075, wristCuffH: 0.07, wristCuffYK: -0.9, // * forearmH
     handW: 0.12, handH: 0.12, handD: 0.16, handY: -0.06,
   },
@@ -319,13 +324,12 @@ export function buildRig(opts = {}) {
     // the torso.
     const hipBulge = jointSphere(L.hipBulgeR * scale, legMat, 'leg');
     thigh.pivot.add(hipBulge);
-    // Thigh rig — small gear-coloured strap on the outer thigh.
-    const thighRig = new THREE.Mesh(
-      _box(L.thighRigW * scale, L.thighRigH * scale, L.thighRigD * scale),
-      gearMat,
-    );
+    // Thigh rig — small gear-coloured pouch on the outer thigh.
+    // Rounded silhouette reads softer than the previous flat box;
+    // sphere scaled to a wedge sits flush against the thigh cylinder.
+    const thighRig = new THREE.Mesh(_sph(0.5, 10, 6), gearMat);
+    thighRig.scale.set(L.thighRigW * scale * 1.2, L.thighRigH * scale, L.thighRigD * scale);
     thighRig.position.set(sign * L.thighRigX * scale, L.thighRigYK * thighH, 0);
-    // Accessory — silhouette covered by the thigh cylinder.
     thighRig.castShadow = false;
     thighRig.userData.zone = 'leg';
     thigh.pivot.add(thighRig);
@@ -336,13 +340,13 @@ export function buildRig(opts = {}) {
     // Knee sphere — smooth bend between thigh and calf.
     const kneeBulge = jointSphere(L.kneeBulgeR * scale, legMat, 'leg');
     knee.add(kneeBulge);
-    // Knee pad — gear-coloured cap over the joint on the front.
-    const kneePad = new THREE.Mesh(
-      _box(L.kneePadW * scale, L.kneePadH * scale, L.kneePadD * scale),
-      gearMat,
-    );
+    // Knee pad — round dome over the front of the joint. Sphere
+    // geometry scaled into a flat oval cap reads softer than the
+    // previous boxy plate; the cel-shading band wraps around the
+    // curve instead of breaking on a hard edge.
+    const kneePad = new THREE.Mesh(_sph(0.5, 12, 8), gearMat);
+    kneePad.scale.set(L.kneePadW * scale, L.kneePadH * scale, L.kneePadD * scale * 1.5);
     kneePad.position.set(0, 0, L.kneePadZ * scale);
-    // Accessory — covered by the calf shadow.
     kneePad.castShadow = false;
     kneePad.userData.zone = 'leg';
     knee.add(kneePad);
