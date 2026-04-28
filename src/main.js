@@ -4082,7 +4082,7 @@ function _rollSubBossLootPile() {
     items.push({ ...rareJunk[Math.floor(Math.random() * rareJunk.length)] });
   }
   // Maybe attachment.
-  if (Math.random() < 0.45) items.push(rollAttachmentRarity({ ...ALL_ATTACHMENTS[Math.floor(Math.random() * ALL_ATTACHMENTS.length)] }));
+  if (Math.random() < 0.18) items.push(rollAttachmentRarity({ ...ALL_ATTACHMENTS[Math.floor(Math.random() * ALL_ATTACHMENTS.length)] }));
   return items;
 }
 
@@ -5773,7 +5773,7 @@ function buildBodyLoot(enemy) {
       items.push({ ...g2, rarity: r2 < 0.10 ? 'epic' : r2 < 0.50 ? 'rare' : 'uncommon',
         durability: { ...(g2.durability || { current: 100, max: 100, repairability: 0.9 }) } });
     }
-    if (Math.random() < 0.45) items.push(randomAttachment());
+    if (Math.random() < 0.18) items.push(randomAttachment());
     if (Math.random() < 0.60) items.push(randomJunk());
     if (Math.random() < 0.30) items.push(randomThrowable());
   } else if (tier === 'subBoss') {
@@ -5784,7 +5784,7 @@ function buildBodyLoot(enemy) {
       items.push({ ...g, rarity: r < 0.20 ? 'epic' : r < 0.65 ? 'rare' : 'uncommon',
         durability: { ...(g.durability || { current: 100, max: 100, repairability: 0.9 }) } });
     }
-    if (Math.random() < 0.35) items.push(randomAttachment());
+    if (Math.random() < 0.14) items.push(randomAttachment());
     if (Math.random() < 0.45) items.push(randomJunk());
     if (Math.random() < 0.20) items.push(randomThrowable());
     // Second consumable on sub-bosses so a clean kill rewards more
@@ -5798,7 +5798,7 @@ function buildBodyLoot(enemy) {
     // Grunt drop only fires on the 30% non-empty roll. Bumped slightly
     // since the surviving 30% needs to feel like the right corpse to
     // walk over to.
-    if (Math.random() < 0.10) items.push(randomAttachment());
+    if (Math.random() < 0.04) items.push(randomAttachment());
     if (Math.random() < 0.18) items.push(randomJunk());
     if (Math.random() < 0.05) items.push(randomThrowable());
   }
