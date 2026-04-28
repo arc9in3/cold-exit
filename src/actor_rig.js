@@ -864,10 +864,14 @@ export function updateAnim(rig, state, dt) {
   // from the previous values — was running too fast for actual ground
   // speed, feet sliding. Each cycle covers ONE left+right step pair.
   let freq = 0.9 + a.blendWalk * 0.7 + a.blendRun * 0.9;
-  // Crouch slows the gait cadence noticeably — sneaking should read
-  // as deliberate, not just "running while squatted." Bumped 0.20 →
-  // 0.40 so a full crouch cuts step frequency by ~40%.
-  freq *= 1 - (a.crouchBlend || 0) * 0.40;
+  // Crouch SPEEDS UP the gait cadence — sneaking reads as fast little
+  // shuffle steps, not slow long bike-pedal swings. Reversed from the
+  // earlier 0.40 reduction per playtest: 'looks like he's pedaling a
+  // bike. legs should be more forward and be more like fast little
+  // steps.' Now +35% step rate at full crouch. Combined with the
+  // smaller stride amp + reduced swing-lift below, the legs barely
+  // leave the centerline and just chitter forward.
+  freq *= 1 + (a.crouchBlend || 0) * 0.35;
   a.cycle += dt * freq * Math.PI * 2;
   const s = Math.sin(a.cycle);
   const s2 = Math.sin(a.cycle * 2);
@@ -1011,10 +1015,12 @@ export function updateAnim(rig, state, dt) {
   const crouchThigh = -crouch * 0.70;
   const crouchKnee  =  crouch * 1.30;
   const crouchAnkle = -(crouchThigh + crouchKnee);
-  // Sneak stride — short + deliberate. 1 - crouch*0.10 = 90% read
-  // as "running while squatted." Now 1 - crouch*0.32 = 68% gives
-  // proper short steps that read as careful footing.
-  const strideScale = 1 - crouch * 0.32;
+  // Sneak stride — much shorter than upright walk. The back-leg in
+  // stance was extending too far rearward at the previous 0.32
+  // attenuation; user described as 'pedaling a bike.' Now 0.65 cut
+  // (full crouch = 35% of upright stride length) so the swinging
+  // leg never reaches far behind the hip.
+  const strideScale = 1 - crouch * 0.65;
   // How much the static "leading leg" offset survives when actively
   // moving. At full crouch-stand (crouchMoveDamp ≈ 1) the front-leg
   // bias dominates so the character reads as poised on one knee.
@@ -1050,15 +1056,18 @@ export function updateAnim(rig, state, dt) {
   const gaitT = a.blendWalk + a.blendRun * 1.15;
   const strideAmp = (a.blendWalk * 0.45 + a.blendRun * 0.25) * strideScale;
   // Swing-forward lift: extra negative (forward) thigh angle at
-  // mid-swing. Run uses a big value to produce the high-knee look
-  // where the knee leads forward of the body.
-  const swingLift = (a.blendWalk * 0.25 + a.blendRun * 0.50) * strideScale;
+  // mid-swing. Run uses a big value to produce the high-knee look.
+  // Crouch suppresses this hard — fast small steps don't need the
+  // dramatic mid-swing forward push that produces the bike-pedal arc.
+  const crouchSwingDamp = 1 - crouch * 0.75;
+  const swingLift = (a.blendWalk * 0.25 + a.blendRun * 0.50) * strideScale * crouchSwingDamp;
   // Knee flex during swing — run flexes harder to clear ground.
-  // Crouching adds extra knee flex on top so the swinging leg actually
-  // CLEARS the ground when the hip is already low. Without this, the
-  // knee bend stayed walk-level while the hip dropped 16cm and the
-  // foot dragged through the floor.
-  const kneeFlex  = (a.blendWalk * 0.85 + a.blendRun * 1.30) * strideScale + crouch * 0.45 * gaitT;
+  // The +crouch * 0.45 bonus was added earlier so the swinging foot
+  // could clear the floor given the dropped hip. Now that the stride
+  // amp is cut to 35% and swingLift is damped, the foot's traversal
+  // distance is small enough that the bonus over-bends the knee.
+  // Trimmed 0.45 → 0.18.
+  const kneeFlex  = (a.blendWalk * 0.85 + a.blendRun * 1.30) * strideScale + crouch * 0.18 * gaitT;
   // Ankle heel-toe roll: toe-UP at heel-strike (phase=3π/2), toe-DOWN
   // at toe-off (phase=π/2). Using `sin(phase)` with the convention
   // that positive ankle rotation = plantarflex (toe-down) gives the
