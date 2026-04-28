@@ -2,7 +2,7 @@
 // 20, 25, then every 5). One large open arena, one massive primitive
 // robot, multiple telegraphed attacks across three phases:
 //
-//   Phase 1 (100% → 75% HP):  base attacks — slam, grenades, cover-artillery
+//   Phase 1 (100% → 75% HP):  base attacks — sweep, slam, grenades, cover-artillery
 //   transition (invuln):       smokes up, barks
 //   Phase 2 (75% → 25% HP):    adds CHARGE rush + GROUND-FIRE pools
 //   transition (invuln):       catches fire, barks
@@ -95,6 +95,7 @@ const _telegraphMat = new THREE.MeshBasicMaterial({
   color: 0xff2030, transparent: true, opacity: 0.0,
   depthWrite: false, side: THREE.DoubleSide,
 });
+const _bulletMat = new THREE.MeshBasicMaterial({ color: 0xff8030 });
 const _grenadeMat = new THREE.MeshStandardMaterial({
   color: 0x303030, roughness: 0.5, metalness: 0.5,
 });
@@ -154,6 +155,7 @@ export class MegaBoss {
 
     // Damage baselines (scaled per encounter).
     this.dmg = {
+      sweepBullet: Math.round(28 * dmgScale),
       artillery:   Math.round(50 * dmgScale),
       slam:        Math.round(70 * dmgScale),
       grenade:     Math.round(35 * dmgScale),
@@ -194,6 +196,7 @@ export class MegaBoss {
     this.invuln = false;
 
     // Hazard lists
+    this.bullets = [];
     this.shells = [];
     this.grenades = [];
     this.gasGrenades = [];
@@ -676,12 +679,14 @@ export class MegaBoss {
     const dz = playerPos.z - this.boss.position.z;
     const d = Math.hypot(dx, dz);
     const choices = [];
-    // Phase 1+: base attacks always available. (180° sweep was
-    // removed per playtest — read as filler vs the slam / grenade /
-    // artillery moveset that already pressures the player.)
-    choices.push({ id: 'grenade', w: 1.0 });
-    choices.push({ id: 'cover_artillery', w: 0.85 });
-    if (d < 9) choices.push({ id: 'slam', w: 1.4 });
+    // Phase 1+: base attacks always available. The 180° sweep is
+    // intentionally untelegraphed — bullets just start flying. The
+    // telegraph wedge that used to cone the floor was removed per
+    // playtest; the sweep itself reads on the bullets in flight.
+    choices.push({ id: 'sweep', w: 1.0 });
+    choices.push({ id: 'grenade', w: 0.85 });
+    choices.push({ id: 'cover_artillery', w: 0.7 });
+    if (d < 9) choices.push({ id: 'slam', w: 1.3 });
     // Phase 2+: charge + ground-fire.
     if (this.phase >= 2) {
       if (d > 6) choices.push({ id: 'charge', w: 1.4 });
@@ -706,7 +711,11 @@ export class MegaBoss {
   _beginTelegraph(attackId) {
     this.state = 'telegraph';
     this.stateT = 0;
-    if (attackId === 'cover_artillery') this.stateUntil = 0.8 * this.freqScale + 0.3;
+    // Sweep: telegraph window is intentionally tiny (no wedge built).
+    // The bullets themselves are the warning — player learns to read
+    // the spawn cluster + curve out of the way.
+    if (attackId === 'sweep')             this.stateUntil = 0.10;
+    else if (attackId === 'cover_artillery') this.stateUntil = 0.8 * this.freqScale + 0.3;
     else if (attackId === 'slam')         this.stateUntil = 1.2 * this.freqScale + 0.5;
     else if (attackId === 'grenade')      this.stateUntil = 0.6 * this.freqScale + 0.3;
     else if (attackId === 'charge')       this.stateUntil = 1.4 * this.freqScale + 0.5;
@@ -794,7 +803,11 @@ export class MegaBoss {
   _beginAttackBody(playerPos) {
     this.state = 'attack';
     this.stateT = 0;
-    if (this.currentAttack === 'cover_artillery') {
+    if (this.currentAttack === 'sweep') {
+      this.stateUntil = 2.6 * this.freqScale + 1.0;
+      this._sweepAngle = -Math.PI / 2;
+      this._sweepTickT = 0;
+    } else if (this.currentAttack === 'cover_artillery') {
       this.stateUntil = 4.2 * this.freqScale + 1.0;
       this._artilleryTickT = 0;
     } else if (this.currentAttack === 'slam') {
@@ -826,7 +839,8 @@ export class MegaBoss {
   }
 
   _tickAttackBody(dt, playerPos) {
-    if (this.currentAttack === 'cover_artillery') this._tickArtillery(dt, playerPos);
+    if (this.currentAttack === 'sweep') this._tickSweep(dt);
+    else if (this.currentAttack === 'cover_artillery') this._tickArtillery(dt, playerPos);
     else if (this.currentAttack === 'slam') this._tickSlam(dt, playerPos);
     else if (this.currentAttack === 'grenade') this._tickGrenade(dt, playerPos);
     else if (this.currentAttack === 'charge') this._tickCharge(dt, playerPos);
@@ -834,6 +848,35 @@ export class MegaBoss {
     else if (this.currentAttack === 'gas') this._tickGas(dt, playerPos);
   }
 
+  _tickSweep(dt) {
+    const totalAngle = Math.PI;
+    const sweepDur = this.stateUntil;
+    this._sweepAngle = -Math.PI / 2 + (this.stateT / sweepDur) * totalAngle;
+    const interval = Math.max(0.045, 0.075 * this.freqScale);
+    this._sweepTickT += dt;
+    while (this._sweepTickT >= interval) {
+      this._sweepTickT -= interval;
+      this._fireSweepBullet();
+    }
+  }
+
+  _fireSweepBullet() {
+    const ang = this.facing + this._sweepAngle;
+    const jitter = (Math.random() - 0.5) * 0.05 * this.spreadScale;
+    const dirX = Math.sin(ang + jitter);
+    const dirZ = Math.cos(ang + jitter);
+    const m = new THREE.Mesh(new THREE.SphereGeometry(0.25, 8, 6), _bulletMat);
+    m.position.set(
+      this.boss.position.x + dirX * 2.5, 1.6,
+      this.boss.position.z + dirZ * 2.5,
+    );
+    this.scene.add(m);
+    this.bullets.push({
+      mesh: m, vx: dirX * 11, vz: dirZ * 11,
+      life: 1.7, t: 0, dmg: this.dmg.sweepBullet,
+    });
+    if (this.ctx.sfx?.enemyFire) this.ctx.sfx.enemyFire('pistol', 0);
+  }
 
   _tickArtillery(dt, playerPos) {
     const interval = Math.max(0.32, 0.6 * this.freqScale);
@@ -1038,8 +1081,27 @@ export class MegaBoss {
     this.currentAttack = null;
   }
 
-  // ----- Hazard tick (shells, grenades, fire, gas) --------
+  // ----- Hazard tick (bullets, shells, grenades, fire, gas) --------
   _tickHazards(dt, playerPos) {
+    // Sweep bullets — straight-line travel + radius hit on player.
+    for (let i = this.bullets.length - 1; i >= 0; i--) {
+      const b = this.bullets[i];
+      b.t += dt;
+      b.mesh.position.x += b.vx * dt;
+      b.mesh.position.z += b.vz * dt;
+      const ddx = b.mesh.position.x - playerPos.x;
+      const ddz = b.mesh.position.z - playerPos.z;
+      const hit = (ddx * ddx + ddz * ddz) < 0.55 * 0.55;
+      if (hit && !this.ctx.playerHasIFrames?.()) {
+        this.ctx.damagePlayer(b.dmg, 'megaboss', { source: this, zone: 'torso', distance: 0 });
+        b.t = b.life;
+      }
+      if (b.t >= b.life) {
+        this.scene.remove(b.mesh);
+        b.mesh.geometry.dispose();
+        this.bullets.splice(i, 1);
+      }
+    }
     // Artillery shells
     for (let i = this.shells.length - 1; i >= 0; i--) {
       const s = this.shells[i];
@@ -1224,11 +1286,13 @@ export class MegaBoss {
   }
 
   _cleanupHazards() {
+    for (const b of this.bullets) { this.scene.remove(b.mesh); b.mesh.geometry.dispose(); }
     for (const s of this.shells)  { this.scene.remove(s.ringMesh); s.ringMesh.geometry.dispose(); s.ringMat.dispose(); }
     for (const g of this.grenades){ this.scene.remove(g.mesh); g.mesh.geometry.dispose(); }
     for (const g of this.gasGrenades){ this.scene.remove(g.mesh); g.mesh.geometry.dispose(); }
     for (const f of this.firePools){ this.scene.remove(f.mesh); f.mesh.geometry.dispose(); f.mat.dispose(); }
     for (const c of this.gasClouds){ this.scene.remove(c.mesh); c.mesh.geometry.dispose(); c.mat.dispose(); }
+    this.bullets.length = 0;
     this.shells.length = 0;
     this.grenades.length = 0;
     this.gasGrenades.length = 0;
