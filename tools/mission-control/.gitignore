@@ -1,6 +1,0 @@
-# Mission Control — never commit these
-.env
-.env.local
-data/
-node_modules/
-*.log
