@@ -85,9 +85,11 @@ export function applyQuality(mode, ctx = {}) {
     ctx.scene.fog.far  = low ? 60 : 80;
   }
   if (ctx.keyLight) {
-    const res = low ? 512 : 1024;
-    // Resize the shadow map only if it's different — reallocating is
-    // expensive and three.js won't no-op an identical assignment.
+    // High mode dropped 1024 → 768 (~44% texel save) — the cel-shaded
+    // look hides the resolution loss, and the soft PCF filter is the
+    // dominant fragment cost so smaller map = noticeably cheaper
+    // shadow render. Low mode unchanged.
+    const res = low ? 512 : 768;
     if (ctx.keyLight.shadow.mapSize.x !== res) {
       ctx.keyLight.shadow.mapSize.set(res, res);
       if (ctx.keyLight.shadow.map) {
@@ -95,6 +97,10 @@ export function applyQuality(mode, ctx = {}) {
         ctx.keyLight.shadow.map = null;
       }
     }
+    // normalBias offsets shadow samples along the surface normal —
+    // mitigates the "shadow acne" that PCF soft sometimes produces
+    // on the rig's curved cylinders. Cheap one-uniform set.
+    ctx.keyLight.shadow.normalBias = 0.02;
   }
   if (ctx.gridHelper) {
     ctx.gridHelper.visible = !low;
