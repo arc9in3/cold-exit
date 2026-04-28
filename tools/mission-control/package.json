@@ -6,6 +6,7 @@
   "description": "Multi-agent workspace — Discord bot orchestrating local + hosted AI models",
   "scripts": {
     "start": "node src/bot.mjs",
+    "dashboard": "node dashboard/server.mjs",
     "init-db": "node src/db.mjs --init",
     "newsie": "node src/workers/newsie.mjs",
     "test-ollama": "node -e \"import('./src/util/ollama.mjs').then(m => m.ollamaChat({model:'qwen2.5-coder:7b',messages:[{role:'user',content:'one sentence: what year is it?'}]}).then(r=>console.log(r)))\""
