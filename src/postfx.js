@@ -287,28 +287,48 @@ const FinisherShader = {
   `,
 };
 
+// Internal resolution scale for the postFX chain. The composer renders
+// the scene + bloom + finisher to a render target at (canvas × scale),
+// and the final OutputPass blits to the canvas with bilinear upscale.
+// On a 1080p canvas at scale 0.75 the chain runs at 810p — fragment
+// cost drops ~44% with a barely-perceptible softness on the cel-shaded
+// look. Lower → cheaper but softer; 0.65-0.85 is the practical band.
+let _postFxScale = 0.75;
+export function setPostFxScale(s) {
+  _postFxScale = Math.max(0.4, Math.min(1.0, s));
+}
+export function getPostFxScale() { return _postFxScale; }
+
 export function createPostFx(renderer, scene, camera) {
   const size = renderer.getSize(new THREE.Vector2());
+  const sw = Math.max(1, Math.floor(size.x * _postFxScale));
+  const sh = Math.max(1, Math.floor(size.y * _postFxScale));
   const composer = new EffectComposer(renderer);
-  composer.setSize(size.x, size.y);
+  composer.setSize(sw, sh);
 
   const renderPass = new RenderPass(scene, camera);
   composer.addPass(renderPass);
 
-  // Bloom — Kawase / dual-filter, half-res, ~30-50% cheaper than the
-  // original UnrealBloomPass. Same threshold + strength controls.
-  const bloom = new KawaseBloomPass(size.x, size.y, 0.75, 0.85);
+  // Bloom — Kawase / dual-filter, half-res relative to its input.
+  // Input is the postFx-scaled buffer (0.75× canvas), so bloom RTs
+  // land at ~0.375× canvas — comfortably cheap.
+  const bloom = new KawaseBloomPass(sw, sh, 0.75, 0.85);
   composer.addPass(bloom);
 
   const finisher = new ShaderPass(FinisherShader);
   composer.addPass(finisher);
 
+  // OutputPass renders the chain's final output to the canvas. Because
+  // the composer's internal target is smaller than the canvas, this
+  // step performs an automatic bilinear upscale via the texture filter.
   const output = new OutputPass();
   composer.addPass(output);
 
   function resize(w, h) {
-    composer.setSize(w, h);
-    bloom.setSize(w, h);
+    const scaled_w = Math.max(1, Math.floor(w * _postFxScale));
+    const scaled_h = Math.max(1, Math.floor(h * _postFxScale));
+    composer.setSize(scaled_w, scaled_h);
+    bloom.setSize(scaled_w, scaled_h);
   }
 
   function render(dt) {

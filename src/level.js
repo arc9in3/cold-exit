@@ -137,6 +137,7 @@ export class Level {
     this.enemySpawns = [];
     this.lights = [];
     this._roomLamps = [];
+    this._cullableProps = [];
     this.exitBounds = null;
     this.bossRoomId = -1;
     this._solidCache = null;
@@ -2227,6 +2228,17 @@ export class Level {
   _registerProp(prop) {
     if (!prop || !prop.group) return false;
     this.scene.add(prop.group);
+    // Track for proximity culling — far-room props hide via .visible
+    // toggle so the renderer skips their per-mesh frustum cull +
+    // matrixWorld walks. Bullets still hit them through level.obstacles
+    // raycasts (separate path that iterates the obstacle list, not
+    // the scene graph), so collision still works while invisible.
+    if (!this._cullableProps) this._cullableProps = [];
+    this._cullableProps.push({
+      obj: prop.group,
+      x: prop.group.position.x,
+      z: prop.group.position.z,
+    });
     // Harvest any PointLight inside the prop — lamps register their
     // glow into the ambient-light set so the stealth math treats a
     // lamp-lit spot the same as a ceiling-lit one.
@@ -4067,6 +4079,25 @@ export class Level {
         L.light.visible = inRange;
         if (L.fixture) L.fixture.visible = inRange;
       }
+    }
+  }
+
+  // Toggle prop group visibility based on player proximity. Props
+  // past the cull radius go invisible — the renderer skips their
+  // per-mesh frustum cull + matrixWorld walks. Bullets still hit them
+  // because raycasts iterate level.obstacles, not the scene graph.
+  // Use a slightly larger radius than light culling (35m vs 28m) so
+  // props on the edge of the visible camera frustum don't pop in/out
+  // when the player turns. Cheap — N props × one squared-distance
+  // check + one boolean compare per frame.
+  updateDecorationCulling(playerX, playerZ, cullRadius = 35) {
+    if (!this._cullableProps || this._cullableProps.length === 0) return;
+    const r2 = cullRadius * cullRadius;
+    for (let i = 0; i < this._cullableProps.length; i++) {
+      const p = this._cullableProps[i];
+      const dx = p.x - playerX, dz = p.z - playerZ;
+      const inRange = (dx * dx + dz * dz) <= r2;
+      if (p.obj.visible !== inRange) p.obj.visible = inRange;
     }
   }
 

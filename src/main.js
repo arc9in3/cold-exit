@@ -10522,6 +10522,12 @@ function tick() {
   if (level.updateRoomLightCulling && player?.mesh) {
     level.updateRoomLightCulling(player.mesh.position.x, player.mesh.position.z);
   }
+  // Prop / decoration culling — far-room props go invisible. Same
+  // pattern as light culling but on a slightly wider radius so props
+  // at the edge of the camera frustum don't pop in/out on rotation.
+  if (level.updateDecorationCulling && player?.mesh) {
+    level.updateDecorationCulling(player.mesh.position.x, player.mesh.position.z);
+  }
   if (creditTextEl) {
     // Include persistent chips alongside run credits so the meta
     // currency is always visible. Format: "credits • chips⚫"
