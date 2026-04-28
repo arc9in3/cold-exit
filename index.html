@@ -3171,6 +3171,41 @@
     .shop-cell-broken { box-shadow: 0 0 0 1px rgba(255, 80, 80, 0.40) inset, 0 0 8px rgba(255, 50, 50, 0.20); }
     .shop-empty { color: #6f6754; font-size: 12px; padding: 12px; text-align: center; }
 
+    /* Gunsmith / armorer affix-transfer station. Two slots side by side
+       with a label band on top; cell area accepts drag-from-backpack
+       drops (right-click to clear). drop-ok class is added during a
+       valid hover so the player sees their drop will land. */
+    .smith-slot {
+      flex: 1;
+      display: flex;
+      flex-direction: column;
+      border: 1px solid #2c323c;
+      border-radius: 3px;
+      background: #15181f;
+      overflow: hidden;
+    }
+    .smith-slot.drop-ok { border-color: #c9a87a; box-shadow: 0 0 8px rgba(201,168,122,0.4); }
+    .smith-slot-label {
+      font-size: 9px;
+      letter-spacing: 2px;
+      color: #7a8290;
+      text-align: center;
+      padding: 3px 0;
+      background: rgba(20,24,32,0.6);
+      border-bottom: 1px solid #2c323c;
+      text-transform: uppercase;
+    }
+    .smith-slot-cell {
+      width: 100%;
+      height: 90px;
+      position: relative;
+    }
+    .smith-slot-cell .shop-item {
+      position: relative;
+      width: 100%;
+      height: 100%;
+    }
+
     /* Shop footprint grid — same visual language as inventory pockets
        and the loot workspace, but with a merchant-tan accent. */
     .shop-footprint-grid {

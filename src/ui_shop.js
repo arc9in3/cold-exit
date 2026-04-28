@@ -7,6 +7,12 @@ import { thumbnailFor } from './item_thumbnails.js';
 import { buildRig, initAnim, updateAnim } from './actor_rig.js';
 import { KEEPER_PALETTE } from './level.js';
 import { snapshotToDataURL } from './snapshot_renderer.js';
+import { affixDef } from './inventory.js';
+import {
+  affixCap, affixesUsed, affixSlotsFree, transferableAffixes,
+  transferCost, transferScalar, makeScaledAffix, smithAccepts,
+  validateTransfer,
+} from './smiths.js';
 
 // Offscreen portrait renderer — one per shopkeeper kind, cached as a
 // data URL so opening the same shop twice doesn't re-render. Uses
@@ -191,8 +197,24 @@ export class ShopUI {
             <div id="shop-trade" style="display:none"></div>
           </div>
           <div class="shop-col">
+            <div id="shop-smith" style="display:none;border:1px solid #c9a87a;border-radius:4px;padding:12px;background:rgba(20,24,32,0.6);margin-bottom:10px;">
+              <div style="font-size:13px;font-weight:700;letter-spacing:2px;color:#c9a87a;text-transform:uppercase;margin-bottom:8px;text-align:center;" id="shop-smith-title">Affix Transfer</div>
+              <div style="display:flex;gap:8px;margin-bottom:8px;">
+                <div id="shop-smith-target-slot" class="smith-slot" data-role="target">
+                  <div class="smith-slot-label">TARGET</div>
+                  <div class="smith-slot-cell" id="shop-smith-target-cell"></div>
+                </div>
+                <div id="shop-smith-source-slot" class="smith-slot" data-role="source">
+                  <div class="smith-slot-label">MATERIAL</div>
+                  <div class="smith-slot-cell" id="shop-smith-source-cell"></div>
+                </div>
+              </div>
+              <div id="shop-smith-status" style="font-size:11px;color:#a09680;text-align:center;margin-bottom:6px;min-height:14px;letter-spacing:0.5px;"></div>
+              <div id="shop-smith-affixes" style="display:flex;flex-direction:column;gap:4px;max-height:160px;overflow-y:auto;margin-bottom:8px;"></div>
+              <button id="shop-smith-confirm" type="button" disabled style="width:100%;padding:8px;font-size:11px;letter-spacing:2px;text-transform:uppercase;background:rgba(255,160,80,0.18);color:#ffd8a0;border:1px solid rgba(255,160,80,0.55);border-radius:3px;cursor:pointer;font-family:inherit;font-weight:700;opacity:0.55;">Pick target + affix</button>
+            </div>
             <div class="inv-heading" style="display:flex;align-items:center;justify-content:space-between;gap:6px;">
-              <span>For Sale</span>
+              <span id="shop-stock-heading">For Sale</span>
               <button id="shop-reroll" type="button" style="display:none;padding:4px 10px;font-size:10px;letter-spacing:1.5px;text-transform:uppercase;background:rgba(120,160,210,0.18);color:#bcd4ee;border:1px solid rgba(120,160,210,0.55);border-radius:2px;cursor:pointer;font-family:inherit;font-weight:700;">Reroll Stock</button>
             </div>
             <div id="shop-stock"></div>
@@ -233,6 +255,18 @@ export class ShopUI {
     this.repairAllBtn.addEventListener('click', () => this._repairAll());
     this.repairItemBtn = this.root.querySelector('#shop-repair-item');
     this.repairItemBtn.addEventListener('click', () => this._openRepairItemModal());
+    // Smith affix-transfer station — gunsmith / armorer only.
+    this.smithEl = this.root.querySelector('#shop-smith');
+    this.smithTitleEl = this.root.querySelector('#shop-smith-title');
+    this.smithTargetCellEl = this.root.querySelector('#shop-smith-target-cell');
+    this.smithSourceCellEl = this.root.querySelector('#shop-smith-source-cell');
+    this.smithAffixesEl = this.root.querySelector('#shop-smith-affixes');
+    this.smithStatusEl = this.root.querySelector('#shop-smith-status');
+    this.smithConfirmBtn = this.root.querySelector('#shop-smith-confirm');
+    this.smith = { target: null, source: null, affix: null };
+    this._wireSmithSlot(this.root.querySelector('#shop-smith-target-slot'), 'target');
+    this._wireSmithSlot(this.root.querySelector('#shop-smith-source-slot'), 'source');
+    this.smithConfirmBtn.addEventListener('click', () => this._smithConfirm());
     this.rerollBtn = this.root.querySelector('#shop-reroll');
     this.rerollBtn.addEventListener('click', () => {
       if (!this.merchant) return;
@@ -259,6 +293,231 @@ export class ShopUI {
     if (this.onClose) this.onClose();
   }
   isOpen() { return this.merchant !== null; }
+
+  // ─── Affix-transfer station ───────────────────────────────────────
+  // Show only at gunsmith / armorer. Two slots (target + source/material),
+  // an affix list with cost previews, and a Confirm button. Drag-from-
+  // backpack is the primary input; right-click a slot to clear it.
+
+  _wireSmithSlot(slotEl, role) {
+    if (!slotEl || slotEl._wired) return;
+    slotEl._wired = true;
+    slotEl.addEventListener('dragover', (e) => {
+      if (!this._drag || this._drag.from !== 'bag') return;
+      const it = this._drag.item;
+      if (!smithAccepts(this.merchant?.kind, it)) return;
+      e.preventDefault();
+      slotEl.classList.add('drop-ok');
+    });
+    slotEl.addEventListener('dragleave', () => slotEl.classList.remove('drop-ok'));
+    slotEl.addEventListener('drop', (e) => {
+      e.preventDefault();
+      slotEl.classList.remove('drop-ok');
+      const d = this._drag;
+      this._drag = null;
+      if (!d || d.from !== 'bag') return;
+      const it = d.item;
+      if (!smithAccepts(this.merchant?.kind, it)) return;
+      // Don't let the player put the same item in both slots.
+      if (role === 'target' && this.smith.source === it) this.smith.source = null;
+      if (role === 'source' && this.smith.target === it) this.smith.target = null;
+      this.smith[role] = it;
+      this.smith.affix = null;  // clear selection on slot change
+      this.render();
+    });
+    // Right-click clears.
+    slotEl.addEventListener('contextmenu', (e) => {
+      e.preventDefault();
+      this.smith[role] = null;
+      this.smith.affix = null;
+      this.render();
+    });
+  }
+
+  _renderSmithSlotCell(cellEl, item, role) {
+    cellEl.innerHTML = '';
+    if (!item) {
+      const placeholder = document.createElement('div');
+      placeholder.style.cssText = 'display:flex;align-items:center;justify-content:center;height:100%;color:#5a6470;font-size:10px;letter-spacing:1.5px;text-transform:uppercase;text-align:center;padding:0 6px;';
+      placeholder.textContent = role === 'target'
+        ? 'Drag item to upgrade'
+        : 'Drag item to consume';
+      cellEl.appendChild(placeholder);
+      return;
+    }
+    const wrap = document.createElement('div');
+    wrap.className = `shop-item rarity-${inferRarity(item)}`;
+    wrap.style.cssText = 'width:100%;height:100%;cursor:default;';
+    wrap.innerHTML = renderItemCell(item, null, { owned: false });
+    cellEl.appendChild(wrap);
+  }
+
+  _renderSmith() {
+    const kind = this.merchant?.kind;
+    const isSmith = (kind === 'gunsmith' || kind === 'armorer');
+    if (!isSmith) {
+      this.smithEl.style.display = 'none';
+      this.smith.target = null;
+      this.smith.source = null;
+      this.smith.affix = null;
+      return;
+    }
+    this.smithEl.style.display = '';
+    this.smithTitleEl.textContent = kind === 'gunsmith'
+      ? 'Weapon Affix Transfer'
+      : 'Armor Affix Transfer';
+
+    // Drop a slotted item if it's no longer in the player's inventory
+    // (e.g. they sold or threw it, or the player swapped equipment).
+    const inInv = (it) => {
+      if (!it) return false;
+      if (this.inventory.backpack.includes(it)) return true;
+      if (this.inventory.equipment) {
+        for (const s in this.inventory.equipment) {
+          if (this.inventory.equipment[s] === it) return true;
+        }
+      }
+      return false;
+    };
+    if (!inInv(this.smith.target)) this.smith.target = null;
+    if (!inInv(this.smith.source)) { this.smith.source = null; this.smith.affix = null; }
+
+    this._renderSmithSlotCell(this.smithTargetCellEl, this.smith.target, 'target');
+    this._renderSmithSlotCell(this.smithSourceCellEl, this.smith.source, 'source');
+
+    // Status line — what the player still needs to do.
+    const target = this.smith.target;
+    const source = this.smith.source;
+    let status = '';
+    if (target && source && target === source) {
+      status = 'Target and material must be different items.';
+    } else if (target) {
+      const free = affixSlotsFree(target);
+      const cap = affixCap(target);
+      const used = affixesUsed(target);
+      status = `Target slots: ${used} / ${cap} used · ${free} free`;
+      if (free <= 0) status += ' — no room for another affix';
+      if (target.mastercraft) status += ' · MASTERCRAFT (+100% transferred value)';
+    }
+    this.smithStatusEl.textContent = status;
+
+    // Affix list. Source-MC scaling shown inline so the player can
+    // judge the trade before committing.
+    this.smithAffixesEl.innerHTML = '';
+    if (!source) {
+      const hint = document.createElement('div');
+      hint.style.cssText = 'font-size:10px;color:#5a6470;padding:8px;text-align:center;letter-spacing:1px;';
+      hint.textContent = source ? '' : 'Material slot empty';
+      this.smithAffixesEl.appendChild(hint);
+    } else {
+      const affixes = transferableAffixes(source);
+      if (affixes.length === 0) {
+        const empty = document.createElement('div');
+        empty.style.cssText = 'font-size:10px;color:#5a6470;padding:8px;text-align:center;letter-spacing:1px;';
+        empty.textContent = 'No transferable affixes on material';
+        this.smithAffixesEl.appendChild(empty);
+      } else {
+        const credits = this.getCredits();
+        for (const aff of affixes) {
+          const row = document.createElement('div');
+          const isSelected = this.smith.affix === aff;
+          const canTransfer = !!(target && affixSlotsFree(target) > 0 && target !== source);
+          const cost = target ? transferCost(target, aff) : 0;
+          const canAfford = credits >= cost;
+          const scalar = target ? transferScalar(source, target) : 1.0;
+          const rawV = aff.value || 0;
+          const newV = Math.round(rawV * scalar * 10) / 10;
+          const def = affixDef(aff.kind);
+          const previewLabel = def ? def.label(newV) : aff.label;
+          row.style.cssText = `
+            display:flex;align-items:center;justify-content:space-between;gap:8px;
+            padding:6px 8px;border:1px solid ${isSelected ? '#c9a87a' : '#2c323c'};
+            border-radius:3px;background:${isSelected ? 'rgba(201,168,122,0.15)' : '#15181f'};
+            cursor:${canTransfer ? 'pointer' : 'default'};opacity:${canTransfer ? 1 : 0.55};
+          `;
+          const left = document.createElement('div');
+          left.style.cssText = 'flex:1;min-width:0;';
+          const labelText = scalar !== 1.0 && target
+            ? `${aff.label} → ${previewLabel}`
+            : aff.label;
+          const scalarTag = scalar === 2.0 ? ' <span style="color:#ffd27a">×2</span>'
+            : scalar === 0.5 ? ' <span style="color:#d28080">×0.5</span>'
+            : '';
+          left.innerHTML = `<div style="font-size:11px;color:#cfd6e0;letter-spacing:0.5px;">${labelText}${scalarTag}</div>`;
+          row.appendChild(left);
+          const right = document.createElement('div');
+          right.style.cssText = `font-size:11px;font-weight:700;letter-spacing:1px;color:${target ? (canAfford ? '#ffd27a' : '#d28080') : '#5a6470'};white-space:nowrap;`;
+          right.textContent = target ? `${cost}c` : '—';
+          row.appendChild(right);
+          if (canTransfer) {
+            row.addEventListener('click', () => {
+              this.smith.affix = aff;
+              this.render();
+            });
+          }
+          this.smithAffixesEl.appendChild(row);
+        }
+      }
+    }
+
+    // Confirm button — locked until the trio is valid + affordable.
+    const credits = this.getCredits();
+    const reason = validateTransfer(target, source, this.smith.affix, credits);
+    if (!reason && this.smith.affix && target) {
+      const cost = transferCost(target, this.smith.affix);
+      this.smithConfirmBtn.disabled = false;
+      this.smithConfirmBtn.style.opacity = '1';
+      this.smithConfirmBtn.style.cursor = 'pointer';
+      this.smithConfirmBtn.textContent = `Forge · ${cost}c`;
+    } else {
+      this.smithConfirmBtn.disabled = true;
+      this.smithConfirmBtn.style.opacity = '0.55';
+      this.smithConfirmBtn.style.cursor = 'default';
+      this.smithConfirmBtn.textContent = reason || 'Pick target + affix';
+    }
+  }
+
+  _smithConfirm() {
+    const { target, source, affix } = this.smith;
+    const credits = this.getCredits();
+    const reason = validateTransfer(target, source, affix, credits);
+    if (reason) { this._flash(reason); return; }
+    const cost = transferCost(target, affix);
+    if (!this.spendCredits(cost)) { this._flash('Could not deduct credits'); return; }
+    // Stamp the scaled affix onto the target.
+    const scaled = makeScaledAffix(source, target, affix);
+    target.affixes = (target.affixes || []).slice();
+    target.affixes.push(scaled);
+    // Destroy the source — pull it from backpack OR equipment, wherever
+    // it lives. Equipped destruction triggers a recompute since stats
+    // change.
+    let removed = false;
+    const bagIdx = this.inventory.backpack.indexOf(source);
+    if (bagIdx >= 0) {
+      this.inventory.takeFromBackpack(bagIdx);
+      removed = true;
+    } else if (this.inventory.equipment) {
+      for (const slot of Object.keys(this.inventory.equipment)) {
+        if (this.inventory.equipment[slot] === source) {
+          this.inventory.equipment[slot] = null;
+          removed = true;
+          break;
+        }
+      }
+    }
+    if (!removed) {
+      // Refund — couldn't actually consume the source. Defensive.
+      this.earnCredits(cost);
+      target.affixes.pop();
+      this._flash('Could not consume material');
+      return;
+    }
+    if (typeof window.__recomputeStats === 'function') window.__recomputeStats();
+    this._flash(`Forged · ${scaled.label} · −${cost}c`);
+    this.smith.source = null;
+    this.smith.affix = null;
+    this.render();
+  }
 
   _renderTrade() {
     if (!this.tradeEl) return;
@@ -357,17 +616,13 @@ export class ShopUI {
     this.render();
   }
 
-  // Per-merchant repair specialty. Gunsmiths repair weapons (ranged
-  // + melee); armorers handle armor + body gear (chest, head, hands,
-  // belt, pants, boots, ears, face, backpack). The general merchant
-  // and other shops can't repair anything — players have to seek out
-  // the right specialist.
-  _canRepair(item) {
-    if (!this.merchant || !item || !item.durability) return false;
-    const kind = this.merchant.kind;
-    const t = item.type;
-    if (kind === 'gunsmith') return t === 'ranged' || t === 'melee';
-    if (kind === 'armorer')  return t === 'armor'  || t === 'gear' || t === 'backpack' || item.slot === 'backpack';
+  // Repair has been removed from the gunsmith / armorer — those two
+  // vendors now do affix transfer instead (see _renderSmith). No other
+  // vendor kind ever repaired gear, so this method permanently returns
+  // false. Kept as a stub so existing call sites (e.g. backpack-cell
+  // mode picker in render()) don't blow up; broken items just sell as
+  // normal at every shop now.
+  _canRepair(_item) {
     return false;
   }
 
@@ -597,45 +852,11 @@ export class ShopUI {
   render() {
     if (!this.merchant) return;
     this.creditsEl.textContent = `${this.getCredits()}c`;
-    // Bulk-action button visibility — Sell-All-Junk is universal,
-    // Repair-All only at the gunsmith / armorer who can actually do
-    // the work. Hidden buttons keep their layout slot via display:none
-    // so the row doesn't reflow when switching between merchants.
+    // Repair buttons are permanently hidden — gunsmith / armorer now
+    // do affix transfer instead, and no other vendor ever repaired.
     const kind = this.merchant.kind;
-    if (this.repairAllBtn) {
-      const canShow = (kind === 'gunsmith' || kind === 'armorer');
-      this.repairAllBtn.style.display = canShow ? '' : 'none';
-      const baseLabel = kind === 'gunsmith' ? 'Repair All Weapons'
-                      : kind === 'armorer'  ? 'Repair All Armor'
-                      : 'Repair All';
-      // Live cost preview — sum of every damaged repairable item.
-      const damaged = canShow ? this._damagedRepairables() : [];
-      const total = damaged.reduce((s, e) => s + e.cost, 0);
-      this.repairAllBtn.textContent = damaged.length === 0
-        ? baseLabel
-        : `${baseLabel} · ${total}c`;
-      // Disabled-greyed when there's nothing to do or the player
-      // can't afford the full sweep.
-      const credits = this.getCredits();
-      const cantAfford = total > 0 && credits < total;
-      this.repairAllBtn.disabled = damaged.length === 0;
-      this.repairAllBtn.style.opacity = (damaged.length === 0 || cantAfford) ? '0.55' : '1';
-      this.repairAllBtn.style.cursor = damaged.length === 0 ? 'default' : 'pointer';
-      this.repairAllBtn.title = cantAfford
-        ? `Need ${total}c (you have ${credits}c). Items will be repaired in order until credits run out.`
-        : '';
-    }
-    if (this.repairItemBtn) {
-      const canShow = (kind === 'gunsmith' || kind === 'armorer');
-      this.repairItemBtn.style.display = canShow ? '' : 'none';
-      const damaged = canShow ? this._damagedRepairables() : [];
-      this.repairItemBtn.disabled = damaged.length === 0;
-      this.repairItemBtn.style.opacity = damaged.length === 0 ? '0.55' : '1';
-      this.repairItemBtn.style.cursor = damaged.length === 0 ? 'default' : 'pointer';
-      this.repairItemBtn.textContent = damaged.length === 0
-        ? 'Repair Item'
-        : `Repair Item (${damaged.length})`;
-    }
+    if (this.repairAllBtn) this.repairAllBtn.style.display = 'none';
+    if (this.repairItemBtn) this.repairItemBtn.style.display = 'none';
     // Reroll: only when the unlock has been purchased AND this visit
     // hasn't burned its single use. Disabled-greyed if used so the
     // player still sees the affordance.
@@ -662,6 +883,7 @@ export class ShopUI {
     this.titleEl.textContent = TITLES[this.merchant.kind] || 'MERCHANT';
     this._renderKeeper();
     this._renderTrade();
+    this._renderSmith();
     // Stock — flat cell list. Shop is intentionally simpler than the
     // inventory/loot grids: left-click to inspect, right-click to buy.
     // No drag-to-rearrange, no footprint layout. Convention matches

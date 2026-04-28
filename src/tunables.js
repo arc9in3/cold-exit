@@ -238,6 +238,18 @@ export const tunables = {
   merchant: {
     stockSize: 6,
   },
+  // Gunsmith / armorer affix-transfer pricing. See src/smiths.js for
+  // the full formula. 10× the original draft so the smith reads as
+  // a high-stakes economic decision (it lets the player skip the
+  // random affix roll, so the gold cost has to bite).
+  smith: {
+    transfer: {
+      base: 2500,        // flat charge per transfer
+      perValue: 200,     // gold per |affix.value| point
+      rarityMult: 1500,  // gold per target-rarity tier (common=0..mythic=5)
+      mcMult: 1.5,       // extra multiplier when target is mastercraft
+    },
+  },
   rarity: {
     tiers: ['common', 'uncommon', 'rare', 'epic', 'legendary'],
     colors: {

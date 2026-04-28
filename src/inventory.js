@@ -106,6 +106,7 @@ export const GEAR_RENDER_BY_ID = {
   gloves_tac:      'Assets/generated/gloves-tac.png',
   hands_trigger:   'Assets/generated/hands-trigger-r2.png',
   hands_climber:   'Assets/generated/hands-climber.png',
+  hands_loader:    'Assets/generated/hands-loader.png',
   mask_gas:        'Assets/generated/mask-gas.png',
   mask_respirator: 'Assets/generated/mask-respirator-r2.png',
   ears_trinket:    'Assets/generated/ears-trinket.png',
@@ -715,9 +716,16 @@ export function rarityColor(item) {
   return RARITY_HEX[inferRarity(item)] || RARITY_HEX.common;
 }
 
-const AFFIX_COUNT_BY_RARITY = {
-  common: 1, uncommon: 1, rare: 2, epic: 3, legendary: 4,
+export const AFFIX_COUNT_BY_RARITY = {
+  common: 1, uncommon: 1, rare: 2, epic: 3, legendary: 4, mythic: 4,
 };
+
+// Look up a pool entry so external systems (the smith UI) can rebuild
+// an affix label after scaling its value. Returns null for setMark and
+// any unknown kind — callers should treat that as non-transferable.
+export function affixDef(kind) {
+  return AFFIX_POOL.find(a => a.kind === kind) || null;
+}
 
 // Named armor/gear sets — each item that rolls a `setMark` affix counts
 // toward set totals. Equipping multiple set pieces unlocks the tiered
