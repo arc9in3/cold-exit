@@ -10371,6 +10371,12 @@ function tick() {
   _perf.start('wallOccl');
   updateWallOcclusion();
   _perf.end('wallOccl');
+  // Cull far-room SpotLights — every lit fragment shader iterates the
+  // scene's lights[] array regardless of intensity, so killing visibility
+  // on lamps in unreachable rooms drops fragment cost noticeably.
+  if (level.updateRoomLightCulling && player?.mesh) {
+    level.updateRoomLightCulling(player.mesh.position.x, player.mesh.position.z);
+  }
   if (creditTextEl) {
     // Include persistent chips alongside run credits so the meta
     // currency is always visible. Format: "credits • chips⚫"

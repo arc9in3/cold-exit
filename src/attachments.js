@@ -716,11 +716,26 @@ export function randomAttachment() {
   return att;
 }
 
-// Compute the *effective* (base × attachments) version of a weapon. Returns a
-// fresh object each call; callers mutate `ammo`/`reloadingT` on the original
-// weapon, not on the effective copy.
+// Mark a weapon's cached effective view as stale. Call after mutating
+// `w.attachments[slot]`, mastercraft modifiers, or any base stat field
+// `effectiveWeapon` reads (damage, hipSpread, range, fireRate, reloadTime,
+// magSize, adsZoom, adsPeekDistance). `ammo` and `reloadingT` are
+// mutated freely on the live weapon and are NOT read here, so those
+// don't need to invalidate.
+export function invalidateEffectiveWeapon(w) {
+  if (w) w._effDirty = true;
+}
+
+// Compute the *effective* (base × attachments) version of a weapon.
+// Cached on the weapon object — `effectiveWeapon` is called 10+ times
+// per frame (HUD, AI vision, hud overlays, scene zoom, etc.) and each
+// call previously did a full attachment-loop iteration plus a fresh
+// object spread. The cache is invalidated by `invalidateEffectiveWeapon`
+// at every mutation point. Callers mutate `ammo`/`reloadingT` on the
+// original weapon, not on this cached copy.
 export function effectiveWeapon(w) {
   if (!w) return null;
+  if (w._effCache && !w._effDirty) return w._effCache;
   const eff = { ...w };
   const atts = w.attachments || {};
   let lightAtt = null;
@@ -752,5 +767,7 @@ export function effectiveWeapon(w) {
     if (m.suppressed) eff.suppressed = true;
   }
   eff.lightAttachment = lightAtt;  // expose for main's cone test
+  w._effCache = eff;
+  w._effDirty = false;
   return eff;
 }

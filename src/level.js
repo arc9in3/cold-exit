@@ -136,6 +136,7 @@ export class Level {
     this.rooms = [];
     this.enemySpawns = [];
     this.lights = [];
+    this._roomLamps = [];
     this.exitBounds = null;
     this.bossRoomId = -1;
     this._solidCache = null;
@@ -2194,6 +2195,14 @@ export class Level {
     this.scene.add(light.target);
     this.decorations.push(light);
     this.decorations.push(light.target);
+    // Track for proximity culling — main.js calls
+    // updateRoomLightCulling(playerPos) each frame and toggles
+    // .visible on far-room lamps so they drop out of the renderer's
+    // active lights[] array. Every lit fragment shader iterates that
+    // array regardless of distance, so culling 8-12 SpotLights from
+    // far rooms is a real fragment-cost win.
+    if (!this._roomLamps) this._roomLamps = [];
+    this._roomLamps.push({ light, fixture, cx, cz });
     // Stealth sampling keeps the radial light entry so detection +
     // cover gameplay tracks the visible pool of light.
     this.lights.push({ x: cx, z: cz, radius: 8.0, intensity: 1.8 });
@@ -3987,6 +3996,26 @@ export class Level {
       if (x >= b.minX && x <= b.maxX && z >= b.minZ && z <= b.maxZ) return r;
     }
     return null;
+  }
+
+  // Toggle per-room SpotLights based on player proximity. Rooms past
+  // the cull radius set .visible = false on their lamp + ceiling
+  // fixture so the renderer drops them from the active lights[]
+  // array. Cull radius 28m keeps the player's room (18×18) plus one
+  // ring of cardinal neighbours (centres 18-19m apart) lit. Cheap to
+  // call every frame — N rooms × one distance check each.
+  updateRoomLightCulling(playerX, playerZ, cullRadius = 28) {
+    if (!this._roomLamps || this._roomLamps.length === 0) return;
+    const r2 = cullRadius * cullRadius;
+    for (let i = 0; i < this._roomLamps.length; i++) {
+      const L = this._roomLamps[i];
+      const dx = L.cx - playerX, dz = L.cz - playerZ;
+      const inRange = (dx * dx + dz * dz) <= r2;
+      if (L.light.visible !== inRange) {
+        L.light.visible = inRange;
+        if (L.fixture) L.fixture.visible = inRange;
+      }
+    }
   }
 
   resolveCollision(oldX, oldZ, newX, newZ, radius) {

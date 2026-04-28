@@ -1,6 +1,7 @@
 import { tunables } from './tunables.js';
 import { rollPerks, GEAR_PERKS } from './perks.js';
 import { GridContainer, stampItemDims, deriveGridLayout } from './grid_container.js';
+import { invalidateEffectiveWeapon } from './attachments.js';
 import { renderForWeaponName as _renderForWeaponName,
          shouldMirrorWeapon as _shouldMirrorWeapon,
          shouldMirrorInHand as _shouldMirrorInHand } from './model_manifest.js';
@@ -2265,6 +2266,7 @@ export class Inventory {
       if (!this.autoPlaceAnywhere(previous)) return false;
     }
     weapon.attachments[slot] = attachment;
+    invalidateEffectiveWeapon(weapon);
     this._bump();
     return true;
   }
@@ -2276,6 +2278,7 @@ export class Inventory {
     stampItemDims(current);
     if (!this.autoPlaceAnywhere(current)) return false;
     weapon.attachments[slot] = null;
+    invalidateEffectiveWeapon(weapon);
     this._bump();
     return true;
   }

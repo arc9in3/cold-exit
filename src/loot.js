@@ -38,6 +38,13 @@ export class LootManager {
     this._pool = [];
     this._sharedBoxGeom = new THREE.BoxGeometry(0.35, 0.35, 0.35);
     const POOL_SIZE = 24;
+    // Only the first half of slots get a per-drop PointLight. The box
+    // mesh is already emissive (tinted ~0.75× on spawn) and reads
+    // through bloom on its own; the PointLight just adds a small warm
+    // floor spill. Halving the lit-slot count drops 12 always-on
+    // PointLights from the scene's lights[] array — every lit fragment
+    // shader iterates that array regardless of intensity.
+    const LIT_SLOTS = POOL_SIZE >> 1;
     for (let i = 0; i < POOL_SIZE; i++) {
       const group = new THREE.Group();
       const mat = new THREE.MeshStandardMaterial({
@@ -66,12 +73,17 @@ export class LootManager {
       sprite.visible = false;
       group.add(sprite);
 
-      // PointLight stays parented to the group at intensity 0 when
-      // the slot is idle. Scene is part of a fixed-count shader
-      // key set; no recompile when a slot activates.
-      const light = new THREE.PointLight(0xffffff, 0, 2.2);
-      light.position.y = 0.2;
-      group.add(light);
+      // PointLight on the first LIT_SLOTS only. Idle lights stay at
+      // intensity 0 (no recompile on activation since the scene's
+      // light count is fixed at constructor time). The remaining
+      // slots get a `null` light reference and skip the per-spawn
+      // light tweak.
+      let light = null;
+      if (i < LIT_SLOTS) {
+        light = new THREE.PointLight(0xffffff, 0, 2.2);
+        light.position.y = 0.2;
+        group.add(light);
+      }
 
       // Pre-allocated rarity beacon — vertical column of light + a
       // pulse PointLight, parked invisible at the bottom of the
@@ -98,24 +110,29 @@ export class LootManager {
       beam.visible = false;
       beam.position.y = 0.5;
       group.add(beam);
-      const beamPulse = new THREE.PointLight(0xffffff, 0, 5.5);
-      beamPulse.position.y = 0.4;
-      group.add(beamPulse);
+      // No per-slot pulse PointLight — the additive emissive cylinder
+      // mesh + bloom carries the rare-tier glow on its own. Removing
+      // 24 idle PointLights from the scene cut the always-on light
+      // count substantially (every lit fragment shader iterates the
+      // full lights[] array regardless of intensity).
 
       group.visible = false;
       group.position.set(0, -1000, 0);
       this.scene.add(group);
       this._pool.push({
         group, mesh, mat, light,
-        beam, beamMat, beamPulse,
+        beam, beamMat,
         sprite, canvas, ctx: canvas.getContext('2d'), tex,
         inUse: false,
       });
     }
   }
 
-  // Grab an idle pool slot; if all are in use, steal the oldest.
+  // Grab an idle pool slot; prefer the lit half so the most recent
+  // drops get their per-item PointLight. Falls back to unlit slots,
+  // then evicts the oldest live entry if everything is taken.
   _acquire() {
+    for (const s of this._pool) if (!s.inUse && s.light) return s;
     for (const s of this._pool) if (!s.inUse) return s;
     // Pool exhausted — evict the oldest live entry (matches how the
     // tracer / flash pools handle saturation in combat.js).
@@ -186,8 +203,10 @@ export class LootManager {
     // color changes. Three.js treats this as an in-place uniform
     // update, no shader recompile.
     slot.mat.emissive.setHex(tint).multiplyScalar(0.75);
-    slot.light.color.setHex(tint);
-    slot.light.intensity = 0.9;
+    if (slot.light) {
+      slot.light.color.setHex(tint);
+      slot.light.intensity = 0.9;
+    }
     // Defer the nametag canvas paint + texture upload until the
     // sprite actually becomes visible (proximity-gated in update()).
     // Painting + uploading per drop was a real ~1-3ms cost on a
@@ -218,11 +237,12 @@ export class LootManager {
     return entry;
   }
 
-  // Rare-tier ground beacon — re-tints the pre-allocated beam mesh +
-  // pulse light owned by the pool slot. No allocations, no light
-  // count changes (beamPulse always exists at intensity 0 when idle),
-  // no shader recompile. Epic / legendary / mythic / mastercraft
-  // each get a distinct color / height / intensity profile.
+  // Rare-tier ground beacon — re-tints the pre-allocated beam mesh
+  // owned by the pool slot. No allocations, no light count changes,
+  // no shader recompile. Epic / legendary / mythic / mastercraft each
+  // get a distinct color / height / opacity profile. The beam itself
+  // is an additive emissive cylinder; bloom carries the glow without
+  // a paired PointLight.
   _maybeAttachBeacon(entry, item) {
     if (!entry || !item || !entry.slot) return;
     const slot = entry.slot;
@@ -232,7 +252,6 @@ export class LootManager {
       // Make sure the slot's beacon is hidden (a previous use of this
       // slot may have shown one).
       if (slot.beam) slot.beam.visible = false;
-      if (slot.beamPulse) slot.beamPulse.intensity = 0;
       return;
     }
     const profile = isMaster
@@ -248,10 +267,6 @@ export class LootManager {
       slot.beam.scale.set(1, profile.height, 1);
       slot.beam.position.y = profile.height / 2 - 0.45;
       slot.beam.visible = true;
-    }
-    if (slot.beamPulse) {
-      slot.beamPulse.color.setHex(profile.color);
-      slot.beamPulse.intensity = profile.pulse;
     }
   }
 
@@ -466,12 +481,11 @@ export class LootManager {
       entry.slot.group.visible = false;
       entry.slot.group.position.set(0, -1000, 0);
       entry.slot.sprite.visible = false;
-      entry.slot.light.intensity = 0;
+      if (entry.slot.light) entry.slot.light.intensity = 0;
       // Hide the rare-drop beacon if this slot had one. Geometry +
       // material stay alive on the slot, ready for the next rare
       // drop with a re-tint instead of a re-alloc.
       if (entry.slot.beam) entry.slot.beam.visible = false;
-      if (entry.slot.beamPulse) entry.slot.beamPulse.intensity = 0;
       entry.slot.inUse = false;
       return;
     }

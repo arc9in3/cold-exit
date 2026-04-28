@@ -74,3 +74,26 @@ You ship to main directly (the historical pattern). Skip the branch
 flow for in-session iterative work — that's faster and matches how
 the user runs the project. Background Claude (e.g. `/loop`) still
 branches per PROJECT.md.
+
+## Task delegation to local workers
+
+When you identify a contained piece of work in this codebase — a perf
+issue, a refactor opportunity, a mechanical sweep, a small audit —
+queue it for the local workers instead of doing it yourself, unless
+the user specifically asks you to do it.
+
+- Use the `mc_queue_task` MCP tool when available.
+- Fallback if the MCP tool isn't loaded: shell out to
+  `node ../../mission-control/scripts/queue.mjs --slug=... --owner=... --prompt=... --files=...`.
+- `owner='sage'` for read-only audits / scans / "find me X"
+- `owner='wrenchy'` for code drafts / refactors / "rewrite Y"
+- slug must start with `audit-` or `refactor-`
+- files: pass relative paths from the cold-exit project root
+
+Workers run the local 32B models (deepseek-r1, qwen2.5-coder), poll
+every 5 seconds, and write results to `audits/<slug>.md`. Free to use,
+run them liberally — that's the whole point of the queue.
+
+Still do creative / cross-cutting / interactive work yourself. The
+queue is for parallelizable grunt work that benefits from a second
+brain running in the background.

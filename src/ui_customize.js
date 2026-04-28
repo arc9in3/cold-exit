@@ -1,4 +1,4 @@
-import { effectiveWeapon } from './attachments.js';
+import { effectiveWeapon, invalidateEffectiveWeapon } from './attachments.js';
 import { layoutForWeapon } from './weapon_layouts.js';
 import { renderItemCell } from './ui_item_cell.js';
 import { thumbnailFor } from './item_thumbnails.js';
@@ -236,6 +236,7 @@ export class CustomizeUI {
           const cur = w.attachments?.[slot];
           if (cur && this.onDrop) {
             w.attachments[slot] = null;
+            invalidateEffectiveWeapon(w);
             this.inventory._bump();
             this.onDrop(cur);
             this.render();
@@ -277,6 +278,7 @@ export class CustomizeUI {
           const current = w.attachments[slot];
           w.attachments[slot] = d.item;
           w.attachments[d.slot] = current;
+          invalidateEffectiveWeapon(w);
           this.inventory._bump();
         }
         this.setDragState(null);

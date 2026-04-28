@@ -68,7 +68,11 @@ export function applyQuality(mode, ctx = {}) {
 
   if (ctx.renderer) {
     ctx.renderer.shadowMap.enabled = !low;
-    ctx.renderer.setPixelRatio(low ? 1 : Math.min(window.devicePixelRatio, 2));
+    // High mode caps pixel ratio at 1.5 (down from 2). On a 4K display
+    // the postFx chain (Kawase 4 fullscreen draws + finisher + output)
+    // runs at width*height*dpr^2 — dropping 2.0 → 1.5 cuts that ~44%
+    // for a barely-perceptible visual delta on the cel-shaded look.
+    ctx.renderer.setPixelRatio(low ? 1 : Math.min(window.devicePixelRatio, 1.5));
   }
   if (ctx.fillLight) ctx.fillLight.visible = !low;
   if (ctx.rimLight)  ctx.rimLight.visible  = !low;
