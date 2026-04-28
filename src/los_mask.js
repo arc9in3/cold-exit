@@ -15,16 +15,19 @@
 
 import * as THREE from 'three';
 
-const RAY_COUNT = 48;       // halved from 96 — finisher smoothstep + 4-tap blur hide edge faceting
+// Ray count dropped 48 → 32 (~33% fewer rays/eval). The finisher's
+// smoothstep on the sampled mask hides the slight extra faceting; at
+// the iso camera distance + half-res mask, the difference isn't
+// readable in motion.
+const RAY_COUNT = 32;
 const RAY_RANGE = 48;       // meters — bumped 32 → 48 so the player sees rooms ahead before
                             // entering them; was reading as a tight, claustrophobic LoS bubble
 const MASK_SCALE = 0.35;    // quarter-ish-res mask cuts GPU mask render to ~30%; smoothstep masks the resolution loss
 const FAN_HEIGHT = 0.04;    // sits a hair above the floor so it doesn't z-fight
-// Update cadence — every other frame is plenty for player-vision
-// boundaries that move at human walking pace. Halves the per-second
-// raycast budget for the LoS pass, which was the dominant CPU row
-// on the perf overlay (~40ms before, ~20ms after — frame 100ms→80ms).
-const UPDATE_EVERY_N_FRAMES = 2;
+// Update cadence — every 3 frames (~20Hz at 60fps) is still plenty
+// for human walking pace, and saves another ~33% of LoS CPU vs the
+// previous every-other-frame schedule.
+const UPDATE_EVERY_N_FRAMES = 3;
 
 export function createLosMask(renderer, sourceCamera) {
   const scene = new THREE.Scene();
