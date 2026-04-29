@@ -53,7 +53,7 @@
 <div id="stage"></div>
 <div id="crumb">
   <b>rig tuner</b> · drag to orbit · wheel to zoom
-  <span class="hint">dims sliders on the right · "pose editor" → enable edit mode → click a body part → drag the gizmo rings to rotate</span>
+  <span class="hint">dims sliders on the right · "pose editor" → enable edit mode → click a body part → drag the gizmo rings to rotate · <b>Ctrl+Z</b> undoes the last change</span>
 </div>
 <div id="export-toast">Copied dims + colors to clipboard.</div>
 <script type="module">
@@ -277,6 +277,9 @@ tControls.setMode('rotate');
 tControls.setSize(0.85);
 tControls.addEventListener('dragging-changed', (e) => {
   controls.enabled = !e.value;
+  // Push a snapshot at the moment a drag starts, before any rotation
+  // has been written. Skip if we're mid-restore.
+  if (e.value && typeof pushUndo === 'function' && !isRestoring) pushUndo();
 });
 tControls.addEventListener('change', () => refreshEditorUI());
 scene.add(tControls);
@@ -332,6 +335,155 @@ gui.domElement.style.overflowY = 'auto';
 // Collect every control so preset-applies can refresh displays.
 const poseControls = [];
 
+// --- undo stack ----------------------------------------------------
+// A simple snapshot history. Push before any destructive change
+// (slider drag start, gizmo drag start, IK target drag start, button-
+// based mutations like reset / zero). Ctrl+Z pops the latest snapshot
+// and restores it. Cap depth so the editor doesn't grow unbounded.
+const UNDO_DEPTH = 80;
+const undoStack = [];
+
+function snapshot() {
+  // Capture every joint pivot rotation so a gizmo edit can be undone
+  // even after subsequent slider changes.
+  const jointRots = {};
+  for (const [pivot, name] of jointNames) {
+    jointRots[name + '@' + pivot.uuid] = {
+      uuid: pivot.uuid,
+      rot: { x: pivot.rotation.x, y: pivot.rotation.y, z: pivot.rotation.z },
+    };
+  }
+  // IK target world positions (only enabled ones move).
+  const ikTargets = {};
+  for (const [name, mesh] of Object.entries(ikTargetMeshes)) {
+    ikTargets[name] = { x: mesh.position.x, y: mesh.position.y, z: mesh.position.z };
+  }
+  // IK enable + selected.
+  const ikSt = {};
+  for (const k of Object.keys(ikState)) {
+    if (k === 'selected') { ikSt.selected = ikState.selected; continue; }
+    ikSt[k] = { enabled: ikState[k].enabled };
+  }
+  return {
+    dims: structuredClone(state.dims),
+    colors: { ...state.colors },
+    pose: { ...state.pose },
+    tunables: structuredClone(POSE_TUNABLES),
+    jointRots,
+    ikTargets,
+    ikSt,
+    selectedJointName: selectedJoint?.name ?? null,
+  };
+}
+
+function pushUndo() {
+  undoStack.push(snapshot());
+  if (undoStack.length > UNDO_DEPTH) undoStack.shift();
+}
+
+let isRestoring = false;    // guard so restore() doesn't re-trigger pushUndo
+function restore(snap) {
+  if (!snap) return;
+  isRestoring = true;
+  try {
+    // dims — reassign object so all GUI bindings (which capture the
+    // object reference) keep working. structuredClone keeps undo
+    // entries independent.
+    Object.assign(state.dims, snap.dims);
+    // colors
+    Object.assign(state.colors, snap.colors);
+    // pose state
+    Object.assign(state.pose, snap.pose);
+    // procedural pose tunables
+    for (const k of Object.keys(snap.tunables.crouch)) {
+      POSE_TUNABLES.crouch[k] = snap.tunables.crouch[k];
+    }
+    // IK enable flags + target positions. Apply enable BEFORE moving
+    // targets so visibility/gizmo attach state matches.
+    for (const k of Object.keys(snap.ikSt)) {
+      if (k === 'selected') continue;
+      const wasOn = ikState[k].enabled;
+      const wantOn = snap.ikSt[k].enabled;
+      if (wasOn !== wantOn) setIkEnabled(k, wantOn);
+    }
+    if (snap.ikSt.selected) selectIkTarget(snap.ikSt.selected);
+    for (const [name, p] of Object.entries(snap.ikTargets)) {
+      ikTargetMeshes[name].position.set(p.x, p.y, p.z);
+    }
+    // Rebuild rig with restored dims/colors so the visible rig matches
+    // what the snapshot captured.
+    rebuildRig();
+    // After rebuild, jointMap has fresh pivots — restore by NAME, not
+    // by uuid (uuids change with rebuild). For each captured rotation,
+    // find the pivot whose registered name matches and apply.
+    const rotsByName = {};
+    for (const key of Object.keys(snap.jointRots)) {
+      const entry = snap.jointRots[key];
+      const name = key.split('@')[0];
+      // Last write wins; chest etc. has multiple meshes registered for
+      // the same pivot so values agree.
+      rotsByName[name] = entry.rot;
+    }
+    for (const [pivot, name] of jointNames) {
+      const r = rotsByName[name];
+      if (r) pivot.rotation.set(r.x, r.y, r.z);
+    }
+    // Refresh all GUI controllers so sliders match the restored state.
+    gui.controllersRecursive().forEach(c => c.updateDisplay());
+    refreshEditorUI();
+  } finally {
+    isRestoring = false;
+  }
+}
+
+window.addEventListener('keydown', (e) => {
+  // Ctrl+Z (or Cmd+Z) — pop one snapshot. Ignore when typing into an
+  // input/textarea (lil-gui number fields).
+  const tag = (e.target && e.target.tagName) || '';
+  if (tag === 'INPUT' || tag === 'TEXTAREA') return;
+  if ((e.ctrlKey || e.metaKey) && !e.shiftKey && (e.key === 'z' || e.key === 'Z')) {
+    e.preventDefault();
+    if (undoStack.length === 0) return;
+    const snap = undoStack.pop();
+    restore(snap);
+    const toast = document.getElementById('export-toast');
+    toast.textContent = `Undone (${undoStack.length} steps remaining)`;
+    toast.classList.add('show');
+    setTimeout(() => toast.classList.remove('show'), 1100);
+  }
+});
+
+// Slider / dropdown / checkbox / color undo: any pointerdown inside
+// the lil-gui panel pushes a single snapshot for that interaction.
+// A pointerup clears the latch so the next interaction pushes again.
+// Buttons that mutate state call pushUndo() inline (see button bodies);
+// this listener only covers controllers that don't.
+let _guiPressed = false;
+gui.domElement.addEventListener('pointerdown', () => {
+  if (isRestoring || _guiPressed) return;
+  pushUndo();
+  _guiPressed = true;
+}, true);
+window.addEventListener('pointerup',     () => { _guiPressed = false; }, true);
+window.addEventListener('pointercancel', () => { _guiPressed = false; }, true);
+// Keyboard editing of a number field — push on the first keystroke
+// per focus session, then suppress until blur.
+let _kbField = null;
+gui.domElement.addEventListener('keydown', (e) => {
+  if (isRestoring) return;
+  const tgt = e.target;
+  if (!(tgt instanceof HTMLInputElement)) return;
+  // Skip pure cursor keys / modifiers.
+  if (e.key === 'ArrowLeft' || e.key === 'ArrowRight'
+      || e.key === 'Home' || e.key === 'End'
+      || e.key === 'Tab' || e.key === 'Shift' || e.key === 'Control'
+      || e.key === 'Meta' || e.key === 'Alt') return;
+  if (_kbField === tgt) return;
+  pushUndo();
+  _kbField = tgt;
+}, true);
+gui.domElement.addEventListener('focusout', () => { _kbField = null; }, true);
+
 // --- pose ---
 {
   const f = gui.addFolder('pose');
@@ -365,12 +517,14 @@ const poseControls = [];
   f.add({
     zero: () => {
       if (!selectedJoint) return;
+      pushUndo();
       selectedJoint.pivot.rotation.set(0, 0, 0);
       refreshEditorUI();
     },
   }, 'zero').name('zero selected rotation');
   f.add({
     zeroAll: () => {
+      pushUndo();
       for (const pivot of jointNames.keys()) pivot.rotation.set(0, 0, 0);
       refreshEditorUI();
     },
@@ -504,6 +658,7 @@ const TUNABLE_DEFAULTS = structuredClone(POSE_TUNABLES);
   // Reset + export-as-code
   f.add({
     reset: () => {
+      pushUndo();
       Object.assign(POSE_TUNABLES.crouch, TUNABLE_DEFAULTS.crouch);
       gui.controllersRecursive().forEach(c => c.updateDisplay());
     },
@@ -567,7 +722,10 @@ const ikState = {
 const ikControls = new TransformControls(camera, renderer.domElement);
 ikControls.setMode('translate');
 ikControls.setSize(0.6);
-ikControls.addEventListener('dragging-changed', (e) => { controls.enabled = !e.value; });
+ikControls.addEventListener('dragging-changed', (e) => {
+  controls.enabled = !e.value;
+  if (e.value && typeof pushUndo === 'function' && !isRestoring) pushUndo();
+});
 scene.add(ikControls);
 
 function selectIkTarget(name) {
@@ -773,6 +931,7 @@ function applyIK() {
   }
   f.add({
     seedAll: () => {
+      pushUndo();
       for (const name of Object.keys(ikTargetMeshes)) {
         const v = ikChainEndPose(name);
         if (v) ikTargetMeshes[name].position.copy(v);
@@ -781,6 +940,7 @@ function applyIK() {
   }, 'seedAll').name('seed targets at current pose');
   f.add({
     disableAll: () => {
+      pushUndo();
       for (const name of Object.keys(ikTargetMeshes)) setIkEnabled(name, false);
       gui.controllersRecursive().forEach(c => c.updateDisplay());
     },
@@ -812,6 +972,7 @@ function applyIK() {
   }, 'export').name('export → clipboard');
   f.add({
     reset: () => {
+      pushUndo();
       state.dims = structuredClone(DEFAULT_DIMS);
       state.pose.preset = 'idle';
       applyPreset('idle');
