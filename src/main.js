@@ -66,8 +66,8 @@ import { GameMenuUI } from './ui_menu.js';
 import { StartUI } from './ui_start.js';
 import { MainMenuUI } from './ui_main_menu.js';
 import { HideoutUI } from './ui_hideout.js';
-import { tryClaimContract, defForId } from './contracts.js';
-import { getActiveContract, setActiveContract } from './prefs.js';
+import { tryClaimContract, defForId, buildModifiers } from './contracts.js';
+import { getActiveContract, setActiveContract, awardMarks, bumpContractRank, bumpMegabossKills, bumpRunCount, queueEncounterFollowup } from './prefs.js';
 import { StoreUpgradeUI, StoreRollUI, rollRarityForTier } from './ui_starting_store.js';
 import { getQualityPref, setQualityPref, applyQuality, qualityFlags } from './quality.js';
 import { DetailsUI } from './ui_details.js';
@@ -717,8 +717,26 @@ function _resetEncounterCompletionForRun() {
   resetShrineTiersForRun();
 }
 
+// Active contract modifiers for the current run. Populated by
+// _refreshActiveModifiers() at run start (and again on contract pick
+// in the hideout). Always non-null — `buildModifiers(null)` collapses
+// to a clean no-op default with all multipliers at 1.
+let _activeModifiers = buildModifiers(null);
+function _refreshActiveModifiers() {
+  const ac = getActiveContract();
+  const def = ac ? defForId(ac.activeContractId) : null;
+  _activeModifiers = buildModifiers(def);
+}
+function getActiveModifiers() { return _activeModifiers; }
+window.__activeModifiers = () => _activeModifiers;
+
 function startNewRun(weaponClass) {
   _resetEncounterCompletionForRun();
+  // Snapshot the active contract's modifiers for the run. Read by
+  // the gunmen / loot / damage paths via getActiveModifiers().
+  // Resolved lazily from getActiveContract() so the player can switch
+  // contracts in the hideout right up until they hit Start Run.
+  _refreshActiveModifiers();
   // First-run welcome hint — only fires on the very first ever run
   // because fireHint persists per-player. Subsequent fresh runs see
   // nothing here.
@@ -1219,6 +1237,12 @@ const hideoutUI = new HideoutUI({
     savePersistentChips();
     return true;
   },
+  applyCharacterStyle: (v) => {
+    // Pushes the silhouette change to the live rig so the change is
+    // visible the moment the player closes the hideout, not just on
+    // the next fresh run.
+    player.applyCharacterStyle?.(v);
+  },
   rollQuartermasterItem: (tier) => {
     // Tier 0 → common; 4 → legendary floor. Mirrors the rolled-store
     // pipeline. Pull a non-mythic weapon at the requested rarity.
@@ -1231,10 +1255,25 @@ const hideoutUI = new HideoutUI({
     return wrapWeapon({ ...pick, rarity });
   },
   onClose: () => {
-    // Hideout exit → main menu. (Cash-out flow + post-extract entry
-    // will set their own onClose later; this is the default for the
-    // "Hideout from main menu" path.)
+    // Hideout's "Start New Run" — kick the existing class-picker
+    // flow so the player can choose loadout. Once the diegetic
+    // stash-room weapon-pick lands this becomes the camera-zoom
+    // path; for now it surfaces the existing class picker via the
+    // main-menu Play hook.
+    mainMenuUI.hide();
+    if (mainMenuUI.onPlay) mainMenuUI.onPlay();
+  },
+  onExitToTitle: () => {
+    // Back button — return to the main menu without starting a run.
     mainMenuUI.show();
+  },
+  onQuickStart: () => {
+    // Quick Start — skips the class picker, re-uses last-played
+    // class. Falls back to onPlay (class picker) if no quickstart
+    // hook exists.
+    mainMenuUI.hide();
+    if (mainMenuUI.onQuickStart) mainMenuUI.onQuickStart();
+    else if (mainMenuUI.onPlay) mainMenuUI.onPlay();
   },
 });
 
@@ -1941,6 +1980,11 @@ function regenerateLevel() {
         // Reveal the exit zone — already staged by generateMegaArena.
         if (level.revealExit) level.revealExit();
         if (sfx?.roomClear) sfx.roomClear();
+        // Persistent megaboss-kill counter feeds harder contract
+        // unlocks (lethal-tier `unlockedAt.megabossKills`). Per-run
+        // counter mirrors it for contract evaluation.
+        runStats.megabossKillsThisRun = (runStats.megabossKillsThisRun | 0) + 1;
+        bumpMegabossKills();
       },
       lootRolls: (encIdx) => lootFn({
         randomWeapon: (rarity) => {
@@ -2939,8 +2983,16 @@ function tryEncounterItemDrop(item, x, z) {
   ctx.dropPos = { x, z };
   const result = ent.def.onItemDropped(item, ctx);
   if (!result) return false;
-  if (result.complete && ent.def.oncePerSave) {
-    _runCompletedEncounters.add(ent.def.id);
+  if (result.complete) {
+    if (ent.def.oncePerSave) _runCompletedEncounters.add(ent.def.id);
+    // Forced-followup queue — encounter requested a continuation in
+    // the next 1-2 floors. Fires once per completion. The queue is
+    // persistent (prefs) so a save/load mid-thread doesn't drop it.
+    if (ent.def.forceFollowup && ent.def.forceFollowup.id) {
+      const floors = Math.max(1, ent.def.forceFollowup.floors | 0 || 1);
+      try { queueEncounterFollowup(ent.def.forceFollowup.id, floors); }
+      catch (_) { /* prefs may be unavailable in private mode */ }
+    }
   }
   return !!result.consume;
 }
@@ -4236,12 +4288,12 @@ function enemyResolveCollision(oldX, oldZ, newX, newZ, radius) {
 // function (or flip the tunable) to roll back. The behavioural
 // difference is downstream in fireOneShot: this function returns the
 // same shape; the new mode only changes how spread is applied.
-function resolveAim_legacy(muzzleWorld) {
-  return _resolveAimRaycast(muzzleWorld);
+function resolveAim_legacy(muzzleWorld, crouching) {
+  return _resolveAimRaycast(muzzleWorld, crouching);
 }
 
-function resolveAim(muzzleWorld) {
-  return _resolveAimRaycast(muzzleWorld);
+function resolveAim(muzzleWorld, crouching) {
+  return _resolveAimRaycast(muzzleWorld, crouching);
 }
 
 // Reusable scratch — head aim assist projects each enemy head into NDC
@@ -4312,7 +4364,7 @@ function _headAssistAimPoint(headAssist) {
   return headAssist.headWorld.clone();
 }
 
-function _resolveAimRaycast(muzzleWorld) {
+function _resolveAimRaycast(muzzleWorld, crouching) {
   if (!input.hasAim) return { point: null, zone: null, owner: null };
   input.raycaster.setFromCamera(input.mouseNDC, camera);
 
@@ -4325,8 +4377,15 @@ function _resolveAimRaycast(muzzleWorld) {
   // near y=0.04) don't absorb the cursor ray and park the aim point
   // at floor level. Before this filter, aiming NEAR an open doorway
   // would dump every shot into the floor at the threshold.
+  //
+  // When crouching, skip low-cover obstacles entirely. The player can
+  // shoot over them, so the cursor ray should resolve to whatever is
+  // beyond the cover (enemy or floor plane), not the cover face.
   const enemyTargets = allHittables();
-  const wallTargets = level.solidObstacles();
+  const allWallTargets = level.solidObstacles();
+  const wallTargets = crouching
+    ? allWallTargets.filter(m => !m.userData.isLowCover)
+    : allWallTargets;
   const enemyHits = input.raycaster.intersectObjects(enemyTargets, false);
   // Run the head-aim assist regardless — used to upgrade a body-shot
   // raycast to a head-shot when the cursor is in the head's
@@ -4905,6 +4964,13 @@ function _tickGrapples(dt) {
 let _playerGrappleT = 0;
 
 function fireOneShot(playerInfo, weapon, aimPoint, isADS, aimOwner) {
+  // Active contract modifier — weapon-class restriction. 'pistol'
+  // contracts only fire pistols; 'melee' contracts hard-block all
+  // ranged fire. The HUD already signals the restriction via the
+  // contractor tab's modifier list, so a soft fizzle here is enough.
+  const restrict = _activeModifiers.weaponClass;
+  if (restrict === 'melee') return;
+  if (restrict === 'pistol' && weapon.class !== 'pistol') return;
   // Magnum Opus override — full-auto weapons may fire past empty if
   // the relic is owned. Cost is paid in tickShooting (3 HP/s drain).
   const _magnumBypass = (derivedStats.magnumOpusActive
@@ -4954,6 +5020,15 @@ function fireOneShot(playerInfo, weapon, aimPoint, isADS, aimOwner) {
   _tmpDir.copy(aimPoint).sub(fireFrom);
   if (_tmpDir.lengthSq() < 0.0001) return;
   _tmpDir.normalize();
+  // Crouching always fires parallel to the ground or above — never
+  // downward. The aim resolution already skips low cover so the
+  // aimPoint should be past the cover, but clamp here as a safety net
+  // for any edge cases (cursor on floor, extreme angles, etc.).
+  if (inputStateCrouchHeld() && _tmpDir.y < 0) {
+    _tmpDir.y = 0;
+    if (_tmpDir.lengthSq() < 0.0001) return;
+    _tmpDir.normalize();
+  }
 
   const baseSpread = isADS
     ? eff.adsSpread * (derivedStats.adsSpreadOnlyMult || 1)
@@ -6170,6 +6245,12 @@ runStats.reset = function () { _origRunStatsReset(); _resetDeathRecap(); };
 
 function damagePlayer(amount, damageType = 'generic', srcCtx = null) {
   if (amount <= 0) return;
+  // Active contract modifier: playerDamageTakenMult (Glass Cannon
+  // and similar). 1.0 = neutral. Applied first so subsequent
+  // resistances scale over the modified base.
+  if (_activeModifiers.playerDamageTakenMult !== 1) {
+    amount *= _activeModifiers.playerDamageTakenMult;
+  }
   // Mourner's Bell relic — incoming damage scales by the bell's hidden
   // multiplier (default no-op when the relic isn't owned).
   if ((derivedStats.incomingDmgMult || 1) !== 1) {
@@ -8517,6 +8598,14 @@ function applyConsumable(item) {
     return true;
   }
   if (!item.useEffect) return false;
+  // Active contract modifier — `noConsumables: true` hard-blocks
+  // consumable use (Iron Will). Throwables are returned earlier so
+  // the rule cleanly only governs heals / buffs / boosts.
+  if (_activeModifiers.noConsumables) {
+    transientHudMsg('Contract bars consumables.');
+    sfx.empty?.();
+    return false;
+  }
   // From here on we're using a real consumable (heal / buff / boost).
   // Throwables are returned earlier so they don't trip the contract.
   runStats.noteConsumableUsed();
@@ -10720,7 +10809,7 @@ function tick() {
   _muzzleWorldTmp.y = inputState.crouchHeld
     ? tunables.move.crouchMuzzleY
     : tunables.move.standMuzzleY;
-  const aimInfo = resolveAim(_muzzleWorldTmp);
+  const aimInfo = resolveAim(_muzzleWorldTmp, inputState.crouchHeld);
   lastAim = aimInfo.point;
   lastAimZone = aimInfo.zone || null;
 
@@ -11276,6 +11365,20 @@ function tick() {
     runStats.deathAt = Date.now();
     runStats.playerName = getPlayerName() || 'anon';
     try { Leaderboard.submitRun(runStats); } catch (e) { console.warn(e); }
+    // Marks — death currency. Earned for trying. Scales with how
+    // far the run went (peak floor + 1) plus fractional credit for
+    // damage and kills. Floor: 5 marks for a fresh-start death; a
+    // mid-run death at floor 8 with decent kills lands ~30 marks.
+    const peak = (runStats.levels | 0) + 1;
+    const damageBonus = Math.floor((runStats.damage | 0) / 800);
+    const killBonus = Math.floor((runStats.kills | 0) / 8);
+    const marksEarned = Math.max(5, peak * 3 + damageBonus + killBonus);
+    runStats.marksEarned = marksEarned;
+    try { awardMarks(marksEarned); } catch (e) { console.warn(e); }
+    // Lifetime run counter — feeds the hidden encounter-tier formula
+    // and the cooldownRuns timer. Bumped here on death; extract path
+    // bumps separately at runExtract().
+    try { bumpRunCount(); } catch (_) {}
     // Populate the death-screen run-summary panel with the freshly-
     // sealed stats. Mirrors the leaderboard fields so the player gets
     // immediate feedback about how the run went without having to

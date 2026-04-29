@@ -1334,8 +1334,11 @@ export function createPlayer(scene) {
       const horiz = Math.hypot(dx, dz);
       if (horiz > 0.05) aimPitch = Math.atan2(dy, horiz);
       // Clamp so extreme angles (cursor on player's own feet) don't
-      // wrench the head/arms past believable range.
-      aimPitch = Math.max(-0.6, Math.min(0.7, aimPitch));
+      // wrench the head/arms past believable range. While crouching,
+      // never pitch down — gun always stays parallel to the ground or
+      // above so it looks correct when shooting over low cover.
+      const pitchMin = state.crouched ? 0 : -0.6;
+      aimPitch = Math.max(pitchMin, Math.min(0.7, aimPitch));
     }
     // Melee block stance — raise the weapon across the chest with
     // both hands holding it at a defensive angle. Only triggers when

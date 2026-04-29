@@ -679,12 +679,14 @@ export class Level {
     const eligible = this.rooms.filter(r =>
       r.type === 'combat' && !r.giant && r.bounds);
     if (!eligible.length) return;
-    // Pity-timer chance. Base 30% per level; main.js bumps via
-    // `level._encounterChance` (runStats.encounterChanceBonus stacks
-    // +10% per encounter-less level, capped at 95%, resets when one
-    // actually spawns). Pre-pity behaviour was a flat 30%.
+    // Encounter spawn chance — base 80% per level (raised from 30%
+    // because the pool is large and levels run longer than original
+    // tuning assumed; a player should hit an encounter most floors,
+    // not once every three). main.js still bumps via
+    // `level._encounterChance` (encounterChanceBonus stacks per
+    // encounter-less level, capped at 95%, resets when one spawns).
     const chance = typeof this._encounterChance === 'number'
-      ? this._encounterChance : 0.30;
+      ? this._encounterChance : 0.80;
     if (Math.random() >= chance) return;
     // Shuffle so we don't always favour earlier rooms when the first
     // candidate's centroid is blocked.
@@ -3436,6 +3438,10 @@ export class Level {
       minX: x - w / 2, maxX: x + w / 2,
       minZ: z - d / 2, maxZ: z + d / 2,
     };
+    // Tag obstacles whose top sits below half the wall height as low
+    // cover. The aim system skips these when the player is crouching so
+    // the shot resolves past the cover rather than into its near face.
+    if (y + h / 2 < WALL_HEIGHT / 2) mesh.userData.isLowCover = true;
     // Walls + doors + columns don't move during gameplay. Disable
     // matrixAutoUpdate so Three.js skips the per-frame matrix
     // recompute cascade for hundreds of obstacles per level. We
