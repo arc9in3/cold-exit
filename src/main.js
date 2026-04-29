@@ -65,6 +65,9 @@ import { sfx, attachUnlock, getMasterVolume, setMasterVolume } from './audio.js'
 import { GameMenuUI } from './ui_menu.js';
 import { StartUI } from './ui_start.js';
 import { MainMenuUI } from './ui_main_menu.js';
+import { HideoutUI } from './ui_hideout.js';
+import { tryClaimContract, defForId } from './contracts.js';
+import { getActiveContract, setActiveContract } from './prefs.js';
 import { StoreUpgradeUI, StoreRollUI, rollRarityForTier } from './ui_starting_store.js';
 import { getQualityPref, setQualityPref, applyQuality, qualityFlags } from './quality.js';
 import { DetailsUI } from './ui_details.js';
@@ -1190,7 +1193,44 @@ const mainMenuUI = new MainMenuUI({
     setCharacterStyle(v);
     player.applyCharacterStyle?.(v);
   },
+  onOpenHideout: () => {
+    mainMenuUI.hide();
+    hideoutUI.open();
+  },
 });
+
+// Hideout — between-runs panel. Opens from the main menu's Hideout
+// button, on death (replaces the default "back to main menu" screen),
+// and from the cash-out path. ctx hooks bridge chip read/write to
+// the existing persistent-chip plumbing and a quartermaster-roller
+// to the existing weapon-rarity pipeline.
+const hideoutUI = new HideoutUI({
+  awardChips: (n) => awardPersistentChips(n),
+  spendChips: (n) => {
+    if (persistentChips < n) return false;
+    persistentChips -= n;
+    savePersistentChips();
+    return true;
+  },
+  rollQuartermasterItem: (tier) => {
+    // Tier 0 → common; 4 → legendary floor. Mirrors the rolled-store
+    // pipeline. Pull a non-mythic weapon at the requested rarity.
+    const rarities = ['common', 'uncommon', 'rare', 'epic', 'legendary'];
+    const rarity = rarities[Math.max(0, Math.min(rarities.length - 1, tier | 0))];
+    const pool = tunables.weapons.filter(w => w.rarity !== 'mythic');
+    const candidates = pool.filter(w => (w.rarity || 'common') === rarity);
+    const pick = (candidates.length ? candidates : pool)[Math.floor(Math.random() * (candidates.length ? candidates.length : pool.length))];
+    if (!pick) return null;
+    return wrapWeapon({ ...pick, rarity });
+  },
+  onClose: () => {
+    // Hideout exit → main menu. (Cash-out flow + post-extract entry
+    // will set their own onClose later; this is the default for the
+    // "Hideout from main menu" path.)
+    mainMenuUI.show();
+  },
+});
+
 // Mastery offers queued when class XP crosses a threshold. Each entry is
 // { classId, options:[nodeRef,...] } and gets resolved by the picker modal.
 const pendingMasteryOffers = [];

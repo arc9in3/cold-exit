@@ -42,6 +42,22 @@ export class RunStats {
     // spawns. Read by level.js _pickAndMarkEncounterRoom via a
     // per-level config field set by main.js before generate().
     this.encounterChanceBonus = 0;
+    // Contract-relevant event flags + counters. Read by contracts.js
+    // evaluate(snapshot) on extract / death; they aren't part of the
+    // leaderboard payload. Defaults are the "best-case" assumptions
+    // that get flipped off as the player plays:
+    //   pistolOnly  flips false on first non-pistol fire
+    //   noConsum    flips false on first consumable use
+    //   noMelee     flips false on first melee swing landed
+    //   critHeadshots / throwableKills count up
+    //   extracted   flips true on a successful extract event
+    //   (peakLevel mirrors `levels` and is exposed on snapshot)
+    this.pistolOnly = true;
+    this.noConsumables = true;
+    this.noMelee = true;
+    this.critHeadshots = 0;
+    this.throwableKills = 0;
+    this.extracted = false;
   }
 
   markTainted() { this.tainted = true; }
@@ -61,6 +77,14 @@ export class RunStats {
     // shouldn't quietly drop their furthest-reached record).
     if (i > this.levels) this.levels = i;
   }
+  // Contract-event helpers — main.js calls these from the relevant
+  // gameplay sites (fire path, melee resolve, throwable kill, etc.).
+  noteFireWeaponClass(cls) { if (cls && cls !== 'pistol') this.pistolOnly = false; }
+  noteConsumableUsed()     { this.noConsumables = false; }
+  noteMeleeLanded()        { this.noMelee = false; }
+  noteCritHeadshot()       { this.critHeadshots += 1; }
+  noteThrowableKill()      { this.throwableKills += 1; }
+  noteExtracted()          { this.extracted = true; }
 
   snapshot() {
     return {
@@ -73,6 +97,18 @@ export class RunStats {
       deathLevel: this.deathLevel,
       deathAt: this.deathAt,
       playerName: this.playerName || 'anon',
+      // Contract-event surface — present on every snapshot so
+      // contracts.js's evaluate(snapshot) gets stable field shapes.
+      // peakLevel mirrors `levels` under a stable name for contract defs
+      // that read by run-end "highest floor" rather than the leaderboard
+      // sort key.
+      peakLevel: this.levels,
+      extracted: this.extracted,
+      pistolOnly: this.pistolOnly,
+      noConsumables: this.noConsumables,
+      noMelee: this.noMelee,
+      critHeadshots: this.critHeadshots,
+      throwableKills: this.throwableKills,
     };
   }
 }
