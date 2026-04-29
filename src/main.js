@@ -24,6 +24,7 @@ import { spawnSpeechBubble } from './hud.js';
 import { makeContainer, buildContainerMesh, pickContainerType, pickContainerSize } from './containers.js';
 import { Level } from './level.js';
 import { MegaBoss, isMegaBossLevel, buildMegaBossLoot } from './megaboss.js';
+import { MegaBossEcho, buildEchoLoot } from './megaboss_echo.js';
 import { ProjectileManager } from './projectiles.js';
 import { spawnDamageNumber } from './hud.js';
 import { initDebugPanel, setDebugPanelVisible } from './debug.js';
@@ -1865,7 +1866,16 @@ function regenerateLevel() {
   // attack FSM, hazards, and HUD bar. The dormant intro ritual runs
   // first, leaving the player free to position before combat starts.
   if (isMegaFloor) {
-    megaBoss = new MegaBoss({
+    // Pick which mega-boss runs this floor. The mega-boss rotation
+    // alternates ARBOTER (floors where (idx/5) is even — 10, 20, 30...)
+    // with THE ECHO (idx/5 odd — 15, 25, 35...). Both share the same
+    // ctx surface and main.js's mega-boss hit branch reads
+    // hit.mesh.userData.megaBoss generically.
+    const floorIdx = (level.index | 0) + 1;
+    const useEcho = floorIdx >= 15 && Math.floor(floorIdx / 5) % 2 === 1;
+    const MegaCtor = useEcho ? MegaBossEcho : MegaBoss;
+    const lootFn   = useEcho ? buildEchoLoot : buildMegaBossLoot;
+    megaBoss = new MegaCtor({
       scene, camera,
       combat, loot, sfx, projectiles,
       damagePlayer,
@@ -1885,7 +1895,7 @@ function regenerateLevel() {
         if (level.revealExit) level.revealExit();
         if (sfx?.roomClear) sfx.roomClear();
       },
-      lootRolls: (encIdx) => buildMegaBossLoot({
+      lootRolls: (encIdx) => lootFn({
         randomWeapon: (rarity) => {
           // Pull from the existing weapon roll pipeline. randomWeapon
           // doesn't exist here; we synthesize via wrapWeapon over the
