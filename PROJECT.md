@@ -82,6 +82,17 @@ check these first:
    etc.) are exposed via the ctx factory in main.js. **There is no
    `ctx.spendCredits` — use `spendPlayerCredits`.** That naming
    inconsistency has bitten multiple encounters.
+6. **Smith vendors do NOT repair.** The gunsmith + armorer used to
+   have Repair All / Repair Item buttons — these were removed when
+   the affix-transfer station was added (`src/smiths.js` + the smith
+   panel in `ui_shop.js`). `_canRepair` is a permanent `false` stub.
+   Don't reintroduce repair UI without checking with the user first.
+   Affix transfer rules: target needs a free affix slot (rarity cap,
+   setMark doesn't count); source is destroyed; MC scaling is in
+   `transferScalar` (×0.5 if source MC + target normal, ×2.0 if
+   source normal + target MC, else ×1.0); cost scales with affix
+   value + target rarity tier and is intentionally expensive
+   (`tunables.smith.transfer`) since it bypasses the random roll.
 
 ## Multi-AI coordination
 
@@ -254,7 +265,7 @@ The user DOES need to be asked for:
 ## Memory + skills
 
 Claude maintains a project-memory directory at
-`C:\Users\Landon\.claude\projects\C--work-personal-tacticalrogue\memory\`.
+`C:\Users\Landon\.claude\projects\C--work-personal-cold-exit\memory\`.
 Read it for accumulated context (user role, feedback, project
 decisions).
 
