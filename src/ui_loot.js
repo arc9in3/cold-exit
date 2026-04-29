@@ -1781,6 +1781,19 @@ export class LootUI {
       const x = Math.floor((clientX - rect.left) / (PL_CELL_PX + PL_CELL_GAP));
       const y = Math.floor((clientY - rect.top)  / (PL_CELL_PX + PL_CELL_GAP));
       if (x < 0 || y < 0 || x >= blk.grid.w || y >= blk.grid.h) return;
+      // Attachment dropped onto a grid cell containing a compatible weapon.
+      if (item.type === 'attachment') {
+        const cellEntry = blk.grid.at(x, y);
+        const cellItem = cellEntry?.item;
+        if (cellItem && (cellItem.type === 'ranged' || cellItem.type === 'melee')
+            && cellItem.attachments && (item.slot in cellItem.attachments)) {
+          if (this.inventory.attachToWeapon(cellItem, item.slot, item)) {
+            removeFromBody();
+            this.render();
+          }
+          return;
+        }
+      }
       stampItemDims(item);
       let placed = blk.grid.canPlace(item, x, y, false);
       if (placed) blk.grid.place(item, x, y, false);
@@ -1794,6 +1807,18 @@ export class LootUI {
     const playerSlot = this._closestLoot(target, '.inv-slot.loot-slot-player');
     if (playerSlot) {
       const slotId = playerSlot.dataset.slot;
+      // Attachment dropped onto a paperdoll slot holding a compatible weapon.
+      if (item.type === 'attachment') {
+        const equipped = this.inventory.equipment[slotId];
+        if (equipped && (equipped.type === 'ranged' || equipped.type === 'melee')
+            && equipped.attachments && (item.slot in equipped.attachments)) {
+          if (this.inventory.attachToWeapon(equipped, item.slot, item)) {
+            removeFromBody();
+            this.render();
+          }
+          return;
+        }
+      }
       if (!this.inventory.canSlotHold(slotId, item)) return;
       const prev = this.inventory.equipment[slotId];
       this.inventory.equipment[slotId] = item;

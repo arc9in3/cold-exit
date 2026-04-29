@@ -12,7 +12,7 @@
 
 // Short-hand helpers ---------------------------------------------------------
 function g(id, name, icon, levels, opts = {}) {
-  return { id, name, icon, kind: 'general', levels, requires: opts.requires || [] };
+  return { id, name, icon, kind: 'general', disc: opts.disc || 'utility', levels, requires: opts.requires || [] };
 }
 function c(id, classId, name, levels, opts = {}) {
   return { id, name, icon: '◇', kind: classId, levels, requires: opts.requires || [] };
@@ -24,102 +24,33 @@ export const SKILL_TREE = [
   // ── General perks (SP cost, arranged in mini-trees by theme) ───────────
   g('ghost', 'Ghost', '◐', [
     lvl('−15% enemy detection range',  1, (s) => { s.stealthMult *= 0.85; }),
-    lvl('−30% enemy detection range',  1, (s) => { s.stealthMult *= 0.82; }),  // stacks to ~0.70
-    lvl('−50% enemy detection range',  2, (s) => { s.stealthMult *= 0.72; }),  // stacks to ~0.50
-  ]),
-  // Renamed from `silentSteps` (which collided with the basic-skill id of
-  // the same name). Crouch-speed identity, gated behind Ghost.
+    lvl('−30% enemy detection range',  1, (s) => { s.stealthMult *= 0.82; }),
+    lvl('−50% enemy detection range',  2, (s) => { s.stealthMult *= 0.72; }),
+  ], { disc: 'stealth' }),
   g('crouchSpeed', 'Silent Steps', '∴', [
     lvl('+10% move speed while crouched',  1, (s) => { s.crouchMoveBonus = (s.crouchMoveBonus || 1) * 1.10; }),
     lvl('+25% move speed while crouched',  1, (s) => { s.crouchMoveBonus = (s.crouchMoveBonus || 1) * 1.136; }),
     lvl('+50% move speed while crouched',  2, (s) => { s.crouchMoveBonus = (s.crouchMoveBonus || 1) * 1.20; }),
-  ], { requires: [{ id: 'ghost', level: 1 }] }),
+  ], { disc: 'stealth', requires: [{ id: 'ghost', level: 1 }] }),
   g('shadowStrike', 'Shadow Strike', '☽', [
-    lvl('Crouched ranged hits deal +30% dmg',  2,
-      (s) => { s.crouchDmgMult *= 1.30; }),
-    lvl('Crouched ranged hits deal +60% dmg',  2,
-      (s) => { s.crouchDmgMult *= 1.23; }),  // stacks ~1.6
-  ], { requires: [{ id: 'ghost', level: 2 }] }),
+    lvl('Crouched ranged hits deal +30% dmg',  2, (s) => { s.crouchDmgMult *= 1.30; }),
+    lvl('Crouched ranged hits deal +60% dmg',  2, (s) => { s.crouchDmgMult *= 1.23; }),
+  ], { disc: 'stealth', requires: [{ id: 'ghost', level: 2 }] }),
 
   g('marksman', 'Marksman', '◎', [
     lvl('−10% spread on all weapons',  1, (s) => { s.rangedSpreadMult *= 0.90; }),
     lvl('−20% spread on all weapons',  1, (s) => { s.rangedSpreadMult *= 0.89; }),
     lvl('−35% spread on all weapons',  2, (s) => { s.rangedSpreadMult *= 0.82; }),
-  ]),
+  ], { disc: 'precision' }),
   g('deadeye', 'Deadeye', '⌖', [
     lvl('+5% crit chance',  1, (s) => { s.critChance += 0.05; }),
     lvl('+10% crit chance',  1, (s) => { s.critChance += 0.05; }),
     lvl('+15% crit chance',  2, (s) => { s.critChance += 0.05; }),
-  ], { requires: [{ id: 'marksman', level: 1 }] }),
+  ], { disc: 'precision', requires: [{ id: 'marksman', level: 1 }] }),
   g('finisher', 'Finisher', '✸', [
     lvl('+30% crit damage',  1, (s) => { s.critDamageMult += 0.3; }),
     lvl('+60% crit damage',  2, (s) => { s.critDamageMult += 0.3; }),
-  ], { requires: [{ id: 'deadeye', level: 1 }] }),
-
-  g('ironWill', 'Iron Will', '♥', [
-    lvl('+15 max HP',  1, (s) => { s.maxHealthBonus += 15; }),
-    lvl('+30 max HP total',  1, (s) => { s.maxHealthBonus += 15; }),
-    lvl('+50 max HP total',  2, (s) => { s.maxHealthBonus += 20; }),
-  ]),
-  g('fortitude', 'Fortitude', '◈', [
-    lvl('5% damage reduction',  1, (s) => { s.dmgReduction = Math.min(0.7, s.dmgReduction + 0.05); }),
-    lvl('10% damage reduction',  1, (s) => { s.dmgReduction = Math.min(0.7, s.dmgReduction + 0.05); }),
-    lvl('15% damage reduction',  2, (s) => { s.dmgReduction = Math.min(0.7, s.dmgReduction + 0.05); }),
-  ], { requires: [{ id: 'ironWill', level: 2 }] }),
-  g('cornered', 'Cornered', '◉', [
-    lvl('+15% dmg reduction below 30% HP',  1,
-      (s) => { s.cornerReduction = (s.cornerReduction || 0) + 0.15; }),
-    lvl('+25% dmg reduction below 30% HP',  2,
-      (s) => { s.cornerReduction = (s.cornerReduction || 0) + 0.10; }),
-  ], { requires: [{ id: 'ironWill', level: 1 }] }),
-  g('resolveTree', 'Second Wind', '✚', [
-    lvl('+20% health regen',  1, (s) => { s.healthRegenMult *= 1.20; }),
-    lvl('+50% health regen, −1s regen delay',  2,
-      (s) => { s.healthRegenMult *= 1.25; s.healthRegenDelayBonus -= 1.0; }),
-  ], { requires: [{ id: 'ironWill', level: 1 }] }),
-
-  g('quickHands', 'Quick Hands', '⟳', [
-    lvl('−10% reload time',  1, (s) => { s.reloadSpeedMult *= 1.111; }),
-    lvl('−20% reload time',  1, (s) => { s.reloadSpeedMult *= 1.125; }),
-    lvl('−30% reload time',  2, (s) => { s.reloadSpeedMult *= 1.143; }),
-  ]),
-  g('berserkerPerk', 'Berserker', '⚔', [
-    lvl('+20% dmg below 50% HP',  1, (s) => { s.berserkBonus = (s.berserkBonus || 0) + 0.20; }),
-    lvl('+40% dmg below 50% HP',  2, (s) => { s.berserkBonus = (s.berserkBonus || 0) + 0.20; }),
-  ]),
-
-  g('scavenger', 'Scavenger', '⛀', [
-    lvl('+1 backpack pocket',  1, (s) => { s.pocketsBonus += 1; }),
-    lvl('+2 backpack pockets', 1, (s) => { s.pocketsBonus += 1; }),
-    lvl('+3 backpack pockets', 2, (s) => { s.pocketsBonus += 1; }),
-  ]),
-
-  g('ballisticResistTree', 'Ballistic Weave', '◊', [
-    lvl('−10% bullet damage',  1, (s) => { s.ballisticResist = Math.min(0.7, s.ballisticResist + 0.10); }),
-    lvl('−20% bullet damage',  1, (s) => { s.ballisticResist = Math.min(0.7, s.ballisticResist + 0.10); }),
-    lvl('−30% bullet damage',  2, (s) => { s.ballisticResist = Math.min(0.7, s.ballisticResist + 0.10); }),
-  ]),
-
-  // Renamed from `endurance` (collided with the basic-skill id).
-  g('staminaTraining', 'Endurance', '●', [
-    lvl('+15 max stamina, +10% regen',  1,
-      (s) => { s.maxStaminaBonus += 15; s.staminaRegenMult *= 1.10; }),
-    lvl('+30 max stamina, +25% regen',  2,
-      (s) => { s.maxStaminaBonus += 15; s.staminaRegenMult *= 1.136; }),
-  ]),
-
-  // Throwables. `grenadier` basic skill handles cooldown + charges; this
-  // tree adds the kill-resets-cooldowns capstone the player asked for.
-  g('grenadierMaster', 'Demolitions Master', '✹', [
-    lvl('Throwable kills refund 1 charge',  2,
-      (s) => { s.throwableRefundOnKill = Math.max(s.throwableRefundOnKill || 0, 1); }),
-    lvl('Throwable kills fully reset cooldowns', 3,
-      (s) => { s.throwableResetOnKill = 1; }),
-  ]),
-
-  // ── Wild perks — game-mechanic-altering, not just stat bumps ───────────
-  // Ricochet moved closer to a 'spread / chaos' theme; LMG mastery owns
-  // the sustained-fire identity but Ricochet fits any spray archetype.
+  ], { disc: 'precision', requires: [{ id: 'deadeye', level: 1 }] }),
   g('ricochet', 'Ricochet Rounds', '↯', [
     lvl('Shots ricochet once (20% chance)',  2,
       (s) => { s.ricochetCount = Math.max(s.ricochetCount, 1); s.ricochetChance = Math.max(s.ricochetChance, 0.20); }),
@@ -127,17 +58,100 @@ export const SKILL_TREE = [
       (s) => { s.ricochetChance = Math.max(s.ricochetChance, 0.45); }),
     lvl('Shots ricochet up to twice (60% chance)', 3,
       (s) => { s.ricochetCount = 2; s.ricochetChance = Math.max(s.ricochetChance, 0.60); }),
-  ], { requires: [{ id: 'marksman', level: 2 }] }),
+  ], { disc: 'precision', requires: [{ id: 'marksman', level: 2 }] }),
+  g('headshotHeal', 'Vampiric Aim', '♥', [
+    lvl('Headshots heal 6 HP',  2, (s) => { s.headshotHeal = Math.max(s.headshotHeal, 6); }),
+    lvl('Headshots heal 14 HP', 3, (s) => { s.headshotHeal = Math.max(s.headshotHeal, 14); }),
+  ], { disc: 'precision', requires: [{ id: 'deadeye', level: 1 }] }),
+  g('shockCrit', 'Shock Rounds', '⚡', [
+    lvl('Crits dazzle for 1.0s',  2, (s) => { s.shockOnCrit = Math.max(s.shockOnCrit, 1.0); }),
+    lvl('Crits dazzle for 2.0s',  2, (s) => { s.shockOnCrit = Math.max(s.shockOnCrit, 2.0); }),
+  ], { disc: 'precision', requires: [{ id: 'deadeye', level: 2 }] }),
+  g('goldenBullet', 'Golden Bullet', '★', [
+    lvl('2% chance a shot instantly kills non-boss enemies', 3,
+      (s) => { s.goldenBulletChance = Math.max(s.goldenBulletChance, 0.02); }),
+    lvl('5% chance a shot instantly kills non-boss enemies', 3,
+      (s) => { s.goldenBulletChance = Math.max(s.goldenBulletChance, 0.05); }),
+  ], { disc: 'precision', requires: [{ id: 'finisher', level: 1 }] }),
+
+  g('ironWill', 'Iron Will', '♥', [
+    lvl('+15 max HP',  1, (s) => { s.maxHealthBonus += 15; }),
+    lvl('+30 max HP total',  1, (s) => { s.maxHealthBonus += 15; }),
+    lvl('+50 max HP total',  2, (s) => { s.maxHealthBonus += 20; }),
+  ], { disc: 'toughness' }),
+  g('fortitude', 'Fortitude', '◈', [
+    lvl('5% damage reduction',  1, (s) => { s.dmgReduction = Math.min(0.7, s.dmgReduction + 0.05); }),
+    lvl('10% damage reduction',  1, (s) => { s.dmgReduction = Math.min(0.7, s.dmgReduction + 0.05); }),
+    lvl('15% damage reduction',  2, (s) => { s.dmgReduction = Math.min(0.7, s.dmgReduction + 0.05); }),
+  ], { disc: 'toughness', requires: [{ id: 'ironWill', level: 2 }] }),
+  g('cornered', 'Cornered', '◉', [
+    lvl('+15% dmg reduction below 30% HP',  1,
+      (s) => { s.cornerReduction = (s.cornerReduction || 0) + 0.15; }),
+    lvl('+25% dmg reduction below 30% HP',  2,
+      (s) => { s.cornerReduction = (s.cornerReduction || 0) + 0.10; }),
+  ], { disc: 'toughness', requires: [{ id: 'ironWill', level: 1 }] }),
+  g('resolveTree', 'Resolve', '✚', [
+    lvl('+20% health regen',  1, (s) => { s.healthRegenMult *= 1.20; }),
+    lvl('+50% health regen, −1s regen delay',  2,
+      (s) => { s.healthRegenMult *= 1.25; s.healthRegenDelayBonus -= 1.0; }),
+  ], { disc: 'toughness', requires: [{ id: 'ironWill', level: 1 }] }),
+  g('secondWind', 'Second Wind', '☯', [
+    lvl('Fatal damage is prevented once per run (revive to 40% HP)', 3,
+      (s) => { s.secondWindCharges = Math.max(s.secondWindCharges, 1); }),
+    lvl('Two revives per run',  3,
+      (s) => { s.secondWindCharges = Math.max(s.secondWindCharges, 2); }),
+  ], { disc: 'toughness', requires: [{ id: 'ironWill', level: 3 }] }),
+  g('adrenalRush', 'Adrenal Rush', '❂', [
+    lvl('+25% fire rate while below 35% HP',  2,
+      (s) => { s.adrenalOnLowHp = Math.max(s.adrenalOnLowHp, 0.25); }),
+    lvl('+50% fire rate while below 35% HP',  3,
+      (s) => { s.adrenalOnLowHp = Math.max(s.adrenalOnLowHp, 0.50); }),
+  ], { disc: 'toughness', requires: [{ id: 'cornered', level: 1 }] }),
+
+  g('quickHands', 'Quick Hands', '⟳', [
+    lvl('−10% reload time',  1, (s) => { s.reloadSpeedMult *= 1.111; }),
+    lvl('−20% reload time',  1, (s) => { s.reloadSpeedMult *= 1.125; }),
+    lvl('−30% reload time',  2, (s) => { s.reloadSpeedMult *= 1.143; }),
+  ], { disc: 'combat' }),
+  g('berserkerPerk', 'Berserker', '⚔', [
+    lvl('+20% dmg below 50% HP',  1, (s) => { s.berserkBonus = (s.berserkBonus || 0) + 0.20; }),
+    lvl('+40% dmg below 50% HP',  2, (s) => { s.berserkBonus = (s.berserkBonus || 0) + 0.20; }),
+  ], { disc: 'combat' }),
   g('reloadOnKill', 'Fast Magazine', '⚙', [
     lvl('Kills refill 7% of the current mag', 2,
       (s) => { s.reloadOnKill = Math.max(s.reloadOnKill, 0.07); }),
     lvl('Kills refill 15% of the current mag', 3,
       (s) => { s.reloadOnKill = Math.max(s.reloadOnKill, 0.15); }),
-  ]),
-  g('headshotHeal', 'Vampiric Aim', '♥', [
-    lvl('Headshots heal 6 HP',  2, (s) => { s.headshotHeal = Math.max(s.headshotHeal, 6); }),
-    lvl('Headshots heal 14 HP', 3, (s) => { s.headshotHeal = Math.max(s.headshotHeal, 14); }),
-  ], { requires: [{ id: 'deadeye', level: 1 }] }),
+  ], { disc: 'combat' }),
+  g('ammoOnHit', 'Scavenged Rounds', '⊕', [
+    lvl('10% chance body hits refund 1 round', 1,
+      (s) => { s.ammoOnHitChance = Math.max(s.ammoOnHitChance, 0.10); }),
+    lvl('20% chance body hits refund 1 round', 2,
+      (s) => { s.ammoOnHitChance = Math.max(s.ammoOnHitChance, 0.20); }),
+  ], { disc: 'combat' }),
+
+  g('scavenger', 'Scavenger', '⛀', [
+    lvl('+1 backpack pocket',  1, (s) => { s.pocketsBonus += 1; }),
+    lvl('+2 backpack pockets', 1, (s) => { s.pocketsBonus += 1; }),
+    lvl('+3 backpack pockets', 2, (s) => { s.pocketsBonus += 1; }),
+  ], { disc: 'utility' }),
+  g('ballisticResistTree', 'Ballistic Weave', '◊', [
+    lvl('−10% bullet damage',  1, (s) => { s.ballisticResist = Math.min(0.7, s.ballisticResist + 0.10); }),
+    lvl('−20% bullet damage',  1, (s) => { s.ballisticResist = Math.min(0.7, s.ballisticResist + 0.10); }),
+    lvl('−30% bullet damage',  2, (s) => { s.ballisticResist = Math.min(0.7, s.ballisticResist + 0.10); }),
+  ], { disc: 'utility' }),
+  g('staminaTraining', 'Endurance', '●', [
+    lvl('+15 max stamina, +10% regen',  1,
+      (s) => { s.maxStaminaBonus += 15; s.staminaRegenMult *= 1.10; }),
+    lvl('+30 max stamina, +25% regen',  2,
+      (s) => { s.maxStaminaBonus += 15; s.staminaRegenMult *= 1.136; }),
+  ], { disc: 'utility' }),
+  g('grenadierMaster', 'Demolitions Master', '✹', [
+    lvl('Throwable kills refund 1 charge',  2,
+      (s) => { s.throwableRefundOnKill = Math.max(s.throwableRefundOnKill || 0, 1); }),
+    lvl('Throwable kills fully reset cooldowns', 3,
+      (s) => { s.throwableResetOnKill = 1; }),
+  ], { disc: 'utility' }),
   g('explodeKill', 'Final Blast', '✹', [
     lvl('20% chance kills trigger a 3m AoE (18 dmg)',  2,
       (s) => { s.explodeOnKillChance = Math.max(s.explodeOnKillChance, 0.20);
@@ -147,35 +161,7 @@ export const SKILL_TREE = [
       (s) => { s.explodeOnKillChance = Math.max(s.explodeOnKillChance, 0.40);
                s.explodeOnKillDmg = Math.max(s.explodeOnKillDmg, 34);
                s.explodeOnKillRadius = Math.max(s.explodeOnKillRadius, 4); }),
-  ]),
-  g('goldenBullet', 'Golden Bullet', '★', [
-    lvl('2% chance a shot instantly kills non-boss enemies', 3,
-      (s) => { s.goldenBulletChance = Math.max(s.goldenBulletChance, 0.02); }),
-    lvl('5% chance a shot instantly kills non-boss enemies', 3,
-      (s) => { s.goldenBulletChance = Math.max(s.goldenBulletChance, 0.05); }),
-  ], { requires: [{ id: 'finisher', level: 1 }] }),
-  g('shockCrit', 'Shock Rounds', '⚡', [
-    lvl('Crits dazzle for 1.0s',  2, (s) => { s.shockOnCrit = Math.max(s.shockOnCrit, 1.0); }),
-    lvl('Crits dazzle for 2.0s',  2, (s) => { s.shockOnCrit = Math.max(s.shockOnCrit, 2.0); }),
-  ], { requires: [{ id: 'deadeye', level: 2 }] }),
-  g('ammoOnHit', 'Scavenged Rounds', '⊕', [
-    lvl('10% chance body hits refund 1 round', 1,
-      (s) => { s.ammoOnHitChance = Math.max(s.ammoOnHitChance, 0.10); }),
-    lvl('20% chance body hits refund 1 round', 2,
-      (s) => { s.ammoOnHitChance = Math.max(s.ammoOnHitChance, 0.20); }),
-  ]),
-  g('secondWind', 'Second Wind', '☯', [
-    lvl('Fatal damage is prevented once per run (revive to 40% HP)', 3,
-      (s) => { s.secondWindCharges = Math.max(s.secondWindCharges, 1); }),
-    lvl('Two revives per run',  3,
-      (s) => { s.secondWindCharges = Math.max(s.secondWindCharges, 2); }),
-  ], { requires: [{ id: 'ironWill', level: 3 }] }),
-  g('adrenalRush', 'Adrenal Rush', '❂', [
-    lvl('+25% fire rate while below 35% HP',  2,
-      (s) => { s.adrenalOnLowHp = Math.max(s.adrenalOnLowHp, 0.25); }),
-    lvl('+50% fire rate while below 35% HP',  3,
-      (s) => { s.adrenalOnLowHp = Math.max(s.adrenalOnLowHp, 0.50); }),
-  ], { requires: [{ id: 'cornered', level: 1 }] }),
+  ], { disc: 'utility' }),
   // Reaper / Bloodletter / Bloodlust / Executioner moved into the melee
   // class tree below — they thematically belong with melee builds and
   // the general tree was getting top-heavy on damage perks.
