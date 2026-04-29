@@ -885,9 +885,9 @@ export const POSE_TUNABLES = {
     ankleAdjust: 0,
     // torso
     hipDrop: 0.26,
-    chestLean: 0.25,
+    chestLean: 0.26,
     chestMoveLean: 0.0,
-    hipPitch: 0.26,
+    hipPitch: 0.45,
     headCounterPitch: 0.22,
     // gait
     hipRoll: -0.70,
