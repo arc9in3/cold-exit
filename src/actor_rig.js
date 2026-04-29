@@ -834,6 +834,38 @@ function lerpT(current, target, rate, dt) {
   return current + (target - current) * k;
 }
 
+// Live-tunable procedural pose constants. The rig tuner mutates this
+// object directly so changes are visible the very next frame. All
+// crouch-related magic numbers in updateAnim() are read from here so
+// you can iterate the silhouette without recompiling.
+export const POSE_TUNABLES = {
+  crouch: {
+    // legs — primary pose
+    thighFwd: 1.224,             // forward thigh tilt at hip (rad, applied as -crouch*this)
+    kneeBend: 1.30,              // knee bend depth (rad, applied as crouch*this)
+    kneeGaitStraighten: 0.524,   // knees straighten by this much during walk/run
+    strideScale: 0.30,           // 1 - this = how much stride length is cut at full crouch
+    swingLift: 0.15,             // 1 - this = footstep height multiplier at full crouch
+    kneeFlex: 0.18,              // extra knee flex during crouch gait
+    swingDamp: 0.80,             // 1 - this = mid-swing thigh push at full crouch
+    // legs — asymmetry (right leg leads in static crouch idle)
+    rightThighIdleLead: 0.70,    // extra forward bias on right leg when idle
+    rightThighStaticBoost: 0.45, // multiplicative boost on right thigh fwd during idle
+    rightKneeStaticBoost: 0.25,  // multiplicative boost on right knee bend during idle
+    // torso
+    hipDrop: 0.26,               // how far hips drop while crouched (m, scaled by rs)
+    chestLean: 0.30,             // chest forward fold (rad)
+    chestMoveLean: 0.10,         // additional chest fold during crouch-walk (rad, scaled by gaitT)
+    hipPitch: 0.26,              // hip pitch matching the chest hunch (rad)
+    headCounterPitch: 0.22,      // head counter-pitch to keep face level (rad)
+    // gait
+    hipRoll: -0.70,              // gait hip roll multiplier when crouched (negative = damped)
+    bobReduction: 0.60,          // 1 - this = vertical bob multiplier at full crouch
+    plantDipReduction: 0.80,     // 1 - this = foot-plant dip multiplier at full crouch
+    stepRate: 0.65,              // step cadence boost when crouched
+  },
+};
+
 // `state` fields expected:
 //   speed       — horizontal units/sec (0=idle, <2 walk, >4 run)
 //   aimYaw      — radians, 0=neutral (shoulder faces forward)
@@ -849,6 +881,7 @@ function lerpT(current, target, rate, dt) {
 export function updateAnim(rig, state, dt) {
   if (!rig.anim) initAnim(rig);
   const a = rig.anim;
+  const Tc = POSE_TUNABLES.crouch;
 
   // --- phase advance driven by ground speed --------------------------
   const speed = state.speed || 0;
@@ -871,7 +904,7 @@ export function updateAnim(rig, state, dt) {
   // steps.' Now +35% step rate at full crouch. Combined with the
   // smaller stride amp + reduced swing-lift below, the legs barely
   // leave the centerline and just chitter forward.
-  freq *= 1 + (a.crouchBlend || 0) * 0.65;
+  freq *= 1 + (a.crouchBlend || 0) * Tc.stepRate;
   a.cycle += dt * freq * Math.PI * 2;
   const s = Math.sin(a.cycle);
   const s2 = Math.sin(a.cycle * 2);
@@ -1017,16 +1050,16 @@ export function updateAnim(rig, state, dt) {
   // +30° forward thigh tilt at the hip for both idle and walk/run.
   // During walk/run the knee is straightened 30° to compensate so
   // the foot doesn't clip the ground with the extra forward lean.
-  const crouchThigh = -crouch * (0.70 + 0.524);
-  const crouchKneeBase =  crouch * 1.30;
-  const crouchKnee  = crouchKneeBase - crouch * gaitT * 0.524;
+  const crouchThigh = -crouch * Tc.thighFwd;
+  const crouchKneeBase =  crouch * Tc.kneeBend;
+  const crouchKnee  = crouchKneeBase - crouch * gaitT * Tc.kneeGaitStraighten;
   const crouchAnkle = -(crouchThigh + crouchKneeBase);
   // Sneak stride — much shorter than upright walk. The back-leg in
   // stance was extending too far rearward at the previous 0.32
   // attenuation; user described as 'pedaling a bike.' Now 0.65 cut
   // (full crouch = 35% of upright stride length) so the swinging
   // leg never reaches far behind the hip.
-  const strideScale = 1 - crouch * 0.30;
+  const strideScale = 1 - crouch * Tc.strideScale;
   // How much the static "leading leg" offset survives when actively
   // moving. At full crouch-stand (crouchMoveDamp ≈ 1) the front-leg
   // bias dominates so the character reads as poised on one knee.
@@ -1064,15 +1097,15 @@ export function updateAnim(rig, state, dt) {
   // mid-swing. Run uses a big value to produce the high-knee look.
   // Crouch suppresses this hard — fast small steps don't need the
   // dramatic mid-swing forward push that produces the bike-pedal arc.
-  const crouchSwingDamp = 1 - crouch * 0.8;
-  const swingLift = (a.blendWalk * 0.25 + a.blendRun * 0.50) * strideScale * crouchSwingDamp * (1 - crouch * 0.15);
+  const crouchSwingDamp = 1 - crouch * Tc.swingDamp;
+  const swingLift = (a.blendWalk * 0.25 + a.blendRun * 0.50) * strideScale * crouchSwingDamp * (1 - crouch * Tc.swingLift);
   // Knee flex during swing — run flexes harder to clear ground.
   // The +crouch * 0.45 bonus was added earlier so the swinging foot
   // could clear the floor given the dropped hip. Now that the stride
   // amp is cut to 35% and swingLift is damped, the foot's traversal
   // distance is small enough that the bonus over-bends the knee.
   // Trimmed 0.45 → 0.18.
-  const kneeFlex  = (a.blendWalk * 0.85 + a.blendRun * 1.30) * strideScale + crouch * 0.18 * gaitT;
+  const kneeFlex  = (a.blendWalk * 0.85 + a.blendRun * 1.30) * strideScale + crouch * Tc.kneeFlex * gaitT;
   // Ankle heel-toe roll: toe-UP at heel-strike (phase=3π/2), toe-DOWN
   // at toe-off (phase=π/2). Using `sin(phase)` with the convention
   // that positive ankle rotation = plantarflex (toe-down) gives the
@@ -1099,8 +1132,8 @@ export function updateAnim(rig, state, dt) {
   // alternating legs instead of a permanent limp.
   // Right leg pushed an extra 0.3 rad forward during the static crouch
   // idle. Damped by crouchMoveDamp so the bias fades once gait kicks in.
-  const rightCrouchThigh = crouchThigh * (1 + 0.45 * crouchMoveDamp) - 0.70 * crouch * crouchMoveDamp;
-  const rightCrouchKnee  = crouchKnee  * (1 + 0.25 * crouchMoveDamp);
+  const rightCrouchThigh = crouchThigh * (1 + Tc.rightThighStaticBoost * crouchMoveDamp) - Tc.rightThighIdleLead * crouch * crouchMoveDamp;
+  const rightCrouchKnee  = crouchKnee  * (1 + Tc.rightKneeStaticBoost * crouchMoveDamp);
   let leftThighRot  = leftThighGait  + crouchThigh;
   let rightThighRot = rightThighGait + rightCrouchThigh;
   let leftKneeRot   = leftKneeGait   + crouchKnee;
@@ -1197,20 +1230,20 @@ export function updateAnim(rig, state, dt) {
   // full-size rig. Multiplying through by rig.scale keeps proportions
   // stable across every caller's scale value.
   const rs = rig.scale;
-  const bob = 0.03 * s2 * (a.blendWalk + a.blendRun * 1.4) * (1 - crouch * 0.6) * rs;
+  const bob = 0.03 * s2 * (a.blendWalk + a.blendRun * 1.4) * (1 - crouch * Tc.bobReduction) * rs;
   // Hip drop scales with crouch depth and then drops further during
   // the kneel — the front leg's near-horizontal thigh means the hip
   // has to be ~0.43m lower than standing for the front foot to plant.
   // Re-tuned for hipY=1.1 / thighH=0.42 / calfH=0.59 (long-leg proportions).
   // Deeper hip drop so the crouched silhouette reads as a real squat,
   // not a half-bend. 0.16 → 0.26 (~16cm extra drop at full scale).
-  const crouchHipDrop = (crouch * 0.26 + kneel * 0.32) * rs;
+  const crouchHipDrop = (crouch * Tc.hipDrop + kneel * 0.32) * rs;
   // Foot-plant impact dip — at heel-strike (cos(cycle) ≈ ±1) the hip
   // drops a couple cm to sell weight transfer onto the planted leg.
   // cos² peaks at both heel strikes per cycle (left foot at 0, right
   // foot at π). Scales with gait intensity.
   const plantDip = -0.015 * Math.cos(a.cycle) * Math.cos(a.cycle)
-                 * (a.blendWalk + a.blendRun) * (1 - crouch * 0.8) * rs;
+                 * (a.blendWalk + a.blendRun) * (1 - crouch * Tc.plantDipReduction) * rs;
   const hipYBase = (rig.dims?.hipY ?? 0.92) * rs;
   rig.hips.position.y = hipYBase + bob - crouchHipDrop + breathRise * rs + plantDip;
   // Stomach counter-rotates slightly so the character doesn't feel
@@ -1231,8 +1264,8 @@ export function updateAnim(rig, state, dt) {
   // settling weight low + forward, the classic stalker silhouette.
   // Extra fold during a crouch-walk (not just static crouch) so
   // sneaking has a deliberate "creeping in" shape vs standing crouch.
-  const crouchMoveLean = crouch * gaitT * 0.10;
-  const crouchLean = crouch * 0.30 + kneel * 0.18 + crouchMoveLean;
+  const crouchMoveLean = crouch * gaitT * Tc.chestMoveLean;
+  const crouchLean = crouch * Tc.chestLean + kneel * 0.18 + crouchMoveLean;
   const dashLean = a.dashBlend * 0.28;
   // Run lean is suppressed while crouched — the crouch pose is
   // already hunched forward, so stacking the full run lean on top
@@ -1253,7 +1286,7 @@ export function updateAnim(rig, state, dt) {
   // Hip pitch matches the chest hunch so the spine doesn't break — a
   // deeper crouch chest fold without matching hip pitch reads as a
   // bent torso rather than a settled squat.
-  rig.hips.rotation.x = crouch * 0.26 + kneel * 0.16 + a.dashBlend * 0.22;
+  rig.hips.rotation.x = crouch * Tc.hipPitch + kneel * 0.16 + a.dashBlend * 0.22;
 
   // Head follows aim pitch/yaw with a bit of extra snap. A small
   // counter-pitch during crouch/kneel keeps the head level-ish
@@ -1283,13 +1316,13 @@ export function updateAnim(rig, state, dt) {
   rig.head.position.y = headYBase - bob * 0.7;
   rig.head.rotation.y = a.aimBlend * (state.aimYaw || 0) * 0.6 + idleHeadYaw;
   rig.head.rotation.x = -aimPitchV * (0.35 + a.aimBlend * 0.45)
-                      - crouch * 0.22 - kneel * 0.14
+                      - crouch * Tc.headCounterPitch - kneel * 0.14
                       - chestPitch * 0.6;
   // Hip roll — combines slow idle weight-shift with a small gait-
   // driven sway. Standing walk gets a subtle roll; crouching adds a
   // light bump (was ×2.4, now ×1.2) so sneaking still reads as
   // weight-shifting onto the planted foot but doesn't waddle.
-  const gaitHipRoll = Math.cos(a.cycle) * 0.035 * gaitT * (1 - crouch * 0.70);
+  const gaitHipRoll = Math.cos(a.cycle) * 0.035 * gaitT * (1 + crouch * Tc.hipRoll);
   rig.hips.rotation.z = idleHipRoll + gaitHipRoll;
 
   // --- pose: arms -----------------------------------------------------

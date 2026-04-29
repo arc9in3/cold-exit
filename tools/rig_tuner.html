@@ -62,7 +62,7 @@ import { OrbitControls } from 'three/addons/controls/OrbitControls.js';
 import { TransformControls } from 'three/addons/controls/TransformControls.js';
 import GUI from 'lil-gui';
 import {
-  buildRig, initAnim, updateAnim, DEFAULT_DIMS,
+  buildRig, initAnim, updateAnim, DEFAULT_DIMS, POSE_TUNABLES,
 } from '../src/actor_rig.js';
 
 // ---------- scene ----------
@@ -465,6 +465,323 @@ function addDimsFolder(gui, obj, path) {
 let dimsFolder = gui.addFolder('dimensions');
 addDimsFolder(dimsFolder, state.dims, []);
 
+// --- procedural pose constants (live-tunable) ---
+// These read from POSE_TUNABLES which actor_rig.js's updateAnim() also
+// reads, every frame. Mutating a value here updates the runtime pose
+// next frame. Defaults captured up front so the "reset" button works.
+const TUNABLE_DEFAULTS = structuredClone(POSE_TUNABLES);
+{
+  const f = gui.addFolder('procedural pose · crouch');
+  f.close();
+  // Sub-folders by theme so the panel doesn't become a wall of sliders.
+  const legs = f.addFolder('legs (primary)');
+  legs.add(POSE_TUNABLES.crouch, 'thighFwd',           0, 2.5, 0.005).name('thigh fwd (rad)');
+  legs.add(POSE_TUNABLES.crouch, 'kneeBend',           0, 2.5, 0.01).name('knee bend (rad)');
+  legs.add(POSE_TUNABLES.crouch, 'kneeGaitStraighten', 0, 1.5, 0.01).name('knee straighten on walk');
+  legs.add(POSE_TUNABLES.crouch, 'strideScale',        0, 1.0, 0.01).name('stride scale (1−this)');
+  legs.add(POSE_TUNABLES.crouch, 'swingDamp',          0, 1.5, 0.01).name('swing damp');
+  legs.add(POSE_TUNABLES.crouch, 'swingLift',          0, 1.0, 0.01).name('footstep height (1−this)');
+  legs.add(POSE_TUNABLES.crouch, 'kneeFlex',           0, 1.0, 0.01).name('extra knee flex');
+
+  const asym = f.addFolder('legs · right-leg lead');
+  asym.add(POSE_TUNABLES.crouch, 'rightThighIdleLead',    -1.5, 1.5, 0.01).name('right thigh idle lead');
+  asym.add(POSE_TUNABLES.crouch, 'rightThighStaticBoost', -1.0, 1.0, 0.01).name('right thigh boost ×');
+  asym.add(POSE_TUNABLES.crouch, 'rightKneeStaticBoost',  -1.0, 1.0, 0.01).name('right knee boost ×');
+
+  const torso = f.addFolder('torso');
+  torso.add(POSE_TUNABLES.crouch, 'hipDrop',          0, 0.6, 0.005).name('hip drop (m)');
+  torso.add(POSE_TUNABLES.crouch, 'chestLean',        0, 0.8, 0.005).name('chest fwd lean (rad)');
+  torso.add(POSE_TUNABLES.crouch, 'chestMoveLean',    0, 0.5, 0.005).name('chest move-lean (rad)');
+  torso.add(POSE_TUNABLES.crouch, 'hipPitch',         0, 0.6, 0.005).name('hip pitch (rad)');
+  torso.add(POSE_TUNABLES.crouch, 'headCounterPitch', 0, 0.6, 0.005).name('head counter-pitch');
+
+  const gait = f.addFolder('gait');
+  gait.add(POSE_TUNABLES.crouch, 'hipRoll',           -1.5, 1.5, 0.01).name('hip roll mult (− = damp)');
+  gait.add(POSE_TUNABLES.crouch, 'bobReduction',      0, 1.0, 0.01).name('bob reduction');
+  gait.add(POSE_TUNABLES.crouch, 'plantDipReduction', 0, 1.0, 0.01).name('plant dip reduction');
+  gait.add(POSE_TUNABLES.crouch, 'stepRate',          0, 2.0, 0.01).name('step rate boost');
+
+  // Reset + export-as-code
+  f.add({
+    reset: () => {
+      Object.assign(POSE_TUNABLES.crouch, TUNABLE_DEFAULTS.crouch);
+      gui.controllersRecursive().forEach(c => c.updateDisplay());
+    },
+  }, 'reset').name('reset crouch tunables');
+
+  f.add({
+    copyCode: () => {
+      const c = POSE_TUNABLES.crouch;
+      const lines = Object.entries(c).map(([k, v]) => `    ${k}: ${(+v).toFixed(4)},`);
+      const code = `// Paste into POSE_TUNABLES.crouch in src/actor_rig.js\n{\n${lines.join('\n')}\n}`;
+      navigator.clipboard?.writeText(code);
+      const toast = document.getElementById('export-toast');
+      toast.textContent = 'Copied crouch tunables to clipboard.';
+      toast.classList.add('show');
+      setTimeout(() => toast.classList.remove('show'), 1600);
+      console.log('[rig tuner] crouch tunables:\n' + code);
+    },
+  }, 'copyCode').name('copy crouch values → clipboard');
+}
+
+// --- IK targets (constrained two-bone analytic for arms/legs, look-at for head) ---
+// Each target is a small sphere with TransformControls in translate
+// mode. When a chain's IK is enabled, that chain is solved AFTER
+// updateAnim() runs each frame, overriding the procedural pose for
+// just that chain. Targets are clamped to within (sumBoneLengths)
+// of the chain root; clamped targets render red so it's obvious the
+// reach is being limited.
+const ikChains = {};
+
+function addIkTarget(name, color) {
+  const mesh = new THREE.Mesh(
+    new THREE.SphereGeometry(0.05, 16, 12),
+    new THREE.MeshBasicMaterial({ color, transparent: true, opacity: 0.85, depthTest: false }),
+  );
+  mesh.renderOrder = 999;
+  mesh.userData.ikTarget = name;
+  mesh.visible = false;
+  scene.add(mesh);
+  return mesh;
+}
+
+const ikTargetMeshes = {
+  leftHand:  addIkTarget('leftHand',  0x6abf6a),
+  rightHand: addIkTarget('rightHand', 0xbf6a6a),
+  head:      addIkTarget('head',      0x6abfff),
+  leftFoot:  addIkTarget('leftFoot',  0x9a8a6a),
+  rightFoot: addIkTarget('rightFoot', 0xa86060),
+};
+
+const ikState = {
+  leftHand:  { enabled: false, clamped: false },
+  rightHand: { enabled: false, clamped: false },
+  head:      { enabled: false, clamped: false },
+  leftFoot:  { enabled: false, clamped: false },
+  rightFoot: { enabled: false, clamped: false },
+  selected: 'leftHand',
+};
+
+// Separate TransformControls instance for IK targets — keeps it from
+// fighting the joint-rotate gizmo (different selection model).
+const ikControls = new TransformControls(camera, renderer.domElement);
+ikControls.setMode('translate');
+ikControls.setSize(0.6);
+ikControls.addEventListener('dragging-changed', (e) => { controls.enabled = !e.value; });
+scene.add(ikControls);
+
+function selectIkTarget(name) {
+  ikState.selected = name;
+  if (ikState[name]?.enabled) {
+    ikControls.attach(ikTargetMeshes[name]);
+  } else {
+    ikControls.detach();
+  }
+}
+
+function setIkEnabled(name, on) {
+  ikState[name].enabled = on;
+  ikTargetMeshes[name].visible = on;
+  if (on) {
+    // Seed target at the chain's current end-effector world position so
+    // turning IK on doesn't snap the pose.
+    const end = ikChainEndPose(name);
+    if (end) ikTargetMeshes[name].position.copy(end);
+    if (ikState.selected === name) ikControls.attach(ikTargetMeshes[name]);
+  } else if (ikControls.object === ikTargetMeshes[name]) {
+    ikControls.detach();
+  }
+}
+
+// Where is the chain's current end-effector? Used to seed the target
+// when IK is first turned on.
+function ikChainEndPose(name) {
+  const v = new THREE.Vector3();
+  switch (name) {
+    case 'leftHand':  rig.leftArm.hand.mesh.getWorldPosition(v); return v;
+    case 'rightHand': rig.rightArm.hand.mesh.getWorldPosition(v); return v;
+    case 'head':      rig.head.getWorldPosition(v); return v;
+    case 'leftFoot':  rig.leftLeg.foot.mesh.getWorldPosition(v); return v;
+    case 'rightFoot': rig.rightLeg.foot.mesh.getWorldPosition(v); return v;
+  }
+  return null;
+}
+
+// Two-bone analytic IK. Given:
+//   rootPivot   — Object3D (the upper-bone joint)
+//   midPivot    — Object3D (the lower-bone joint, child of root)
+//   endPivot    — Object3D (the wrist/ankle, child of mid)
+//   targetWorld — THREE.Vector3 in world space
+//   upperLen, lowerLen
+//   poleHint    — local-frame unit vector for "which way the elbow/knee bends"
+// Solves rootPivot.rotation + midPivot.rotation so endPivot ends near
+// target. Clamps target distance to (upperLen + lowerLen) so the chain
+// never tries to over-extend (returns clamped: bool).
+const _vA = new THREE.Vector3(), _vB = new THREE.Vector3(), _vC = new THREE.Vector3();
+const _qA = new THREE.Quaternion(), _qB = new THREE.Quaternion();
+const _mA = new THREE.Matrix4();
+function solveTwoBoneIK(rootPivot, midPivot, upperLen, lowerLen, targetWorld, poleHint) {
+  // 1) target in root-local space
+  rootPivot.parent.updateWorldMatrix(true, false);
+  _mA.copy(rootPivot.parent.matrixWorld).invert();
+  _vA.copy(targetWorld).applyMatrix4(_mA);
+  // root pivot offset within parent (rootPivot.position is the joint origin)
+  _vA.sub(rootPivot.position);
+  // 2) clamp distance
+  const reach = upperLen + lowerLen;
+  const minReach = Math.abs(upperLen - lowerLen) * 1.02;
+  let clamped = false;
+  let d = _vA.length();
+  if (d > reach * 0.999) { _vA.multiplyScalar(reach * 0.999 / d); d = reach * 0.999; clamped = true; }
+  if (d < minReach)      { _vA.normalize().multiplyScalar(minReach); d = minReach; clamped = true; }
+  // 3) law of cosines for elbow/knee bend angle
+  const a = upperLen, b = lowerLen;
+  const cosKnee = Math.max(-1, Math.min(1, (a*a + b*b - d*d) / (2 * a * b)));
+  const kneeAngle = Math.PI - Math.acos(cosKnee); // 0 = straight, π = fully folded
+  // 4) thigh/shoulder pitch — solve the upper-bone angle so the chain reaches the target
+  // Place the chain in the plane defined by `_vA` (root→target) and the pole hint.
+  // The upper bone makes angle α with the root→target vector where
+  //     cos α = (a² + d² − b²) / (2ad)
+  const cosUpper = Math.max(-1, Math.min(1, (a*a + d*d - b*b) / (2 * a * d)));
+  const upperAngle = Math.acos(cosUpper);
+  // Build a basis: forward = root→target normalized, pole = poleHint perp to forward
+  const fwd = _vB.copy(_vA).normalize();
+  const pole = _vC.copy(poleHint).sub(fwd.clone().multiplyScalar(_vC.dot(fwd))).normalize();
+  // If poleHint was parallel to forward, fall back to world up
+  if (!isFinite(pole.x) || pole.lengthSq() < 1e-4) pole.set(0, 1, 0);
+  // Upper bone direction: rotate forward toward pole by upperAngle
+  const upper = new THREE.Vector3()
+    .copy(fwd).multiplyScalar(Math.cos(upperAngle))
+    .addScaledVector(pole, Math.sin(upperAngle));
+  // Convert upper-bone direction into a thigh/shoulder rotation. The
+  // upper bone in this rig hangs DOWN at rest (local +Y to -Y). So
+  // we want a quaternion that rotates (0, -1, 0) into `upper`.
+  _qA.setFromUnitVectors(new THREE.Vector3(0, -1, 0), upper);
+  rootPivot.quaternion.copy(_qA);
+  // Mid bone — bend by `kneeAngle` in the plane (forward × pole).
+  // The natural bend axis in the upper-bone's local frame is `pole`
+  // rotated into local frame by inverse of root quaternion.
+  const localPole = pole.clone().applyQuaternion(_qA.clone().invert());
+  // For elbow/knee: rotate around the local pole axis by kneeAngle
+  _qB.setFromAxisAngle(new THREE.Vector3(1, 0, 0), kneeAngle);
+  // Use the X-axis hinge (the rig's knee/elbow rotates around its
+  // local X) — the rig is built with X as the bend axis, so a single
+  // rotation.x = kneeAngle is the canonical bend.
+  void localPole;
+  midPivot.quaternion.copy(_qB);
+  return clamped;
+}
+
+// Estimate bone segment lengths from rig dims, scaled by the rig.
+function ikBoneLens() {
+  const rs = rig.scale;
+  const dims = rig.dims;
+  return {
+    upperArm: dims.shoulder.upperArmH * rs,
+    forearm:  dims.shoulder.forearmH * rs,
+    thigh:    dims.thighH * rs,
+    calf:     dims.calfH * rs,
+  };
+}
+
+function applyIK() {
+  const lens = ikBoneLens();
+  // Arms — pole hints point forward (-Z) so elbows pop forward when
+  // wrists are near the chest, which reads as a "ready to punch" stance
+  // rather than chicken-winging.
+  const armPole = new THREE.Vector3(0, 0, -1);
+  if (ikState.leftHand.enabled) {
+    ikState.leftHand.clamped = solveTwoBoneIK(
+      rig.leftArm.shoulder.pivot, rig.leftArm.elbow,
+      lens.upperArm, lens.forearm,
+      ikTargetMeshes.leftHand.position, armPole,
+    );
+  }
+  if (ikState.rightHand.enabled) {
+    ikState.rightHand.clamped = solveTwoBoneIK(
+      rig.rightArm.shoulder.pivot, rig.rightArm.elbow,
+      lens.upperArm, lens.forearm,
+      ikTargetMeshes.rightHand.position, armPole,
+    );
+  }
+  // Legs — pole hint points forward (knees bend forward).
+  const legPole = new THREE.Vector3(0, 0, 1);
+  if (ikState.leftFoot.enabled) {
+    ikState.leftFoot.clamped = solveTwoBoneIK(
+      rig.leftLeg.thigh.pivot, rig.leftLeg.knee,
+      lens.thigh, lens.calf,
+      ikTargetMeshes.leftFoot.position, legPole,
+    );
+  }
+  if (ikState.rightFoot.enabled) {
+    ikState.rightFoot.clamped = solveTwoBoneIK(
+      rig.rightLeg.thigh.pivot, rig.rightLeg.knee,
+      lens.thigh, lens.calf,
+      ikTargetMeshes.rightFoot.position, legPole,
+    );
+  }
+  // Head — look-at IK. Just orient the head pivot toward the target.
+  if (ikState.head.enabled) {
+    rig.head.parent.updateWorldMatrix(true, false);
+    const headParentInv = new THREE.Matrix4().copy(rig.head.parent.matrixWorld).invert();
+    const localTarget = ikTargetMeshes.head.position.clone().applyMatrix4(headParentInv).sub(rig.head.position);
+    // Clamp head IK target to neckMaxReach so an absurd target doesn't
+    // produce comical neck angles.
+    const reach = 0.5;
+    if (localTarget.length() > reach) {
+      localTarget.normalize().multiplyScalar(reach);
+      ikState.head.clamped = true;
+    } else {
+      ikState.head.clamped = false;
+    }
+    // Yaw + pitch only (no roll) — head-up-vector stays world-up so the
+    // face doesn't tilt sideways.
+    const yaw = Math.atan2(localTarget.x, localTarget.z);
+    const pitch = -Math.atan2(localTarget.y, Math.hypot(localTarget.x, localTarget.z));
+    rig.head.rotation.set(pitch, yaw, 0);
+  }
+  // Update target colors based on clamp state.
+  for (const [name, st] of Object.entries(ikState)) {
+    if (name === 'selected') continue;
+    if (!ikTargetMeshes[name]) continue;
+    const baseColor = {
+      leftHand: 0x6abf6a, rightHand: 0xbf6a6a, head: 0x6abfff,
+      leftFoot: 0x9a8a6a, rightFoot: 0xa86060,
+    }[name];
+    ikTargetMeshes[name].material.color.setHex(st.clamped ? 0xff3030 : baseColor);
+  }
+}
+
+// IK GUI
+{
+  const f = gui.addFolder('IK targets');
+  f.close();
+  f.add({
+    selected: 'leftHand',
+  }, 'selected', ['leftHand', 'rightHand', 'head', 'leftFoot', 'rightFoot'])
+    .name('selected target')
+    .onChange((n) => selectIkTarget(n));
+  for (const name of ['leftHand', 'rightHand', 'head', 'leftFoot', 'rightFoot']) {
+    f.add({
+      [name]: false,
+    }, name).name(`enable ${name}`).onChange((on) => setIkEnabled(name, on));
+  }
+  f.add({
+    seedAll: () => {
+      for (const name of Object.keys(ikTargetMeshes)) {
+        const v = ikChainEndPose(name);
+        if (v) ikTargetMeshes[name].position.copy(v);
+      }
+    },
+  }, 'seedAll').name('seed targets at current pose');
+  f.add({
+    disableAll: () => {
+      for (const name of Object.keys(ikTargetMeshes)) setIkEnabled(name, false);
+      gui.controllersRecursive().forEach(c => c.updateDisplay());
+    },
+  }, 'disableAll').name('disable all');
+}
+
 // --- actions ---
 {
   const f = gui.addFolder('actions');
@@ -524,6 +841,10 @@ function tick() {
   if (!state.pose.freeze && !state.pose.editPose) {
     updateAnim(rig, state.pose, dt);
   }
+  // IK runs after updateAnim so it overrides the procedural pose for
+  // the selected chains. In edit-pose mode it's still useful — the
+  // user may pose by gizmo on some joints and IK on others.
+  if (rig) applyIK();
   controls.update();
   renderer.render(scene, camera);
   requestAnimationFrame(tick);
