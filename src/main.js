@@ -4228,6 +4228,27 @@ function _findHeadAimAssist() {
   return best;
 }
 
+// Rather than snapping to the dead-center of the enemy head, intersect the
+// cursor ray with the horizontal plane at head height. This preserves the
+// zone/owner benefit of head-assist while letting lateral cursor position
+// still influence where the shot goes — feels like tracking, not lock-on.
+// Falls back to head center only if the ray is nearly horizontal (t ≤ 0).
+function _headAssistAimPoint(headAssist) {
+  const ray = input.raycaster.ray;
+  const headY = headAssist.headWorld.y;
+  if (Math.abs(ray.direction.y) > 0.001) {
+    const t = (headY - ray.origin.y) / ray.direction.y;
+    if (t > 0) {
+      return new THREE.Vector3(
+        ray.origin.x + t * ray.direction.x,
+        headY,
+        ray.origin.z + t * ray.direction.z,
+      );
+    }
+  }
+  return headAssist.headWorld.clone();
+}
+
 function _resolveAimRaycast(muzzleWorld) {
   if (!input.hasAim) return { point: null, zone: null, owner: null };
   input.raycaster.setFromCamera(input.mouseNDC, camera);
@@ -4259,7 +4280,7 @@ function _resolveAimRaycast(muzzleWorld) {
     // grazing into the shoulder.
     if (headAssist && hitZone !== 'head' && headAssist.enemy === hitOwner) {
       return {
-        point: headAssist.headWorld.clone(),
+        point: _headAssistAimPoint(headAssist),
         zone: 'head',
         owner: headAssist.enemy,
       };
@@ -4277,7 +4298,7 @@ function _resolveAimRaycast(muzzleWorld) {
   // clipping the very edge of the cranium.
   if (headAssist) {
     return {
-      point: headAssist.headWorld.clone(),
+      point: _headAssistAimPoint(headAssist),
       zone: 'head',
       owner: headAssist.enemy,
     };
