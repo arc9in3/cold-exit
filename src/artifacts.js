@@ -317,3 +317,64 @@ export const ARTIFACT_DEFS = {
 };
 
 export const ALL_ARTIFACTS = Object.values(ARTIFACT_DEFS);
+
+export class ArtifactCollection {
+  constructor() { this.owned = new Set(); }
+  has(id) { return this.owned.has(id); }
+  acquire(id) {
+    if (!ARTIFACT_DEFS[id]) return false;
+    if (this.owned.has(id)) return false;
+    this.owned.add(id);
+    // Synth chain — owning both Acts auto-grants Magnum Opus. The
+    // synthetic isn't shoppable; this is the only acquisition path.
+    if ((id === 'opening_act' || id === 'closing_act')
+        && this.owned.has('opening_act')
+        && this.owned.has('closing_act')
+        && !this.owned.has('magnum_opus')) {
+      this.owned.add('magnum_opus');
+    }
+    return true;
+  }
+  // Remove a single relic from the owned set. Used by the Curse
+  // Breaker encounter to lift Brass Prisoner. Returns true if the
+  // relic was present and removed; false otherwise.
+  remove(id) {
+    if (!this.owned.has(id)) return false;
+    this.owned.delete(id);
+    return true;
+  }
+  reset() { this.owned.clear(); }
+  applyTo(stats) {
+    for (const id of this.owned) {
+      const a = ARTIFACT_DEFS[id];
+      if (a && typeof a.apply === 'function') a.apply(stats);
+    }
+  }
+  list() {
+    return [...this.owned].map(id => ARTIFACT_DEFS[id]).filter(Boolean);
+  }
+}
+
+// Build a relic pickup item. A relic is a permanent run modifier —
+// the shop buy flow + the floor pickup path both recognise items
+// with `type === 'relic'` and grant the artifact directly to the
+// player's owned set rather than putting it in the inventory grid.
+// `relicFor` is the canonical builder; `artifactScrollFor` is kept
+// as a backwards-compat alias for any caller that still uses the
+// old name.
+export function relicFor(id) {
+  const def = ARTIFACT_DEFS[id];
+  if (!def) return null;
+  return {
+    id: `relic_${id}`,
+    artifactId: id,
+    name: def.name,
+    type: 'relic',
+    tint: def.tint,
+    rarity: 'legendary',
+    description: def.short,
+    lore: def.lore,
+    basePrice: def.price,
+  };
+}
+export const artifactScrollFor = relicFor;
