@@ -1011,6 +1011,8 @@ export function updateAnim(rig, state, dt) {
   // kneelBlend factor.
   const crouch = a.crouchBlend;
   const kneel = a.kneelBlend;
+  // Gait blend (declared early — crouch-knee straightening reads it).
+  const gaitT = a.blendWalk + a.blendRun * 1.15;
   // Crouch-walk pose — deeper squat for the slick sneak silhouette.
   // +30° forward thigh tilt at the hip for both idle and walk/run.
   // During walk/run the knee is straightened 30° to compensate so
@@ -1057,7 +1059,6 @@ export function updateAnim(rig, state, dt) {
   // swing, producing the stiff compass-walk look. Now the knee flex
   // peaks at mid-swing (phase=π), which is when a real leg's knee is
   // highest.
-  const gaitT = a.blendWalk + a.blendRun * 1.15;
   const strideAmp = (a.blendWalk * 0.45 + a.blendRun * 0.25) * strideScale;
   // Swing-forward lift: extra negative (forward) thigh angle at
   // mid-swing. Run uses a big value to produce the high-knee look.
