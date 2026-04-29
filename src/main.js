@@ -361,12 +361,14 @@ if (deathBtnEl) {
 }
 if (deathMenuBtnEl) {
   deathMenuBtnEl.addEventListener('click', () => {
-    // Bail out to the main menu. Run is already submitted (or dropped
-    // if tainted) from the death-detection branch in tick(); all we do
-    // here is reset the world and show the menu.
+    // Death-exit flow: the run is sealed (leaderboard already submitted
+    // or dropped). Capture a snapshot of the dying run BEFORE we reset
+    // — contract evaluation reads pistolOnly / noConsumables / kills /
+    // peakLevel / etc. from the snapshot.
     deathRootEl.style.display = 'none';
     playerDead = false;
     input.clearMouseState();
+    const runSnapshot = runStats.snapshot();
     // Mirror Quit-to-title's reset so a fresh Play from the main menu
     // starts cleanly rather than inheriting meta progression.
     playerCredits = 0;
@@ -385,7 +387,12 @@ if (deathMenuBtnEl) {
     pendingShopRerolls = 0;
     giftSacrificeHp = 0;
     sfx.ambientStop();
-    mainMenuUI.show();
+    // Open the hideout instead of going straight to the main menu.
+    // Death = no extract queue (the run was lost); the hideout still
+    // pays out any winning contract and lets the player spend chips
+    // before they start a fresh run. The hideout's onClose hook
+    // (defined at construction) takes them to the main menu next.
+    hideoutUI.openWithExtract([], runSnapshot);
   });
 }
 if (meleeHudEl) meleeHudEl.style.display = 'none';
@@ -4466,6 +4473,10 @@ function tickFlame(dt, playerInfo, weapon, inputState, aimInfo) {
   if (weapon.ammo <= 0) { tryReload(weapon); return; }
   if (weapon.flameTickT > 0) return;
 
+  // First tick this trigger pull counts as a non-pistol fire for
+  // contract evaluation. Flame is its own class so this is sufficient.
+  runStats.noteFireWeaponClass('flame');
+
   const tickInterval = 1 / Math.max(1, weapon.flameTickRate || 12);
   weapon.flameTickT = tickInterval;
 
@@ -4509,6 +4520,7 @@ function tickFlame(dt, playerInfo, weapon, inputState, aimInfo) {
     const wasAlive = c.alive;
     runStats.addDamage(baseDmg);
     c.manager.applyHit(c, baseDmg, 'torso', dir, { weaponClass: 'melee' });
+    runStats.noteMeleeLanded();
     applyBurnStack(c, tunables.burn.duration * (derivedStats.burnDurationBonus || 1));
     if (wasAlive && !c.alive) {
       onEnemyKilled(c);
@@ -4682,6 +4694,7 @@ function firePlayerProjectile(playerInfo, weapon, aimPoint) {
     weapon.ammo = Math.max(0, weapon.ammo - 2);
   }
   sfx.fire(weapon.class || 'shotgun');
+  runStats.noteFireWeaponClass(weapon.class || 'shotgun');
   alertEnemiesFromShot(playerInfo.muzzleWorld);
   if (player.kickRecoil) player.kickRecoil();
   triggerShake(0.28, 0.22);
@@ -4766,6 +4779,7 @@ function firePlayerGrapple(playerInfo, weapon, aimPoint) {
   combat.spawnShot(origin, endPoint, weapon.tracerColor || 0xffd040,
     { light: false, flash: true });
   if (sfx.fire) sfx.fire('exotic');
+  runStats.noteFireWeaponClass('exotic');
   alertEnemiesFromShot(origin);
   if (!hit) return;
   // Did we hit an enemy? Owner.manager + alive flag distinguishes
@@ -5074,6 +5088,7 @@ function fireOneShot(playerInfo, weapon, aimPoint, isADS, aimOwner) {
     tryReload(weapon);
   }
   sfx.fire(weapon.class || 'pistol');
+  runStats.noteFireWeaponClass(weapon.class || 'pistol');
   alertEnemiesFromShot(tracerFrom);
   // Player recoil spring — animation layer reads this via the rig's
   // recoilT and kicks the weapon arm back for ~0.18s.
@@ -5259,6 +5274,7 @@ function fireOneShot(playerInfo, weapon, aimPoint, isADS, aimOwner) {
       let critChance = derivedStats.critChance || 0;
       if (hit.zone !== 'head') critChance += (derivedStats.bodyCritChanceBonus || 0);
       const crit = Math.random() < critChance;
+      if (crit && hit.zone === 'head') runStats.noteCritHeadshot();
       if (crit) {
         let critMult = derivedStats.critDamageMult || 2;
         if (hit.zone !== 'head') critMult += (derivedStats.bodyCritDamageBonus || 0);
@@ -5698,6 +5714,7 @@ function resolveComboHit(attackEvent) {
     const wasAlive = c.alive;
     runStats.addDamage(dmg);
     c.manager.applyHit(c, dmg, 'torso', facing, { weaponClass: 'melee', isCrit });
+    runStats.noteMeleeLanded();
     c.manager.applyKnockback?.(c, {
       x: facing.x * (attack.knockback || 0) * derivedStats.knockbackMult,
       z: facing.z * (attack.knockback || 0) * derivedStats.knockbackMult,
@@ -5746,6 +5763,7 @@ function resolveComboHit(attackEvent) {
       const wasAlive = c.alive;
       runStats.addDamage(swDmg);
       c.manager.applyHit(c, swDmg, 'torso', pushDir, { weaponClass: 'melee' });
+      runStats.noteMeleeLanded();
       c.manager.applyKnockback?.(c, {
         x: pushDir.x * (attack.shockwaveKnockback || 0) * derivedStats.knockbackMult,
         z: pushDir.z * (attack.shockwaveKnockback || 0) * derivedStats.knockbackMult,
@@ -6362,6 +6380,7 @@ function tickMeleeSwipe(dt, inputState, aimInfo, playerInfo) {
     const wasAlive = c.alive;
     runStats.addDamage(dmg);
     c.manager.applyHit(c, dmg, comboStep.zone, _swipeDir, { weaponClass: 'melee' });
+    runStats.noteMeleeLanded();
     if (c.manager.applyKnockback) {
       c.manager.applyKnockback(c, {
         x: _swipeDir.x * comboStep.knockback * derivedStats.knockbackMult,
@@ -7059,6 +7078,7 @@ function onProjectileExplode(pos, explosion, owner, p) {
         // which matches the player's expectation of "explosions =
         // demolitions".
         onEnemyKilled(c, { byThrowable: true });
+        runStats.noteThrowableKill();
       }
     }
   };
@@ -7122,6 +7142,7 @@ function spawnKillBlast(pos, radius, dmg) {
       const pd = Math.hypot(dx, dz) || 1;
       runStats.addDamage(dmg);
       c.manager.applyHit(c, dmg, 'torso', { x: dx / pd, z: dz / pd }, { weaponClass: 'melee' });
+      runStats.noteMeleeLanded();
     }
   };
   pushAll(gunmen.gunmen);
@@ -8496,6 +8517,9 @@ function applyConsumable(item) {
     return true;
   }
   if (!item.useEffect) return false;
+  // From here on we're using a real consumable (heal / buff / boost).
+  // Throwables are returned earlier so they don't trip the contract.
+  runStats.noteConsumableUsed();
   const e = item.useEffect;
   if (e.kind === 'heal') {
     // Pass through `cures` so healing items can clear bleed / broken bones.
@@ -10029,6 +10053,11 @@ async function runExtract() {
   input.clearMouseState();
   inventoryUI.hide();
   exitCooldown = 1.0;
+  // Stamp the run as having seen at least one extract — contract
+  // evaluation reads this on death too (a player can die later in the
+  // run and still satisfy "extract from floor X" if they extracted
+  // earlier). peakLevel is monotonic via runStats.setLevel.
+  runStats.noteExtracted();
   await skillPickUI.show();
   input.clearMouseState();
   paused = false;
