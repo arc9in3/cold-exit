@@ -792,22 +792,22 @@ export class MeleeEnemyManager {
       e.smokeConfusedT = Math.max(0, (e.smokeConfusedT || 0) - dt);
       if (e.smokeConfusedT <= 0) e.smokeZoneRef = null;
     }
-    // Build the chase target. When smoke-confused, walk toward the
-    // random smoke aim point instead of the live player. _m_targetPos
-    // is a scratch we reuse so we don't allocate per frame.
-    const _smokeOn = (e.smokeConfusedT || 0) > 0 && typeof e.smokeAimX === 'number';
-    const targetX = _smokeOn ? e.smokeAimX : ctx.playerPos.x;
-    const targetY = ctx.playerPos.y;
-    const targetZ = _smokeOn ? e.smokeAimZ : ctx.playerPos.z;
-    const toPlayer = _m_toPlayer.set(
-      targetX - e.group.position.x,
-      targetY - e.group.position.y,
-      targetZ - e.group.position.z,
-    );
+    // toPlayer / dist are ALWAYS the real player vector — the windup
+    // gate, strike-lands check, and assassin-block math all read this
+    // and must reflect actual reach. Without that, a smoke-confused
+    // melee that lurched within strike range of an empty point in the
+    // cloud would still register a hit on a player 10m away.
+    const toPlayer = _m_toPlayer.subVectors(ctx.playerPos, e.group.position);
     const dist = Math.hypot(toPlayer.x, toPlayer.z);
-    const dir2d = _m_dir2d.set(toPlayer.x, 0, toPlayer.z);
+    e._lastRangeToPlayer = dist;
+    // dir2d drives FACING and chase MOVEMENT. When smoke-confused, point
+    // toward the random smoke-aim point so the enemy lurches around the
+    // cloud instead of homing on the player.
+    const _smokeOn = (e.smokeConfusedT || 0) > 0 && typeof e.smokeAimX === 'number';
+    const dir2d = _smokeOn
+      ? _m_dir2d.set(e.smokeAimX - e.group.position.x, 0, e.smokeAimZ - e.group.position.z)
+      : _m_dir2d.set(toPlayer.x, 0, toPlayer.z);
     if (dir2d.lengthSq() > 0.0001) dir2d.normalize();
-    e._lastRangeToPlayer = dist;   // read by applyHit for assassin block
 
     // Door-state gating removed — keycard redesign opens most doors
     // by default. Detection falls through to LoS + suspicion only.
