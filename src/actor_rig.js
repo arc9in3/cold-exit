@@ -895,6 +895,18 @@ export const POSE_TUNABLES = {
     plantDipReduction: 0.80,
     stepRate: 0.42,
   },
+  // Upright walk / run gait — every value below ALSO matters when not
+  // crouched (unlike the crouch.* fields which are crouch-only
+  // modifiers that zero out when not crouched). Touching these is the
+  // only way to dial back the upright run bob / plant dip / hip roll.
+  gait: {
+    bobAmplitude: 0.03,           // vertical bob amplitude (m, scaled by rs)
+    runBobMult: 1.4,              // run-vs-walk multiplier on the bob
+    plantDipAmplitude: 0.015,     // heel-strike hip dip (m, scaled by rs)
+    hipRollAmplitude: 0.035,      // gait-driven hip roll (rad)
+    runLeanWalk: 0.04,            // forward lean per blendWalk
+    runLeanRun: 0.16,             // forward lean per blendRun
+  },
   // Kneel pose — fires when state.crouched && speed < kneel.threshold.
   // At full blend, overrides the crouch-pose leg rotations (one knee
   // down, the other forward). Set enabled=0 to let the crouch sliders
@@ -932,6 +944,7 @@ export function updateAnim(rig, state, dt) {
   const a = rig.anim;
   const Tc = POSE_TUNABLES.crouch;
   const Tk = POSE_TUNABLES.kneel;
+  const Tg = POSE_TUNABLES.gait;
 
   // --- phase advance driven by ground speed --------------------------
   const speed = state.speed || 0;
@@ -1286,7 +1299,7 @@ export function updateAnim(rig, state, dt) {
   // full-size rig. Multiplying through by rig.scale keeps proportions
   // stable across every caller's scale value.
   const rs = rig.scale;
-  const bob = 0.03 * s2 * (a.blendWalk + a.blendRun * 1.4) * (1 - crouch * Tc.bobReduction) * rs;
+  const bob = Tg.bobAmplitude * s2 * (a.blendWalk + a.blendRun * Tg.runBobMult) * (1 - crouch * Tc.bobReduction) * rs;
   // Hip drop scales with crouch depth and then drops further during
   // the kneel — the front leg's near-horizontal thigh means the hip
   // has to be ~0.43m lower than standing for the front foot to plant.
@@ -1298,7 +1311,7 @@ export function updateAnim(rig, state, dt) {
   // drops a couple cm to sell weight transfer onto the planted leg.
   // cos² peaks at both heel strikes per cycle (left foot at 0, right
   // foot at π). Scales with gait intensity.
-  const plantDip = -0.015 * Math.cos(a.cycle) * Math.cos(a.cycle)
+  const plantDip = -Tg.plantDipAmplitude * Math.cos(a.cycle) * Math.cos(a.cycle)
                  * (a.blendWalk + a.blendRun) * (1 - crouch * Tc.plantDipReduction) * rs;
   const hipYBase = (rig.dims?.hipY ?? 0.92) * rs;
   rig.hips.position.y = hipYBase + bob - crouchHipDrop + breathRise * rs + plantDip;
@@ -1334,7 +1347,7 @@ export function updateAnim(rig, state, dt) {
   // about to fall over. The waist bend below then adds a deliberate
   // small spine flex so the upper body still reads as "coiled".
   const meleeActive = !!state.meleeStance && !state.sleeping;
-  const rawRunLean = (a.blendWalk * 0.04 + a.blendRun * 0.16) * (1 - crouch * 0.85);
+  const rawRunLean = (a.blendWalk * Tg.runLeanWalk + a.blendRun * Tg.runLeanRun) * (1 - crouch * 0.85);
   const runLean = meleeActive ? rawRunLean * 0.5 : rawRunLean;
   const meleeWaistBend = meleeActive ? 0.08 : 0;
   rig.chest.rotation.y = chestAimYaw;
@@ -1378,7 +1391,7 @@ export function updateAnim(rig, state, dt) {
   // driven sway. Standing walk gets a subtle roll; crouching adds a
   // light bump (was ×2.4, now ×1.2) so sneaking still reads as
   // weight-shifting onto the planted foot but doesn't waddle.
-  const gaitHipRoll = Math.cos(a.cycle) * 0.035 * gaitT * (1 + crouch * Tc.hipRoll);
+  const gaitHipRoll = Math.cos(a.cycle) * Tg.hipRollAmplitude * gaitT * (1 + crouch * Tc.hipRoll);
   rig.hips.rotation.z = idleHipRoll + gaitHipRoll;
 
   // --- pose: arms -----------------------------------------------------

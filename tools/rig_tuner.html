@@ -730,7 +730,19 @@ const gaitOnlyCtrls = [];
   torso.add(POSE_TUNABLES.crouch, 'hipPitch',         0, 0.6, 0.005).name('hip pitch (rad)');
   torso.add(POSE_TUNABLES.crouch, 'headCounterPitch', 0, 0.6, 0.005).name('head counter-pitch');
 
-  const gait = f.addFolder('gait (walk / run only)');
+  // Upright walk/run gait — these affect the non-crouched silhouette.
+  // Always editable (not in gaitOnlyCtrls) so you can tune the run
+  // even from idle preset. Values do nothing at speed=0 but the
+  // preview reflects them as soon as you switch presets.
+  const upright = f.addFolder('gait · upright walk/run');
+  upright.add(POSE_TUNABLES.gait, 'bobAmplitude',      0,    0.20, 0.001).name('bob amplitude (m)');
+  upright.add(POSE_TUNABLES.gait, 'runBobMult',        0,    3.0,  0.01).name('run bob mult');
+  upright.add(POSE_TUNABLES.gait, 'plantDipAmplitude', 0,    0.10, 0.001).name('plant dip amp (m)');
+  upright.add(POSE_TUNABLES.gait, 'hipRollAmplitude',  0,    0.20, 0.001).name('hip roll amp (rad)');
+  upright.add(POSE_TUNABLES.gait, 'runLeanWalk',       0,    0.30, 0.001).name('walk fwd lean');
+  upright.add(POSE_TUNABLES.gait, 'runLeanRun',        0,    0.50, 0.001).name('run fwd lean');
+
+  const gait = f.addFolder('gait · crouch only (walk / run)');
   gaitOnlyCtrls.push(gait.add(POSE_TUNABLES.crouch, 'hipRoll',           -1.5, 1.5, 0.01).name('hip roll mult (− = damp)'));
   gaitOnlyCtrls.push(gait.add(POSE_TUNABLES.crouch, 'bobReduction',      0, 1.0, 0.01).name('bob reduction'));
   gaitOnlyCtrls.push(gait.add(POSE_TUNABLES.crouch, 'plantDipReduction', 0, 1.0, 0.01).name('plant dip reduction'));
@@ -753,7 +765,8 @@ const gaitOnlyCtrls = [];
       const code =
         '// Paste into POSE_TUNABLES in src/actor_rig.js\n' +
         'crouch: {\n' + fmt(POSE_TUNABLES.crouch) + '\n},\n' +
-        'kneel: {\n'  + fmt(POSE_TUNABLES.kneel)  + '\n},';
+        'kneel: {\n'  + fmt(POSE_TUNABLES.kneel)  + '\n},\n' +
+        'gait: {\n'   + fmt(POSE_TUNABLES.gait)   + '\n},';
       navigator.clipboard?.writeText(code);
       const toast = document.getElementById('export-toast');
       toast.textContent = 'Copied crouch + kneel tunables to clipboard.';
