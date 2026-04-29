@@ -677,14 +677,19 @@ function ikBoneLens() {
   const rs = rig.scale;
   const dims = rig.dims;
   return {
-    upperArm: dims.shoulder.upperArmH * rs,
-    forearm:  dims.shoulder.forearmH * rs,
-    thigh:    dims.thighH * rs,
-    calf:     dims.calfH * rs,
+    upperArm: dims.arms.upperArmH * rs,
+    forearm:  dims.arms.forearmH * rs,
+    thigh:    dims.legs.thighH * rs,
+    calf:     dims.legs.calfH * rs,
   };
 }
 
 function applyIK() {
+  // Early-out if nothing's enabled — keeps the render loop alive even
+  // if ikBoneLens or the solver later throws.
+  const anyOn = ikState.leftHand.enabled || ikState.rightHand.enabled
+    || ikState.head.enabled || ikState.leftFoot.enabled || ikState.rightFoot.enabled;
+  if (!anyOn) return;
   const lens = ikBoneLens();
   // Arms — pole hints point forward (-Z) so elbows pop forward when
   // wrists are near the chest, which reads as a "ready to punch" stance
