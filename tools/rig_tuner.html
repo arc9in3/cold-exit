@@ -53,7 +53,7 @@
 <div id="stage"></div>
 <div id="crumb">
   <b>rig tuner</b> · drag to orbit · wheel to zoom
-  <span class="hint">dims sliders on the right · "pose editor" → enable edit mode → click a body part → drag the gizmo rings to rotate · <b>Ctrl+Z</b> undoes the last change</span>
+  <span class="hint">dims sliders on the right · "pose editor" → enable edit mode → click a body part → drag the gizmo rings · <b>R</b>=rotate · <b>T</b>=translate · <b>Ctrl+Z</b>=undo</span>
 </div>
 <div id="export-toast">Copied dims + colors to clipboard.</div>
 <script type="module">
@@ -182,6 +182,19 @@ function applyPreset(name) {
   state.pose.preset = name;
   // Reflect onto GUI controls so sliders match.
   for (const ctrl of poseControls) ctrl.updateDisplay();
+  refreshGaitGate();
+}
+
+// Disable / re-enable gait-only sliders based on whether the rig is
+// moving. Their effect is multiplied by gaitT (blendWalk+blendRun) so
+// at speed=0 they have no visible effect; greying them out tells the
+// user 'pick a walk/run preset to tune these'.
+function refreshGaitGate() {
+  const moving = (state.pose.speed || 0) > 0.01;
+  for (const c of gaitOnlyCtrls) {
+    if (!c) continue;
+    if (moving) c.enable(); else c.disable();
+  }
 }
 
 // ---------- rig ----------
@@ -453,6 +466,31 @@ window.addEventListener('keydown', (e) => {
   }
 });
 
+// R / T hotkeys to flip the joint-rotate gizmo between rotate /
+// translate modes. Mirrors the standard DCC-tool convention. The IK
+// target gizmo always stays in translate mode (you can't rotate a
+// point target). Skip while typing into a number field so the keys
+// don't fight numeric input.
+window.addEventListener('keydown', (e) => {
+  const tag = (e.target && e.target.tagName) || '';
+  if (tag === 'INPUT' || tag === 'TEXTAREA') return;
+  if (e.ctrlKey || e.metaKey || e.altKey) return;
+  const k = e.key.toLowerCase();
+  if (k === 'r') {
+    tControls.setMode('rotate');
+    showHotkeyToast('Gizmo: ROTATE');
+  } else if (k === 't') {
+    tControls.setMode('translate');
+    showHotkeyToast('Gizmo: TRANSLATE');
+  }
+});
+function showHotkeyToast(msg) {
+  const toast = document.getElementById('export-toast');
+  toast.textContent = msg;
+  toast.classList.add('show');
+  setTimeout(() => toast.classList.remove('show'), 900);
+}
+
 // Slider / dropdown / checkbox / color undo: any pointerdown inside
 // the lil-gui panel pushes a single snapshot for that interaction.
 // A pointerup clears the latch so the next interaction pushes again.
@@ -489,7 +527,7 @@ gui.domElement.addEventListener('focusout', () => { _kbField = null; }, true);
   const f = gui.addFolder('pose');
   f.add(state.pose, 'preset', Object.keys(POSE_PRESETS)).name('preset').onChange(applyPreset);
   poseControls.push(f.add(state.pose, 'freeze').name('freeze (pause anim)'));
-  poseControls.push(f.add(state.pose, 'speed', 0, 6, 0.05).name('speed (walk/run)'));
+  poseControls.push(f.add(state.pose, 'speed', 0, 6, 0.05).name('speed (walk/run)').onChange(() => refreshGaitGate()));
   poseControls.push(f.add(state.pose, 'aimYaw',  -1.5, 1.5, 0.01).name('aim yaw'));
   poseControls.push(f.add(state.pose, 'aimPitch',-1.2, 1.2, 0.01).name('aim pitch'));
   poseControls.push(f.add(state.pose, 'aiming',  0, 1, 0.01).name('aim blend'));
@@ -624,6 +662,11 @@ addDimsFolder(dimsFolder, state.dims, []);
 // reads, every frame. Mutating a value here updates the runtime pose
 // next frame. Defaults captured up front so the "reset" button works.
 const TUNABLE_DEFAULTS = structuredClone(POSE_TUNABLES);
+// Sliders whose effect is multiplied by gaitT (blendWalk+blendRun) or
+// other movement terms — they have zero visible effect at speed=0.
+// Auto-disabled when the rig is stationary so the panel doesn't look
+// broken. Re-enabled the moment speed > 0.
+const gaitOnlyCtrls = [];
 {
   const f = gui.addFolder('procedural pose · crouch');
   f.close();
@@ -631,11 +674,11 @@ const TUNABLE_DEFAULTS = structuredClone(POSE_TUNABLES);
   const legs = f.addFolder('legs (primary)');
   legs.add(POSE_TUNABLES.crouch, 'thighFwd',           0, 2.5, 0.005).name('thigh fwd (rad)');
   legs.add(POSE_TUNABLES.crouch, 'kneeBend',           0, 2.5, 0.01).name('knee bend (rad)');
-  legs.add(POSE_TUNABLES.crouch, 'kneeGaitStraighten', 0, 1.5, 0.01).name('knee straighten on walk');
-  legs.add(POSE_TUNABLES.crouch, 'strideScale',        0, 1.0, 0.01).name('stride scale (1−this)');
-  legs.add(POSE_TUNABLES.crouch, 'swingDamp',          0, 1.5, 0.01).name('swing damp');
-  legs.add(POSE_TUNABLES.crouch, 'swingLift',          0, 1.0, 0.01).name('footstep height (1−this)');
-  legs.add(POSE_TUNABLES.crouch, 'kneeFlex',           0, 1.0, 0.01).name('extra knee flex');
+  gaitOnlyCtrls.push(legs.add(POSE_TUNABLES.crouch, 'kneeGaitStraighten', 0, 1.5, 0.01).name('knee straighten on walk'));
+  gaitOnlyCtrls.push(legs.add(POSE_TUNABLES.crouch, 'strideScale',        0, 1.0, 0.01).name('stride scale (1−this)'));
+  gaitOnlyCtrls.push(legs.add(POSE_TUNABLES.crouch, 'swingDamp',          0, 1.5, 0.01).name('swing damp'));
+  gaitOnlyCtrls.push(legs.add(POSE_TUNABLES.crouch, 'swingLift',          0, 1.0, 0.01).name('footstep height (1−this)'));
+  gaitOnlyCtrls.push(legs.add(POSE_TUNABLES.crouch, 'kneeFlex',           0, 1.0, 0.01).name('extra knee flex'));
 
   const asym = f.addFolder('legs · right-leg lead');
   asym.add(POSE_TUNABLES.crouch, 'rightThighIdleLead',    -1.5, 1.5, 0.01).name('right thigh idle lead');
@@ -645,15 +688,15 @@ const TUNABLE_DEFAULTS = structuredClone(POSE_TUNABLES);
   const torso = f.addFolder('torso');
   torso.add(POSE_TUNABLES.crouch, 'hipDrop',          0, 0.6, 0.005).name('hip drop (m)');
   torso.add(POSE_TUNABLES.crouch, 'chestLean',        0, 0.8, 0.005).name('chest fwd lean (rad)');
-  torso.add(POSE_TUNABLES.crouch, 'chestMoveLean',    0, 0.5, 0.005).name('chest move-lean (rad)');
+  gaitOnlyCtrls.push(torso.add(POSE_TUNABLES.crouch, 'chestMoveLean', 0, 0.5, 0.005).name('chest move-lean (rad)'));
   torso.add(POSE_TUNABLES.crouch, 'hipPitch',         0, 0.6, 0.005).name('hip pitch (rad)');
   torso.add(POSE_TUNABLES.crouch, 'headCounterPitch', 0, 0.6, 0.005).name('head counter-pitch');
 
-  const gait = f.addFolder('gait');
-  gait.add(POSE_TUNABLES.crouch, 'hipRoll',           -1.5, 1.5, 0.01).name('hip roll mult (− = damp)');
-  gait.add(POSE_TUNABLES.crouch, 'bobReduction',      0, 1.0, 0.01).name('bob reduction');
-  gait.add(POSE_TUNABLES.crouch, 'plantDipReduction', 0, 1.0, 0.01).name('plant dip reduction');
-  gait.add(POSE_TUNABLES.crouch, 'stepRate',          0, 2.0, 0.01).name('step rate boost');
+  const gait = f.addFolder('gait (walk / run only)');
+  gaitOnlyCtrls.push(gait.add(POSE_TUNABLES.crouch, 'hipRoll',           -1.5, 1.5, 0.01).name('hip roll mult (− = damp)'));
+  gaitOnlyCtrls.push(gait.add(POSE_TUNABLES.crouch, 'bobReduction',      0, 1.0, 0.01).name('bob reduction'));
+  gaitOnlyCtrls.push(gait.add(POSE_TUNABLES.crouch, 'plantDipReduction', 0, 1.0, 0.01).name('plant dip reduction'));
+  gaitOnlyCtrls.push(gait.add(POSE_TUNABLES.crouch, 'stepRate',          0, 2.0, 0.01).name('step rate boost'));
 
   // Reset + export-as-code
   f.add({
@@ -1015,6 +1058,7 @@ function tick() {
   renderer.render(scene, camera);
   requestAnimationFrame(tick);
 }
+refreshGaitGate();   // initial pass — disable gait-only sliders if starting in idle
 tick();
 
 // ---------- resize ----------
