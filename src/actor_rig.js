@@ -207,6 +207,13 @@ export const DEFAULT_DIMS = {
     // and slimmed chestBotR so the cylinder reads with shoulders-out
     // and a defined waistline. Hip cylinder slightly slimmed to match.
     pelvisH: 0.17, pelvisTopR: 0.18, pelvisBotR: 0.21, pelvisY: 0.12,
+    // Crotch wedge — small downward-tapering cylinder filling the
+    // inverted-V gap between pelvis bottom and the inner-thigh tops.
+    // Top (crotchTopR) should roughly match the inner-edge of the
+    // pelvis bottom; bottom (crotchBotR) tapers to just enough to
+    // sit between the inner thigh surfaces. Set crotchH to 0 to
+    // disable.
+    crotchTopR: 0.13, crotchBotR: 0.07, crotchH: 0.06, crotchY: 0.005,
     stomachH: 0.235, stomachTopR: 0.24, stomachBotR: 0.18, stomachY: 0.22,
     chestH: 0.345, chestTopR: 0.32, chestBotR: 0.22,
     collarH: 0.055, collarTopR: 0.11, collarBotR: 0.32, collarDY: 0.057,
@@ -412,6 +419,22 @@ export function buildRig(opts = {}) {
   pelvis.receiveShadow = true;
   pelvis.userData.zone = 'torso';
   hips.add(pelvis);
+
+  // Crotch wedge — closes the inverted-V gap below the pelvis between
+  // the two inner-thigh surfaces. Top meets pelvis bottom, tapers
+  // down to just below the hip joint. Skipped when crotchH is 0.
+  if ((T.crotchH || 0) > 0.0001) {
+    const crotch = new THREE.Mesh(
+      _cyl(T.crotchTopR * scale, T.crotchBotR * scale, T.crotchH * scale, T.segs),
+      legMat,
+    );
+    crotch.position.set(0, (T.crotchY || 0) * scale, 0);
+    crotch.scale.z = T.depthRatio;
+    crotch.castShadow = true;
+    crotch.receiveShadow = true;
+    crotch.userData.zone = 'torso';
+    hips.add(crotch);
+  }
 
   // Stomach — tapered cylinder narrowing to the waist.
   const stomach = (() => {
