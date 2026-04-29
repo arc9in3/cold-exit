@@ -4421,9 +4421,10 @@ function tickFlame(dt, playerInfo, weapon, inputState, aimInfo) {
   if (artifacts && artifacts.has('brass_prisoner')) {
     weapon.ammo = Math.max(0, weapon.ammo - 2);
   }
-  if (weapon.durability) {
+  if (weapon.durability && !derivedStats.indestructibleWeapons) {
+    const _wMult = derivedStats.weaponDurabilityMult || 1;
     weapon.durability.current = Math.max(
-      0, weapon.durability.current - tunables.durability.weaponDecayPerShot * 0.4,
+      0, weapon.durability.current - tunables.durability.weaponDecayPerShot * 0.4 * _wMult,
     );
   }
 
@@ -4632,9 +4633,10 @@ function firePlayerProjectile(playerInfo, weapon, aimPoint) {
   alertEnemiesFromShot(playerInfo.muzzleWorld);
   if (player.kickRecoil) player.kickRecoil();
   triggerShake(0.28, 0.22);
-  if (weapon.durability) {
+  if (weapon.durability && !derivedStats.indestructibleWeapons) {
+    const _wMult = derivedStats.weaponDurabilityMult || 1;
     weapon.durability.current = Math.max(
-      0, weapon.durability.current - tunables.durability.weaponDecayPerShot,
+      0, weapon.durability.current - tunables.durability.weaponDecayPerShot * _wMult,
     );
   }
 
@@ -4894,6 +4896,13 @@ function fireOneShot(playerInfo, weapon, aimPoint, isADS, aimOwner) {
   const crouched = inputStateCrouchHeld();
   const crouchSpreadK = crouched ? (derivedStats.crouchSpreadMult ?? 1) : 1;
   let spread = baseSpread * derivedStats.rangedSpreadMult * crouchSpreadK;
+  // Broken ranged weapon — barrel / sights / action degrade accuracy.
+  // 5× the post-skill cone before bloom + pixel-aim multipliers fold
+  // in, so a broken pistol still resembles a panic-fire (vs the prior
+  // hard-stop that locked the player out of shooting entirely).
+  if (weapon.durability && weapon.durability.current <= 0) {
+    spread *= 5;
+  }
   // Per-shot bloom — sustained fire inflates spread; disciplined
   // bursts let it decay. First shot from a cold trigger gets a small
   // tighten. Shotguns / sniper are heavy-cost-per-shot; SMG / LMG
@@ -5034,9 +5043,10 @@ function fireOneShot(playerInfo, weapon, aimPoint, isADS, aimOwner) {
                      : weapon.class === 'flame'   ? 0.05
                      : 0.08;                  // pistol / smg / default
   triggerShake(shakeByClass, 0.18);
-  if (weapon.durability) {
+  if (weapon.durability && !derivedStats.indestructibleWeapons) {
+    const _wMult = derivedStats.weaponDurabilityMult || 1;
     weapon.durability.current = Math.max(
-      0, weapon.durability.current - tunables.durability.weaponDecayPerShot,
+      0, weapon.durability.current - tunables.durability.weaponDecayPerShot * _wMult,
     );
   }
 
@@ -5453,17 +5463,18 @@ function tickShooting(dt, playerInfo, inputState, aimInfo) {
   const weapon = currentWeapon();
   if (!weapon) return;
   if (weapon.type === 'melee') return;
-  // Broken weapons can't fire — repair at a shop. Throttled HUD msg
-  // so a held trigger doesn't spam the toast.
+  // Broken ranged weapons still fire, but accuracy is wrecked (5×
+  // spread, applied below at the spread-compute site). Throttled HUD
+  // msg so a held trigger doesn't spam the toast.
   if (weapon.durability && weapon.durability.current <= 0) {
     if (inputState.attackHeld || inputState.attackPressed) {
       const now = performance.now();
       if (!_brokenToastT || now - _brokenToastT > 1500) {
-        transientHudMsg('Weapon broken — repair at a shop', 1.2);
+        transientHudMsg('Weapon broken — accuracy degraded', 1.2);
         _brokenToastT = now;
       }
     }
-    return;
+    // Fall through — keep firing; spread multiplier handles the penalty.
   }
   if (weapon.fireMode === 'flame') { tickFlame(dt, playerInfo, weapon, inputState, aimInfo); return; }
   playerFireCooldown = Math.max(0, playerFireCooldown - dt);
@@ -5625,6 +5636,17 @@ function resolveComboHit(attackEvent) {
     // Crit was rolled at swing-start so the whole animation commits
     // to it. Apply the multiplier now at hit-resolve time.
     if (isCrit) dmg *= (derivedStats.critDamageMult || 2.0);
+    // Broken melee weapon — swing still lands, but the head / edge is
+    // mangled. Reduce final damage to 30% of nominal. Bare-fist quick-
+    // melee (ranged weapon equipped) skips this since the "weapon" is
+    // the player's hand, not a degradable item.
+    {
+      const _eqW = currentWeapon();
+      if (_eqW && _eqW.type === 'melee'
+          && _eqW.durability && _eqW.durability.current <= 0) {
+        dmg *= 0.30;
+      }
+    }
     const wasAlive = c.alive;
     runStats.addDamage(dmg);
     c.manager.applyHit(c, dmg, 'torso', facing, { weaponClass: 'melee', isCrit });
@@ -6102,16 +6124,22 @@ function damagePlayer(amount, damageType = 'generic', srcCtx = null) {
   if ((derivedStats.highHpReduction || 0) > 0 && lastHpRatio > 0.8) {
     amount *= (1 - Math.min(0.85, derivedStats.highHpReduction));
   }
-  const ratio = tunables.durability.armorDamageRatio;
-  for (const slot of SLOT_IDS) {
-    const item = inventory.equipment[slot];
-    if (!item || !item.reduction || !item.durability) continue;
-    if (item.durability.current <= 0) continue;
-    item.durability.current = Math.max(0, item.durability.current - amount * ratio);
-    // First time a piece of armour breaks, surface the repair
-    // mechanic — players might not realise broken gear gives no
-    // bonuses + needs a shop visit.
-    if (item.durability.current <= 0) fireHint('brokenItem');
+  // Durability drain — gated by Covetous-style indestructible relics
+  // and scaled by the per-build armorDurabilityMult (Patcher relic +
+  // Armor Maintenance perk both push this below 1.0).
+  if (!derivedStats.indestructibleGear) {
+    const armorMult = derivedStats.armorDurabilityMult || 1;
+    const ratio = tunables.durability.armorDamageRatio * armorMult;
+    for (const slot of SLOT_IDS) {
+      const item = inventory.equipment[slot];
+      if (!item || !item.reduction || !item.durability) continue;
+      if (item.durability.current <= 0) continue;
+      item.durability.current = Math.max(0, item.durability.current - amount * ratio);
+      // First time a piece of armour breaks, surface the repair
+      // mechanic — players might not realise broken gear gives no
+      // bonuses + needs a shop visit.
+      if (item.durability.current <= 0) fireHint('brokenItem');
+    }
   }
   // Second Wind — intercept damage that would kill and spend a charge to
   // revive at 40% of max HP instead.
@@ -6288,7 +6316,16 @@ function tickMeleeSwipe(dt, inputState, aimInfo, playerInfo) {
 
     const strikePoint = new THREE.Vector3(c.group.position.x, 1.2, c.group.position.z);
     if (!combat.hasLineOfSight(losFrom, strikePoint, losBlockers)) continue;
-    const dmg = comboStep.damage * derivedStats.meleeDmgMult * berserkMult();
+    let dmg = comboStep.damage * derivedStats.meleeDmgMult * berserkMult();
+    // Broken-weapon damage penalty applies only to the weapon swing
+    // (combo step 0). Punch / kick are bare-fist and unaffected.
+    if (comboStep.kind === 'swing') {
+      const _eqW = currentWeapon();
+      if (_eqW && _eqW.type === 'melee'
+          && _eqW.durability && _eqW.durability.current <= 0) {
+        dmg *= 0.30;
+      }
+    }
     const wasAlive = c.alive;
     runStats.addDamage(dmg);
     c.manager.applyHit(c, dmg, comboStep.zone, _swipeDir, { weaponClass: 'melee' });

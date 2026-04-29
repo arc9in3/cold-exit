@@ -261,9 +261,9 @@ export const tunables = {
     },
   },
   durability: {
-    weaponDecayPerShot: 0.005,   // tiny — weapons effectively don't break
+    weaponDecayPerShot: 0.020,   // weapons drain noticeably (4× prior); base 200 HP still ≈10k shots
     weaponDecayPerSwipe: 0.02,
-    armorDamageRatio: 0.55,      // fraction of incoming dmg routed to armor HP
+    armorDamageRatio: 0.85,      // fraction of incoming dmg routed to armor HP — gear drains 55% faster
     minRepairability: 0.85,      // doc'd here for the store later
   },
   burn: {
