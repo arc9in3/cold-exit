@@ -871,7 +871,7 @@ export function updateAnim(rig, state, dt) {
   // steps.' Now +35% step rate at full crouch. Combined with the
   // smaller stride amp + reduced swing-lift below, the legs barely
   // leave the centerline and just chitter forward.
-  freq *= 1 + (a.crouchBlend || 0) * 0.35;
+  freq *= 1 + (a.crouchBlend || 0) * 0.65;
   a.cycle += dt * freq * Math.PI * 2;
   const s = Math.sin(a.cycle);
   const s2 = Math.sin(a.cycle * 2);
@@ -1026,7 +1026,7 @@ export function updateAnim(rig, state, dt) {
   // attenuation; user described as 'pedaling a bike.' Now 0.65 cut
   // (full crouch = 35% of upright stride length) so the swinging
   // leg never reaches far behind the hip.
-  const strideScale = 1 - crouch * 0.65;
+  const strideScale = 1 - crouch * 0.30;
   // How much the static "leading leg" offset survives when actively
   // moving. At full crouch-stand (crouchMoveDamp ≈ 1) the front-leg
   // bias dominates so the character reads as poised on one knee.
@@ -1097,7 +1097,9 @@ export function updateAnim(rig, state, dt) {
   // (athletic poised stance). Once the character starts walking, this
   // asymmetric bias dampens via crouchMoveDamp so the gait reads as
   // alternating legs instead of a permanent limp.
-  const rightCrouchThigh = crouchThigh * (1 + 0.45 * crouchMoveDamp);
+  // Right leg pushed an extra 0.3 rad forward during the static crouch
+  // idle. Damped by crouchMoveDamp so the bias fades once gait kicks in.
+  const rightCrouchThigh = crouchThigh * (1 + 0.45 * crouchMoveDamp) - 0.30 * crouch * crouchMoveDamp;
   const rightCrouchKnee  = crouchKnee  * (1 + 0.25 * crouchMoveDamp);
   let leftThighRot  = leftThighGait  + crouchThigh;
   let rightThighRot = rightThighGait + rightCrouchThigh;
@@ -1287,7 +1289,7 @@ export function updateAnim(rig, state, dt) {
   // driven sway. Standing walk gets a subtle roll; crouching adds a
   // light bump (was ×2.4, now ×1.2) so sneaking still reads as
   // weight-shifting onto the planted foot but doesn't waddle.
-  const gaitHipRoll = Math.cos(a.cycle) * 0.035 * gaitT * (1 + crouch * 0.20);
+  const gaitHipRoll = Math.cos(a.cycle) * 0.035 * gaitT * (1 - crouch * 0.70);
   rig.hips.rotation.z = idleHipRoll + gaitHipRoll;
 
   // --- pose: arms -----------------------------------------------------
