@@ -53,6 +53,7 @@ import { LootUI } from './ui_loot.js';
 import { ShopUI, priceFor, sellPriceFor } from './ui_shop.js';
 import { PerkUI } from './ui_perks.js';
 import { InventoryUI } from './ui_inventory.js';
+import { DurabilityHud } from './ui_durability_hud.js';
 import { SkillLoadout, BASE_STATS } from './skills.js';
 import { SkillPickUI } from './ui_skills.js';
 import { SpecialPerkLoadout, BuffState, SPECIAL_PERKS, GEAR_PERKS } from './perks.js';
@@ -1653,6 +1654,11 @@ const inventoryUI = new InventoryUI({
   },
   getDragState, setDragState,
 });
+
+// Left-edge durability column — shows orange / red glyphs for any
+// equipped armor / gear / weapon whose durability is below 20% (or
+// broken). Throttled 5Hz internally; we just call tick() each frame.
+const durabilityHud = new DurabilityHud(inventory);
 
 const debugGui = initDebugPanel({
   onGiveAll: () => {
@@ -10595,6 +10601,9 @@ function tick() {
     // recomputation (LoS mask raycasts, bloom mip chain, finisher
     // chroma/grain) is wasted work. Cut to a direct render and
     // suppress the LoS update for the rest of the pause.
+    // Still tick the durability HUD so a freshly-equipped or
+    // repaired item flips its glyph state while the inventory is open.
+    try { durabilityHud.tick(rawDt); } catch (_) {}
     _safeRender(rawDt, /* paused */ true);
     _perf.end('frame');
     if (_perf.isVisible()) _perf.render(rawDt > 0 ? 1 / rawDt : 0);
@@ -11310,6 +11319,10 @@ function tick() {
     toastFadeT -= dt;
     if (toastFadeT <= 0) toastEl.style.opacity = '0';
   }
+
+  // Durability HUD edge column — internally throttles to 5Hz; cheap
+  // when no equipment state has flipped.
+  try { durabilityHud.tick(rawDt); } catch (_) {}
 
   _safeRender(rawDt);
   _perf.end('frame');
