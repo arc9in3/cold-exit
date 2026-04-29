@@ -45,6 +45,7 @@ import {
   GEAR_DEFS, JUNK_DEFS, TOY_DEFS,
   wrapWeapon, withAffixes, randomArmor, randomGear, randomConsumable, randomJunk, randomToy, setLootLevel,
   randomThrowable, THROWABLE_DEFS, makeThrowable, forceMastercraft,
+  randomRepairKit, randomEitherRepairKit,
 } from './inventory.js';
 import { ALL_ATTACHMENTS, ATTACHMENT_DEFS, effectiveWeapon, randomAttachment, rollAttachmentRarity } from './attachments.js';
 import { CustomizeUI } from './ui_customize.js';
@@ -3673,6 +3674,10 @@ let lastInventoryVersion = -1;
 let _flawlessAtFull = false;
 function recomputeStats() {
   derivedStats = BASE_STATS();
+  // Expose to window so external systems (Inventory.applyRepairKit
+  // reads .repairKitPotency, the durability HUD reads thresholds)
+  // don't need to thread the bag through every call site.
+  if (typeof window !== 'undefined') window.__derivedStats = derivedStats;
   skills.applyTo(derivedStats);
   inventory.applyTo(derivedStats);
   specialPerks.applyTo(derivedStats);           // legacy (kept for compat)
@@ -5848,6 +5853,13 @@ function buildBodyLoot(enemy) {
     if (Math.random() < 0.18) items.push(randomJunk());
     if (Math.random() < 0.05) items.push(randomThrowable());
   }
+  // Repair-kit drop — independent of the empty-body roll so a clean
+  // grunt corpse can still surface a kit. Chance scales with tier so
+  // bosses pretty much always cough one up.
+  const repairKitChance = tier === 'boss' ? 0.45
+    : tier === 'subBoss' ? 0.18
+    : (isEmptyBody ? 0 : 0.07);
+  if (Math.random() < repairKitChance) items.push(randomEitherRepairKit());
   return items;
 }
 

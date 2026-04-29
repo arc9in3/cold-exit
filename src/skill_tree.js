@@ -162,6 +162,25 @@ export const SKILL_TREE = [
                s.explodeOnKillDmg = Math.max(s.explodeOnKillDmg, 34);
                s.explodeOnKillRadius = Math.max(s.explodeOnKillRadius, 4); }),
   ], { disc: 'utility' }),
+  // ── Durability-overhaul perks ─────────────────────────────────────
+  // Field Tinker raises repairKitPotency. Tuned to land at exactly
+  // 1.25× / 1.50× rather than the 1.5625× the brief's example would
+  // produce — cleaner numbers in tooltips, matches the description.
+  g('repairTinker', 'Field Tinker', '⚒', [
+    lvl('+25% repair kit potency',  2,
+      (s) => { s.repairKitPotency = (s.repairKitPotency || 1) * 1.25; }),
+    lvl('+50% repair kit potency total', 3,
+      (s) => { s.repairKitPotency = (s.repairKitPotency || 1) * 1.20; }),
+  ], { disc: 'utility' }),
+  // Armor Maintenance scales armor durability drain DOWN. Multiplies
+  // by 0.85 per level → 0.85 / 0.7225 cumulative. Requires Field
+  // Tinker so the perk reads as a maintenance-themed sub-tree.
+  g('armorMaintenance', 'Armor Maintenance', '◊', [
+    lvl('−15% armor durability drain', 2,
+      (s) => { s.armorDurabilityMult = (s.armorDurabilityMult || 1) * 0.85; }),
+    lvl('−30% armor durability drain (cumulative)', 3,
+      (s) => { s.armorDurabilityMult = (s.armorDurabilityMult || 1) * 0.85; }),
+  ], { disc: 'utility', requires: [{ id: 'repairTinker', level: 1 }] }),
   // Reaper / Bloodletter / Bloodlust / Executioner moved into the melee
   // class tree below — they thematically belong with melee builds and
   // the general tree was getting top-heavy on damage perks.
