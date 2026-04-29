@@ -864,6 +864,22 @@ export const POSE_TUNABLES = {
     plantDipReduction: 0.80,     // 1 - this = foot-plant dip multiplier at full crouch
     stepRate: 0.65,              // step cadence boost when crouched
   },
+  // Kneel pose — fires when state.crouched && speed < 0.25. At full
+  // blend, fully overrides the crouch-pose leg rotations (one knee
+  // down, the other forward at horizontal). When disabled, static
+  // crouch idle uses the regular crouch sliders.
+  kneel: {
+    enabled: 1,                  // 1 = kneel takes over static crouch idle, 0 = let crouch sliders drive it
+    threshold: 0.25,             // speed below which kneelBlend ramps to 1
+    leftThigh:  0.30,            // rear leg thigh angle (rad, positive = backward)
+    leftKnee:   0.70,            // rear leg knee bend (rad)
+    rightThigh: -1.57,           // front leg thigh angle (rad, negative = forward; -π/2 = horizontal)
+    rightKnee:  1.57,            // front leg knee bend (rad, π/2 = calf vertical)
+    hipDrop:    0.32,            // extra hip drop on top of crouch hipDrop (m, scaled by rs)
+    chestLean:  0.18,            // extra chest forward fold (rad)
+    hipPitch:   0.16,            // extra hip pitch (rad)
+    headCounterPitch: 0.14,      // head counter-pitch to keep face level (rad)
+  },
 };
 
 // `state` fields expected:
@@ -882,6 +898,7 @@ export function updateAnim(rig, state, dt) {
   if (!rig.anim) initAnim(rig);
   const a = rig.anim;
   const Tc = POSE_TUNABLES.crouch;
+  const Tk = POSE_TUNABLES.kneel;
 
   // --- phase advance driven by ground speed --------------------------
   const speed = state.speed || 0;
@@ -998,7 +1015,7 @@ export function updateAnim(rig, state, dt) {
   // position" stance instead of a tiptoe squat. Speed threshold is
   // generous so the pose doesn't flicker on micro-adjustment taps.
   a.crouchBlend = lerpT(a.crouchBlend, state.crouched ? 1 : 0, 9, dt);
-  const wantsKneel = state.crouched && speed < 0.25;
+  const wantsKneel = state.crouched && speed < Tk.threshold && Tk.enabled > 0.5;
   a.kneelBlend = lerpT(a.kneelBlend, wantsKneel ? 1 : 0, 5, dt);
 
   // --- recoil spring (call once per shot) ----------------------------
@@ -1162,10 +1179,10 @@ export function updateAnim(rig, state, dt) {
     //     thigh -1.57 rad (90°) → thigh horizontal forward, knee out front
     //     knee  +1.57 rad → calf counter-rotates to vertical so the
     //                       front foot plants directly below the knee.
-    const kL_thigh =  0.30;
-    const kL_knee  =  0.70;
-    const kR_thigh = -1.57;
-    const kR_knee  =  1.57;
+    const kL_thigh = Tk.leftThigh;
+    const kL_knee  = Tk.leftKnee;
+    const kR_thigh = Tk.rightThigh;
+    const kR_knee  = Tk.rightKnee;
     leftThighRot  = leftThighRot  * (1 - kneel) + kL_thigh * kneel;
     leftKneeRot   = leftKneeRot   * (1 - kneel) + kL_knee  * kneel;
     leftAnkleRot  = leftAnkleRot  * (1 - kneel) + -(kL_thigh + kL_knee) * kneel;
@@ -1237,7 +1254,7 @@ export function updateAnim(rig, state, dt) {
   // Re-tuned for hipY=1.1 / thighH=0.42 / calfH=0.59 (long-leg proportions).
   // Deeper hip drop so the crouched silhouette reads as a real squat,
   // not a half-bend. 0.16 → 0.26 (~16cm extra drop at full scale).
-  const crouchHipDrop = (crouch * Tc.hipDrop + kneel * 0.32) * rs;
+  const crouchHipDrop = (crouch * Tc.hipDrop + kneel * Tk.hipDrop) * rs;
   // Foot-plant impact dip — at heel-strike (cos(cycle) ≈ ±1) the hip
   // drops a couple cm to sell weight transfer onto the planted leg.
   // cos² peaks at both heel strikes per cycle (left foot at 0, right
@@ -1265,7 +1282,7 @@ export function updateAnim(rig, state, dt) {
   // Extra fold during a crouch-walk (not just static crouch) so
   // sneaking has a deliberate "creeping in" shape vs standing crouch.
   const crouchMoveLean = crouch * gaitT * Tc.chestMoveLean;
-  const crouchLean = crouch * Tc.chestLean + kneel * 0.18 + crouchMoveLean;
+  const crouchLean = crouch * Tc.chestLean + kneel * Tk.chestLean + crouchMoveLean;
   const dashLean = a.dashBlend * 0.28;
   // Run lean is suppressed while crouched — the crouch pose is
   // already hunched forward, so stacking the full run lean on top
@@ -1286,7 +1303,7 @@ export function updateAnim(rig, state, dt) {
   // Hip pitch matches the chest hunch so the spine doesn't break — a
   // deeper crouch chest fold without matching hip pitch reads as a
   // bent torso rather than a settled squat.
-  rig.hips.rotation.x = crouch * Tc.hipPitch + kneel * 0.16 + a.dashBlend * 0.22;
+  rig.hips.rotation.x = crouch * Tc.hipPitch + kneel * Tk.hipPitch + a.dashBlend * 0.22;
 
   // Head follows aim pitch/yaw with a bit of extra snap. A small
   // counter-pitch during crouch/kneel keeps the head level-ish
@@ -1316,7 +1333,7 @@ export function updateAnim(rig, state, dt) {
   rig.head.position.y = headYBase - bob * 0.7;
   rig.head.rotation.y = a.aimBlend * (state.aimYaw || 0) * 0.6 + idleHeadYaw;
   rig.head.rotation.x = -aimPitchV * (0.35 + a.aimBlend * 0.45)
-                      - crouch * Tc.headCounterPitch - kneel * 0.14
+                      - crouch * Tc.headCounterPitch - kneel * Tk.headCounterPitch
                       - chestPitch * 0.6;
   // Hip roll — combines slow idle weight-shift with a small gait-
   // driven sway. Standing walk gets a subtle roll; crouching adds a

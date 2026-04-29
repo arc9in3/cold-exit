@@ -670,8 +670,28 @@ const gaitOnlyCtrls = [];
 {
   const f = gui.addFolder('procedural pose · crouch');
   f.close();
-  // Sub-folders by theme so the panel doesn't become a wall of sliders.
-  const legs = f.addFolder('legs (primary)');
+
+  // Kneel pose — fires automatically when state.crouched && speed
+  // < threshold. AT FULL BLEND IT FULLY OVERRIDES the per-leg
+  // crouch values below, which is why thighFwd / kneeBend / right-leg
+  // sliders had no visible effect in static crouch idle. Either
+  // disable the kneel pose here, or tune the kneel sliders directly.
+  const kneel = f.addFolder('kneel pose (static crouch idle)');
+  kneel.add(POSE_TUNABLES.kneel, 'enabled', 0, 1, 1).name('kneel pose ON (0/1)');
+  kneel.add(POSE_TUNABLES.kneel, 'threshold',        0, 1.0, 0.01).name('speed threshold');
+  kneel.add(POSE_TUNABLES.kneel, 'leftThigh',  -1.5, 1.5, 0.01).name('left thigh (rad)');
+  kneel.add(POSE_TUNABLES.kneel, 'leftKnee',   -1.5, 2.5, 0.01).name('left knee (rad)');
+  kneel.add(POSE_TUNABLES.kneel, 'rightThigh', -2.5, 1.5, 0.01).name('right thigh (rad)');
+  kneel.add(POSE_TUNABLES.kneel, 'rightKnee',  -1.5, 2.5, 0.01).name('right knee (rad)');
+  kneel.add(POSE_TUNABLES.kneel, 'hipDrop',          0, 0.6, 0.005).name('hip drop (m)');
+  kneel.add(POSE_TUNABLES.kneel, 'chestLean',        0, 0.6, 0.005).name('chest lean (rad)');
+  kneel.add(POSE_TUNABLES.kneel, 'hipPitch',         0, 0.6, 0.005).name('hip pitch (rad)');
+  kneel.add(POSE_TUNABLES.kneel, 'headCounterPitch', 0, 0.6, 0.005).name('head counter-pitch');
+
+  // The crouch sliders below drive the crouch-walk / crouch-run
+  // pose. They're suppressed during static idle by the kneel
+  // override (unless kneel.enabled = 0).
+  const legs = f.addFolder('legs (crouch walk — overridden by kneel in idle)');
   legs.add(POSE_TUNABLES.crouch, 'thighFwd',           0, 2.5, 0.005).name('thigh fwd (rad)');
   legs.add(POSE_TUNABLES.crouch, 'kneeBend',           0, 2.5, 0.01).name('knee bend (rad)');
   gaitOnlyCtrls.push(legs.add(POSE_TUNABLES.crouch, 'kneeGaitStraighten', 0, 1.5, 0.01).name('knee straighten on walk'));
@@ -680,7 +700,7 @@ const gaitOnlyCtrls = [];
   gaitOnlyCtrls.push(legs.add(POSE_TUNABLES.crouch, 'swingLift',          0, 1.0, 0.01).name('footstep height (1−this)'));
   gaitOnlyCtrls.push(legs.add(POSE_TUNABLES.crouch, 'kneeFlex',           0, 1.0, 0.01).name('extra knee flex'));
 
-  const asym = f.addFolder('legs · right-leg lead');
+  const asym = f.addFolder('right-leg lead (crouch walk — overridden by kneel in idle)');
   asym.add(POSE_TUNABLES.crouch, 'rightThighIdleLead',    -1.5, 1.5, 0.01).name('right thigh idle lead');
   asym.add(POSE_TUNABLES.crouch, 'rightThighStaticBoost', -1.0, 1.0, 0.01).name('right thigh boost ×');
   asym.add(POSE_TUNABLES.crouch, 'rightKneeStaticBoost',  -1.0, 1.0, 0.01).name('right knee boost ×');
@@ -703,23 +723,27 @@ const gaitOnlyCtrls = [];
     reset: () => {
       pushUndo();
       Object.assign(POSE_TUNABLES.crouch, TUNABLE_DEFAULTS.crouch);
+      Object.assign(POSE_TUNABLES.kneel,  TUNABLE_DEFAULTS.kneel);
       gui.controllersRecursive().forEach(c => c.updateDisplay());
     },
-  }, 'reset').name('reset crouch tunables');
+  }, 'reset').name('reset crouch + kneel tunables');
 
   f.add({
     copyCode: () => {
-      const c = POSE_TUNABLES.crouch;
-      const lines = Object.entries(c).map(([k, v]) => `    ${k}: ${(+v).toFixed(4)},`);
-      const code = `// Paste into POSE_TUNABLES.crouch in src/actor_rig.js\n{\n${lines.join('\n')}\n}`;
+      const fmt = (obj) => Object.entries(obj)
+        .map(([k, v]) => `    ${k}: ${(+v).toFixed(4)},`).join('\n');
+      const code =
+        '// Paste into POSE_TUNABLES in src/actor_rig.js\n' +
+        'crouch: {\n' + fmt(POSE_TUNABLES.crouch) + '\n},\n' +
+        'kneel: {\n'  + fmt(POSE_TUNABLES.kneel)  + '\n},';
       navigator.clipboard?.writeText(code);
       const toast = document.getElementById('export-toast');
-      toast.textContent = 'Copied crouch tunables to clipboard.';
+      toast.textContent = 'Copied crouch + kneel tunables to clipboard.';
       toast.classList.add('show');
       setTimeout(() => toast.classList.remove('show'), 1600);
-      console.log('[rig tuner] crouch tunables:\n' + code);
+      console.log('[rig tuner] tunables:\n' + code);
     },
-  }, 'copyCode').name('copy crouch values → clipboard');
+  }, 'copyCode').name('copy crouch + kneel values → clipboard');
 }
 
 // --- IK targets (constrained two-bone analytic for arms/legs, look-at for head) ---
