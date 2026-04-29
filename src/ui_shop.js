@@ -109,6 +109,18 @@ function _affixPerkPremium(item) {
   return premium;
 }
 
+// Relic price scales with run depth. ARTIFACT_DEFS entries store the
+// CAP (level-7 price); early levels pay a fraction so the first relic
+// purchase is reachable on a fresh run. Linear ramp from 5% at L1 to
+// 100% at L7+. Level 1 produces the original (pre-20×) prices since
+// the cap was set at exactly 20× the originals.
+function _relicLevelMult() {
+  const lv = (typeof window !== 'undefined' && (window.__levelIndex | 0)) || 1;
+  if (lv >= 7) return 1.0;
+  if (lv <= 1) return 0.05;
+  return 0.05 + (lv - 1) * (0.95 / 6);
+}
+
 // `priceFor` returns the merchant-facing BUY price and honours per-item
 // `priceMult` fluctuations rolled at stock time, plus a premium for
 // affixes + perks that reflects how strong the roll is.
@@ -117,7 +129,7 @@ export function priceFor(item, shopMult = 1) {
     // Artifact prices are fixed premium amounts on the ARTIFACT_DEFS entry.
     const def = item.artifactPrice ?? item.basePrice;
     const base = def ?? 4000;
-    return Math.max(1, Math.round(base * (item.priceMult ?? 1) * shopMult));
+    return Math.max(1, Math.round(base * _relicLevelMult() * (item.priceMult ?? 1) * shopMult));
   }
   if (item.type === 'junk' && typeof item.sellValue === 'number') {
     const mult = item.priceMult ?? 1;

@@ -3673,6 +3673,9 @@ let lastInventoryVersion = -1;
 let _flawlessAtFull = false;
 function recomputeStats() {
   derivedStats = BASE_STATS();
+  // Expose level depth so ui_shop's relic price ramp can read it
+  // without threading level through every priceFor call site.
+  if (typeof window !== 'undefined') window.__levelIndex = (level && level.index) | 0;
   skills.applyTo(derivedStats);
   inventory.applyTo(derivedStats);
   specialPerks.applyTo(derivedStats);           // legacy (kept for compat)
