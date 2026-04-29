@@ -899,6 +899,7 @@ export class GunmanManager {
       damage *= 2.0;
       g.group.rotation.x = 0;
     }
+    if ((g.stunT || 0) > 0) damage *= 1.25;
     g.hp -= damage;
     g.flashT = tunables.enemy.hitFlashTime;
     if (g.state === STATE.IDLE || g.state === STATE.SLEEP) g.state = STATE.ALERTED;

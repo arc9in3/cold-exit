@@ -401,6 +401,7 @@ export class MeleeEnemyManager {
       }
     }
 
+    if ((e.stunT || 0) > 0) damage *= 1.25;
     e.hp -= damage;
     e.flashT = tunables.enemy.hitFlashTime;
     const isMelee = opts.weaponClass === 'melee';
