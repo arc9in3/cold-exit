@@ -1099,7 +1099,7 @@ export function updateAnim(rig, state, dt) {
   // alternating legs instead of a permanent limp.
   // Right leg pushed an extra 0.3 rad forward during the static crouch
   // idle. Damped by crouchMoveDamp so the bias fades once gait kicks in.
-  const rightCrouchThigh = crouchThigh * (1 + 0.45 * crouchMoveDamp) - 0.30 * crouch * crouchMoveDamp;
+  const rightCrouchThigh = crouchThigh * (1 + 0.45 * crouchMoveDamp) - 0.70 * crouch * crouchMoveDamp;
   const rightCrouchKnee  = crouchKnee  * (1 + 0.25 * crouchMoveDamp);
   let leftThighRot  = leftThighGait  + crouchThigh;
   let rightThighRot = rightThighGait + rightCrouchThigh;
