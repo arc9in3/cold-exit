@@ -194,3 +194,139 @@ export function getMythicRunUnlocked() {
 export function setMythicRunUnlocked(v) {
   _write(MYTHIC_RUN_UNLOCK_KEY, !!v);
 }
+
+// ---------------------------------------------------------------------
+// Hideout — persistent meta-game state. The hideout is the
+// between-runs panel where the player banks key gear, picks
+// contracts, and spends chips on between-run upgrades. None of these
+// values are touched by `startNewRun` / death — they're the player's
+// long-term identity outside any single run.
+// ---------------------------------------------------------------------
+
+// Stash — a small fixed-slot persistent inventory that survives death.
+// Slot 0 is always available; the rest are unlocked via chip purchases.
+// Items are stored as full ItemDef objects (same shape as inventory.js
+// items), wrapped in { slot, item }. Slot count caps at STASH_SLOT_MAX.
+const STASH_KEY = 'tacticalrogue:stash:v1';
+export const STASH_SLOT_MIN = 4;
+export const STASH_SLOT_MAX = 8;
+// Cost (in chips) to unlock the Nth slot. Index 0 = buying slot #5
+// from the base 4 — slots #1-4 are free / on by default.
+export const STASH_SLOT_COSTS = [
+  150,    // slot #5
+  300,    // slot #6
+  550,    // slot #7
+  950,    // slot #8
+];
+export function getStash() {
+  const arr = _read(STASH_KEY, []);
+  return Array.isArray(arr) ? arr : [];
+}
+export function setStash(arr) {
+  _write(STASH_KEY, Array.isArray(arr) ? arr : []);
+}
+// Convenience: list of items (no slot indexing). Use getStash() if you
+// need slot positions.
+export function getStashItems() {
+  return getStash().map(e => e?.item).filter(Boolean);
+}
+// Add item; returns the slot it landed in or -1 if no room.
+export function stashAddItem(item, slotCap) {
+  if (!item) return -1;
+  const cap = Math.max(STASH_SLOT_MIN, Math.min(STASH_SLOT_MAX, slotCap | 0 || STASH_SLOT_MIN));
+  const cur = getStash();
+  // Find first empty slot index < cap.
+  const used = new Set(cur.map(e => e.slot | 0));
+  for (let s = 0; s < cap; s++) {
+    if (!used.has(s)) {
+      cur.push({ slot: s, item });
+      setStash(cur);
+      return s;
+    }
+  }
+  return -1;
+}
+export function stashRemoveAt(slotIdx) {
+  const cur = getStash();
+  const i = cur.findIndex(e => (e.slot | 0) === (slotIdx | 0));
+  if (i < 0) return null;
+  const removed = cur[i].item;
+  cur.splice(i, 1);
+  setStash(cur);
+  return removed;
+}
+
+// Hideout upgrades — chip-purchased tier levels for the various
+// hideout NPCs. stashSlots = total stash slot count (4..8).
+// quartermasterTier raises rarity floor of guaranteed gear sold by
+// the Quartermaster (0 = common only, 4 = legendary floor).
+// mailboxUnlocked flips true once the player has played a co-op
+// session — gates the trade-mailbox panel until then.
+const HIDEOUT_UPGRADES_KEY = 'tacticalrogue:hideoutUpgrades:v1';
+export const QUARTERMASTER_TIER_MAX = 4;
+export const QUARTERMASTER_TIER_COSTS = [200, 450, 850, 1500];
+export function getHideoutUpgrades() {
+  const raw = _read(HIDEOUT_UPGRADES_KEY, null);
+  return {
+    stashSlots: Math.max(STASH_SLOT_MIN, Math.min(STASH_SLOT_MAX,
+      (raw?.stashSlots | 0) || STASH_SLOT_MIN)),
+    quartermasterTier: Math.max(0, Math.min(QUARTERMASTER_TIER_MAX,
+      (raw?.quartermasterTier | 0) || 0)),
+    mailboxUnlocked: !!raw?.mailboxUnlocked,
+  };
+}
+export function setHideoutUpgrades(u) {
+  _write(HIDEOUT_UPGRADES_KEY, {
+    stashSlots: Math.max(STASH_SLOT_MIN, Math.min(STASH_SLOT_MAX, u?.stashSlots | 0 || STASH_SLOT_MIN)),
+    quartermasterTier: Math.max(0, Math.min(QUARTERMASTER_TIER_MAX, u?.quartermasterTier | 0 || 0)),
+    mailboxUnlocked: !!u?.mailboxUnlocked,
+  });
+}
+export function stashNextSlotCost(currentSlots) {
+  if (currentSlots >= STASH_SLOT_MAX) return null;
+  return STASH_SLOT_COSTS[currentSlots - STASH_SLOT_MIN];
+}
+export function quartermasterNextTierCost(currentTier) {
+  if (currentTier >= QUARTERMASTER_TIER_MAX) return null;
+  return QUARTERMASTER_TIER_COSTS[currentTier];
+}
+
+// Active contract — daily/weekly modifier challenge picked at the
+// hideout. activeContractId references CONTRACT_DEFS in contracts.js.
+// expiresAt is a UTC ms timestamp; progress is contract-specific
+// (a counter or a flag map). claimedAt is set when the reward has
+// been paid out so we don't double-credit on a save/load.
+const CONTRACTS_KEY = 'tacticalrogue:contracts:v1';
+export function getActiveContract() {
+  const v = _read(CONTRACTS_KEY, null);
+  if (!v || typeof v !== 'object') return null;
+  return {
+    activeContractId: typeof v.activeContractId === 'string' ? v.activeContractId : null,
+    expiresAt: v.expiresAt | 0,
+    progress: v.progress && typeof v.progress === 'object' ? v.progress : {},
+    claimedAt: v.claimedAt | 0,
+  };
+}
+export function setActiveContract(c) {
+  if (!c) { _write(CONTRACTS_KEY, null); return; }
+  _write(CONTRACTS_KEY, {
+    activeContractId: c.activeContractId || null,
+    expiresAt: c.expiresAt | 0,
+    progress: c.progress || {},
+    claimedAt: c.claimedAt | 0,
+  });
+}
+export function clearActiveContract() { _write(CONTRACTS_KEY, null); }
+
+// Persistent contract chips — the meta currency. Mirrors the
+// `persistentChips` accessor in main.js so any module can read/write
+// without importing from main.js. Single source of truth for the key.
+const CHIPS_KEY = 'tacticalrogue:persistentChips';
+export function getPersistentChips() {
+  try { return parseInt(localStorage.getItem(CHIPS_KEY) || '0', 10) || 0; }
+  catch (_) { return 0; }
+}
+export function setPersistentChips(n) {
+  try { localStorage.setItem(CHIPS_KEY, String(Math.max(0, n | 0))); }
+  catch (_) { /* private mode / quota */ }
+}
