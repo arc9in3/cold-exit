@@ -841,52 +841,48 @@ function lerpT(current, target, rate, dt) {
 export const POSE_TUNABLES = {
   crouch: {
     // legs — primary pose
-    thighFwd: 1.224,             // forward thigh tilt at hip (rad, applied as -crouch*this)
-    kneeBend: 1.30,              // knee bend depth (rad, applied as crouch*this)
-    kneeGaitStraighten: 0.524,   // knees straighten by this much during walk/run
-    strideScale: 0.30,           // 1 - this = how much stride length is cut at full crouch
-    swingLift: 0.15,             // 1 - this = footstep height multiplier at full crouch
-    kneeFlex: 0.18,              // extra knee flex during crouch gait
-    swingDamp: 0.80,             // 1 - this = mid-swing thigh push at full crouch
+    thighFwd: 1.27,
+    kneeBend: 1.35,
+    kneeGaitStraighten: 0.524,
+    strideScale: 0.0,
+    swingLift: 1.0,
+    kneeFlex: 0.61,
+    swingDamp: 1.5,
     // legs — asymmetry (right leg leads in static crouch idle)
-    rightThighIdleLead: 0.70,    // extra forward bias on right leg when idle
-    rightThighStaticBoost: 0.45, // multiplicative boost on right thigh fwd during idle
-    rightKneeStaticBoost: 0.25,  // multiplicative boost on right knee bend during idle
-    // ankles — additive offset on top of the auto-flat compensation
-    // (which is -(thigh + knee), so the foot stays flat by default).
-    // Positive = toe down (plantar flex), negative = toe up.
-    ankleAdjust: 0,              // applied to BOTH ankles in crouch pose
+    rightThighIdleLead: 0.70,
+    rightThighStaticBoost: 0.45,
+    rightKneeStaticBoost: 0.25,
+    // ankles — additive offset on top of auto-flat compensation.
+    ankleAdjust: 0,
     // torso
-    hipDrop: 0.26,               // how far hips drop while crouched (m, scaled by rs)
-    chestLean: 0.30,             // chest forward fold (rad)
-    chestMoveLean: 0.10,         // additional chest fold during crouch-walk (rad, scaled by gaitT)
-    hipPitch: 0.26,              // hip pitch matching the chest hunch (rad)
-    headCounterPitch: 0.22,      // head counter-pitch to keep face level (rad)
+    hipDrop: 0.26,
+    chestLean: 0.25,
+    chestMoveLean: 0.0,
+    hipPitch: 0.26,
+    headCounterPitch: 0.22,
     // gait
-    hipRoll: -0.70,              // gait hip roll multiplier when crouched (negative = damped)
-    bobReduction: 0.60,          // 1 - this = vertical bob multiplier at full crouch
-    plantDipReduction: 0.80,     // 1 - this = foot-plant dip multiplier at full crouch
-    stepRate: 0.65,              // step cadence boost when crouched
+    hipRoll: -0.70,
+    bobReduction: 1.0,
+    plantDipReduction: 0.80,
+    stepRate: 0.65,
   },
-  // Kneel pose — fires when state.crouched && speed < 0.25. At full
-  // blend, fully overrides the crouch-pose leg rotations (one knee
-  // down, the other forward at horizontal). When disabled, static
-  // crouch idle uses the regular crouch sliders.
+  // Kneel pose — fires when state.crouched && speed < kneel.threshold.
+  // At full blend, overrides the crouch-pose leg rotations (one knee
+  // down, the other forward). Set enabled=0 to let the crouch sliders
+  // drive static idle.
   kneel: {
-    enabled: 1,                  // 1 = kneel takes over static crouch idle, 0 = let crouch sliders drive it
-    threshold: 0.25,             // speed below which kneelBlend ramps to 1
-    leftThigh:  0.30,            // rear leg thigh angle (rad, positive = backward)
-    leftKnee:   0.70,            // rear leg knee bend (rad)
-    rightThigh: -1.57,           // front leg thigh angle (rad, negative = forward; -π/2 = horizontal)
-    rightKnee:  1.57,            // front leg knee bend (rad, π/2 = calf vertical)
-    // ankle additive offsets (default 0 = foot stays flat via auto-compensation).
-    // Positive = toe down, negative = toe up.
-    leftAnkle:  0,
-    rightAnkle: 0,
-    hipDrop:    0.32,            // extra hip drop on top of crouch hipDrop (m, scaled by rs)
-    chestLean:  0.18,            // extra chest forward fold (rad)
-    hipPitch:   0.16,            // extra hip pitch (rad)
-    headCounterPitch: 0.14,      // head counter-pitch to keep face level (rad)
+    enabled: 1,
+    threshold: 0.25,
+    leftThigh:  -0.70,
+    leftKnee:    1.89,
+    rightThigh: -2.24,
+    rightKnee:   1.57,
+    leftAnkle:   1.0,
+    rightAnkle: -0.35,
+    hipDrop:     0.32,
+    chestLean:   0.18,
+    hipPitch:    0.16,
+    headCounterPitch: 0.14,
   },
 };
 
