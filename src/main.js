@@ -67,7 +67,13 @@ import { StartUI } from './ui_start.js';
 import { MainMenuUI } from './ui_main_menu.js';
 import { HideoutUI } from './ui_hideout.js';
 import { tryClaimContract, defForId, buildModifiers } from './contracts.js';
-import { getActiveContract, setActiveContract, awardMarks, bumpContractRank, bumpMegabossKills, bumpRunCount, queueEncounterFollowup } from './prefs.js';
+import {
+  getActiveContract, setActiveContract, awardMarks, bumpContractRank, bumpMegabossKills,
+  bumpRunCount, queueEncounterFollowup,
+  getUnlockedWeapons, isWeaponUnlocked, unlockWeapon,
+  consumeStarterInventory,
+  getSelectedStarterWeapon,
+} from './prefs.js';
 import { StoreUpgradeUI, StoreRollUI, rollRarityForTier } from './ui_starting_store.js';
 import { getQualityPref, setQualityPref, applyQuality, qualityFlags } from './quality.js';
 import { DetailsUI } from './ui_details.js';
@@ -338,6 +344,7 @@ if (deathBtnEl) {
       if (perkUI.isOpen()) perkUI.toggle?.();
       if (gameMenuUI.isOpen()) gameMenuUI.hide();
       deathRootEl.style.display = 'none';
+      document.getElementById('death-unlock-prompt')?.remove();
       // If we never captured an entry snapshot (fresh-after-boot edge
       // case), fall through to regenerating the current level so the
       // restart still produces a playable state instead of a stuck one.
@@ -366,6 +373,9 @@ if (deathMenuBtnEl) {
     // — contract evaluation reads pistolOnly / noConsumables / kills /
     // peakLevel / etc. from the snapshot.
     deathRootEl.style.display = 'none';
+    // Clean up the locked-trial unlock prompt if the player closes
+    // the death screen without acting on it (or after acting).
+    document.getElementById('death-unlock-prompt')?.remove();
     playerDead = false;
     input.clearMouseState();
     const runSnapshot = runStats.snapshot();
@@ -676,11 +686,46 @@ function _clone(def) {
   return out;
 }
 // Pick a common-rarity weapon of the given class from tunables.
+// The five always-free baseline starter weapons, one per major class.
+// These are common-rarity, low-power picks that anyone can take into
+// any run without spending chips. Permanent unlocks at the Stash
+// Armory expand this pool over time.
+const BASELINE_STARTER_NAMES = ['Makarov', 'PDW', 'Mini-14', 'Mossberg 500', 'Baton'];
+
 function _pickStarterWeapon(weaponClass) {
-  // Mythics are boss-only — they must never seed a run as a starter.
+  // Stash-selected weapon takes precedence over the class roll. The
+  // hideout's Stash tab "Take a Weapon" picker writes to this pref;
+  // _pickStarterWeapon honors it if the chosen weapon is in the
+  // player's available pool (baseline-5 ∪ unlocked). Falls back to
+  // class-pick if the selection is invalid or not set.
+  const unlockedAll = getUnlockedWeapons();
+  const baselineSet = new Set(BASELINE_STARTER_NAMES);
+  const selected = getSelectedStarterWeapon();
+  if (selected) {
+    const def = tunables.weapons.find(w => w.name === selected);
+    if (def && !def.mythic && def.rarity !== 'mythic'
+        && (baselineSet.has(def.name) || unlockedAll.has(def.name))) {
+      return def;
+    }
+  }
+  // Pull the weapon from { baseline-5 ∪ chip-unlocked } filtered by
+  // requested class. Mythics still excluded entirely. Falls back to
+  // any same-class def if the class isn't represented in the player's
+  // unlocked-or-baseline pool.
+  const unlocked = unlockedAll;
+  const fromStash = tunables.weapons.filter((w) =>
+    w.class === weaponClass
+    && !w.mythic && w.rarity !== 'mythic'
+    && (baselineSet.has(w.name) || unlocked.has(w.name)));
+  if (fromStash.length) {
+    return fromStash[Math.floor(Math.random() * fromStash.length)];
+  }
+  // Fallback — same-class non-mythic. Reproduces the prior behaviour
+  // for any class the player hasn't unlocked / doesn't have a
+  // baseline pick for (e.g. unusual classes added later).
   const candidates = tunables.weapons.filter((w) =>
     w.class === weaponClass && !w.mythic && w.rarity !== 'mythic');
-  if (!candidates.length) return tunables.weapons[0];  // fallback
+  if (!candidates.length) return tunables.weapons[0];
   return candidates[Math.floor(Math.random() * candidates.length)];
 }
 // Adds the standard starter consumable kit — 3 bandages + 1 random
@@ -730,6 +775,26 @@ function _refreshActiveModifiers() {
 function getActiveModifiers() { return _activeModifiers; }
 window.__activeModifiers = () => _activeModifiers;
 
+// Throttled HUD warning when an active contract blocks fire. Avoids
+// spamming the message on every trigger pull; cooldown ~1.5s.
+let _contractWarnT = 0;
+function _maybeWarnContractBlock(msg) {
+  const now = performance.now();
+  if (now - _contractWarnT < 1500) return;
+  _contractWarnT = now;
+  transientHudMsg(msg, 1.6);
+}
+
+// Dev escape hatch — clears any stale active contract from
+// localStorage. Useful when an old run left a melee-only contract
+// active and ranged fire is silently blocked. Run from the console:
+// `window.__clearActiveContract()`.
+window.__clearActiveContract = () => {
+  setActiveContract(null);
+  _refreshActiveModifiers();
+  console.log('[contract] cleared. fire restrictions removed.');
+};
+
 function startNewRun(weaponClass) {
   _resetEncounterCompletionForRun();
   // Snapshot the active contract's modifiers for the run. Read by
@@ -758,7 +823,70 @@ function startNewRun(weaponClass) {
   const weaponDef = _pickStarterWeapon(weaponClass);
   inventory.add(wrapWeapon(weaponDef, { rarity: 'common' }));
   _seedStarterKit();
+  // Pre-Run Store starter inventory — items the player bought from
+  // the rotating stock get added directly to the run inventory now,
+  // then the queue is cleared. Each entry is a marker shape from the
+  // store (__storeWeapon / __storeArmor / __storeConsumable / etc.)
+  // that we materialize into real inventory items here so the rest
+  // of the run code paths see normal item shapes.
+  try {
+    const queued = consumeStarterInventory();
+    for (const raw of queued) {
+      if (!raw) continue;
+      const real = _materializeStarterItem(raw);
+      if (!real) continue;
+      // Auto-equip armor slots; everything else gets added as
+      // pocket/loose inventory like a normal pickup.
+      const armorSlot = real.__armorSlot;
+      if (armorSlot && !inventory.equipment[armorSlot]) {
+        delete real.__armorSlot;
+        inventory.equipment[armorSlot] = real;
+      } else {
+        if (real.__armorSlot) delete real.__armorSlot;
+        inventory.add(real);
+      }
+    }
+    inventory._recomputeCapacity();
+  } catch (e) { console.warn('[starter-inventory] consume failed', e); }
   inventory._bump();
+}
+
+// Materialize a Pre-Run Store stock entry into a real inventory item.
+// Mirrors the store's `_materializeStoreItem` markers; consumed at
+// startNewRun time after the player chooses their loadout.
+function _materializeStarterItem(raw) {
+  if (raw.__storeWeapon) {
+    const def = tunables.weapons.find(w => w.name === raw.defName);
+    if (!def) return null;
+    return wrapWeapon({ ...def }, { rarity: raw.rarity || def.rarity || 'common' });
+  }
+  if (raw.__storeArmor) {
+    const armorDef = ARMOR_DEFS[raw.defId];
+    if (!armorDef) return null;
+    const item = _clone(armorDef);
+    if (raw.rarity) item.rarity = raw.rarity;
+    if (raw.slot) item.__armorSlot = raw.slot;
+    return item;
+  }
+  if (raw.__storeConsumable) {
+    const c = CONSUMABLE_DEFS[raw.defId];
+    if (!c) return null;
+    return { ...c };
+  }
+  if (raw.__storeAmmo) {
+    // Ammo packs translate to a +N spare-mag bonus on the player's
+    // starter weapon. Simplest implementation today: add a bandage as
+    // a placeholder — wire actual ammo handoff once the spare-mag
+    // pipeline supports a per-class bonus pool.
+    return CONSUMABLE_DEFS.bandage ? { ...CONSUMABLE_DEFS.bandage } : null;
+  }
+  if (raw.__storeBuff) {
+    // Buffs wire later — for now drop a placeholder consumable so the
+    // queue doesn't leak silent failures. Future: thread these into
+    // recomputeStats as time-boxed effects starting at run gen.
+    return CONSUMABLE_DEFS.bandage ? { ...CONSUMABLE_DEFS.bandage } : null;
+  }
+  return null;
 }
 
 const skills = new SkillLoadout();
@@ -3825,6 +3953,16 @@ function recomputeStats() {
   if (baseMax + derivedStats.maxHealthBonus < 1) {
     derivedStats.maxHealthBonus = 1 - baseMax;
   }
+  // Active contract `playerDamageDealtMult` — Glass Cannon and
+  // similar contracts crank player outgoing damage up alongside
+  // damage taken. Folded into the universal ranged + melee mults so
+  // every damage path inherits it without touching individual sites.
+  // Default 1 = neutral when no contract / standard tier active.
+  const _contractDealt = window.__activeModifiers?.()?.playerDamageDealtMult || 1;
+  if (_contractDealt !== 1) {
+    derivedStats.rangedDmgMult *= _contractDealt;
+    derivedStats.meleeDmgMult  *= _contractDealt;
+  }
   // Soft caps applied AFTER all sources roll up — prevents stack-stack
   // exploits flagged in the rebalance review (movespeed in particular
   // could pile to ~1.7×+ with artifact + Swift + class perks).
@@ -4964,13 +5102,18 @@ function _tickGrapples(dt) {
 let _playerGrappleT = 0;
 
 function fireOneShot(playerInfo, weapon, aimPoint, isADS, aimOwner) {
-  // Active contract modifier — weapon-class restriction. 'pistol'
-  // contracts only fire pistols; 'melee' contracts hard-block all
-  // ranged fire. The HUD already signals the restriction via the
-  // contractor tab's modifier list, so a soft fizzle here is enough.
+  // Active contract modifier — weapon-class restriction. Surfaces a
+  // throttled HUD message when fire is blocked so the player
+  // understands the trigger isn't broken — it's the contract.
   const restrict = _activeModifiers.weaponClass;
-  if (restrict === 'melee') return;
-  if (restrict === 'pistol' && weapon.class !== 'pistol') return;
+  if (restrict === 'melee') {
+    _maybeWarnContractBlock('Contract: melee only.');
+    return;
+  }
+  if (restrict === 'pistol' && weapon.class !== 'pistol') {
+    _maybeWarnContractBlock('Contract: pistols only.');
+    return;
+  }
   // Magnum Opus override — full-auto weapons may fire past empty if
   // the relic is owned. Cost is paid in tickShooting (3 HP/s drain).
   const _magnumBypass = (derivedStats.magnumOpusActive
@@ -5020,15 +5163,6 @@ function fireOneShot(playerInfo, weapon, aimPoint, isADS, aimOwner) {
   _tmpDir.copy(aimPoint).sub(fireFrom);
   if (_tmpDir.lengthSq() < 0.0001) return;
   _tmpDir.normalize();
-  // Crouching always fires parallel to the ground or above — never
-  // downward. The aim resolution already skips low cover so the
-  // aimPoint should be past the cover, but clamp here as a safety net
-  // for any edge cases (cursor on floor, extreme angles, etc.).
-  if (inputStateCrouchHeld() && _tmpDir.y < 0) {
-    _tmpDir.y = 0;
-    if (_tmpDir.lengthSq() < 0.0001) return;
-    _tmpDir.normalize();
-  }
 
   const baseSpread = isADS
     ? eff.adsSpread * (derivedStats.adsSpreadOnlyMult || 1)
@@ -5123,7 +5257,15 @@ function fireOneShot(playerInfo, weapon, aimPoint, isADS, aimOwner) {
   const effRange = _classMaxRange;
   // Exclude unlocked doors — their flattened mesh still intersects
   // raycasts otherwise, so bullets would invisibly hit the doorway.
-  const hitTargets = [...allHittables(), ...level.solidObstacles()];
+  // When crouching, also exclude low-cover obstacles: the player's
+  // fireOrigin (chest) can be as low as ~0.55 m when kneeling, well
+  // below the 0.80 m cover top, so the bullet trajectory can never
+  // clear the cover even when aimed past it. Low cover is a "shoot-over"
+  // obstacle by design — the crouching player shoots through it.
+  const _solidForShot = inputStateCrouchHeld()
+    ? level.solidObstacles().filter(m => !m.userData.isLowCover)
+    : level.solidObstacles();
+  const hitTargets = [...allHittables(), ..._solidForShot];
 
   // Scavenger's Eye / freeShotChance — chance the round isn't consumed.
   // Battle Trance / instantReloadChance — chance to instantly fully reload
@@ -10147,11 +10289,69 @@ async function runExtract() {
   // run and still satisfy "extract from floor X" if they extracted
   // earlier). peakLevel is monotonic via runStats.setLevel.
   runStats.noteExtracted();
+  // Locked-trial unlock prompt — fire on extract too, not just death.
+  // The prompt is non-blocking (overlays the skill picker) so the
+  // existing extract flow continues uninterrupted.
+  _maybeShowLockedTrialPrompt();
   await skillPickUI.show();
   input.clearMouseState();
   paused = false;
   recomputeStats();
   regenerateLevel();
+}
+
+// Locked-trial unlock prompt — shared between death + extract. Walks
+// the player's full inventory for any `lockedTrial: true` weapon
+// they picked up during the run; if found, surfaces a one-shot
+// "Unlock for chips?" prompt. Discovery → desire → purchase loop —
+// the player gets to feel the locked weapon, then chooses whether
+// to spend chips to keep it forever.
+function _maybeShowLockedTrialPrompt() {
+  try {
+    if (document.getElementById('death-unlock-prompt')) return;
+    const surfaces = [
+      inventory.equipment.weapon1, inventory.equipment.weapon2, inventory.equipment.melee,
+      ...((inventory.pocketsGrid?.items?.()) || []),
+      ...((inventory.rigGrid?.items?.()) || []),
+      ...((inventory.backpackGrid?.items?.()) || []),
+    ];
+    const trial = surfaces.find(it => it && it.lockedTrial && !isWeaponUnlocked(it.name));
+    if (!trial) return;
+    const cost = ({ common: 150, uncommon: 350, rare: 800, epic: 2000, legendary: 5000, mythic: 12000 })[trial.rarity || 'common'] || 150;
+    const prompt = document.createElement('div');
+    prompt.id = 'death-unlock-prompt';
+    Object.assign(prompt.style, {
+      position: 'fixed', top: '50%', left: '50%',
+      transform: 'translate(-50%, calc(-50% + 180px))', zIndex: '100',
+      background: 'linear-gradient(180deg, #1a1d24, #0c0e14)',
+      border: '1px solid #5a8acf', borderRadius: '4px',
+      padding: '16px 22px', minWidth: '320px', textAlign: 'center',
+      color: '#e8dfc8', fontFamily: 'ui-monospace, SFMono-Regular, Menlo, Consolas, monospace',
+      boxShadow: '0 8px 24px rgba(0,0,0,0.6)',
+    });
+    prompt.innerHTML = `
+      <div style="font-size:11px; letter-spacing:1.4px; color:#9b8b6a; margin-bottom:6px;">FIELD TRIAL</div>
+      <div style="font-size:14px; color:#f2c060; margin-bottom:4px;">${trial.name}</div>
+      <div style="font-size:11px; color:#c9a87a; margin-bottom:12px;">Unlock permanently? Adds it to your stash and the world drop pool.</div>
+      <div style="display:flex; gap:8px; justify-content:center;">
+        <button id="dup-buy" type="button" style="background:linear-gradient(180deg,#2a4a6e,#1e3450);border:1px solid #5a8acf;color:#e8dfc8;padding:6px 14px;border-radius:3px;font:inherit;font-size:11px;letter-spacing:1px;cursor:pointer;text-transform:uppercase;">Unlock — ${cost}c</button>
+        <button id="dup-skip" type="button" style="background:#1a1d24;border:1px solid #4a505a;color:#9b8b6a;padding:6px 14px;border-radius:3px;font:inherit;font-size:11px;letter-spacing:1px;cursor:pointer;text-transform:uppercase;">Skip</button>
+      </div>
+    `;
+    document.body.appendChild(prompt);
+    prompt.querySelector('#dup-buy').addEventListener('click', () => {
+      if (persistentChips < cost) {
+        transientHudMsg(`Need ${cost}c — you have ${persistentChips}c`);
+        return;
+      }
+      persistentChips -= cost;
+      savePersistentChips();
+      unlockWeapon(trial.name);
+      transientHudMsg(`${trial.name} unlocked.`);
+      prompt.remove();
+    });
+    prompt.querySelector('#dup-skip').addEventListener('click', () => prompt.remove());
+  } catch (e) { console.warn('[locked-trial-prompt]', e); }
 }
 
 // Firing a gun is noisy: any alive enemy within noiseRange of the muzzle
@@ -11422,6 +11622,7 @@ function tick() {
       setDS('death-recap-dist', dist != null ? `${dist.toFixed(1)}m` : '—');
     }
     if (deathRootEl) deathRootEl.style.display = 'flex';
+    _maybeShowLockedTrialPrompt();
   }
   if (hudStatsEl) {
     const zoneLabel = aimInfo.zone ? `[${aimInfo.zone}]` : '';
