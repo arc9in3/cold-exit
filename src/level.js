@@ -3060,15 +3060,20 @@ export class Level {
       // Eight archetypes in rotation — droneSummoner ("THE HIVEMASTER")
       // is temporarily disabled because the drone swarm tanks frame
       // rate. Re-enable once drone perf is reworked. Other eight share
-      // roughly equal probability.
-      const bossArchetype = archRoll < 0.14 ? 'evasive'
-                          : archRoll < 0.28 ? 'bulletHell'
-                          : archRoll < 0.42 ? 'elite'
-                          : archRoll < 0.56 ? 'assassin'
-                          : archRoll < 0.70 ? 'flamer'
-                          : archRoll < 0.84 ? 'grenadier'
-                          : archRoll < 0.93 ? 'spawner'
-                          :                   'berserker';
+      // roughly equal probability. Necromancer (`spawner`) is gated
+      // to runs deeper than level 5 — early runs substitute berserker
+      // so the bucket isn't lost.
+      let bossArchetype = archRoll < 0.14 ? 'evasive'
+                        : archRoll < 0.28 ? 'bulletHell'
+                        : archRoll < 0.42 ? 'elite'
+                        : archRoll < 0.56 ? 'assassin'
+                        : archRoll < 0.70 ? 'flamer'
+                        : archRoll < 0.84 ? 'grenadier'
+                        : archRoll < 0.93 ? 'spawner'
+                        :                   'berserker';
+      if (bossArchetype === 'spawner' && this.index <= 5) {
+        bossArchetype = 'berserker';
+      }
       const archVariant =
         bossArchetype === 'bulletHell'    ? 'tank'
       : bossArchetype === 'assassin'      ? 'standard'    // melee variant slot

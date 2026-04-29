@@ -9310,29 +9310,50 @@ function _tickCamping(dt) {
 // recharge window. Picks open spots via simple random sampling
 // inside the room bounds; walks away if no open spot is found
 // within a few attempts.
-function spawnerTeleportAndSummon(boss) {
-  if (!boss || !boss.alive) return;
+// Generic boss teleport — pick a random open spot inside the boss's
+// room, no closer than 4m to the player. Used by the melee boss to
+// reposition periodically (counter to kiting). Returns true on
+// success so callers can reset their teleport timer.
+function bossTeleport(boss) {
+  if (!boss || !boss.alive) return false;
   const room = level.rooms?.find(r => r.id === boss.roomId);
-  if (!room) return;
+  if (!room) return false;
   const b = room.bounds;
-  let tx = boss.group.position.x, tz = boss.group.position.z;
   for (let attempt = 0; attempt < 20; attempt++) {
     const x = b.minX + 2 + Math.random() * (b.maxX - b.minX - 4);
     const z = b.minZ + 2 + Math.random() * (b.maxZ - b.minZ - 4);
     if (level._collidesAt && level._collidesAt(x, z, 0.6)) continue;
-    // Don't teleport on top of the player.
     const dx = x - player.mesh.position.x, dz = z - player.mesh.position.z;
     if (dx * dx + dz * dz < 16) continue;
-    tx = x; tz = z; break;
+    // Telegraph the teleport with smoke puffs at both endpoints so the
+    // player can read the move. Capture the old position first.
+    const oldX = boss.group.position.x;
+    const oldZ = boss.group.position.z;
+    boss.group.position.x = x;
+    boss.group.position.z = z;
+    _spawnSmokePuff(oldX, oldZ);
+    _spawnSmokePuff(x, z);
+    return true;
   }
-  boss.group.position.x = tx;
-  boss.group.position.z = tz;
-  // Spawn 4-6 melee adds in a small ring around the boss. Bumped
-  // back up from 2-3 — the previous count made the spawner boss
-  // feel underwhelming compared to its earlier "swarm of adds"
-  // identity. Reuses melees.spawn so the adds get the standard rig
-  // + AI; tier set to 'normal' so they go down quickly.
-  const addCount = 4 + Math.floor(Math.random() * 3);
+  return false;
+}
+
+function spawnerTeleportAndSummon(boss) {
+  if (!boss || !boss.alive) return;
+  const room = level.rooms?.find(r => r.id === boss.roomId);
+  if (!room) return;
+  // Necromancer no longer teleports — it summons in place. Teleport
+  // moved to the melee boss instead (see meleeBossTeleport).
+  const tx = boss.group.position.x;
+  const tz = boss.group.position.z;
+  // Spawn count ramps with run depth. The necromancer is gated to
+  // appear only after level 5 (see level.js), so this formula starts
+  // at 2 on its first appearance and tops out at 6 around level 13.
+  const lvIdx = (level && level.index) || 1;
+  const baseCount = Math.max(2, Math.min(6, 2 + Math.floor((lvIdx - 6) / 2)));
+  // Random jitter ±0/+1 so cadence varies but never drops below the
+  // floor or above the cap.
+  const addCount = Math.min(6, baseCount + (Math.random() < 0.4 ? 1 : 0));
   for (let i = 0; i < addCount; i++) {
     // Pick an open spot near the boss that ALSO has a clear walkable
     // segment to the player. Without this last check minions
@@ -10904,8 +10925,12 @@ function tick() {
     onAlert: (e) => propagateAggro(e),
     isRoomActive,
     isInsideSmoke,
+    smokeContaining,
+    smokeOnSegment,
+    randomSmokeAim,
     activeDecoy,
     droneSummonAt: (gx, gz) => spawnDronesAt(gx, gz),
+    bossTeleport: (e) => bossTeleport(e),
     onPlayerHit: (d, enemy) => {
       if (playerInfo.blocking) {
         const hitPt = new THREE.Vector3(

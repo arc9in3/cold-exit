@@ -173,7 +173,7 @@ const VARIANT_PROFILES = {
   },
   dasher: {
     scale: 0.9, hp: 0.55, dmg: 0.9,
-    moveSpeedMult: 1.85, preferredRange: 15, rangeTolerance: 4,
+    moveSpeedMult: 1.48, preferredRange: 15, rangeTolerance: 4,
     reactionMult: 0.4, settlePause: false,
     strafe: true, dash: true, coverSeek: false,
     tint: 0x1f3a4a,
@@ -214,7 +214,7 @@ const VARIANT_PROFILES = {
     // player can dodge with a roll. Backs up if the player closes.
     // Frail on purpose — the counter is "close the distance fast."
     scale: 1.0, hp: 0.7, dmg: 1.0,
-    moveSpeedMult: 0.9, preferredRange: 22, rangeTolerance: 6,
+    moveSpeedMult: 0.72, preferredRange: 22, rangeTolerance: 6,
     reactionMult: 0.6, settlePause: true,
     strafe: false, dash: false, coverSeek: true,
     tint: 0x554020,

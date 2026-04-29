@@ -742,6 +742,19 @@ export class MeleeEnemyManager {
       return;
     }
     e.cooldownT = Math.max(0, e.cooldownT - dt);
+    // Melee boss teleport — every 9-14s of engaged combat, the boss
+    // blinks to a random open spot in its room. Counters kiting at
+    // range. Skips while idle (no aggro yet) or stunned.
+    if (e.tier === 'boss' && ctx.bossTeleport && (e.stunT || 0) <= 0
+        && e.state !== STATE.IDLE && e.state !== STATE.DEAD) {
+      e.teleportT = (e.teleportT === undefined)
+        ? (9 + Math.random() * 5)
+        : e.teleportT - dt;
+      if (e.teleportT <= 0) {
+        if (ctx.bossTeleport(e)) e.teleportT = 9 + Math.random() * 5;
+        else e.teleportT = 1.0;   // retry shortly if no open spot
+      }
+    }
     // Smoke confusion: same logic as gunman.js — when the player is
     // inside or behind smoke from this enemy's POV, target a random
     // point inside the freshest smoke zone instead. Refreshed while
