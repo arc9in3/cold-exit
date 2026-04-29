@@ -1459,12 +1459,15 @@ export function updateAnim(rig, state, dt) {
   // the arms for natural coupling.
   // Arm-lean compensation must subtract BOTH the chest forward pitch
   // (crouchLean + dashLean + runLean) AND the hips forward pitch
-  // (crouch * 0.18 + kneel * 0.10 + dashBlend * 0.22). Arms are
+  // (Tc.hipPitch + Tk.hipPitch + dashBlend * 0.22). Arms are
   // children of chest which is a child of hips, so both rotations
-  // accumulate down the chain and push the gun barrel downward. Prior
-  // version only compensated for chest, leaving the hips' 0.18 rad of
-  // crouch pitch to droop the muzzle when the player crouches.
-  const hipsLean = crouch * 0.18 + kneel * 0.10 + a.dashBlend * 0.22;
+  // accumulate down the chain and push the gun barrel downward.
+  // Use the actual tunable hip-pitch values so compensation stays
+  // exact when POSE_TUNABLES.crouch.hipPitch or .kneel.hipPitch is
+  // adjusted — the old hardcoded 0.18 / 0.10 were stale (Tc.hipPitch
+  // is 0.45, Tk.hipPitch is 0.16) and left ~0.27 rad uncompensated,
+  // drooping the gun barrel ~15° below horizontal while crouching.
+  const hipsLean = crouch * Tc.hipPitch + kneel * Tk.hipPitch + a.dashBlend * 0.22;
   const armLeanComp = runLean + dashLean + crouchLean + hipsLean;
   const rightShoulder = chestShoulderPitch * (1 - a.aimBlend)
                        + headShoulderPitch * a.aimBlend;
