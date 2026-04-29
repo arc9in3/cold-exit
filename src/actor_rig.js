@@ -212,8 +212,10 @@ export const DEFAULT_DIMS = {
     // Top (crotchTopR) should roughly match the inner-edge of the
     // pelvis bottom; bottom (crotchBotR) tapers to just enough to
     // sit between the inner thigh surfaces. Set crotchH to 0 to
-    // disable.
-    crotchTopR: 0.13, crotchBotR: 0.07, crotchH: 0.06, crotchY: 0.005,
+    // disable. crotchX / crotchY / crotchZ position the wedge
+    // within the hips group (m, scaled by rig.scale).
+    crotchTopR: 0.13, crotchBotR: 0.07, crotchH: 0.06,
+    crotchX: 0, crotchY: 0.005, crotchZ: 0,
     stomachH: 0.235, stomachTopR: 0.24, stomachBotR: 0.18, stomachY: 0.22,
     chestH: 0.345, chestTopR: 0.32, chestBotR: 0.22,
     collarH: 0.055, collarTopR: 0.11, collarBotR: 0.32, collarDY: 0.057,
@@ -428,7 +430,11 @@ export function buildRig(opts = {}) {
       _cyl(T.crotchTopR * scale, T.crotchBotR * scale, T.crotchH * scale, T.segs),
       legMat,
     );
-    crotch.position.set(0, (T.crotchY || 0) * scale, 0);
+    crotch.position.set(
+      (T.crotchX || 0) * scale,
+      (T.crotchY || 0) * scale,
+      (T.crotchZ || 0) * scale,
+    );
     crotch.scale.z = T.depthRatio;
     crotch.castShadow = true;
     crotch.receiveShadow = true;

@@ -641,6 +641,21 @@ function rangeFor(value) {
   return { min: 0, max: a * 2, step: 0.01 };
 }
 
+// Per-key range overrides — for offset-style fields the auto-range
+// heuristic clamps too tight (a small default like 0.005 produces a
+// useless ±0.015 slider). Anything ending in X / Y / Z that's a
+// position offset gets a generous ±0.5 m range. Add entries here as
+// fields stop fitting the auto-range.
+const RANGE_OVERRIDES = {
+  crotchX:    { min: -0.5, max: 0.5, step: 0.001 },
+  crotchY:    { min: -0.5, max: 0.5, step: 0.001 },
+  crotchZ:    { min: -0.5, max: 0.5, step: 0.001 },
+  crotchH:    { min:  0,   max: 0.5, step: 0.001 },
+  crotchTopR: { min:  0,   max: 0.5, step: 0.001 },
+  crotchBotR: { min:  0,   max: 0.5, step: 0.001 },
+  hipJointY:  { min: -0.3, max: 0.3, step: 0.001 },
+};
+
 function addDimsFolder(gui, obj, path) {
   for (const [k, v] of Object.entries(obj)) {
     if (v !== null && typeof v === 'object' && !Array.isArray(v)) {
@@ -648,8 +663,8 @@ function addDimsFolder(gui, obj, path) {
       sub.close();
       addDimsFolder(sub, v, [...path, k]);
     } else if (typeof v === 'number') {
-      const { min, max, step } = rangeFor(v);
-      gui.add(obj, k, min, max, step).onChange(() => rebuildRig());
+      const r = RANGE_OVERRIDES[k] || rangeFor(v);
+      gui.add(obj, k, r.min, r.max, r.step).onChange(() => rebuildRig());
     }
   }
 }
