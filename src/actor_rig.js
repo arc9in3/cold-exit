@@ -873,10 +873,10 @@ export const POSE_TUNABLES = {
     thighFwd: 1.27,
     kneeBend: 1.35,
     kneeGaitStraighten: 0.524,
-    strideScale: 0.0,
-    swingLift: 1.0,
+    strideScale: 0.49,
+    swingLift: 0.47,
     kneeFlex: 0.61,
-    swingDamp: 1.5,
+    swingDamp: 0.71,
     // legs — asymmetry (right leg leads in static crouch idle)
     rightThighIdleLead: 0.70,
     rightThighStaticBoost: 0.45,
@@ -893,7 +893,7 @@ export const POSE_TUNABLES = {
     hipRoll: -0.70,
     bobReduction: 1.0,
     plantDipReduction: 0.80,
-    stepRate: 0.65,
+    stepRate: 0.42,
   },
   // Kneel pose — fires when state.crouched && speed < kneel.threshold.
   // At full blend, overrides the crouch-pose leg rotations (one knee
