@@ -5083,6 +5083,16 @@ function fireOneShot(playerInfo, weapon, aimPoint, isADS, aimOwner) {
     // "some shots reached, some didn't" feel near the edge.
     const _pelletRange = _classMaxRange * (0.75 + Math.random() * 0.50);
     const hit = combat.raycast(fireFrom, dir, hitTargets, _pelletRange);
+    // Bullet magnetism — when the cursor's ray clips ANY edge of an
+    // enemy body part, the impact / tracer endpoint / damage number /
+    // blood splatter all snap to the visual center of the hit mesh.
+    // The muzzle direction is unchanged (still driven by the cursor's
+    // aim point) so the gun doesn't visually pull toward the body
+    // center — only the registered hit moves. Zone is already taken
+    // from userData so damage routing is unaffected.
+    if (hit && hit.owner && hit.mesh) {
+      hit.point = hit.mesh.getWorldPosition(new THREE.Vector3());
+    }
     const endPoint = hit
       ? hit.point
       : _tmpEndPt.copy(fireFrom).addScaledVector(dir, effRange);
@@ -5395,11 +5405,18 @@ function fireOneShot(playerInfo, weapon, aimPoint, isADS, aimOwner) {
             onEnemyKilled(ph.owner);
             awardClassXp(weapon.class, ph.owner.tier, ph.owner);
           }
-          // Visual feedback at the pierce point.
+          // Visual feedback at the pierce point — same magnetism as the
+          // primary hit: snap to the visual center of the hit mesh so
+          // the blood/impact/damage number lands on the body part.
+          const _ppt = (ph.mesh && ph.owner)
+            ? ph.mesh.getWorldPosition(new THREE.Vector3())
+            : ph.point.clone();
           let pa = hitAgg.get(ph.owner);
           if (!pa) {
-            pa = { totalDmg: 0, hadHead: false, point: ph.point.clone(), dir: dir.clone(), zone: ph.zone || 'torso' };
+            pa = { totalDmg: 0, hadHead: false, point: _ppt, dir: dir.clone(), zone: ph.zone || 'torso' };
             hitAgg.set(ph.owner, pa);
+          } else {
+            pa.point = _ppt;
           }
           pa.totalDmg += pdmg;
           pierced++;
