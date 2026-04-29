@@ -852,6 +852,10 @@ export const POSE_TUNABLES = {
     rightThighIdleLead: 0.70,    // extra forward bias on right leg when idle
     rightThighStaticBoost: 0.45, // multiplicative boost on right thigh fwd during idle
     rightKneeStaticBoost: 0.25,  // multiplicative boost on right knee bend during idle
+    // ankles — additive offset on top of the auto-flat compensation
+    // (which is -(thigh + knee), so the foot stays flat by default).
+    // Positive = toe down (plantar flex), negative = toe up.
+    ankleAdjust: 0,              // applied to BOTH ankles in crouch pose
     // torso
     hipDrop: 0.26,               // how far hips drop while crouched (m, scaled by rs)
     chestLean: 0.30,             // chest forward fold (rad)
@@ -875,6 +879,10 @@ export const POSE_TUNABLES = {
     leftKnee:   0.70,            // rear leg knee bend (rad)
     rightThigh: -1.57,           // front leg thigh angle (rad, negative = forward; -π/2 = horizontal)
     rightKnee:  1.57,            // front leg knee bend (rad, π/2 = calf vertical)
+    // ankle additive offsets (default 0 = foot stays flat via auto-compensation).
+    // Positive = toe down, negative = toe up.
+    leftAnkle:  0,
+    rightAnkle: 0,
     hipDrop:    0.32,            // extra hip drop on top of crouch hipDrop (m, scaled by rs)
     chestLean:  0.18,            // extra chest forward fold (rad)
     hipPitch:   0.16,            // extra hip pitch (rad)
@@ -1161,8 +1169,11 @@ export function updateAnim(rig, state, dt) {
   // of flat slabs of foot.
   const sneakRollBoost = 1 + crouch * 0.6 * gaitT;
   const rightCrouchAnkle = -(rightCrouchThigh + rightCrouchKnee);
-  let leftAnkleRot  = -leftKneeGait  * 0.35 + leftFootRoll  * sneakRollBoost + crouchAnkle;
-  let rightAnkleRot = -rightKneeGait * 0.35 + rightFootRoll * sneakRollBoost + rightCrouchAnkle;
+  // ankleAdjust is added to both ankles on top of the auto-flat
+  // compensation. Scaled by `crouch` so the offset only applies
+  // while crouched (standing pose isn't dragged off-axis).
+  let leftAnkleRot  = -leftKneeGait  * 0.35 + leftFootRoll  * sneakRollBoost + crouchAnkle  + crouch * Tc.ankleAdjust;
+  let rightAnkleRot = -rightKneeGait * 0.35 + rightFootRoll * sneakRollBoost + rightCrouchAnkle + crouch * Tc.ankleAdjust;
 
   if (kneel > 0.01) {
     // Kneel pose targets — calibrated for the current leg proportions
@@ -1185,10 +1196,13 @@ export function updateAnim(rig, state, dt) {
     const kR_knee  = Tk.rightKnee;
     leftThighRot  = leftThighRot  * (1 - kneel) + kL_thigh * kneel;
     leftKneeRot   = leftKneeRot   * (1 - kneel) + kL_knee  * kneel;
-    leftAnkleRot  = leftAnkleRot  * (1 - kneel) + -(kL_thigh + kL_knee) * kneel;
+    // Ankle = auto-flat compensation (-(thigh + knee)) + additive
+    // offset from POSE_TUNABLES.kneel.{left,right}Ankle. Default
+    // offset is 0 so foot stays flat.
+    leftAnkleRot  = leftAnkleRot  * (1 - kneel) + (-(kL_thigh + kL_knee) + Tk.leftAnkle) * kneel;
     rightThighRot = rightThighRot * (1 - kneel) + kR_thigh * kneel;
     rightKneeRot  = rightKneeRot  * (1 - kneel) + kR_knee  * kneel;
-    rightAnkleRot = rightAnkleRot * (1 - kneel) + -(kR_thigh + kR_knee) * kneel;
+    rightAnkleRot = rightAnkleRot * (1 - kneel) + (-(kR_thigh + kR_knee) + Tk.rightAnkle) * kneel;
   }
 
   // Melee ready stance — subtle thigh + knee bend so the character

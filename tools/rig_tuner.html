@@ -683,6 +683,8 @@ const gaitOnlyCtrls = [];
   kneel.add(POSE_TUNABLES.kneel, 'leftKnee',   -1.5, 2.5, 0.01).name('left knee (rad)');
   kneel.add(POSE_TUNABLES.kneel, 'rightThigh', -2.5, 1.5, 0.01).name('right thigh (rad)');
   kneel.add(POSE_TUNABLES.kneel, 'rightKnee',  -1.5, 2.5, 0.01).name('right knee (rad)');
+  kneel.add(POSE_TUNABLES.kneel, 'leftAnkle',  -1.0, 1.0, 0.01).name('left ankle offset (rad)');
+  kneel.add(POSE_TUNABLES.kneel, 'rightAnkle', -1.0, 1.0, 0.01).name('right ankle offset (rad)');
   kneel.add(POSE_TUNABLES.kneel, 'hipDrop',          0, 0.6, 0.005).name('hip drop (m)');
   kneel.add(POSE_TUNABLES.kneel, 'chestLean',        0, 0.6, 0.005).name('chest lean (rad)');
   kneel.add(POSE_TUNABLES.kneel, 'hipPitch',         0, 0.6, 0.005).name('hip pitch (rad)');
@@ -699,6 +701,7 @@ const gaitOnlyCtrls = [];
   gaitOnlyCtrls.push(legs.add(POSE_TUNABLES.crouch, 'swingDamp',          0, 1.5, 0.01).name('swing damp'));
   gaitOnlyCtrls.push(legs.add(POSE_TUNABLES.crouch, 'swingLift',          0, 1.0, 0.01).name('footstep height (1−this)'));
   gaitOnlyCtrls.push(legs.add(POSE_TUNABLES.crouch, 'kneeFlex',           0, 1.0, 0.01).name('extra knee flex'));
+  legs.add(POSE_TUNABLES.crouch, 'ankleAdjust',  -1.0, 1.0, 0.01).name('ankle adjust (rad, both)');
 
   const asym = f.addFolder('right-leg lead (crouch walk — overridden by kneel in idle)');
   asym.add(POSE_TUNABLES.crouch, 'rightThighIdleLead',    -1.5, 1.5, 0.01).name('right thigh idle lead');
