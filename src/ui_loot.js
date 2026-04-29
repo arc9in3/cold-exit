@@ -1724,10 +1724,14 @@ export class LootUI {
       };
       const onUp = (ev) => {
         if (!dragging) {
-          // Plain click / shift-click / ctrl-click fallbacks.
+          // Plain click / shift-click fallbacks. Shift+left-click on a
+          // loot-pile item moves the item into the player's bag without
+          // equipping (use shift+right-click to force-equip — see the
+          // contextmenu handler below).
           cleanup();
           if (ev.shiftKey) {
-            this._takeAndEquip(lootIdx);
+            this._takeOne(lootIdx);
+            this.render();
           } else if (item && window.__showDetails) {
             window.__showDetails(item);
           }
