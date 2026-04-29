@@ -7679,6 +7679,69 @@ function _tickStunStars(dt) {
   }
 }
 
+// --- Smoke-confused "?" sprite over the head. Mirrors the stun-stars
+// pattern but renders a billboarded ? glyph via CanvasTexture so the
+// status reads from any camera angle. Built once, shared.
+let _questionTex = null;
+function _buildQuestionTex() {
+  if (_questionTex) return _questionTex;
+  const c = document.createElement('canvas');
+  c.width = 64; c.height = 64;
+  const ctx = c.getContext('2d');
+  ctx.clearRect(0, 0, 64, 64);
+  ctx.font = 'bold 56px ui-monospace, Menlo, Consolas, monospace';
+  ctx.textAlign = 'center';
+  ctx.textBaseline = 'middle';
+  // Stroke first for legibility against light / smoke backdrops, then fill.
+  ctx.strokeStyle = '#1a0a14';
+  ctx.lineWidth = 6;
+  ctx.strokeText('?', 32, 36);
+  ctx.fillStyle = '#ffe060';
+  ctx.fillText('?', 32, 36);
+  _questionTex = new THREE.CanvasTexture(c);
+  return _questionTex;
+}
+function _attachQuestionMark(enemy) {
+  if (!enemy || !enemy.group || enemy._questionMark) return;
+  const tex = _buildQuestionTex();
+  const mat = new THREE.SpriteMaterial({
+    map: tex, transparent: true, depthWrite: false, depthTest: false,
+  });
+  const spr = new THREE.Sprite(mat);
+  spr.scale.set(0.55, 0.55, 1);
+  spr.position.y = 2.20;
+  spr.renderOrder = 999;
+  enemy.group.add(spr);
+  enemy._questionMark = spr;
+}
+function _detachQuestionMark(enemy) {
+  if (!enemy || !enemy._questionMark) return;
+  if (enemy._questionMark.parent) enemy._questionMark.parent.remove(enemy._questionMark);
+  enemy._questionMark.material?.dispose?.();
+  enemy._questionMark = null;
+}
+const _questionMarkList = [];
+function _tickQuestionMarks(dt) {
+  void dt;
+  // Attach / refresh on enemies that became confused this frame, detach
+  // on those whose timer ran out. Run on both gunmen and melee mobs.
+  const sweep = (arr) => {
+    for (const e of arr) {
+      const confused = e.alive && (e.smokeConfusedT || 0) > 0;
+      if (confused && !e._questionMark) _attachQuestionMark(e);
+      else if (!confused && e._questionMark) _detachQuestionMark(e);
+    }
+  };
+  sweep(gunmen.gunmen);
+  sweep(melees.enemies);
+  // Tiny float bob so the icon feels alive.
+  _questionMarkList.length = 0;
+  for (const g of gunmen.gunmen) if (g._questionMark) _questionMarkList.push(g);
+  for (const m of melees.enemies) if (m._questionMark) _questionMarkList.push(m);
+  const bob = Math.sin(performance.now() * 0.004) * 0.05;
+  for (const c of _questionMarkList) c._questionMark.position.y = 2.20 + bob;
+}
+
 // Tag every rig source mesh's _instHide flag — drives whether the
 // rig instancer parks that mesh's instance slot at zero-scale or
 // reads matrixWorld each frame. Used when an actor needs to be
@@ -9165,6 +9228,50 @@ function isInsideSmoke(x, z) {
     if (dx * dx + dz * dz < zone.radius * zone.radius) return true;
   }
   return false;
+}
+
+// Smoke-confusion helpers ------------------------------------------------
+// "Freshest" = last-pushed = the smoke the player most recently entered.
+// Returns the matching zone object (with {x, z, radius}) or null.
+function smokeContaining(x, z) {
+  for (let i = _smokeZones.length - 1; i >= 0; i--) {
+    const zone = _smokeZones[i];
+    const dx = x - zone.x, dz = z - zone.z;
+    if (dx * dx + dz * dz < zone.radius * zone.radius) return zone;
+  }
+  return null;
+}
+
+// Does the segment from (eyeX, eyeZ) to (px, pz) pass through any smoke
+// dome's XZ footprint? Returns the freshest-matching zone or null.
+// Standard segment-circle intersection: project the centre onto the
+// segment, compare perpendicular distance to the radius. The result is
+// used as the "shoot at the smoke" target when the player is on the
+// far side of a smoke from the enemy.
+function smokeOnSegment(eyeX, eyeZ, px, pz) {
+  const dx = px - eyeX, dz = pz - eyeZ;
+  const segLenSq = dx * dx + dz * dz;
+  if (segLenSq < 0.0001) return null;
+  for (let i = _smokeZones.length - 1; i >= 0; i--) {
+    const zone = _smokeZones[i];
+    const cx = zone.x - eyeX, cz = zone.z - eyeZ;
+    let t = (cx * dx + cz * dz) / segLenSq;
+    t = Math.max(0, Math.min(1, t));
+    const closestX = t * dx, closestZ = t * dz;
+    const distX = cx - closestX, distZ = cz - closestZ;
+    const r = zone.radius;
+    if (distX * distX + distZ * distZ < r * r) return zone;
+  }
+  return null;
+}
+
+// Random aim point inside a smoke zone — used by confused enemies to
+// spray bullets into the cloud rather than locking on the entry edge.
+// Returns { x, z } at a uniformly-distributed point in the disc.
+function randomSmokeAim(zone) {
+  const r = zone.radius * Math.sqrt(Math.random()) * 0.85;
+  const a = Math.random() * Math.PI * 2;
+  return { x: zone.x + Math.cos(a) * r, z: zone.z + Math.sin(a) * r };
 }
 function activeDecoy() {
   // Return the freshest active decoy (last spawned), or null.
@@ -10696,6 +10803,7 @@ function tick() {
   _tickBurnFlames(dt);
   tickAmbushDrops(dt);
   _tickStunStars(dt);
+  _tickQuestionMarks(dt);
   _tickGrapples(dt);
   tickCorpseDespawn(dt);
   tickEncounters(dt);
@@ -10772,6 +10880,9 @@ function tick() {
     spawnAiGrenade: (g) => spawnAiGrenade(g),
     spawnSniperShot: (g) => spawnSniperShot(g),
     isInsideSmoke,                  // smoke-grenade LoS override
+    smokeContaining,                // returns the freshest zone the player is inside
+    smokeOnSegment,                 // returns the freshest zone blocking enemy LoS to player
+    randomSmokeAim,                 // random aim point inside a zone (for confused fire)
     activeDecoy,                    // decoy beacon target hijack
     spawnAiThrowable: (g, kind) => spawnAiThrowable(g, kind),
     isPlayerCamping: () => playerCampingT > playerCampingThreshold,

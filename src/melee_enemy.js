@@ -742,7 +742,49 @@ export class MeleeEnemyManager {
       return;
     }
     e.cooldownT = Math.max(0, e.cooldownT - dt);
-    const toPlayer = _m_toPlayer.subVectors(ctx.playerPos, e.group.position);
+    // Smoke confusion: same logic as gunman.js — when the player is
+    // inside or behind smoke from this enemy's POV, target a random
+    // point inside the freshest smoke zone instead. Refreshed while
+    // obstructed; cleared once the timer drains. Only applies once
+    // the enemy has noticed the player (skip while idle).
+    {
+      const playerInSmokeNow = ctx.isInsideSmoke
+        ? ctx.isInsideSmoke(ctx.playerPos.x, ctx.playerPos.z)
+        : false;
+      if (e.state !== STATE.IDLE) {
+        let zone = playerInSmokeNow && ctx.smokeContaining
+          ? ctx.smokeContaining(ctx.playerPos.x, ctx.playerPos.z)
+          : null;
+        if (!zone && ctx.smokeOnSegment) {
+          zone = ctx.smokeOnSegment(e.group.position.x, e.group.position.z, ctx.playerPos.x, ctx.playerPos.z);
+        }
+        if (zone) {
+          e.smokeConfusedT = 1.6;
+          e.smokeAimReroll = (e.smokeAimReroll || 0) - dt;
+          if (e.smokeAimReroll <= 0 || e.smokeZoneRef !== zone) {
+            const pt = ctx.randomSmokeAim ? ctx.randomSmokeAim(zone) : { x: zone.x, z: zone.z };
+            e.smokeAimX = pt.x;
+            e.smokeAimZ = pt.z;
+            e.smokeAimReroll = 0.7 + Math.random() * 0.6;
+            e.smokeZoneRef = zone;
+          }
+        }
+      }
+      e.smokeConfusedT = Math.max(0, (e.smokeConfusedT || 0) - dt);
+      if (e.smokeConfusedT <= 0) e.smokeZoneRef = null;
+    }
+    // Build the chase target. When smoke-confused, walk toward the
+    // random smoke aim point instead of the live player. _m_targetPos
+    // is a scratch we reuse so we don't allocate per frame.
+    const _smokeOn = (e.smokeConfusedT || 0) > 0 && typeof e.smokeAimX === 'number';
+    const targetX = _smokeOn ? e.smokeAimX : ctx.playerPos.x;
+    const targetY = ctx.playerPos.y;
+    const targetZ = _smokeOn ? e.smokeAimZ : ctx.playerPos.z;
+    const toPlayer = _m_toPlayer.set(
+      targetX - e.group.position.x,
+      targetY - e.group.position.y,
+      targetZ - e.group.position.z,
+    );
     const dist = Math.hypot(toPlayer.x, toPlayer.z);
     const dir2d = _m_dir2d.set(toPlayer.x, 0, toPlayer.z);
     if (dir2d.lengthSq() > 0.0001) dir2d.normalize();

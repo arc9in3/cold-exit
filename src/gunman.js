@@ -1738,6 +1738,43 @@ export class GunmanManager {
       g.noLosT = 0;
     }
 
+    // --- Smoke confusion -------------------------------------------------
+    // When smoke is between this enemy and the player (or the player is
+    // inside it), the enemy can't track the player precisely. They pick
+    // a random point inside the freshest smoke zone and shoot/walk
+    // toward it, re-rolling every ~0.7-1.3s so the bullets spray. A
+    // "?" status icon over the head telegraphs the state to the player.
+    // Only applies once the AI is already aware of the player (idle
+    // patrols don't get fooled by smoke they haven't reacted to).
+    if (g.state !== STATE.IDLE) {
+      let zone = playerInSmoke
+        ? (ctx.smokeContaining ? ctx.smokeContaining(ctx.playerPos.x, ctx.playerPos.z) : null)
+        : null;
+      if (!zone && ctx.smokeOnSegment) {
+        zone = ctx.smokeOnSegment(g.group.position.x, g.group.position.z, ctx.playerPos.x, ctx.playerPos.z);
+      }
+      if (zone) {
+        g.smokeConfusedT = 1.6;     // refresh while obstructed
+        g.smokeAimReroll = (g.smokeAimReroll || 0) - dt;
+        if (g.smokeAimReroll <= 0 || g.smokeZoneRef !== zone) {
+          const pt = ctx.randomSmokeAim ? ctx.randomSmokeAim(zone) : { x: zone.x, z: zone.z };
+          g.smokeAimX = pt.x;
+          g.smokeAimZ = pt.z;
+          g.smokeAimReroll = 0.7 + Math.random() * 0.6;
+          g.smokeZoneRef = zone;
+        }
+      }
+    }
+    g.smokeConfusedT = Math.max(0, (g.smokeConfusedT || 0) - dt);
+    if (g.smokeConfusedT > 0 && typeof g.smokeAimX === 'number') {
+      // Override the lastKnown position so all downstream targeting
+      // (face, walk, suppressive fire) reads the random smoke point.
+      g.lastKnownX = g.smokeAimX;
+      g.lastKnownZ = g.smokeAimZ;
+    } else {
+      g.smokeZoneRef = null;
+    }
+
     // Stuck detection — if the enemy has been trying to move but
     // hasn't shifted more than ~2cm/frame for over a second, pick
     // a fresh waypoint. Now also cancels mid-dash bursts so dashers
@@ -2430,10 +2467,13 @@ export class GunmanManager {
       // Previous implementation fired indefinitely at last-known
       // which read as "enemy shooting at nothing through walls".
       let suppressing = false;
+      // Window: standard 0.3–1.1s after losing LoS, OR any time the
+      // enemy is smoke-confused (they keep spraying into the cloud).
+      const smokeWindow = (g.smokeConfusedT || 0) > 0;
+      const stdWindow = (g.noLosT || 0) > 0.3 && (g.noLosT || 0) < 1.1;
       if (!canSee && g.state === STATE.FIRING
           && typeof g.lastKnownX === 'number'
-          && (g.noLosT || 0) > 0.3
-          && (g.noLosT || 0) < 1.1
+          && (stdWindow || smokeWindow)
           && dist <= (g.weapon?.range || 0) * 1.2) {
         const mTest = g.muzzle.getWorldPosition(_g_muzzleTest);
         const aTest = _g_aimTest.set(g.lastKnownX, mTest.y, g.lastKnownZ);
