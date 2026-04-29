@@ -42,7 +42,7 @@ import { tunables } from './tunables.js';
 import {
   Inventory, SLOT_IDS,
   ALL_GEAR, ALL_ARMOR, ALL_CONSUMABLES, CONSUMABLE_DEFS, ALL_JUNK, ALL_TOYS, ARMOR_DEFS,
-  JUNK_DEFS, TOY_DEFS,
+  GEAR_DEFS, JUNK_DEFS, TOY_DEFS,
   wrapWeapon, withAffixes, randomArmor, randomGear, randomConsumable, randomJunk, randomToy, setLootLevel,
   randomThrowable, THROWABLE_DEFS, makeThrowable, forceMastercraft,
 } from './inventory.js';
@@ -790,15 +790,18 @@ window.__give = (query, count = 1) => {
   const lookups = [
     { kind: 'weapon', list: tunables.weapons,
       build: (d) => wrapWeapon(d) },
-    { kind: 'armor', list: ALL_ARMOR,
+    // Use raw *_DEFS values (not the filtered ALL_*) so encounter-only
+    // items like the Small Magical Pack are still reachable via the
+    // dev cheat. Players can't get them via natural drops either way.
+    { kind: 'armor', list: Object.values(ARMOR_DEFS),
       build: (d) => withAffixes({ ...d, durability: { ...(d.durability || {}) } }) },
-    { kind: 'gear', list: ALL_GEAR,
+    { kind: 'gear', list: Object.values(GEAR_DEFS),
       build: (d) => withAffixes({ ...d, durability: { ...(d.durability || {}) } }) },
     { kind: 'attachment', list: ALL_ATTACHMENTS,
       build: (d) => ({ ...d, modifier: { ...(d.modifier || {}) } }) },
     { kind: 'consumable', list: Object.values(CONSUMABLE_DEFS || {}),
       build: (d) => ({ ...d }) },
-    { kind: 'throwable', list: Object.values(THROWABLE_DEFS || {}),
+    { kind: 'throwable', list: Object.values(THROWABLE_DEFS || {}),    // already raw — includes mythic + encounter-only
       build: (d) => makeThrowable(d) },
     { kind: 'junk', list: Object.values(JUNK_DEFS || {}),
       build: (d) => ({ ...d }) },
@@ -831,8 +834,8 @@ window.__list = (filter) => {
   const f = filter ? String(filter).toLowerCase() : null;
   const groups = {
     weapons: tunables.weapons.map(d => d.name),
-    armor: ALL_ARMOR.map(d => d.name),
-    gear: ALL_GEAR.map(d => d.name),
+    armor: Object.values(ARMOR_DEFS).map(d => d.name),
+    gear: Object.values(GEAR_DEFS).map(d => d.name),
     attachments: ALL_ATTACHMENTS.map(d => d.name),
     consumables: Object.values(CONSUMABLE_DEFS || {}).map(d => d.name),
     throwables: Object.values(THROWABLE_DEFS || {}).map(d => d.name),
