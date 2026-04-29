@@ -73,17 +73,23 @@ export class LootManager {
       sprite.visible = false;
       group.add(sprite);
 
-      // PointLight on the first LIT_SLOTS only. Idle lights stay at
-      // intensity 0 (no recompile on activation since the scene's
-      // light count is fixed at constructor time). The remaining
-      // slots get a `null` light reference and skip the per-spawn
-      // light tweak.
-      let light = null;
-      if (i < LIT_SLOTS) {
-        light = new THREE.PointLight(0xffffff, 0, 2.2);
-        light.position.y = 0.2;
-        group.add(light);
-      }
+      // No per-drop PointLight. Earlier revisions added a PointLight per
+      // pool slot at intensity:0 idle, intensity:0.9 on use. The
+      // assumption was that pre-allocating the lights upfront froze
+      // the lit-shader's NUM_POINT_LIGHTS at construction time, but
+      // three.js actually counts only VISIBLE (intensity > 0) lights —
+      // so each fresh drop bumps the count and forces a shader
+      // recompile across every lit material in the scene. With 4+
+      // drops in a row the recompile cascade caused the user-reported
+      // hitches that compounded with each drop.
+      //
+      // The emissive material (~0.75× tint) + scene bloom carries the
+      // ground-drop glow visually without a real light. The rare-tier
+      // beacon (epic / legendary / mythic / mastercraft) follows the
+      // same pattern — see _maybeAttachBeacon and the additive emissive
+      // cylinder mesh below.
+      const light = null;
+      void LIT_SLOTS;
 
       // Pre-allocated rarity beacon — vertical column of light + a
       // pulse PointLight, parked invisible at the bottom of the
