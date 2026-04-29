@@ -751,22 +751,41 @@ export class MeleeEnemyManager {
       const playerInSmokeNow = ctx.isInsideSmoke
         ? ctx.isInsideSmoke(ctx.playerPos.x, ctx.playerPos.z)
         : false;
+      const selfInSmoke = ctx.isInsideSmoke
+        ? ctx.isInsideSmoke(e.group.position.x, e.group.position.z)
+        : false;
       if (e.state !== STATE.IDLE) {
-        let zone = playerInSmokeNow && ctx.smokeContaining
-          ? ctx.smokeContaining(ctx.playerPos.x, ctx.playerPos.z)
-          : null;
-        if (!zone && ctx.smokeOnSegment) {
-          zone = ctx.smokeOnSegment(e.group.position.x, e.group.position.z, ctx.playerPos.x, ctx.playerPos.z);
-        }
-        if (zone) {
+        if (selfInSmoke) {
+          // Enemy is blinded inside the cloud — wildly random target
+          // around itself, faster re-roll so the lurch reads as
+          // panicked. Will swing at empty air half the time.
           e.smokeConfusedT = 1.6;
           e.smokeAimReroll = (e.smokeAimReroll || 0) - dt;
-          if (e.smokeAimReroll <= 0 || e.smokeZoneRef !== zone) {
-            const pt = ctx.randomSmokeAim ? ctx.randomSmokeAim(zone) : { x: zone.x, z: zone.z };
-            e.smokeAimX = pt.x;
-            e.smokeAimZ = pt.z;
-            e.smokeAimReroll = 0.7 + Math.random() * 0.6;
-            e.smokeZoneRef = zone;
+          if (e.smokeAimReroll <= 0 || e.smokeZoneRef !== 'self') {
+            const ang = Math.random() * Math.PI * 2;
+            const dist = 1.5 + Math.random() * 3.0;
+            e.smokeAimX = e.group.position.x + Math.cos(ang) * dist;
+            e.smokeAimZ = e.group.position.z + Math.sin(ang) * dist;
+            e.smokeAimReroll = 0.35 + Math.random() * 0.4;
+            e.smokeZoneRef = 'self';
+          }
+        } else {
+          let zone = playerInSmokeNow && ctx.smokeContaining
+            ? ctx.smokeContaining(ctx.playerPos.x, ctx.playerPos.z)
+            : null;
+          if (!zone && ctx.smokeOnSegment) {
+            zone = ctx.smokeOnSegment(e.group.position.x, e.group.position.z, ctx.playerPos.x, ctx.playerPos.z);
+          }
+          if (zone) {
+            e.smokeConfusedT = 1.6;
+            e.smokeAimReroll = (e.smokeAimReroll || 0) - dt;
+            if (e.smokeAimReroll <= 0 || e.smokeZoneRef !== zone) {
+              const pt = ctx.randomSmokeAim ? ctx.randomSmokeAim(zone) : { x: zone.x, z: zone.z };
+              e.smokeAimX = pt.x;
+              e.smokeAimZ = pt.z;
+              e.smokeAimReroll = 0.7 + Math.random() * 0.6;
+              e.smokeZoneRef = zone;
+            }
           }
         }
       }

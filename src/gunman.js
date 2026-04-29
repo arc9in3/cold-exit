@@ -1747,14 +1747,39 @@ export class GunmanManager {
     // Only applies once the AI is already aware of the player (idle
     // patrols don't get fooled by smoke they haven't reacted to).
     if (g.state !== STATE.IDLE) {
-      let zone = playerInSmoke
-        ? (ctx.smokeContaining ? ctx.smokeContaining(ctx.playerPos.x, ctx.playerPos.z) : null)
-        : null;
-      if (!zone && ctx.smokeOnSegment) {
-        zone = ctx.smokeOnSegment(g.group.position.x, g.group.position.z, ctx.playerPos.x, ctx.playerPos.z);
+      // (A) Enemy itself is inside smoke — they're blinded and
+      // fire/move wildly in any direction around their own position.
+      // Re-rolls fast so the spray reads as "panicked".
+      const selfInSmoke = ctx.isInsideSmoke
+        ? ctx.isInsideSmoke(g.group.position.x, g.group.position.z)
+        : false;
+      // (B) Otherwise, smoke between this enemy and the player (or
+      // player inside smoke) — aim into the freshest such zone.
+      let zone = null;
+      if (!selfInSmoke) {
+        zone = playerInSmoke
+          ? (ctx.smokeContaining ? ctx.smokeContaining(ctx.playerPos.x, ctx.playerPos.z) : null)
+          : null;
+        if (!zone && ctx.smokeOnSegment) {
+          zone = ctx.smokeOnSegment(g.group.position.x, g.group.position.z, ctx.playerPos.x, ctx.playerPos.z);
+        }
       }
-      if (zone) {
-        g.smokeConfusedT = 1.6;     // refresh while obstructed
+      if (selfInSmoke) {
+        g.smokeConfusedT = 1.6;
+        g.smokeAimReroll = (g.smokeAimReroll || 0) - dt;
+        if (g.smokeAimReroll <= 0 || g.smokeZoneRef !== 'self') {
+          // Random direction, 2-6m out from the enemy. The fire path
+          // raycasts to this point — bullet flies into whatever
+          // happens to be in that direction.
+          const ang = Math.random() * Math.PI * 2;
+          const dist = 2 + Math.random() * 4;
+          g.smokeAimX = g.group.position.x + Math.cos(ang) * dist;
+          g.smokeAimZ = g.group.position.z + Math.sin(ang) * dist;
+          g.smokeAimReroll = 0.35 + Math.random() * 0.4;  // faster spray
+          g.smokeZoneRef = 'self';
+        }
+      } else if (zone) {
+        g.smokeConfusedT = 1.6;
         g.smokeAimReroll = (g.smokeAimReroll || 0) - dt;
         if (g.smokeAimReroll <= 0 || g.smokeZoneRef !== zone) {
           const pt = ctx.randomSmokeAim ? ctx.randomSmokeAim(zone) : { x: zone.x, z: zone.z };

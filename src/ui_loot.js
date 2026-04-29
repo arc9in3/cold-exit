@@ -211,6 +211,11 @@ export class LootUI {
   open(target) {
     this.target = target;
     this.bodyHidden = false;
+    // Register the workspace as the inventory's overflow sink. Any
+    // swap that displaces an item that doesn't fit in pockets/rig/
+    // backpack now falls into the workspace (which grows as needed)
+    // instead of silently rolling back the swap.
+    this.inventory._overflowSink = (item) => this._pushToWorkspace(item);
     this.bodyColEl.style.display = '';
     if (this.bodyEl) this.bodyEl.classList.remove('body-hidden');
     // Containers AND ground piles both use the no-body layout — no
@@ -289,6 +294,14 @@ export class LootUI {
       this.workspaceGrid.clear();
       for (const it of leftovers) if (this.onDrop) this.onDrop(it);
     }
+    // Restore workspace to its base size so the next loot session
+    // doesn't keep growing rows from a previous overflow burst.
+    if (this.workspaceGrid && this.workspaceGrid.w > WORKSPACE_W) {
+      this.workspaceGrid.resize(WORKSPACE_W, WORKSPACE_H);
+    }
+    // Drop the overflow sink — standalone inventory should rollback
+    // again when the loot UI isn't open.
+    if (this.inventory) this.inventory._overflowSink = null;
     this.root.style.display = 'none';
     if (this.target) this.target.looted = (this.target.loot?.length || 0) === 0;
     this.target = null;
@@ -398,8 +411,10 @@ export class LootUI {
               if (srcGrid) srcGrid.remove(item);
               this.inventory.equipment[slot] = item;
               this.inventory._recomputeCapacity();
-              if (prev && !this.inventory.autoPlaceAnywhere(prev)) {
-                // Rollback — no room for the displaced item.
+              if (prev && !this.inventory.placeOrOverflow(prev)) {
+                // True last-resort rollback — placeOrOverflow already
+                // tries the workspace, so this branch only fires if
+                // even the workspace refused (shouldn't happen).
                 this.inventory.equipment[slot] = prev;
                 this.inventory._recomputeCapacity();
                 this.inventory.autoPlaceAnywhere(item);
@@ -416,9 +431,10 @@ export class LootUI {
             const prev = this.inventory.equipment[slot];
             this.workspaceGrid.remove(d.entry);
             this.inventory.equipment[slot] = item;
-            if (prev && !this.inventory.autoPlaceAnywhere(prev)) {
-              // No room anywhere — put the displaced item back into the
-              // workspace so nothing is lost.
+            // placeOrOverflow tries containers, then falls back to the
+            // workspace (which grows). The displaced item should
+            // always land somewhere.
+            if (prev && !this.inventory.placeOrOverflow(prev)) {
               this.inventory.equipment[slot] = prev;
               this.workspaceGrid.autoPlace(item);
             }
@@ -2040,6 +2056,34 @@ export class LootUI {
   }
 
   // ——— workspace (staging grid) ————————————————————————————————————
+
+  // Overflow path used by inventory.placeOrOverflow when no container
+  // grid has room. Tries autoPlace; if that fails because the
+  // workspace is full, grows it wide enough to fit the item and
+  // tries again. Always returns true (the workspace is unbounded).
+  _pushToWorkspace(item) {
+    stampItemDims(item);
+    if (this.workspaceGrid.autoPlace(item)) {
+      this.render();
+      return true;
+    }
+    // Need more room. Grow width by max(item.w, 4) so we don't have
+    // to resize on every overflow. Item dims are 1×1..3×3 typically.
+    const need = Math.max(2, (item.w | 0) || 1, (item.h | 0) || 1);
+    const newW = this.workspaceGrid.w + Math.max(4, need * 2);
+    const newH = Math.max(this.workspaceGrid.h, need);
+    this.workspaceGrid.resize(newW, newH);
+    if (this.workspaceGrid.autoPlace(item)) {
+      this.render();
+      return true;
+    }
+    // Pathological — item bigger than the grid even after growth.
+    // Grow once more big enough to cover it.
+    this.workspaceGrid.resize(newW + need, Math.max(newH, need));
+    this.workspaceGrid.autoPlace(item);
+    this.render();
+    return true;
+  }
 
   _buildWorkspace() {
     if (!this.workspaceEl) return;

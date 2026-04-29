@@ -132,6 +132,27 @@ export class GridContainer {
     return this.move(entry, entry.x, entry.y, !entry.rotated);
   }
 
+  // Grow the grid in-place. Existing entries keep their (x, y) — the
+  // backing cell array is rebuilt at the new dimensions and entries
+  // are re-stamped onto it. Used by the workspace overflow path so a
+  // displaced item that doesn't fit in the player's containers can
+  // still land somewhere safe.
+  resize(newW, newH) {
+    if (newW < this.w || newH < this.h) return false;
+    const cells = new Array(newW * newH).fill(null);
+    for (const entry of this._entries) {
+      for (let dy = 0; dy < entry.h; dy++) {
+        for (let dx = 0; dx < entry.w; dx++) {
+          cells[(entry.y + dy) * newW + (entry.x + dx)] = entry;
+        }
+      }
+    }
+    this.w = newW;
+    this.h = newH;
+    this._cells = cells;
+    return true;
+  }
+
   // Lookup helpers.
   at(x, y) {
     if (x < 0 || y < 0 || x >= this.w || y >= this.h) return null;

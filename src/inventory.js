@@ -2274,6 +2274,18 @@ export class Inventory {
     return null;
   }
 
+  // autoPlaceAnywhere → if that fails, fall through to a registered
+  // overflow sink (the loot-UI workspace, set on open / cleared on
+  // close). Returns true iff the item landed somewhere safe. Swap
+  // paths use this in place of plain autoPlaceAnywhere so a swap
+  // never silently rolls back when there's nowhere obvious to put
+  // the displaced item.
+  placeOrOverflow(item) {
+    if (this.autoPlaceAnywhere(item)) return true;
+    if (typeof this._overflowSink === 'function' && this._overflowSink(item)) return true;
+    return false;
+  }
+
   add(item) {
     if (!item) return { placed: false };
     stampItemDims(item);

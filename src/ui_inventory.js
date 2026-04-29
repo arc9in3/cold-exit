@@ -363,7 +363,9 @@ export class InventoryUI {
           this.inventory.equipment[slot] = item;
           this.inventory._recomputeCapacity?.();
           if (prev) {
-            if (!this.inventory.autoPlaceAnywhere(prev)) {
+            // placeOrOverflow falls through to the loot UI workspace
+            // when registered. Rolls back only as a last resort.
+            if (!this.inventory.placeOrOverflow(prev)) {
               this.inventory.equipment[slot] = prev;
               this.inventory._recomputeCapacity?.();
               this.inventory.autoPlaceAnywhere(item);
@@ -880,8 +882,9 @@ export class InventoryUI {
       srcGrid.remove(item);
       this.inventory.equipment[slotId] = item;
       this.inventory._recomputeCapacity?.();
-      if (prev && !this.inventory.autoPlaceAnywhere(prev)) {
-        // Rollback — target had an item that can't fit anywhere.
+      if (prev && !this.inventory.placeOrOverflow(prev)) {
+        // True rollback — only fires when no overflow sink is set
+        // (i.e. inventory open standalone, no workspace available).
         this.inventory.equipment[slotId] = prev;
         this.inventory._recomputeCapacity?.();
         this.inventory.autoPlaceAnywhere(item);
