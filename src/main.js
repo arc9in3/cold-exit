@@ -8299,13 +8299,17 @@ function updateHealthHud(playerInfo) {
 
 // Nearest dead body within reach — used for the loot prompt.
 function nearestBody(playerPos, radius = 2.2) {
-  let best = null, bestDist = radius;
+  // Squared-distance compare — Math.hypot is ~5-8× slower because of
+  // overflow-safe scaling, and we never use the actual distance value
+  // here, just the ordering. Called every frame from updateLootPrompt.
+  let best = null;
+  let bestDist2 = radius * radius;
   const check = (e) => {
     if (e.alive) return;
     const dx = e.group.position.x - playerPos.x;
     const dz = e.group.position.z - playerPos.z;
-    const d = Math.hypot(dx, dz);
-    if (d < bestDist) { bestDist = d; best = e; }
+    const d2 = dx * dx + dz * dz;
+    if (d2 < bestDist2) { bestDist2 = d2; best = e; }
   };
   for (const g of gunmen.gunmen) check(g);
   for (const m of melees.enemies) check(m);
