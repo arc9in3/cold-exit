@@ -1797,7 +1797,11 @@ function _tryAcquireRelic(item) {
   sfx.uiAccept?.();
   const def = ARTIFACT_DEFS[item.artifactId];
   const tag = def?.short ? ` — ${def.short}` : '';
-  transientHudMsg(`RELIC ACQUIRED: ${item.name}${tag}`, 5.0);
+  // Floor-pickup relics carry item.name; auto-grant paths (cursed
+  // chest, encounter rewards) only ship { type, artifactId }, so
+  // fall back to the def's name to avoid 'RELIC ACQUIRED: undefined'.
+  const name = item.name || def?.name || item.artifactId;
+  transientHudMsg(`RELIC ACQUIRED: ${name}${tag}`, 5.0);
   return true;
 }
 
