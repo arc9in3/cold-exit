@@ -52,10 +52,13 @@ const BASELINE_STARTERS = ['Makarov', 'M1911', 'PDW', 'SPCA3', 'Mini-14', 'Mossb
 // live in the WEAPON UNLOCKS section under the armory; armor is a
 // run-persistent slot, not a temporary boost. Everything here is
 // "use it up during the run" gear: heals, ammo packs, run buffs.
+// Store rotates between medical consumables (medkit / bandage / stim)
+// and armor. Ammo and buff items are gone from the store roll — the
+// pre-mission boost reads as "stock up on heals + armor" only, which
+// keeps the curation focused and predictable for the player.
 const STORE_KINDS = [
-  { kind: 'consumable', weight: 60 },
-  { kind: 'ammo',       weight: 18 },
-  { kind: 'buff',       weight: 22 },
+  { kind: 'consumable', weight: 55 },
+  { kind: 'armor',      weight: 45 },
 ];
 const STORE_ARMOR_CATALOG = [
   { id: 'chest_med',          name: 'Combat Vest',     kind: 'armor', slot: 'chest',    rarity: 'uncommon', basePrice: 220 },
@@ -2831,10 +2834,13 @@ export class HideoutUI {
         color: #e8dfc8;
       }
 
-      /* BOTTOM-RIGHT ACTION CLUSTER — Quick Start + Start Run */
+      /* BOTTOM-RIGHT ACTION CLUSTER — Quick Start + Start Run buttons
+         removed per UI overhaul. Run launches happen via the contractor
+         flow's CONFIRM LOADOUT button instead. The DOM nodes are still
+         created by render() but hidden so the rest of the wiring is
+         intact for future re-introduction. */
       #hideout-actions {
-        position: absolute; bottom: 20px; right: 20px;
-        display: flex; gap: 8px;
+        display: none !important;
       }
 
       /* TOP HORIZONTAL TAB BAR — sits below the topbar, spans the
@@ -2858,10 +2864,10 @@ export class HideoutUI {
 
       /* CONTENT PANEL — edge-to-edge by default. Every tab uses the
          contractor-stage treatment now: full window minus topbar +
-         tab strip + bottom action cluster. Individual tab bodies
-         own their internal layout. */
+         tab strip. Bottom action cluster removed in the UI overhaul,
+         so the panel now reaches all the way to bottom: 16px. */
       #hideout-panel {
-        position: absolute; top: 132px; left: 16px; right: 16px; bottom: 80px;
+        position: absolute; top: 132px; left: 16px; right: 16px; bottom: 16px;
         width: auto; max-width: none;
         background: linear-gradient(180deg, rgba(14,16,24,0.92) 0%, rgba(14,16,24,0.95) 100%);
         border: 1px solid rgba(90,138,207,0.4); border-radius: 6px;
@@ -3119,15 +3125,16 @@ export class HideoutUI {
       .prep-sub {
         font-size: 11px; color: #c9a87a; margin-top: 4px; letter-spacing: 1px;
       }
-      /* Mission-prep three-column grid. Per the design brief, the
-         armory is the most prestigious surface — equal width with
-         the paperdoll, store column narrower since it's the lowest
-         priority of the three (boost shop, not mandatory). */
+      /* Mission-prep three-column grid. With the panel now running
+         full-width, the pre-run store column gets more breathing room
+         to display a richer stock catalog. Paperdoll stays fixed-
+         width since it's a single-figure layout; armory + store both
+         flex on the remaining horizontal space. */
       .contractor-loadout {
         position: absolute; inset: 0;
         display: grid;
-        grid-template-columns: 300px minmax(0, 1.5fr) 280px;
-        gap: 16px; padding: 92px 24px 96px;
+        grid-template-columns: 280px minmax(0, 1fr) minmax(0, 1.2fr);
+        gap: 16px; padding: 88px 24px 56px;
       }
       .loadout-storecol { overflow-y: auto; }
       .loadout-armorycol { overflow-y: auto; }

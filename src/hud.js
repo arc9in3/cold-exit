@@ -25,6 +25,15 @@ const _DMG_KEYFRAMES = [
   { transform: 'translate(-50%, -70%) scale(1.1)', opacity: 1, offset: 0.15 },
   { transform: 'translate(-50%, -160%) scale(1.0)', opacity: 0 },
 ];
+// Crit + headshot keyframes — number punches in larger, then settles
+// to the regular display size before drifting up to fade. The brief
+// oversize pop is the visual reward for landing the high-skill hit.
+const _DMG_CRIT_KEYFRAMES = [
+  { transform: 'translate(-50%, -50%) scale(0.7)', opacity: 0 },
+  { transform: 'translate(-50%, -65%) scale(1.7)', opacity: 1, offset: 0.10 },
+  { transform: 'translate(-50%, -85%) scale(1.0)', opacity: 1, offset: 0.30 },
+  { transform: 'translate(-50%, -160%) scale(1.0)', opacity: 0 },
+];
 const _DMG_ANIM_OPTS = { duration: 900, easing: 'ease-out', fill: 'forwards' };
 
 function _ensureDmgPool() {
@@ -39,7 +48,7 @@ function _ensureDmgPool() {
   }
 }
 
-export function spawnDamageNumber(worldPos, camera, amount, zone) {
+export function spawnDamageNumber(worldPos, camera, amount, zone, isCrit) {
   _ensureDmgPool();
   const p = worldPos.clone().project(camera);
   const x = (p.x * 0.5 + 0.5) * window.innerWidth;
@@ -59,15 +68,21 @@ export function spawnDamageNumber(worldPos, camera, amount, zone) {
     if (slot.anim) slot.anim.cancel();
   }
   slot.inUse = true;
+  // Headshots and crits both get the punchy "crit" animation. Zone
+  // classes still drive color (head → crit-color via ZONE_CLASS).
+  const isHeadOrCrit = zone === 'head' || !!isCrit;
   const cls = ZONE_CLASS[zone] ?? '';
-  slot.el.className = 'dmg-number' + (cls ? ' ' + cls : '');
+  slot.el.className = 'dmg-number'
+    + (cls ? ' ' + cls : '')
+    + (isHeadOrCrit ? ' crit-pop' : '');
   slot.el.textContent = Math.round(amount);
   slot.el.style.left = `${x}px`;
   slot.el.style.top = `${y}px`;
   // Cancel any in-flight animation on this slot so the new one
   // restarts from frame zero.
   if (slot.anim) slot.anim.cancel();
-  const anim = slot.el.animate(_DMG_KEYFRAMES, _DMG_ANIM_OPTS);
+  const frames = isHeadOrCrit ? _DMG_CRIT_KEYFRAMES : _DMG_KEYFRAMES;
+  const anim = slot.el.animate(frames, _DMG_ANIM_OPTS);
   slot.anim = anim;
   anim.onfinish = () => {
     if (slot.anim === anim) {

@@ -5425,7 +5425,7 @@ function _tickGrapples(dt) {
 }
 let _playerGrappleT = 0;
 
-function fireOneShot(playerInfo, weapon, aimPoint, isADS, aimOwner) {
+function fireOneShot(playerInfo, weapon, aimPoint, isADS, aimOwner, aimZone) {
   // Active contract modifier — weapon-class restriction. Surfaces a
   // throttled HUD message when fire is blocked so the player
   // understands the trigger isn't broken — it's the contract.
@@ -5490,12 +5490,12 @@ function fireOneShot(playerInfo, weapon, aimPoint, isADS, aimOwner) {
   const fireFrom = playerInfo.fireOrigin || playerInfo.muzzleWorld;
   const tracerFrom = playerInfo.muzzleWorld;
   let aimTarget = aimPoint;
-  if (aimOwner && aimInfo && aimInfo.zone) {
+  if (aimOwner && aimZone) {
     // Walk the locked enemy's hit meshes for the matching zone and
     // use its world center. Falls back to the cursor surface point
     // if the lookup fails (no matching zone mesh, dead enemy, etc.).
     const zoneMesh = (aimOwner.rig?.meshes || []).find(m =>
-      m.userData?.zone === aimInfo.zone);
+      m.userData?.zone === aimZone);
     if (zoneMesh) {
       _tmpAimCenter.setFromMatrixPosition(zoneMesh.matrixWorld);
       aimTarget = _tmpAimCenter;
@@ -5538,6 +5538,13 @@ function fireOneShot(playerInfo, weapon, aimPoint, isADS, aimOwner) {
       ? (_aimCfg.enemyTightenPellet ?? 0.50)   // shotgun / dragonbreath
       : (_aimCfg.enemyTightenSingle ?? 0.20);  // pistol / smg / rifle / sniper / lmg
     spread *= tighten;
+  }
+  // Head-hover bonus — when the cursor is over an enemy head, an
+  // additional spread tightening kicks in on top of the pixel-mode
+  // enemy tighten. Rewards committed head tracking with consistent
+  // landings so headshots feel like a real-skill payoff, not RNG.
+  if (aimZone === 'head' && aimOwner) {
+    spread *= (_aimCfg.headHoverSpreadMult ?? 0.55);
   }
   // LMG Walking Fire — sustained-fire spread bleed. While holding the
   // trigger, multiply spread by max(0, 1 - decay * heldT). Decay tracked
@@ -5989,11 +5996,12 @@ function fireOneShot(playerInfo, weapon, aimPoint, isADS, aimOwner) {
       }
       let agg = hitAgg.get(hit.owner);
       if (!agg) {
-        agg = { totalDmg: 0, hadHead: false, point: hit.point.clone(), dir: dir.clone(), zone: hit.zone || 'torso' };
+        agg = { totalDmg: 0, hadHead: false, hadCrit: false, point: hit.point.clone(), dir: dir.clone(), zone: hit.zone || 'torso' };
         hitAgg.set(hit.owner, agg);
       }
       agg.totalDmg += dmg;
       if (hit.zone === 'head') { agg.hadHead = true; agg.zone = 'head'; }
+      if (crit) agg.hadCrit = true;
       agg.point.copy(hit.point);
       // Ricochet — roll to bounce a second/third round to another nearby enemy.
       // Bounced damage = source dmg × ricochetDmgMult (default 0.6 from
@@ -6071,7 +6079,7 @@ function fireOneShot(playerInfo, weapon, aimPoint, isADS, aimOwner) {
   for (const agg of hitAgg.values()) {
     const burstAmount = agg.hadHead ? 10 : 5;
     combat.spawnBloodBurst(agg.point, agg.dir, burstAmount);
-    spawnDamageNumber(agg.point, camera, agg.totalDmg, agg.zone);
+    spawnDamageNumber(agg.point, camera, agg.totalDmg, agg.zone, agg.hadCrit || agg.hadHead);
     if (agg.hadHead) anyHead = true;
   }
   if (hitAgg.size > 0) {
@@ -6122,7 +6130,7 @@ function tickShooting(dt, playerInfo, inputState, aimInfo) {
   const eff = effectiveWeapon(weapon);
 
   if (playerBurstRemaining > 0 && playerBurstTimer <= 0 && aimInfo.point) {
-    fireOneShot(playerInfo, weapon, aimInfo.point, inputState.adsHeld, aimInfo.owner);
+    fireOneShot(playerInfo, weapon, aimInfo.point, inputState.adsHeld, aimInfo.owner, aimInfo.zone);
     playerBurstRemaining -= 1;
     playerBurstTimer = eff.burstInterval || 0.07;
     return;
@@ -6175,7 +6183,7 @@ function tickShooting(dt, playerInfo, inputState, aimInfo) {
     return;
   }
 
-  fireOneShot(playerInfo, weapon, aimInfo.point, inputState.adsHeld);
+  fireOneShot(playerInfo, weapon, aimInfo.point, inputState.adsHeld, aimInfo.owner, aimInfo.zone);
 
   if (weapon.fireMode === 'burst' && (eff.burstCount | 0) > 1) {
     playerBurstRemaining = (eff.burstCount | 0) - 1;

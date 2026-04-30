@@ -301,6 +301,11 @@ export const tunables = {
     headAssistEnabled: true,
     headAssistRadiusPx: 14,
     headAssistTopBias: 1.2,
+    // When the cursor is over an enemy head (zone === 'head'), spread
+    // gets an additional tightening multiplier on top of the existing
+    // pixel-mode enemyTighten. Headshots are the highest-skill outcome
+    // and should reward consistent aim with consistent landings.
+    headHoverSpreadMult: 0.55,
   },
   medkit: {
     smallHeal: 30,
