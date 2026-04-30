@@ -354,6 +354,7 @@ export const tunables = {
       reloadTime: 3.0,
     },
     {
+      unlockRank: 10, unlockCost: 1000,
       name: 'M249',
       type: 'ranged',
       class: 'lmg',
@@ -383,6 +384,7 @@ export const tunables = {
       // actual identity. The flamer boss archetype still finds it
       // via `tunables.weapons.find(w => w.fireMode === 'flame')`,
       // so the `name` change is purely cosmetic to the player.
+      unlockRank: 12, unlockCost: 1200,
       name: 'Flamethrower',
       type: 'ranged',
       // Reclassed under the unified 'exotic' mastery family (flame, GL,
@@ -429,6 +431,7 @@ export const tunables = {
       // Single-shot, slow flat-flying projectile, big AoE on impact.
       // Reads through the firePlayerProjectile path (main.js:4108)
       // because fireMode === 'projectile'.
+      unlockRank: 14, unlockCost: 1500,
       name: 'Widowmaker Rocket Launcher',
       type: 'ranged',
       class: 'exotic',
@@ -537,6 +540,7 @@ export const tunables = {
       magSize: 30, reloadTime: 1.6,
     },
     {
+      unlockRank: 8, unlockCost: 800,
       name: 'AS VAL', type: 'ranged', class: 'rifle', rarity: 'rare',
       attachmentSlots: ['muzzle', 'barrel', 'underRail', 'sideRail', 'topRail', 'stock', 'grip', 'trigger', 'magazine'],
       fireMode: 'auto', fireRate: 15, damage: 32, range: 50,
@@ -553,6 +557,7 @@ export const tunables = {
       // fire rate, higher per-shot damage, tighter ADS spread, longer
       // range; semi-auto only so it reads as a marksman rifle vs. the
       // VAL's close-range auto role.
+      unlockRank: 8, unlockCost: 800,
       name: 'VSS', type: 'ranged', class: 'rifle', rarity: 'rare',
       attachmentSlots: ['muzzle', 'barrel', 'underRail', 'sideRail', 'topRail', 'stock', 'grip', 'trigger', 'magazine'],
       fireMode: 'semi', fireRate: 4.0, damage: 58, range: 72,
@@ -622,6 +627,7 @@ export const tunables = {
       magSize: 10, reloadTime: 2.4,
     },
     {
+      unlockRank: 16, unlockCost: 2500,
       name: 'Cheytac Intervention', type: 'ranged', class: 'sniper', rarity: 'epic',
       attachmentSlots: ['muzzle', 'topRail', 'stock', 'trigger', 'underRail'],
       // .408 CheyTac is a bolt-action anti-materiel platform. ~0.4/s
@@ -662,6 +668,7 @@ export const tunables = {
 
     // --- LMG lineup ---
     {
+      unlockRank: 10, unlockCost: 1000,
       name: 'Type 80 LMG', type: 'ranged', class: 'lmg', rarity: 'rare',
       attachmentSlots: ['muzzle', 'barrel', 'underRail', 'sideRail', 'topRail', 'stock', 'grip'],
       fireMode: 'auto', fireRate: 12, damage: 36, range: 65,
@@ -1109,6 +1116,7 @@ export const tunables = {
       reloadTime: 2.4,
     },
     {
+      unlockRank: 6, unlockCost: 400,
       name: 'Spectre',
       type: 'ranged',
       class: 'smg',
@@ -1301,6 +1309,7 @@ export const tunables = {
       // cyclic (very high for a pistol caliber), 25-round stick. Even
       // recoil from the in-line bolt makes it remarkably controllable
       // for the rate of fire.
+      unlockRank: 8, unlockCost: 800,
       name: 'Kriss Vector', type: 'ranged', class: 'smg', rarity: 'rare',
       attachmentSlots: ['muzzle', 'underRail', 'sideRail', 'topRail', 'stock', 'grip', 'trigger', 'magazine'],
       fireMode: 'auto', fireRate: 20, damage: 22, range: 28,
@@ -1334,6 +1343,7 @@ export const tunables = {
       reloadTime: 3.2,
     },
     {
+      unlockRank: 5, unlockCost: 200,
       name: 'Sawed-Off Shotgun',
       type: 'ranged',
       class: 'shotgun',
@@ -1357,6 +1367,7 @@ export const tunables = {
       reloadTime: 2.0,
     },
     {
+      unlockRank: 9, unlockCost: 800,
       name: 'KSG-12',
       type: 'ranged',
       class: 'shotgun',
@@ -1629,6 +1640,7 @@ export const tunables = {
       // Henry single-shot 12-gauge slug — break-action, one round at
       // a time, slug round (single high-damage projectile, not pellets
       // like a regular shotgun). Long reload, very high per-shot dmg.
+      unlockRank: 6, unlockCost: 400,
       name: 'Henry Slug Rifle', type: 'ranged', class: 'shotgun', rarity: 'uncommon',
       attachmentSlots: ['muzzle', 'topRail', 'stock', 'trigger'],
       fireMode: 'semi', fireRate: 1.0, damage: 110, range: 60,
