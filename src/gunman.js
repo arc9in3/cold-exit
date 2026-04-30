@@ -893,8 +893,9 @@ export class GunmanManager {
           if (opts.shieldBreaker) {
             // Magnum-class hits chip the 200-HP shield pool. Damage
             // already includes any crit roll from the bullet path.
+            // Flash the SHIELD only — the chassis is intact behind it.
             g.shield.hp -= damage;
-            g.flashT = tunables.enemy.hitFlashTime;
+            g.shield.flashT = tunables.enemy.hitFlashTime;
             if (g.state === STATE.IDLE) g.state = STATE.ALERTED;
             if (g.shield.hp <= 0) {
               g.shield.hp = 0;
@@ -903,8 +904,10 @@ export class GunmanManager {
             }
             return { drops, blocked: true, shieldHit: true, shieldDamage: damage };
           }
-          // Non-breaker bullet — fully blocked. Flash + 0 damage.
-          g.flashT = tunables.enemy.hitFlashTime;
+          // Non-breaker bullet — fully blocked. Flash the SHIELD,
+          // not the body, so the player can read 'shot bounced off'
+          // visually. 0 damage to the chassis.
+          g.shield.flashT = tunables.enemy.hitFlashTime;
           if (g.state === STATE.IDLE) g.state = STATE.ALERTED;
           return { drops, blocked: true, shieldHit: true, shieldBlocked: true, shieldDamage: 0 };
         }
@@ -1101,6 +1104,20 @@ export class GunmanManager {
           // corpse, headless tests).
           g.bodyMat.color.copy(this._normalBodyColor).lerp(this._hurt, k);
           g.headMat.color.copy(this._normalHeadColor).lerp(this._hurt, k);
+        }
+      }
+      // Shield-only flash — fires when a bullet was absorbed/chipped
+      // by the panel. Tints the shield mesh's material to a sharp
+      // spark color so the player reads 'bounced off' without the
+      // body flashing as if the chassis took damage.
+      if (g.shield && (g.shield.flashT || 0) > 0) {
+        g.shield.flashT = Math.max(0, g.shield.flashT - dt);
+        const k = g.shield.flashT / tunables.enemy.hitFlashTime;
+        const mat = g.shield.mesh && g.shield.mesh.material;
+        if (mat && mat.emissive) {
+          mat.emissive.setRGB(k * 0.9, k * 0.85, k * 0.6);
+        } else if (mat && mat.color) {
+          mat.color.lerpColors(mat.color, this._hurt, k * 0.6);
         }
       }
       g.slowT = Math.max(0, g.slowT - dt);

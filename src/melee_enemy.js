@@ -389,9 +389,10 @@ export class MeleeEnemyManager {
           // Magnum-class hits chip the shield's 200 HP pool. Damage
           // already includes any crit roll from the bullet path so a
           // crit landing on the shield does 2× chip damage. No
-          // weakspot — flat dmg = damage.
+          // weakspot — flat dmg = damage. Flash the SHIELD, not the
+          // chassis (it's intact behind the panel).
           e.shield.hp -= damage;
-          e.flashT = tunables.enemy.hitFlashTime;
+          e.shield.flashT = tunables.enemy.hitFlashTime;
           if (e.shield.hp <= 0) {
             e.shield.hp = 0;
             this._disableShield(e);
@@ -399,9 +400,9 @@ export class MeleeEnemyManager {
           }
           return { drops, blocked: true, shieldHit: true, shieldDamage: damage };
         }
-        // Non-breaker bullet — fully blocked. Shield flash + show
-        // 0 dmg so the player sees the shot landed but did nothing.
-        e.flashT = tunables.enemy.hitFlashTime;
+        // Non-breaker bullet — fully blocked. Flash the SHIELD only;
+        // the body behind didn't take damage so it shouldn't flash.
+        e.shield.flashT = tunables.enemy.hitFlashTime;
         return { drops, blocked: true, shieldHit: true, shieldBlocked: true, shieldDamage: 0 };
       }
     }
@@ -515,6 +516,17 @@ export class MeleeEnemyManager {
         const k = e.flashT / tunables.enemy.hitFlashTime;
         e.bodyMat.color.copy(this._baseBody).lerp(this._hurt, k);
         e.headMat.color.copy(this._baseHead).lerp(this._hurt, k);
+      }
+      // Shield-only flash — fires when a bullet was absorbed/chipped
+      // by the panel. Tints just the shield mesh's emissive so the
+      // body color stays neutral (the chassis is intact).
+      if (e.shield && (e.shield.flashT || 0) > 0) {
+        e.shield.flashT = Math.max(0, e.shield.flashT - dt);
+        const k = e.shield.flashT / tunables.enemy.hitFlashTime;
+        const mat = e.shield.mesh && e.shield.mesh.material;
+        if (mat && mat.emissive) {
+          mat.emissive.setRGB(k * 0.9, k * 0.85, k * 0.6);
+        }
       }
 
       e.blindT = Math.max(0, (e.blindT || 0) - dt);
