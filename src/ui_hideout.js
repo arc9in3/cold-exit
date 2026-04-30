@@ -18,6 +18,7 @@ import {
   getActiveContract, setActiveContract,
   getPersistentChips, setPersistentChips,
   getMarks, awardMarks, spendMarks, bumpContractRank, getContractRank, getMegabossKills,
+  getRankPoints, awardRankPoints, rankPointsForNext,
   getSigils, awardSigils, spendSigils,
   getRelicPermits, setRelicPermitOwned, hasRelicPermit,
   getKeystoneQueue, queueKeystone, getOwnedKeystones, setKeystoneOwned,
@@ -41,6 +42,7 @@ import {
   CONTRACT_DEFS, defForId, contractExpired,
   pickDailyContract, pickWeeklyContract, utcDayIndex, utcWeekIndex,
   liveProgressFor, tryClaimContract, isContractUnlocked, buildModifiers, difficultyScore,
+  rankRewardFor, rankPerKillFor,
 } from './contracts.js';
 import { iconForItem, inferRarity, rarityColor, CONSUMABLE_DEFS, ARMOR_DEFS } from './inventory.js';
 
@@ -518,13 +520,15 @@ export class HideoutUI {
     const ac = getActiveContract();
     if (!ac || (ac.claimedAt | 0) > 0) return;
     if (!this._lastRunSnapshot) return;
+    const def = defForId(ac.activeContractId);
+    const completionRank = def ? rankRewardFor(def) : 0;
     const result = tryClaimContract(
       ac,
       this._lastRunSnapshot,
       setActiveContract,
       (n) => { if (this.ctx.awardChips) this.ctx.awardChips(n); },
       (n) => awardMarks(n),
-      () => bumpContractRank(),
+      () => awardRankPoints(completionRank),
       (n) => awardSigils(n),
     );
     this._lastClaim = result;
@@ -1690,11 +1694,16 @@ export class HideoutUI {
       wrap.appendChild(this._renderLeaderboardSection());
     }
 
-    // Corner stats — visible on all steps.
+    // Corner stats — visible on all steps. Rank line shows current
+    // rank + XP progress toward next rank-up so the player can see
+    // exactly what each contract is paying into.
+    const _rankNow = getContractRank();
+    const _ptsNow = getRankPoints();
+    const _ptsNext = rankPointsForNext(_rankNow);
     const corner = document.createElement('div');
     corner.className = 'contractor-corner';
     corner.innerHTML = `
-      <div class="corner-line">RANK <b>${unlockState.contractsCompleted}</b></div>
+      <div class="corner-line corner-rank">RANK <b>${_rankNow}</b> · <b>${_ptsNow}</b>/${_ptsNext} XP</div>
       <div class="corner-line">MEGABOSSES <b>${unlockState.megabossKills}</b></div>
       <div class="corner-refresh">CONTRACT REFRESH<br><span class="refresh-time">${this._refreshCountdownStr()}</span></div>
     `;
@@ -2080,6 +2089,11 @@ export class HideoutUI {
       + (isClaimed ? ' claimed' : '');
     const targetLabel = this._targetLabel(def.targetType, def.targetCount);
     const totalCap = (def.perKillReward | 0) * (def.targetCount | 0) + (def.reward | 0);
+    // Rank-points payout: completion bonus + per-kill bonus. Surface
+    // both numbers so the player sees exactly what each contract is
+    // worth toward their next rank.
+    const rankReward = rankRewardFor(def);
+    const rankPerKill = rankPerKillFor(def);
 
     card.innerHTML = `
       <div class="wanted-portrait" data-portrait="${def.portrait || 'any'}">${this._portraitGlyph(def.portrait)}</div>
@@ -2088,9 +2102,26 @@ export class HideoutUI {
       <div class="wanted-conds">${def.targetCount} × ${targetLabel}</div>
       ${this._renderModifierList(def)}
       <div class="wanted-rewards">
-        <span class="wanted-reward chips" title="Total chips on completion">◇ ${totalCap}c</span>
-        ${(def.marksReward | 0) > 0 ? `<span class="wanted-reward marks" title="Marks on completion">◈ ${def.marksReward}</span>` : ''}
-        ${(def.sigilsReward | 0) > 0 ? `<span class="wanted-reward sigils" title="Sigils on completion">✪ ${def.sigilsReward}</span>` : ''}
+        <div class="wanted-reward-row">
+          <span class="wanted-reward-label">BOUNTY</span>
+          <span class="wanted-reward-val chips">${totalCap}c</span>
+        </div>
+        <div class="wanted-reward-row">
+          <span class="wanted-reward-label">RANK PTS</span>
+          <span class="wanted-reward-val rank">+${rankReward}${rankPerKill > 0 ? ` <span class="wanted-reward-perkill">(+${rankPerKill}/kill)</span>` : ''}</span>
+        </div>
+        ${(def.perKillReward | 0) > 0 ? `<div class="wanted-reward-row">
+          <span class="wanted-reward-label">PER KILL</span>
+          <span class="wanted-reward-val chips">+${def.perKillReward}c</span>
+        </div>` : ''}
+        ${(def.marksReward | 0) > 0 ? `<div class="wanted-reward-row">
+          <span class="wanted-reward-label">MARKS</span>
+          <span class="wanted-reward-val marks">+${def.marksReward}</span>
+        </div>` : ''}
+        ${(def.sigilsReward | 0) > 0 ? `<div class="wanted-reward-row">
+          <span class="wanted-reward-label">SIGILS</span>
+          <span class="wanted-reward-val sigils">+${def.sigilsReward}</span>
+        </div>` : ''}
       </div>
     `;
     if (isClaimed) {
@@ -3663,12 +3694,13 @@ export class HideoutUI {
         color: #6f6754; font-style: italic; padding: 16px;
       }
 
-      /* Wanted-poster card — bigger now */
+      /* Wanted-poster card — sized so the reward breakdown reads at
+         a glance from the player's chair. */
       .wanted-card {
-        flex: 0 0 240px;
+        flex: 0 0 280px;
         background: linear-gradient(180deg, #1a1d24 0%, #0c0e14 100%);
         border: 2px solid #2a2f3a; border-radius: 6px;
-        padding: 10px; display: flex; flex-direction: column; gap: 6px;
+        padding: 12px; display: flex; flex-direction: column; gap: 8px;
         text-align: center;
         box-shadow: 0 4px 16px rgba(0,0,0,0.6);
       }
@@ -3702,28 +3734,44 @@ export class HideoutUI {
       .wanted-portrait[data-portrait="boss"]     { color: #f2c060; }
       .wanted-portrait[data-portrait="megaboss"] { color: #f2a040; }
       .wanted-name {
-        font-size: 13px; font-weight: 700; color: #e8dfc8;
-        letter-spacing: 1.2px; margin-top: 4px;
+        font-size: 16px; font-weight: 700; color: #e8dfc8;
+        letter-spacing: 1.4px; margin-top: 6px;
       }
       .wanted-mission {
-        font-size: 9px; letter-spacing: 1.4px; color: #9b8b6a;
+        font-size: 10px; letter-spacing: 1.6px; color: #9b8b6a;
       }
       .wanted-conds {
-        font-size: 11px; color: #c9a87a;
+        font-size: 13px; color: #c9a87a; font-weight: 700;
       }
       .wanted-card .row-mods {
         margin: 2px 0 0; padding: 0; list-style: none;
-        font-size: 9px; color: #d4a060;
+        font-size: 10px; color: #d4a060;
       }
       .wanted-card .row-mods li { line-height: 1.4; }
+      /* Reward breakdown — line-by-line so each value reads on its
+         own. Player needs to compare bounty vs rank pts vs marks at a
+         glance, so each row gets its own line + label. */
       .wanted-rewards {
-        display: flex; justify-content: center; gap: 8px;
-        font-size: 10px; padding-top: 4px;
+        display: flex; flex-direction: column; gap: 4px;
+        margin-top: 6px; padding-top: 8px;
         border-top: 1px solid #2a2f3a;
       }
-      .wanted-reward.chips  { color: #f2c060; font-weight: 700; }
-      .wanted-reward.marks  { color: #6abf78; }
-      .wanted-reward.sigils { color: #b870e0; }
+      .wanted-reward-row {
+        display: flex; justify-content: space-between;
+        font-size: 13px; line-height: 1.2;
+      }
+      .wanted-reward-label {
+        color: #6f6754; letter-spacing: 1.2px;
+        font-size: 10px; align-self: center;
+      }
+      .wanted-reward-val { font-weight: 700; }
+      .wanted-reward-val.chips  { color: #f2c060; }
+      .wanted-reward-val.rank   { color: #5a8acf; }
+      .wanted-reward-val.marks  { color: #6abf78; }
+      .wanted-reward-val.sigils { color: #b870e0; }
+      .wanted-reward-perkill {
+        color: #6f6754; font-size: 10px; font-weight: 400;
+      }
       .wanted-actions { display: flex; justify-content: center; gap: 6px; }
       .wanted-actions .hideout-btn { width: 100%; }
 
@@ -3731,11 +3779,18 @@ export class HideoutUI {
         position: absolute; bottom: 14px; right: 14px;
         background: rgba(10,12,18,0.7);
         border: 1px solid rgba(90,138,207,0.25); border-radius: 4px;
-        padding: 8px 12px; min-width: 180px;
-        font-size: 10px; letter-spacing: 0.8px; color: #9b8b6a;
+        padding: 10px 14px; min-width: 220px;
+        font-size: 11px; letter-spacing: 0.8px; color: #9b8b6a;
       }
       .contractor-corner b { color: #f2c060; }
       .corner-line { padding: 2px 0; }
+      /* Rank line — bigger so the player notices their progress
+         immediately when they walk up to the contracts board. */
+      .corner-rank {
+        font-size: 14px; letter-spacing: 1.2px; color: #c9a87a;
+        padding: 4px 0;
+      }
+      .corner-rank b { font-size: 16px; }
       .corner-refresh {
         margin-top: 6px; padding-top: 6px;
         border-top: 1px solid rgba(90,138,207,0.2);

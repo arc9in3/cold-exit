@@ -96,6 +96,33 @@ function _autoEval(def) {
     return (ak[def.targetType] | 0) >= need;
   };
 }
+// Per-rarity rank-point defaults — used when a contract def doesn't
+// override `rankReward` / `rankPerKill` explicitly. Rarer contracts
+// pay more both for completion and per qualifying kill, so taking
+// harder contracts is the fastest path to rank-up.
+const RANK_REWARD_BY_RARITY = {
+  common:    5,
+  uncommon:  12,
+  rare:      25,
+  epic:      60,
+  legendary: 120,
+};
+const RANK_PER_KILL_BY_RARITY = {
+  common:    0,
+  uncommon:  0,
+  rare:      1,
+  epic:      2,
+  legendary: 3,
+};
+export function rankRewardFor(def) {
+  if (typeof def?.rankReward === 'number') return def.rankReward | 0;
+  return RANK_REWARD_BY_RARITY[def?.rarity || 'common'] | 0;
+}
+export function rankPerKillFor(def) {
+  if (typeof def?.rankPerKill === 'number') return def.rankPerKill | 0;
+  return RANK_PER_KILL_BY_RARITY[def?.rarity || 'common'] | 0;
+}
+
 function _kill(def) {
   // Wraps a contract def with auto-evaluator + safe defaults.
   return {

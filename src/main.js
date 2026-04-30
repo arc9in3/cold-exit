@@ -66,7 +66,8 @@ import { GameMenuUI } from './ui_menu.js';
 import { StartUI } from './ui_start.js';
 import { MainMenuUI } from './ui_main_menu.js';
 import { HideoutUI } from './ui_hideout.js';
-import { tryClaimContract, defForId, buildModifiers, evaluateContract } from './contracts.js';
+import { tryClaimContract, defForId, buildModifiers, evaluateContract,
+         rankRewardFor, rankPerKillFor } from './contracts.js';
 import {
   getActiveContract, setActiveContract, awardMarks, bumpContractRank, bumpMegabossKills,
   bumpRunCount, queueEncounterFollowup,
@@ -78,6 +79,7 @@ import {
   getRelicPermits,
   getContractRank,
   getRecruiterUnlocks,
+  getRankPoints, awardRankPoints, rankPointsForNext,
 } from './prefs.js';
 import { StoreUpgradeUI, StoreRollUI, rollRarityForTier } from './ui_starting_store.js';
 import { getQualityPref, setQualityPref, applyQuality, qualityFlags } from './quality.js';
@@ -802,6 +804,12 @@ function _applyContractPerKillReward(arch) {
   if ((def.perKillReward | 0) > 0 && counted <= (def.targetCount | 0)) {
     awardPersistentChips(def.perKillReward | 0);
   }
+  // Per-kill rank-point bonus (rare contracts and up). Capped at
+  // targetCount so overkill doesn't farm rank.
+  const perKillRank = rankPerKillFor(def);
+  if (perKillRank > 0 && counted <= (def.targetCount | 0)) {
+    awardRankPoints(perKillRank);
+  }
   // Fire the completion claim the moment the counter reaches the
   // target. Mid-run, no floor-transition wait.
   if (counted === (def.targetCount | 0)) {
@@ -813,13 +821,15 @@ function _applyContractPerKillReward(arch) {
         setActiveContract,
         (n) => awardPersistentChips(n),
         (n) => awardMarks(n),
-        () => bumpContractRank(),
+        () => awardRankPoints(rankRewardFor(def)),
         (n) => awardSigils(n),
       );
       const parts = [];
       if (result.chips > 0)  parts.push(`+${result.chips} chips`);
       if (result.marks > 0)  parts.push(`+${result.marks} marks`);
       if (result.sigils > 0) parts.push(`+${result.sigils} sigils`);
+      const completionRank = rankRewardFor(def);
+      if (completionRank > 0) parts.push(`+${completionRank} rank pts`);
       if (parts.length) {
         transientHudMsg(`Contract complete: ${parts.join(' · ')}`, 3.0);
       }

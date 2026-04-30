@@ -690,6 +690,51 @@ export function bumpContractRank() {
   return next;
 }
 
+// Rank points — XP accumulator that drives rank-ups. Each contract
+// claim (and per-qualifying-kill in some contracts) awards points;
+// when the player crosses the cost-for-next-rank threshold, rank
+// bumps and the carry-over rolls into the next pool. The cost ladder
+// is non-linear so early ranks come fast and later ranks demand
+// committing to harder contracts.
+const RANK_POINTS_KEY = 'tacticalrogue:rankPoints:v1';
+export function getRankPoints() {
+  try { return parseInt(localStorage.getItem(RANK_POINTS_KEY) || '0', 10) || 0; }
+  catch (_) { return 0; }
+}
+export function setRankPoints(n) {
+  try { localStorage.setItem(RANK_POINTS_KEY, String(Math.max(0, n | 0))); }
+  catch (_) {}
+}
+// Cumulative cost to go from `rank` to `rank + 1`. Round-up of
+// 5 × (rank+1)^1.5 gives:
+//   rank 0→1   5 pts
+//   rank 1→2   14 pts
+//   rank 3→4   45 pts
+//   rank 7→8   181 pts
+//   rank 15→16 524 pts
+//   rank 17→18 643 pts
+// A common contract pays 5 pts; a rare pays ~25 + per-kill bonus.
+export function rankPointsForNext(rank) {
+  return Math.max(1, Math.round(5 * Math.pow(((rank | 0) + 1), 1.5)));
+}
+// Award N rank points and roll any accumulated overflow into rank-ups.
+// Returns { rankBefore, rankAfter, pointsAfter } for caller-side
+// toast / unlock-name plumbing.
+export function awardRankPoints(n) {
+  const rankBefore = getContractRank();
+  let rank = rankBefore;
+  let pts = getRankPoints() + Math.max(0, n | 0);
+  let threshold = rankPointsForNext(rank);
+  while (pts >= threshold) {
+    pts -= threshold;
+    rank = rank + 1;
+    setContractRank(rank);
+    threshold = rankPointsForNext(rank);
+  }
+  setRankPoints(pts);
+  return { rankBefore, rankAfter: rank, pointsAfter: pts };
+}
+
 // Relic permits — sigil-spent unlocks that admit a locked relic
 // into the relic-merchant rotation. Persistent Set; once owned, the
 // permit stays forever.
