@@ -1,8 +1,8 @@
 // Hideout — between-runs panel UI.
 //
-// Five tabs: Stash, Quartermaster, Contractor, Doctor, Mailbox.
+// Five tabs: Stash, Armorer, Contractor, Doctor, Mailbox.
 //   Stash:        persistent gear grid (4-8 slots, expandable via chips).
-//   Quartermaster: chip-bought guaranteed gear; tier raises rarity floor.
+//   Armorer: chip-buyable weapon unlocks gated by contract rank.
 //   Contractor:   active contract pickup + status. Daily / weekly rolls.
 //   Doctor:       v1 stub. Opens for hardcore wounded-extract heals later.
 //   Mailbox:      v1 stub. Unlocks once the player has played a co-op session.
@@ -14,7 +14,7 @@
 
 import {
   getStash, setStash, stashAddItem, stashRemoveAt, STASH_SLOT_MIN, STASH_SLOT_MAX, stashNextSlotCost,
-  getHideoutUpgrades, setHideoutUpgrades, quartermasterNextTierCost, QUARTERMASTER_TIER_MAX,
+  getHideoutUpgrades, setHideoutUpgrades,
   getActiveContract, setActiveContract,
   getPersistentChips, setPersistentChips,
   getMarks, awardMarks, spendMarks, bumpContractRank, getContractRank, getMegabossKills,
@@ -84,7 +84,7 @@ const RARITY_INDEX = { common: 0, uncommon: 1, rare: 2, epic: 3, legendary: 4 };
 
 const TAB_DEFS = [
   { id: 'stash',        label: 'STASH'         },
-  { id: 'quartermaster',label: 'QUARTERMASTER' },
+  { id: 'quartermaster',label: 'ARMORER' },
   { id: 'vendors',      label: 'VENDORS'       },
   { id: 'blackmarket',  label: 'BLACK MARKET'  },
   { id: 'contractor',   label: 'CONTRACTOR'    },
@@ -639,12 +639,14 @@ export class HideoutUI {
     const wrap = document.createElement('div');
     wrap.className = 'hideout-tab-body hideout-stash-root';
 
+    // 'armory' sub-tab moved to its own top-level ARMORER tab so the
+    // player has a single place to spend chips on weapon unlocks.
     const SUB_TABS = [
       { id: 'take',   label: 'TAKE A WEAPON' },
-      { id: 'armory', label: 'ARMORY' },
       { id: 'store',  label: 'PRE-RUN STORE' },
       { id: 'bank',   label: 'BANK' },
     ];
+    if (this.stashSubTab === 'armory') this.stashSubTab = 'take';
     const subBar = document.createElement('div');
     subBar.className = 'hideout-substabs';
     for (const t of SUB_TABS) {
@@ -663,7 +665,6 @@ export class HideoutUI {
     const leftCol = document.createElement('div');
     leftCol.className = 'hideout-stash-leftcol';
     if (this.stashSubTab === 'take')        leftCol.appendChild(this._renderTakeSection());
-    else if (this.stashSubTab === 'armory') leftCol.appendChild(this._renderArmorySection());
     else if (this.stashSubTab === 'store')  leftCol.appendChild(this._renderStoreSection());
     else if (this.stashSubTab === 'bank')   leftCol.appendChild(this._renderBankSection());
     cols.appendChild(leftCol);
@@ -739,89 +740,6 @@ export class HideoutUI {
     `;
     tile.addEventListener('click', () => {
       setSelectedStarterWeapon(isSelected ? null : weapon.name);
-      this.render();
-    });
-    return tile;
-  }
-
-  // ----- ARMORY section --------------------------------------------
-  _renderArmorySection() {
-    const wrap = document.createElement('div');
-    wrap.className = 'hideout-stash-section';
-    const head = document.createElement('div');
-    head.className = 'hideout-section-head';
-    head.innerHTML = `
-      <div class="hideout-section-title">ARMORY</div>
-      <div class="hideout-section-sub">Spend chips to permanently unlock weapons. They join your stash and start dropping in the world.</div>
-    `;
-    wrap.appendChild(head);
-
-    const unlocked = getUnlockedWeapons();
-    // A weapon shows up in the chip-buy locked column if it's flagged
-    // worldDrop:false (locked from world entirely) OR it carries an
-    // explicit unlockRank (rank-gated chip-buy that ALSO drops in
-    // runs — the iconic 5). Mythics, artifacts, encounter-only, and
-    // pact-reward weapons are excluded — those have bespoke unlock
-    // paths and should never sit in the chip-buy column.
-    const locked = tunables.weapons.filter(w =>
-      (w.worldDrop === false || (w.unlockRank | 0) > 0)
-      && !w.mythic && w.rarity !== 'mythic'
-      && !w.artifact && !w.encounterOnly && !w.pactReward
-      && !unlocked.has(w.name));
-    if (!locked.length) {
-      const p = document.createElement('div');
-      p.className = 'hideout-placeholder';
-      p.textContent = 'Every weapon unlocked. Nothing left to spend chips on here.';
-      wrap.appendChild(p);
-      return wrap;
-    }
-
-    const RARITY_COSTS = { common: 150, uncommon: 350, rare: 800, epic: 2000, legendary: 5000, mythic: 12000 };
-    const byClass = {};
-    for (const w of locked) {
-      (byClass[w.class || 'other'] = byClass[w.class || 'other'] || []).push(w);
-    }
-    const order = ['pistol', 'smg', 'rifle', 'shotgun', 'sniper', 'lmg', 'melee', 'exotic', 'other'];
-    for (const cls of order) {
-      const list = byClass[cls];
-      if (!list?.length) continue;
-      const sec = document.createElement('div');
-      sec.className = 'hideout-take-classgroup';
-      sec.innerHTML = `<div class="hideout-take-classlabel">${cls.toUpperCase()}</div>`;
-      const row = document.createElement('div');
-      row.className = 'hideout-take-row';
-      for (const w of list) {
-        const cost = (w.unlockCost | 0) > 0
-          ? (w.unlockCost | 0)
-          : (RARITY_COSTS[w.rarity || 'common'] || 150);
-        row.appendChild(this._buildStashArmoryTile(w, cost));
-      }
-      sec.appendChild(row);
-      wrap.appendChild(sec);
-    }
-    return wrap;
-  }
-
-  _buildStashArmoryTile(weapon, cost) {
-    const tile = document.createElement('div');
-    tile.className = 'hideout-take-tile locked';
-    tile.style.borderColor = rarityColor({ rarity: weapon.rarity });
-    const icon = iconForItem({ name: weapon.name, type: weapon.type });
-    tile.innerHTML = `
-      ${icon ? `<img class="hideout-take-icon" src="${icon}" alt="">` : '<div class="hideout-take-icon-fallback"></div>'}
-      <div class="hideout-take-name">${(weapon.name || '').replace(/<[^>]+>/g, '')}</div>
-      <div class="hideout-take-meta">${weapon.rarity || 'common'}</div>
-      <div class="hideout-take-actions">
-        <button type="button" class="hideout-buy">Unlock — ${cost}c</button>
-      </div>
-    `;
-    const btn = tile.querySelector('.hideout-buy');
-    btn.disabled = getPersistentChips() < cost;
-    btn.addEventListener('click', (e) => {
-      e.stopPropagation();
-      if (!this.ctx.spendChips || !this.ctx.spendChips(cost)) return;
-      unlockWeapon(weapon.name);
-      this.ctx.notifyUnlock?.(weapon.name);
       this.render();
     });
     return tile;
@@ -1281,79 +1199,104 @@ export class HideoutUI {
     return tile;
   }
 
-  // ----- Quartermaster ----------------------------------------------
+  // ----- Armorer ----------------------------------------------------
+  // Single home for chip-buy weapon unlocks. Was previously split
+  // across Mission Prep's LOCKED column and Stash > Armory; both have
+  // been removed in favor of this tab. The legacy random-roll feature
+  // (buy a guaranteed weapon at a rarity floor) is deferred for now —
+  // the storage key is still 'quartermaster' so saved tier upgrades
+  // don't get clobbered when the roll comes back.
   _renderQuartermasterTab() {
     const wrap = document.createElement('div');
     wrap.className = 'hideout-tab-body';
-    const upg = getHideoutUpgrades();
-    const tier = upg.quartermasterTier;
-    const tierLabels = ['Common floor', 'Uncommon floor', 'Rare floor', 'Epic floor', 'Legendary floor'];
-    const tierName = tierLabels[tier] || 'Common floor';
 
+    const unlocked = getUnlockedWeapons();
+    const lockedAll = tunables.weapons.filter(w =>
+      !w.mythic && w.rarity !== 'mythic'
+      && !w.artifact && !w.encounterOnly && !w.pactReward
+      && (w.worldDrop === false || (w.unlockRank | 0) > 0)
+      && !unlocked.has(w.name));
+
+    const RARITY_COSTS = { common: 150, uncommon: 350, rare: 800, epic: 2000, legendary: 5000 };
+    const BUYABLE_RANK = { common: 0, uncommon: 2, rare: 5, epic: 10, legendary: 18 };
+    const RARITY_RANK = { legendary: 0, epic: 1, rare: 2, uncommon: 3, common: 4 };
+    const reqRankFor = (w) => (w.unlockRank | 0) > 0
+      ? (w.unlockRank | 0)
+      : (BUYABLE_RANK[w.rarity || 'common'] ?? 0);
+    const costFor = (w) => (w.unlockCost | 0) > 0
+      ? (w.unlockCost | 0)
+      : (RARITY_COSTS[w.rarity || 'common'] || 150);
+    const rank = getContractRank();
+    const isBuyable = (w) => rank >= reqRankFor(w);
+    const reqRankSort = (a, b) => {
+      const ar = reqRankFor(a);
+      const br = reqRankFor(b);
+      if (ar !== br) return ar - br;
+      const arr = RARITY_RANK[a.rarity || 'common'] ?? 5;
+      const brr = RARITY_RANK[b.rarity || 'common'] ?? 5;
+      if (arr !== brr) return arr - brr;
+      const ac = (a.class || '').localeCompare(b.class || '');
+      if (ac !== 0) return ac;
+      return (a.name || '').localeCompare(b.name || '');
+    };
+
+    const buyable = [];
+    const stillLocked = [];
+    for (const w of lockedAll) (isBuyable(w) ? buyable : stillLocked).push(w);
+    buyable.sort(reqRankSort);
+    stillLocked.sort(reqRankSort);
+
+    const totalUnlockable = unlocked.size + lockedAll.length;
     const head = document.createElement('div');
     head.className = 'hideout-section-head';
     head.innerHTML = `
-      <div class="hideout-section-title">QUARTERMASTER</div>
-      <div class="hideout-section-sub">Tier ${tier} / ${QUARTERMASTER_TIER_MAX} — ${tierName}</div>
+      <div class="hideout-section-title">ARMORER</div>
+      <div class="hideout-section-sub">Rank <b>${rank}</b> · <b>${unlocked.size}</b> / ${totalUnlockable} weapons unlocked. Spend chips to permanently add a weapon to your stash.</div>
     `;
     wrap.appendChild(head);
 
-    const blurb = document.createElement('div');
-    blurb.className = 'hideout-blurb';
-    blurb.textContent =
-      'Spend chips on a guaranteed weapon at the current rarity floor. Higher tiers raise the floor. Items go straight to the stash.';
-    wrap.appendChild(blurb);
-
-    // Buy buttons row — generates a single guaranteed item per click.
-    const buyRow = document.createElement('div');
-    buyRow.className = 'hideout-quart-buy-row';
-    const cost = 80 + tier * 60;
-    buyRow.innerHTML = `
-      <span>Buy a guaranteed weapon roll: <b>${cost}</b> chips</span>
-      <button type="button" class="hideout-buy">Buy</button>
-    `;
-    const buyBtn = buyRow.querySelector('.hideout-buy');
-    buyBtn.disabled = getPersistentChips() < cost;
-    buyBtn.title = (this.ctx.rollQuartermasterItem ? '' : 'Quartermaster roll not wired yet — placeholder.');
-    buyBtn.addEventListener('click', () => {
-      if (!this.ctx.spendChips || !this.ctx.spendChips(cost)) return;
-      // Roll an item via the host hook; if missing, just refund.
-      const item = this.ctx.rollQuartermasterItem ? this.ctx.rollQuartermasterItem(tier) : null;
-      if (!item) {
-        // Refund silently — host hasn't wired the roller yet.
-        if (this.ctx.awardChips) this.ctx.awardChips(cost);
-        return;
-      }
-      const slot = stashAddItem(item, upg.stashSlots);
-      if (slot < 0) {
-        // No room — auto-convert + refund the difference.
-        if (this.ctx.awardChips) this.ctx.awardChips(this._chipValueOf(item));
-      }
-      this.render();
-    });
-    wrap.appendChild(buyRow);
-
-    // Tier upgrade button.
-    const upgRow = document.createElement('div');
-    upgRow.className = 'hideout-upgrade-row';
-    const nextCost = quartermasterNextTierCost(tier);
-    if (nextCost == null) {
-      upgRow.innerHTML = `<span class="muted">Quartermaster at max tier.</span>`;
+    // ---- BUYABLE NOW ----
+    const buyHead = document.createElement('div');
+    buyHead.className = 'armory-half-head';
+    buyHead.style.cssText = 'margin-top:14px;';
+    buyHead.textContent = 'BUYABLE NOW';
+    wrap.appendChild(buyHead);
+    const buyGrid = document.createElement('div');
+    buyGrid.className = 'armory-tile-grid';
+    if (!buyable.length) {
+      const e = document.createElement('div');
+      e.className = 'armory-half-empty';
+      e.textContent = lockedAll.length === 0
+        ? 'Every weapon unlocked.'
+        : 'Nothing buyable yet — complete contracts to raise your rank.';
+      buyGrid.appendChild(e);
     } else {
-      upgRow.innerHTML = `
-        <span>Upgrade to Tier ${tier + 1} (${tierLabels[tier + 1] || 'higher floor'}): <b>${nextCost}</b> chips</span>
-        <button type="button" class="hideout-buy">Buy</button>
-      `;
-      const btn = upgRow.querySelector('.hideout-buy');
-      btn.disabled = getPersistentChips() < nextCost;
-      btn.addEventListener('click', () => {
-        if (!this.ctx.spendChips || !this.ctx.spendChips(nextCost)) return;
-        const u = getHideoutUpgrades();
-        setHideoutUpgrades({ ...u, quartermasterTier: Math.min(QUARTERMASTER_TIER_MAX, u.quartermasterTier + 1) });
-        this.render();
-      });
+      for (const w of buyable) {
+        const cost = costFor(w);
+        buyGrid.appendChild(this._buildArmoryMiniTile(w, 'buyable', cost, () => {
+          if (!this.ctx.spendChips || !this.ctx.spendChips(cost)) return;
+          unlockWeapon(w.name);
+          this.ctx.notifyUnlock?.(w.name);
+          this.render();
+        }));
+      }
     }
-    wrap.appendChild(upgRow);
+    wrap.appendChild(buyGrid);
+
+    // ---- WORKING TOWARD ----
+    if (stillLocked.length) {
+      const lockHead = document.createElement('div');
+      lockHead.className = 'armory-half-head';
+      lockHead.style.cssText = 'margin-top:18px;';
+      lockHead.textContent = 'WORKING TOWARD';
+      wrap.appendChild(lockHead);
+      const lockGrid = document.createElement('div');
+      lockGrid.className = 'armory-tile-grid';
+      for (const w of stillLocked) {
+        lockGrid.appendChild(this._buildArmoryMiniTile(w, 'locked', null, null, reqRankFor(w)));
+      }
+      wrap.appendChild(lockGrid);
+    }
 
     // ---- Pouch slot upgrades (absorbed from old Upgrades panel) ----
     const pouchHead = document.createElement('div');
@@ -1827,74 +1770,27 @@ export class HideoutUI {
     `;
     wrap.appendChild(charCol);
 
-    // ----- Middle: ARMORY — owned weapons only. Locked + buyable
-    // weapons moved to their own column on the right (next to the
-    // pre-mission boost). This column is the player's collection
-    // they actually have, categorized by class.
+    // ----- Middle: ARMORY — the player's owned weapons, click to
+    // pick a starter. The chip-buy unlock list lives on its own
+    // ARMORER tab now, so this column is purely "what I own".
     const armoryCol = document.createElement('div');
     armoryCol.className = 'loadout-armorycol loadout-panel';
-    // Locked column = either world-locked (worldDrop:false) OR
-    // rank-gated (explicit unlockRank). The iconic 5 sit in the
-    // second bucket so they remain chip-buyable for permanent stash
-    // access even though they also drop in runs.
-    //
-    // Special-condition unlocks (artifacts like Jessica's Rage,
-    // encounter-only weapons like Zipline Gun, pact rewards like Pain)
-    // are excluded — those have their own bespoke acquisition paths
-    // and should never sit in the chip-buy column.
-    const lockedAll = tunables.weapons.filter(w =>
-      !w.mythic && w.rarity !== 'mythic'
-      && !w.artifact && !w.encounterOnly && !w.pactReward
-      && (w.worldDrop === false || (w.unlockRank | 0) > 0)
-      && !unlocked.has(w.name));
-
-    const RARITY_COSTS = { common: 150, uncommon: 350, rare: 800, epic: 2000, legendary: 5000 };
     const rank = getContractRank();
-    // Rank ladder — each tier visibly opens new weapons in the
-    // armory's LOCKED column when the player crosses the threshold.
-    // Tuned so the early ranks reward the player almost every
-    // contract, while higher rarities take real commitment. Iconic
-    // early unlocks (Glock, UMP45, Remington 700, M4, AK47) override
-    // the rarity gate via per-weapon `unlockRank` so they trickle in
-    // at ranks 1-4 regardless of rarity tier.
-    const BUYABLE_RANK = { common: 0, uncommon: 2, rare: 5, epic: 10, legendary: 18 };
-    const reqRankFor = (w) => (w.unlockRank | 0) > 0
-      ? (w.unlockRank | 0)
-      : (BUYABLE_RANK[w.rarity || 'common'] ?? 0);
-    const costFor = (w) => (w.unlockCost | 0) > 0
-      ? (w.unlockCost | 0)
-      : (RARITY_COSTS[w.rarity || 'common'] || 150);
-    const isBuyable = (w) => rank >= reqRankFor(w);
-
-    const totalRoster = available.length + lockedAll.length;
     armoryCol.innerHTML = `
       <div class="armory-head">
         <div class="armory-eyebrow">YOUR ARMORY</div>
         <div class="armory-title">UNLOCKED COLLECTION</div>
-        <div class="armory-count"><b>${available.length}</b> / ${totalRoster} weapons · Rank <b>${rank}</b></div>
+        <div class="armory-count"><b>${available.length}</b> weapons · Rank <b>${rank}</b></div>
       </div>
     `;
 
     const RARITY_RANK = { legendary: 0, epic: 1, rare: 2, uncommon: 3, common: 4 };
 
-    // Two-column split inside the armory column:
-    //   LEFT half — AVAILABLE (owned, click-to-select)
-    //   RIGHT half — LOCKED (buyable + still-locked, in one list)
-    // Both halves use the same compact tile size so the player can
-    // scan their collection vs. the unlocks they're working toward.
-    const split = document.createElement('div');
-    split.className = 'armory-split';
-
-    // ----- LEFT half: available weapons -----
-    const availCol = document.createElement('div');
-    availCol.className = 'armory-half';
-    availCol.innerHTML = `<div class="armory-half-head">AVAILABLE</div>`;
+    // Single grid — class first, then rarity, then name. Selecting
+    // does NOT promote to the front; highlight is CSS state only so
+    // tiles don't reshuffle on click.
     const availGrid = document.createElement('div');
-    availGrid.className = 'armory-tile-grid';
-    // Stable sort — class first, then rarity, then name. Selecting
-    // a weapon does NOT promote it to the front; the highlight reads
-    // entirely via CSS state so tiles don't visibly reshuffle on
-    // every click.
+    availGrid.className = 'armory-tile-grid loadout-armory-grid';
     const availSorted = available.slice().sort((a, b) => {
       if (a.class !== b.class) return (a.class || '').localeCompare(b.class || '');
       const ar = RARITY_RANK[a.rarity || 'common'] ?? 5;
@@ -1917,59 +1813,7 @@ export class HideoutUI {
       e.textContent = 'No weapons available.';
       availGrid.appendChild(e);
     }
-    availCol.appendChild(availGrid);
-    split.appendChild(availCol);
-
-    // ----- RIGHT half: locked weapons (buyable + still-locked) ----
-    const lockedCol = document.createElement('div');
-    lockedCol.className = 'armory-half';
-    lockedCol.innerHTML = `<div class="armory-half-head">LOCKED · WORKING TOWARD</div>`;
-    const lockedGrid = document.createElement('div');
-    lockedGrid.className = 'armory-tile-grid';
-    const buyable = [];
-    const stillLocked = [];
-    for (const w of lockedAll) {
-      if (isBuyable(w)) buyable.push(w);
-      else stillLocked.push(w);
-    }
-    // Locked column orders strictly by required rank (lowest first) so
-    // the next unlock the player is working toward sits at the top of
-    // the list. Ties break on rarity, then class, then name.
-    const reqRankSort = (a, b) => {
-      const ar = reqRankFor(a);
-      const br = reqRankFor(b);
-      if (ar !== br) return ar - br;
-      const arr = RARITY_RANK[a.rarity || 'common'] ?? 5;
-      const brr = RARITY_RANK[b.rarity || 'common'] ?? 5;
-      if (arr !== brr) return arr - brr;
-      const ac = (a.class || '').localeCompare(b.class || '');
-      if (ac !== 0) return ac;
-      return (a.name || '').localeCompare(b.name || '');
-    };
-    buyable.sort(reqRankSort);
-    stillLocked.sort(reqRankSort);
-    for (const w of buyable) {
-      const cost = costFor(w);
-      lockedGrid.appendChild(this._buildArmoryMiniTile(w, 'buyable', cost, () => {
-        if (!this.ctx.spendChips || !this.ctx.spendChips(cost)) return;
-        unlockWeapon(w.name);
-        this.ctx.notifyUnlock?.(w.name);
-        this.render();
-      }));
-    }
-    for (const w of stillLocked) {
-      lockedGrid.appendChild(this._buildArmoryMiniTile(w, 'locked', null, null, reqRankFor(w)));
-    }
-    if (!buyable.length && !stillLocked.length) {
-      const e = document.createElement('div');
-      e.className = 'armory-half-empty';
-      e.textContent = 'Every weapon unlocked.';
-      lockedGrid.appendChild(e);
-    }
-    lockedCol.appendChild(lockedGrid);
-    split.appendChild(lockedCol);
-
-    armoryCol.appendChild(split);
+    armoryCol.appendChild(availGrid);
     wrap.appendChild(armoryCol);
 
     // ----- Right: Pre-Run Store (upgrades top · stock middle ·
