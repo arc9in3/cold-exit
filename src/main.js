@@ -5878,9 +5878,15 @@ function fireOneShot(playerInfo, weapon, aimPoint, isADS, aimOwner, aimZone) {
     if (hit && hit.owner && hit.mesh) {
       hit.point = hit.mesh.getWorldPosition(new THREE.Vector3());
     }
+    // Tracer endpoint uses the per-pellet jittered range, not
+    // effRange. Without this every miss draws to the same wall-of-
+    // tracers terminator at exactly classMaxRange — looks identical
+    // shot-to-shot. With _pelletRange (±25% per shot) tracers fade
+    // out at the actual reach of that bullet, which reads as real
+    // ballistic spread.
     const endPoint = hit
       ? hit.point
-      : _tmpEndPt.copy(fireFrom).addScaledVector(dir, effRange);
+      : _tmpEndPt.copy(fireFrom).addScaledVector(dir, _pelletRange);
     if (window.__debug?.traceShots && hit) {
       const m = hit.mesh || hit.object;
       const ud = m?.userData || {};
