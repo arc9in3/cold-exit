@@ -2833,26 +2833,32 @@ export class HideoutUI {
         display: flex; gap: 8px;
       }
 
-      /* BOTTOM-LEFT TAB STRIP — vertical column tucked into corner.
-         z-index keeps it above the contractor stage panel which
-         extends edge-to-edge and would otherwise cover this. */
+      /* TOP HORIZONTAL TAB BAR — sits below the topbar, spans the
+         full width. Replaces the old bottom-left vertical strip
+         which was covering back-buttons on the contractor stage. */
       #hideout-tabs {
-        position: absolute; bottom: 20px; left: 20px;
+        position: absolute; top: 78px; left: 16px; right: 16px;
         z-index: 50;
-        display: flex; flex-direction: column; gap: 4px;
+        display: flex; flex-direction: row; gap: 2px;
         background: linear-gradient(180deg, rgba(14,16,24,0.85) 0%, rgba(14,16,24,0.65) 100%);
         border: 1px solid rgba(90,138,207,0.4); border-radius: 6px;
-        padding: 8px;
+        padding: 6px 8px;
         backdrop-filter: blur(4px);
         box-shadow: 0 4px 18px rgba(0,0,0,0.6);
-        max-height: calc(100vh - 180px); overflow-y: auto;
+        overflow-x: auto;
       }
-      #hideout-tabs .hideout-tab { text-align: left; min-width: 160px; }
+      #hideout-tabs .hideout-tab {
+        text-align: center; min-width: 110px;
+        padding: 7px 16px; flex: 0 0 auto;
+      }
 
-      /* FLOATING CONTENT PANEL — right side, scrollable */
+      /* CONTENT PANEL — edge-to-edge by default. Every tab uses the
+         contractor-stage treatment now: full window minus topbar +
+         tab strip + bottom action cluster. Individual tab bodies
+         own their internal layout. */
       #hideout-panel {
-        position: absolute; top: 84px; right: 16px; bottom: 80px;
-        width: 580px; max-width: 50vw;
+        position: absolute; top: 132px; left: 16px; right: 16px; bottom: 80px;
+        width: auto; max-width: none;
         background: linear-gradient(180deg, rgba(14,16,24,0.92) 0%, rgba(14,16,24,0.95) 100%);
         border: 1px solid rgba(90,138,207,0.4); border-radius: 6px;
         padding: 14px 18px;
@@ -2866,17 +2872,15 @@ export class HideoutUI {
       #hideout-panel::-webkit-scrollbar-thumb { background: #2a2f3a; border-radius: 4px; }
       #hideout-panel::-webkit-scrollbar-thumb:hover { background: #3a3f4a; }
 
-      /* Stash twocol — compress to single column inside the narrower
-         panel (paperdoll moves below or hides). */
-      #hideout-panel .hideout-stash-twocol { grid-template-columns: 1fr; }
-      #hideout-panel .hideout-paperdoll-col { display: none; }
+      /* Stash twocol — natural twocol layout from .hideout-stash-twocol
+         applies now that #hideout-panel runs full-width. The compress-
+         to-single-column override has been removed. */
 
       /* === CONTRACTOR STAGE === */
-      /* When the contractor tab is active, the panel takes the full
-         window — no tab strip. Edge-to-edge stage. */
+      /* Edge-to-edge is now the default for #hideout-panel. The
+         contractor stage just removes its inner padding so the
+         absolute-positioned children can fill cleanly. */
       #hideout-panel:has(.contractor-stage) {
-        top: 84px; right: 16px; bottom: 16px; left: 16px;
-        width: auto; max-width: none;
         padding: 0; overflow: hidden;
         background: linear-gradient(180deg, rgba(12,14,22,0.95) 0%, rgba(20,16,28,0.96) 100%);
       }
