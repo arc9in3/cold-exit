@@ -42,7 +42,7 @@ import {
   pickDailyContract, pickWeeklyContract, utcDayIndex, utcWeekIndex,
   liveProgressFor, tryClaimContract, isContractUnlocked, buildModifiers, difficultyScore,
 } from './contracts.js';
-import { iconForItem, inferRarity, rarityColor, CONSUMABLE_DEFS } from './inventory.js';
+import { iconForItem, inferRarity, rarityColor, CONSUMABLE_DEFS, ARMOR_DEFS } from './inventory.js';
 
 // Baseline starter-weapon roster — five always-free common picks,
 // one per major class. Must match BASELINE_STARTER_NAMES in main.js.
@@ -862,6 +862,27 @@ export class HideoutUI {
     const state = getStoreState();
     const slot = state.stock[idx];
     if (!slot || slot.sold) return;
+    // Replacement warning — armor slots only one piece per slot at run
+    // start, so buying a second chest/head/etc. piece overwrites the
+    // first one (the displaced one falls into loose inventory at run
+    // start, not back into the store). Confirm before charging chips.
+    if (slot.kind === 'armor' && slot.armorSlot) {
+      const queue = getStarterInventory();
+      const existing = queue.find(q => q && q.__storeArmor && q.slot === slot.armorSlot);
+      if (existing) {
+        const exDef = ARMOR_DEFS && ARMOR_DEFS[existing.defId];
+        const exName = exDef?.name || existing.defId;
+        const ok = window.confirm(
+          `You already have ${exName} queued for the ${slot.armorSlot} slot.\n` +
+          `Buying ${slot.label} will replace it — the previous piece will be lost.\n\n` +
+          `Continue?`
+        );
+        if (!ok) return;
+        // Drop the displaced entry from the queue before adding the new one.
+        const next = queue.filter(q => !(q && q.__storeArmor && q.slot === slot.armorSlot));
+        setStarterInventory(next);
+      }
+    }
     if (!this.ctx.spendChips || !this.ctx.spendChips(slot.price)) return;
     // Build the actual run-inventory item from the slot blueprint.
     const item = this._materializeStoreItem(slot);
@@ -872,6 +893,7 @@ export class HideoutUI {
     }
     slot.sold = true;
     setStoreState(state);
+    // Re-render so the paperdoll picks up the new slot art live.
     this.render();
   }
 
@@ -1733,6 +1755,27 @@ export class HideoutUI {
       name: selectedDef.name, baseName: selectedDef.name,
       type: selectedDef.type, class: selectedDef.class,
     }) : '';
+    // Read the pre-mission store queue to find the most recent armor
+    // purchase per slot. The paperdoll mirrors what the player will
+    // actually wear at run start so they can verify their loadout
+    // before launching. Same iconForItem call as the in-game UI uses,
+    // so the icons match across surfaces.
+    const queuedArmorBySlot = {};
+    for (const q of getStarterInventory()) {
+      if (q && q.__storeArmor && q.slot) {
+        queuedArmorBySlot[q.slot] = q;
+      }
+    }
+    const armorTile = (slotKey, label, glyph) => {
+      const queued = queuedArmorBySlot[slotKey];
+      if (!queued) return slotTile(slotKey, label, null, null, glyph);
+      const def = ARMOR_DEFS && ARMOR_DEFS[queued.defId];
+      if (!def) return slotTile(slotKey, label, queued.defId, null, glyph);
+      const icon = iconForItem({
+        id: def.id, name: def.name, type: def.type || 'armor', slot: def.slot,
+      });
+      return slotTile(slotKey, label, def.name, icon, glyph);
+    };
     const slotTile = (key, label, item, iconUrl, glyph) => {
       const filled = !!item;
       const art = filled && iconUrl
@@ -1751,11 +1794,11 @@ export class HideoutUI {
       <div class="prep-section-head">EQUIPMENT</div>
       <div class="paperdoll-grid3">
         <div class="pd-col pd-col-left">
-          ${slotTile('head',  'HEAD',  null, null, '◐')}
-          ${slotTile('face',  'FACE',  null, null, '◉')}
-          ${slotTile('ears',  'EARS',  null, null, '◜◝')}
-          ${slotTile('chest', 'CHEST', 'Shirt', null, '◧')}
-          ${slotTile('hands', 'HANDS', null, null, '✋')}
+          ${armorTile('head',  'HEAD',  '◐')}
+          ${armorTile('face',  'FACE',  '◉')}
+          ${armorTile('ears',  'EARS',  '◜◝')}
+          ${armorTile('chest', 'CHEST', '◧')}
+          ${armorTile('hands', 'HANDS', '✋')}
         </div>
         <div class="pd-col pd-col-center">
           <div class="pd-callout pd-callout-bonus">
@@ -1773,13 +1816,13 @@ export class HideoutUI {
           </div>
         </div>
         <div class="pd-col pd-col-right">
-          ${slotTile('backpack', 'BACKPACK', 'Small', null, '⊞')}
+          ${armorTile('backpack', 'BACKPACK', '⊞')}
           ${slotTile('weapon1',  'WEAPON 1', selected || null, selectedIcon, '▶')}
           ${slotTile('weapon2',  'WEAPON 2', null, null, '▶')}
           ${slotTile('melee',    'MELEE',    null, null, '✕')}
-          ${slotTile('belt',     'BELT',     null, null, '━')}
-          ${slotTile('pants',    'PANTS',    'Combat', null, '⊓')}
-          ${slotTile('boots',    'BOOTS',    null, null, '◣')}
+          ${armorTile('belt',     'BELT',    '━')}
+          ${armorTile('pants',    'PANTS',   '⊓')}
+          ${armorTile('boots',    'BOOTS',   '◣')}
         </div>
       </div>
 
