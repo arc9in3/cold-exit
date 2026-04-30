@@ -77,6 +77,7 @@ import {
   consumeKeystoneQueue,
   getRelicPermits,
   getContractRank,
+  getRecruiterUnlocks,
 } from './prefs.js';
 import { StoreUpgradeUI, StoreRollUI, rollRarityForTier } from './ui_starting_store.js';
 import { getQualityPref, setQualityPref, applyQuality, qualityFlags } from './quality.js';
@@ -356,6 +357,8 @@ if (deathBtnEl) {
         restoreFromSnapshot();
       } else {
         console.warn('[restart] no snapshot — regenerating current level');
+        recomputeStats();
+        player.applyDerivedStats(derivedStats);
         player.restoreFullHealth();
         regenerateLevel();
       }
@@ -1398,7 +1401,12 @@ const startUI = new StartUI({
     // Full HP reset — otherwise state.health from the previous death
     // (= 0) survives into the new run and the tick's death-detection
     // branch re-fires immediately on frame 1.
+    // applyDerivedStats fires BEFORE restoreFullHealth so state.maxHealth
+    // reflects Trainer HP upgrades / equipment bonuses BEFORE the snap.
+    // Otherwise the snap pins health to a stale max and the player
+    // spawns missing the difference.
     recomputeStats();
+    player.applyDerivedStats(derivedStats);
     player.restoreFullHealth();
     regenerateLevel();
     sfx.ambientStart();
@@ -1443,9 +1451,11 @@ function startRunWithWeaponDef(def) {
   playerDead = false;
   if (deathRootEl) deathRootEl.style.display = 'none';
   // Recompute derived stats first so state.maxHealth reflects the
-  // freshly-equipped loadout, THEN snap health back to max. Order
-  // matters: restoreFullHealth reads state.maxHealth.
+  // freshly-equipped loadout + Trainer HP upgrades, THEN snap health
+  // back to max. Order matters: applyDerivedStats writes state.maxHealth
+  // from derivedStats; restoreFullHealth reads state.maxHealth.
   recomputeStats();
+  player.applyDerivedStats(derivedStats);
   player.restoreFullHealth();
   regenerateLevel();
 }
@@ -1569,6 +1579,7 @@ const mainMenuUI = new MainMenuUI({
     playerDead = false;
     if (deathRootEl) deathRootEl.style.display = 'none';
     recomputeStats();
+    player.applyDerivedStats(derivedStats);
     player.restoreFullHealth();
     regenerateLevel();
     sfx.ambientStart();
@@ -3674,9 +3685,12 @@ function restoreFromSnapshot() {
   inventory._bump();
   currentWeaponIndex = s.currentWeaponIndex || 0;
   level.index = s.levelIndex - 1; // regenerate increments back to target
+  // recompute + apply BEFORE restoring full health so the snap reads
+  // the correct maxHealth (Trainer upgrades, Pain mace 0.5× max, etc.)
+  recomputeStats();
+  player.applyDerivedStats(derivedStats);
   player.restoreFullHealth();
   onInventoryChanged();
-  recomputeStats();
   regenerateLevel();
 }
 
@@ -4255,6 +4269,23 @@ let lastInventoryVersion = -1;
 // means re-running recomputeStats. Tracked at module scope so the
 // player tick can detect transitions cheaply.
 let _flawlessAtFull = false;
+// Trainer (Recruiter) unlocks — marks-spent permanent buffs the
+// player owns. The UI side has labels + costs; this side has the
+// actual stat effects. Storage key + def list are kept stable so
+// any saved unlocks survive future Trainer-tab edits.
+function _applyTrainerUnlocks(s) {
+  const owned = getRecruiterUnlocks();
+  if (!owned || !owned.size) return;
+  if (owned.has('vit_1')) s.maxHealthBonus = (s.maxHealthBonus || 0) + 10;
+  if (owned.has('vit_2')) s.maxHealthBonus = (s.maxHealthBonus || 0) + 10;
+  if (owned.has('vit_3')) s.maxHealthBonus = (s.maxHealthBonus || 0) + 10;
+  if (owned.has('end_1')) s.staminaRegenMult = (s.staminaRegenMult || 1) * 1.10;
+  if (owned.has('end_2')) s.staminaRegenMult = (s.staminaRegenMult || 1) * 1.10;
+  // comp_1 — −10% stagger duration. Stagger isn't a derived stat
+  // today; flag it for the staggered fire path to read.
+  if (owned.has('comp_1')) s.staggerDurationMult = (s.staggerDurationMult || 1) * 0.90;
+}
+
 function recomputeStats() {
   derivedStats = BASE_STATS();
   // Expose level depth so ui_shop's relic price ramp can read it
@@ -4266,6 +4297,7 @@ function recomputeStats() {
   skillTree.applyTo(derivedStats, currentWeapon());
   artifacts.applyTo(derivedStats);
   buffs.applyTo(derivedStats);
+  _applyTrainerUnlocks(derivedStats);
   // Flawless perk — conditional 10% bundle while at full HP. Reads
   // the live player info if available (so equipping the perk while
   // at full HP applies the bundle on the next recompute), otherwise
