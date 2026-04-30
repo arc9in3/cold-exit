@@ -2034,6 +2034,41 @@ export const ENCOUNTER_DEFS = {
         && pz >= ctx.room.bounds.minZ && pz <= ctx.room.bounds.maxZ;
 
       if (s.phase === 'standoff') {
+        // Track whether the player ever entered the room. The walk-
+        // away consequence requires that they actually engaged with
+        // the encounter — the relic shouldn't drop just because they
+        // glimpsed it through the door.
+        if (inRoom) s.everEntered = true;
+        // Walk-away consequence — player entered and left while both
+        // NPCs are still alive. Off-screen, the standoff plays out:
+        // both end up dead, and Indecision lies between them. Marks
+        // the encounter complete; the relic stays on the floor for
+        // re-entry.
+        if (s.everEntered && !inRoom
+            && s.pair && s.pair.gunman && s.pair.gunman.alive
+            && s.pair.kneeler && s.pair.kneeler.alive) {
+          s.phase = 'returned';
+          s.chosenDead = 'both';
+          s.chosenSurvivor = null;
+          s.relicSpawned = true;
+          s.complete = true;
+          // Lay both NPCs down (quick rotation; they're dummies the
+          // raycast targets are already invisible). keepDead pins
+          // them so the dummies system doesn't auto-respawn.
+          if (s.pair.gunman.group)  s.pair.gunman.group.rotation.x = -Math.PI / 2;
+          if (s.pair.kneeler.group) s.pair.kneeler.group.rotation.x = -Math.PI / 2;
+          s.pair.gunman.alive = false;
+          s.pair.kneeler.alive = false;
+          s.pair.gunman.keepDead = true;
+          s.pair.kneeler.keepDead = true;
+          if (s.hint) s.hint.userData.setText('You walked away. Indecision lies between them.');
+          ctx.spawnSpeech(new THREE.Vector3(s.disc.cx, 2.2, s.disc.cz),
+            'Indecision lies between them.', 4.0);
+          const relic = ctx.relicFor && ctx.relicFor('indecision');
+          if (relic) ctx.spawnLoot(s.disc.cx, s.disc.cz, relic);
+          if (ctx.markEncounterComplete) ctx.markEncounterComplete('choices_and_consequences');
+          return;
+        }
         // Bark dialog when player is close. Skip if the speaker is
         // already dead (otherwise corpses keep arguing for a frame
         // or two between the kill and the phase advance below).
