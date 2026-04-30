@@ -5635,25 +5635,22 @@ function fireOneShot(playerInfo, weapon, aimPoint, isADS, aimOwner, aimZone) {
   // dunk every shot into the floor. Direction points from that stable
   // origin to the cursor target.
   //
-  // When an enemy is locked under the cursor (`aimOwner` set), aim
-  // for the locked mesh's CENTER rather than the surface-intersect
-  // point. Surface-intersect grazes the front edge of the body, so
-  // even tight spread can fly off-target. Aiming at center plus the
-  // pixel-mode spread tighten gives reliable hits.
+  // Bullet trajectory points at the cursor's actual surface point —
+  // body-location-based aim. The previous 'snap to zone CENTER' for
+  // locked enemies made every shot feel auto-aimed (bullet always
+  // landed dead-center regardless of where on the body the cursor
+  // hovered) AND let bullets skip shielded enemies — when the cursor
+  // landed on a head poking over the shield top, the bullet fired at
+  // the head's world-center and sailed past the shield mesh entirely.
+  // Reliability is now handled by:
+  //   1) bullet magnetism — registered impact snaps to mesh center
+  //      so blood/numbers land cleanly even on edge grazes
+  //   2) head-hover spread bonus — gated on stable bloom for headshots
+  //   3) pixelMode enemy-tighten — spread cone shrinks on enemy hover
+  //   4) bloom system — first-shot tighten + spread bloom on spam
   const fireFrom = playerInfo.fireOrigin || playerInfo.muzzleWorld;
   const tracerFrom = playerInfo.muzzleWorld;
-  let aimTarget = aimPoint;
-  if (aimOwner && aimZone) {
-    // Walk the locked enemy's hit meshes for the matching zone and
-    // use its world center. Falls back to the cursor surface point
-    // if the lookup fails (no matching zone mesh, dead enemy, etc.).
-    const zoneMesh = (aimOwner.rig?.meshes || []).find(m =>
-      m.userData?.zone === aimZone);
-    if (zoneMesh) {
-      _tmpAimCenter.setFromMatrixPosition(zoneMesh.matrixWorld);
-      aimTarget = _tmpAimCenter;
-    }
-  }
+  const aimTarget = aimPoint;
   _tmpDir.copy(aimTarget).sub(fireFrom);
   if (_tmpDir.lengthSq() < 0.0001) return;
   _tmpDir.normalize();
