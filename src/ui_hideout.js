@@ -3335,8 +3335,10 @@ export class HideoutUI {
         margin-bottom: 6px;
       }
       .store-stock-list {
-        display: grid; grid-template-columns: repeat(2, 1fr);
+        display: grid;
+        grid-template-columns: repeat(auto-fill, minmax(120px, 1fr));
         gap: 8px; overflow-y: auto;
+        align-content: start;
       }
       .store-footer {
         display: flex; flex-direction: column; gap: 6px;
