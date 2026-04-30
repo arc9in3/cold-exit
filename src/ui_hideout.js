@@ -3683,21 +3683,26 @@ export class HideoutUI {
 
       /* Cards positioned just below center — bigger, more present.
          Wrap when there are too many to fit in a single row. */
+      /* Contract row scales to whatever space the window has — no
+         scrolling, no wrap. Each card flexes from a 220px floor up
+         to 280px so 3-6 cards always fit in a single row. */
       .contractor-cards {
         position: absolute; top: 56%; left: 240px; right: 240px;
         transform: translateY(-50%);
-        display: flex; gap: 18px; justify-content: center;
-        flex-wrap: wrap; max-height: 40%;
-        overflow-y: auto;
+        display: flex; gap: 14px; justify-content: center;
+        align-items: stretch;
+        flex-wrap: nowrap; overflow: hidden;
       }
       .contractor-empty {
         color: #6f6754; font-style: italic; padding: 16px;
       }
 
-      /* Wanted-poster card — sized so the reward breakdown reads at
-         a glance from the player's chair. */
+      /* Wanted-poster card — flexes between 200px (cramped 6-card
+         row on narrow viewports) and 280px (normal 3-card row).
+         No vertical scroll — content is always visible. */
       .wanted-card {
-        flex: 0 0 280px;
+        flex: 1 1 220px;
+        min-width: 200px; max-width: 280px;
         background: linear-gradient(180deg, #1a1d24 0%, #0c0e14 100%);
         border: 2px solid #2a2f3a; border-radius: 6px;
         padding: 12px; display: flex; flex-direction: column; gap: 8px;
@@ -3720,12 +3725,13 @@ export class HideoutUI {
       .wanted-card.claimed  { opacity: 0.55; }
 
       .wanted-portrait {
-        width: 100%; aspect-ratio: 1;
+        width: calc(100% + 24px);
+        height: 110px; flex: 0 0 110px;
         background: radial-gradient(circle at 50% 40%, #1a1d24 0%, #0a0a10 100%);
         border-bottom: 1px solid #2a2f3a;
         display: flex; align-items: center; justify-content: center;
-        font-size: 64px; color: #c9a87a;
-        margin: -10px -10px 0; border-radius: 4px 4px 0 0;
+        font-size: 56px; color: #c9a87a;
+        margin: -12px -12px 0; border-radius: 4px 4px 0 0;
       }
       .wanted-portrait[data-portrait="dasher"]   { color: #6abf78; }
       .wanted-portrait[data-portrait="tank"]     { color: #c98a3a; }
