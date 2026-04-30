@@ -54,6 +54,8 @@ import { buildProp } from './props.js';
 import {
   getCompletedEncounters, markEncounterDone,
   getEncounterCooldowns, getRunCount, takeEncounterFollowupForFloor,
+  getPriestRefusals, bumpPriestRefusals,
+  getDemonBearGranted, setDemonBearGranted,
 } from './prefs.js';
 import { TOY_DEFS, ARMOR_DEFS, JUNK_DEFS } from './inventory.js';
 import { tunables } from './tunables.js';
@@ -4065,19 +4067,22 @@ export const ENCOUNTER_DEFS = {
   },
 
   // -----------------------------------------------------------------
-  // The Priest — recurring encounter. Stands in the room and asks
-  // the player if they want to pray. "Yes" → heals; "No" → flavor
-  // line about salvation + increments runStats.priestRefusals.
-  // The third "no" drops a Demon Bear toy and flips
-  // runStats.hasDemonBear, which (a) blocks the priest from
-  // re-spawning and (b) unlocks the Great Bear's "Pain" trade.
+  // The Priest — recurring encounter that PERSISTS refusal state
+  // across runs. Stands in the room and asks the player to pray.
+  // "Yes" heals + ends the encounter for that run. "No" increments a
+  // persistent refusal counter (carries through deaths). Third "No"
+  // drops the Demon Bear toy + flips a persistent flag that blocks
+  // the priest from spawning ever again + unlocks the Great Bear's
+  // "Pain" trade.
   // -----------------------------------------------------------------
   priest: {
     id: 'priest',
     name: 'The Priest',
     floorColor: 0xe8d8a8,             // candle-warm dais
     oncePerSave: false,
-    condition: (state) => state.levelIndex >= 1 && !(state.runStats?.hasDemonBear),
+    condition: (state) => state.levelIndex >= 1
+      && !getDemonBearGranted()
+      && !(state.runStats?.hasDemonBear),
     SALVATION_LINES: [
       'Then I shall pray for your soul, traveler.',
       'Salvation does not wait forever, my friend.',
@@ -4100,7 +4105,8 @@ export const ENCOUNTER_DEFS = {
     interact(ctx) {
       const s = ctx.state;
       if (s.complete) return;
-      const refused = ctx.runStats?.priestRefusals | 0;
+      // Persistent refusal counter — carries across deaths.
+      const refused = getPriestRefusals();
       const def = ENCOUNTER_DEFS.priest;
       ctx.showPrompt({
         title: 'The Priest',
@@ -4126,13 +4132,16 @@ export const ENCOUNTER_DEFS = {
               const idx = Math.min(refused, def.SALVATION_LINES.length - 1);
               ctx.spawnSpeech(s.npc.position.clone().setY(2.4),
                 def.SALVATION_LINES[idx], 4.0);
-              if (ctx.runStats) ctx.runStats.priestRefusals = refused + 1;
+              const next = bumpPriestRefusals();
               s.complete = true;
               if (ctx.markEncounterComplete) ctx.markEncounterComplete('priest');
-              // Third "no" — drop the Demon Bear toy and flip the
-              // run flag so the priest stops respawning + the Great
-              // Bear merchant unlocks the Pain trade.
-              if ((refused + 1) >= 3 && !ctx.runStats?.hasDemonBear) {
+              // Third "no" (cumulative across runs) — drop the Demon
+              // Bear toy and flip the persistent flag. Also stamp the
+              // per-run hasDemonBear so any in-run code paths (Great
+              // Bear merchant unlocking the Pain trade) read it
+              // immediately without waiting for the next reload.
+              if (next >= 3 && !getDemonBearGranted()) {
+                setDemonBearGranted(true);
                 if (ctx.runStats) ctx.runStats.hasDemonBear = true;
                 if (ctx.spawnDemonBear) ctx.spawnDemonBear(s.disc.cx + 0.8, s.disc.cz);
               }

@@ -690,6 +690,34 @@ export function bumpContractRank() {
   return next;
 }
 
+// Priest encounter refusal counter — persists across runs so the
+// player can build up refusals over multiple runs and still earn the
+// Demon Bear reward. Capped at 3 (saying no a fourth time after
+// receiving the reward shouldn't double-grant).
+const PRIEST_REFUSALS_KEY = 'tacticalrogue:priestRefusals:v1';
+const DEMON_BEAR_GRANTED_KEY = 'tacticalrogue:demonBearGranted:v1';
+export function getPriestRefusals() {
+  try { return parseInt(localStorage.getItem(PRIEST_REFUSALS_KEY) || '0', 10) || 0; }
+  catch (_) { return 0; }
+}
+export function setPriestRefusals(n) {
+  try { localStorage.setItem(PRIEST_REFUSALS_KEY, String(Math.max(0, Math.min(99, n | 0)))); }
+  catch (_) {}
+}
+export function bumpPriestRefusals() {
+  const next = getPriestRefusals() + 1;
+  setPriestRefusals(next);
+  return next;
+}
+export function getDemonBearGranted() {
+  try { return localStorage.getItem(DEMON_BEAR_GRANTED_KEY) === '1'; }
+  catch (_) { return false; }
+}
+export function setDemonBearGranted(v) {
+  try { localStorage.setItem(DEMON_BEAR_GRANTED_KEY, v ? '1' : '0'); }
+  catch (_) {}
+}
+
 // Rank points — XP accumulator that drives rank-ups. Each contract
 // claim (and per-qualifying-kill in some contracts) awards points;
 // when the player crosses the cost-for-next-rank threshold, rank

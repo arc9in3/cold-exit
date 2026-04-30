@@ -80,6 +80,7 @@ import {
   getContractRank,
   getRecruiterUnlocks,
   getRankPoints, awardRankPoints, rankPointsForNext,
+  getDemonBearGranted,
 } from './prefs.js';
 import { StoreUpgradeUI, StoreRollUI, rollRarityForTier } from './ui_starting_store.js';
 import { getQualityPref, setQualityPref, applyQuality, qualityFlags } from './quality.js';
@@ -6929,7 +6930,18 @@ function _enemyDisplayName(src) {
 }
 function _resetDeathRecap() { _attackerStats.clear(); _lastFatalHit = null; }
 const _origRunStatsReset = runStats.reset.bind(runStats);
-runStats.reset = function () { _origRunStatsReset(); _resetDeathRecap(); };
+runStats.reset = function () {
+  _origRunStatsReset();
+  _resetDeathRecap();
+  // Cross-run flags — runStats.reset clears per-run defaults, but
+  // these mirror persistent prefs so the in-run code paths read the
+  // saved state immediately (Great Bear merchant unlock, priest
+  // condition gate). Refusals are NOT mirrored — the priest reads
+  // from getPriestRefusals() directly.
+  if (typeof getDemonBearGranted === 'function' && getDemonBearGranted()) {
+    runStats.hasDemonBear = true;
+  }
+};
 
 function damagePlayer(amount, damageType = 'generic', srcCtx = null) {
   if (amount <= 0) return;
