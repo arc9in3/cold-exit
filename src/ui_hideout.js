@@ -60,17 +60,22 @@ const STORE_KINDS = [
   { kind: 'consumable', weight: 55 },
   { kind: 'armor',      weight: 45 },
 ];
+// IDs in this catalog must match real ARMOR_DEFS entries in
+// inventory.js — the materialize step looks the def up by id, so
+// a typo here will silently spawn an unequippable item.
 const STORE_ARMOR_CATALOG = [
   // Common-tier entries — small, cheap pieces so a starting player at
   // ceiling 0 always has something to buy in the store.
   { id: 'chest_light',        name: 'Light Vest',      kind: 'armor', slot: 'chest',    rarity: 'common',   basePrice: 80  },
-  { id: 'helmet_cap',         name: 'Padded Cap',      kind: 'armor', slot: 'head',     rarity: 'common',   basePrice: 50  },
+  { id: 'mask_balaclava',     name: 'Balaclava',       kind: 'armor', slot: 'face',     rarity: 'common',   basePrice: 40  },
   { id: 'backpack_small',     name: 'Small Pack',      kind: 'armor', slot: 'backpack', rarity: 'common',   basePrice: 70  },
-  { id: 'chest_med',          name: 'Combat Vest',     kind: 'armor', slot: 'chest',    rarity: 'uncommon', basePrice: 220 },
-  { id: 'chest_heavy',        name: 'Heavy Plate',     kind: 'armor', slot: 'chest',    rarity: 'rare',     basePrice: 480 },
+  { id: 'backpack_satchel',   name: 'Field Satchel',   kind: 'armor', slot: 'backpack', rarity: 'common',   basePrice: 110 },
+  { id: 'chest_med',          name: 'Tactical Vest',   kind: 'armor', slot: 'chest',    rarity: 'uncommon', basePrice: 220 },
+  { id: 'chest_heavy',        name: 'Plate Armor',     kind: 'armor', slot: 'chest',    rarity: 'rare',     basePrice: 480 },
   { id: 'helmet_kevlar',      name: 'Kevlar Helmet',   kind: 'armor', slot: 'head',     rarity: 'uncommon', basePrice: 180 },
-  { id: 'backpack_medium',    name: 'Medium Pack',     kind: 'armor', slot: 'backpack', rarity: 'uncommon', basePrice: 200 },
-  { id: 'backpack_large',     name: 'Large Pack',      kind: 'armor', slot: 'backpack', rarity: 'rare',     basePrice: 420 },
+  { id: 'helmet_tactical',    name: 'Tactical Helmet', kind: 'armor', slot: 'head',     rarity: 'uncommon', basePrice: 260 },
+  { id: 'backpack_med',       name: 'Combat Pack',     kind: 'armor', slot: 'backpack', rarity: 'uncommon', basePrice: 200 },
+  { id: 'backpack_large',     name: 'Large Rucksack',  kind: 'armor', slot: 'backpack', rarity: 'rare',     basePrice: 420 },
 ];
 const STORE_CONSUMABLE_CATALOG = [
   // Smaller / cheaper entries first so the rolled stock has a lot of
@@ -2126,9 +2131,15 @@ export class HideoutUI {
       return tile;
     }
     tile.style.borderColor = rarityColor({ rarity: slot.rarity });
+    // iconForItem dispatches on id + slot (armor) and id (consumable);
+    // pass them through so the proper PNG resolves. Without these the
+    // armor tiles fall back to the generic shield silhouette and read
+    // as 'broken' / placeholder art.
     const itemHint = slot.kind === 'weapon'
       ? { name: slot.id, baseName: slot.id, type: 'ranged' }
-      : { name: slot.label, type: slot.kind };
+      : slot.kind === 'armor'
+        ? { name: slot.label, type: 'armor', id: slot.id, slot: slot.armorSlot }
+        : { name: slot.label, type: slot.kind, id: slot.id };
     const icon = iconForItem(itemHint);
     tile.innerHTML = `
       <div class="lt-icon">${icon ? `<img src="${icon}" alt="">` : '<div class="lt-icon-fallback"></div>'}</div>
