@@ -294,9 +294,13 @@ export const tunables = {
     // headAssistTopBias > 1 makes the radius extend further ABOVE
     // the head than to the sides — the top of the cranium is the
     // pixel most often brushed past while trying to land headshots.
+    // Recovery-only assist — only fires when the primary raycast
+    // missed every body part. Tight radius so it catches genuine
+    // near-misses, not deliberate body shots that happen to be
+    // close to a head in screen space.
     headAssistEnabled: true,
-    headAssistRadiusPx: 30,
-    headAssistTopBias: 1.8,
+    headAssistRadiusPx: 14,
+    headAssistTopBias: 1.2,
   },
   medkit: {
     smallHeal: 30,

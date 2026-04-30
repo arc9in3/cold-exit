@@ -841,6 +841,71 @@ window.__clearActiveContract = () => {
   console.log('[contract] cleared. fire restrictions removed.');
 };
 
+// Aim diag — exhaustive readout. Run `window.__diagAim()` with the
+// cursor over an enemy. Tells us:
+//  - active contract restrictions
+//  - fireOrigin / muzzle / aimInfo.point
+//  - how many hittables are in the cache + how many are "visible"
+//    (have matrixWorld + are in scene)
+//  - whether a fresh cursor ray actually intersects any hittable
+window.__diagAim = () => {
+  const m = _activeModifiers || {};
+  console.group('[aim diag]');
+  console.log('contract weaponClass:', m.weaponClass || '(none)');
+  console.log('contract noConsumables:', !!m.noConsumables);
+  console.log('player position:', player?.mesh?.position?.toArray?.());
+  if (lastPlayerInfo) {
+    console.log('fireOrigin (chest world):', lastPlayerInfo.fireOrigin?.toArray?.());
+    console.log('muzzleWorld:', lastPlayerInfo.muzzleWorld?.toArray?.());
+    console.log('crouched:', !!lastPlayerInfo.crouched);
+  }
+  console.log('aimInfo.point:', aimInfo?.point?.toArray?.());
+  console.log('aimInfo.zone:', aimInfo?.zone);
+  console.log('aimInfo.owner alive?:', !!aimInfo?.owner?.alive);
+
+  // ----- Hittables sanity check -----
+  const hits = allHittables();
+  console.log('hittables count:', hits.length);
+  let inScene = 0, sample = null;
+  for (const h of hits) {
+    if (h && h.parent) inScene++;
+    if (!sample && h && h.userData?.owner) sample = h;
+  }
+  console.log('hittables with parent (in scene):', inScene);
+  if (sample) {
+    sample.updateMatrixWorld?.(true);
+    const wp = new THREE.Vector3();
+    sample.getWorldPosition?.(wp);
+    console.log('sample hittable world pos:', wp.toArray?.(), 'zone:', sample.userData?.zone);
+  }
+
+  // ----- Live cursor ray test -----
+  if (input?.raycaster && input?.mouseNDC && camera) {
+    input.raycaster.setFromCamera(input.mouseNDC, camera);
+    const enemyHits = input.raycaster.intersectObjects(hits, false);
+    console.log('LIVE ray cursor → enemy hits:', enemyHits.length);
+    if (enemyHits[0]) {
+      const h = enemyHits[0];
+      console.log('  first hit object:', h.object?.userData?.zone || '(no zone)',
+        'distance:', h.distance.toFixed(2),
+        'point:', h.point?.toArray?.());
+    }
+    const wallHits = input.raycaster.intersectObjects(level.solidObstacles(), false);
+    console.log('LIVE ray cursor → wall hits:', wallHits.length);
+  } else {
+    console.log('input.raycaster not ready');
+  }
+
+  if (lastPlayerInfo?.fireOrigin && aimInfo?.point) {
+    const dx = aimInfo.point.x - lastPlayerInfo.fireOrigin.x;
+    const dy = aimInfo.point.y - lastPlayerInfo.fireOrigin.y;
+    const dz = aimInfo.point.z - lastPlayerInfo.fireOrigin.z;
+    const len = Math.sqrt(dx*dx + dy*dy + dz*dz);
+    console.log('fire-dir:', { dx: dx/len, dy: dy/len, dz: dz/len, distance: len.toFixed(2) });
+  }
+  console.groupEnd();
+};
+
 function startNewRun(weaponClass) {
   _resetEncounterCompletionForRun();
   // Reset any pending starter-buff floor counters from a prior run
@@ -3344,6 +3409,7 @@ document.addEventListener('dragend', _clearGridDragClass, true);
 const clock = new THREE.Clock();
 const _tmpDir = new THREE.Vector3();
 const _tmpEndPt = new THREE.Vector3();
+const _tmpAimCenter = new THREE.Vector3();
 const _rotatedDir = new THREE.Vector3();
 const _muzzleWorldTmp = new THREE.Vector3();
 const _muzzlePlane = new THREE.Plane(new THREE.Vector3(0, 1, 0), 0);
@@ -4733,30 +4799,20 @@ function _resolveAimRaycast(muzzleWorld, crouching) {
     ? allWallTargets.filter(m => !m.userData.isLowCover)
     : allWallTargets;
   const enemyHits = input.raycaster.intersectObjects(enemyTargets, false);
-  // Run the head-aim assist regardless — used to upgrade a body-shot
-  // raycast to a head-shot when the cursor is in the head's
-  // neighborhood (especially above), and to recover a missed primary
-  // raycast onto a head that the cursor is brushing past.
-  const headAssist = _findHeadAimAssist();
+  // Body-hit path — when the cursor's ray landed on an enemy body
+  // part, return that hit DIRECTLY. The previous "upgrade to head if
+  // within assist radius" branch hijacked too many body shots: the
+  // head sits right above the body in screen space, the assist's
+  // 30px radius almost always matched, and re-projecting the aim
+  // onto the head-Y plane shifted the bullet's XZ enough to whiff
+  // past the enemy entirely. Body hits stay body hits now; the
+  // head-assist only recovers MISSED primary hits below.
   if (enemyHits.length > 0) {
     const h = enemyHits[0];
-    const hitOwner = h.object.userData?.owner || null;
-    const hitZone = h.object.userData?.zone || null;
-    // Same-enemy upgrade: the cursor caught a body part but is also
-    // within head-assist range of the same enemy's head — promote to
-    // a head shot so deliberate aim at the cranium lands instead of
-    // grazing into the shoulder.
-    if (headAssist && hitZone !== 'head' && headAssist.enemy === hitOwner) {
-      return {
-        point: _headAssistAimPoint(headAssist),
-        zone: 'head',
-        owner: headAssist.enemy,
-      };
-    }
     return {
       point: h.point.clone(),
-      zone: hitZone,
-      owner: hitOwner,
+      zone: h.object.userData?.zone || null,
+      owner: h.object.userData?.owner || null,
     };
   }
   // Primary raycast missed every body part. If the cursor is right
@@ -4764,6 +4820,7 @@ function _resolveAimRaycast(muzzleWorld, crouching) {
   // an intended head shot and snap the aim point onto the head — keeps
   // pixel-aim spread tightening + zone bonus alive when the cursor is
   // clipping the very edge of the cranium.
+  const headAssist = _findHeadAimAssist();
   if (headAssist) {
     return {
       point: _headAssistAimPoint(headAssist),
@@ -5364,11 +5421,28 @@ function fireOneShot(playerInfo, weapon, aimPoint, isADS, aimOwner) {
   // happens to be), but the *bullet physics* fires from a stable
   // chest-height virtual origin so crouching / low-hand poses don't
   // dunk every shot into the floor. Direction points from that stable
-  // origin to the cursor target, letting us keep accurate vertical
-  // aim (up at a standing enemy, down at a cursor on the floor).
+  // origin to the cursor target.
+  //
+  // When an enemy is locked under the cursor (`aimOwner` set), aim
+  // for the locked mesh's CENTER rather than the surface-intersect
+  // point. Surface-intersect grazes the front edge of the body, so
+  // even tight spread can fly off-target. Aiming at center plus the
+  // pixel-mode spread tighten gives reliable hits.
   const fireFrom = playerInfo.fireOrigin || playerInfo.muzzleWorld;
   const tracerFrom = playerInfo.muzzleWorld;
-  _tmpDir.copy(aimPoint).sub(fireFrom);
+  let aimTarget = aimPoint;
+  if (aimOwner && aimInfo && aimInfo.zone) {
+    // Walk the locked enemy's hit meshes for the matching zone and
+    // use its world center. Falls back to the cursor surface point
+    // if the lookup fails (no matching zone mesh, dead enemy, etc.).
+    const zoneMesh = (aimOwner.rig?.meshes || []).find(m =>
+      m.userData?.zone === aimInfo.zone);
+    if (zoneMesh) {
+      _tmpAimCenter.setFromMatrixPosition(zoneMesh.matrixWorld);
+      aimTarget = _tmpAimCenter;
+    }
+  }
+  _tmpDir.copy(aimTarget).sub(fireFrom);
   if (_tmpDir.lengthSq() < 0.0001) return;
   _tmpDir.normalize();
 

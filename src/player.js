@@ -1468,17 +1468,26 @@ export function createPlayer(scene) {
       muzzle.rotation.copy(gunMesh.rotation);
     }
 
-    // Virtual firing origin — always at chest height of the rig so
-    // bullets don't follow the hand's pose. Keeps shots straight at
-    // the cursor whether the player is standing, crouched, or mid-
-    // recoil. The visible muzzle is still returned for tracer FX.
-    const chestWorld = body.getWorldPosition(new THREE.Vector3());
+    // Virtual firing origin — pinned to a STABLE point above the
+    // player's foot center. Previously read body.getWorldPosition()
+    // which is the animated chest mesh's world pos — that gets
+    // displaced laterally by hip roll (gaitHipRoll + idle breathing
+    // sway), so every bullet fires from a swaying chest pos and
+    // shots whiff to the side of the cursor target. Anchoring to
+    // group.position + chest-height Y keeps bullets straight at the
+    // cursor regardless of pose. Visible muzzle (tracer origin)
+    // still follows the hand's animation.
+    const fireOrigin = new THREE.Vector3(
+      group.position.x,
+      group.position.y + (state.crouched ? 0.85 : 1.25),
+      group.position.z,
+    );
     return {
       position: group.position,
       aim: aimPoint || null,
       facing: facing.clone(),
       muzzleWorld: muzzle.getWorldPosition(new THREE.Vector3()),
-      fireOrigin: chestWorld,
+      fireOrigin,
       adsAmount: state.adsAmount,
       mode: state.mode,
       crouched: state.crouched,
