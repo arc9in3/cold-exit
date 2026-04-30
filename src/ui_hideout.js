@@ -1912,14 +1912,22 @@ export class HideoutUI {
       if (isBuyable(w)) buyable.push(w);
       else stillLocked.push(w);
     }
-    const rarityClassSort = (a, b) => {
-      const ar = RARITY_RANK[a.rarity || 'common'] ?? 5;
-      const br = RARITY_RANK[b.rarity || 'common'] ?? 5;
+    // Locked column orders strictly by required rank (lowest first) so
+    // the next unlock the player is working toward sits at the top of
+    // the list. Ties break on rarity, then class, then name.
+    const reqRankSort = (a, b) => {
+      const ar = reqRankFor(a);
+      const br = reqRankFor(b);
       if (ar !== br) return ar - br;
-      return (a.class || '').localeCompare(b.class || '');
+      const arr = RARITY_RANK[a.rarity || 'common'] ?? 5;
+      const brr = RARITY_RANK[b.rarity || 'common'] ?? 5;
+      if (arr !== brr) return arr - brr;
+      const ac = (a.class || '').localeCompare(b.class || '');
+      if (ac !== 0) return ac;
+      return (a.name || '').localeCompare(b.name || '');
     };
-    buyable.sort(rarityClassSort);
-    stillLocked.sort(rarityClassSort);
+    buyable.sort(reqRankSort);
+    stillLocked.sort(reqRankSort);
     for (const w of buyable) {
       const cost = costFor(w);
       lockedGrid.appendChild(this._buildArmoryMiniTile(w, 'buyable', cost, () => {

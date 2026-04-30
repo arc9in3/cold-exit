@@ -7516,6 +7516,7 @@ function onProjectileExplode(pos, explosion, owner, p) {
     // Sets stunT (gunman + melee tick check this) which fully
     // freezes movement + fire while active. Spawns a star ring
     // above the victim's head; the stars rotate while stunT > 0.
+    const stunDur = p.stunDuration || 3.0;
     const victims = [...gunmen.gunmen, ...melees.enemies];
     for (const c of victims) {
       if (!c.alive) continue;
