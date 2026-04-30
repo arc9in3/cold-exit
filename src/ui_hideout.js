@@ -2164,9 +2164,11 @@ export class HideoutUI {
     const rps = weapon.fireRate != null ? `<span class="amini-stat">RPS ${weapon.fireRate}</span>` : '';
     const range = weapon.range != null ? `<span class="amini-stat">RNG ${weapon.range}</span>` : '';
 
+    // Owned tiles have no CTA — click anywhere on the tile to equip.
+    // Selected tile shows an [EQUIPPED] indicator. Buyable / locked
+    // keep their explicit CTA so the chip-cost or rank-gate read clearly.
     let action = '';
-    if (state === 'taking')       action = `<div class="amini-cta taking">TAKING</div>`;
-    else if (state === 'owned')   action = `<button type="button" class="amini-cta select">Take</button>`;
+    if (state === 'taking')       action = `<div class="amini-cta taking">EQUIPPED</div>`;
     else if (state === 'buyable') action = `<button type="button" class="amini-cta buy">Unlock · ${cost}c</button>`;
     else if (state === 'locked')  action = `<div class="amini-cta locked">Rank ${reqRank} to unlock</div>`;
 
@@ -2186,10 +2188,15 @@ export class HideoutUI {
       : state === 'buyable'
         ? `Unlock ${weapon.name} for ${cost}c (${weapon.rarity || 'common'} ${weapon.class || ''})`
         : `${weapon.name} · ${weapon.rarity || 'common'} ${weapon.class || ''}`;
-    const cta = tile.querySelector('button.amini-cta');
-    if (cta && onClick && state !== 'locked') {
-      if (state === 'buyable') cta.disabled = getPersistentChips() < cost;
-      cta.addEventListener('click', (e) => { e.stopPropagation(); onClick(); });
+    if ((state === 'owned' || state === 'taking') && onClick) {
+      tile.style.cursor = 'pointer';
+      tile.addEventListener('click', (e) => { e.stopPropagation(); onClick(); });
+    } else if (state === 'buyable' && onClick) {
+      const cta = tile.querySelector('button.amini-cta');
+      if (cta) {
+        cta.disabled = getPersistentChips() < cost;
+        cta.addEventListener('click', (e) => { e.stopPropagation(); onClick(); });
+      }
     }
     return tile;
   }
@@ -3963,19 +3970,20 @@ export class HideoutUI {
       .hideout-take-actions { margin-top: 6px; }
       .hideout-take-actions .hideout-buy { width: 100%; }
 
-      /* STORE */
+      /* STORE — sized to match the armory mini-tile grid so the loadout
+         columns read as one consistent shop / armory experience. */
       .hideout-store-grid {
-        display: grid; grid-template-columns: repeat(auto-fill, minmax(140px, 1fr));
+        display: grid; grid-template-columns: repeat(auto-fill, minmax(120px, 1fr));
         gap: 8px; margin-top: 6px;
       }
       .hideout-store-slot {
         background: linear-gradient(180deg, #1a1d24, #131720);
         border: 1px solid #2a2f3a; border-left: 3px solid #5a8acf;
-        border-radius: 3px; padding: 8px 10px; min-height: 92px;
-        display: flex; flex-direction: column; gap: 2px;
+        border-radius: 4px; padding: 8px;
+        display: flex; flex-direction: column; gap: 4px;
       }
       .hideout-store-slot.empty { color: #4a505a; text-align: center;
-        line-height: 92px; padding: 0; }
+        padding: 16px 0; }
       .hideout-store-slot.sold { opacity: 0.5; }
       .hideout-store-slot.sold .hideout-store-status {
         margin-top: auto; text-align: center; font-size: 11px;
