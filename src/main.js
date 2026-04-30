@@ -2335,11 +2335,10 @@ function regenerateLevel() {
   // here moves it into the level-transition window where the
   // player's already paying for regen + asset loads.
   if (combat._ensurePools) combat._ensurePools();
-  // Encounter chance temporarily pinned to 100% so every level rolls
-  // an encounter — used while we're iterating on the encounter pool
-  // and want fast feedback. Restore the pity-timer formula
-  // (Math.max(0.30, Math.min(0.95, 0.30 + bonus))) when shipping.
-  level._encounterChance = 1.0;
+  // Encounter chance pinned to 90% — the encounter pool brings the
+  // variety we want most floors, but a 1-in-10 plain combat floor
+  // keeps the rhythm from feeling overscripted.
+  level._encounterChance = 0.9;
   // Mega-boss milestone floors get a custom generator: a single open
   // arena, no random walk, no encounter rolls, no AI spawns. The boss
   // itself is allocated below after BVHs build. Detect by the index
@@ -6648,6 +6647,13 @@ function onEnemyKilled(enemy, opts = {}) {
   if (!enemy.noXp) {
     const gained = rollCredits(enemy.tier || 'normal');
     if (gained > 0) { playerCredits += gained; runStats.addCredits(gained); }
+    // Lucky Dice — every kill rolls 2d6 (range 2-12) bonus credits
+    // on top of the base credit roll.
+    if (artifacts && artifacts.has('lucky_dice')) {
+      const dice = (1 + Math.floor(Math.random() * 6)) + (1 + Math.floor(Math.random() * 6));
+      playerCredits += dice;
+      runStats.addCredits(dice);
+    }
   }
   runStats.addKill();
   // Per-archetype kill counter for contract evaluators. Map kind +
@@ -6887,7 +6893,9 @@ function damagePlayer(amount, damageType = 'generic', srcCtx = null) {
   if (damageType === 'ballistic' && derivedStats.ballisticResist > 0) {
     amount *= (1 - Math.min(0.7, derivedStats.ballisticResist));
   } else if (damageType === 'fire' && derivedStats.fireResist > 0) {
-    amount *= (1 - Math.min(0.8, derivedStats.fireResist));
+    // Cap raised to 0.95 so Brian's Hat (+0.9) actually delivers
+    // its advertised 90% fire protection.
+    amount *= (1 - Math.min(0.95, derivedStats.fireResist));
   }
   // Cornered: extra reduction while below 30% HP (reads the last tick's
   // cached HP ratio since this runs from hit callbacks mid-frame).

@@ -340,6 +340,23 @@ export const ARTIFACT_DEFS = {
     synthetic: true,
     apply(_s) { /* effect is at the fire callsite — see tickShooting */ },
   },
+
+  // -------------------------------------------------------------
+  // Lucky Dice — Brian encounter reward (the "take off the hat"
+  // path). A small set of weighted dice that hum in your pocket.
+  // Every kill grants 2-12 extra credits on top of the base roll.
+  // synthetic: true keeps it out of shops + random pools — only
+  // path is the Brian encounter.
+  // -------------------------------------------------------------
+  lucky_dice: {
+    id: 'lucky_dice', name: 'Lucky Dice',
+    lore: 'A loaded pair Brian rolled when he could still sleep. They roll for you now.',
+    short: 'Every kill drops 2-12 extra credits',
+    tint: 0xe8d060,
+    price: 0,
+    synthetic: true,
+    apply(_s) { /* effect is in onEnemyKilled — see main.js */ },
+  },
 };
 
 export const ALL_ARTIFACTS = Object.values(ARTIFACT_DEFS);

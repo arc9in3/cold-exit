@@ -78,8 +78,12 @@ export function currentEncounterTier() {
 //   currentTier      — result of currentEncounterTier()
 export function isEncounterEligible(def, completedSet, cooldownMap, currentRun, currentTier) {
   if (!def || !def.id) return false;
-  // Tier gate.
-  if ((def.tier | 0) > (currentTier | 0)) return false;
+  // Tier gate intentionally disabled — every non-chained encounter
+  // is in the pool from the start. Chained encounters (e.g. Curse
+  // Breaker → Brass Prisoner) still gate themselves via their
+  // per-def `condition()` function, so they remain dependency-locked
+  // even with the tier system off.
+  // if ((def.tier | 0) > (currentTier | 0)) return false;
   // Already-finished one-shot encounters.
   if (def.oncePerSave && completedSet && completedSet.has(def.id)) return false;
   // Run-cooldown.

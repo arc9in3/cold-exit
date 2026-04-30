@@ -1023,6 +1023,16 @@ export function inferRarity(item) {
 
 // Armor pieces (have `reduction` and a body slot).
 export const ARMOR_DEFS = {
+  // Brian's Hat — encounter-only reward (the "how much was it" path).
+  // Common gear, no damage reduction or other stats. ONE feature: 90%
+  // protection from fire (apply hook bumps fireResist by 0.9). The
+  // resistance cap in damagePlayer is bumped to 0.95 to let the hat
+  // actually deliver the 90% it advertises.
+  brians_hat: { id: 'brians_hat', name: "Brian's Hat", slot: 'head', type: 'gear',
+    tint: 0x6a6a72, durability: dur(40, 0.95), rarity: 'common',
+    description: '90% fire resistance',
+    apply(s) { s.fireResist = (s.fireResist || 0) + 0.9; } },
+
   helmet_kevlar: { id: 'helmet_kevlar', name: 'Kevlar Helmet', slot: 'head', type: 'armor',
     tint: 0x7a8a9a, reduction: 0.18, durability: dur(80, 0.85),
     description: '−18% damage taken (head)' },

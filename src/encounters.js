@@ -55,7 +55,7 @@ import {
   getCompletedEncounters, markEncounterDone,
   getEncounterCooldowns, getRunCount, takeEncounterFollowupForFloor,
 } from './prefs.js';
-import { TOY_DEFS } from './inventory.js';
+import { TOY_DEFS, ARMOR_DEFS } from './inventory.js';
 import { tunables } from './tunables.js';
 import { isEncounterEligible, currentEncounterTier } from './encounter_tier.js';
 
@@ -4451,6 +4451,10 @@ export const ENCOUNTER_DEFS = {
             onPick: () => {
               ctx.spawnSpeech(s.npc.position.clone().setY(2.6),
                 'It\'s not a distraction.', 4.0);
+              // Reward — Lucky Dice relic. Granted directly so the
+              // moment lands inside the speech beat. ONE-SHOT
+              // encounter: picking this branch locks out the hat.
+              if (ctx.grantRelic) ctx.grantRelic('lucky_dice');
               s.phase = 'preSob';
               s.phaseT = 0;
               s.complete = true;
@@ -4464,6 +4468,13 @@ export const ENCOUNTER_DEFS = {
               ctx.spawnSpeech(s.npc.position.clone().setY(2.6),
                 'ITS ILLEGAL FOR YOU TO ASK ME THAT',
                 5.5);
+              // Brian throws the hat at the player's feet. Common
+              // gear; only stat is 90% fire resistance. ONE-SHOT —
+              // picking this branch locks out the relic.
+              const hatDef = ARMOR_DEFS && ARMOR_DEFS.brians_hat;
+              if (hatDef && ctx.spawnLoot) {
+                ctx.spawnLoot(s.disc.cx + 0.6, s.disc.cz + 0.6, { ...hatDef });
+              }
               s.complete = true;
               if (s.hint) s.hint.visible = false;
               if (ctx.markEncounterComplete) ctx.markEncounterComplete('brian');
