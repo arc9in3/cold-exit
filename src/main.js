@@ -5709,6 +5709,12 @@ function fireOneShot(playerInfo, weapon, aimPoint, isADS, aimOwner, aimZone) {
     const k = Math.max(0, 1 - derivedStats.lmgSustainedSpreadDecay * _lmgHeldT);
     spread *= k;
   }
+  // Broken weapon — wildly inflated spread instead of a hard fire-
+  // lock. Lets the player limp through to a repair at the shop, but
+  // the gun is barely useful until then.
+  if (weapon.durability && weapon.durability.current <= 0) {
+    spread *= (tunables.durability?.brokenSpreadMult ?? 5.0);
+  }
   // Twin Fangs — each stack rolls a fresh 15% chance to add one
   // extra pellet to THIS shot. Independent rolls per stack so two
   // copies of the perk can both fire on the same trigger pull.
@@ -6281,17 +6287,21 @@ function tickShooting(dt, playerInfo, inputState, aimInfo) {
   const weapon = currentWeapon();
   if (!weapon) return;
   if (weapon.type === 'melee') return;
-  // Broken weapons can't fire — repair at a shop. Throttled HUD msg
-  // so a held trigger doesn't spam the toast.
+  // Broken weapons no longer hard-stop the trigger. Per the
+  // durability overhaul, a broken ranged weapon still fires but
+  // with massively inflated spread (5× via tunables.durability.
+  // brokenSpreadMult, applied in fireOneShot). Surface a one-shot
+  // toast on the first broken-trigger pull so the player knows
+  // why their grouping just exploded.
   if (weapon.durability && weapon.durability.current <= 0) {
-    if (inputState.attackHeld || inputState.attackPressed) {
+    const wasFiring = inputState.attackHeld || inputState.attackPressed;
+    if (wasFiring) {
       const now = performance.now();
-      if (!_brokenToastT || now - _brokenToastT > 1500) {
-        transientHudMsg('Weapon broken — repair at a shop', 1.2);
+      if (!_brokenToastT || now - _brokenToastT > 4000) {
+        transientHudMsg('Weapon broken — spread × 5 until repaired', 1.6);
         _brokenToastT = now;
       }
     }
-    return;
   }
   if (weapon.fireMode === 'flame') { tickFlame(dt, playerInfo, weapon, inputState, aimInfo); return; }
   playerFireCooldown = Math.max(0, playerFireCooldown - dt);
@@ -6453,6 +6463,15 @@ function resolveComboHit(attackEvent) {
     // Crit was rolled at swing-start so the whole animation commits
     // to it. Apply the multiplier now at hit-resolve time.
     if (isCrit) dmg *= (derivedStats.critDamageMult || 2.0);
+    // Broken-melee softening — held weapon at 0 durability still
+    // swings but only delivers a fraction of damage. Bare-fist
+    // quick-melee (no melee weapon equipped) is untouched since the
+    // 'weapon' is the player's hand, not breakable.
+    const _meleeWeapon = currentWeapon();
+    if (_meleeWeapon && _meleeWeapon.type === 'melee'
+        && _meleeWeapon.durability && _meleeWeapon.durability.current <= 0) {
+      dmg *= (tunables.durability?.brokenMeleeDmgMult ?? 0.30);
+    }
     const wasAlive = c.alive;
     runStats.addDamage(dmg);
     c.manager.applyHit(c, dmg, 'torso', facing, { weaponClass: 'melee', isCrit });
@@ -7166,7 +7185,15 @@ function tickMeleeSwipe(dt, inputState, aimInfo, playerInfo) {
 
     const strikePoint = new THREE.Vector3(c.group.position.x, 1.2, c.group.position.z);
     if (!combat.hasLineOfSight(losFrom, strikePoint, losBlockers)) continue;
-    const dmg = comboStep.damage * derivedStats.meleeDmgMult * berserkMult();
+    let dmg = comboStep.damage * derivedStats.meleeDmgMult * berserkMult();
+    // Broken melee weapon — fractional damage instead of fire-lock.
+    // Bare-fist quick-melee skipped (handled by the early-return at
+    // line 7136 when current weapon is ranged).
+    const _swipeWeapon = currentWeapon();
+    if (_swipeWeapon && _swipeWeapon.type === 'melee'
+        && _swipeWeapon.durability && _swipeWeapon.durability.current <= 0) {
+      dmg *= (tunables.durability?.brokenMeleeDmgMult ?? 0.30);
+    }
     const wasAlive = c.alive;
     runStats.addDamage(dmg);
     c.manager.applyHit(c, dmg, comboStep.zone, _swipeDir, { weaponClass: 'melee' });

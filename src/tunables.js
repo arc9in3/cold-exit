@@ -261,10 +261,23 @@ export const tunables = {
     },
   },
   durability: {
-    weaponDecayPerShot: 0.005,   // tiny — weapons effectively don't break
+    // Drain retune (durability overhaul):
+    //   weaponDecayPerShot: 0.005 → 0.020 — weapons drain noticeably
+    //     (4× prior). Base 200 HP still ≈10k shots before broken,
+    //     so most runs never bottom out, but late-game farming will.
+    //   armorDamageRatio: 0.55 → 0.85 — gear drains 55% faster, so
+    //     mid-run armor swaps + repair kits matter.
+    weaponDecayPerShot: 0.020,
     weaponDecayPerSwipe: 0.02,
-    armorDamageRatio: 0.55,      // fraction of incoming dmg routed to armor HP
+    armorDamageRatio: 0.85,
     minRepairability: 0.85,      // doc'd here for the store later
+    // Broken-state softening — instead of hard-stopping the trigger
+    // when a weapon hits 0 durability, the gun still fires but with
+    // wildly inflated spread; the swing still lands but at fractional
+    // damage. Read by fireOneShot + tickMeleeSwipe / resolveComboHit
+    // when weapon.durability.current <= 0.
+    brokenSpreadMult: 5.0,        // 5× spread on a broken ranged weapon
+    brokenMeleeDmgMult: 0.30,     // 30% damage on a broken melee weapon
   },
   burn: {
     // Burn now stacks per fire-damage instance — each stack contributes
