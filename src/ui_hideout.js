@@ -86,12 +86,12 @@ const STORE_BUFF_CATALOG = [
 const RARITY_INDEX = { common: 0, uncommon: 1, rare: 2, epic: 3, legendary: 4 };
 
 const TAB_DEFS = [
+  { id: 'contractor',   label: 'CONTRACTOR'    },
   { id: 'stash',        label: 'STASH'         },
   { id: 'vault',        label: 'VAULT'         },
   { id: 'quartermaster',label: 'ARMORER'       },
   { id: 'vendors',      label: 'VENDORS'       },
   { id: 'blackmarket',  label: 'BLACK MARKET'  },
-  { id: 'contractor',   label: 'CONTRACTOR'    },
   { id: 'recruiter',    label: 'RECRUITER'     },
   { id: 'tailor',       label: 'TAILOR'        },
   { id: 'mailbox',      label: 'MAILBOX'       },
