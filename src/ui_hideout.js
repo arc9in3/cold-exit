@@ -568,11 +568,10 @@ export class HideoutUI {
       this.root.appendChild(actions);
     }
 
-    // ── Bottom-left vertical tab strip. Hidden on the contractor
-    //    stage so it owns the full window. Other tabs keep it.
-    if (this.tab === 'contractor') {
-      // Skip rendering tabs entirely on the contractor stage.
-    } else {
+    // ── Bottom-left vertical tab strip. Always visible — the player
+    // needs to be able to navigate to the Armorer / Vendors / etc. from
+    // any stage, including mid-mission-prep.
+    {
     const tabs = document.createElement('div');
     tabs.id = 'hideout-tabs';
     const tabToStation = {
