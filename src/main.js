@@ -3075,11 +3075,15 @@ function regenerateLevel() {
           return true;
         },
     });
-    const _state = def.spawn(scene, r, _ctxFactory()) || {};
-    // Default actor-collision policy — every encounter NPC blocks player
-    // + AI movement unless the encounter explicitly opts out via
-    // `state._noCollider = true` (Duck bobs around the disc, Crow is
-    // perched, Sleepy Beauty lies on the floor — those skip).
+    // Build the ctx once at spawn and cache it on the encounter
+    // entry. tickEncounters / tryEncounterItemDrop then reuse the
+    // same object — refreshing only the handful of fields that
+    // actually change per-frame (playerSpeed, state, dropPos).
+    // Was rebuilding the ctx (290-line literal + ~80 closures) for
+    // every active encounter every frame; that was the single
+    // largest GC contributor on later floors.
+    const _spawnCtx = _ctxFactory();
+    const _state = def.spawn(scene, r, _spawnCtx) || {};
     if (_state.npc && _state.npc.position && !_state._noCollider) {
       const np = _state.npc.position;
       _state._collider = level.addEncounterCollider(np.x, np.z, 0.65, 0.65, 1.6);
@@ -3087,7 +3091,8 @@ function regenerateLevel() {
     r._encounter = {
       def,
       state: _state,
-      ctxFactory: _ctxFactory,
+      ctx: _spawnCtx,
+      ctxFactory: _ctxFactory,    // kept for any path that needs a fresh build (rare)
     };
   }
   // Pity-timer roll — reset the bonus the moment an encounter ROOM
@@ -3461,7 +3466,13 @@ function tickEncounters(dt) {
       if (!ent.state.needsTick) continue;
     }
     if (ent.def.tick) {
-      const ctx = ent.ctxFactory();
+      const ctx = ent.ctx;
+      // Per-frame refresh: playerSpeed + state are the only fields
+      // the tick path mutates; playerPos is a Vector3 reference that
+      // auto-tracks player.mesh.position. Everything else (helpers,
+      // roll functions, scene/level refs) is stable for the spawn's
+      // lifetime.
+      ctx.playerSpeed = lastPlayerInfo ? (lastPlayerInfo.speed || 0) : 0;
       ctx.state = ent.state;
       ent.def.tick(dt, ctx);
     }
@@ -3478,7 +3489,8 @@ function tryEncounterItemDrop(item, x, z) {
   if (!room || !room._encounter) return false;
   const ent = room._encounter;
   if (!ent.def.onItemDropped) return false;
-  const ctx = ent.ctxFactory();
+  const ctx = ent.ctx;
+  ctx.playerSpeed = lastPlayerInfo ? (lastPlayerInfo.speed || 0) : 0;
   ctx.state = ent.state;
   // Drop position — encounters that gate on a sub-region (wishing
   // well disc, etc.) read this. World XZ at the drop point.
@@ -9219,9 +9231,10 @@ function tryInteract({ nearItem, body, bodies, npc, container }) {
   if (!hasPickup) {
     const enc = nearestInteractableEncounter();
     if (enc) {
-      const ctx = enc.ctxFactory();
+      const ctx = enc.ctx;
+      ctx.playerSpeed = lastPlayerInfo ? (lastPlayerInfo.speed || 0) : 0;
       ctx.state = enc.state;
-      // showPrompt / closePrompt are now exposed by the ctx factory
+      // showPrompt / closePrompt are exposed by the ctx factory
       // itself — the local re-assign here used to be the only path,
       // which meant tick() and onItemDropped() couldn't call them.
       enc.def.interact(ctx);
