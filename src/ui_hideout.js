@@ -2833,9 +2833,12 @@ export class HideoutUI {
         display: flex; gap: 8px;
       }
 
-      /* BOTTOM-LEFT TAB STRIP — vertical column tucked into corner */
+      /* BOTTOM-LEFT TAB STRIP — vertical column tucked into corner.
+         z-index keeps it above the contractor stage panel which
+         extends edge-to-edge and would otherwise cover this. */
       #hideout-tabs {
         position: absolute; bottom: 20px; left: 20px;
+        z-index: 50;
         display: flex; flex-direction: column; gap: 4px;
         background: linear-gradient(180deg, rgba(14,16,24,0.85) 0%, rgba(14,16,24,0.65) 100%);
         border: 1px solid rgba(90,138,207,0.4); border-radius: 6px;
