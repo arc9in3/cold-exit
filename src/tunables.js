@@ -390,7 +390,7 @@ export const tunables = {
       // actual identity. The flamer boss archetype still finds it
       // via `tunables.weapons.find(w => w.fireMode === 'flame')`,
       // so the `name` change is purely cosmetic to the player.
-      unlockRank: 12, unlockCost: 1200,
+      unlockRank: 17, unlockCost: 1200,
       name: 'Flamethrower',
       type: 'ranged',
       // Reclassed under the unified 'exotic' mastery family (flame, GL,
@@ -437,7 +437,7 @@ export const tunables = {
       // Single-shot, slow flat-flying projectile, big AoE on impact.
       // Reads through the firePlayerProjectile path (main.js:4108)
       // because fireMode === 'projectile'.
-      unlockRank: 14, unlockCost: 1500,
+      unlockRank: 18, unlockCost: 1500,
       name: 'Widowmaker Rocket Launcher',
       type: 'ranged',
       class: 'exotic',
@@ -1280,7 +1280,7 @@ export const tunables = {
       reloadTime: 1.5,
     },
     {
-      unlockRank: 12,
+      unlockRank: 6,
       name: 'JARD J67',
       type: 'ranged',
       class: 'rifle',
@@ -1415,7 +1415,7 @@ export const tunables = {
       reloadTime: 4.0,
     },
     {
-      unlockRank: 15, shieldBreaker: true,
+      unlockRank: 18, shieldBreaker: true,
       name: 'AWP',
       type: 'ranged',
       class: 'sniper',
@@ -1442,7 +1442,7 @@ export const tunables = {
       reloadTime: 3.8,
     },
     {
-      unlockRank: 13, shieldBreaker: true,
+      unlockRank: 17, shieldBreaker: true,
       name: '.338 Lapua',
       type: 'ranged',
       class: 'sniper',
@@ -1606,7 +1606,7 @@ export const tunables = {
       // 7.5" AR pistol with no stock. Treated as a pistol-class for
       // its size + brace-only ergos. Bigger mag than other pistols
       // (30) since it takes AR mags; weaker damage from short barrel.
-      unlockRank: 15,
+      unlockRank: 5,
       name: 'AR-15 Pistol', type: 'ranged', class: 'pistol', rarity: 'rare',
       attachmentSlots: ['muzzle', 'underRail', 'sideRail', 'topRail', 'grip', 'trigger', 'magazine'],
       fireMode: 'auto', fireRate: 13, damage: 22, range: 36,
@@ -1646,7 +1646,7 @@ export const tunables = {
     },
     {
       // JARD J68 — bullpup chambered in 5.56. Compact, integral rail.
-      unlockRank: 9,
+      unlockRank: 5,
       name: 'JARD J68', type: 'ranged', class: 'rifle', rarity: 'uncommon',
       attachmentSlots: ['muzzle', 'barrel', 'underRail', 'sideRail', 'topRail', 'grip', 'trigger', 'magazine'],
       fireMode: 'auto', fireRate: 11, damage: 28, range: 60,
@@ -1659,7 +1659,7 @@ export const tunables = {
     {
       // JARD J56 — heavier-caliber bullpup variant (.308 platform).
       // Slower fire, more damage, longer range, smaller mag.
-      unlockRank: 13,
+      unlockRank: 8,
       name: 'JARD J56', type: 'ranged', class: 'rifle', rarity: 'rare',
       attachmentSlots: ['muzzle', 'barrel', 'underRail', 'sideRail', 'topRail', 'grip', 'trigger', 'magazine'],
       fireMode: 'auto', fireRate: 8, damage: 42, range: 72,
@@ -1687,7 +1687,7 @@ export const tunables = {
       // Remington 700 in tactical chassis — same action as base 700,
       // but with the lowpoly tactical-furniture FBX. Slightly faster
       // fire and tighter ADS spread thanks to chassis ergonomics.
-      unlockRank: 14,
+      unlockRank: 5,
       name: 'Remington 700 Tactical', type: 'ranged', class: 'sniper', rarity: 'rare',
       attachmentSlots: ['muzzle', 'barrel', 'underRail', 'sideRail', 'topRail', 'stock', 'grip', 'trigger', 'magazine'],
       fireMode: 'semi', fireRate: 1.6, damage: 92, range: 110,

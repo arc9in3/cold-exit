@@ -397,6 +397,9 @@ export const WEAPON_RENDER_BY_NAME = {
   'Colt 357':               'Colt_357.png',
   '.38 Special':            '_38_Special.png',
   'Colt Six Shooter':       'Colt_Six_Shooter.png',
+  // Variants without their own renders share an existing one.
+  'AR-15 Pistol':           'M4.png',
+  'Draco NAK9':             'AK47.png',
 
   // SMGs
   'PDW':                    'PDW.png',
@@ -416,6 +419,18 @@ export const WEAPON_RENDER_BY_NAME = {
   'AUG A3-CQC':             'AUG_A3-CQC.png',
   'CAR-15':                 'CAR-15.png',
   'JARD J67':               'JARD_J67.png',
+  'M4':                     'M4.png',
+  // Reuse existing renders for variants without their own PNG yet —
+  // better than the generic 'rifle' silhouette fallback.
+  'Mini-14':                'Hunting_Rifle.png',
+  'AKS-47':                 'AK47.png',
+  'AR-15 SBR':              'M4.png',
+  'JARD J68':               'CAR-15.png',
+  'JARD J56':               'CAR-15.png',
+
+  // SMG variants without their own renders
+  'SPCA3':                  'SPC9.png',
+  'SPC223':                 'SPC9.png',
 
   // LMGs
   'Type 80 LMG':            'Type_80_LMG.png',
@@ -423,6 +438,7 @@ export const WEAPON_RENDER_BY_NAME = {
 
   // Snipers
   'Remington 700':          'Remington_700.png',
+  'Remington 700 Tactical': 'Remington_700.png',
   'SVD Dragunov':           'SVD_Dragunov.png',
   'Cheytac Intervention':   'Cheytac_Intervention.png',
   'AWP':                    'AWP.png',
@@ -439,6 +455,7 @@ export const WEAPON_RENDER_BY_NAME = {
 
   // Exotic / mythic
   'Widowmaker Rocket Launcher': 'Widowmaker_Rocket_Launcher.png',
+  'Flamethrower':           'flamethrower.png',
   'Dragonbreath':           'Dragonbreath.png',
 
   // Legendary artifact
