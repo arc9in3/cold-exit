@@ -1,5 +1,6 @@
 import * as THREE from 'three';
 import { tunables } from './tunables.js';
+import { isWeaponUnlocked } from './prefs.js';
 import { buildRig, initAnim, updateAnim, pokeHit, pokeRecoil, pokeDeath } from './actor_rig.js';
 import { spawnSpeechBubble } from './hud.js';
 import { loadModelClone, fitToRadius } from './gltf_cache.js';
@@ -232,7 +233,13 @@ export class GunmanManager {
   }
 
   _pickWeapon() {
-    const ws = tunables.weapons;
+    // Enemy-held weapons follow the same world-drop filter as chests.
+    // Locked weapons (worldDrop:false, unowned) don't show up on
+    // enemy bodies — keeps the unlock surface "I haven't seen this
+    // gun yet" until the player actually unlocks it.
+    const ws = tunables.weapons.filter(w =>
+      w.worldDrop !== false || isWeaponUnlocked(w.name));
+    if (!ws.length) return tunables.weapons[0];
     return ws[Math.floor(Math.random() * ws.length)];
   }
 
@@ -467,7 +474,10 @@ export class GunmanManager {
 
     const tierHp = (tier === 'boss' ? 3.2 : tier === 'subBoss' ? 1.8 : 1);
     const hpMult = tierHp * profile.hp * difficultyHp;
-    const damageMult = baseDamageMult * profile.dmg;
+    // Active contract modifier — Risky/Lethal contracts can crank
+    // enemy damage output. Multiplied into the per-enemy damageMult.
+    const contractDmg = window.__activeModifiers?.()?.enemyDamageMult || 1;
+    const damageMult = baseDamageMult * profile.dmg * contractDmg;
     // Tier sizing was ballooning into "giant-robot" territory because
     // tier×variant compounded (tank=1.6 × boss=1.35 ≈ 2.2×). Clamp the
     // combined size so bosses read as "noticeably bigger" without
@@ -711,8 +721,8 @@ export class GunmanManager {
       snipLaser,                  // null on non-snipers
       snipPhase: 'idle',          // 'idle' | 'paint' | 'cool'
       snipPhaseT: 0,
-      hp: tunables.ai.maxHealth * hpMult,
-      maxHp: tunables.ai.maxHealth * hpMult,
+      hp: tunables.ai.maxHealth * hpMult * (window.__activeModifiers?.()?.enemyHpMult || 1),
+      maxHp: tunables.ai.maxHealth * hpMult * (window.__activeModifiers?.()?.enemyHpMult || 1),
       alive: true,
       state: STATE.IDLE,
       role,

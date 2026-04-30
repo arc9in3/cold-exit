@@ -3013,26 +3013,44 @@ export class Level {
                         : lv <= 3 ? (Math.random() < 0.6 ? 1 : 0)
                         : 1 + (Math.random() < 0.4 ? 1 : 0);
       const meleeLevelExtra = Math.min(3, Math.floor(Math.max(0, lv - 4) / 3));
-      const meleesN = meleeBase + meleeBonus + meleeLevelExtra;
+      // Active contract spawnDensityMult — Risky 'Press Wave' multiplies
+      // counts. Read live so the modifier kicks in for the current run.
+      const densityMult = window.__activeModifiers?.()?.spawnDensityMult || 1;
+      // Active contract eliteChanceMult — promotes normal spawns to
+      // subBoss tier with a per-enemy roll. Capped at 1 promotion per
+      // 4 spawns so a 2x mult doesn't fill the room with mini-bosses.
+      const eliteMult = window.__activeModifiers?.()?.eliteChanceMult || 1;
+      const eliteRoll = (eliteMult > 1) ? (eliteMult - 1) * 0.15 : 0;
+      const eliteCap  = (eliteMult > 1) ? Math.max(1, Math.floor(densityMult * 2)) : 0;
+      let elitePromoted = 0;
+      const _maybePromote = (entry) => {
+        if (eliteRoll <= 0 || elitePromoted >= eliteCap) return entry;
+        if (Math.random() < eliteRoll) {
+          elitePromoted++;
+          return { ...entry, tier: 'subBoss' };
+        }
+        return entry;
+      };
+      const meleesN = Math.round((meleeBase + meleeBonus + meleeLevelExtra) * densityMult);
       const gunmanChance = lv <= 1 ? 0.35 : lv <= 3 ? 0.65 : 0.85;
       const baseGunmen = Math.random() < gunmanChance
         ? (lv >= 4 && Math.random() < 0.25 ? 2 : 1)
         : 0;
       const gunmenLevelExtra = Math.min(2, Math.floor(Math.max(0, lv - 5) / 4));
-      const gunmenN = baseGunmen + gunmenLevelExtra;
+      const gunmenN = Math.round((baseGunmen + gunmenLevelExtra) * densityMult);
       for (let i = 0; i < meleesN; i++) {
         const p = pickOpen();
-        this.enemySpawns.push({
+        this.enemySpawns.push(_maybePromote({
           x: p.x, z: p.z, kind: 'melee', tier: 'normal', roomId: room.id,
           variant: pickMeleeVariant(),
-        });
+        }));
       }
       for (let i = 0; i < gunmenN; i++) {
         const p = pickOpen();
-        this.enemySpawns.push({
+        this.enemySpawns.push(_maybePromote({
           x: p.x, z: p.z, kind: 'gunman', tier: 'normal', roomId: room.id,
           variant: pickGunmanVariant(),
-        });
+        }));
       }
     } else if (room.type === 'subBoss') {
       const p = pickOpen(3);

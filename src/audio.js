@@ -367,19 +367,22 @@ export const sfx = {
     src.connect(lp).connect(g1).connect(master);
     connectToWet(g1, 0.15);
     src.start();
-    // Sub drone — slow-swelling sine at ~45 Hz with a second detuned
-    // layer for movement. Keeps rooms feeling "inhabited".
+    // Sub drone — DRASTICALLY attenuated. Original 0.05 gain was
+    // perceived as a "mechanical droning" sound that fatigued the
+    // ear. Pulled to 0.008 (84% reduction) so the bed reads as
+    // "quiet room" not "engine room hum". LFO modulation also
+    // scaled down proportionally.
     const d1 = ctx.createOscillator();
     d1.type = 'sine'; d1.frequency.value = 45;
     const d2 = ctx.createOscillator();
     d2.type = 'sine'; d2.frequency.value = 46.8;
     const dg = ctx.createGain();
-    dg.gain.value = 0.05;
+    dg.gain.value = 0.008;
     d1.connect(dg); d2.connect(dg); dg.connect(master);
     const lfo = ctx.createOscillator();
     lfo.frequency.value = 0.08;     // ~12s cycle
     const lfoG = ctx.createGain();
-    lfoG.gain.value = 0.02;
+    lfoG.gain.value = 0.003;        // proportionally smaller LFO swing
     lfo.connect(lfoG).connect(dg.gain);
     d1.start(); d2.start(); lfo.start();
     ambientNodes = { src, d1, d2, lfo, g1, dg };
@@ -399,4 +402,126 @@ export const sfx = {
       }, 450);
     } catch (_) { ambientNodes = null; }
   },
+
+  // ---- Music ----
+  // Procedural background music — no audio files. Each track is a
+  // small synth ensemble: pad chord, slow arpeggio, optional bass.
+  // Tracks: 'menu' (sparse, contemplative), 'run' (low-key tension),
+  // 'boss' (faster tempo, urgent). Volume is independent of master
+  // so player can scale music separately if we add a slider later.
+  musicPlay(track = 'menu') {
+    if (!unlocked || !ensureCtx()) return;
+    if (musicNodes && musicNodes.track === track) return;
+    if (musicNodes) this.musicStop();
+    const cfg = MUSIC_TRACKS[track] || MUSIC_TRACKS.menu;
+    musicNodes = _buildMusicNodes(cfg);
+    musicNodes.track = track;
+  },
+  musicStop() {
+    if (!musicNodes) return;
+    try {
+      const now = ctx.currentTime;
+      musicNodes.bus.gain.linearRampToValueAtTime(0.0001, now + 0.6);
+      const ref = musicNodes;
+      setTimeout(() => {
+        try { for (const o of ref.oscs) o.stop(); } catch (_) {}
+        try { clearInterval(ref.intervalId); } catch (_) {}
+      }, 700);
+      musicNodes = null;
+    } catch (_) { musicNodes = null; }
+  },
 };
+
+// ---- Music track definitions ----
+let musicNodes = null;
+const MUSIC_TRACKS = {
+  // Sparse minor-key pad. Contemplative; suits the hideout / menu.
+  menu: {
+    tempo: 70,
+    chord: [220.00, 261.63, 329.63],   // A3 / C4 / E4 — A minor
+    arp:   [440.00, 523.25, 659.25, 523.25],
+    busGain: 0.16,
+    padGain: 0.06,
+    arpGain: 0.045,
+    arpInterval: 0.85,
+  },
+  // Low-key tension. In-run combat; restrained so it doesn't fight
+  // with gunfire SFX.
+  run: {
+    tempo: 95,
+    chord: [196.00, 246.94, 293.66],   // G3 / B3 / D4 — G major
+    arp:   [392.00, 493.88, 587.33, 783.99],
+    busGain: 0.12,
+    padGain: 0.045,
+    arpGain: 0.05,
+    arpInterval: 0.55,
+  },
+  // Faster + brighter for boss fights.
+  boss: {
+    tempo: 130,
+    chord: [146.83, 174.61, 220.00],   // D3 / F3 / A3 — D minor
+    arp:   [293.66, 349.23, 440.00, 523.25],
+    busGain: 0.18,
+    padGain: 0.055,
+    arpGain: 0.07,
+    arpInterval: 0.32,
+  },
+};
+function _buildMusicNodes(cfg) {
+  // Bus — single output gain so musicStop fades cleanly.
+  const bus = ctx.createGain();
+  bus.gain.value = cfg.busGain;
+  bus.connect(master);
+  // Wet send — small amount through reverb for room feel.
+  if (wet?._input) {
+    const send = ctx.createGain();
+    send.gain.value = cfg.busGain * 0.4;
+    bus.connect(send);
+    send.connect(wet._input);
+  }
+  const oscs = [];
+  // Pad — sustained chord. Each note is a sine + slightly detuned
+  // saw mixed for warmth. Long attack/release for "drift" feel.
+  const padG = ctx.createGain();
+  padG.gain.value = cfg.padGain;
+  const padLP = ctx.createBiquadFilter();
+  padLP.type = 'lowpass';
+  padLP.frequency.value = 1200;
+  padG.connect(padLP).connect(bus);
+  for (const f of cfg.chord) {
+    const o1 = ctx.createOscillator(); o1.type = 'sine'; o1.frequency.value = f;
+    const o2 = ctx.createOscillator(); o2.type = 'triangle'; o2.frequency.value = f * 1.005;
+    const ng = ctx.createGain(); ng.gain.value = 0;
+    o1.connect(ng); o2.connect(ng); ng.connect(padG);
+    // Slow attack for swell feel.
+    ng.gain.linearRampToValueAtTime(1.0, ctx.currentTime + 1.2);
+    o1.start(); o2.start();
+    oscs.push(o1, o2);
+  }
+  // Arpeggio — single oscillator that re-pitches via a JS interval.
+  // Uses a short envelope per note to keep it from droning.
+  const arpG = ctx.createGain();
+  arpG.gain.value = 0;
+  const arpFilter = ctx.createBiquadFilter();
+  arpFilter.type = 'lowpass';
+  arpFilter.frequency.value = 2400;
+  arpG.connect(arpFilter).connect(bus);
+  const arpO = ctx.createOscillator();
+  arpO.type = 'triangle';
+  arpO.frequency.value = cfg.arp[0];
+  arpO.connect(arpG);
+  arpO.start();
+  oscs.push(arpO);
+  let arpStep = 0;
+  const intervalId = setInterval(() => {
+    if (!ctx) return;
+    arpStep = (arpStep + 1) % cfg.arp.length;
+    arpO.frequency.setValueAtTime(cfg.arp[arpStep], ctx.currentTime);
+    const t = ctx.currentTime;
+    arpG.gain.cancelScheduledValues(t);
+    arpG.gain.setValueAtTime(0, t);
+    arpG.gain.linearRampToValueAtTime(cfg.arpGain, t + 0.02);
+    arpG.gain.exponentialRampToValueAtTime(0.0001, t + cfg.arpInterval * 0.85);
+  }, cfg.arpInterval * 1000);
+  return { bus, oscs, intervalId };
+}

@@ -97,33 +97,49 @@ const MIL_BASE  = 'Assets/UI/Military/';
 // render and skip the procedural primitive without touching the build
 // system.
 export const GEAR_RENDER_BY_ID = {
-  helmet_kevlar:   'Assets/generated/helmet-kevlar.png',
-  helmet_tactical: 'Assets/generated/armor-helmet.png',
-  helmet_tac_nvg:  'Assets/generated/tactical-helmet.png',
-  chest_light:     'Assets/generated/chest-light-r2.png',
+  helmet_kevlar:    'Assets/proposed/helmet_kevlar.png',
+  helmet_tactical:  'Assets/proposed/helmet_tactical.png',
+  helmet_tac_nvg:   'Assets/proposed/helmet_tac_nvg.png',
+  helmet_ballistic: 'Assets/proposed/helmet_ballistic.png',
+  chest_light:     'Assets/generated/icon-chest_light-v304.png',
   chest_med:       'Assets/generated/chest-med-r2.png',
   chest_heavy:     'Assets/generated/chest-heavy.png',
+  chest_rig:       'Assets/generated/armor-chest-rig.png',
+  chest_ghillie:   'Assets/generated/icon-chest_ghillie-v894.png',
   gloves_tac:      'Assets/generated/gloves-tac.png',
-  hands_trigger:   'Assets/generated/hands-trigger-r2.png',
-  hands_climber:   'Assets/generated/hands-climber.png',
+  hands_trigger:   'Assets/generated/icon-hands_trigger-v880.png',
+  hands_climber:   'Assets/generated/icon-hands_climber-v720.png',
   hands_loader:    'Assets/generated/hands-loader.png',
+  hands_hunter:    'Assets/proposed/hands_hunter.png',
+  hands_wraith:    'Assets/proposed/hands_wraith.png',
   mask_gas:        'Assets/generated/mask-gas.png',
-  mask_respirator: 'Assets/generated/mask-respirator-r2.png',
+  mask_respirator: 'Assets/proposed/mask_respirator.png',
+  mask_balaclava:  'Assets/proposed/mask_balaclava.png',
+  face_tac_goggles: 'Assets/generated/icon-face_tac_goggles-v603.png',
   ears_trinket:    'Assets/generated/ears-trinket.png',
   ears_comtacs:    'Assets/generated/ears-comtacs-r2.png',
   ears_amp:        'Assets/generated/ears-amp.png',
-  ears_surveil:    'Assets/generated/ears-surveil.png',
-  ears_plugs:      'Assets/generated/ears-plugs.png',
+  ears_surveil:    'Assets/generated/icon-ears_surveil-v300.png',
+  ears_plugs:      'Assets/generated/icon-ears_plugs-v307.png',
   belt_ammo:       'Assets/generated/belt-ammo-r2.png',
   belt_mag_pouch:  'Assets/generated/belt-mag-pouch.png',
   belt_grenade_pouch: 'Assets/generated/belt-grenade-pouch.png',
   belt_coinpouch:  'Assets/generated/belt-coinpouch.png',
-  pants_runner:    'Assets/generated/pants-runner.png',
+  belt_quickdraw:  'Assets/generated/icon-belt_quickdraw-v632.png',
+  pants_combat:    'Assets/proposed/pants_combat.png',
+  pants_runner:    'Assets/generated/icon-pants_runner-v431.png',
+  pants_quilt:     'Assets/generated/icon-pants_quilt-v375.png',
   boots_light:     'Assets/generated/boots-light-r2.png',
-  boots_heavy:     'Assets/generated/boots-heavy.png',
-  backpack_satchel: 'Assets/generated/backpack-satchel.png',
-  backpack_med:    'Assets/generated/backpack-med.png',
-  backpack_large:  'Assets/generated/backpack-large.png',
+  boots_heavy:     'Assets/generated/icon-boots_heavy-v596.png',
+  boots_silent:    'Assets/generated/icon-boots_silent-v443.png',
+  boots_steeltoe:  'Assets/proposed/boots_steeltoe.png',
+  backpack_small:  'Assets/generated/icon-backpack_small-v521.png',
+  backpack_satchel: 'Assets/generated/icon-backpack_satchel-v989.png',
+  backpack_med:    'Assets/proposed/backpack_med.png',
+  backpack_assault: 'Assets/proposed/backpack_assault.png',
+  backpack_large:  'Assets/generated/icon-backpack_large-v604.png',
+  backpack_ranger: 'Assets/proposed/backpack_ranger.png',
+  backpack_expedition: 'Assets/generated/icon-backpack_expedition-v688.png',
 };
 
 // Curated junk PNG overrides — same idea as GEAR_RENDER_BY_ID, but for
@@ -131,8 +147,12 @@ export const GEAR_RENDER_BY_ID = {
 // big procedural-builder library in item_thumbnails.js, but a polished
 // PNG reads better at 96px cell size than the primitive cylinders.
 export const JUNK_RENDER_BY_ID = {
-  junk_watch:  'Assets/generated/junk-watch.png',
-  junk_silver: 'Assets/generated/junk-silver-coin.png',
+  junk_watch:          'Assets/proposed/junk_watch.png',
+  junk_silver:         'Assets/generated/junk-silver-coin.png',
+  junk_yummy_biscuits: 'Assets/proposed/junk_yummy_biscuits.png',
+  junk_skull:          'Assets/proposed/junk_skull.png',
+  junk_monocle:        'Assets/proposed/junk_monocle.png',
+  junk_dogtags:        'Assets/proposed/junk_dogtags.png',
 };
 
 // Curated consumable PNG overrides — same idea as the gear / junk
@@ -144,6 +164,13 @@ export const CONSUMABLE_RENDER_BY_ID = {
   cons_combat_stim: 'Assets/generated/consum-stim.png',
   cons_medkit:      'Assets/generated/consum-medkit.png',
   cons_bandage:     'Assets/generated/consum-bandage.png',
+};
+
+// Curated attachment PNG overrides — same idea as the gear table, but
+// keyed by ATTACHMENT_DEFS[*].id. Wins over ATTACHMENT_ICON_BY_ID and
+// the FBX async upgrade in thumbnailFor.
+export const ATTACHMENT_RENDER_BY_ID = {
+  att_barrel_long: 'Assets/proposed/att_barrel_long.png',
 };
 
 // Per-weapon-name overrides — uses the SM_Wep_* BattleRoyale/Military art
@@ -252,6 +279,8 @@ const ARMOR_GEAR_ICON_BY_ID = {
   gauntlets:         'ICON_MilitaryCombat_Stat_Strength_01_Underlay.png',
   hands_trigger:     'ICON_MilitaryCombat_Stat_Speed_01_Underlay.png',
   hands_climber:     'ICON_MilitaryCombat_Stat_Speed_03_Underlay.png',
+  hands_hunter:      'ICON_MilitaryCombat_Status_Critical_01_Underlay.png',
+  hands_wraith:      'ICON_MilitaryCombat_Stat_Spirit_01_Underlay.png',
   gear_stonefist:    'ICON_MilitaryCombat_Stat_Strength_02_Underlay.png',
   belt_rig:          'ICON_MilitaryCombat_Inventory_Melee_01_Underlay.png',
   belt_ammo:         'ICON_MilitaryCombat_Inventory_Ammo_Bullets_02_Underlay.png',
@@ -432,6 +461,8 @@ export function iconForItem(item) {
     return ICON_BASE + 'ICON_MilitaryCombat_Inventory_Minerals_01_Underlay.png';
   }
   if (item.type === 'attachment') {
+    const render = ATTACHMENT_RENDER_BY_ID[item.id];
+    if (render) return render;
     const byId = ATTACHMENT_ICON_BY_ID[item.id];
     if (byId) return MIL_BASE + byId;
     return MIL_BASE + 'ICON_MilitaryCombat_Inventory_Ammo_Bullets_02_Underlay.png';
@@ -1141,6 +1172,12 @@ export const ARMOR_DEFS = {
     tint: 0x3a5030, durability: dur(90, 0.9), stealthMult: 0.7, pockets: 1,
     description: 'Deep stealth, −20% detection', rarity: 'rare',
     apply(s) { s.stealthMult *= 0.8; } },
+  // Pure-utility chest harness — no plates, so no damage reduction; trades
+  // armor for pocket count and a small reload bump from the front mag rack.
+  chest_rig: { id: 'chest_rig', name: 'Chest Rig', slot: 'chest', type: 'gear',
+    tint: 0x6f7a3a, durability: dur(70, 0.94), pockets: 2,
+    description: '+2 pockets · −5% reload, no armor', rarity: 'common',
+    apply(s) { s.reloadSpeedMult *= 1.05; } },
   chest_spetsnaz: { id: 'chest_spetsnaz', name: 'Spetsnaz Plate Carrier', slot: 'chest', type: 'armor',
     tint: 0x2a3a2a, reduction: 0.32, speedMult: 0.93, stealthMult: 0.92, pockets: 2,
     durability: dur(180, 0.9),

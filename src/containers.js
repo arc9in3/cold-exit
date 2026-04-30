@@ -16,6 +16,54 @@ import {
 } from './inventory.js';
 import { ALL_ATTACHMENTS, randomAttachment } from './attachments.js';
 import { tunables } from './tunables.js';
+import { isWeaponUnlocked } from './prefs.js';
+
+// World-drop weapon pool — everything `worldDrop !== false` plus any
+// individual weapons the player has chip-unlocked at the Stash Armory.
+// Locked weapons (worldDrop:false, unowned) are silently filtered out
+// so fresh players see only the open-pool variety, with a separate
+// trial-drop path adding the occasional locked-weapon "ooh, what's
+// THIS?" beat (handled below).
+function _worldDropPool() {
+  return tunables.weapons.filter(w =>
+    !w.artifact && !w.mythic && w.rarity !== 'mythic'
+    && (w.worldDrop !== false || isWeaponUnlocked(w.name)));
+}
+
+// Pick a weapon from the pool, biased by lootQualityMult. The mult
+// is a multiplier on the picked weapon's rarity weight: 1.0 = uniform
+// (vanilla), 1.5 = 50% more likely to land on rares+, 2.0 = 2x. The
+// rarity weights ramp common→legendary (1, 0.6, 0.35, 0.18, 0.08)
+// with the mult applied to non-common picks.
+const _RARITY_WEIGHTS = { common: 1.0, uncommon: 0.6, rare: 0.35, epic: 0.18, legendary: 0.08, mythic: 0 };
+function _pickWeightedFromPool(pool) {
+  const mult = window.__activeModifiers?.()?.lootQualityMult || 1;
+  let total = 0;
+  const weights = pool.map(w => {
+    const base = _RARITY_WEIGHTS[w.rarity || 'common'] ?? 1;
+    const wt = (w.rarity && w.rarity !== 'common') ? base * mult : base;
+    total += wt;
+    return wt;
+  });
+  if (total <= 0) return pool[Math.floor(Math.random() * pool.length)];
+  let r = Math.random() * total;
+  for (let i = 0; i < pool.length; i++) {
+    if ((r -= weights[i]) <= 0) return pool[i];
+  }
+  return pool[pool.length - 1];
+}
+
+// Locked-pool sample for the trial-drop path. Returns one locked,
+// unowned weapon at low rate; caller picks whether to substitute it
+// into the regular roll. The substitution rate (5-10%) is tuned at
+// the call site.
+function _trialDropCandidate() {
+  const locked = tunables.weapons.filter(w =>
+    !w.artifact && !w.mythic && w.rarity !== 'mythic'
+    && w.worldDrop === false && !isWeaponUnlocked(w.name));
+  if (!locked.length) return null;
+  return locked[Math.floor(Math.random() * locked.length)];
+}
 
 // Visual tint per container type — top of the box reads as a colored
 // strip so the player can identify the type at a glance even before
@@ -65,10 +113,20 @@ function rollItemForType(type, levelIdx) {
   if (type === 'weapon') {
     const r = Math.random();
     if (r < 0.55) {
-      const pool = tunables.weapons.filter(w =>
-        !w.artifact && !w.mythic && w.rarity !== 'mythic');
-      const pick = pool[Math.floor(Math.random() * pool.length)];
-      return wrapWeapon(pick);
+      // Trial-drop chance — 8% of weapon-crate weapon rolls return a
+      // locked weapon as a one-shot find. Picking it up at run-end
+      // surfaces an "Unlock for chips?" prompt so the player can
+      // permanently add it to their collection if they liked it.
+      if (Math.random() < 0.08) {
+        const trial = _trialDropCandidate();
+        if (trial) {
+          const w = wrapWeapon(trial);
+          w.lockedTrial = true;     // run-end prompt reads this flag
+          return w;
+        }
+      }
+      const pool = _worldDropPool();
+      return wrapWeapon(_pickWeightedFromPool(pool));
     }
     if (r < 0.80) return randomThrowable();
     return randomAttachment();
@@ -90,10 +148,11 @@ function rollItemForType(type, levelIdx) {
   }
   if (type === 'masterwork') {
     // Single item, always high-rarity — caller already gates this to
-    // a single-item chest.
-    const pool = tunables.weapons.filter(w =>
-      !w.artifact && !w.mythic && w.rarity !== 'mythic');
-    const wpn = wrapWeapon(pool[Math.floor(Math.random() * pool.length)]);
+    // a single-item chest. Masterwork respects worldDrop locks too:
+    // a chest can't fish a locked weapon out of the pool. Players
+    // unlock those at the Stash Armory.
+    const pool = _worldDropPool();
+    const wpn = wrapWeapon(_pickWeightedFromPool(pool));
     wpn.rarity = Math.random() < 0.55 ? 'epic' : 'legendary';
     // Use forceMastercraft instead of just flipping the flag — it
     // applies the 1.5× bump to affix values, useEffect numbers, and
@@ -113,9 +172,8 @@ function rollItemForType(type, levelIdx) {
   if (r < 0.92) return randomJunk();
   // Small chance of a weapon in a general crate — rare enough that
   // weapon crates still feel like the right place to look.
-  const pool = tunables.weapons.filter(w =>
-    !w.artifact && !w.mythic && w.rarity !== 'mythic');
-  return wrapWeapon(pool[Math.floor(Math.random() * pool.length)]);
+  const pool = _worldDropPool();
+  return wrapWeapon(_pickWeightedFromPool(pool));
 }
 
 // Build a complete container descriptor. Caller spawns the mesh and

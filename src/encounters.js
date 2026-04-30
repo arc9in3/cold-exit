@@ -22,6 +22,28 @@
 //                   { consume: true, complete?: true } → item is removed,
 //                       optionally mark the encounter complete
 //
+// Optional fields (default values noted; older encounter defs omit them
+// and inherit defaults — no migration required):
+//   tier          int 0..3 — hidden tier gate. Default 0 (always
+//                 available). Higher tiers only become eligible once
+//                 the player's hidden tier (see encounter_tier.js)
+//                 climbs past the threshold. The number is NEVER
+//                 surfaced in UI — players discover their world is
+//                 deepening on their own.
+//   cooldownRuns  int — after a player triggers this encounter,
+//                 suppress it for the next N completed runs.
+//                 Distinct from oncePerSave (forever-gone). 0 / undefined
+//                 = no run-cooldown. Stored in prefs.encounterCooldowns.
+//   markOnMap     bool — default true. Set false on tier-2/3 mystery
+//                 encounters that should be discovered by walking
+//                 into them, not by reading the minimap.
+//   forceFollowup { id, floors } — encounter requests a specific
+//                 follow-up encounter spawn on the next `floors`
+//                 levels (typically 1-2). Queued via
+//                 prefs.queueEncounterFollowup() at completion time.
+//                 Used to preserve continuity across levels for
+//                 mystery threads.
+//
 // The runtime sits in main.js: pickEncounterForLevel() fills a room's
 // `encounter` slot at gen time, an EncounterRuntime instance walks
 // every frame to tick each active encounter and route dropped items
@@ -29,9 +51,13 @@
 
 import * as THREE from 'three';
 import { buildProp } from './props.js';
-import { getCompletedEncounters, markEncounterDone } from './prefs.js';
+import {
+  getCompletedEncounters, markEncounterDone,
+  getEncounterCooldowns, getRunCount, takeEncounterFollowupForFloor,
+} from './prefs.js';
 import { TOY_DEFS } from './inventory.js';
 import { tunables } from './tunables.js';
+import { isEncounterEligible, currentEncounterTier } from './encounter_tier.js';
 
 // Shared frozen empty list — every hittables() call that has nothing
 // to expose returns this reference instead of allocating [] per frame.
@@ -4837,8 +4863,23 @@ const _EPIC_SCRIPTS = {
 // Helper — pick one valid encounter for the given level state, or null.
 // Caller handles the "no encounter this level" outcome.
 export function pickEncounterForLevel(levelIndex, completedSet, runStats = null, artifacts = null) {
+  // Forced followups jump the queue — when the previous floor's
+  // encounter requested a continuation (`forceFollowup`), that id
+  // is placed here regardless of the random pool. Returns null if
+  // the queued id no longer exists, so the normal roll still runs.
+  const queued = takeEncounterFollowupForFloor();
+  if (queued && ENCOUNTER_DEFS[queued.id]) {
+    return ENCOUNTER_DEFS[queued.id];
+  }
+  // Hidden encounter-tier filter — encounter_tier.js reads run /
+  // contract / boss / sigil meta-state and produces a 0..3 ceiling.
+  // Encounters above that ceiling are silently invisible. The
+  // player never sees the tier number.
+  const cooldownMap = getEncounterCooldowns();
+  const runCount = getRunCount();
+  const tier = currentEncounterTier();
   const candidates = Object.values(ENCOUNTER_DEFS).filter((def) => {
-    if (def.oncePerSave && completedSet.has(def.id)) return false;
+    if (!isEncounterEligible(def, completedSet, cooldownMap, runCount, tier)) return false;
     if (def.condition && !def.condition({ levelIndex, completed: completedSet, runStats, artifacts })) return false;
     return true;
   });

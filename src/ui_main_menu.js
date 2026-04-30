@@ -93,28 +93,18 @@ export class MainMenuUI {
     nameInput.addEventListener('input', () => this.setPlayerName(nameInput.value));
     this.bodyEl.appendChild(nameWrap);
 
-    // Button names match the splash-art mock. Keep the same
-    // callbacks so nothing in the flow changes.
-    this.bodyEl.appendChild(this._btn('New Game', () => {
+    // Collapsed main-menu — the Hideout is the lobby now. Play opens
+    // the Hideout (default landing on Contracts). Run-start happens
+    // from inside the Hideout's stash via the Take-a-Weapon flow.
+    // Tutorial / Leaderboard / Options stay on the title screen so
+    // they remain reachable without entering the loop.
+    this.bodyEl.appendChild(this._btn('Hideout', () => {
       this.hide();
-      this.onPlay?.();
-    }));
-    // Quick Start — bypass the rolled-store flow and pick a starting
-    // weapon class directly. Useful when the player wants a clean
-    // pistol / sniper / melee run without rolling for an upgrade.
-    this.bodyEl.appendChild(this._btn('Quick Start (pick class)', () => {
-      this.hide();
-      this.onQuickStart?.();
-    }));
+      this.onOpenHideout?.();
+    }, ' primary'));
     this.bodyEl.appendChild(this._btn('Tutorial', () => {
       this.hide();
       this.onTutorial?.();
-    }));
-    this.bodyEl.appendChild(this._btn('Upgrades', () => {
-      this.onOpenStore?.();
-    }));
-    this.bodyEl.appendChild(this._btn('Hideout', () => {
-      this.onOpenHideout?.();
     }));
     this.bodyEl.appendChild(this._btn('Leaderboard', () => { this.view = 'leaderboard'; this.render(); }));
     this.bodyEl.appendChild(this._btn('Options',    () => { this.view = 'settings';    this.render(); }));

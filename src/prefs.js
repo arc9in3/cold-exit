@@ -58,6 +58,28 @@ export function setCharacterStyle(v) {
   _write(CHARACTER_STYLE_KEY, v === 'marine' ? 'marine' : 'operator');
 }
 
+// Character appearance — color palette + accessory toggles. Stored
+// as a single object so adding fields doesn't require new keys.
+const CHARACTER_APPEARANCE_KEY = 'tacticalrogue:characterAppearance:v1';
+export const APPEARANCE_DEFAULTS = {
+  primary:    '#3a4a5a',     // jacket / armor body
+  accent:     '#c9a87a',     // straps / trim
+  skin:       '#caa07a',     // skin tone
+  hair:       '#3a2c1c',     // hair / beard
+  helmet:     true,
+  vestOver:   true,           // overlay vest decoration
+};
+export function getCharacterAppearance() {
+  const raw = _read(CHARACTER_APPEARANCE_KEY, null);
+  if (!raw || typeof raw !== 'object') return { ...APPEARANCE_DEFAULTS };
+  return { ...APPEARANCE_DEFAULTS, ...raw };
+}
+export function setCharacterAppearance(patch) {
+  if (!patch || typeof patch !== 'object') return;
+  const cur = getCharacterAppearance();
+  _write(CHARACTER_APPEARANCE_KEY, { ...cur, ...patch });
+}
+
 // Persistent pouch slot count. Starts at 1 — the player spends
 // contract chips to unlock more slots, up to a cap of 9. Very expensive
 // ramp: the last slot should feel like a milestone upgrade, not a
@@ -161,6 +183,289 @@ export function resetEncounterCompletion(id) {
   if (!set.has(id)) return;
   set.delete(id);
   _write(COMPLETED_ENCOUNTERS_KEY, [...set].sort());
+}
+
+// Per-encounter persistent state — used by mystery-thread encounters
+// that build up across runs. Each encounter id maps to a free-form
+// state blob the encounter's interact() reads + mutates. Distinct
+// from getCompletedEncounters() (which is the binary "done forever"
+// set) so state can persist on a chain that hasn't fully resolved.
+const ENCOUNTER_STATE_KEY = 'tacticalrogue:encounterState:v1';
+export function getEncounterState(id) {
+  if (!id) return {};
+  const all = _read(ENCOUNTER_STATE_KEY, {}) || {};
+  return (all && typeof all === 'object' && all[id] && typeof all[id] === 'object')
+    ? all[id]
+    : {};
+}
+export function setEncounterState(id, state) {
+  if (!id) return;
+  const all = _read(ENCOUNTER_STATE_KEY, {}) || {};
+  all[id] = (state && typeof state === 'object') ? state : {};
+  _write(ENCOUNTER_STATE_KEY, all);
+}
+export function patchEncounterState(id, patch) {
+  if (!id || !patch) return;
+  const cur = getEncounterState(id);
+  setEncounterState(id, { ...cur, ...patch });
+}
+
+// Run-cooldown tracker — encounters with `cooldownRuns: N` are
+// suppressed for the next N completed runs after a player triggers
+// them. The map is { encounterId: runIndexAtUnsuppress }. Compared
+// against getRunCount() in the eligibility filter.
+const ENCOUNTER_COOLDOWN_KEY = 'tacticalrogue:encounterCooldown:v1';
+export function getEncounterCooldowns() {
+  const raw = _read(ENCOUNTER_COOLDOWN_KEY, {}) || {};
+  return (raw && typeof raw === 'object') ? raw : {};
+}
+export function setEncounterCooldown(id, unsuppressAtRun) {
+  if (!id) return;
+  const all = getEncounterCooldowns();
+  all[id] = unsuppressAtRun | 0;
+  _write(ENCOUNTER_COOLDOWN_KEY, all);
+}
+
+// Forced-followup queue — encounters can request that a specific
+// follow-up encounter spawn on the next 1-2 floors regardless of
+// the normal encounter roll. Each entry is { id, floorsRemaining }.
+// Decremented on every level transition; consumed on placement.
+// Persists across save/load so a thread doesn't break on a quit-out.
+const FOLLOWUP_QUEUE_KEY = 'tacticalrogue:encounterFollowups:v1';
+export function getEncounterFollowups() {
+  const arr = _read(FOLLOWUP_QUEUE_KEY, []);
+  return Array.isArray(arr) ? arr : [];
+}
+export function setEncounterFollowups(arr) {
+  _write(FOLLOWUP_QUEUE_KEY, Array.isArray(arr) ? arr : []);
+}
+export function queueEncounterFollowup(id, floors = 1) {
+  if (!id) return;
+  const cur = getEncounterFollowups();
+  cur.push({ id, floorsRemaining: Math.max(1, floors | 0) });
+  setEncounterFollowups(cur);
+}
+// Tick the queue on level transition — decrements all entries; drops
+// any that hit 0. Returns the entry that was placed (if any) so the
+// caller can consume it.
+export function takeEncounterFollowupForFloor() {
+  const cur = getEncounterFollowups();
+  if (!cur.length) return null;
+  // Pop the oldest entry that's ready to fire.
+  const idx = cur.findIndex(e => (e.floorsRemaining | 0) > 0);
+  if (idx < 0) { setEncounterFollowups([]); return null; }
+  const out = cur[idx];
+  cur.splice(idx, 1);
+  // Decrement remaining entries (they wait one more floor).
+  for (const e of cur) e.floorsRemaining = Math.max(0, (e.floorsRemaining | 0) - 1);
+  setEncounterFollowups(cur.filter(e => e.floorsRemaining > 0));
+  return out;
+}
+export function clearEncounterFollowups() { setEncounterFollowups([]); }
+
+// Lifetime run counter — bumps once per completed run (extract OR
+// death). Feeds the hidden encounter-tier formula and the cooldown
+// timing for cooldownRuns-flagged encounters. Visible to nobody —
+// the player should never see this number.
+const RUN_COUNT_KEY = 'tacticalrogue:runCount:v1';
+export function getRunCount() {
+  try { return parseInt(localStorage.getItem(RUN_COUNT_KEY) || '0', 10) || 0; }
+  catch (_) { return 0; }
+}
+export function bumpRunCount() {
+  try {
+    const next = getRunCount() + 1;
+    localStorage.setItem(RUN_COUNT_KEY, String(next));
+    return next;
+  } catch (_) { return 0; }
+}
+
+// ---------------------------------------------------------------------
+// Weapon unlocks — chips spent at the Stash Armory permanently unlock
+// a weapon flagged `worldDrop: false` in tunables. Two effects per
+// purchase: (a) the weapon enters the player's free-take starter pool,
+// (b) it starts dropping in chests via loot.js's filter.
+// Stored as a Set serialised to a sorted string array.
+// ---------------------------------------------------------------------
+const UNLOCKED_WEAPONS_KEY = 'tacticalrogue:unlockedWeapons:v1';
+export function getUnlockedWeapons() {
+  const arr = _read(UNLOCKED_WEAPONS_KEY, []);
+  return Array.isArray(arr) ? new Set(arr) : new Set();
+}
+export function unlockWeapon(name) {
+  if (!name) return;
+  const set = getUnlockedWeapons();
+  if (set.has(name)) return;
+  set.add(name);
+  _write(UNLOCKED_WEAPONS_KEY, [...set].sort());
+}
+export function isWeaponUnlocked(name) {
+  return getUnlockedWeapons().has(name);
+}
+
+// Selected starter weapon — the player picks ONE weapon name from
+// their stash (baseline-5 ∪ unlocked) before starting a run. Read by
+// main.js's _pickStarterWeapon at run start. If null, falls back to
+// the old class-based pick (any common-or-unlocked of the chosen
+// class).
+const STARTER_WEAPON_KEY = 'tacticalrogue:selectedStarterWeapon:v1';
+export function getSelectedStarterWeapon() {
+  try { return localStorage.getItem(STARTER_WEAPON_KEY) || null; }
+  catch (_) { return null; }
+}
+export function setSelectedStarterWeapon(name) {
+  try {
+    if (name) localStorage.setItem(STARTER_WEAPON_KEY, String(name));
+    else localStorage.removeItem(STARTER_WEAPON_KEY);
+  } catch (_) {}
+}
+
+// ---------------------------------------------------------------------
+// Pre-Run Store — rotating stock of single-use items (weapons, armor,
+// consumables) the player buys with chips at the Stash. Items go into
+// the next-run starter inventory and are consumed at run start. The
+// store auto-refreshes after STORE_REFRESH_MS; once an item is bought,
+// its slot is empty until the next refresh. Prices float ±30% per
+// refresh so timing matters.
+//
+// Schema:
+//   slots         int — base 4, expandable via chip purchases (max 8)
+//   ceiling       int 0..4 — rarity ceiling: 0 common-only, 4 legendary
+//   refreshMs     int — refresh cadence in ms (default 4h, min 1h)
+//   lastRefreshAt int — UTC ms timestamp of last roll
+//   stock         array of { id, kind, rarity, price, sold } per slot
+//
+// `kind` is one of: 'weapon' | 'armor' | 'consumable' | 'ammo' | 'buff'
+// ---------------------------------------------------------------------
+const STORE_KEY = 'tacticalrogue:preRunStore:v1';
+export const STORE_SLOT_MIN = 4;
+export const STORE_SLOT_MAX = 8;
+export const STORE_CEILING_MAX = 4;
+export const STORE_REFRESH_DEFAULT_MS = 4 * 60 * 60 * 1000;   // 4h
+export const STORE_REFRESH_MIN_MS     = 1 * 60 * 60 * 1000;   // 1h floor
+export const STORE_SLOT_COSTS    = [200, 400, 700, 1100];     // buying slot 5..8
+export const STORE_CEILING_COSTS = [250, 500, 900, 1500];     // ceiling 1..4
+export const STORE_REFRESH_COSTS = [300, 600, 1200];          // refresh tier upgrades
+
+export function getStoreState() {
+  const raw = _read(STORE_KEY, null);
+  if (!raw || typeof raw !== 'object') {
+    return {
+      slots: STORE_SLOT_MIN,
+      ceiling: 0,
+      refreshMs: STORE_REFRESH_DEFAULT_MS,
+      lastRefreshAt: 0,
+      stock: [],
+    };
+  }
+  return {
+    slots: Math.max(STORE_SLOT_MIN, Math.min(STORE_SLOT_MAX, (raw.slots | 0) || STORE_SLOT_MIN)),
+    ceiling: Math.max(0, Math.min(STORE_CEILING_MAX, raw.ceiling | 0)),
+    refreshMs: Math.max(STORE_REFRESH_MIN_MS, (raw.refreshMs | 0) || STORE_REFRESH_DEFAULT_MS),
+    lastRefreshAt: raw.lastRefreshAt | 0,
+    stock: Array.isArray(raw.stock) ? raw.stock : [],
+  };
+}
+export function setStoreState(state) {
+  _write(STORE_KEY, {
+    slots: Math.max(STORE_SLOT_MIN, Math.min(STORE_SLOT_MAX, state?.slots | 0 || STORE_SLOT_MIN)),
+    ceiling: Math.max(0, Math.min(STORE_CEILING_MAX, state?.ceiling | 0)),
+    refreshMs: Math.max(STORE_REFRESH_MIN_MS, state?.refreshMs | 0 || STORE_REFRESH_DEFAULT_MS),
+    lastRefreshAt: state?.lastRefreshAt | 0,
+    stock: Array.isArray(state?.stock) ? state.stock : [],
+  });
+}
+export function storeNextSlotCost(currentSlots) {
+  if (currentSlots >= STORE_SLOT_MAX) return null;
+  return STORE_SLOT_COSTS[currentSlots - STORE_SLOT_MIN];
+}
+export function storeNextCeilingCost(currentCeiling) {
+  if (currentCeiling >= STORE_CEILING_MAX) return null;
+  return STORE_CEILING_COSTS[currentCeiling];
+}
+export function storeNextRefreshCost(currentRefreshMs) {
+  // Tiered refresh rates: 4h → 2h → 1h. Each tier has a cost.
+  if (currentRefreshMs <= 60 * 60 * 1000) return null;          // already at 1h
+  if (currentRefreshMs <= 2 * 60 * 60 * 1000) return STORE_REFRESH_COSTS[2];
+  if (currentRefreshMs <= 3 * 60 * 60 * 1000) return STORE_REFRESH_COSTS[1];
+  return STORE_REFRESH_COSTS[0];
+}
+
+// ---------------------------------------------------------------------
+// Pre-run starter inventory queue — items the player buys from the
+// Pre-Run Store get queued here and applied at startNewRun(). Hard-cap
+// is "what fits in the run-start inventory" — over-buying is prevented
+// at the UI layer (paperdoll) rather than auto-converted to chips.
+// ---------------------------------------------------------------------
+const STARTER_INVENTORY_KEY = 'tacticalrogue:starterInventory:v1';
+export function getStarterInventory() {
+  const arr = _read(STARTER_INVENTORY_KEY, []);
+  return Array.isArray(arr) ? arr : [];
+}
+export function setStarterInventory(arr) {
+  _write(STARTER_INVENTORY_KEY, Array.isArray(arr) ? arr : []);
+}
+export function addStarterInventoryItem(item) {
+  if (!item) return;
+  const cur = getStarterInventory();
+  cur.push(item);
+  setStarterInventory(cur);
+}
+export function consumeStarterInventory() {
+  const cur = getStarterInventory();
+  setStarterInventory([]);
+  return cur;
+}
+
+// Sigils — the rarest currency. Earned from named-bounty contracts
+// (megaboss kills under specific contract targets). Spent at the
+// Black Market on relic permits + keystone perks. Distinct from
+// the lifetime counter (below) which never decays so meta-content
+// stays unlocked even after the player spends down their balance.
+const SIGILS_KEY = 'tacticalrogue:sigils:v1';
+export function getSigils() {
+  try { return parseInt(localStorage.getItem(SIGILS_KEY) || '0', 10) || 0; }
+  catch (_) { return 0; }
+}
+export function setSigils(n) {
+  try { localStorage.setItem(SIGILS_KEY, String(Math.max(0, n | 0))); }
+  catch (_) {}
+}
+export function awardSigils(n) {
+  const add = Math.max(0, n | 0);
+  if (!add) return getSigils();
+  const next = getSigils() + add;
+  setSigils(next);
+  // Bump the lifetime counter too — feeds the hidden encounter-tier
+  // formula. Spending sigils later doesn't decrement this.
+  bumpSigilsLifetime(add);
+  return next;
+}
+export function spendSigils(n) {
+  const cost = Math.max(0, n | 0);
+  const cur = getSigils();
+  if (cost > cur) return false;
+  setSigils(cur - cost);
+  return true;
+}
+
+// Lifetime sigils-earned counter — distinct from current sigil
+// balance (which gets spent down). The hidden encounter-tier
+// formula reads this so spending sigils doesn't *unlock* the
+// gameplay surface and then *re-lock* it once you've cashed in.
+const SIGILS_LIFETIME_KEY = 'tacticalrogue:sigilsLifetime:v1';
+export function getSigilsLifetime() {
+  try { return parseInt(localStorage.getItem(SIGILS_LIFETIME_KEY) || '0', 10) || 0; }
+  catch (_) { return 0; }
+}
+export function bumpSigilsLifetime(n) {
+  const add = Math.max(0, n | 0);
+  if (!add) return getSigilsLifetime();
+  try {
+    const next = getSigilsLifetime() + add;
+    localStorage.setItem(SIGILS_LIFETIME_KEY, String(next));
+    return next;
+  } catch (_) { return 0; }
 }
 
 // Shrine tiers — three independent purchases, each one-shot per RUN
@@ -329,4 +634,140 @@ export function getPersistentChips() {
 export function setPersistentChips(n) {
   try { localStorage.setItem(CHIPS_KEY, String(Math.max(0, n | 0))); }
   catch (_) { /* private mode / quota */ }
+}
+
+// Marks — the death currency. Earned by dying on a run; spent at the
+// Recruiter for permanent structural unlocks (NPCs, classes,
+// stat-tier upgrades). Separate from chips so the player can never
+// "skip the death loop" by extracting more. Storage key kept as
+// `bones:v1` from the prior naming so existing local saves carry
+// over cleanly — only the JS surface is renamed.
+const MARKS_KEY = 'tacticalrogue:bones:v1';
+export function getMarks() {
+  try { return parseInt(localStorage.getItem(MARKS_KEY) || '0', 10) || 0; }
+  catch (_) { return 0; }
+}
+export function setMarks(n) {
+  try { localStorage.setItem(MARKS_KEY, String(Math.max(0, n | 0))); }
+  catch (_) {}
+}
+export function awardMarks(n) {
+  const add = Math.max(0, n | 0);
+  if (!add) return getMarks();
+  const next = getMarks() + add;
+  setMarks(next);
+  return next;
+}
+export function spendMarks(n) {
+  const cost = Math.max(0, n | 0);
+  const cur = getMarks();
+  if (cost > cur) return false;
+  setMarks(cur - cost);
+  return true;
+}
+
+// Contract rank — number of contracts the player has successfully
+// claimed. Acts as the primary "I am ready for harder content" gate
+// for harder contract tiers (`unlockedAt.contractsCompleted`).
+const CONTRACT_RANK_KEY = 'tacticalrogue:contractRank:v1';
+export function getContractRank() {
+  try { return parseInt(localStorage.getItem(CONTRACT_RANK_KEY) || '0', 10) || 0; }
+  catch (_) { return 0; }
+}
+export function setContractRank(n) {
+  try { localStorage.setItem(CONTRACT_RANK_KEY, String(Math.max(0, n | 0))); }
+  catch (_) {}
+}
+export function bumpContractRank() {
+  const next = getContractRank() + 1;
+  setContractRank(next);
+  return next;
+}
+
+// Relic permits — sigil-spent unlocks that admit a locked relic
+// into the relic-merchant rotation. Persistent Set; once owned, the
+// permit stays forever.
+const RELIC_PERMITS_KEY = 'tacticalrogue:relicPermits:v1';
+export function getRelicPermits() {
+  const arr = _read(RELIC_PERMITS_KEY, []);
+  return Array.isArray(arr) ? new Set(arr) : new Set();
+}
+export function setRelicPermitOwned(id) {
+  if (!id) return;
+  const set = getRelicPermits();
+  if (set.has(id)) return;
+  set.add(id);
+  _write(RELIC_PERMITS_KEY, [...set].sort());
+}
+export function hasRelicPermit(id) {
+  return getRelicPermits().has(id);
+}
+
+// Keystones — sigil-spent run-modifier perks. Two patterns: one-shot
+// (consumed on next run start, e.g. "Deep Run starts at floor 5") and
+// permanent (always-on once owned, e.g. "Pain drops enabled"). The
+// queue holds one-shots; the owned set holds permanents.
+const KEYSTONE_QUEUE_KEY = 'tacticalrogue:keystoneQueue:v1';
+const KEYSTONE_OWNED_KEY = 'tacticalrogue:keystoneOwned:v1';
+export function getKeystoneQueue() {
+  const arr = _read(KEYSTONE_QUEUE_KEY, []);
+  return Array.isArray(arr) ? arr : [];
+}
+export function queueKeystone(id) {
+  if (!id) return;
+  const cur = getKeystoneQueue();
+  cur.push(id);
+  _write(KEYSTONE_QUEUE_KEY, cur);
+}
+export function consumeKeystoneQueue() {
+  const cur = getKeystoneQueue();
+  _write(KEYSTONE_QUEUE_KEY, []);
+  return cur;
+}
+export function getOwnedKeystones() {
+  const arr = _read(KEYSTONE_OWNED_KEY, []);
+  return Array.isArray(arr) ? new Set(arr) : new Set();
+}
+export function setKeystoneOwned(id) {
+  if (!id) return;
+  const set = getOwnedKeystones();
+  if (set.has(id)) return;
+  set.add(id);
+  _write(KEYSTONE_OWNED_KEY, [...set].sort());
+}
+
+// Lifetime megaboss kills — counted once per (boss, run-end). Feeds
+// `unlockedAt.megabossKills` predicates on top-tier contracts.
+const MEGABOSS_KILLS_KEY = 'tacticalrogue:megabossKills:v1';
+export function getMegabossKills() {
+  try { return parseInt(localStorage.getItem(MEGABOSS_KILLS_KEY) || '0', 10) || 0; }
+  catch (_) { return 0; }
+}
+export function bumpMegabossKills() {
+  try {
+    const next = getMegabossKills() + 1;
+    localStorage.setItem(MEGABOSS_KILLS_KEY, String(next));
+    return next;
+  } catch (_) { return 0; }
+}
+
+// Recruiter — marks-spent permanent unlocks. Each row is one-shot;
+// once purchased, the upgrade applies forever. Stored as a Set
+// serialised to a sorted array so we can grow the catalog without
+// worrying about positional drift. Storage key kept as the prior
+// `morticianUnlocks` for save-file compatibility.
+const RECRUITER_UNLOCKS_KEY = 'tacticalrogue:morticianUnlocks:v1';
+export function getRecruiterUnlocks() {
+  const arr = _read(RECRUITER_UNLOCKS_KEY, []);
+  return Array.isArray(arr) ? new Set(arr) : new Set();
+}
+export function setRecruiterUnlocked(id) {
+  if (!id) return;
+  const set = getRecruiterUnlocks();
+  if (set.has(id)) return;
+  set.add(id);
+  _write(RECRUITER_UNLOCKS_KEY, [...set].sort());
+}
+export function hasRecruiterUnlock(id) {
+  return getRecruiterUnlocks().has(id);
 }

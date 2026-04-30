@@ -47,74 +47,329 @@ export const CONTRACT_EVENT_FIELDS = {
 };
 
 // --- Defs --------------------------------------------------------------
-// Six daily contracts and three weekly. The active contract slot rolls
-// from these; daily refreshes every 24h, weekly every 7 days.
-export const CONTRACT_DEFS = {
-  daily_extract_floor_5: {
-    id: 'daily_extract_floor_5',
-    label: 'Survey Mission',
-    blurb: 'Extract from floor 5 or higher.',
-    kind: 'daily', period: 'daily', reward: 80,
-    evaluate: (s) => !!s.extracted && (s.peakLevel | 0) >= 5,
-  },
-  daily_kills_50: {
-    id: 'daily_kills_50',
-    label: 'Sweeper',
-    blurb: 'Kill 50 enemies in one run.',
-    kind: 'daily', period: 'daily', reward: 90,
-    evaluate: (s) => (s.kills | 0) >= 50,
-  },
-  daily_no_consumables: {
-    id: 'daily_no_consumables',
-    label: 'Iron Lung',
-    blurb: 'Reach floor 4 without using a consumable.',
-    kind: 'daily', period: 'daily', reward: 110,
-    evaluate: (s) => !!s.noConsumables && (s.peakLevel | 0) >= 4,
-  },
-  daily_pistol_only: {
-    id: 'daily_pistol_only',
-    label: 'Sidearm Drill',
-    blurb: 'Extract using only pistols.',
-    kind: 'daily', period: 'daily', reward: 130,
-    evaluate: (s) => !!s.extracted && !!s.pistolOnly,
-  },
-  daily_throwable_kills_10: {
-    id: 'daily_throwable_kills_10',
-    label: 'Demolitionist',
-    blurb: 'Get 10 throwable kills in one run.',
-    kind: 'daily', period: 'daily', reward: 100,
-    evaluate: (s) => (s.throwableKills | 0) >= 10,
-  },
-  daily_crit_heads_15: {
-    id: 'daily_crit_heads_15',
-    label: 'Marksman',
-    blurb: 'Land 15 crit headshots in one run.',
-    kind: 'daily', period: 'daily', reward: 110,
-    evaluate: (s) => (s.critHeadshots | 0) >= 15,
-  },
+// Contracts are bounty-style missions: "kill N of <archetype>". Plain
+// language, plain reward, plain progression. As the player ranks up,
+// harder rarities surface — modifiers + restrictions appear ONLY on
+// rare/epic/legendary tiers so an early player isn't faced with
+// pistol-only missions on day one.
+//
+// Schema:
+//   id          stable string key
+//   label       human-readable mission title
+//   rarity      'common' | 'uncommon' | 'rare' | 'epic' | 'legendary'
+//   portrait    string id — visual icon for the contract card. Maps
+//               to a glyph in the UI: 'dasher' | 'tank' | 'gunman' |
+//               'melee' | 'sniper' | 'boss' | 'megaboss' | 'any'
+//   targetType  'any' | 'dasher' | 'tank' | 'gunman' | 'melee' |
+//               'sniper' | 'boss' | 'megaboss' — what to kill
+//   targetCount number of kills required. Tracked via
+//               runStats.archetypeKills[targetType].
+//   perKillReward chips paid per qualifying kill (capped at
+//               targetCount). Surfaces in the UI so the player
+//               sees "+15c per kill" alongside the total.
+//   reward      total chips paid on contract completion (separate
+//               from per-kill — this is the bonus on top of the
+//               per-kill chips, paid only when targetCount is hit)
+//   marksReward marks floor on completion (rare/epic/legendary)
+//   unlockedAt  predicates: { contractsCompleted, megabossKills, marks }
+//   modifiers   only on rare+ — { weaponClass, enemyHpMult, etc. }
+//   evaluate    optional override; defaults to targetType+targetCount
+//
+// Common contracts pay only via perKillReward + a small completion
+// bonus. Higher rarities ramp both the per-kill rate AND the bonus,
+// AND pay marks floors AND unlock sigils once that economy lands.
+// Helper — auto-evaluator built from targetType + targetCount. Reads
+// runStats.archetypeKills (a per-archetype counter populated by main.js
+// at every kill site). Returns true once the kill count for the
+// requested archetype passes the target. 'any' just sums total kills.
+function _autoEval(def) {
+  return (s) => {
+    const need = def.targetCount | 0;
+    if (!need) return false;
+    if (def.targetType === 'any' || !def.targetType) {
+      return (s.kills | 0) >= need;
+    }
+    if (def.targetType === 'megaboss') {
+      return (s.megabossKillsThisRun | 0) >= need;
+    }
+    const ak = s.archetypeKills || {};
+    return (ak[def.targetType] | 0) >= need;
+  };
+}
+function _kill(def) {
+  // Wraps a contract def with auto-evaluator + safe defaults.
+  return {
+    rarity: 'common',
+    perKillReward: 10,
+    reward: 0,
+    marksReward: 0,
+    unlockedAt: {},
+    modifiers: {},
+    targetType: 'any',
+    targetCount: 5,
+    portrait: 'any',
+    kind: 'daily', period: 'daily',
+    ...def,
+    evaluate: def.evaluate || _autoEval(def),
+    // Backwards-compat alias — older code reads `tier`. Map rarity to
+    // the prior risky/lethal/standard scheme so render code that
+    // hasn't been updated yet still works.
+    tier: def.tier || (
+      def.rarity === 'legendary' ? 'lethal'
+        : def.rarity === 'epic' ? 'lethal'
+        : def.rarity === 'rare' ? 'risky'
+        : 'standard'
+    ),
+  };
+}
 
-  weekly_extract_floor_10: {
-    id: 'weekly_extract_floor_10',
-    label: 'Deep Run',
-    blurb: 'Extract from floor 10 or higher.',
-    kind: 'weekly', period: 'weekly', reward: 350,
-    evaluate: (s) => !!s.extracted && (s.peakLevel | 0) >= 10,
-  },
-  weekly_no_melee_floor_8: {
-    id: 'weekly_no_melee_floor_8',
-    label: 'Cold Hands',
-    blurb: 'Reach floor 8 without landing a melee hit.',
-    kind: 'weekly', period: 'weekly', reward: 400,
-    evaluate: (s) => !!s.noMelee && (s.peakLevel | 0) >= 8,
-  },
-  weekly_pistol_floor_8: {
-    id: 'weekly_pistol_floor_8',
-    label: 'Pistolero',
-    blurb: 'Reach floor 8 using only pistols.',
-    kind: 'weekly', period: 'weekly', reward: 450,
-    evaluate: (s) => !!s.pistolOnly && (s.peakLevel | 0) >= 8,
-  },
+export const CONTRACT_DEFS = {
+  // ============= COMMON — always unlocked, no modifiers, plain kill goals =============
+  common_clear_5: _kill({
+    id: 'common_clear_5',
+    label: 'Sweep the Block',
+    rarity: 'common',
+    portrait: 'any',
+    targetType: 'any', targetCount: 5,
+    perKillReward: 8, reward: 30,
+  }),
+  common_dashers_3: _kill({
+    id: 'common_dashers_3',
+    label: 'Outrun the Runners',
+    rarity: 'common',
+    portrait: 'dasher',
+    targetType: 'dasher', targetCount: 3,
+    perKillReward: 18, reward: 50,
+  }),
+  common_gunmen_5: _kill({
+    id: 'common_gunmen_5',
+    label: 'Suppress the Riflemen',
+    rarity: 'common',
+    portrait: 'gunman',
+    targetType: 'gunman', targetCount: 5,
+    perKillReward: 14, reward: 40,
+  }),
+  common_melee_8: _kill({
+    id: 'common_melee_8',
+    label: 'Hand to Hand',
+    rarity: 'common',
+    portrait: 'melee',
+    targetType: 'melee', targetCount: 8,
+    perKillReward: 10, reward: 40,
+  }),
+  common_clear_15: _kill({
+    id: 'common_clear_15',
+    label: 'Make Some Noise',
+    rarity: 'common',
+    portrait: 'any',
+    targetType: 'any', targetCount: 15,
+    perKillReward: 8, reward: 70,
+  }),
+
+  // ============= UNCOMMON — unlock at rank 3, bigger numbers, still no modifiers =====
+  uncommon_dashers_8: _kill({
+    id: 'uncommon_dashers_8',
+    label: 'Faster Than They Look',
+    rarity: 'uncommon',
+    portrait: 'dasher',
+    targetType: 'dasher', targetCount: 8,
+    perKillReward: 22, reward: 110,
+    unlockedAt: { contractsCompleted: 3 },
+  }),
+  uncommon_tanks_4: _kill({
+    id: 'uncommon_tanks_4',
+    label: 'Bring Down the Heavies',
+    rarity: 'uncommon',
+    portrait: 'tank',
+    targetType: 'tank', targetCount: 4,
+    perKillReward: 35, reward: 120,
+    unlockedAt: { contractsCompleted: 3 },
+  }),
+  uncommon_clear_30: _kill({
+    id: 'uncommon_clear_30',
+    label: 'Body Count',
+    rarity: 'uncommon',
+    portrait: 'any',
+    targetType: 'any', targetCount: 30,
+    perKillReward: 10, reward: 150,
+    unlockedAt: { contractsCompleted: 3 },
+  }),
+  uncommon_gunmen_15: _kill({
+    id: 'uncommon_gunmen_15',
+    label: 'Quiet the Watchers',
+    rarity: 'uncommon',
+    portrait: 'gunman',
+    targetType: 'gunman', targetCount: 15,
+    perKillReward: 18, reward: 130,
+    unlockedAt: { contractsCompleted: 5 },
+  }),
+
+  // ============= RARE — unlock at rank 8, ONE mild modifier, marks floor ============
+  rare_density_dashers: _kill({
+    id: 'rare_density_dashers',
+    label: 'They Sent More',
+    rarity: 'rare',
+    portrait: 'dasher',
+    targetType: 'dasher', targetCount: 12,
+    perKillReward: 32, reward: 220, marksReward: 6,
+    unlockedAt: { contractsCompleted: 8 },
+    modifiers: { spawnDensityMult: 1.3 },
+  }),
+  rare_tough_tanks: _kill({
+    id: 'rare_tough_tanks',
+    label: 'Reinforced Plating',
+    rarity: 'rare',
+    portrait: 'tank',
+    targetType: 'tank', targetCount: 6,
+    perKillReward: 50, reward: 250, marksReward: 8,
+    unlockedAt: { contractsCompleted: 8 },
+    modifiers: { enemyHpMult: 1.4 },
+  }),
+  rare_boss_hunt: _kill({
+    id: 'rare_boss_hunt',
+    label: 'Bag the Captain',
+    rarity: 'rare',
+    portrait: 'boss',
+    targetType: 'boss', targetCount: 1,
+    perKillReward: 200, reward: 200, marksReward: 10,
+    unlockedAt: { contractsCompleted: 10 },
+    modifiers: {},
+  }),
+
+  // ============= EPIC — unlock at rank 15, stacked modifiers ========================
+  epic_press_wave: _kill({
+    id: 'epic_press_wave',
+    label: 'Press Wave',
+    rarity: 'epic',
+    portrait: 'any',
+    targetType: 'any', targetCount: 50,
+    perKillReward: 14, reward: 400, marksReward: 18,
+    unlockedAt: { contractsCompleted: 15, megabossKills: 1 },
+    modifiers: { spawnDensityMult: 1.5, enemyHpMult: 1.25 },
+  }),
+  epic_glass_cannon: _kill({
+    id: 'epic_glass_cannon',
+    label: 'Glass Cannon',
+    rarity: 'epic',
+    portrait: 'any',
+    targetType: 'any', targetCount: 40,
+    perKillReward: 18, reward: 500, marksReward: 22,
+    unlockedAt: { contractsCompleted: 15, megabossKills: 1 },
+    modifiers: { playerDamageTakenMult: 1.5, playerDamageDealtMult: 1.5 },
+  }),
+  epic_iron_will: _kill({
+    id: 'epic_iron_will',
+    label: 'Iron Will',
+    rarity: 'epic',
+    portrait: 'tank',
+    targetType: 'tank', targetCount: 8,
+    perKillReward: 80, reward: 600, marksReward: 28,
+    unlockedAt: { contractsCompleted: 18, megabossKills: 1 },
+    modifiers: { enemyHpMult: 1.75, noConsumables: true },
+  }),
+
+  // ============= LEGENDARY — unlock at rank 25 + 2 megabosses; the gauntlets =======
+  legendary_pistolero: _kill({
+    id: 'legendary_pistolero',
+    label: 'Lone Pistol',
+    rarity: 'legendary',
+    portrait: 'gunman',
+    targetType: 'gunman', targetCount: 25,
+    perKillReward: 40, reward: 1000, marksReward: 40, sigilsReward: 2,
+    unlockedAt: { contractsCompleted: 25, megabossKills: 2 },
+    modifiers: { weaponClass: 'pistol' },
+  }),
+  legendary_knife_work: _kill({
+    id: 'legendary_knife_work',
+    label: 'Knife Work',
+    rarity: 'legendary',
+    portrait: 'melee',
+    targetType: 'melee', targetCount: 30,
+    perKillReward: 35, reward: 1000, marksReward: 40, sigilsReward: 2,
+    unlockedAt: { contractsCompleted: 25, megabossKills: 2 },
+    modifiers: { weaponClass: 'melee' },
+  }),
+  legendary_megaboss_hunt: _kill({
+    id: 'legendary_megaboss_hunt',
+    label: 'Megaboss Hunt',
+    rarity: 'legendary',
+    portrait: 'megaboss',
+    targetType: 'megaboss', targetCount: 1,
+    perKillReward: 1500, reward: 0, marksReward: 60, sigilsReward: 3,
+    unlockedAt: { contractsCompleted: 30, megabossKills: 2 },
+    modifiers: { enemyDamageMult: 1.5 },
+  }),
 };
+
+// Returns true if `def` is unlocked given current persistent state.
+// `state` shape: { contractsCompleted, megabossKills, marks }. Missing
+// fields default to 0 (i.e. unmet).
+export function isContractUnlocked(def, state) {
+  const u = def?.unlockedAt;
+  if (!u) return true;
+  if ((u.contractsCompleted | 0) > 0 && ((state?.contractsCompleted | 0) < u.contractsCompleted)) return false;
+  if ((u.megabossKills | 0) > 0 && ((state?.megabossKills | 0) < u.megabossKills)) return false;
+  if ((u.marks | 0) > 0 && ((state?.marks | 0) < u.marks)) return false;
+  return true;
+}
+
+// Computes a difficulty score from the contract's hard rules. Each
+// rule contributes a weight; the score feeds the auto-derived reward
+// multipliers below. This keeps content authoring cheap: defs only
+// state the rules, the engine offsets the math.
+//
+//   weaponClass restriction (pistol / melee)   +0.40
+//   noConsumables                              +0.20
+//   enemyHpMult > 1                            +(mult - 1) * 0.80
+//   enemyDamageMult > 1                        +(mult - 1) * 0.70
+//   spawnDensityMult > 1                       +(mult - 1) * 0.50
+//   eliteChanceMult > 1                        +(mult - 1) * 0.40
+//   playerDamageTakenMult > 1                  +(mult - 1) * 0.60
+//   playerDamageDealtMult < 1                  +(1 - mult) * 0.60
+//
+// (playerDamageDealtMult > 1 is a *buff*, not a punishment, so it
+// doesn't add to the score. Glass-cannon "+50% taken / +50% dealt"
+// nets out at +0.30 from the taken-damage side only.)
+export function difficultyScore(def) {
+  const m = def?.modifiers || {};
+  let score = 0;
+  if (m.weaponClass) score += 0.4;
+  if (m.noConsumables) score += 0.2;
+  if ((m.enemyHpMult || 1) > 1) score += ((m.enemyHpMult || 1) - 1) * 0.8;
+  if ((m.enemyDamageMult || 1) > 1) score += ((m.enemyDamageMult || 1) - 1) * 0.7;
+  if ((m.spawnDensityMult || 1) > 1) score += ((m.spawnDensityMult || 1) - 1) * 0.5;
+  if ((m.eliteChanceMult || 1) > 1) score += ((m.eliteChanceMult || 1) - 1) * 0.4;
+  if ((m.playerDamageTakenMult || 1) > 1) score += ((m.playerDamageTakenMult || 1) - 1) * 0.6;
+  if ((m.playerDamageDealtMult || 1) < 1) score += (1 - (m.playerDamageDealtMult || 1)) * 0.6;
+  return score;
+}
+
+// Build the run-time modifier object the gameplay code actually
+// reads. Empty modifiers object on the def collapses to a clean
+// no-op default. `lootQualityMult`, `chipsMult`, `marksMult` are auto-derived
+// auto-derived counter-pressure offsets that scale with the
+// difficulty score so harder rules pay better without needing
+// per-contract hand-tuning.
+export function buildModifiers(def) {
+  const m = def?.modifiers || {};
+  const score = difficultyScore(def);
+  return {
+    weaponClass: m.weaponClass || null,        // 'pistol' | 'melee' | null
+    enemyHpMult: m.enemyHpMult || 1,
+    enemyDamageMult: m.enemyDamageMult || 1,
+    spawnDensityMult: m.spawnDensityMult || 1,
+    eliteChanceMult: m.eliteChanceMult || 1,
+    playerDamageTakenMult: m.playerDamageTakenMult || 1,
+    playerDamageDealtMult: m.playerDamageDealtMult || 1,
+    noConsumables: !!m.noConsumables,
+    // Auto-derived counter-pressure. Override by setting the field
+    // explicitly on a def's `modifiers` block — explicit values win.
+    lootQualityMult: m.lootQualityMult || (1 + score * 0.5),
+    chipsMult: m.chipsMult || (1 + score * 0.6),
+    marksMult: m.marksMult || (1 + score * 0.6),
+    _score: score,
+  };
+}
 
 const DAILY_MS = 24 * 60 * 60 * 1000;
 const WEEKLY_MS = 7 * DAILY_MS;
@@ -186,18 +441,26 @@ export function evaluateContract(activeContract, snapshot) {
 
 // Convenience: award the contract reward + stamp the claim. main.js
 // calls this on extract / death after building the snapshot. Returns
-// the chips paid out, or 0 on no-op.
+// { chips, marks } paid out, or zeros on no-op.
 //   setActiveContractFn(updated) — persists the claimedAt stamp
-//   awardChipsFn(amount) — pays out the reward (main.js's
-//     awardPersistentChips, which honors restart-penalty etc.)
-export function tryClaimContract(activeContract, snapshot, setActiveContractFn, awardChipsFn) {
+//   awardChipsFn(amount) — pays out chips reward
+//   awardMarksFn(amount) — pays out marks reward (optional; harder
+//     tiers carry a marks floor in addition to chips)
+//   bumpRankFn() — bumps the player's contract rank counter
+export function tryClaimContract(activeContract, snapshot, setActiveContractFn, awardChipsFn, awardMarksFn, bumpRankFn, awardSigilsFn) {
   const { def, passed, alreadyClaimed, reward } = evaluateContract(activeContract, snapshot);
-  if (!def || alreadyClaimed || !passed) return 0;
-  // Stamp claim BEFORE awarding so a double-call can't double-pay.
+  if (!def || alreadyClaimed || !passed) return { chips: 0, marks: 0, sigils: 0 };
   const updated = { ...activeContract, claimedAt: Date.now() };
   if (typeof setActiveContractFn === 'function') setActiveContractFn(updated);
-  if (typeof awardChipsFn === 'function') awardChipsFn(reward);
-  return reward;
+  const mods = buildModifiers(def);
+  const chips = Math.round(reward * mods.chipsMult);
+  const marks = Math.round((def.marksReward | 0) * mods.marksMult);
+  const sigils = (def.sigilsReward | 0);   // sigils don't auto-scale; gated explicitly per-def
+  if (typeof awardChipsFn === 'function' && chips > 0) awardChipsFn(chips);
+  if (typeof awardMarksFn === 'function' && marks > 0) awardMarksFn(marks);
+  if (typeof awardSigilsFn === 'function' && sigils > 0) awardSigilsFn(sigils);
+  if (typeof bumpRankFn === 'function') bumpRankFn();
+  return { chips, marks, sigils };
 }
 
 // runStats hook — hideout panel reads this to show live progress on

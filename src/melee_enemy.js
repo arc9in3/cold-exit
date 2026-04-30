@@ -64,8 +64,12 @@ export class MeleeEnemyManager {
   spawn(x, z, opts = {}) {
     const tier = opts.tier || 'normal';
     const roomId = opts.roomId ?? -1;
-    const difficultyHp = opts.hpMult || 1;
-    const damageMult = opts.damageMult || 1;
+    // Active contract modifiers — Risky/Lethal contracts can scale
+    // enemy HP and damage at spawn time. Both default to 1 so a
+    // standard run is unchanged.
+    const contractMods = window.__activeModifiers?.() || {};
+    const difficultyHp = (opts.hpMult || 1) * (contractMods.enemyHpMult || 1);
+    const damageMult = (opts.damageMult || 1) * (contractMods.enemyDamageMult || 1);
     const variant = opts.variant || 'standard';
     // Shield-bearer chassis is 0.5× normal HP (dies in a few rear
      // shots — base maxHealth 100 × 0.5 = ~50 chassis HP). The

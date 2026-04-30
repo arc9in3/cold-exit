@@ -58,6 +58,24 @@ export class RunStats {
     this.critHeadshots = 0;
     this.throwableKills = 0;
     this.extracted = false;
+    // Total firearms shots taken this run. Read by melee-only
+    // contracts (firedShots === 0 = ranged-free). Incremented at the
+    // same fire-path sites that already call noteFireWeaponClass().
+    this.firedShots = 0;
+    // Megabosses killed this run — set by main.js's onMegaBossDead
+    // hook. Drives the lethal_megaboss_hunt contract.
+    this.megabossKillsThisRun = 0;
+    // Per-archetype kill counters — populated by main.js at every
+    // kill site. Read by contract auto-evaluators that target a
+    // specific enemy archetype (dasher / tank / gunman / melee /
+    // boss / megaboss). 'any' contracts read the top-level kills.
+    this.archetypeKills = {
+      dasher: 0, tank: 0, gunman: 0, melee: 0, sniper: 0,
+      boss: 0, megaboss: 0, standard: 0, elite: 0,
+    };
+    // Marks awarded on death — populated by main.js when the run
+    // ends. Surfaces on the death recap UI.
+    this.marksEarned = 0;
   }
 
   markTainted() { this.tainted = true; }
@@ -79,7 +97,19 @@ export class RunStats {
   }
   // Contract-event helpers — main.js calls these from the relevant
   // gameplay sites (fire path, melee resolve, throwable kill, etc.).
-  noteFireWeaponClass(cls) { if (cls && cls !== 'pistol') this.pistolOnly = false; }
+  noteFireWeaponClass(cls) {
+    this.firedShots = (this.firedShots | 0) + 1;
+    if (cls && cls !== 'pistol') this.pistolOnly = false;
+  }
+  // Bump an archetype counter on enemy kill. main.js calls this at
+  // each kill site with the enemy's tier/variant — any unknown key
+  // is ignored so we don't grow the map unboundedly.
+  noteArchetypeKill(archetype) {
+    if (!archetype) return;
+    if (this.archetypeKills[archetype] != null) {
+      this.archetypeKills[archetype] += 1;
+    }
+  }
   noteConsumableUsed()     { this.noConsumables = false; }
   noteMeleeLanded()        { this.noMelee = false; }
   noteCritHeadshot()       { this.critHeadshots += 1; }
@@ -109,6 +139,10 @@ export class RunStats {
       noMelee: this.noMelee,
       critHeadshots: this.critHeadshots,
       throwableKills: this.throwableKills,
+      firedShots: this.firedShots,
+      megabossKillsThisRun: this.megabossKillsThisRun,
+      marksEarned: this.marksEarned,
+      archetypeKills: { ...this.archetypeKills },
     };
   }
 }

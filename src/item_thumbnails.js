@@ -13,7 +13,7 @@ import * as THREE from 'three';
 import { loadModelClone } from './gltf_cache.js';
 import { modelForItem, renderForWeaponName } from './model_manifest.js';
 import { snapshotToDataURL } from './snapshot_renderer.js';
-import { GEAR_RENDER_BY_ID, JUNK_RENDER_BY_ID, CONSUMABLE_RENDER_BY_ID } from './inventory.js';
+import { GEAR_RENDER_BY_ID, JUNK_RENDER_BY_ID, CONSUMABLE_RENDER_BY_ID, ATTACHMENT_RENDER_BY_ID } from './inventory.js';
 
 const SIZE = 96;                    // thumbnail resolution (px)
 const BG = 0x1a1e24;                // matches inventory card bg
@@ -1441,6 +1441,13 @@ export function thumbnailFor(item) {
   }
   if (item.type === 'consumable') {
     const render = CONSUMABLE_RENDER_BY_ID[item.id];
+    if (render) {
+      _cache.set(key, render);
+      return render;
+    }
+  }
+  if (item.type === 'attachment') {
+    const render = ATTACHMENT_RENDER_BY_ID[item.id];
     if (render) {
       _cache.set(key, render);
       return render;

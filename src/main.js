@@ -66,13 +66,15 @@ import { GameMenuUI } from './ui_menu.js';
 import { StartUI } from './ui_start.js';
 import { MainMenuUI } from './ui_main_menu.js';
 import { HideoutUI } from './ui_hideout.js';
-import { tryClaimContract, defForId, buildModifiers } from './contracts.js';
+import { tryClaimContract, defForId, buildModifiers, evaluateContract } from './contracts.js';
 import {
   getActiveContract, setActiveContract, awardMarks, bumpContractRank, bumpMegabossKills,
   bumpRunCount, queueEncounterFollowup,
   getUnlockedWeapons, isWeaponUnlocked, unlockWeapon,
   consumeStarterInventory,
   getSelectedStarterWeapon,
+  getSigils, awardSigils,
+  consumeKeystoneQueue,
 } from './prefs.js';
 import { StoreUpgradeUI, StoreRollUI, rollRarityForTier } from './ui_starting_store.js';
 import { getQualityPref, setQualityPref, applyQuality, qualityFlags } from './quality.js';
@@ -775,6 +777,50 @@ function _refreshActiveModifiers() {
 function getActiveModifiers() { return _activeModifiers; }
 window.__activeModifiers = () => _activeModifiers;
 
+// Pay per-kill chip reward for the active contract if the kill
+// matches the contract's targetType. Capped at the contract's
+// targetCount so overkill doesn't keep paying. When the killing
+// blow takes the counter to targetCount, also fire the contract
+// claim (bonus chips + marks + sigils + rank bump) right then —
+// completion shouldn't wait for a floor transition.
+function _applyContractPerKillReward(arch) {
+  const ac = getActiveContract();
+  if (!ac || (ac.claimedAt | 0) > 0) return;
+  const def = defForId(ac.activeContractId);
+  if (!def) return;
+  const target = def.targetType || 'any';
+  if (target !== 'any' && target !== arch) return;
+  const counted = (target === 'any')
+    ? (runStats.kills | 0)
+    : (runStats.archetypeKills?.[target] | 0);
+  // Pay the per-kill reward up to targetCount.
+  if ((def.perKillReward | 0) > 0 && counted <= (def.targetCount | 0)) {
+    awardPersistentChips(def.perKillReward | 0);
+  }
+  // Fire the completion claim the moment the counter reaches the
+  // target. Mid-run, no floor-transition wait.
+  if (counted === (def.targetCount | 0)) {
+    try {
+      const snapshot = runStats.snapshot();
+      const result = tryClaimContract(
+        ac, snapshot,
+        setActiveContract,
+        (n) => awardPersistentChips(n),
+        (n) => awardMarks(n),
+        () => bumpContractRank(),
+        (n) => awardSigils(n),
+      );
+      const parts = [];
+      if (result.chips > 0)  parts.push(`+${result.chips} chips`);
+      if (result.marks > 0)  parts.push(`+${result.marks} marks`);
+      if (result.sigils > 0) parts.push(`+${result.sigils} sigils`);
+      if (parts.length) {
+        transientHudMsg(`Contract complete: ${parts.join(' · ')}`, 3.0);
+      }
+    } catch (e) { console.warn('[contract-mid-run-claim]', e); }
+  }
+}
+
 // Throttled HUD warning when an active contract blocks fire. Avoids
 // spamming the message on every trigger pull; cooldown ~1.5s.
 let _contractWarnT = 0;
@@ -797,6 +843,18 @@ window.__clearActiveContract = () => {
 
 function startNewRun(weaponClass) {
   _resetEncounterCompletionForRun();
+  // Reset any pending starter-buff floor counters from a prior run
+  // so a buff bought for the previous (now-ended) run doesn't bleed
+  // into this one. _applyStarterBuffs below repopulates from the
+  // queue if there's a fresh buff purchase.
+  _starterBuffSpeedFloors = 0;
+  _starterBuffReloadFloors = 0;
+  // Clear keystone window flags from a prior run — they're one-shots
+  // consumed at run start. _applyOneShotKeystone below re-sets them
+  // if a fresh keystone is in the queue.
+  window.__keystoneMythicStart = false;
+  window.__keystoneLegendaryStart = false;
+  window.__keystonePainDrops = false;
   // Snapshot the active contract's modifiers for the run. Read by
   // the gunmen / loot / damage paths via getActiveModifiers().
   // Resolved lazily from getActiveContract() so the player can switch
@@ -848,7 +906,41 @@ function startNewRun(weaponClass) {
     }
     inventory._recomputeCapacity();
   } catch (e) { console.warn('[starter-inventory] consume failed', e); }
+  // Apply queued starter buffs (energy drink / adrenaline / lucky
+  // coin). Speed + reload buffs decay floor-by-floor; lucky coin
+  // adds a pending reroll consumed by the shop UI.
+  _applyStarterBuffs();
+  // Apply queued one-shot keystones from the Black Market — Deep Run
+  // jumps to floor 5 + grants 500 chips; Mythic Start / Legendary
+  // Start tag the next class-pick offer pool.
+  try {
+    const ks = consumeKeystoneQueue();
+    for (const id of ks) _applyOneShotKeystone(id);
+  } catch (e) { console.warn('[keystone-queue] consume failed', e); }
   inventory._bump();
+}
+
+// Apply a one-shot keystone purchased from the Black Market. Each
+// id has a different effect, all gated to "fires once at run start
+// after the keystone is consumed from the queue."
+function _applyOneShotKeystone(id) {
+  if (id === 'keystone_deep_run') {
+    // Jump to floor 5 + +500 chips at start.
+    level.index = 5;
+    awardPersistentChips(500);
+  } else if (id === 'keystone_mythic_start') {
+    // Tag for the class-pick UI to inject a mythic offer. The
+    // existing mythic-run unlock plumbing handles offer injection;
+    // we set a transient flag the picker reads.
+    window.__keystoneMythicStart = true;
+  } else if (id === 'keystone_legendary_drop') {
+    window.__keystoneLegendaryStart = true;
+  } else if (id === 'keystone_pain_drops') {
+    // One-shot: Pain (mythic mace) becomes drop-eligible for this
+    // run. The loot path reads window.__keystonePainDrops at roll
+    // time; cleared at next advanceFloor / death.
+    window.__keystonePainDrops = true;
+  }
 }
 
 // Materialize a Pre-Run Store stock entry into a real inventory item.
@@ -874,20 +966,57 @@ function _materializeStarterItem(raw) {
     return { ...c };
   }
   if (raw.__storeAmmo) {
-    // Ammo packs translate to a +N spare-mag bonus on the player's
-    // starter weapon. Simplest implementation today: add a bandage as
-    // a placeholder — wire actual ammo handoff once the spare-mag
-    // pipeline supports a per-class bonus pool.
+    // Ammo pack — TODO: thread through as a per-class spare-mag
+    // bonus once that pipeline supports it. For now return a real
+    // bandage so the queue doesn't leak invalid items into the
+    // inventory grid.
     return CONSUMABLE_DEFS.bandage ? { ...CONSUMABLE_DEFS.bandage } : null;
   }
   if (raw.__storeBuff) {
-    // Buffs wire later — for now drop a placeholder consumable so the
-    // queue doesn't leak silent failures. Future: thread these into
-    // recomputeStats as time-boxed effects starting at run gen.
-    return CONSUMABLE_DEFS.bandage ? { ...CONSUMABLE_DEFS.bandage } : null;
+    // Buff — schedules a startup effect (move speed / reload speed /
+    // free reroll). We push the id into a global pending-buffs queue
+    // here; main.js's run-start path applies them.
+    _pendingStarterBuffs.push(raw.defId);
+    // Return null so nothing concrete enters the inventory; the
+    // buff is effect-only.
+    return null;
   }
   return null;
 }
+
+// Pending buff queue — populated by _materializeStarterItem at run
+// start, drained by _applyStarterBuffs below right before the run
+// loop begins. Each id maps to a small effect that mutates
+// derivedStats / persistentChips / etc. on a one-shot basis.
+let _pendingStarterBuffs = [];
+function _applyStarterBuffs() {
+  if (!_pendingStarterBuffs.length) return;
+  for (const id of _pendingStarterBuffs) {
+    if (id === 'buff_speed') {
+      // +20% move speed for the first 3 floors. Tracked via a
+      // floor-counter that decays at every floor transition.
+      _starterBuffSpeedFloors = 3;
+    } else if (id === 'buff_reload') {
+      // +30% reload speed for the first floor only.
+      _starterBuffReloadFloors = 1;
+    } else if (id === 'buff_luck') {
+      // +1 reroll at the first relic merchant. pendingShopRerolls is
+      // already a counter that the shop UI consumes.
+      pendingShopRerolls = (pendingShopRerolls | 0) + 1;
+    }
+  }
+  _pendingStarterBuffs = [];
+}
+let _starterBuffSpeedFloors = 0;
+let _starterBuffReloadFloors = 0;
+window.__starterBuffSpeedActive = () => _starterBuffSpeedFloors > 0;
+window.__starterBuffReloadActive = () => _starterBuffReloadFloors > 0;
+// Tick the buff floor-counters down on every level transition.
+function _tickStarterBuffsOnLevelChange() {
+  if (_starterBuffSpeedFloors > 0) _starterBuffSpeedFloors--;
+  if (_starterBuffReloadFloors > 0) _starterBuffReloadFloors--;
+}
+window.__tickStarterBuffsOnLevelChange = _tickStarterBuffsOnLevelChange;
 
 const skills = new SkillLoadout();
 const skillPickUI = new SkillPickUI(skills);
@@ -1159,6 +1288,7 @@ const startUI = new StartUI({
     player.restoreFullHealth();
     regenerateLevel();
     sfx.ambientStart();
+    sfx.musicPlay?.('run');
   },
 });
 
@@ -1328,6 +1458,7 @@ const mainMenuUI = new MainMenuUI({
     player.restoreFullHealth();
     regenerateLevel();
     sfx.ambientStart();
+    sfx.musicPlay?.('run');
   },
   getLeaderboard: () => Leaderboard,
   getVolume: getMasterVolume,
@@ -1365,11 +1496,31 @@ const hideoutUI = new HideoutUI({
     savePersistentChips();
     return true;
   },
+  // Hideout audio bridge — lets the panel stop the in-run bed when
+  // the player opens the menu, so the 45Hz drone doesn't leak.
+  // Also swaps to menu music while in the hideout.
+  stopAmbient: () => {
+    sfx.ambientStop?.();
+    sfx.musicPlay?.('menu');
+  },
+  // Renderer share — diegetic hideout scene reuses the game's
+  // WebGLRenderer so we don't spin up a second GL context. main.js
+  // tick swaps which scene is being rendered based on hideoutUI.visible.
+  getRenderer: () => renderer,
   applyCharacterStyle: (v) => {
     // Pushes the silhouette change to the live rig so the change is
     // visible the moment the player closes the hideout, not just on
     // the next fresh run.
     player.applyCharacterStyle?.(v);
+  },
+  // Color + accessory applier — pushes appearance changes to the rig
+  // if it supports them. Falls back silently if the rig method isn't
+  // present (color hookup is a follow-up rig change). Prefs are still
+  // saved either way so the next run start can read them.
+  applyCharacterAppearance: (appearance) => {
+    if (player?.applyCharacterAppearance) {
+      player.applyCharacterAppearance(appearance);
+    }
   },
   rollQuartermasterItem: (tier) => {
     // Tier 0 → common; 4 → legendary floor. Mirrors the rolled-store
@@ -1402,6 +1553,27 @@ const hideoutUI = new HideoutUI({
     mainMenuUI.hide();
     if (mainMenuUI.onQuickStart) mainMenuUI.onQuickStart();
     else if (mainMenuUI.onPlay) mainMenuUI.onPlay();
+  },
+  // Title-modal hooks — Tutorial / Leaderboard / Options live behind
+  // the legacy MainMenuUI which we now surface as a side-modal from
+  // the hideout header. The hideout stays visible in the background.
+  onOpenSettings: () => {
+    if (mainMenuUI?.show) {
+      mainMenuUI.show();
+      mainMenuUI.view = 'settings';
+      mainMenuUI.render?.();
+    }
+  },
+  onOpenLeaderboard: () => {
+    if (mainMenuUI?.show) {
+      mainMenuUI.show();
+      mainMenuUI.view = 'leaderboard';
+      mainMenuUI.render?.();
+    }
+  },
+  onOpenTutorial: () => {
+    mainMenuUI.hide();
+    if (mainMenuUI.onTutorial) mainMenuUI.onTutorial();
   },
 });
 
@@ -2113,6 +2285,19 @@ function regenerateLevel() {
         // counter mirrors it for contract evaluation.
         runStats.megabossKillsThisRun = (runStats.megabossKillsThisRun | 0) + 1;
         bumpMegabossKills();
+        runStats.noteArchetypeKill('megaboss');
+        _applyContractPerKillReward('megaboss');
+        // Sigil bounty — if the active contract names megaboss, pay
+        // its sigilsReward immediately. Sigils survive subsequent
+        // death (they're banked at kill-time, not run-end).
+        const ac = getActiveContract();
+        if (ac && (ac.claimedAt | 0) === 0) {
+          const def = defForId(ac.activeContractId);
+          if (def && def.targetType === 'megaboss' && (def.sigilsReward | 0) > 0) {
+            awardSigils(def.sigilsReward | 0);
+            transientHudMsg(`+${def.sigilsReward} sigils — bounty.`);
+          }
+        }
       },
       lootRolls: (encIdx) => lootFn({
         randomWeapon: (rarity) => {
@@ -2148,6 +2333,7 @@ function regenerateLevel() {
       }, encIdx),
     });
     megaBoss.spawn(level.megaArenaCenter || new THREE.Vector3(0, 0, 0));
+    sfx.musicPlay?.('boss');
   }
 
   // Keycard assignment — hand each level.keycardColors entry to a
@@ -3952,6 +4138,15 @@ function recomputeStats() {
   const baseMax = tunables.player.maxHealth;
   if (baseMax + derivedStats.maxHealthBonus < 1) {
     derivedStats.maxHealthBonus = 1 - baseMax;
+  }
+  // Starter buff — Energy Drink. +20% move speed for the first 3
+  // floors of the run. Decays via _tickStarterBuffsOnLevelChange.
+  if (_starterBuffSpeedFloors > 0) {
+    derivedStats.moveSpeedMult *= 1.20;
+  }
+  // Starter buff — Adrenaline. +30% reload speed for the first floor.
+  if (_starterBuffReloadFloors > 0) {
+    derivedStats.reloadSpeedMult = (derivedStats.reloadSpeedMult || 1) * 1.30;
   }
   // Active contract `playerDamageDealtMult` — Glass Cannon and
   // similar contracts crank player outgoing damage up alongside
@@ -6183,6 +6378,24 @@ function onEnemyKilled(enemy, opts = {}) {
     if (gained > 0) { playerCredits += gained; runStats.addCredits(gained); }
   }
   runStats.addKill();
+  // Per-archetype kill counter for contract evaluators. Map kind +
+  // tier + variant to a contract archetype: tier='boss' → boss,
+  // tier='subBoss' → boss too, kind='melee' → melee, kind='gunman'
+  // with variant='dasher' → dasher, etc. Contracts that track 'any'
+  // already read runStats.kills.
+  try {
+    let arch = null;
+    if (enemy.tier === 'boss' || enemy.tier === 'subBoss') arch = 'boss';
+    else if (enemy.kind === 'melee') arch = 'melee';
+    else if (enemy.variant === 'dasher') arch = 'dasher';
+    else if (enemy.variant === 'tank') arch = 'tank';
+    else if (enemy.kind === 'gunman') arch = 'gunman';
+    runStats.noteArchetypeKill(arch);
+    // Per-kill chip reward for active contracts that pay per-kill.
+    // Capped at the contract's targetCount so the perKillReward
+    // doesn't pay forever on overkill.
+    _applyContractPerKillReward(arch);
+  } catch (e) { /* defensive — contract path must never break a kill */ }
   if (enemy.tier === 'subBoss') playerSkillPoints += 1;
   // Corpse position fix-up — if the body's last position landed inside
   // a wall / pillar / prop AABB, push it out so the loot prompt can
@@ -8696,7 +8909,7 @@ function tryInteract({ nearItem, body, bodies, npc, container }) {
     return;
   }
   if (level.isPlayerInExit(player.mesh.position) && exitCooldown <= 0) {
-    // Tutorial extract — bypass the normal runExtract flow and
+    // Tutorial extract — bypass the normal advanceFloor flow and
     // bounce back to the main menu so the player doesn't roll into
     // a real run by accident.
     if (tutorialMode) {
@@ -10279,7 +10492,7 @@ _wireHotbarCluster('.action-slot', 4, renderActionBar);
 window.__renderActionBar = renderActionBar;
 window.__renderWeaponBar = renderWeaponBar;
 
-async function runExtract() {
+async function advanceFloor() {
   paused = true;
   input.clearMouseState();
   inventoryUI.hide();
@@ -10289,6 +10502,14 @@ async function runExtract() {
   // run and still satisfy "extract from floor X" if they extracted
   // earlier). peakLevel is monotonic via runStats.setLevel.
   runStats.noteExtracted();
+  // Note: contract claim used to live here. Moved to
+  // _applyContractPerKillReward — contracts now complete the
+  // moment the kill counter hits targetCount, not on floor
+  // transition. Run thesis stays "go as far as you can or die
+  // trying"; the floor-transition function is just per-floor
+  // bookkeeping (skill pick + level regen).
+  // Starter buff decay — speed / reload buffs tick down per floor.
+  _tickStarterBuffsOnLevelChange();
   // Locked-trial unlock prompt — fire on extract too, not just death.
   // The prompt is non-blocking (overlays the skill picker) so the
   // existing extract flow continues uninterrupted.
@@ -11422,7 +11643,7 @@ function tick() {
   updateRoomClearance(playerInfo.position);
   if (extractPending) {
     extractPending = false;
-    runExtract();
+    advanceFloor();
   } else if (pendingLevelUps > 0 && !paused) {
     pendingLevelUps -= 1;
     runLevelUp();
@@ -11577,7 +11798,7 @@ function tick() {
     try { awardMarks(marksEarned); } catch (e) { console.warn(e); }
     // Lifetime run counter — feeds the hidden encounter-tier formula
     // and the cooldownRuns timer. Bumped here on death; extract path
-    // bumps separately at runExtract().
+    // bumps separately at advanceFloor().
     try { bumpRunCount(); } catch (_) {}
     // Populate the death-screen run-summary panel with the freshly-
     // sealed stats. Mirrors the leaderboard fields so the player gets
@@ -11711,7 +11932,17 @@ function _safeRender(rawDt, modalPaused = false) {
     const _ri = rigInstancer && rigInstancer();
     if (_ri) _ri.syncFrame();
     _perf.start('render');
-    if (modalPaused) {
+    // Hideout-active swap — when the diegetic hideout scene is
+    // visible, render IT to the shared canvas instead of the game
+    // scene. Keeps a single renderer / canvas / GL context.
+    const hsActive = hideoutUI?.isOpen?.() && hideoutUI._scene && hideoutUI._scene.visible;
+    if (hsActive) {
+      try {
+        hideoutUI._scene.update(rawDt);
+      } catch (e) {
+        console.warn('[hideout-scene]', e);
+      }
+    } else if (modalPaused) {
       renderer.render(scene, camera);
     } else if (qualityFlags.postFx) {
       postFx.render(rawDt);
@@ -11830,12 +12061,18 @@ try { renderer.debug.checkShaderErrors = false; } catch (_) {}
   } catch (_) { /* preload best-effort */ }
 })();
 
-// Initial screen: the main menu. Play routes through the starting
-// store picker; classic class-picker is still accessible as a
-// fallback if someone hits startUI.show() from a callback (e.g. the
-// Quit-to-title flow, which needs a new-run entry point).
+// Initial screen: the Hideout IS the main menu. Boot routes the
+// player straight into the lobby — Tutorial / Leaderboard / Options
+// are reachable via the ≡ button in the hideout header. The legacy
+// MainMenuUI still exists for the Quit-to-title flow, but the
+// landing page is no longer the splash card.
+//
+// Music kicks in on the first user interaction (browsers block
+// AudioContext until then). Both listeners fire once and detach.
+window.addEventListener('pointerdown', () => sfx.musicPlay?.('menu'), { once: true });
+window.addEventListener('keydown',     () => sfx.musicPlay?.('menu'), { once: true });
 if (inventory.pocketsGrid.isEmpty() && !inventory.equipment.backpack) {
-  mainMenuUI.show();
+  hideoutUI.open();
 }
 // Cursor-tracking bloom reticle. Hidden until a ranged weapon is
 // equipped (toggled per-frame in tick).
