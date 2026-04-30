@@ -874,23 +874,31 @@ export class GunmanManager {
     // triggering the cross-room pursuit.
     if (g.huntsPlayer && !g.huntActive) g.huntActive = true;
 
-    // Shield absorption — frontal hits + any bullet that lands on the
-    // shield mesh itself get soaked until the shield breaks. Shotgun slugs
-    // and melee swipes destroy the shield outright.
+    // Shield absorption — full-block shields (heavy riot panel) are
+    // INVULNERABLE to bullets: no HP chip, no damage bleed, no break
+    // from gunfire. Only melee shatters them. Partial shields keep
+    // their old chip behaviour so the partial variant still feels
+    // distinct from the heavy panel.
     if (g.shield && g.shield.hp > 0 && (zone === 'shield' || hitDir)) {
       const fx = Math.sin(g.group.rotation.y), fz = Math.cos(g.group.rotation.y);
       const frontDot = hitDir ? -hitDir.x * fx - hitDir.z * fz : 1;
       if (zone === 'shield' || frontDot > 0.2) {
         const wClass = opts.weaponClass;
-        const shieldBreaker = wClass === 'shotgun' || wClass === 'melee';
-        if (shieldBreaker) {
+        if (wClass === 'melee') {
           g.shield.hp = 0;
           this._disableShield(g);
           return { drops, blocked: false, shieldBroke: true };
         }
-        // Partial shield lets some damage bleed through.
-        const reductionPct = g.shield.fullBlock ? 1.0 : 0.6;
-        const absorbed = damage * reductionPct;
+        if (g.shield.fullBlock) {
+          // Bullets bounce off — visual flash only, no HP touched on
+          // either the shield or the chassis behind it.
+          g.flashT = tunables.enemy.hitFlashTime;
+          if (g.state === STATE.IDLE) g.state = STATE.ALERTED;
+          return { drops, blocked: true, shieldHit: true };
+        }
+        // Partial shield — old chip-through behaviour. 60% absorbed,
+        // remainder bleeds onto the chassis.
+        const absorbed = damage * 0.6;
         g.shield.hp -= absorbed;
         damage -= absorbed;
         if (g.shield.hp <= 0) this._disableShield(g);

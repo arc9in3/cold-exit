@@ -7864,7 +7864,13 @@ function aiFireFlame(origin, dir, weapon, damageMult = 1, source = null) {
     ? Math.hypot(player.mesh.position.x - source.group.position.x,
                  player.mesh.position.z - source.group.position.z)
     : d;
-  damagePlayer((weapon.damage || 5) * damageMult, 'fire',
+  // Enemy flame DPS was killing the player almost instantly — direct
+  // damage of 5/tick × 12 ticks/sec × difficulty mult easily ran past
+  // 60-100 DPS through full HP in a couple seconds. The 0.4 mult here
+  // keeps the cone visually threatening (player still wants out of
+  // it) without one-shotting through medkits + armor.
+  const ENEMY_FLAME_DAMAGE_MULT = 0.4;
+  damagePlayer((weapon.damage || 5) * damageMult * ENEMY_FLAME_DAMAGE_MULT, 'fire',
     { source, zone: 'torso', distance: _flameDist });
 }
 

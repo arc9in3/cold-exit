@@ -372,21 +372,20 @@ export class MeleeEnemyManager {
       }
     }
 
-    // Frontal shield absorbs damage until the shield breaks. Shotgun and
-    // melee hits to the shield destroy it outright.
+    // Frontal shield is INVULNERABLE to bullets — no chip damage, no
+    // break. Players have to go around (back shot bypasses the
+    // frontDot check), shoot from behind, or close to melee range to
+    // shatter the shield outright.
     if (e.shield && e.shield.hp > 0 && (zone === 'shield' || hitDir)) {
       const fx = Math.sin(e.group.rotation.y), fz = Math.cos(e.group.rotation.y);
       const frontDot = hitDir ? -hitDir.x * fx - hitDir.z * fz : 1;
       if (zone === 'shield' || frontDot > 0.2) {
-        const wClass = opts.weaponClass;
-        const breaker = wClass === 'shotgun' || wClass === 'melee';
-        if (breaker) {
+        if (opts.weaponClass === 'melee') {
           e.shield.hp = 0;
           this._disableShield(e);
           return { drops, blocked: false, shieldBroke: true };
         }
-        e.shield.hp -= damage;
-        if (e.shield.hp <= 0) this._disableShield(e);
+        // Bullets — fully blocked. No HP chip, no damage to chassis.
         e.flashT = tunables.enemy.hitFlashTime;
         return { drops, blocked: true, shieldHit: true };
       }

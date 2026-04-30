@@ -106,7 +106,7 @@ const TAB_DEFS = [
   { id: 'quartermaster',label: 'ARMORER'       },
   { id: 'vendors',      label: 'VENDORS'       },
   { id: 'blackmarket',  label: 'BLACK MARKET'  },
-  { id: 'recruiter',    label: 'RECRUITER'     },
+  { id: 'recruiter',    label: 'TRAINER'       },
   { id: 'tailor',       label: 'TAILOR'        },
   { id: 'mailbox',      label: 'MAILBOX'       },
 ];
@@ -131,10 +131,11 @@ export const KEYSTONES = {
   keystone_legendary_drop:{ id: 'keystone_legendary_drop',label: 'Legendary at Start', blurb: 'Start your next run with a guaranteed legendary weapon offer.', cost: 14, oneShot: true },
 };
 
-// Recruiter — marks-spent permanent unlocks. Each row is one-shot.
-// Categories: stat tiers (capped per-tier), structural unlocks
-// (NPCs, classes), and stash-slot expansions paid in marks instead
-// of chips for players who go all-in on the death loop.
+// Trainer — marks-spent permanent unlocks. Storage key stays
+// 'recruiter' so saved purchases survive the rename. Stat tiers stay
+// the same; structural unlocks are now ALL classes (NPC unlocks
+// removed). Class definitions land in a follow-up — for now these
+// rows are placeholders that flag the class as available at run start.
 export const RECRUITER_UNLOCKS = {
   // Stat tiers — small per-purchase, capped at +30 max HP across the
   // three rows so curve stays bounded.
@@ -144,11 +145,16 @@ export const RECRUITER_UNLOCKS = {
   end_1:        { id: 'end_1',        label: 'Endurance I',        blurb: '+10% stamina recovery, permanent.', cost: 80 },
   end_2:        { id: 'end_2',        label: 'Endurance II',       blurb: '+10% stamina recovery, permanent.', cost: 180, requires: ['end_1'] },
   comp_1:       { id: 'comp_1',       label: 'Composure I',        blurb: '−10% stagger duration, permanent.', cost: 90 },
-  // Structural unlocks — NPCs and classes the run start UI gates on.
-  npc_engineer:  { id: 'npc_engineer',  label: 'Engineer (NPC)',    blurb: 'Unlocks the Engineer in the hideout. Repairs gear between runs.', cost: 200 },
-  npc_cartog:    { id: 'npc_cartog',    label: 'Cartographer (NPC)', blurb: 'Unlocks the Cartographer. Reveals layout hints for the next run.', cost: 350 },
-  class_demolisher: { id: 'class_demolisher', label: 'Class: Demolisher', blurb: 'Unlocks Demolisher as a starting class.', cost: 260 },
-  class_marksman:   { id: 'class_marksman',   label: 'Class: Marksman',   blurb: 'Unlocks Marksman as a starting class.', cost: 260 },
+  // Class unlocks — each one opens a new starting class for run-start
+  // selection. Demolisher + Marksman were the original two; Heavy /
+  // Recon / Medic / Pyro are placeholder rows ready for class
+  // definitions to land in a follow-up pass.
+  class_demolisher: { id: 'class_demolisher', label: 'Class: Demolisher', blurb: 'Explosives + AoE specialist. Starts with grenades.',           cost: 260 },
+  class_marksman:   { id: 'class_marksman',   label: 'Class: Marksman',   blurb: 'Long-range precision. Starts with a marksman rifle.',           cost: 260 },
+  class_heavy:      { id: 'class_heavy',      label: 'Class: Heavy',      blurb: 'LMG + plate carrier. More HP, slower move.',                    cost: 320 },
+  class_recon:      { id: 'class_recon',      label: 'Class: Recon',      blurb: 'Silenced loadout. Faster move, stealth bonus.',                 cost: 320 },
+  class_medic:      { id: 'class_medic',      label: 'Class: Medic',      blurb: 'Heal kits at start, faster bandage cast.',                      cost: 380 },
+  class_pyro:       { id: 'class_pyro',       label: 'Class: Pyro',       blurb: 'Flame + burn DoT focus. Starts with a flamethrower.',           cost: 420 },
 };
 
 export class HideoutUI {
@@ -2558,8 +2564,8 @@ export class HideoutUI {
     const head = document.createElement('div');
     head.className = 'hideout-section-head';
     head.innerHTML = `
-      <div class="hideout-section-title">RECRUITER</div>
-      <div class="hideout-section-sub">Spend marks earned by dying. Permanent unlocks. <b>${marks}</b> marks on file.</div>
+      <div class="hideout-section-title">TRAINER</div>
+      <div class="hideout-section-sub">Spend marks earned by dying. Permanent stat tiers + new starting classes. <b>${marks}</b> marks on file.</div>
     `;
     wrap.appendChild(head);
 
