@@ -1477,6 +1477,11 @@ export const JUNK_DEFS = {
   // (no _encounter flag) so the player has a way to find them.
   fancyAlcohol: { id: 'junk_fancy_alcohol', name: 'Fancy Alcohol', type: 'junk', tint: 0xa030c0, sellValue: 95, rarity: 'uncommon', description: 'A small bottle of something potent. Hand-painted label.', stackMax: 3 },
   yummyBiscuits: { id: 'junk_yummy_biscuits', name: 'Yummy Biscuits', type: 'junk', tint: 0xd8b870, sellValue: 60, rarity: 'common', description: 'Honey-glazed shortbreads. Smell like a holiday morning.', stackMax: 5 },
+  // Spaces Inbetween — clown drops the bike after his bark chain.
+  // _encounter: true keeps it out of natural drops + shop pools, so
+  // the only way to find one is the encounter. Drop it on the puppet
+  // in the chained 'Want to Play a Game' room to get Bloody Jigsaw.
+  shittyBike: { id: 'junk_shitty_bike', name: 'Shitty Bike', type: 'junk', tint: 0xb02828, sellValue: 5, rarity: 'common', description: 'this really is a shitty bike', stackMax: 1, _encounter: true },
 };
 export const ALL_JUNK = Object.values(JUNK_DEFS);
 

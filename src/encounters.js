@@ -55,7 +55,7 @@ import {
   getCompletedEncounters, markEncounterDone,
   getEncounterCooldowns, getRunCount, takeEncounterFollowupForFloor,
 } from './prefs.js';
-import { TOY_DEFS, ARMOR_DEFS } from './inventory.js';
+import { TOY_DEFS, ARMOR_DEFS, JUNK_DEFS } from './inventory.js';
 import { tunables } from './tunables.js';
 import { isEncounterEligible, currentEncounterTier } from './encounter_tier.js';
 
@@ -4528,6 +4528,280 @@ export const ENCOUNTER_DEFS = {
       });
     },
     onItemDropped(_item, _ctx) { return { consume: false }; },
+  },
+
+  // -----------------------------------------------------------------
+  // Spaces Inbetween — a clown standing in the middle of the room.
+  // Interact starts a 4-bark monologue (each line ~2.4s with short
+  // gaps). After the last bark he drops the 'Shitty Bike' junk item
+  // — small red bike, no value, only used as the key for the
+  // chained 'Want to Play a Game' encounter to pop the Bloody
+  // Jigsaw relic. One-shot per save.
+  // -----------------------------------------------------------------
+  spaces_inbetween: {
+    id: 'spaces_inbetween',
+    name: 'Spaces Inbetween',
+    floorColor: 0xe04a8a,             // pink dais — circus mood
+    oncePerSave: true,
+    condition: (state) => state.levelIndex >= 1,
+    spawn(scene, room, ctx) {
+      const disc = _spawnFloorDisc(scene, room, this.floorColor);
+      // Clown — yellow shirt, red pants, big red nose ball + green
+      // wig built off the simple-NPC base. Skip hair (the wig replaces
+      // it) so we can stack our own floof on top.
+      const npc = _buildSimpleNpc({
+        bodyColor: 0xf2d040,         // yellow shirt
+        headColor: 0xe8c8a0,         // pale skin
+        accentColor: 0xc02040,
+        pantsColor: 0xc02040,        // red pants
+        bootColor: 0x4a3018,
+        height: 1.78,
+        skipHair: true,
+      });
+      // Green wig — three squashed spheres around the head crown so
+      // it reads "messy floof" from iso distance, not a smooth cap.
+      const wigMat = new THREE.MeshStandardMaterial({ color: 0x40c060, roughness: 0.85 });
+      const head_top_y = npc.userData?.headTopY ?? 1.78 * 0.94;
+      for (let i = 0; i < 3; i++) {
+        const a = (i / 3) * Math.PI * 2;
+        const tuft = new THREE.Mesh(new THREE.SphereGeometry(0.13, 10, 8), wigMat);
+        tuft.position.set(Math.cos(a) * 0.13, head_top_y - 0.03, Math.sin(a) * 0.13);
+        tuft.scale.set(1.2, 0.85, 1.2);
+        tuft.castShadow = true;
+        npc.add(tuft);
+      }
+      // Red nose ball — emissive so it pops in the iso lighting.
+      const noseMat = new THREE.MeshStandardMaterial({
+        color: 0xff3030, emissive: 0x802020, emissiveIntensity: 0.6, roughness: 0.5,
+      });
+      const nose = new THREE.Mesh(new THREE.SphereGeometry(0.06, 12, 10), noseMat);
+      nose.position.set(0, head_top_y - 0.18, 0.16);
+      npc.add(nose);
+      // Big white frill collar — torus around the neck.
+      const collarMat = new THREE.MeshStandardMaterial({ color: 0xf8f8f8, roughness: 0.85 });
+      const collar = new THREE.Mesh(new THREE.TorusGeometry(0.18, 0.05, 6, 18), collarMat);
+      collar.position.set(0, head_top_y - 0.34, 0);
+      collar.rotation.x = Math.PI / 2;
+      npc.add(collar);
+
+      npc.position.set(disc.cx, 0, disc.cz);
+      npc.rotation.y = -Math.PI * 0.18;
+      scene.add(npc);
+
+      const label = _makeLabelSprite('A CLOWN', '#ffb060');
+      label.position.set(disc.cx, 2.4, disc.cz);
+      scene.add(label);
+      const hint = _makeLabelSprite('press E to talk to the clown', '#ffb060');
+      hint.scale.set(4.0, 0.55, 1);
+      hint.position.set(disc.cx, 0.55, disc.cz + 1.4);
+      scene.add(hint);
+      return {
+        npc, label, hint, disc,
+        complete: false,       // becomes true after the bike drops
+        phase: 'idle',         // 'idle' → 'monologue' → 'done'
+        barkIdx: 0,
+        barkT: 0,
+        bikeSpawned: false,
+      };
+    },
+    tick(dt, ctx) {
+      const s = ctx.state;
+      if (!s.npc) return;
+      // Idle bob — gentle breath until interacted with.
+      if (s.phase === 'idle') {
+        s.phaseT = (s.phaseT || 0) + dt;
+        s.npc.position.y = Math.sin(s.phaseT * 1.1) * 0.02;
+        return;
+      }
+      if (s.phase === 'monologue') {
+        const lines = [
+          'oh f**k, i\'m not even supposed to be here',
+          'hope i don\'t j**k off',
+          'what the f**k a clownputer? probably don\'t got no games',
+          'this little bike\'s a f**king piece of s**t',
+        ];
+        s.barkT -= dt;
+        if (s.barkT <= 0) {
+          if (s.barkIdx < lines.length) {
+            const line = lines[s.barkIdx];
+            ctx.spawnSpeech(s.npc.position.clone().setY(2.5), line, 3.0);
+            // First line lands fast (1.6s gap before #2 — feels like
+            // a sigh of resignation), then ~3.2s between subsequent
+            // beats so each one reads.
+            s.barkT = (s.barkIdx === 0) ? 1.6 : 3.2;
+            s.barkIdx++;
+          } else if (!s.bikeSpawned) {
+            // After the last bark, drop the Shitty Bike at his feet.
+            s.bikeSpawned = true;
+            const bike = JUNK_DEFS && JUNK_DEFS.shittyBike;
+            if (bike && ctx.spawnLoot) {
+              ctx.spawnLoot(s.disc.cx + 0.6, s.disc.cz + 0.6, { ...bike });
+            }
+            s.complete = true;
+            s.phase = 'done';
+            if (s.hint) s.hint.visible = false;
+            if (ctx.markEncounterComplete) ctx.markEncounterComplete('spaces_inbetween');
+          }
+        }
+      }
+    },
+    interact(ctx) {
+      const s = ctx.state;
+      if (s.complete || s.phase !== 'idle') return;
+      s.phase = 'monologue';
+      s.barkIdx = 0;
+      s.barkT = 0;        // first bark fires immediately
+      if (s.hint) s.hint.userData.setText('the clown is rambling.');
+    },
+    onItemDropped(_item, _ctx) { return { consume: false }; },
+  },
+
+  // -----------------------------------------------------------------
+  // Want to Play a Game — a Jigsaw-style puppet (wooden body, white
+  // face, red squirly eyes) lays slumped on the floor saying "want
+  // to play a game?" on entry + interact. Drop the Shitty Bike on
+  // him: he stands up, says his line, drops the Bloody Jigsaw relic
+  // (immune to bleeding). One-shot per save. Spawns regardless of
+  // whether the player has the bike yet — players can stumble into
+  // him in any order; the relic only drops on the bike-drop trigger.
+  // -----------------------------------------------------------------
+  want_to_play_a_game: {
+    id: 'want_to_play_a_game',
+    name: 'Want To Play A Game',
+    floorColor: 0x901020,             // dim blood red dais
+    oncePerSave: true,
+    condition: (state) => state.levelIndex >= 1,
+    spawn(scene, room, ctx) {
+      const disc = _spawnFloorDisc(scene, room, this.floorColor);
+      // Puppet — built from primitives, NOT the simple-NPC rig (he's
+      // a wooden marionette, not a person). Lays on his side until the
+      // bike drop triggers the stand-up animation.
+      const puppet = new THREE.Group();
+      const suitMat = new THREE.MeshStandardMaterial({ color: 0x18181a, roughness: 0.7 });
+      const shirtMat = new THREE.MeshStandardMaterial({ color: 0xf8f8f8, roughness: 0.85 });
+      const tieMat = new THREE.MeshStandardMaterial({ color: 0xb02020, roughness: 0.6 });
+      const woodMat = new THREE.MeshStandardMaterial({ color: 0xd0a070, roughness: 0.65 });
+      const faceMat = new THREE.MeshStandardMaterial({ color: 0xf0f0e8, roughness: 0.55 });
+      const eyeMat = new THREE.MeshBasicMaterial({ color: 0xff2020 });
+      const hairMat = new THREE.MeshStandardMaterial({ color: 0x18181a, roughness: 0.85 });
+      // Body — short suited torso (capsule) + white shirt strip + red tie.
+      const torso = new THREE.Mesh(new THREE.CapsuleGeometry(0.30, 0.55, 4, 10), suitMat);
+      torso.position.y = 1.05;
+      torso.castShadow = true;
+      puppet.add(torso);
+      const shirt = new THREE.Mesh(new THREE.BoxGeometry(0.20, 0.45, 0.06), shirtMat);
+      shirt.position.set(0, 1.05, 0.30);
+      puppet.add(shirt);
+      const tie = new THREE.Mesh(new THREE.BoxGeometry(0.06, 0.32, 0.02), tieMat);
+      tie.position.set(0, 1.05, 0.34);
+      puppet.add(tie);
+      // Wooden limbs — thin sticks for arms/legs (4 of them).
+      const limb = (x, y, z) => {
+        const m = new THREE.Mesh(new THREE.CylinderGeometry(0.06, 0.06, 0.55, 8), woodMat);
+        m.position.set(x, y, z);
+        return m;
+      };
+      const armL = limb(-0.36, 1.05, 0); puppet.add(armL);
+      const armR = limb( 0.36, 1.05, 0); puppet.add(armR);
+      const legL = limb(-0.13, 0.45, 0); puppet.add(legL);
+      const legR = limb( 0.13, 0.45, 0); puppet.add(legR);
+      // White round face. Black hair cap on top.
+      const head = new THREE.Mesh(new THREE.SphereGeometry(0.22, 16, 12), faceMat);
+      head.position.y = 1.55;
+      head.castShadow = true;
+      puppet.add(head);
+      const hair = new THREE.Mesh(
+        new THREE.SphereGeometry(0.225, 14, 8, 0, Math.PI * 2, 0, Math.PI * 0.45),
+        hairMat,
+      );
+      hair.position.y = 1.55;
+      puppet.add(hair);
+      // Red squirly eyes — two flat discs. The "squirly" reads via
+      // a small black spiral pattern faked by an inner darker ring.
+      const eyeRingMat = new THREE.MeshBasicMaterial({ color: 0x300000 });
+      const makeEye = (x) => {
+        const e = new THREE.Group();
+        const outer = new THREE.Mesh(new THREE.CircleGeometry(0.05, 16), eyeMat);
+        e.add(outer);
+        const ring = new THREE.Mesh(new THREE.RingGeometry(0.025, 0.04, 16), eyeRingMat);
+        ring.position.z = 0.001;
+        e.add(ring);
+        const dot = new THREE.Mesh(new THREE.CircleGeometry(0.012, 10), eyeRingMat);
+        dot.position.z = 0.002;
+        e.add(dot);
+        e.position.set(x, 1.58, 0.21);
+        return e;
+      };
+      puppet.add(makeEye(-0.07));
+      puppet.add(makeEye(0.07));
+
+      // Slumped pose — rotate around X so he's lying on his side,
+      // lift slightly so he doesn't z-fight the floor.
+      puppet.rotation.x = Math.PI / 2;
+      puppet.rotation.z = -0.1;
+      puppet.position.set(disc.cx, 0.30, disc.cz);
+      scene.add(puppet);
+
+      const label = _makeLabelSprite('JIGSAW', '#ff8080');
+      label.position.set(disc.cx, 1.6, disc.cz);
+      scene.add(label);
+      const hint = _makeLabelSprite('drop the right thing on him.', '#c08080');
+      hint.scale.set(4.0, 0.55, 1);
+      hint.position.set(disc.cx, 0.55, disc.cz + 1.4);
+      scene.add(hint);
+      return {
+        puppet, label, hint, disc,
+        complete: false,
+        proxT: 0,         // throttle for the on-approach line
+        spokeOnEntry: false,
+      };
+    },
+    tick(dt, ctx) {
+      const s = ctx.state;
+      if (!s.puppet || s.complete) return;
+      const dx = ctx.playerPos.x - s.disc.cx;
+      const dz = ctx.playerPos.z - s.disc.cz;
+      const near = (dx * dx + dz * dz) < 36;
+      // First-time-near line. After that, he repeats every ~9s while
+      // the player lingers in the room.
+      s.proxT = Math.max(0, s.proxT - dt);
+      if (near && s.proxT <= 0) {
+        ctx.spawnSpeech(new THREE.Vector3(s.disc.cx, 1.6, s.disc.cz),
+          'want to play a game?', 4.0);
+        s.proxT = 9.0;
+        s.spokeOnEntry = true;
+      }
+    },
+    interact(ctx) {
+      const s = ctx.state;
+      if (s.complete) return;
+      ctx.spawnSpeech(new THREE.Vector3(s.disc.cx, 1.6, s.disc.cz),
+        'want to play a game?', 4.0);
+      s.proxT = 9.0;
+    },
+    onItemDropped(item, ctx) {
+      const s = ctx.state;
+      if (s.complete) return { consume: false };
+      const isBike = item && (item.id === 'junk_shitty_bike'
+                           || item.name === 'Shitty Bike');
+      if (!isBike) return { consume: false };
+      // Stand him up — undo the slumped rotation and lift to the
+      // standing height. Then drop the Bloody Jigsaw relic at his
+      // feet. Encounter completes immediately.
+      if (s.puppet) {
+        s.puppet.rotation.x = 0;
+        s.puppet.rotation.z = 0;
+        s.puppet.position.y = 0;
+      }
+      ctx.spawnSpeech(new THREE.Vector3(s.disc.cx, 1.95, s.disc.cz),
+        'i\'ve been looking for this thing all over.', 5.0);
+      const relic = ctx.relicFor && ctx.relicFor('bloody_jigsaw');
+      if (relic) ctx.spawnLoot(s.disc.cx + 0.7, s.disc.cz, relic);
+      s.complete = true;
+      if (s.hint) s.hint.visible = false;
+      if (ctx.markEncounterComplete) ctx.markEncounterComplete('want_to_play_a_game');
+      return { consume: true, complete: true };
+    },
   },
 
   // -----------------------------------------------------------------

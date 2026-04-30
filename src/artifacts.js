@@ -357,6 +357,22 @@ export const ARTIFACT_DEFS = {
     synthetic: true,
     apply(_s) { /* effect is in onEnemyKilled — see main.js */ },
   },
+
+  // -------------------------------------------------------------
+  // Bloody Jigsaw — Spaces Inbetween chain reward (puppet stands
+  // up, drops this when handed the Shitty Bike). Full immunity to
+  // bleed status from any damage source. Broken bones still apply.
+  // synthetic: true — only path is the encounter chain.
+  // -------------------------------------------------------------
+  bloody_jigsaw: {
+    id: 'bloody_jigsaw', name: 'Bloody Jigsaw',
+    lore: '"I\'ve been looking for this thing all over." His grin doesn\'t move when he talks.',
+    short: 'Immune to bleeding',
+    tint: 0xb02020,
+    price: 0,
+    synthetic: true,
+    apply(s) { s.bleedImmune = true; },
+  },
 };
 
 export const ALL_ARTIFACTS = Object.values(ARTIFACT_DEFS);

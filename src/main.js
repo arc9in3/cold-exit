@@ -6970,11 +6970,15 @@ function damagePlayer(amount, damageType = 'generic', srcCtx = null) {
 
   // Status effects based on the damage source. Ballistic hits occasionally
   // cause a bleed; melee hits are more likely and can also crack bones.
+  // Bloody Jigsaw relic — full bleed immunity (skips ballistic + melee
+  // bleed application). Broken bones are unaffected.
   const st = tunables.status || {};
-  if (damageType === 'ballistic' && player.applyStatus && Math.random() < (st.bulletBleedChance || 0)) {
+  const bleedImmune = !!derivedStats.bleedImmune;
+  if (damageType === 'ballistic' && player.applyStatus && !bleedImmune
+      && Math.random() < (st.bulletBleedChance || 0)) {
     player.applyStatus('bleed', st.bleedDuration || 12);
   } else if (damageType === 'melee' && player.applyStatus) {
-    if (Math.random() < (st.meleeBleedChance || 0)) player.applyStatus('bleed', st.bleedDuration || 12);
+    if (!bleedImmune && Math.random() < (st.meleeBleedChance || 0)) player.applyStatus('bleed', st.bleedDuration || 12);
     if (Math.random() < (st.meleeBrokenChance || 0)) player.applyStatus('broken', st.brokenDuration || 20);
   }
 }
