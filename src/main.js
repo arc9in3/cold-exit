@@ -3007,6 +3007,21 @@ function regenerateLevel() {
           if (ok) recomputeStats();
           return !!ok;
         },
+        // Direct relic grant — used by the Curse Breaker to award
+        // Djinn's Blessing on success. Bypasses the floor-pickup path
+        // so there's nothing to walk over; the relic is added straight
+        // to the owned set + a HUD toast fires.
+        grantRelic: (id) => {
+          const ok = artifacts.acquire?.(id);
+          if (ok) {
+            recomputeStats();
+            const def = ARTIFACT_DEFS[id];
+            const tag = def?.short ? ` — ${def.short}` : '';
+            transientHudMsg(`RELIC ACQUIRED: ${def?.name || id}${tag}`, 5.0);
+            sfx.uiAccept?.();
+          }
+          return !!ok;
+        },
         // The Button alarm — spawn one summoned minion at XZ.
         spawnSummonedMinion: (x, z, room2) => _spawnSummonedMinionAt(x, z, room2),
         // Duck — drops the Unused Rocket Ticket as a junk pickup
@@ -3173,23 +3188,17 @@ function _spawnSusChestAt(x, z) {
   level.containers.push({ container, group, x, z, r: 1.8 });
 }
 
-// The Lamp encounter — chest stuffed with a single relic. Used to
-// deliver the Brass Prisoner curse via a chest open instead of a
-// floor pickup so the moment reads as "you opened the wrong one."
-// Visually a general 'm' chest with darker tint; loot list is just
-// the relic.
+// The Lamp encounter — chest that delivers the Brass Prisoner curse.
+// Visually IDENTICAL to the masterwork chests it sits beside (same
+// kind, size, colors) so the player can't tell which is the trap.
+// `autoCurseRelic` flag triggers an immediate auto-grant on open —
+// the curse is applied without a pickup item or loot-UI step, so the
+// player's choice is "did I open the wrong one?" not "did I touch the
+// wrong item in the loot panel?"
 function _spawnCursedChestAt(x, z, relicId) {
-  const container = makeContainer('general', 'm', level?.index | 0);
+  const container = makeContainer('masterwork', 's', level?.index | 0);
   container.loot.length = 0;
-  const relic = relicFor(relicId);
-  if (relic) container.loot.push(relic);
-  // Repaint the chest in cursed tones so the player can tell it apart
-  // from the masterworks once it's been searched.
-  if (container.colors) {
-    container.colors.body = 0x32242a;
-    container.colors.trim = 0x6a4030;
-    container.colors.glow = 0x602030;
-  }
+  container.autoCurseRelic = relicId;
   const group = buildContainerMesh(container, x, 0, z);
   scene.add(group);
   const { w, d } = container.geo;
@@ -4188,6 +4197,13 @@ let _rifleChainLastT = 0;
 // genuinely inaccurate. Recovery is fast enough that a disciplined 2-3
 // shot burst followed by a beat barely pays any tax.
 //
+// Djinn's Blessing — spectral orb that orbits the player and fires
+// a parallel shot every time the player fires. Lazy-init on first
+// frame after the relic is owned; despawns + disposes if the relic
+// is ever removed. Position is updated each tick in _tickDjinnOrb.
+let _djinnOrb = null;
+let _djinnOrbAngle = 0;
+
 // First-shot tighten: when bloom is below FIRST_SHOT_THRESHOLD, the
 // shot is multiplied by FIRST_SHOT_TIGHTEN — the very first round from
 // a cold trigger lands tighter than the per-weapon baseline.
@@ -5004,7 +5020,9 @@ function tickFlame(dt, playerInfo, weapon, inputState, aimInfo) {
   weapon.ammo -= 1;
   // Brass Prisoner curse — flame ticks also pay the toll. Floored at 0.
   if (artifacts && artifacts.has('brass_prisoner')) {
-    weapon.ammo = Math.max(0, weapon.ammo - 2);
+    // Brass Prisoner curse — every shot pays an extra round on top
+    // of the normal ammo cost (2 bullets per pull total).
+    weapon.ammo = Math.max(0, weapon.ammo - 1);
   }
   if (weapon.durability) {
     weapon.durability.current = Math.max(
@@ -5209,10 +5227,11 @@ function spawnSniperShot(g) {
 
 function firePlayerProjectile(playerInfo, weapon, aimPoint) {
   if (typeof weapon.ammo === 'number' && !weapon.infiniteAmmo) weapon.ammo -= 1;
-  // Brass Prisoner curse — projectile launchers pay the same toll.
+  // Brass Prisoner curse — projectile launchers pay the same toll
+  // (one extra round on top of the normal cost = 2 per shot).
   if (typeof weapon.ammo === 'number' && !weapon.infiniteAmmo
       && artifacts && artifacts.has('brass_prisoner')) {
-    weapon.ammo = Math.max(0, weapon.ammo - 2);
+    weapon.ammo = Math.max(0, weapon.ammo - 1);
   }
   sfx.fire(weapon.class || 'shotgun');
   runStats.noteFireWeaponClass(weapon.class || 'shotgun');
@@ -5425,6 +5444,85 @@ function _tickGrapples(dt) {
 }
 let _playerGrappleT = 0;
 
+// Build the Djinn orb mesh on demand. Cheap geometry — small
+// emissive sphere with additive blending so it reads as spectral
+// rather than a physical marble. Added directly to the scene so the
+// player rig doesn't have to know about it.
+function _ensureDjinnOrb() {
+  if (_djinnOrb) return;
+  if (!artifacts || !artifacts.has('djinns_blessing')) return;
+  const geom = new THREE.SphereGeometry(0.10, 14, 10);
+  const mat = new THREE.MeshBasicMaterial({
+    color: 0x80c0ff, transparent: true, opacity: 0.85,
+    blending: THREE.AdditiveBlending, depthWrite: false,
+  });
+  _djinnOrb = new THREE.Mesh(geom, mat);
+  scene.add(_djinnOrb);
+}
+
+// Per-frame orbit. Floats around the player's shoulder height; the
+// vertical wobble (sin × 2) keeps it from looking pinned to a track.
+function _tickDjinnOrb(dt) {
+  const owned = !!(artifacts && artifacts.has('djinns_blessing'));
+  if (!owned) {
+    if (_djinnOrb) {
+      scene.remove(_djinnOrb);
+      _djinnOrb.geometry.dispose();
+      _djinnOrb.material.dispose();
+      _djinnOrb = null;
+    }
+    return;
+  }
+  _ensureDjinnOrb();
+  if (!_djinnOrb || !player) return;
+  _djinnOrbAngle = (_djinnOrbAngle + dt * 1.4) % (Math.PI * 2);
+  const r = 0.95;
+  _djinnOrb.position.set(
+    player.mesh.position.x + Math.cos(_djinnOrbAngle) * r,
+    1.55 + Math.sin(_djinnOrbAngle * 2.0) * 0.08,
+    player.mesh.position.z + Math.sin(_djinnOrbAngle) * r,
+  );
+}
+
+// Parallel shot from the orb when the player fires. 25% of the
+// player's effective weapon damage with a normal crit roll, so the
+// crit pop animation triggers and runs through the same hit pipeline
+// as a regular bullet. Tracer is the orb's signature blue.
+function _fireDjinnShot(weapon, eff, aimTarget, hitTargets) {
+  if (!artifacts || !artifacts.has('djinns_blessing')) return;
+  if (!_djinnOrb || !aimTarget) return;
+  const fireFrom = _djinnOrb.position.clone();
+  const dir = new THREE.Vector3(
+    aimTarget.x - fireFrom.x,
+    aimTarget.y - fireFrom.y,
+    aimTarget.z - fireFrom.z,
+  );
+  if (dir.lengthSq() < 0.0001) return;
+  dir.normalize();
+  const range = eff.range || 60;
+  const hit = combat.raycast(fireFrom, dir, hitTargets, range);
+  // Snap impact + tracer endpoint to the visual mesh center for the
+  // same magnetism the main bullet path uses.
+  const endPoint = (hit && hit.mesh)
+    ? hit.mesh.getWorldPosition(new THREE.Vector3())
+    : (hit ? hit.point : fireFrom.clone().addScaledVector(dir, range));
+  combat.spawnShot(fireFrom, endPoint, 0x80c0ff, { light: false, flash: false });
+  if (hit && hit.owner && hit.owner.manager) {
+    const zoneCfg = tunables.zones[hit.zone];
+    const zoneMult = zoneCfg ? zoneCfg.damageMult : 1.0;
+    let dmg = eff.damage * 0.25 * zoneMult * (derivedStats.rangedDmgMult || 1);
+    const critChance = derivedStats.critChance || 0;
+    const isCrit = Math.random() < critChance;
+    if (isCrit) dmg *= (derivedStats.critDamageMult || 2);
+    runStats.addDamage(dmg);
+    hit.owner.manager.applyHit(hit.owner, dmg, hit.zone, dir, { weaponClass: weapon.class });
+    spawnDamageNumber(endPoint, camera, dmg, hit.zone, isCrit || hit.zone === 'head');
+    combat.spawnImpact(endPoint);
+  } else if (hit) {
+    combat.spawnImpact(hit.point);
+  }
+}
+
 function fireOneShot(playerInfo, weapon, aimPoint, isADS, aimOwner, aimZone) {
   // Active contract modifier — weapon-class restriction. Surfaces a
   // throttled HUD message when fire is blocked so the player
@@ -5632,14 +5730,14 @@ function fireOneShot(playerInfo, weapon, aimPoint, isADS, aimOwner, aimZone) {
   // === eff.magSize before decrement = first round; ammo === 1 = last.
   const _ammoBefore = (typeof weapon.ammo === 'number') ? weapon.ammo : -1;
   if (typeof weapon.ammo === 'number' && !weapon.infiniteAmmo && !freeShot) weapon.ammo -= 1;
-  // Brass Prisoner curse — every shot eats 2 EXTRA bullets from the
-  // magazine on top of the round we just fired. Floored at 0 so the
-  // last bullet still fires; the next trigger pull clicks empty.
-  // Skipped on freeShot so Scavenger's Eye still feels like a perk
-  // even under the curse.
+  // Brass Prisoner curse — every shot eats 1 EXTRA bullet from the
+  // magazine on top of the round we just fired (2 total per pull).
+  // Floored at 0 so the last bullet still fires; the next trigger
+  // pull clicks empty. Skipped on freeShot so Scavenger's Eye still
+  // feels like a perk even under the curse.
   if (typeof weapon.ammo === 'number' && !weapon.infiniteAmmo && !freeShot
       && artifacts && artifacts.has('brass_prisoner')) {
-    weapon.ammo = Math.max(0, weapon.ammo - 2);
+    weapon.ammo = Math.max(0, weapon.ammo - 1);
   }
   if ((derivedStats.instantReloadChance || 0) > 0
       && typeof weapon.ammo === 'number' && !weapon.infiniteAmmo
@@ -6090,6 +6188,10 @@ function fireOneShot(playerInfo, weapon, aimPoint, isADS, aimOwner, aimZone) {
   if (hitAgg.size > 0) {
     if (anyHead) sfx.headshot(); else sfx.hit();
   }
+  // Djinn's Blessing — orb fires a parallel shot once per trigger
+  // pull (NOT per pellet). Aimed at the same target the main bullet
+  // path resolved against, 25% damage with a normal crit roll.
+  _fireDjinnShot(weapon, eff, aimTarget, hitTargets);
 }
 
 // Throttle for the "Weapon broken" toast in tickShooting — held
@@ -9037,6 +9139,17 @@ function tryInteract({ nearItem, body, bodies, npc, container }) {
     return;
   }
   if (container && !container.container.looted) {
+    // Cursed chest from The Lamp encounter — auto-applies the relic
+    // the moment the chest is "opened" so the player can't peek + bail.
+    // The chest is then marked looted (no loot UI, no pickup).
+    if (container.container.autoCurseRelic) {
+      const relic = { type: 'relic', artifactId: container.container.autoCurseRelic };
+      _tryAcquireRelic(relic);
+      container.container.looted = true;
+      container.container.autoCurseRelic = null;
+      sfx.uiAccept?.();
+      return;
+    }
     // Containers reuse the body-loot UI flow — same {loot, looted}
     // shape — and stay visually present after looting (just no
     // longer interactable). Items inside auto-load the same way
@@ -11406,6 +11519,7 @@ function tick() {
   tryStartQuickMelee(inputState, aimInfo);
 
   const playerInfo = player.update(dt, inputState, aimInfo.point, resolveCollision);
+  _tickDjinnOrb(dt);
   if (playerInfo && playerInfo.maxHealth > 0) {
     lastHpRatio = Math.max(0, Math.min(1, playerInfo.health / playerInfo.maxHealth));
     playerMaxHealthCached = playerInfo.maxHealth;

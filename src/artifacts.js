@@ -311,10 +311,32 @@ export const ARTIFACT_DEFS = {
   brass_prisoner: {
     id: 'brass_prisoner', name: 'Brass Prisoner',
     lore: 'A small brass figure curled inside a bullet casing. He pays your debts in lead.',
-    short: 'CURSED — every shot drains 3 bullets',
+    short: 'CURSED — every shot drains 2 bullets',
     tint: 0x8a6028,
     price: 0,
     curse: true,
+    synthetic: true,
+    apply(_s) { /* effect is at the fire callsite — see tickShooting */ },
+  },
+
+  // -------------------------------------------------------------
+  // Djinn's Blessing — granted by the Curse Breaker on success
+  // (the gypsy traps the freed djinn in a charm and bonds it to
+  // the player). A small orb floats around the player and fires
+  // a parallel shot every time the player fires, dealing 25% of
+  // the player weapon's damage and able to crit.
+  //
+  // synthetic: true keeps it out of shops + random pools — the
+  // only acquisition path is the curse-breaker reward, so the
+  // player has to take the curse + pay 8000c to lift it before
+  // they earn the blessing.
+  // -------------------------------------------------------------
+  djinns_blessing: {
+    id: 'djinns_blessing', name: "Djinn's Blessing",
+    lore: 'A grateful echo of the brass prisoner, freed and bound. It floats at your shoulder and shoots when you do.',
+    short: 'Spectral orb fires alongside you · 25% damage · can crit',
+    tint: 0x80c0ff,
+    price: 0,
     synthetic: true,
     apply(_s) { /* effect is at the fire callsite — see tickShooting */ },
   },

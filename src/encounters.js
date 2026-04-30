@@ -3761,7 +3761,11 @@ export const ENCOUNTER_DEFS = {
               const ok = ctx.removeRelic && ctx.removeRelic('brass_prisoner');
               const speakAt = s.npc.position.clone().setY(2.5);
               if (ok) {
-                ctx.spawnSpeech(speakAt, 'He fights — but he goes. Walk lighter.', 4.5);
+                ctx.spawnSpeech(speakAt, 'He fights — but he goes. And what came with him stays with you.', 5.0);
+                // Reward — the freed djinn bonds to the player as
+                // Djinn's Blessing. Granted directly (no pickup) so
+                // the moment lands inside the speech beat.
+                if (ctx.grantRelic) ctx.grantRelic('djinns_blessing');
                 s.complete = true;
                 if (ctx.markEncounterComplete) ctx.markEncounterComplete('curse_breaker');
               } else {
