@@ -75,6 +75,8 @@ import {
   getSelectedStarterWeapon,
   getSigils, awardSigils,
   consumeKeystoneQueue,
+  getRelicPermits,
+  getContractRank,
 } from './prefs.js';
 import { StoreUpgradeUI, StoreRollUI, rollRarityForTier } from './ui_starting_store.js';
 import { getQualityPref, setQualityPref, applyQuality, qualityFlags } from './quality.js';
@@ -692,7 +694,7 @@ function _clone(def) {
 // These are common-rarity, low-power picks that anyone can take into
 // any run without spending chips. Permanent unlocks at the Stash
 // Armory expand this pool over time.
-const BASELINE_STARTER_NAMES = ['Makarov', 'PDW', 'Mini-14', 'Mossberg 500', 'Baton'];
+const BASELINE_STARTER_NAMES = ['Makarov', 'M1911', 'PDW', 'SPCA3', 'Mini-14', 'Mossberg 500', 'Baton'];
 
 function _pickStarterWeapon(weaponClass) {
   // Stash-selected weapon takes precedence over the class roll. The
@@ -802,6 +804,7 @@ function _applyContractPerKillReward(arch) {
   if (counted === (def.targetCount | 0)) {
     try {
       const snapshot = runStats.snapshot();
+      const rankBefore = getContractRank();
       const result = tryClaimContract(
         ac, snapshot,
         setActiveContract,
@@ -817,8 +820,50 @@ function _applyContractPerKillReward(arch) {
       if (parts.length) {
         transientHudMsg(`Contract complete: ${parts.join(' · ')}`, 3.0);
       }
+      // Rank-up beat — fires after the contract toast so the
+      // player sees the progression land. Each rank-up may also
+      // open new weapons for purchase at the Stash Armory.
+      const rankAfter = getContractRank();
+      if (rankAfter > rankBefore) {
+        const named = _newlyBuyableNames(rankBefore, rankAfter);
+        const tiers = _newlyBuyableTiers(rankBefore, rankAfter);
+        const parts = [];
+        if (named.length) parts.push(named.join(' + '));
+        if (tiers.length) parts.push(`${tiers.join(' + ')} tier`);
+        const tail = parts.length ? ` · ${parts.join(' · ')} now buyable` : '';
+        setTimeout(() => transientHudMsg(`RANK UP — Rank ${rankAfter}${tail}`, 3.5), 350);
+      }
     } catch (e) { console.warn('[contract-mid-run-claim]', e); }
   }
+}
+
+// Returns the weapon-rarity tiers that crossed their BUYABLE_RANK
+// threshold between the two rank values. Used by the rank-up toast
+// to tell the player "Rare weapons now buyable" etc. Mirrors the
+// BUYABLE_RANK ladder in ui_hideout's mission-prep section.
+const _BUYABLE_RANK_TIERS = [
+  { rarity: 'uncommon',  rank: 2 },
+  { rarity: 'rare',      rank: 5 },
+  { rarity: 'epic',      rank: 10 },
+  { rarity: 'legendary', rank: 18 },
+];
+function _newlyBuyableTiers(prev, next) {
+  const out = [];
+  for (const t of _BUYABLE_RANK_TIERS) {
+    if (prev < t.rank && next >= t.rank) out.push(t.rarity);
+  }
+  return out;
+}
+
+// Per-weapon `unlockRank` overrides — names the specific iconic gun
+// the player just unlocked access to (e.g. "Glock 17 now buyable").
+function _newlyBuyableNames(prev, next) {
+  const out = [];
+  for (const w of (tunables.weapons || [])) {
+    const r = w.unlockRank | 0;
+    if (r > 0 && prev < r && next >= r) out.push(w.name);
+  }
+  return out;
 }
 
 // Throttled HUD warning when an active contract blocks fire. Avoids
@@ -1572,6 +1617,14 @@ const hideoutUI = new HideoutUI({
   // WebGLRenderer so we don't spin up a second GL context. main.js
   // tick swaps which scene is being rendered based on hideoutUI.visible.
   getRenderer: () => renderer,
+  // Toast bridge — armory tile + mission-prep tile call this when the
+  // player chip-buys a weapon unlock. Surfaces the unlock through the
+  // existing in-game HUD pipeline so the menu and run share one feel.
+  notifyUnlock: (weaponName) => {
+    if (!weaponName) return;
+    transientHudMsg(`UNLOCKED: ${String(weaponName).toUpperCase()}`, 2.5);
+    sfx.uiAccept?.();
+  },
   // Leaderboard accessor — hideout's contractor leaderboard block
   // + full-screen leaderboards step read top entries via this.
   getLeaderboard: () => Leaderboard,
@@ -2054,7 +2107,15 @@ function makeRelicSellerStock() {
   // Upgrade level adds extra unowned-artifact slots.
   // Encounter-only artifacts are filtered out — they're earned via
   // their dedicated encounter, not bought from the shop.
-  const unowned = ALL_ARTIFACTS.filter(a => !artifacts.has(a.id) && !a.encounterOnly && !a.synthetic);
+  // Permit-gated artifacts (a.permitGated) require the player to
+  // have purchased the matching Black Market permit before they
+  // appear in the rotation. Lazy-import to avoid a top-level cycle.
+  const ownedPermits = (typeof getRelicPermits === 'function')
+    ? getRelicPermits()
+    : new Set();
+  const unowned = ALL_ARTIFACTS.filter(a =>
+    !artifacts.has(a.id) && !a.encounterOnly && !a.synthetic
+    && (!a.permitGated || ownedPermits.has(`permit_${a.id}`)));
   const bonus = getMerchantStockBonus('relicSeller');
   const offerCount = Math.min(3 + bonus, unowned.length);
   const picks = [];
@@ -2330,13 +2391,11 @@ function regenerateLevel() {
   // attack FSM, hazards, and HUD bar. The dormant intro ritual runs
   // first, leaving the player free to position before combat starts.
   if (isMegaFloor) {
-    // Pick which mega-boss runs this floor. The mega-boss rotation
-    // alternates ARBOTER (floors where (idx/5) is even — 10, 20, 30...)
-    // with THE ECHO (idx/5 odd — 15, 25, 35...). Both share the same
-    // ctx surface and main.js's mega-boss hit branch reads
-    // hit.mesh.userData.megaBoss generically.
-    const floorIdx = (level.index | 0) + 1;
-    const useEcho = floorIdx >= 15 && Math.floor(floorIdx / 5) % 2 === 1;
+    // Pick which mega-boss runs this floor. THE ECHO is currently
+    // disabled while we fix his fight; every mega-floor spawns ARBOTER
+    // until Echo is re-enabled. (Previous rotation: ARBOTER on
+    // floors 10/20/30, Echo on 15/25/35.)
+    const useEcho = false;
     const MegaCtor = useEcho ? MegaBossEcho : MegaBoss;
     const lootFn   = useEcho ? buildEchoLoot : buildMegaBossLoot;
     megaBoss = new MegaCtor({
@@ -10655,7 +10714,8 @@ function _maybeShowLockedTrialPrompt() {
       persistentChips -= cost;
       savePersistentChips();
       unlockWeapon(trial.name);
-      transientHudMsg(`${trial.name} unlocked.`);
+      transientHudMsg(`UNLOCKED: ${String(trial.name).toUpperCase()}`, 2.5);
+      sfx.uiAccept?.();
       prompt.remove();
     });
     prompt.querySelector('#dup-skip').addEventListener('click', () => prompt.remove());

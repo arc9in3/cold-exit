@@ -10,6 +10,7 @@ export const ARTIFACT_DEFS = {
     short: '+15% dmg reduction above 80% HP',
     tint: 0x7a8a9a,
     price: 96000,
+    permitGated: true,   // Black Market permit required to enter relic-merchant rotation
     apply(s) { s.highHpReduction = (s.highHpReduction || 0) + 0.15; },
   },
   bloodied_rosary: {
@@ -52,6 +53,7 @@ export const ARTIFACT_DEFS = {
     short: '+35% melee damage, +10% execute range',
     tint: 0x2a2230,
     price: 100000,
+    permitGated: true,
     apply(s) {
       s.meleeDmgMult *= 1.35;
       s.executeRangeBonus = (s.executeRangeBonus || 0) + 1.0;
@@ -222,6 +224,7 @@ export const ARTIFACT_DEFS = {
     lore: 'Brand burned into your wrist. Drinks where it bites.',
     short: 'Ranged hits heal 4% of damage dealt',
     tint: 0x801818, price: 88000,
+    permitGated: true,
     apply(s) { s.lifestealRangedPercent = (s.lifestealRangedPercent || 0) + 4; },
   },
 
@@ -278,6 +281,7 @@ export const ARTIFACT_DEFS = {
     lore: 'A quiet reminder of a life well lived.',
     short: '???',
     tint: 0x404048, price: 110000,
+    permitGated: true,
     apply(s) {
       s.incomingDmgMult = (s.incomingDmgMult || 1) * 1.30;
       s.mythicDropChanceFloor = Math.max(s.mythicDropChanceFloor || 0, 0.06);

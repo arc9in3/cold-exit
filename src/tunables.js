@@ -465,6 +465,9 @@ export const tunables = {
     },
     // --- Extended pistol lineup ---
     {
+      // Iconic early unlock — gated to rank 1, cheap, locked from
+      // world drops so the player feels the rank-up pop when it lands.
+      worldDrop: false, unlockRank: 1, unlockCost: 100,
       name: 'Glock 17', type: 'ranged', class: 'pistol', rarity: 'common',
       attachmentSlots: ['muzzle', 'sideRail', 'topRail', 'grip', 'trigger', 'magazine'],
       fireMode: 'semi', fireRate: 5.0, damage: 32, range: 34,
@@ -476,6 +479,8 @@ export const tunables = {
     },
     // --- Extended SMG lineup ---
     {
+      // Iconic early unlock — gated to rank 2.
+      worldDrop: false, unlockRank: 2, unlockCost: 120,
       name: 'UMP45', type: 'ranged', class: 'smg', rarity: 'common',
       attachmentSlots: ['muzzle', 'underRail', 'sideRail', 'topRail', 'stock', 'grip', 'trigger', 'magazine'],
       fireMode: 'auto', fireRate: 10, damage: 22, range: 28,
@@ -521,6 +526,9 @@ export const tunables = {
       magSize: 20, reloadTime: 1.5,
     },
     {
+      // Iconic early unlock — gated to rank 4, cheap despite uncommon
+      // rarity so the rank-up flow doesn't stall on chip-saving.
+      worldDrop: false, unlockRank: 4, unlockCost: 200,
       name: 'AK47', type: 'ranged', class: 'rifle', rarity: 'uncommon',
       attachmentSlots: ['muzzle', 'barrel', 'underRail', 'sideRail', 'topRail', 'stock', 'grip', 'trigger', 'magazine'],
       fireMode: 'auto', fireRate: 10, damage: 32, range: 58,
@@ -595,6 +603,9 @@ export const tunables = {
 
     // --- Marksman / bolt lineup (still class: rifle — rides the rifle mastery tree) ---
     {
+      // Iconic early unlock — gated to rank 3. Bolt-action sniper
+      // intro for the player who's earned their first long-range pick.
+      worldDrop: false, unlockRank: 3, unlockCost: 150,
       name: 'Remington 700', type: 'ranged', class: 'sniper', rarity: 'common',
       attachmentSlots: ['muzzle', 'barrel', 'sideRail', 'topRail', 'stock', 'grip', 'trigger', 'magazine'],
       fireMode: 'semi', fireRate: 1.3, damage: 72, range: 80,
@@ -1538,8 +1549,9 @@ export const tunables = {
     // ================================================================
     {
       // 14.5" 5.56 NATO M4 carbine — bread-and-butter US service
-      // weapon. Common-uncommon spawn so it's the rifle the player
-      // sees most often early. Balanced fire rate, average range.
+      // weapon. Iconic early unlock — gated to rank 4 alongside the
+      // AK47 so the player picks a side at that milestone.
+      worldDrop: false, unlockRank: 4, unlockCost: 200,
       name: 'M4', type: 'ranged', class: 'rifle', rarity: 'uncommon',
       attachmentSlots: ['muzzle', 'barrel', 'underRail', 'sideRail', 'topRail', 'stock', 'grip', 'trigger', 'magazine'],
       fireMode: 'auto', fireRate: 12, damage: 26, range: 56,

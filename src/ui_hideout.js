@@ -46,7 +46,7 @@ import { iconForItem, inferRarity, rarityColor, CONSUMABLE_DEFS } from './invent
 
 // Baseline starter-weapon roster — five always-free common picks,
 // one per major class. Must match BASELINE_STARTER_NAMES in main.js.
-const BASELINE_STARTERS = ['Makarov', 'PDW', 'Mini-14', 'Mossberg 500', 'Baton'];
+const BASELINE_STARTERS = ['Makarov', 'M1911', 'PDW', 'SPCA3', 'Mini-14', 'Mossberg 500', 'Baton'];
 
 // Pre-Run Store stock pool — temporary consumables only. Weapons
 // live in the WEAPON UNLOCKS section under the armory; armor is a
@@ -97,11 +97,14 @@ const TAB_DEFS = [
 // the relic-merchant rotation; keystones apply run-modifier perks.
 // Content can grow without schema changes — main.js reads
 // hasRelicPermit / hasKeystone and adjusts run init accordingly.
+// Permit ids match `permit_<artifact_id>`. The relic merchant
+// filter strips the `permit_` prefix and checks the artifact's
+// permitGated flag against the player's owned permit set.
 export const RELIC_PERMITS = {
-  permit_mourners_bell: { id: 'permit_mourners_bell', label: "Mourner's Bell", blurb: 'Permit unlocks Mourner\'s Bell in the relic merchant rotation.', cost: 8 },
-  permit_iron_faith:    { id: 'permit_iron_faith',    label: 'Iron Faith',     blurb: 'Permit unlocks Iron Faith in the relic merchant rotation.', cost: 8 },
-  permit_magnum_opus:   { id: 'permit_magnum_opus',   label: 'Magnum Opus',    blurb: 'Permit unlocks Magnum Opus in the relic merchant rotation.', cost: 10 },
-  permit_golden_bullet: { id: 'permit_golden_bullet', label: 'Golden Bullet',  blurb: 'Permit unlocks Golden Bullet in the relic merchant rotation.', cost: 10 },
+  permit_mourners_bell:  { id: 'permit_mourners_bell',  label: "Mourner's Bell",   blurb: '+30% incoming damage in exchange for higher mythic drop chance. Unlocks in relic merchant rotation.', cost: 8 },
+  permit_iron_faith:     { id: 'permit_iron_faith',     label: 'Iron Faith',       blurb: '+15% damage reduction above 80% HP. Unlocks in relic merchant rotation.', cost: 8 },
+  permit_vampires_mark:  { id: 'permit_vampires_mark',  label: "Vampire's Mark",   blurb: 'Ranged hits heal 4% of damage dealt. Unlocks in relic merchant rotation.', cost: 10 },
+  permit_reapers_scythe: { id: 'permit_reapers_scythe', label: "Reaper's Scythe",  blurb: '+35% melee damage and longer execute range. Unlocks in relic merchant rotation.', cost: 10 },
 };
 export const KEYSTONES = {
   keystone_pain_drops:    { id: 'keystone_pain_drops',    label: 'Pain Drops',         blurb: 'Pain (mythic mace) can drop in the world this run.', cost: 12, oneShot: true },
@@ -779,7 +782,9 @@ export class HideoutUI {
       const row = document.createElement('div');
       row.className = 'hideout-take-row';
       for (const w of list) {
-        const cost = RARITY_COSTS[w.rarity || 'common'] || 150;
+        const cost = (w.unlockCost | 0) > 0
+          ? (w.unlockCost | 0)
+          : (RARITY_COSTS[w.rarity || 'common'] || 150);
         row.appendChild(this._buildStashArmoryTile(w, cost));
       }
       sec.appendChild(row);
@@ -807,6 +812,7 @@ export class HideoutUI {
       e.stopPropagation();
       if (!this.ctx.spendChips || !this.ctx.spendChips(cost)) return;
       unlockWeapon(weapon.name);
+      this.ctx.notifyUnlock?.(weapon.name);
       this.render();
     });
     return tile;
@@ -1824,8 +1830,21 @@ export class HideoutUI {
 
     const RARITY_COSTS = { common: 150, uncommon: 350, rare: 800, epic: 2000, legendary: 5000 };
     const rank = getContractRank();
-    const BUYABLE_RANK = { common: 0, uncommon: 0, rare: 5, epic: 12, legendary: 22 };
-    const isBuyable = (w) => rank >= (BUYABLE_RANK[w.rarity || 'common'] ?? 0);
+    // Rank ladder — each tier visibly opens new weapons in the
+    // armory's LOCKED column when the player crosses the threshold.
+    // Tuned so the early ranks reward the player almost every
+    // contract, while higher rarities take real commitment. Iconic
+    // early unlocks (Glock, UMP45, Remington 700, M4, AK47) override
+    // the rarity gate via per-weapon `unlockRank` so they trickle in
+    // at ranks 1-4 regardless of rarity tier.
+    const BUYABLE_RANK = { common: 0, uncommon: 2, rare: 5, epic: 10, legendary: 18 };
+    const reqRankFor = (w) => (w.unlockRank | 0) > 0
+      ? (w.unlockRank | 0)
+      : (BUYABLE_RANK[w.rarity || 'common'] ?? 0);
+    const costFor = (w) => (w.unlockCost | 0) > 0
+      ? (w.unlockCost | 0)
+      : (RARITY_COSTS[w.rarity || 'common'] || 150);
+    const isBuyable = (w) => rank >= reqRankFor(w);
 
     const totalRoster = available.length + lockedAll.length;
     armoryCol.innerHTML = `
@@ -1902,16 +1921,16 @@ export class HideoutUI {
     buyable.sort(rarityClassSort);
     stillLocked.sort(rarityClassSort);
     for (const w of buyable) {
-      const cost = RARITY_COSTS[w.rarity || 'common'] || 150;
+      const cost = costFor(w);
       lockedGrid.appendChild(this._buildArmoryMiniTile(w, 'buyable', cost, () => {
         if (!this.ctx.spendChips || !this.ctx.spendChips(cost)) return;
         unlockWeapon(w.name);
+        this.ctx.notifyUnlock?.(w.name);
         this.render();
       }));
     }
     for (const w of stillLocked) {
-      const reqRank = BUYABLE_RANK[w.rarity || 'common'] ?? 0;
-      lockedGrid.appendChild(this._buildArmoryMiniTile(w, 'locked', null, null, reqRank));
+      lockedGrid.appendChild(this._buildArmoryMiniTile(w, 'locked', null, null, reqRankFor(w)));
     }
     if (!buyable.length && !stillLocked.length) {
       const e = document.createElement('div');
@@ -2567,8 +2586,8 @@ export class HideoutUI {
     switch (type) {
       case 'dasher':   return `dasher${plural}`;
       case 'tank':     return `tank${plural}`;
-      case 'gunman':   return `gunman${n === 1 ? '' : ' gunmen'.slice(1)}`;
-      case 'melee':    return `melee enemy${n === 1 ? '' : ' melee enemies'.slice(11)}`;
+      case 'gunman':   return n === 1 ? 'gunman' : 'gunmen';
+      case 'melee':    return n === 1 ? 'melee enemy' : 'melee enemies';
       case 'sniper':   return `sniper${plural}`;
       case 'boss':     return `boss${n === 1 ? '' : 'es'}`;
       case 'megaboss': return `megaboss${n === 1 ? '' : 'es'}`;

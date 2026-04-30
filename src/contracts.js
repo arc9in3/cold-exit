@@ -346,7 +346,7 @@ export function difficultyScore(def) {
 
 // Build the run-time modifier object the gameplay code actually
 // reads. Empty modifiers object on the def collapses to a clean
-// no-op default. `lootQualityMult`, `chipsMult`, `marksMult` are auto-derived
+// no-op default. `lootQualityMult`, `chipsMult`, `marksMult` are
 // auto-derived counter-pressure offsets that scale with the
 // difficulty score so harder rules pay better without needing
 // per-contract hand-tuning.
