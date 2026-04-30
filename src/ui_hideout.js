@@ -56,9 +56,12 @@ const BASELINE_STARTERS = ['Makarov', 'M1911', 'PDW', 'SPCA3', 'Mini-14', 'Mossb
 // and armor. Ammo and buff items are gone from the store roll — the
 // pre-mission boost reads as "stock up on heals + armor" only, which
 // keeps the curation focused and predictable for the player.
+// Store is armor-only. Health items + ammo + buffs were previously
+// in the roll but have been pulled — extra heals at run start will
+// live on a separate upgrade landing in a follow-up. Keeping the
+// kinds array as a list so adding kinds back stays cheap.
 const STORE_KINDS = [
-  { kind: 'consumable', weight: 55 },
-  { kind: 'armor',      weight: 45 },
+  { kind: 'armor', weight: 100 },
 ];
 // IDs in this catalog must match real ARMOR_DEFS entries in
 // inventory.js — the materialize step looks the def up by id, so
@@ -1755,26 +1758,48 @@ export class HideoutUI {
       name: selectedDef.name, baseName: selectedDef.name,
       type: selectedDef.type, class: selectedDef.class,
     }) : '';
-    // Read the pre-mission store queue to find the most recent armor
-    // purchase per slot. The paperdoll mirrors what the player will
-    // actually wear at run start so they can verify their loadout
-    // before launching. Same iconForItem call as the in-game UI uses,
-    // so the icons match across surfaces.
+    // Paperdoll mirrors what the player will actually wear at run
+    // start. Resolution order per slot:
+    //   1. queued store buy (overrides the baseline)
+    //   2. baseline starter loadout (always-on defaults from
+    //      startNewRun: chest_light, pants_combat, backpack_small)
+    //   3. empty (glyph fallback)
+    // Same iconForItem call as the in-game inventory uses, so the
+    // icons match across surfaces.
     const queuedArmorBySlot = {};
     for (const q of getStarterInventory()) {
       if (q && q.__storeArmor && q.slot) {
         queuedArmorBySlot[q.slot] = q;
       }
     }
+    const BASELINE_DEFS_BY_SLOT = {
+      chest:    'chest_light',
+      pants:    'pants_combat',
+      backpack: 'backpack_small',
+    };
     const armorTile = (slotKey, label, glyph) => {
+      // Queued store buy first.
       const queued = queuedArmorBySlot[slotKey];
-      if (!queued) return slotTile(slotKey, label, null, null, glyph);
-      const def = ARMOR_DEFS && ARMOR_DEFS[queued.defId];
-      if (!def) return slotTile(slotKey, label, queued.defId, null, glyph);
-      const icon = iconForItem({
-        id: def.id, name: def.name, type: def.type || 'armor', slot: def.slot,
-      });
-      return slotTile(slotKey, label, def.name, icon, glyph);
+      if (queued) {
+        const def = ARMOR_DEFS && ARMOR_DEFS[queued.defId];
+        if (def) {
+          const icon = iconForItem({
+            id: def.id, name: def.name, type: def.type || 'armor', slot: def.slot,
+          });
+          return slotTile(slotKey, label, def.name, icon, glyph);
+        }
+        return slotTile(slotKey, label, queued.defId, null, glyph);
+      }
+      // Baseline default — chest_light / pants_combat / backpack_small.
+      const baselineId = BASELINE_DEFS_BY_SLOT[slotKey];
+      if (baselineId && ARMOR_DEFS && ARMOR_DEFS[baselineId]) {
+        const def = ARMOR_DEFS[baselineId];
+        const icon = iconForItem({
+          id: def.id, name: def.name, type: def.type || 'armor', slot: def.slot,
+        });
+        return slotTile(slotKey, label, def.name, icon, glyph);
+      }
+      return slotTile(slotKey, label, null, null, glyph);
     };
     const slotTile = (key, label, item, iconUrl, glyph) => {
       const filled = !!item;
