@@ -1003,14 +1003,18 @@ function startNewRun(weaponClass) {
       if (!raw) continue;
       const real = _materializeStarterItem(raw);
       if (!real) continue;
-      // Auto-equip armor slots; everything else gets added as
-      // pocket/loose inventory like a normal pickup.
+      // Auto-equip armor — the player paid chips for this piece, so
+      // it goes onto the paperdoll for the next run regardless of
+      // what's already in the slot. Any displaced piece falls back
+      // to loose inventory (or auto-converts later if pockets are
+      // full). Non-armor purchases drop into inventory as before.
       const armorSlot = real.__armorSlot;
-      if (armorSlot && !inventory.equipment[armorSlot]) {
+      if (armorSlot) {
         delete real.__armorSlot;
+        const prev = inventory.equipment[armorSlot];
+        if (prev) inventory.add(prev);
         inventory.equipment[armorSlot] = real;
       } else {
-        if (real.__armorSlot) delete real.__armorSlot;
         inventory.add(real);
       }
     }
