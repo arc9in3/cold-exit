@@ -5539,11 +5539,16 @@ function fireOneShot(playerInfo, weapon, aimPoint, isADS, aimOwner, aimZone) {
       : (_aimCfg.enemyTightenSingle ?? 0.20);  // pistol / smg / rifle / sniper / lmg
     spread *= tighten;
   }
-  // Head-hover bonus — when the cursor is over an enemy head, an
-  // additional spread tightening kicks in on top of the pixel-mode
-  // enemy tighten. Rewards committed head tracking with consistent
-  // landings so headshots feel like a real-skill payoff, not RNG.
-  if (aimZone === 'head' && aimOwner) {
+  // Head-hover bonus — when the cursor is over an enemy head AND the
+  // recoil indicator is stable (bloom below the first-shot threshold),
+  // an additional spread tightening kicks in on top of the pixel-mode
+  // enemy tighten. This makes:
+  //   - Tap-fired first shots → very accurate headshot landings
+  //   - Held / spammed shots  → bloom inflates above the threshold,
+  //                              bonus drops off, headshots stay hard
+  // The cap matches FIRST_SHOT_THRESHOLD so the bonus and the
+  // existing first-shot tighten share one coherent stable-aim window.
+  if (aimZone === 'head' && aimOwner && _shotBloom < FIRST_SHOT_THRESHOLD) {
     spread *= (_aimCfg.headHoverSpreadMult ?? 0.55);
   }
   // LMG Walking Fire — sustained-fire spread bleed. While holding the
