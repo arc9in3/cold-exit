@@ -42,22 +42,20 @@ import {
   pickDailyContract, pickWeeklyContract, utcDayIndex, utcWeekIndex,
   liveProgressFor, tryClaimContract, isContractUnlocked, buildModifiers, difficultyScore,
 } from './contracts.js';
-import { iconForItem, inferRarity, rarityColor } from './inventory.js';
+import { iconForItem, inferRarity, rarityColor, CONSUMABLE_DEFS } from './inventory.js';
 
 // Baseline starter-weapon roster — five always-free common picks,
 // one per major class. Must match BASELINE_STARTER_NAMES in main.js.
 const BASELINE_STARTERS = ['Makarov', 'PDW', 'Mini-14', 'Mossberg 500', 'Baton'];
 
-// Pre-Run Store stock pool — items the rotating store can roll. Each
-// entry has a `kind` and an `id` resolver. Weapons are sampled at
-// roll time so the rarity ceiling can bias which weapons show up;
-// armor / consumables / buffs come from a small static catalog.
+// Pre-Run Store stock pool — temporary consumables only. Weapons
+// live in the WEAPON UNLOCKS section under the armory; armor is a
+// run-persistent slot, not a temporary boost. Everything here is
+// "use it up during the run" gear: heals, ammo packs, run buffs.
 const STORE_KINDS = [
-  { kind: 'weapon',     weight: 35 },
-  { kind: 'armor',      weight: 20 },
-  { kind: 'consumable', weight: 25 },
-  { kind: 'ammo',       weight: 10 },
-  { kind: 'buff',       weight: 10 },
+  { kind: 'consumable', weight: 60 },
+  { kind: 'ammo',       weight: 18 },
+  { kind: 'buff',       weight: 22 },
 ];
 const STORE_ARMOR_CATALOG = [
   { id: 'chest_med',          name: 'Combat Vest',     kind: 'armor', slot: 'chest',    rarity: 'uncommon', basePrice: 220 },
@@ -152,6 +150,19 @@ export class HideoutUI {
     // Stash sub-tab state. 'take' is the default — picking a starter
     // weapon is the most common reason to visit the stash.
     this.stashSubTab = 'take';
+    // Contractor stage flow:
+    //   'home'        — host + Start New Run CTA (no cards)
+    //   'cards'       — 3 wanted-poster cards visible
+    //   'weapon'      — mission prep / stash / weapon loadout
+    //   'leaderboard' — full-screen leaderboards list
+    this.contractorStep = 'home';
+    // Live-feed shuffle interval id — keeps the contract ticker
+    // feeling alive. Cleared on hideout close + on tab change.
+    this._feedIntervalId = 0;
+    // Stable card-slot state — array of def IDs currently shown on
+    // the cards step. Refilled on demand; swapped one slot at a
+    // time when a contract is accepted.
+    this._cardSlots = [];
     // Items that just came back from a run, awaiting bank-or-convert
     // decision. Set by openWithExtract(items).
     this._extractedQueue = [];
@@ -163,6 +174,7 @@ export class HideoutUI {
     this.root.id = 'hideout-root';
     this.root.style.display = 'none';
     document.body.classList.remove('hideout-active');
+    this._stopFeedPulse();
     document.body.appendChild(this.root);
     this.root.addEventListener('mousedown', (e) => {
       // Don't dismiss on backdrop click — hideout is a destination,
@@ -184,10 +196,10 @@ export class HideoutUI {
   }
 
   _ensureScene() {
-    // Diegetic 3D scene defaults ON. Reuses the host renderer
-    // passed via ctx.getRenderer(). No new GL context, no second
-    // canvas. Falls back silently if no renderer is available.
-    if (window.__hideoutDiegetic === false) return null;
+    // Diegetic 3D scene defaults OFF — design pivoted to 2D +
+    // stylized art for the lobby. To re-enable for testing:
+    // `window.__hideoutDiegetic = true; location.reload();`
+    if (window.__hideoutDiegetic !== true) return null;
     if (!this._scene) {
       const renderer = this.ctx.getRenderer?.();
       if (!renderer) return null;
@@ -232,6 +244,8 @@ export class HideoutUI {
     this._lastRunSnapshot = runSnapshot || null;
     this._evaluateContractClaim();
     this.tab = 'contractor';
+    this.contractorStep = 'home';
+    this._currentGreeting = null;          // re-roll the host's opening line
     this.visible = true;
     document.body.classList.add('hideout-active');
     this.root.style.display = 'flex';
@@ -249,6 +263,8 @@ export class HideoutUI {
     this._extractedQueue = [];
     this._lastRunSnapshot = null;
     this.tab = 'contractor';
+    this.contractorStep = 'home';
+    this._currentGreeting = null;          // re-roll the host's opening line
     this.visible = true;
     document.body.classList.add('hideout-active');
     this.root.style.display = 'flex';
@@ -286,7 +302,8 @@ export class HideoutUI {
     // run-start if the scene was disabled.
     this.root.style.display = 'none';
     document.body.classList.remove('hideout-active');
-    if (this._scene && window.__hideoutDiegetic !== false) {
+    this._stopFeedPulse();
+    if (this._scene && window.__hideoutDiegetic === true) {
       this._scene.gotoStation('exitDoor');
       this._fadeOutAndRunStart();
     } else {
@@ -338,6 +355,7 @@ export class HideoutUI {
         this.visible = false;
         this.root.style.display = 'none';
     document.body.classList.remove('hideout-active');
+    this._stopFeedPulse();
         this._stopSceneLoop();
         this._scene?.hide();
         it.fn();
@@ -355,6 +373,18 @@ export class HideoutUI {
       };
       document.addEventListener('mousedown', onAway, true);
     }, 0);
+  }
+
+  // Global back-button — pinned to the SAME location on every
+  // screen (hard rule). Use this everywhere instead of inline back
+  // buttons so the player's eye never has to hunt for the exit.
+  _renderBackButton(label, onClick) {
+    const btn = document.createElement('button');
+    btn.type = 'button';
+    btn.className = 'global-back-btn';
+    btn.textContent = `◀ ${label}`;
+    btn.addEventListener('click', onClick);
+    return btn;
   }
 
   _showHint(msg) {
@@ -420,6 +450,7 @@ export class HideoutUI {
     this.visible = false;
     this.root.style.display = 'none';
     document.body.classList.remove('hideout-active');
+    this._stopFeedPulse();
     this._stopSceneLoop();
     this._scene?.hide();
     if (this.ctx.onExitToTitle) this.ctx.onExitToTitle();
@@ -437,6 +468,7 @@ export class HideoutUI {
     this.visible = false;
     this.root.style.display = 'none';
     document.body.classList.remove('hideout-active');
+    this._stopFeedPulse();
     this._stopSceneLoop();
     this._scene?.hide();
     if (this.ctx.onQuickStart) this.ctx.onQuickStart();
@@ -519,18 +551,25 @@ export class HideoutUI {
     this.root.appendChild(topbar);
 
     // ── Bottom-right action cluster — Quick Start + Start New Run.
-    const actions = document.createElement('div');
-    actions.id = 'hideout-actions';
-    actions.innerHTML = `
-      <button id="hideout-quickstart" type="button" title="Last-class quick run">Quick Start</button>
-      <button id="hideout-startrun" type="button">Start New Run ▶</button>
-    `;
-    actions.querySelector('#hideout-startrun').addEventListener('click', () => this.close());
-    actions.querySelector('#hideout-quickstart').addEventListener('click', () => this._quickStart());
-    this.root.appendChild(actions);
+    // Hidden on the contractor tab because the stage owns its own
+    // run-start CTA (the big golden button).
+    if (this.tab !== 'contractor') {
+      const actions = document.createElement('div');
+      actions.id = 'hideout-actions';
+      actions.innerHTML = `
+        <button id="hideout-quickstart" type="button" title="Last-class quick run">Quick Start</button>
+        <button id="hideout-startrun" type="button">Start New Run ▶</button>
+      `;
+      actions.querySelector('#hideout-startrun').addEventListener('click', () => this.close());
+      actions.querySelector('#hideout-quickstart').addEventListener('click', () => this._quickStart());
+      this.root.appendChild(actions);
+    }
 
-    // ── Bottom-left vertical tab strip. Each tab lerps the diegetic
-    //    camera to the matching station as it activates.
+    // ── Bottom-left vertical tab strip. Hidden on the contractor
+    //    stage so it owns the full window. Other tabs keep it.
+    if (this.tab === 'contractor') {
+      // Skip rendering tabs entirely on the contractor stage.
+    } else {
     const tabs = document.createElement('div');
     tabs.id = 'hideout-tabs';
     const tabToStation = {
@@ -548,7 +587,14 @@ export class HideoutUI {
       btn.className = `hideout-tab${this.tab === t.id ? ' active' : ''}`;
       btn.textContent = t.label;
       btn.addEventListener('click', () => {
+        const fromTab = this.tab;
         this.tab = t.id;
+        if (t.id === 'contractor') {
+          this.contractorStep = 'home';
+          // Re-roll the opening line whenever the player walks back
+          // into the contracts office from another station.
+          if (fromTab !== 'contractor') this._currentGreeting = null;
+        }
         const stationId = tabToStation[t.id];
         if (stationId && this._scene) this._scene.gotoStation(stationId);
         this.render();
@@ -556,6 +602,7 @@ export class HideoutUI {
       tabs.appendChild(btn);
     }
     this.root.appendChild(tabs);
+    }
 
     // ── Floating content panel anchored to the right side. Takes
     //    ~half the viewport so the diegetic scene stays visible on
@@ -733,7 +780,7 @@ export class HideoutUI {
       row.className = 'hideout-take-row';
       for (const w of list) {
         const cost = RARITY_COSTS[w.rarity || 'common'] || 150;
-        row.appendChild(this._buildArmoryTile(w, cost));
+        row.appendChild(this._buildStashArmoryTile(w, cost));
       }
       sec.appendChild(row);
       wrap.appendChild(sec);
@@ -741,7 +788,7 @@ export class HideoutUI {
     return wrap;
   }
 
-  _buildArmoryTile(weapon, cost) {
+  _buildStashArmoryTile(weapon, cost) {
     const tile = document.createElement('div');
     tile.className = 'hideout-take-tile locked';
     tile.style.borderColor = rarityColor({ rarity: weapon.rarity });
@@ -1536,13 +1583,16 @@ export class HideoutUI {
   }
 
   // ----- Contractor --------------------------------------------------
-  // Stage-style contractor view per mockup — host portrait + speech
-  // bubble + a daily set of 3 featured wanted-poster cards. Side rails
-  // show a live contract-feed ticker and the global contract board.
-  // The full rarity browser is reachable via a "Browse all" link.
+  // Stage-style contractor — three-step flow:
+  //   home    : host + speech + Start New Run CTA centered low
+  //   cards   : 3 wanted-poster cards bottom-center; pick one
+  //   weapon  : paperdoll + weapon list + Confirm Loadout
+  // Side rails (live feed + contract board) show on home + cards;
+  // they hide on the weapon screen so the loadout view gets full
+  // breathing room.
   _renderContractorTab() {
     const wrap = document.createElement('div');
-    wrap.className = 'hideout-tab-body contractor-stage';
+    wrap.className = `hideout-tab-body contractor-stage step-${this.contractorStep}`;
 
     const active = getActiveContract();
     const activeId = active?.activeContractId || null;
@@ -1552,66 +1602,423 @@ export class HideoutUI {
       megabossKills: getMegabossKills(),
       marks: getMarks(),
     };
-
-    // Featured 3 — pick the highest-rarity unlocked contracts (so as
-    // the player ranks up the daily set ramps with them). Falls back
-    // to common+uncommon for a fresh player.
     const allDefs = Object.values(CONTRACT_DEFS).filter(d => isContractUnlocked(d, unlockState));
-    const RARITY_ORDER = { common: 0, uncommon: 1, rare: 2, epic: 3, legendary: 4 };
-    allDefs.sort((a, b) => (RARITY_ORDER[b.rarity || 'common'] - RARITY_ORDER[a.rarity || 'common']));
-    const featured = this._featuredDailySlice(allDefs, 3);
 
-    // Host greeting — rotates each render so the host has presence.
-    const greeting = this._pickHostGreeting();
+    // Side rails — visible on home + cards. Hidden on weapon and
+    // leaderboard steps where they'd compete with the focal content.
+    if (this.contractorStep === 'home' || this.contractorStep === 'cards') {
+      const feed = document.createElement('div');
+      feed.className = 'contractor-feed';
+      feed.innerHTML = `<div class="feed-head">LIVE CONTRACT FEED</div>${this._renderLiveFeedHTML()}`;
+      // Compact leaderboards block below the feed — top 3 in Levels
+      // (the most relatable category for a contracts screen). Click
+      // on the block opens the full leaderboards step.
+      const lb = document.createElement('div');
+      lb.className = 'contractor-leaderboard-block';
+      lb.innerHTML = `
+        <div class="lb-block-head">LEADERBOARDS</div>
+        ${this._renderLeaderboardMiniHTML('levels', 3)}
+        <button type="button" class="lb-view-all">View all categories ▶</button>
+      `;
+      lb.querySelector('.lb-view-all').addEventListener('click', () => {
+        this.contractorStep = 'leaderboard';
+        this.render();
+      });
+      feed.appendChild(lb);
+      wrap.appendChild(feed);
 
-    wrap.innerHTML = `
-      <div class="contractor-feed">
-        <div class="feed-head">LIVE CONTRACT FEED</div>
-        ${this._renderLiveFeedHTML()}
-      </div>
+      const board = document.createElement('div');
+      board.className = 'contractor-board';
+      board.innerHTML = `<div class="board-head">CONTRACT BOARD</div>${this._renderBoardListHTML(allDefs)}`;
+      wrap.appendChild(board);
 
-      <div class="contractor-board">
-        <div class="board-head">CONTRACT BOARD</div>
-        ${this._renderBoardListHTML(allDefs)}
-      </div>
+      // Kick the live-feed shuffle interval. _stopFeedPulse handles
+      // cleanup on close.
+      this._startFeedPulse();
+    } else {
+      this._stopFeedPulse();
+    }
 
-      <div class="contractor-host">
-        <div class="host-portrait" aria-hidden="true">
-          <div class="host-glyph">◆</div>
+    // Host portrait + speech (home + cards only — hidden on weapon).
+    if (this.contractorStep !== 'weapon') {
+      const greeting = this.contractorStep === 'cards'
+        ? "Here's what's available to you today. Pick one."
+        : this._pickHostGreeting();
+      const host = document.createElement('div');
+      host.className = 'contractor-host';
+      host.innerHTML = `
+        <div class="host-portrait" aria-hidden="true"><div class="host-glyph">◆</div></div>
+        <div class="host-bubble"><div class="host-quote">"${greeting}"</div></div>
+      `;
+      wrap.appendChild(host);
+    }
+
+    // Step-specific content.
+    if (this.contractorStep === 'home') {
+      const cta = document.createElement('button');
+      cta.id = 'contractor-cta';
+      cta.type = 'button';
+      cta.textContent = 'START NEW RUN';
+      cta.addEventListener('click', () => {
+        this.contractorStep = 'cards';
+        this.render();
+      });
+      wrap.appendChild(cta);
+    } else if (this.contractorStep === 'cards') {
+      this._refreshCardSlots(allDefs, activeId);
+      const cards = document.createElement('div');
+      cards.className = 'contractor-cards';
+      for (let i = 0; i < this._cardSlots.length; i++) {
+        const def = CONTRACT_DEFS[this._cardSlots[i]];
+        if (!def) continue;
+        cards.appendChild(this._renderContractWantedCard(def, active, activeId, claimed, i));
+      }
+      if (!this._cardSlots.length) {
+        const empty = document.createElement('div');
+        empty.className = 'contractor-empty';
+        empty.textContent = 'No contracts available — try again after a refresh.';
+        cards.appendChild(empty);
+      }
+      wrap.appendChild(cards);
+
+      wrap.appendChild(this._renderBackButton('Back', () => {
+        this.contractorStep = 'home';
+        this.render();
+      }));
+    } else if (this.contractorStep === 'weapon') {
+      wrap.appendChild(this._renderMissionPrepSection());
+    } else if (this.contractorStep === 'leaderboard') {
+      wrap.appendChild(this._renderLeaderboardSection());
+    }
+
+    // Corner stats — visible on all steps.
+    const corner = document.createElement('div');
+    corner.className = 'contractor-corner';
+    corner.innerHTML = `
+      <div class="corner-line">RANK <b>${unlockState.contractsCompleted}</b></div>
+      <div class="corner-line">MEGABOSSES <b>${unlockState.megabossKills}</b></div>
+      <div class="corner-refresh">CONTRACT REFRESH<br><span class="refresh-time">${this._refreshCountdownStr()}</span></div>
+    `;
+    wrap.appendChild(corner);
+
+    return wrap;
+  }
+
+  // Mission-prep / stash screen — character placeholder middle-left
+  // with paperdoll equipment slots arranged around them, weapon list
+  // on the right, Confirm Loadout button centered. Click a weapon to
+  // select it as the run's primary; click Confirm to fire close().
+  _renderMissionPrepSection() {
+    const wrap = document.createElement('div');
+    wrap.className = 'contractor-loadout';
+
+    const ac = getActiveContract();
+    const def = ac ? defForId(ac.activeContractId) : null;
+    const banner = document.createElement('div');
+    banner.className = 'prep-banner';
+    banner.innerHTML = `
+      <div class="prep-eyebrow">MISSION PREP</div>
+      <div class="prep-title">${def ? def.label.toUpperCase() : 'NO CONTRACT ACTIVE'}</div>
+      ${def ? `<div class="prep-sub">${def.targetCount} × ${this._targetLabel(def.targetType, def.targetCount)}</div>` : ''}
+    `;
+    wrap.appendChild(banner);
+
+    const selected = getSelectedStarterWeapon();
+    const unlocked = getUnlockedWeapons();
+    const baselineSet = new Set(BASELINE_STARTERS);
+    const available = tunables.weapons.filter(w =>
+      !w.mythic && w.rarity !== 'mythic'
+      && (baselineSet.has(w.name) || unlocked.has(w.name)));
+
+    // ----- Left: PAPERDOLL — focus on equipped items. Mirrors the
+    // in-game inventory's slot vocabulary. Pockets + backpack are
+    // intentionally de-emphasized (one-line summary instead of
+    // grids) since the player only needs to know they start with
+    // bandages.
+    const charCol = document.createElement('div');
+    charCol.className = 'loadout-charcol';
+    // Paperdoll mirrors the in-game inventory's slot order — top-to-
+    // bottom: head row → torso row → mid row → legs row → weapons
+    // row. Vertical stack matches what the player sees in-game; the
+    // figure sits in its own dedicated band so the slots read
+    // straight down without a square-frame layout.
+    const bandageIcon = iconForItem(CONSUMABLE_DEFS?.bandage) || '';
+    charCol.innerHTML = `
+      <div class="prep-section-head">PAPERDOLL</div>
+      <div class="paperdoll-vstack">
+        <div class="pd-figure-tall"><div class="pd-figure-glyph">◇</div></div>
+        <div class="pd-row">
+          <div class="pd-slot pd-head"   data-slot="head">HEAD</div>
+          <div class="pd-slot pd-face"   data-slot="face">FACE</div>
+          <div class="pd-slot pd-ears"   data-slot="ears">EARS</div>
         </div>
-        <div class="host-bubble">
-          <div class="host-quote">"${greeting}"</div>
+        <div class="pd-row">
+          <div class="pd-slot pd-chest filled"  data-slot="chest">CHEST<br><b>Shirt</b></div>
+          <div class="pd-slot pd-hands"          data-slot="hands">HANDS</div>
+          <div class="pd-slot pd-backpack filled" data-slot="backpack">PACK<br><b>Small</b></div>
+        </div>
+        <div class="pd-row">
+          <div class="pd-slot pd-belt"   data-slot="belt">BELT</div>
+          <div class="pd-slot pd-pants filled" data-slot="pants">PANTS<br><b>Combat</b></div>
+          <div class="pd-slot pd-boots"  data-slot="boots">BOOTS</div>
+        </div>
+        <div class="pd-row">
+          <div class="pd-slot pd-primary ${selected ? 'filled' : ''}" data-slot="weapon1">
+            PRIMARY<br><b>${selected ? selected : '—'}</b>
+          </div>
+          <div class="pd-slot" data-slot="weapon2">SLOT 2</div>
+          <div class="pd-slot pd-melee" data-slot="melee">MELEE</div>
+        </div>
+
+        <div class="pd-starter-strip" title="Run starts with these items in your pockets.">
+          <div class="pd-starter-label">STARTING POCKETS</div>
+          <div class="pd-starter-icons">
+            ${bandageIcon ? `<div class="pd-starter-ico"><img src="${bandageIcon}" alt="Bandage"></div>`.repeat(3) : '<div class="pd-starter-ico empty">×3</div>'}
+            <div class="pd-starter-ico throwable">⊕</div>
+          </div>
         </div>
       </div>
+    `;
+    wrap.appendChild(charCol);
 
-      <button id="contractor-cta" type="button">START NEW RUN</button>
-      <div class="contractor-cta-sub">HERE'S WHAT'S AVAILABLE TO YOU TODAY.</div>
+    // ----- Middle: ARMORY — owned weapons only. Locked + buyable
+    // weapons moved to their own column on the right (next to the
+    // pre-mission boost). This column is the player's collection
+    // they actually have, categorized by class.
+    const armoryCol = document.createElement('div');
+    armoryCol.className = 'loadout-armorycol loadout-panel';
+    const lockedAll = tunables.weapons.filter(w =>
+      !w.mythic && w.rarity !== 'mythic'
+      && w.worldDrop === false && !unlocked.has(w.name));
 
-      <div class="contractor-cards"></div>
+    const RARITY_COSTS = { common: 150, uncommon: 350, rare: 800, epic: 2000, legendary: 5000 };
+    const rank = getContractRank();
+    const BUYABLE_RANK = { common: 0, uncommon: 0, rare: 5, epic: 12, legendary: 22 };
+    const isBuyable = (w) => rank >= (BUYABLE_RANK[w.rarity || 'common'] ?? 0);
 
-      <div class="contractor-corner">
-        <div class="corner-line">RANK <b>${unlockState.contractsCompleted}</b></div>
-        <div class="corner-line">MEGABOSSES <b>${unlockState.megabossKills}</b></div>
-        <div class="corner-refresh">CONTRACT REFRESH<br><span class="refresh-time">${this._refreshCountdownStr()}</span></div>
+    const totalRoster = available.length + lockedAll.length;
+    armoryCol.innerHTML = `
+      <div class="armory-head">
+        <div class="armory-eyebrow">YOUR ARMORY</div>
+        <div class="armory-title">UNLOCKED COLLECTION</div>
+        <div class="armory-count"><b>${available.length}</b> / ${totalRoster} weapons · Rank <b>${rank}</b></div>
       </div>
     `;
 
-    // Wire CTA — same as the floating Start New Run button. The mockup
-    // shows a big golden CTA right inside the stage; clicking it does
-    // the same close()/scene-fade flow.
-    wrap.querySelector('#contractor-cta').addEventListener('click', () => this.close());
+    const RARITY_RANK = { legendary: 0, epic: 1, rare: 2, uncommon: 3, common: 4 };
 
-    // Contract cards.
-    const cards = wrap.querySelector('.contractor-cards');
-    for (const def of featured) {
-      cards.appendChild(this._renderContractWantedCard(def, active, activeId, claimed));
+    // Two-column split inside the armory column:
+    //   LEFT half — AVAILABLE (owned, click-to-select)
+    //   RIGHT half — LOCKED (buyable + still-locked, in one list)
+    // Both halves use the same compact tile size so the player can
+    // scan their collection vs. the unlocks they're working toward.
+    const split = document.createElement('div');
+    split.className = 'armory-split';
+
+    // ----- LEFT half: available weapons -----
+    const availCol = document.createElement('div');
+    availCol.className = 'armory-half';
+    availCol.innerHTML = `<div class="armory-half-head">AVAILABLE</div>`;
+    const availGrid = document.createElement('div');
+    availGrid.className = 'armory-tile-grid';
+    const availSorted = available.slice().sort((a, b) => {
+      if (a.name === selected) return -1;
+      if (b.name === selected) return 1;
+      const ar = RARITY_RANK[a.rarity || 'common'] ?? 5;
+      const br = RARITY_RANK[b.rarity || 'common'] ?? 5;
+      if (ar !== br) return ar - br;
+      // Then by class so similar weapons cluster, then alphabetical.
+      if (a.class !== b.class) return (a.class || '').localeCompare(b.class || '');
+      return a.name.localeCompare(b.name);
+    });
+    for (const w of availSorted) {
+      availGrid.appendChild(this._buildArmoryMiniTile(w,
+        w.name === selected ? 'taking' : 'owned',
+        null,
+        () => {
+          setSelectedStarterWeapon(w.name === selected ? null : w.name);
+          this.render();
+        }));
     }
-    if (!featured.length) {
-      const empty = document.createElement('div');
-      empty.className = 'contractor-empty';
-      empty.textContent = 'No contracts available — try again after a refresh.';
-      cards.appendChild(empty);
+    if (!availSorted.length) {
+      const e = document.createElement('div');
+      e.className = 'armory-half-empty';
+      e.textContent = 'No weapons available.';
+      availGrid.appendChild(e);
     }
+    availCol.appendChild(availGrid);
+    split.appendChild(availCol);
+
+    // ----- RIGHT half: locked weapons (buyable + still-locked) ----
+    const lockedCol = document.createElement('div');
+    lockedCol.className = 'armory-half';
+    lockedCol.innerHTML = `<div class="armory-half-head">LOCKED · WORKING TOWARD</div>`;
+    const lockedGrid = document.createElement('div');
+    lockedGrid.className = 'armory-tile-grid';
+    const buyable = [];
+    const stillLocked = [];
+    for (const w of lockedAll) {
+      if (isBuyable(w)) buyable.push(w);
+      else stillLocked.push(w);
+    }
+    const rarityClassSort = (a, b) => {
+      const ar = RARITY_RANK[a.rarity || 'common'] ?? 5;
+      const br = RARITY_RANK[b.rarity || 'common'] ?? 5;
+      if (ar !== br) return ar - br;
+      return (a.class || '').localeCompare(b.class || '');
+    };
+    buyable.sort(rarityClassSort);
+    stillLocked.sort(rarityClassSort);
+    for (const w of buyable) {
+      const cost = RARITY_COSTS[w.rarity || 'common'] || 150;
+      lockedGrid.appendChild(this._buildArmoryMiniTile(w, 'buyable', cost, () => {
+        if (!this.ctx.spendChips || !this.ctx.spendChips(cost)) return;
+        unlockWeapon(w.name);
+        this.render();
+      }));
+    }
+    for (const w of stillLocked) {
+      const reqRank = BUYABLE_RANK[w.rarity || 'common'] ?? 0;
+      lockedGrid.appendChild(this._buildArmoryMiniTile(w, 'locked', null, null, reqRank));
+    }
+    if (!buyable.length && !stillLocked.length) {
+      const e = document.createElement('div');
+      e.className = 'armory-half-empty';
+      e.textContent = 'Every weapon unlocked.';
+      lockedGrid.appendChild(e);
+    }
+    lockedCol.appendChild(lockedGrid);
+    split.appendChild(lockedCol);
+
+    armoryCol.appendChild(split);
+    wrap.appendChild(armoryCol);
+
+    // ----- Right: Pre-Run Store (upgrades top · stock middle ·
+    //        refresh button bottom · timer below) per the wireframe.
+    const storeCol = document.createElement('div');
+    storeCol.className = 'loadout-storecol loadout-panel';
+    const storeState = this._getOrRefreshStore();
+    const elapsed = Math.max(0, Date.now() - storeState.lastRefreshAt);
+    const remaining = Math.max(0, storeState.refreshMs - elapsed);
+    const hh = Math.floor(remaining / 3600000);
+    const mm = Math.floor((remaining % 3600000) / 60000);
+    storeCol.innerHTML = `
+      <div class="loadout-collabel">
+        PRE-MISSION BOOST
+        <span class="store-refresh-meta">limited stock</span>
+      </div>
+      <div class="store-blurb">Spend chips to boost this run. Stock won't replenish until refresh — upgrading any tier triggers a free reroll.</div>
+    `;
+
+    // ----- Top: two prominent upgrade tiles. Per the wireframe the
+    //        store has two big "upgrade" boxes at the top. We map the
+    //        most-used two: stock size + rarity ceiling. The faster-
+    //        refresh cadence sits as a small inline option next to
+    //        the manual-refresh CTA at the bottom.
+    const upgrades = document.createElement('div');
+    upgrades.className = 'store-upgrades';
+    const slotCost = storeNextSlotCost(storeState.slots);
+    upgrades.appendChild(this._buildStoreUpgradeTile({
+      title: `STOCK SIZE · ${storeState.slots}/${STORE_SLOT_MAX}`,
+      sub: slotCost == null ? 'MAX' : `+1 slot · ${slotCost}c · free refresh`,
+      cost: slotCost,
+      onClick: () => {
+        if (!this.ctx.spendChips || !this.ctx.spendChips(slotCost)) return;
+        const s = getStoreState();
+        setStoreState({ ...s, slots: Math.min(STORE_SLOT_MAX, s.slots + 1) });
+        this._refreshStore(true);
+        this.render();
+      },
+    }));
+    const ceilCost = storeNextCeilingCost(storeState.ceiling);
+    const ceilLabels = ['common', 'common+uncommon', 'rare-floor', 'epic-floor', 'legendary-floor'];
+    upgrades.appendChild(this._buildStoreUpgradeTile({
+      title: `RARITY CEILING · ${ceilLabels[storeState.ceiling] || 'common'}`,
+      sub: ceilCost == null ? 'MAX' : `+1 tier · ${ceilCost}c · free refresh`,
+      cost: ceilCost,
+      onClick: () => {
+        if (!this.ctx.spendChips || !this.ctx.spendChips(ceilCost)) return;
+        const s = getStoreState();
+        setStoreState({ ...s, ceiling: Math.min(STORE_CEILING_MAX, s.ceiling + 1) });
+        // Free reroll on any store upgrade per design brief.
+        this._refreshStore(true);
+        this.render();
+      },
+    }));
+    storeCol.appendChild(upgrades);
+
+    // ----- Middle: items for sale -----
+    const stockBlock = document.createElement('div');
+    stockBlock.className = 'store-stock';
+    stockBlock.innerHTML = `<div class="store-stock-label">ITEMS FOR SALE</div>`;
+    const sgrid = document.createElement('div');
+    sgrid.className = 'store-stock-list';
+    for (let i = 0; i < storeState.stock.length; i++) {
+      sgrid.appendChild(this._buildStoreTile(storeState.stock[i], i));
+    }
+    stockBlock.appendChild(sgrid);
+    storeCol.appendChild(stockBlock);
+
+    // ----- Bottom: refresh button + timer + faster-refresh option
+    const footer = document.createElement('div');
+    footer.className = 'store-footer';
+    const refreshBtn = document.createElement('button');
+    refreshBtn.type = 'button';
+    refreshBtn.className = 'store-refresh-btn';
+    refreshBtn.textContent = `Refresh now · 200c`;
+    refreshBtn.disabled = getPersistentChips() < 200;
+    refreshBtn.addEventListener('click', () => {
+      if (!this.ctx.spendChips || !this.ctx.spendChips(200)) return;
+      this._refreshStore(true);
+      this.render();
+    });
+    footer.appendChild(refreshBtn);
+
+    const refCost = storeNextRefreshCost(storeState.refreshMs);
+    if (refCost != null) {
+      const fasterBtn = document.createElement('button');
+      fasterBtn.type = 'button';
+      fasterBtn.className = 'store-faster-btn';
+      fasterBtn.textContent = `Faster cadence · ${refCost}c · free refresh`;
+      fasterBtn.disabled = getPersistentChips() < refCost;
+      fasterBtn.addEventListener('click', () => {
+        if (!this.ctx.spendChips || !this.ctx.spendChips(refCost)) return;
+        const s = getStoreState();
+        const tiers = [4 * 3600000, 3 * 3600000, 2 * 3600000, 1 * 3600000];
+        const idx = tiers.findIndex(t => t < s.refreshMs);
+        const next = idx >= 0 ? tiers[idx] : s.refreshMs;
+        setStoreState({ ...s, refreshMs: next });
+        // Free reroll on any store upgrade per design brief.
+        this._refreshStore(true);
+        this.render();
+      });
+      footer.appendChild(fasterBtn);
+    }
+
+    const timer = document.createElement('div');
+    timer.className = 'store-timer';
+    timer.textContent = `auto-refresh in ${hh}h ${mm}m`;
+    footer.appendChild(timer);
+
+    storeCol.appendChild(footer);
+    wrap.appendChild(storeCol);
+
+    // ----- Confirm CTA + back -----
+    const confirm = document.createElement('button');
+    confirm.className = 'loadout-confirm';
+    confirm.type = 'button';
+    confirm.textContent = 'CONFIRM LOADOUT';
+    confirm.disabled = !selected;
+    confirm.addEventListener('click', () => {
+      if (!getSelectedStarterWeapon()) return;
+      this.close();
+    });
+    wrap.appendChild(confirm);
+
+    wrap.appendChild(this._renderBackButton('Back to contracts', () => {
+      this.contractorStep = 'cards';
+      this.render();
+    }));
 
     return wrap;
   }
@@ -1619,13 +2026,39 @@ export class HideoutUI {
   // Wanted-poster style card — target portrait at top, name, conditions,
   // reward strip at bottom. Replaces the older grid row card for the
   // featured-3 set inside the stage view.
-  _renderContractWantedCard(def, active, activeId, claimed) {
-    const card = document.createElement('div');
-    const isActive = (def.id === activeId);
-    const isClaimed = isActive && claimed;
+  // Card-slot maintenance — fills `_cardSlots` up to MAX_CARDS with
+  // fresh def IDs from the unlocked pool, excluding the currently-
+  // active contract. Existing slots are kept stable (so the player
+  // sees the same cards across renders) until they accept one.
+  _refreshCardSlots(allDefs, activeId) {
+    const MAX_CARDS = 6;
+    const cap = Math.min(MAX_CARDS, allDefs.length);
+    // Drop slots that point to the active contract or to a missing
+    // def, so cycling kicks in at the right moments.
+    this._cardSlots = this._cardSlots.filter(id =>
+      id && id !== activeId && CONTRACT_DEFS[id]);
+    const seen = new Set(this._cardSlots);
+    if (activeId) seen.add(activeId);
+    while (this._cardSlots.length < cap) {
+      const candidates = allDefs.filter(d => !seen.has(d.id));
+      if (!candidates.length) break;
+      const pick = candidates[Math.floor(Math.random() * candidates.length)];
+      this._cardSlots.push(pick.id);
+      seen.add(pick.id);
+    }
+  }
+
+  // Wanted-poster card — the entire card is the affordance. Click
+  // sets the active contract AND advances the contractor stage to
+  // mission-prep (stash + weapon loadout). On accept, the slot the
+  // card occupied is replaced with a fresh draw so the cards row
+  // always feels alive.
+  _renderContractWantedCard(def, active, activeId, claimed, slotIdx = -1) {
+    const card = document.createElement('button');
+    card.type = 'button';
+    const isClaimed = (def.id === activeId) && claimed;
     card.className = 'wanted-card'
       + ` rarity-${def.rarity || 'common'}`
-      + (isActive ? ' active' : '')
       + (isClaimed ? ' claimed' : '');
     const targetLabel = this._targetLabel(def.targetType, def.targetCount);
     const totalCap = (def.perKillReward | 0) * (def.targetCount | 0) + (def.reward | 0);
@@ -1641,28 +2074,11 @@ export class HideoutUI {
         ${(def.marksReward | 0) > 0 ? `<span class="wanted-reward marks" title="Marks on completion">◈ ${def.marksReward}</span>` : ''}
         ${(def.sigilsReward | 0) > 0 ? `<span class="wanted-reward sigils" title="Sigils on completion">✪ ${def.sigilsReward}</span>` : ''}
       </div>
-      <div class="wanted-actions"></div>
     `;
-    const actions = card.querySelector('.wanted-actions');
     if (isClaimed) {
-      const tag = document.createElement('span');
-      tag.className = 'hideout-tag claimed'; tag.textContent = 'DONE';
-      actions.appendChild(tag);
-    } else if (isActive) {
-      const tag = document.createElement('span');
-      tag.className = 'hideout-tag active'; tag.textContent = 'ACTIVE';
-      actions.appendChild(tag);
-      const drop = document.createElement('button');
-      drop.type = 'button'; drop.className = 'hideout-btn';
-      drop.textContent = 'Drop';
-      drop.addEventListener('click', () => { setActiveContract(null); this.render(); });
-      actions.appendChild(drop);
+      card.disabled = true;
     } else {
-      const btn = document.createElement('button');
-      btn.type = 'button';
-      btn.className = 'hideout-btn primary';
-      btn.textContent = 'Accept';
-      btn.addEventListener('click', () => {
+      card.addEventListener('click', () => {
         const period = (def.period === 'weekly') ? 7 * 24 * 3600000 : 24 * 3600000;
         setActiveContract({
           activeContractId: def.id,
@@ -1670,67 +2086,405 @@ export class HideoutUI {
           progress: {},
           claimedAt: 0,
         });
+        // Cycle this card's slot — drop the accepted def from the
+        // visible set so when the player navigates back later they
+        // get a fresh card in its place.
+        if (slotIdx >= 0 && slotIdx < this._cardSlots.length) {
+          this._cardSlots.splice(slotIdx, 1);
+        }
+        if (this.tab === 'contractor') this.contractorStep = 'weapon';
         this.render();
       });
-      actions.appendChild(btn);
     }
     return card;
   }
 
-  // Stable daily slice — picks N defs deterministically from the
-  // unlocked pool seeded by the UTC day so the featured set is the
-  // same all day for one player.
-  _featuredDailySlice(defs, n) {
-    if (!defs.length) return [];
-    const day = Math.floor(Date.now() / (24 * 3600000));
-    const pool = defs.slice();
-    const out = [];
-    let seed = (day * 9301 + 49297) % 233280;
-    for (let i = 0; i < n && pool.length; i++) {
-      seed = (seed * 9301 + 49297) % 233280;
-      const idx = seed % pool.length;
-      out.push(pool.splice(idx, 1)[0]);
+  // Compact leaderboard block — top N entries in a single category.
+  // Mostly decorative on the contractor home/cards step; click "View
+  // all categories" to expand into the full screen.
+  _renderLeaderboardMiniHTML(category, n) {
+    let entries = [];
+    try {
+      const lb = this.ctx.getLeaderboard?.();
+      if (lb?.top) entries = lb.top(category, n) || [];
+    } catch (_) { /* no leaderboard available */ }
+    if (!entries.length) {
+      return `<div class="lb-block-empty">No runs banked yet.</div>`;
     }
-    return out;
+    return entries.map((e, i) => {
+      const who = e.playerName || e.name || 'anon';
+      const val = e[category] ?? e.score ?? 0;
+      return `<div class="lb-block-row">
+        <span class="lb-rank">${i + 1}.</span>
+        <span class="lb-name">${who}</span>
+        <span class="lb-val">${val}</span>
+      </div>`;
+    }).join('');
+  }
+
+  // Full-screen leaderboards inside the contractor stage. Four
+  // category columns (credits / levels / damage / kills), each
+  // showing top 10. Back button uses the global helper.
+  _renderLeaderboardSection() {
+    const wrap = document.createElement('div');
+    wrap.className = 'contractor-leaderboard-full';
+    const lb = this.ctx.getLeaderboard?.();
+    const cats = [
+      { key: 'credits', label: 'MOST VALUE',  fmt: (e) => `${e.credits ?? e.score ?? 0}c` },
+      { key: 'levels',  label: 'FURTHEST',    fmt: (e) => `Lv ${e.levels ?? e.score ?? 0}` },
+      { key: 'damage',  label: 'MOST DAMAGE', fmt: (e) => `${e.damage ?? e.score ?? 0}` },
+      { key: 'kills',   label: 'MOST KILLS',  fmt: (e) => `${e.kills ?? e.score ?? 0}` },
+    ];
+
+    const head = document.createElement('div');
+    head.className = 'lb-full-head';
+    head.innerHTML = `
+      <div class="lb-eyebrow">LEADERBOARDS</div>
+      <div class="lb-title">TOP OF THE BOARD</div>
+      <div class="lb-sub">Other contractors. Their best work. Your benchmark.</div>
+    `;
+    wrap.appendChild(head);
+
+    const cols = document.createElement('div');
+    cols.className = 'lb-full-cols';
+    for (const c of cats) {
+      const col = document.createElement('div');
+      col.className = 'lb-full-col';
+      const entries = lb?.top ? (lb.top(c.key, 10) || []) : [];
+      const rowsHTML = [];
+      for (let i = 0; i < 10; i++) {
+        const e = entries[i];
+        if (e) {
+          const who = e.playerName || e.name || 'anon';
+          rowsHTML.push(`<div class="lb-full-row"><span class="lb-rank">${i + 1}.</span><span class="lb-name">${who}</span><span class="lb-val">${c.fmt(e)}</span></div>`);
+        } else {
+          rowsHTML.push(`<div class="lb-full-row empty"><span class="lb-rank">${i + 1}.</span><span class="lb-name">—</span><span class="lb-val"></span></div>`);
+        }
+      }
+      col.innerHTML = `
+        <div class="lb-col-head">${c.label}</div>
+        ${rowsHTML.join('')}
+      `;
+      cols.appendChild(col);
+    }
+    wrap.appendChild(cols);
+
+    wrap.appendChild(this._renderBackButton('Back', () => {
+      this.contractorStep = 'home';
+      this.render();
+    }));
+    return wrap;
+  }
+
+  // Store tile — same shape as weapon tile, with a chip-cost CTA.
+  _buildStoreTile(slot, idx) {
+    const tile = document.createElement('div');
+    tile.className = 'loadout-tile store-tile';
+    if (!slot) { tile.classList.add('empty'); tile.textContent = '—'; return tile; }
+    if (slot.sold) {
+      tile.classList.add('sold');
+      tile.innerHTML = `<div class="lt-name">${slot.label}</div><div class="lt-sold">SOLD</div>`;
+      return tile;
+    }
+    tile.style.borderColor = rarityColor({ rarity: slot.rarity });
+    const itemHint = slot.kind === 'weapon'
+      ? { name: slot.id, baseName: slot.id, type: 'ranged' }
+      : { name: slot.label, type: slot.kind };
+    const icon = iconForItem(itemHint);
+    tile.innerHTML = `
+      <div class="lt-icon">${icon ? `<img src="${icon}" alt="">` : '<div class="lt-icon-fallback"></div>'}</div>
+      <div class="lt-name">${slot.label}</div>
+      <div class="lt-meta">${(slot.kind || '').toUpperCase()} · ${slot.rarity || 'common'}${slot.qty > 1 ? ` ·×${slot.qty}` : ''}</div>
+      <div class="lt-stats"><span class="lt-stat lt-cost">${slot.price}c</span></div>
+      <button type="button" class="lt-buy">Buy</button>
+    `;
+    const btn = tile.querySelector('.lt-buy');
+    btn.disabled = getPersistentChips() < slot.price;
+    btn.addEventListener('click', () => this._buyStoreSlot(idx));
+    return tile;
+  }
+
+  // Mini-tile — same compact size as the pre-mission store tiles
+  // for visual consistency. Four states: 'owned' (selectable),
+  // 'taking' (currently selected, gold), 'buyable' (chip cost,
+  // click to unlock), 'locked' (silhouette + rank requirement).
+  _buildArmoryMiniTile(weapon, state, cost, onClick, reqRank) {
+    const tile = document.createElement('button');
+    tile.type = 'button';
+    tile.className = `armory-mini rarity-${weapon.rarity || 'common'} state-${state}`;
+    tile.style.borderColor = rarityColor({ rarity: weapon.rarity });
+    const icon = state === 'locked' ? null : iconForItem({
+      name: weapon.name, baseName: weapon.name, type: weapon.type, class: weapon.class,
+    });
+    let badge = '';
+    if (state === 'taking')      badge = `<div class="amini-badge taking">TAKING</div>`;
+    else if (state === 'buyable')badge = `<div class="amini-badge buy">${cost}c</div>`;
+    else if (state === 'locked') badge = `<div class="amini-badge locked">RANK ${reqRank}</div>`;
+
+    tile.innerHTML = `
+      ${badge}
+      <div class="amini-icon">
+        ${icon
+          ? `<img src="${icon}" alt="">`
+          : `<div class="amini-icon-fallback">?</div>`}
+      </div>
+      <div class="amini-name">${state === 'locked' ? '???' : weapon.name}</div>
+    `;
+    tile.title = state === 'locked'
+      ? `Locked — reach Rank ${reqRank} to unlock for purchase.`
+      : state === 'buyable'
+        ? `Unlock ${weapon.name} for ${cost}c (${weapon.rarity || 'common'} ${weapon.class || ''})`
+        : `${weapon.name} · ${weapon.rarity || 'common'} ${weapon.class || ''}`;
+    if (state === 'locked') tile.disabled = true;
+    else if (onClick) tile.addEventListener('click', onClick);
+    return tile;
+  }
+
+
+  // Big upgrade tile shown at the top of the store column. Two of
+  // these stack as the prominent "upgrade your store" boxes per the
+  // wireframe.
+  _buildStoreUpgradeTile({ title, sub, cost, onClick }) {
+    const t = document.createElement('button');
+    t.type = 'button';
+    t.className = 'store-upgrade-tile';
+    t.innerHTML = `
+      <div class="sut-title">${title}</div>
+      <div class="sut-sub">${sub}</div>
+    `;
+    if (cost == null) t.disabled = true;
+    else {
+      t.disabled = getPersistentChips() < cost;
+      t.addEventListener('click', onClick);
+    }
+    return t;
   }
 
   _pickHostGreeting() {
     if (!this._greetings) {
       this._greetings = [
-        'Hi, pretty boy. Looking for work in our line of work? Or just admiring the view?',
-        'Back already? The board never sleeps. Pick a name.',
+        // ── Locked-in keepers (do not delete) ──
+        'You look like trouble. Good. Trouble pays.',
+
+        // ── Rotation pool — playful, haughty, sleek-and-sexy-dark ──
+        "Hi, pretty boy. Looking for work in our line of work? Or just admiring the view?",
+        "Back already? The board never sleeps. Pick a name.",
         "Don't waste my time. I've got a queue.",
-        'You smell like trouble. Good. Trouble pays.',
         "Cute. Now sign here, here, and here.",
         "I had your seat warmed. Don't ask how.",
         "Names on the board, money in the slot. Same as always, sweetheart.",
         "Try not to die before the bonus round.",
+        "You're back. Either you're getting good or getting lucky. Place your bet.",
+        "Eyes up here, pretty boy. The contracts are on the screen.",
+        "Smile. It might be the last good thing on your face.",
+        "Walk in like you own the place. Cute. You don't.",
+        "Pull up a stool. Don't get blood on it this time.",
+        "Welcome back to the only place that takes your calls.",
+        "I'd offer you coffee. I won't.",
+        "Don't thank me. Pay me.",
+        "Ten came in today. Eight'll be back. Two won't. Pick a card.",
+        "Late again. The targets aren't getting any quieter.",
+        "You keep showing up. I keep printing checks. Match made.",
+        "The good ones are gone. Try the bad ones. They die slower.",
+        "Take your pick. I won't tell you which one ends well.",
+        "Light's bad in here on purpose. So's the work.",
+        "Half my clients are corpses. The other half are you.",
+        "Welcome to the part of the building that doesn't exist.",
+        "If you're here for closure, wrong office. We deal in openings.",
+        "You've got the look. The one I bill extra for.",
+        "Quiet day. Make some noise.",
+        "I saw your name on the wire this morning. Twice. Show me what's left.",
+        "Sit. Pretend the chair likes you.",
+        "Whoever's in your file, they're not buying drinks for free.",
+
+        // ── Noir / world-weary atmospheric extension ──
+        "The walls listen. Speak slower.",
+        "Three doors out of this room. Two of them lock from outside.",
+        "I keep a list. You're middle of the page. Don't get promoted.",
+        "Tonight's special is regret. We're out of regret. Try the contract.",
+        "You came in damp. The rain stopped two blocks ago. Talk to me.",
+        "Your previous job left a tip. It was a finger. Pick a card.",
+        "The board updates every hour. Your luck doesn't.",
+        "I take cash, favors, and silence. Mostly silence.",
+        "Take the chair facing the door. You'll need the warning.",
+        "Half this room's on fire. You'd never know. That's the magic.",
+        "Don't read the names too long. Some of them read back.",
+        "We don't do refunds. We do funerals. Different department.",
+        "Came in alone? Smart. Fewer witnesses to negotiate.",
+        "I can hear your pulse from here. Steady it. Targets notice.",
+        "There's a man in your jacket pocket. Hope he's friendly.",
+        "Nice gun. The last guy who carried it left it on the counter.",
+        "You smile like someone who hasn't met their bill yet.",
+        "The contracts are sealed. So are most of the people who took them.",
+        "Read the fine print. There isn't any. That's the fine print.",
+        "Last week a man asked me my name. He's the contract now.",
+        "I bill in installments. The first one's right now. Shut the door.",
+
+        // ── Optimistic cynicism — wit + ledger + never impressed ──
+        "Statistically, you're either bored, broke, or both. The board sorts itself.",
+        "It's not a slow week. The targets are just better at hiding. Briefly.",
+        "Nobody comes here twice for the conversation.",
+        "The job pays. That's all the optimism this room can afford.",
+        "I've buried better. I've billed worse. Today's somewhere in between.",
+        "If it helps: the targets are also having a bad week.",
+        "Your last contract closed under budget. Don't let it go to your head.",
+        "I track three things: pulse, paperwork, and who lied. You're one for three.",
+        "The people who don't come back are usually quieter about it.",
+        "You're punctual. Concerning. Is something wrong?",
+        "Two new names on the board this morning. One owes me twenty.",
+        "I'd ask how you've been. The answer is on your jacket.",
+        "Slow night. Someone's late. Probably late forever.",
+        "We've all got a number. Yours just hasn't been called yet.",
+        "Do me a favor. Don't ask me to do me a favor.",
+        "I run a clean shop. The mess is what we sell.",
+        "Some people walk in with a question. You walk in with a bill.",
+        "I'd warn you about the hard ones. You'd take them anyway.",
+        "Show me your hands. Not for trust. For the calluses.",
+        "Coffee's old. Targets are older. The math evens out.",
+        "Bad week. The board's full. Good for you. Bad for the board.",
+        "I had high hopes for you once. Then I remembered who I was.",
+        "If the door was harder to open, half this town would still be alive.",
+        "I'm not impressed. I haven't been since 2014. Don't take it personally.",
+        "You're early. The bodies aren't. Wait a minute.",
+        "Most of my customers don't ask questions. The dead ones, anyway.",
+        "Read the room. Don't bother reading the contract.",
+        "You came in like someone who's been thinking about it. I charge for thinking.",
+
+        // ── Short-form deadpan compliments ──
+        "You didn't bleed on my counter this time. Growth.",
+        "Two limbs. Two hands. Acceptable.",
+        "Cleaner than last time. The bar was low.",
+        "Still alive. Your mother must be relieved.",
+        "You walk quieter now. Marginally.",
+        "You're improving. I didn't expect you would.",
+        "Still upright. Always nice.",
+        "I almost recognized you. Don't take that as praise.",
+        "No new scars. Lazy week?",
+        "Less limp this time. I noticed.",
+
+        // ── Callbacks to recent work ──
+        "Floor 8. I read the report. Cute.",
+        "You owe a man on level four an apology.",
+        "I heard about the hallway. Subtle.",
+        "The smuggler's friends called. They're upset.",
+        "Last time you came in louder. Improvement.",
+        "I noticed the kill count. The board did too.",
+        "Three runs this week. Pace yourself.",
+        "The thing on floor six. We don't talk about that here.",
+        "You didn't reload. The body counted.",
+        "I logged your last contract under 'optimistic.'",
+
+        // ── The board is alive ──
+        "The board's awake. It noticed you.",
+        "Names rearrange themselves in here. Don't stare.",
+        "The board listens. Pretend it doesn't.",
+        "Two names blinked when you walked in. Coincidence, probably.",
+        "The board's hungry. Feed it.",
+        "I keep meaning to clean the board. It keeps meaning to clean us.",
+        "Your name's not up there. Yet.",
+        "The board flickers when it likes you. It's flickering.",
+        "The board deletes the closed ones slowly. Like memory.",
+        "It's been writing on its own again. Pick a name before it picks you.",
       ];
     }
-    const day = Math.floor(Date.now() / (60 * 60 * 1000));
-    return this._greetings[day % this._greetings.length];
+    // Pick fresh on every render. Cached on `_currentGreeting` until
+    // the player leaves the hideout — so flipping between contractor
+    // sub-steps doesn't reroll the line mid-flow. Cleared in close()
+    // / _exitToTitle so the NEXT visit gets a new opening line.
+    if (!this._currentGreeting) {
+      const idx = Math.floor(Math.random() * this._greetings.length);
+      this._currentGreeting = this._greetings[idx];
+    }
+    return this._currentGreeting;
   }
 
   _renderLiveFeedHTML() {
-    // Decorative ticker — fake names + values flicker as if other
-    // hitmen are clearing bounties. Keeps the world feeling alive.
-    const items = [
-      ['THE BUTCHER', 'CLOSED', 4200],
-      ['CAPTAIN AGENA', 'CLAIMED', 6800],
-      ['THE SMUGGLER', 'OPEN', 1250],
-      ['DR. SILAS', 'CLOSED', 5500],
-      ['THE FOX', 'OPEN', 980],
-      ['JAGUAR', 'CLAIMED', 12300],
-      ['NIGHTSHADE', 'CLOSED', 3300],
-      ['HEX WIDOW', 'OPEN', 2200],
-    ];
-    return items.map(([name, status, val]) => `
-      <div class="feed-row ${status.toLowerCase()}">
-        <span class="feed-name">${name}</span>
-        <span class="feed-val">${val}c</span>
-        <span class="feed-status">${status}</span>
-      </div>
-    `).join('');
+    // Decorative ticker — initial 8 rows. The shuffle interval (see
+    // _startFeedPulse) replaces a random row every ~3.2s with a fresh
+    // entry from the larger pool, with a brief flash animation, so
+    // the world reads as live + ongoing.
+    const items = this._initialFeedRows();
+    return items.map((row, i) => this._feedRowHTML(row, i)).join('');
+  }
+  _feedRowHTML([name, status, val], idx) {
+    return `<div class="feed-row ${status.toLowerCase()}" data-feed-idx="${idx}">
+      <span class="feed-name">${name}</span>
+      <span class="feed-val">${val}c</span>
+      <span class="feed-status">${status}</span>
+    </div>`;
+  }
+  _initialFeedRows() {
+    if (!this._feedPool) {
+      // Fake-name pool — the more colorful, the better. Each pulse
+      // pulls a random one, randomizes status + value.
+      this._feedPool = [
+        'THE BUTCHER', 'CAPTAIN AGENA', 'THE SMUGGLER', 'DR. SILAS',
+        'THE FOX', 'JAGUAR', 'NIGHTSHADE', 'HEX WIDOW',
+        'BARON CASE', 'MS. NUMBERS', 'THE PARSON', 'CIPHER',
+        'GRAY DRESS', 'THE CHAPLAIN', 'OLD MR. BLAKE', 'WIDOW STARK',
+        'THE COURIER', 'LEFT-HAND LARK', 'COUNT VEY', 'THE GLASSMAN',
+        'INDEX', 'THE FIDDLER', 'SEVEN', 'KESTREL',
+        'BLACKHALL', 'THE COMPTROLLER', 'PINHEAD GLORY', 'TWICE-DEAD JANE',
+        'MR. EVENING', 'THE SPONSOR', 'CONVALESCE', 'OUR LADY OF KNIVES',
+      ];
+    }
+    const out = [];
+    const used = new Set();
+    while (out.length < 8) {
+      const name = this._feedPool[Math.floor(Math.random() * this._feedPool.length)];
+      if (used.has(name)) continue;
+      used.add(name);
+      out.push([name, this._randomFeedStatus(), this._randomFeedValue()]);
+    }
+    return out;
+  }
+  _randomFeedStatus() {
+    const r = Math.random();
+    if (r < 0.45) return 'CLOSED';
+    if (r < 0.75) return 'CLAIMED';
+    return 'OPEN';
+  }
+  _randomFeedValue() {
+    const tier = Math.random();
+    const base = tier < 0.55 ? 800 + Math.floor(Math.random() * 2400)
+              : tier < 0.85 ? 3200 + Math.floor(Math.random() * 5500)
+              :               9000 + Math.floor(Math.random() * 18000);
+    // Round to a believable hundreds value.
+    return Math.round(base / 50) * 50;
+  }
+  _startFeedPulse() {
+    if (this._feedIntervalId) return;
+    this._feedIntervalId = setInterval(() => {
+      // Bail if we left the contractor stage's home/cards step —
+      // those are the only places the feed is visible.
+      if (!this.visible || this.tab !== 'contractor'
+          || (this.contractorStep !== 'home' && this.contractorStep !== 'cards')) {
+        return;
+      }
+      const feedEl = this.root.querySelector('.contractor-feed');
+      if (!feedEl) return;
+      const rows = feedEl.querySelectorAll('.feed-row');
+      if (!rows.length) return;
+      // Pick a random row, flash it, swap content with a fresh entry.
+      const row = rows[Math.floor(Math.random() * rows.length)];
+      const [newName, newStatus, newVal] = [
+        this._feedPool[Math.floor(Math.random() * this._feedPool.length)],
+        this._randomFeedStatus(),
+        this._randomFeedValue(),
+      ];
+      row.classList.add('pulse');
+      setTimeout(() => {
+        row.className = `feed-row ${newStatus.toLowerCase()} pulse`;
+        row.querySelector('.feed-name').textContent = newName;
+        row.querySelector('.feed-val').textContent = `${newVal}c`;
+        row.querySelector('.feed-status').textContent = newStatus;
+      }, 180);
+      setTimeout(() => row.classList.remove('pulse'), 800);
+    }, 3200);
+  }
+  _stopFeedPulse() {
+    if (this._feedIntervalId) clearInterval(this._feedIntervalId);
+    this._feedIntervalId = 0;
   }
 
   _renderBoardListHTML(defs) {
@@ -1758,84 +2512,6 @@ export class HideoutUI {
     const m = Math.floor((remaining % 3600000) / 60000);
     const s = Math.floor((remaining % 60000) / 1000);
     return `${String(h).padStart(2, '0')}:${String(m).padStart(2, '0')}:${String(s).padStart(2, '0')}`;
-  }
-
-  _renderContractCard(def, active, activeId, claimed) {
-    const card = document.createElement('div');
-    const isActive = (def.id === activeId);
-    const isClaimed = isActive && claimed;
-    card.className = 'hideout-contract-card'
-      + ` rarity-${def.rarity || 'common'}`
-      + (isActive ? ' active' : '')
-      + (isClaimed ? ' claimed' : '');
-
-    // Plain-language mission line — read directly off targetType +
-    // targetCount. "Eliminate 3 dasher bosses" / "Eliminate 30 enemies".
-    const targetLabel = this._targetLabel(def.targetType, def.targetCount);
-    const mission = `Eliminate ${def.targetCount} ${targetLabel}.`;
-    const perKillLine = (def.perKillReward | 0) > 0
-      ? `<span class="perkill">+${def.perKillReward} chips per kill</span>`
-      : '';
-    const bonusLine = (def.reward | 0) > 0
-      ? `<span class="bonus">+${def.reward} chips on completion</span>`
-      : '';
-    const marksLine = (def.marksReward | 0) > 0
-      ? `<span class="marks">+${def.marksReward} marks on completion</span>`
-      : '';
-    const totalCap = (def.perKillReward | 0) * (def.targetCount | 0) + (def.reward | 0);
-
-    card.innerHTML = `
-      <div class="hideout-contract-portrait" data-portrait="${def.portrait || 'any'}">${this._portraitGlyph(def.portrait)}</div>
-      <div class="hideout-contract-body">
-        <div class="hideout-contract-title">${def.label}</div>
-        <div class="hideout-contract-mission">${mission}</div>
-        <div class="hideout-contract-rewards">
-          ${perKillLine}
-          ${bonusLine}
-          ${marksLine}
-          ${totalCap ? `<span class="totalcap">up to ${totalCap}c total</span>` : ''}
-        </div>
-        ${this._renderModifierList(def)}
-      </div>
-      <div class="hideout-contract-actions"></div>
-    `;
-    const actions = card.querySelector('.hideout-contract-actions');
-    if (isClaimed) {
-      const tag = document.createElement('span');
-      tag.className = 'hideout-tag claimed';
-      tag.textContent = 'DONE';
-      actions.appendChild(tag);
-    } else if (isActive) {
-      const tag = document.createElement('span');
-      tag.className = 'hideout-tag active';
-      tag.textContent = 'ACTIVE';
-      actions.appendChild(tag);
-      const drop = document.createElement('button');
-      drop.type = 'button'; drop.className = 'hideout-btn';
-      drop.textContent = 'Drop';
-      drop.addEventListener('click', () => {
-        setActiveContract(null);
-        this.render();
-      });
-      actions.appendChild(drop);
-    } else {
-      const btn = document.createElement('button');
-      btn.type = 'button';
-      btn.className = 'hideout-btn primary';
-      btn.textContent = 'Accept';
-      btn.addEventListener('click', () => {
-        const period = (def.period === 'weekly') ? 7 * 24 * 3600000 : 24 * 3600000;
-        setActiveContract({
-          activeContractId: def.id,
-          expiresAt: Date.now() + period,
-          progress: {},
-          claimedAt: 0,
-        });
-        this.render();
-      });
-      actions.appendChild(btn);
-    }
-    return card;
   }
 
   // Plain-English label for a target archetype + count. Pluralizes
@@ -2256,12 +2932,13 @@ export class HideoutUI {
       #hideout-panel .hideout-paperdoll-col { display: none; }
 
       /* === CONTRACTOR STAGE === */
-      /* When the contractor tab is active, the panel becomes the
-         full-screen stage. Override the right-anchored layout. */
-      body.contractor-stage-on #hideout-panel {
-        top: 84px; right: 16px; bottom: 80px; left: 220px;
+      /* When the contractor tab is active, the panel takes the full
+         window — no tab strip. Edge-to-edge stage. */
+      #hideout-panel:has(.contractor-stage) {
+        top: 84px; right: 16px; bottom: 16px; left: 16px;
         width: auto; max-width: none;
         padding: 0; overflow: hidden;
+        background: linear-gradient(180deg, rgba(12,14,22,0.95) 0%, rgba(20,16,28,0.96) 100%);
       }
       .contractor-stage {
         position: relative;
@@ -2343,9 +3020,10 @@ export class HideoutUI {
         line-height: 1.5; letter-spacing: 0.4px;
       }
 
+      /* Big golden CTA — bottom-center per spec */
       #contractor-cta {
-        position: absolute; left: 50%; top: 50%;
-        transform: translate(-50%, -50%);
+        position: absolute; left: 50%; bottom: 60px;
+        transform: translateX(-50%);
         background: linear-gradient(180deg, #f2c060 0%, #c98a3a 100%);
         border: 2px solid #f2c060;
         color: #1a1408; font-weight: 900;
@@ -2358,34 +3036,521 @@ export class HideoutUI {
         transition: transform 0.18s, box-shadow 0.18s;
       }
       #contractor-cta:hover {
-        transform: translate(-50%, -50%) scale(1.04);
+        transform: translateX(-50%) scale(1.04);
         box-shadow: 0 0 60px rgba(242,192,96,0.7), 0 12px 28px rgba(0,0,0,0.7);
       }
       .contractor-cta-sub {
-        position: absolute; left: 50%; top: calc(50% + 44px);
+        position: absolute; left: 50%; bottom: 30px;
         transform: translateX(-50%);
         font-size: 11px; color: #c9a87a; letter-spacing: 2px;
         text-transform: uppercase;
       }
+      /* Cards step — host shifts up so cards have room at the bottom. */
+      .contractor-stage.step-cards .contractor-host { top: 16px; }
+      .contractor-stage.step-cards .host-portrait { width: 160px; height: 160px; }
+      .contractor-stage.step-cards .host-glyph { font-size: 64px; }
+      /* GLOBAL BACK BUTTON — pinned to the same place on every screen.
+         Hard rule: never move this. Sits clear of the tab strip. */
+      .global-back-btn {
+        position: absolute; bottom: 18px; left: 24px;
+        background: rgba(20,24,32,0.85);
+        border: 1px solid rgba(155,139,106,0.4);
+        color: #c9a87a; font: inherit; font-size: 11px;
+        letter-spacing: 1.4px; padding: 8px 16px;
+        border-radius: 4px; cursor: pointer;
+        transition: background 0.15s, color 0.15s;
+        z-index: 5;
+      }
+      .global-back-btn:hover {
+        background: rgba(40,46,58,0.9);
+        color: #e8dfc8; border-color: rgba(201,168,122,0.6);
+      }
 
+      /* Live-feed pulse animation when a row is updated */
+      .feed-row { transition: background 0.18s; }
+      .feed-row.pulse {
+        background: rgba(242,192,96,0.18);
+        animation: feed-pulse 0.6s ease-out;
+      }
+      @keyframes feed-pulse {
+        0% { background: rgba(242,192,96,0.45); }
+        100% { background: transparent; }
+      }
+
+      /* Compact leaderboard block under the live feed */
+      .contractor-leaderboard-block {
+        margin-top: 14px; padding-top: 10px;
+        border-top: 1px dashed rgba(90,138,207,0.3);
+      }
+      .lb-block-head {
+        font-size: 10px; letter-spacing: 1.6px; color: #5a8acf;
+        margin-bottom: 8px;
+      }
+      .lb-block-row {
+        display: grid; grid-template-columns: 18px 1fr auto;
+        gap: 4px; padding: 3px 0;
+        font-size: 10px; line-height: 1.3;
+      }
+      .lb-block-row .lb-rank { color: #6f6754; }
+      .lb-block-row .lb-name { color: #c9a87a; }
+      .lb-block-row .lb-val  { color: #f2c060; font-weight: 700; }
+      .lb-block-empty {
+        font-size: 10px; color: #6f6754; font-style: italic;
+        padding: 4px 0;
+      }
+      .lb-view-all {
+        margin-top: 8px; width: 100%;
+        background: transparent; border: 1px solid rgba(90,138,207,0.4);
+        color: #5a8acf; font: inherit; font-size: 10px;
+        letter-spacing: 1.4px; padding: 6px;
+        border-radius: 3px; cursor: pointer;
+      }
+      .lb-view-all:hover { background: rgba(90,138,207,0.1); color: #e8dfc8; }
+
+      /* FULL-SCREEN LEADERBOARDS */
+      .contractor-leaderboard-full {
+        position: absolute; inset: 0;
+        padding: 28px 28px 80px;
+        display: flex; flex-direction: column;
+        background: linear-gradient(180deg, rgba(12,14,22,0.97) 0%, rgba(20,16,28,0.98) 100%);
+      }
+      .lb-full-head { text-align: center; margin-bottom: 18px; }
+      .lb-eyebrow {
+        font-size: 10px; letter-spacing: 2.4px; color: #5a8acf;
+        margin-bottom: 4px;
+      }
+      .lb-title {
+        font-size: 22px; font-weight: 900; letter-spacing: 2.4px;
+        color: #f2c060;
+      }
+      .lb-sub {
+        font-size: 11px; color: #c9a87a; margin-top: 4px; letter-spacing: 1px;
+      }
+      .lb-full-cols {
+        display: grid; grid-template-columns: repeat(4, 1fr);
+        gap: 14px; flex: 1; min-height: 0; overflow: hidden;
+      }
+      .lb-full-col {
+        background: rgba(10,12,18,0.6);
+        border: 1px solid rgba(90,138,207,0.25);
+        border-radius: 4px; padding: 10px;
+        display: flex; flex-direction: column; gap: 4px;
+        overflow-y: auto;
+      }
+      .lb-col-head {
+        font-size: 10px; letter-spacing: 1.6px; color: #5a8acf;
+        text-align: center; padding-bottom: 6px;
+        border-bottom: 1px solid rgba(90,138,207,0.2);
+        margin-bottom: 4px;
+      }
+      .lb-full-row {
+        display: grid; grid-template-columns: 24px 1fr auto;
+        gap: 6px; padding: 4px 6px;
+        font-size: 11px; border-radius: 2px;
+      }
+      .lb-full-row:nth-child(even) { background: rgba(255,255,255,0.02); }
+      .lb-full-row.empty { color: #4a505a; opacity: 0.6; }
+      .lb-full-row .lb-rank { color: #6f6754; font-weight: 700; }
+      .lb-full-row .lb-name { color: #c9a87a; }
+      .lb-full-row .lb-val  { color: #f2c060; font-weight: 700; }
+
+      /* === MISSION PREP / STASH === */
+      .prep-banner {
+        position: absolute; top: 28px; left: 50%;
+        transform: translateX(-50%);
+        text-align: center; pointer-events: none;
+      }
+      .prep-eyebrow {
+        font-size: 10px; letter-spacing: 2.4px; color: #5a8acf;
+        margin-bottom: 4px;
+      }
+      .prep-title {
+        font-size: 22px; font-weight: 900; letter-spacing: 2.4px;
+        color: #f2c060;
+      }
+      .prep-sub {
+        font-size: 11px; color: #c9a87a; margin-top: 4px; letter-spacing: 1px;
+      }
+      /* Mission-prep three-column grid. Per the design brief, the
+         armory is the most prestigious surface — equal width with
+         the paperdoll, store column narrower since it's the lowest
+         priority of the three (boost shop, not mandatory). */
+      .contractor-loadout {
+        position: absolute; inset: 0;
+        display: grid;
+        grid-template-columns: 300px minmax(0, 1.5fr) 280px;
+        gap: 16px; padding: 92px 24px 96px;
+      }
+      .loadout-storecol { overflow-y: auto; }
+      .loadout-armorycol { overflow-y: auto; }
+      .prep-section-head {
+        font-size: 10px; letter-spacing: 1.6px; color: #5a8acf;
+        margin-bottom: 8px; padding-bottom: 6px;
+        border-bottom: 1px solid rgba(90,138,207,0.2);
+      }
+      .loadout-panel {
+        background: rgba(10,12,18,0.55);
+        border: 1px solid rgba(90,138,207,0.25);
+        border-radius: 4px; padding: 12px;
+        display: flex; flex-direction: column;
+        overflow: hidden; min-height: 0;
+      }
+      /* === ARMORY — prestigious unlock collection === */
+      .armory-head {
+        text-align: center; margin-bottom: 14px;
+      }
+      .armory-eyebrow {
+        font-size: 10px; letter-spacing: 2.4px; color: #5a8acf;
+      }
+      .armory-title {
+        font-size: 16px; font-weight: 900; letter-spacing: 2px;
+        color: #f2c060; margin-top: 2px;
+      }
+      .armory-count {
+        font-size: 11px; color: #c9a87a; margin-top: 4px; letter-spacing: 0.8px;
+      }
+      .armory-count b { color: #f2c060; font-weight: 700; }
+      /* Armory two-column split — AVAILABLE | LOCKED. Both halves
+         use the same compact tile size for visual consistency with
+         the pre-mission store. */
+      .armory-split {
+        flex: 1; min-height: 0; overflow: hidden;
+        display: grid; grid-template-columns: 1fr 1fr;
+        gap: 14px;
+      }
+      .armory-half {
+        display: flex; flex-direction: column;
+        min-height: 0; overflow: hidden;
+      }
+      .armory-half-head {
+        font-size: 10px; letter-spacing: 1.6px; color: #5a8acf;
+        margin-bottom: 8px; padding-bottom: 6px;
+        border-bottom: 1px solid rgba(90,138,207,0.2);
+      }
+      .armory-half-empty {
+        font-size: 10px; color: #6f6754; font-style: italic;
+        padding: 16px 8px; text-align: center;
+        grid-column: 1 / -1;
+      }
+      .armory-tile-grid {
+        flex: 1; min-height: 0; overflow-y: auto;
+        display: grid;
+        grid-template-columns: repeat(auto-fill, minmax(70px, 1fr));
+        gap: 6px; padding-right: 2px;
+      }
+
+      /* Mini tile — same scale as the pre-mission store tiles */
+      .armory-mini {
+        position: relative;
+        background: linear-gradient(180deg, rgba(26,29,36,0.92), rgba(14,16,24,0.94));
+        border: 1px solid #2a2f3a; border-radius: 4px;
+        padding: 4px;
+        cursor: pointer; font: inherit; color: #e8dfc8;
+        text-align: center;
+        display: flex; flex-direction: column; align-items: center; gap: 2px;
+        transition: transform 0.12s, box-shadow 0.12s;
+      }
+      .armory-mini:hover:not(:disabled) {
+        transform: translateY(-2px);
+        box-shadow: 0 4px 10px rgba(0,0,0,0.6);
+      }
+      .armory-mini.state-taking {
+        background: linear-gradient(180deg, rgba(40,32,12,0.98), rgba(24,18,6,0.98));
+        box-shadow: 0 0 14px rgba(242,192,96,0.35);
+      }
+      .armory-mini.state-locked {
+        opacity: 0.5; cursor: not-allowed; filter: grayscale(0.6);
+      }
+      .armory-mini.rarity-uncommon  { background: linear-gradient(180deg, rgba(18,28,20,0.92), rgba(10,16,12,0.92)); }
+      .armory-mini.rarity-rare      { background: linear-gradient(180deg, rgba(18,26,38,0.92), rgba(10,14,24,0.92)); }
+      .armory-mini.rarity-epic      { background: linear-gradient(180deg, rgba(26,16,38,0.92), rgba(14,8,24,0.92)); }
+      .armory-mini.rarity-legendary { background: linear-gradient(180deg, rgba(38,26,10,0.95), rgba(22,16,6,0.95)); }
+      .amini-badge {
+        position: absolute; top: -5px; right: -3px;
+        background: #4a505a; color: #c9a87a;
+        font-size: 8px; font-weight: 800; letter-spacing: 0.6px;
+        padding: 2px 5px; border-radius: 2px;
+        box-shadow: 0 1px 4px rgba(0,0,0,0.5);
+      }
+      .amini-badge.taking { background: #f2c060; color: #1a1408; letter-spacing: 1.2px; }
+      .amini-badge.buy    { background: #5a8acf; color: #fff; }
+      .amini-badge.locked { background: #2a2f3a; color: #6f6754; font-size: 8px; }
+      .amini-icon {
+        width: 100%; aspect-ratio: 1;
+        background: rgba(0,0,0,0.35); border-radius: 3px;
+        display: flex; align-items: center; justify-content: center;
+      }
+      .amini-icon img { max-width: 84%; max-height: 84%; image-rendering: pixelated; object-fit: contain; }
+      .amini-icon-fallback { font-size: 22px; color: rgba(155,139,106,0.4); font-weight: 700; }
+      .amini-name {
+        font-size: 9px; font-weight: 700; letter-spacing: 0.2px;
+        color: #e8dfc8; line-height: 1.15;
+        max-width: 100%; overflow: hidden;
+        white-space: nowrap; text-overflow: ellipsis;
+      }
+      .armory-mini.rarity-uncommon  .amini-name { color: #6abf78; }
+      .armory-mini.rarity-rare      .amini-name { color: #5a8acf; }
+      .armory-mini.rarity-epic      .amini-name { color: #b870e0; }
+      .armory-mini.rarity-legendary .amini-name { color: #f2a040; }
+
+      /* Store sub-blurb */
+      .store-blurb {
+        font-size: 10px; color: #9b8b6a; line-height: 1.4;
+        margin-bottom: 10px;
+      }
+      .loadout-storecol {
+        display: flex; flex-direction: column;
+      }
+      .store-upgrades {
+        display: grid; grid-template-columns: 1fr; gap: 6px;
+        margin-bottom: 10px;
+      }
+      .store-upgrade-tile {
+        background: linear-gradient(180deg, #1a1d24, #131720);
+        border: 1px solid rgba(90,138,207,0.4);
+        border-radius: 4px; padding: 8px 12px;
+        text-align: left; font: inherit; color: #e8dfc8;
+        cursor: pointer;
+        transition: background 0.12s;
+      }
+      .store-upgrade-tile:hover:not(:disabled) {
+        background: linear-gradient(180deg, #232730, #181c25);
+      }
+      .store-upgrade-tile:disabled { opacity: 0.45; cursor: not-allowed; }
+      .sut-title {
+        font-size: 11px; font-weight: 700; letter-spacing: 1.2px;
+        color: #c9a87a;
+      }
+      .sut-sub {
+        font-size: 10px; color: #f2c060; margin-top: 2px; letter-spacing: 0.4px;
+      }
+      .store-stock {
+        flex: 1; min-height: 0;
+        display: flex; flex-direction: column;
+        margin-bottom: 10px;
+      }
+      .store-stock-label {
+        font-size: 10px; letter-spacing: 1.4px; color: #5a8acf;
+        margin-bottom: 6px;
+      }
+      .store-stock-list {
+        display: grid; grid-template-columns: repeat(2, 1fr);
+        gap: 8px; overflow-y: auto;
+      }
+      .store-footer {
+        display: flex; flex-direction: column; gap: 6px;
+        padding-top: 10px;
+        border-top: 1px dashed rgba(90,138,207,0.3);
+      }
+      .store-refresh-btn {
+        background: linear-gradient(180deg, #f2c060 0%, #c98a3a 100%);
+        border: 1px solid #f2c060; color: #1a1408;
+        font: inherit; font-size: 12px; font-weight: 700;
+        letter-spacing: 1.4px; padding: 10px;
+        border-radius: 3px; cursor: pointer; text-transform: uppercase;
+      }
+      .store-refresh-btn:hover:not(:disabled) {
+        background: linear-gradient(180deg, #ffd070 0%, #d99a4a 100%);
+      }
+      .store-refresh-btn:disabled { opacity: 0.5; cursor: not-allowed; }
+      .store-faster-btn {
+        background: rgba(20,24,32,0.85);
+        border: 1px solid rgba(155,139,106,0.4); color: #c9a87a;
+        font: inherit; font-size: 10px; letter-spacing: 1px;
+        padding: 6px; border-radius: 3px; cursor: pointer;
+      }
+      .store-faster-btn:hover:not(:disabled) {
+        background: rgba(40,46,58,0.85); color: #e8dfc8;
+      }
+      .store-faster-btn:disabled { opacity: 0.4; cursor: not-allowed; }
+      .store-timer {
+        text-align: center; font-size: 9px; letter-spacing: 1.4px;
+        color: #6f6754;
+      }
+
+      /* Inventory-style tile for weapons + store items */
+      .loadout-collabel {
+        display: flex; justify-content: space-between; align-items: baseline;
+        font-size: 11px; letter-spacing: 1.6px; color: #5a8acf;
+        margin-bottom: 8px; padding-bottom: 6px;
+        border-bottom: 1px solid rgba(90,138,207,0.2);
+      }
+      .store-refresh-meta {
+        font-size: 9px; color: #6f6754; letter-spacing: 1px;
+      }
+      .loadout-tile-grid {
+        display: grid; grid-template-columns: repeat(2, 1fr);
+        gap: 8px;
+      }
+      .loadout-tile {
+        background: linear-gradient(180deg, #1a1d24, #131720);
+        border: 1px solid #2a2f3a; border-radius: 4px;
+        padding: 8px; cursor: pointer;
+        text-align: left; font: inherit; color: #e8dfc8;
+        display: flex; flex-direction: column; gap: 4px;
+        transition: transform 0.12s, box-shadow 0.12s;
+      }
+      .loadout-tile:hover:not(:disabled):not(.empty):not(.sold) {
+        transform: translateY(-2px);
+        box-shadow: 0 6px 14px rgba(0,0,0,0.5);
+      }
+      .loadout-tile.selected {
+        background: linear-gradient(180deg, #221f12, #16140a);
+        border-color: #f2c060;
+      }
+      .loadout-tile.empty {
+        text-align: center; color: #4a505a;
+        align-items: center; justify-content: center; min-height: 80px;
+      }
+      .loadout-tile.sold { opacity: 0.55; }
+      .lt-icon {
+        height: 56px;
+        display: flex; align-items: center; justify-content: center;
+        background: rgba(0,0,0,0.3); border-radius: 3px;
+        margin-bottom: 2px;
+      }
+      .lt-icon img {
+        max-width: 100%; max-height: 100%;
+        image-rendering: pixelated;
+        object-fit: contain;
+      }
+      .lt-icon-fallback {
+        width: 36px; height: 36px;
+        background: #2a2f3a; border-radius: 3px;
+      }
+      .lt-name {
+        font-size: 12px; font-weight: 700; letter-spacing: 0.4px;
+        line-height: 1.2;
+      }
+      .lt-meta { font-size: 9px; color: #9b8b6a; letter-spacing: 0.4px; }
+      .lt-stats {
+        display: flex; gap: 8px; flex-wrap: wrap;
+        font-size: 10px;
+      }
+      .lt-stat { color: #c9a87a; }
+      .lt-stat.lt-cost { color: #f2c060; font-weight: 700; }
+      .lt-sold {
+        text-align: center; font-weight: 700; letter-spacing: 1.2px;
+        color: #6abf78; font-size: 11px; padding: 8px 0;
+      }
+      .lt-buy {
+        margin-top: 4px;
+        background: linear-gradient(180deg, #2a4a6e, #1e3450);
+        border: 1px solid #5a8acf; color: #e8dfc8;
+        font: inherit; font-size: 10px; letter-spacing: 1px;
+        padding: 5px; border-radius: 3px; cursor: pointer;
+        text-transform: uppercase; font-weight: 700;
+      }
+      .lt-buy:hover:not(:disabled) { background: linear-gradient(180deg, #3a5a7e, #2e4460); }
+      .lt-buy:disabled { opacity: 0.45; cursor: not-allowed; }
+
+      .loadout-charcol {
+        display: flex; flex-direction: column; gap: 14px;
+        overflow-y: auto;
+      }
+      /* Vertical paperdoll stack — figure on top, slot rows beneath
+         in head→torso→legs→weapons order. Mirrors the in-game
+         inventory's column-down read. */
+      .paperdoll-vstack {
+        display: flex; flex-direction: column; gap: 8px;
+      }
+      .pd-figure-tall {
+        background: radial-gradient(ellipse at 50% 30%, #2a2030 0%, #0a0a14 80%);
+        border: 1px solid rgba(178,112,224,0.3);
+        border-radius: 6px;
+        display: flex; align-items: center; justify-content: center;
+        height: 130px;
+      }
+      .pd-row {
+        display: grid; grid-template-columns: repeat(3, 1fr);
+        gap: 6px;
+      }
+      .pd-slot {
+        background: rgba(20,24,32,0.88); border: 1px solid #2a2f3a;
+        border-radius: 4px; padding: 6px 6px;
+        font-size: 9px; letter-spacing: 1px; color: #6f6754;
+        text-align: center; line-height: 1.3;
+        display: flex; flex-direction: column; align-items: center; justify-content: center;
+      }
+      .pd-slot b {
+        color: #e8dfc8; font-weight: 700;
+        font-size: 11px; letter-spacing: 0.4px;
+      }
+      .pd-slot.filled { border-color: #5a8acf; background: rgba(20,30,46,0.85); color: #9b8b6a; }
+      .pd-primary.filled { border-color: #f2c060; }
+      .pd-figure-glyph {
+        font-size: 64px; color: rgba(201,168,122,0.55);
+      }
+
+      /* Starter pocket icon strip — replaces the bigger pockets/
+         backpack grids. Just shows the starter consumables visually. */
+      .pd-starter-strip {
+        margin-top: 10px; padding-top: 10px;
+        border-top: 1px dashed rgba(90,138,207,0.25);
+      }
+      .pd-starter-label {
+        font-size: 9px; letter-spacing: 1.6px; color: #5a8acf;
+        margin-bottom: 6px;
+      }
+      .pd-starter-icons { display: flex; gap: 6px; }
+      .pd-starter-ico {
+        width: 36px; height: 36px;
+        background: rgba(20,30,46,0.85); border: 1px solid #2a2f3a;
+        border-radius: 3px;
+        display: flex; align-items: center; justify-content: center;
+      }
+      .pd-starter-ico img { max-width: 80%; max-height: 80%; image-rendering: pixelated; }
+      .pd-starter-ico.empty { color: #6f6754; font-size: 10px; }
+      .pd-starter-ico.throwable {
+        color: #c98a3a; font-size: 18px; font-weight: 700;
+        background: rgba(40,28,16,0.85); border-color: rgba(201,138,58,0.4);
+      }
+      .loadout-confirm {
+        position: absolute; left: 50%; bottom: 44px;
+        transform: translateX(-50%);
+        background: linear-gradient(180deg, #4a8acf 0%, #2a6aaf 100%);
+        border: 2px solid #5a8acf; color: #fff;
+        font-weight: 900; font-size: 18px; letter-spacing: 3px;
+        padding: 14px 48px; border-radius: 4px; cursor: pointer;
+        box-shadow: 0 0 40px rgba(90,138,207,0.45), 0 8px 24px rgba(0,0,0,0.6);
+        font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+        text-transform: uppercase;
+      }
+      .loadout-confirm:hover:not(:disabled) {
+        transform: translateX(-50%) scale(1.04);
+        box-shadow: 0 0 60px rgba(90,138,207,0.6), 0 12px 28px rgba(0,0,0,0.7);
+      }
+      .loadout-confirm:disabled { opacity: 0.45; cursor: not-allowed; }
+
+      /* Cards positioned just below center — bigger, more present.
+         Wrap when there are too many to fit in a single row. */
       .contractor-cards {
-        position: absolute; bottom: 16px; left: 240px; right: 240px;
-        display: flex; gap: 16px; justify-content: center;
-        flex-wrap: nowrap;
+        position: absolute; top: 56%; left: 240px; right: 240px;
+        transform: translateY(-50%);
+        display: flex; gap: 18px; justify-content: center;
+        flex-wrap: wrap; max-height: 40%;
+        overflow-y: auto;
       }
       .contractor-empty {
         color: #6f6754; font-style: italic; padding: 16px;
       }
 
-      /* Wanted-poster card */
+      /* Wanted-poster card — bigger now */
       .wanted-card {
-        flex: 1; max-width: 200px;
+        flex: 0 0 240px;
         background: linear-gradient(180deg, #1a1d24 0%, #0c0e14 100%);
         border: 2px solid #2a2f3a; border-radius: 6px;
         padding: 10px; display: flex; flex-direction: column; gap: 6px;
         text-align: center;
         box-shadow: 0 4px 16px rgba(0,0,0,0.6);
       }
+      .wanted-card { cursor: pointer; transition: transform 0.15s, box-shadow 0.15s, background 0.15s; font: inherit; }
+      .wanted-card:hover:not(:disabled) {
+        transform: translateY(-3px) scale(1.02);
+        box-shadow: 0 10px 26px rgba(0,0,0,0.7), 0 0 28px rgba(242,192,96,0.18);
+      }
+      .wanted-card:active:not(:disabled) { transform: translateY(-1px) scale(1.0); }
+      .wanted-card:disabled { cursor: not-allowed; }
       .wanted-card.rarity-common    { border-color: #c9a87a; }
       .wanted-card.rarity-uncommon  { border-color: #6abf78; }
       .wanted-card.rarity-rare      { border-color: #5a8acf; }
@@ -2609,28 +3774,9 @@ export class HideoutUI {
       }
       .hideout-buy:disabled { opacity: 0.4; cursor: not-allowed; }
 
-      .hideout-contract-card {
-        padding: 14px 18px;
-        background: linear-gradient(180deg, #1a1d24, #131720);
-        border-left: 3px solid #5a8acf;
-        border-radius: 4px;
-      }
-      .hideout-contract-label {
-        font-size: 14px; font-weight: 700; color: #e8dfc8;
-        letter-spacing: 1px;
-      }
-      .hideout-contract-blurb {
-        font-size: 12px; color: #c9a87a; margin: 4px 0 8px;
-      }
-      .hideout-contract-meta {
-        font-size: 10px; color: #6f6754; letter-spacing: 0.5px;
-      }
-      .hideout-contract-meta b { color: #f2c060; }
-      .hideout-contract-meta .claimed {
-        color: #6abf78; font-weight: 700; letter-spacing: 1px;
-      }
-
-      /* Tiered contract list — Standard / Risky / Lethal */
+      /* Tier-grouped section header (used by Recruiter / Black Market /
+         Vendors panels). Standard / Risky / Lethal tier classes are
+         optional decoration on top. */
       .hideout-tier-group { margin-top: 8px; }
       .hideout-tier-group:first-of-type { margin-top: 0; }
       .hideout-tier-head {
@@ -2644,9 +3790,6 @@ export class HideoutUI {
       .hideout-tier-head .s {
         font-size: 10px; color: #6f6754; letter-spacing: 0.5px;
       }
-      .hideout-tier-standard .hideout-tier-head .t { color: #c9a87a; }
-      .hideout-tier-risky .hideout-tier-head .t { color: #e8a040; }
-      .hideout-tier-lethal .hideout-tier-head .t { color: #d24868; }
 
       .hideout-contract-row {
         padding: 10px 14px; margin-bottom: 6px;
@@ -2666,8 +3809,6 @@ export class HideoutUI {
       .hideout-contract-row.locked { opacity: 0.55; }
       .hideout-contract-row.active { border-left-color: #f2c060; background: linear-gradient(180deg, #221f12, #16140a); }
       .hideout-contract-row.claimed { border-left-color: #6abf78; }
-      .hideout-tier-risky  .hideout-contract-row { border-left-color: #b86a2a; }
-      .hideout-tier-lethal .hideout-contract-row { border-left-color: #8a2a3a; }
       .hideout-contract-row .row-head {
         grid-area: head;
         display: flex; align-items: baseline; gap: 8px;
@@ -2871,59 +4012,6 @@ export class HideoutUI {
       .hideout-rarity-head.epic      { color: #b870e0; }
       .hideout-rarity-head.legendary { color: #f2a040; }
 
-      .hideout-contract-card {
-        display: grid; grid-template-columns: 64px 1fr auto; gap: 14px;
-        padding: 10px 14px; margin-bottom: 6px;
-        background: linear-gradient(180deg, #1a1d24, #131720);
-        border: 1px solid #2a2f3a; border-left: 4px solid #5a8acf;
-        border-radius: 4px; align-items: center;
-      }
-      .hideout-contract-card.rarity-common    { border-left-color: #c9a87a; }
-      .hideout-contract-card.rarity-uncommon  { border-left-color: #6abf78; }
-      .hideout-contract-card.rarity-rare      { border-left-color: #5a8acf; }
-      .hideout-contract-card.rarity-epic      { border-left-color: #b870e0; }
-      .hideout-contract-card.rarity-legendary { border-left-color: #f2a040; }
-      .hideout-contract-card.active   { background: linear-gradient(180deg, #221f12, #16140a); }
-      .hideout-contract-card.claimed  { opacity: 0.65; }
-      .hideout-contract-card.locked   { opacity: 0.55; }
-
-      .hideout-contract-portrait {
-        width: 56px; height: 56px;
-        display: flex; align-items: center; justify-content: center;
-        background: #14171e; border: 1px solid #2a2f3a; border-radius: 4px;
-        font-size: 30px; color: #c9a87a; font-weight: 700;
-      }
-      .hideout-contract-portrait[data-portrait="dasher"]   { color: #6abf78; }
-      .hideout-contract-portrait[data-portrait="tank"]     { color: #c98a3a; }
-      .hideout-contract-portrait[data-portrait="gunman"]   { color: #5a8acf; }
-      .hideout-contract-portrait[data-portrait="melee"]    { color: #d24868; }
-      .hideout-contract-portrait[data-portrait="boss"]     { color: #f2c060; }
-      .hideout-contract-portrait[data-portrait="megaboss"] { color: #f2a040; }
-      .hideout-contract-portrait[data-portrait="locked"]   { color: #4a505a; }
-
-      .hideout-contract-body { min-width: 0; }
-      .hideout-contract-title {
-        font-size: 14px; font-weight: 700; color: #e8dfc8; letter-spacing: 0.6px;
-        margin-bottom: 2px;
-      }
-      .hideout-contract-mission {
-        font-size: 12px; color: #c9a87a; margin-bottom: 6px;
-      }
-      .hideout-contract-rewards {
-        display: flex; flex-wrap: wrap; gap: 12px;
-        font-size: 11px; color: #9b8b6a; letter-spacing: 0.4px;
-      }
-      .hideout-contract-rewards .perkill { color: #f2c060; font-weight: 700; }
-      .hideout-contract-rewards .bonus   { color: #c9a87a; }
-      .hideout-contract-rewards .marks   { color: #6abf78; }
-      .hideout-contract-rewards .totalcap { color: #6f6754; font-style: italic; }
-      .hideout-contract-actions {
-        display: flex; flex-direction: column; gap: 6px; align-items: flex-end;
-      }
-      .hideout-contract-card .row-mods {
-        margin: 6px 0 0; padding: 0 0 0 16px;
-        font-size: 10px; color: #d4a060; letter-spacing: 0.4px;
-      }
     `;
     document.head.appendChild(style);
   }
