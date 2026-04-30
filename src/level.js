@@ -1540,6 +1540,41 @@ export class Level {
       return false;
     };
 
+    // Variant of placeAlongWall that pins the prop's BACK to the wall
+    // (center at depth/2 + small gap). placeAlongWall uses EDGE_CLEAR
+    // ~1.7m for the prop center, which leaves ~1.5m of walkable space
+    // BEHIND a thin bookshelf — visually reads as "shelf floating mid-
+    // room with no collision." This placer accounts for the prop's
+    // collision depth so the visible back panel is actually flush
+    // with the wall.
+    const placeBackToWall = (prop, opts = {}) => {
+      const yaw = opts.yaw;
+      const col = prop.collision;
+      if (!col) return placeAlongWall(prop, opts);
+      const wallGap = col.d / 2 + 0.05;
+      const radius = Math.max(col.w, col.d) * 0.6 + 0.2;
+      for (let tries = 0; tries < 25; tries++) {
+        const side = Math.floor(Math.random() * 4);
+        const t = 0.22 + Math.random() * 0.56;
+        let x, z, facing;
+        if (side === 0)      { x = b.minX + t * roomW; z = b.minZ + wallGap;       facing = 0; }
+        else if (side === 1) { x = b.maxX - wallGap;   z = b.minZ + t * roomD;     facing = -Math.PI / 2; }
+        else if (side === 2) { x = b.minX + t * roomW; z = b.maxZ - wallGap;       facing = Math.PI; }
+        else                 { x = b.minX + wallGap;   z = b.minZ + t * roomD;     facing = Math.PI / 2; }
+        if (tooCloseToElev(x, z)) continue;
+        if (inKeepOut(x, z)) continue;
+        if (inCorner(x, z)) continue;
+        if (this._collidesAt(x, z, radius)) continue;
+        const finalYaw = yaw ?? facing;
+        if (!_propFitsInBounds(prop, x, z, finalYaw)) continue;
+        if (!_propFootprintFree(x, z, prop, finalYaw)) continue;
+        prop.group.position.set(x, 0, z);
+        prop.group.rotation.y = finalYaw;
+        return this._registerProp(prop);
+      }
+      return false;
+    };
+
     // Pick a yaw that points the prop's local +Z (its "front") toward
     // the room centre. Snapped to 0 / 90 / 180 / 270 so the prop stays
     // axis-aligned with walls and the AABB collision proxy works
@@ -1777,7 +1812,7 @@ export class Level {
       // Reading nook: 1-2 bookshelves on a wall, a desk facing the
       // room centre, and a chair tucked behind the desk.
       const shelves = 1 + Math.floor(Math.random() * 2);
-      for (let i = 0; i < shelves; i++) _placeAndLoot('bookshelf', placeAlongWall);
+      for (let i = 0; i < shelves; i++) _placeAndLoot('bookshelf', placeBackToWall);
       if (Math.random() < 0.85) {
         const desk = _placeAndLoot('desk', placeInterior);
         if (desk) {
