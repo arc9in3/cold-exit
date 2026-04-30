@@ -2097,10 +2097,15 @@ export const ENCOUNTER_DEFS = {
           s.phase = 'aftermath';
           s.chosenDead = 'gunman';
           s.chosenSurvivor = s.pair.kneeler;
-          // Kneeler invulnerable + reward.
+          // Pin the dead NPC so the dummies' respawn timer doesn't
+          // resurrect them and let the player farm kill XP.
+          if (s.pair.gunman) s.pair.gunman.keepDead = true;
+          // Kneeler — invulnerable + UNHITTABLE so further shots
+          // pass through them entirely (no XP, no flash, no kill).
           if (s.pair.kneeler) {
             s.pair.kneeler.hp = 99999;
             s.pair.kneeler.maxHp = 99999;
+            s.pair.kneeler.unhittable = true;
           }
           ctx.spawnSpeech(s.pair.kneeler.group.position.clone().setY(2.0),
             'Bless you. Take this — every coin I have.', 4.5);
@@ -2111,9 +2116,11 @@ export const ENCOUNTER_DEFS = {
           s.phase = 'aftermath';
           s.chosenDead = 'kneeler';
           s.chosenSurvivor = s.pair.gunman;
+          if (s.pair.kneeler) s.pair.kneeler.keepDead = true;
           if (s.pair.gunman) {
             s.pair.gunman.hp = 99999;
             s.pair.gunman.maxHp = 99999;
+            s.pair.gunman.unhittable = true;
           }
           ctx.spawnSpeech(s.pair.gunman.group.position.clone().setY(2.0),
             'It is finished. I won\'t need this anymore.', 4.5);
@@ -2151,9 +2158,11 @@ export const ENCOUNTER_DEFS = {
           // and tear down the surviving NPC (now a corpse pose).
           s.relicSpawned = true;
           if (s.chosenSurvivor && s.chosenSurvivor.group) {
-            // Lay them down via a quick rotate.
+            // Lay them down via a quick rotate. keepDead pins them so
+            // the dummies respawn loop doesn't stand them back up.
             s.chosenSurvivor.group.rotation.x = -Math.PI / 2;
             s.chosenSurvivor.alive = false;
+            s.chosenSurvivor.keepDead = true;
           }
           if (s.hint) s.hint.visible = false;
           ctx.spawnSpeech(new THREE.Vector3(s.disc.cx, 2.2, s.disc.cz),

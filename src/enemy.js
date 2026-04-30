@@ -61,7 +61,10 @@ export class DummyManager {
   hittables() {
     const out = [];
     for (const d of this.dummies) {
-      if (d.alive) { out.push(d.body); out.push(d.head); }
+      // `unhittable` is set by encounters that want a dummy to remain
+      // visible but ignore further bullets — e.g. the surviving NPC
+      // in Choices and Consequences after a decision is made.
+      if (d.alive && !d.unhittable) { out.push(d.body); out.push(d.head); }
     }
     return out;
   }
