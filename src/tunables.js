@@ -331,6 +331,7 @@ export const tunables = {
       reloadTime: 1.0,
     },
     {
+      unlockRank: 7,
       name: 'Benelli M4',
       type: 'ranged',
       class: 'shotgun',
@@ -501,6 +502,7 @@ export const tunables = {
       magSize: 30, reloadTime: 1.3,
     },
     {
+      unlockRank: 13,
       name: 'P90', type: 'ranged', class: 'smg', rarity: 'rare',
       attachmentSlots: ['muzzle', 'underRail', 'sideRail', 'topRail', 'stock', 'grip', 'magazine'],
       fireMode: 'auto', fireRate: 15, damage: 14, range: 30,
@@ -570,6 +572,7 @@ export const tunables = {
     },
     // --- Revolvers ---
     {
+      unlockRank: 6,
       name: 'Colt Anaconda .44', type: 'ranged', class: 'pistol', rarity: 'common',
       attachmentSlots: ['sideRail', 'topRail', 'grip', 'trigger'],
       fireMode: 'semi', fireRate: 2.6, damage: 82, range: 38,
@@ -580,6 +583,7 @@ export const tunables = {
       magSize: 6, reloadTime: 2.0,
     },
     {
+      unlockRank: 14,
       name: 'Desert Eagle .50', type: 'ranged', class: 'pistol', rarity: 'rare',
       attachmentSlots: ['muzzle', 'sideRail', 'topRail', 'grip', 'trigger', 'magazine'],
       fireMode: 'semi', fireRate: 2.4, damage: 110, range: 42,
@@ -617,6 +621,7 @@ export const tunables = {
       magSize: 5, reloadTime: 2.4,
     },
     {
+      unlockRank: 11,
       name: 'SVD Dragunov', type: 'ranged', class: 'sniper', rarity: 'rare',
       attachmentSlots: ['muzzle', 'barrel', 'sideRail', 'topRail', 'stock', 'grip', 'trigger', 'magazine'],
       fireMode: 'semi', fireRate: 4.0, damage: 78, range: 82,
@@ -643,6 +648,7 @@ export const tunables = {
 
     // --- Extended rifle lineup ---
     {
+      unlockRank: 7,
       name: 'M16', type: 'ranged', class: 'rifle', rarity: 'uncommon',
       attachmentSlots: ['muzzle', 'barrel', 'underRail', 'sideRail', 'topRail', 'stock', 'grip', 'trigger', 'magazine'],
       fireMode: 'auto', fireRate: 12, damage: 26, range: 70,
@@ -656,6 +662,7 @@ export const tunables = {
       // CQC variant — bumped RoF, wider spread, shorter effective
       // range than the standard rifle baseline. Per-platform CQB/CQC
       // rule: trade reach for in-room cyclic suppression.
+      unlockRank: 8,
       name: 'AUG A3-CQC', type: 'ranged', class: 'rifle', rarity: 'uncommon',
       attachmentSlots: ['muzzle', 'barrel', 'underRail', 'sideRail', 'topRail', 'stock', 'grip', 'trigger', 'magazine'],
       fireMode: 'auto', fireRate: 14, damage: 24, range: 48,
@@ -681,6 +688,7 @@ export const tunables = {
 
     // --- Extended shotgun ---
     {
+      unlockRank: 9,
       name: 'AA-12', type: 'ranged', class: 'shotgun', rarity: 'uncommon',
       attachmentSlots: ['muzzle', 'sideRail', 'topRail', 'stock', 'grip', 'magazine'],
       fireMode: 'auto', fireRate: 5.0, damage: 14, range: 18,
@@ -1024,6 +1032,7 @@ export const tunables = {
       ],
     },
     {
+      unlockRank: 10,
       name: 'Colt Python',
       type: 'ranged',
       class: 'pistol',
@@ -1047,6 +1056,7 @@ export const tunables = {
       reloadTime: 1.7,
     },
     {
+      unlockRank: 6,
       name: 'Colt 357',
       type: 'ranged',
       class: 'pistol',
@@ -1070,6 +1080,7 @@ export const tunables = {
       reloadTime: 1.7,
     },
     {
+      unlockRank: 7,
       name: '.38 Special',
       type: 'ranged',
       class: 'pistol',
@@ -1093,6 +1104,7 @@ export const tunables = {
       reloadTime: 1.6,
     },
     {
+      unlockRank: 11,
       name: 'Colt Six Shooter',
       type: 'ranged',
       class: 'pistol',
@@ -1143,6 +1155,7 @@ export const tunables = {
       // CQB variant — bumped RoF, wider spread, shorter range than
       // the standard Spectre. Per the CQB/CQC rule: trade reach for
       // in-room cyclic suppression.
+      unlockRank: 5,
       name: 'Spectre CQB',
       type: 'ranged',
       class: 'smg',
@@ -1166,6 +1179,7 @@ export const tunables = {
       reloadTime: 1.2,
     },
     {
+      unlockRank: 9,
       name: 'SPC9',
       type: 'ranged',
       class: 'smg',
@@ -1189,6 +1203,7 @@ export const tunables = {
       reloadTime: 1.3,
     },
     {
+      unlockRank: 8,
       name: 'CAR-15',
       type: 'ranged',
       class: 'rifle',
@@ -1212,6 +1227,7 @@ export const tunables = {
       reloadTime: 1.2,
     },
     {
+      unlockRank: 7,
       name: 'AKS-74',
       type: 'ranged',
       class: 'rifle',
@@ -1235,6 +1251,7 @@ export const tunables = {
       reloadTime: 1.4,
     },
     {
+      unlockRank: 12,
       name: 'AK104',
       type: 'ranged',
       class: 'rifle',
@@ -1258,6 +1275,7 @@ export const tunables = {
       reloadTime: 1.5,
     },
     {
+      unlockRank: 12,
       name: 'JARD J67',
       type: 'ranged',
       class: 'rifle',
@@ -1320,6 +1338,7 @@ export const tunables = {
       magSize: 25, reloadTime: 1.4,
     },
     {
+      unlockRank: 5,
       name: 'Remington 870',
       type: 'ranged',
       class: 'shotgun',
@@ -1391,6 +1410,7 @@ export const tunables = {
       reloadTime: 4.0,
     },
     {
+      unlockRank: 15,
       name: 'AWP',
       type: 'ranged',
       class: 'sniper',
@@ -1417,6 +1437,7 @@ export const tunables = {
       reloadTime: 3.8,
     },
     {
+      unlockRank: 13,
       name: '.338 Lapua',
       type: 'ranged',
       class: 'sniper',
@@ -1443,6 +1464,7 @@ export const tunables = {
       reloadTime: 3.4,
     },
     {
+      unlockRank: 4,
       name: 'Hunting Rifle',
       type: 'ranged',
       class: 'sniper',
@@ -1565,6 +1587,7 @@ export const tunables = {
     {
       // 10.5" SBR — same platform, shorter barrel. Less range, more
       // hip-fire spread, faster reload from compact handling.
+      unlockRank: 8,
       name: 'AR-15 SBR', type: 'ranged', class: 'rifle', rarity: 'uncommon',
       attachmentSlots: ['muzzle', 'barrel', 'underRail', 'sideRail', 'topRail', 'stock', 'grip', 'trigger', 'magazine'],
       fireMode: 'auto', fireRate: 13, damage: 24, range: 46,
@@ -1578,6 +1601,7 @@ export const tunables = {
       // 7.5" AR pistol with no stock. Treated as a pistol-class for
       // its size + brace-only ergos. Bigger mag than other pistols
       // (30) since it takes AR mags; weaker damage from short barrel.
+      unlockRank: 15,
       name: 'AR-15 Pistol', type: 'ranged', class: 'pistol', rarity: 'rare',
       attachmentSlots: ['muzzle', 'underRail', 'sideRail', 'topRail', 'grip', 'trigger', 'magazine'],
       fireMode: 'auto', fireRate: 13, damage: 22, range: 36,
@@ -1591,6 +1615,7 @@ export const tunables = {
       // Romanian Draco NAK9 — 9×19 AK-pattern pistol. AK furniture
       // on a pistol-caliber platform. Higher mag than typical pistols,
       // poor accuracy at range, decent close-quarters chaos.
+      unlockRank: 11,
       name: 'Draco NAK9', type: 'ranged', class: 'pistol', rarity: 'uncommon',
       attachmentSlots: ['muzzle', 'underRail', 'sideRail', 'topRail', 'grip', 'trigger', 'magazine'],
       fireMode: 'auto', fireRate: 14, damage: 20, range: 32,
@@ -1604,6 +1629,7 @@ export const tunables = {
       // AKS-47 — folding-stock variant of the AK47. Same ballistics,
       // slightly bumpier hip-fire because of the lighter stock when
       // folded out, marginally faster handling.
+      unlockRank: 9,
       name: 'AKS-47', type: 'ranged', class: 'rifle', rarity: 'uncommon',
       attachmentSlots: ['muzzle', 'barrel', 'underRail', 'sideRail', 'topRail', 'stock', 'grip', 'trigger', 'magazine'],
       fireMode: 'auto', fireRate: 9, damage: 32, range: 56,
@@ -1615,6 +1641,7 @@ export const tunables = {
     },
     {
       // JARD J68 — bullpup chambered in 5.56. Compact, integral rail.
+      unlockRank: 9,
       name: 'JARD J68', type: 'ranged', class: 'rifle', rarity: 'uncommon',
       attachmentSlots: ['muzzle', 'barrel', 'underRail', 'sideRail', 'topRail', 'grip', 'trigger', 'magazine'],
       fireMode: 'auto', fireRate: 11, damage: 28, range: 60,
@@ -1627,6 +1654,7 @@ export const tunables = {
     {
       // JARD J56 — heavier-caliber bullpup variant (.308 platform).
       // Slower fire, more damage, longer range, smaller mag.
+      unlockRank: 13,
       name: 'JARD J56', type: 'ranged', class: 'rifle', rarity: 'rare',
       attachmentSlots: ['muzzle', 'barrel', 'underRail', 'sideRail', 'topRail', 'grip', 'trigger', 'magazine'],
       fireMode: 'auto', fireRate: 8, damage: 42, range: 72,
@@ -1654,6 +1682,7 @@ export const tunables = {
       // Remington 700 in tactical chassis — same action as base 700,
       // but with the lowpoly tactical-furniture FBX. Slightly faster
       // fire and tighter ADS spread thanks to chassis ergonomics.
+      unlockRank: 14,
       name: 'Remington 700 Tactical', type: 'ranged', class: 'sniper', rarity: 'rare',
       attachmentSlots: ['muzzle', 'barrel', 'underRail', 'sideRail', 'topRail', 'stock', 'grip', 'trigger', 'magazine'],
       fireMode: 'semi', fireRate: 1.6, damage: 92, range: 110,
@@ -1680,6 +1709,7 @@ export const tunables = {
       // SIG SPC chambered in .223 — rifle round in an SMG-form-factor
       // body. Higher damage than the 9mm SPCA3, faster bullet, smaller
       // mag. Still SMG class for the ergonomics.
+      unlockRank: 10,
       name: 'SPC223', type: 'ranged', class: 'smg', rarity: 'uncommon',
       attachmentSlots: ['muzzle', 'barrel', 'underRail', 'sideRail', 'topRail', 'stock', 'grip', 'trigger', 'magazine'],
       fireMode: 'auto', fireRate: 12, damage: 22, range: 48,
