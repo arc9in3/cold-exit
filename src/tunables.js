@@ -1700,11 +1700,13 @@ export const tunables = {
     {
       // SIG SPCA3 — 9mm AR-style carbine. Treated as SMG class for
       // its caliber + role (close-quarters PCC). Decent fire rate,
-      // larger mag than typical pistols.
+      // larger mag than typical pistols. Spread tuned so the recoil
+      // cone is actually visible — was 0.14/0.022 which felt laser-
+      // tight for a starter SMG and made the bloom system irrelevant.
       name: 'SPCA3', type: 'ranged', class: 'smg', rarity: 'common',
       attachmentSlots: ['muzzle', 'barrel', 'underRail', 'sideRail', 'topRail', 'stock', 'grip', 'trigger', 'magazine'],
       fireMode: 'auto', fireRate: 13, damage: 18, range: 38,
-      hipSpread: 0.14, adsSpread: 0.022,
+      hipSpread: 0.20, adsSpread: 0.038,
       adsZoom: 0.66, adsPeekDistance: 5.6,
       tracerColor: 0xd8c060, muzzleLength: 0.78, muzzleGirth: 0.12,
       pelletCount: 1, burstCount: 1, burstInterval: 0,
