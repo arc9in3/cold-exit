@@ -2396,6 +2396,11 @@ function regenerateLevel() {
   gunmen.removeAll();
   melees.removeAll();
   drones.removeAll();
+  // Dummies (CnC pair, tutorial range targets) used to persist
+  // across floors — the encounter spawns them via dummies.spawn
+  // but the regen sweep didn't dispose them. Resulted in the CnC
+  // gunman + kneeler standing on every subsequent floor's centre.
+  if (dummies.removeAll) dummies.removeAll();
   loot.removeAll();
   // In-flight + settled projectiles (claymores especially) used to
   // persist into the next floor — they were spawned via

@@ -69,6 +69,27 @@ export class DummyManager {
     return out;
   }
 
+  // Tear-down for floor regen — disposes every dummy's geometry +
+  // material and removes its group from the scene. Mirrors the
+  // gunmen / melees / drones removeAll() pattern. Without this,
+  // encounter-spawned dummies (CnC pair, range targets) used to
+  // persist across floors.
+  removeAll() {
+    for (const d of this.dummies) {
+      if (d.group) {
+        d.group.traverse((obj) => {
+          if (obj.geometry) { try { obj.geometry.dispose(); } catch (_) {} }
+          if (obj.material) {
+            const ms = Array.isArray(obj.material) ? obj.material : [obj.material];
+            for (const m of ms) { try { m.dispose(); } catch (_) {} }
+          }
+        });
+        this.scene.remove(d.group);
+      }
+    }
+    this.dummies.length = 0;
+  }
+
   // Main calls this uniformly for all enemy kinds. Dummies never melee so
   // they can't block shots.
   applyHit(dummy, damage, _zone, hitDir) {
