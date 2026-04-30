@@ -760,11 +760,14 @@ export class HideoutUI {
     // A weapon shows up in the chip-buy locked column if it's flagged
     // worldDrop:false (locked from world entirely) OR it carries an
     // explicit unlockRank (rank-gated chip-buy that ALSO drops in
-    // runs — the iconic 5). Mythics and artifacts are excluded.
+    // runs — the iconic 5). Mythics, artifacts, encounter-only, and
+    // pact-reward weapons are excluded — those have bespoke unlock
+    // paths and should never sit in the chip-buy column.
     const locked = tunables.weapons.filter(w =>
       (w.worldDrop === false || (w.unlockRank | 0) > 0)
       && !w.mythic && w.rarity !== 'mythic'
-      && !w.artifact && !unlocked.has(w.name));
+      && !w.artifact && !w.encounterOnly && !w.pactReward
+      && !unlocked.has(w.name));
     if (!locked.length) {
       const p = document.createElement('div');
       p.className = 'hideout-placeholder';
@@ -1834,8 +1837,14 @@ export class HideoutUI {
     // rank-gated (explicit unlockRank). The iconic 5 sit in the
     // second bucket so they remain chip-buyable for permanent stash
     // access even though they also drop in runs.
+    //
+    // Special-condition unlocks (artifacts like Jessica's Rage,
+    // encounter-only weapons like Zipline Gun, pact rewards like Pain)
+    // are excluded — those have their own bespoke acquisition paths
+    // and should never sit in the chip-buy column.
     const lockedAll = tunables.weapons.filter(w =>
       !w.mythic && w.rarity !== 'mythic'
+      && !w.artifact && !w.encounterOnly && !w.pactReward
       && (w.worldDrop === false || (w.unlockRank | 0) > 0)
       && !unlocked.has(w.name));
 
