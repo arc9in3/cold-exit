@@ -5892,7 +5892,7 @@ function fireOneShot(playerInfo, weapon, aimPoint, isADS, aimOwner, aimZone) {
       }
       const wasAlive = hit.owner.alive;
       runStats.addDamage(dmg);
-      const result = hit.owner.manager.applyHit(hit.owner, dmg, hit.zone, dir, { weaponClass: weapon.class });
+      const result = hit.owner.manager.applyHit(hit.owner, dmg, hit.zone, dir, { weaponClass: weapon.class, shieldBreaker: !!weapon.shieldBreaker });
       for (const drop of result.drops) loot.spawnItem(drop.position, wrapWeapon(drop.weapon));
       // Tutorial step ticks on hit-zone — landing the right zone on a
       // tutorial dummy proves the lesson. The arm zone has a random
@@ -6037,7 +6037,7 @@ function fireOneShot(playerInfo, weapon, aimPoint, isADS, aimOwner, aimZone) {
           const pdmg = baseDmg * falloff;
           const wasAlivePh = ph.owner.alive;
           runStats.addDamage(pdmg);
-          ph.owner.manager.applyHit(ph.owner, pdmg, ph.zone, dir, { weaponClass: weapon.class });
+          ph.owner.manager.applyHit(ph.owner, pdmg, ph.zone, dir, { weaponClass: weapon.class, shieldBreaker: !!weapon.shieldBreaker });
           if (wasAlivePh && !ph.owner.alive) {
             onEnemyKilled(ph.owner);
             awardClassXp(weapon.class, ph.owner.tier, ph.owner);
@@ -7864,12 +7864,11 @@ function aiFireFlame(origin, dir, weapon, damageMult = 1, source = null) {
     ? Math.hypot(player.mesh.position.x - source.group.position.x,
                  player.mesh.position.z - source.group.position.z)
     : d;
-  // Enemy flame DPS was killing the player almost instantly — direct
-  // damage of 5/tick × 12 ticks/sec × difficulty mult easily ran past
-  // 60-100 DPS through full HP in a couple seconds. The 0.4 mult here
-  // keeps the cone visually threatening (player still wants out of
-  // it) without one-shotting through medkits + armor.
-  const ENEMY_FLAME_DAMAGE_MULT = 0.4;
+  // Enemy flame DPS target: ~10-20 DPS (was 24-40 at 0.4 mult, still
+  // too high — flame cone could shred a player in 2s). 5/tick ×
+  // 12 ticks/sec × 0.17 ≈ 10 base DPS, scaling to ~17 with
+  // difficulty. Cone reads as a 'get out' threat, never a one-shot.
+  const ENEMY_FLAME_DAMAGE_MULT = 0.17;
   damagePlayer((weapon.damage || 5) * damageMult * ENEMY_FLAME_DAMAGE_MULT, 'fire',
     { source, zone: 'torso', distance: _flameDist });
 }

@@ -884,7 +884,7 @@ export class GunmanManager {
       const frontDot = hitDir ? -hitDir.x * fx - hitDir.z * fz : 1;
       if (zone === 'shield' || frontDot > 0.2) {
         const wClass = opts.weaponClass;
-        if (wClass === 'melee') {
+        if (wClass === 'melee' || opts.shieldBreaker) {
           g.shield.hp = 0;
           this._disableShield(g);
           return { drops, blocked: false, shieldBroke: true };

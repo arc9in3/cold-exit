@@ -637,7 +637,7 @@ export const tunables = {
       magSize: 10, reloadTime: 2.4,
     },
     {
-      unlockRank: 16, unlockCost: 2500,
+      unlockRank: 16, unlockCost: 2500, shieldBreaker: true,
       name: 'Cheytac Intervention', type: 'ranged', class: 'sniper', rarity: 'epic',
       attachmentSlots: ['muzzle', 'topRail', 'stock', 'trigger', 'underRail'],
       // .408 CheyTac is a bolt-action anti-materiel platform. ~0.4/s
@@ -1415,7 +1415,7 @@ export const tunables = {
       reloadTime: 4.0,
     },
     {
-      unlockRank: 15,
+      unlockRank: 15, shieldBreaker: true,
       name: 'AWP',
       type: 'ranged',
       class: 'sniper',
@@ -1442,7 +1442,7 @@ export const tunables = {
       reloadTime: 3.8,
     },
     {
-      unlockRank: 13,
+      unlockRank: 13, shieldBreaker: true,
       name: '.338 Lapua',
       type: 'ranged',
       class: 'sniper',

@@ -380,7 +380,7 @@ export class MeleeEnemyManager {
       const fx = Math.sin(e.group.rotation.y), fz = Math.cos(e.group.rotation.y);
       const frontDot = hitDir ? -hitDir.x * fx - hitDir.z * fz : 1;
       if (zone === 'shield' || frontDot > 0.2) {
-        if (opts.weaponClass === 'melee') {
+        if (opts.weaponClass === 'melee' || opts.shieldBreaker) {
           e.shield.hp = 0;
           this._disableShield(e);
           return { drops, blocked: false, shieldBroke: true };
