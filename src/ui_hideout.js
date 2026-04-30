@@ -84,7 +84,8 @@ const RARITY_INDEX = { common: 0, uncommon: 1, rare: 2, epic: 3, legendary: 4 };
 
 const TAB_DEFS = [
   { id: 'stash',        label: 'STASH'         },
-  { id: 'quartermaster',label: 'ARMORER' },
+  { id: 'vault',        label: 'VAULT'         },
+  { id: 'quartermaster',label: 'ARMORER'       },
   { id: 'vendors',      label: 'VENDORS'       },
   { id: 'blackmarket',  label: 'BLACK MARKET'  },
   { id: 'contractor',   label: 'CONTRACTOR'    },
@@ -576,6 +577,7 @@ export class HideoutUI {
     tabs.id = 'hideout-tabs';
     const tabToStation = {
       stash: 'stash',
+      vault: 'stash',
       quartermaster: 'quartermaster',
       vendors: 'vendors',
       contractor: 'contracts',
@@ -612,6 +614,7 @@ export class HideoutUI {
     const panel = document.createElement('div');
     panel.id = 'hideout-panel';
     if (this.tab === 'stash')              panel.appendChild(this._renderStashTab());
+    else if (this.tab === 'vault')         panel.appendChild(this._renderVaultTab());
     else if (this.tab === 'quartermaster') panel.appendChild(this._renderQuartermasterTab());
     else if (this.tab === 'vendors')       panel.appendChild(this._renderVendorsTab());
     else if (this.tab === 'blackmarket')   panel.appendChild(this._renderBlackMarketTab());
@@ -635,45 +638,17 @@ export class HideoutUI {
   // Right column: paperdoll showing the next-run loadout (selected
   // weapon + queued starter inventory + auto-equip preview).
   _renderStashTab() {
-    const wrap = document.createElement('div');
-    wrap.className = 'hideout-tab-body hideout-stash-root';
-
-    // 'armory' sub-tab moved to its own top-level ARMORER tab so the
-    // player has a single place to spend chips on weapon unlocks.
-    const SUB_TABS = [
-      { id: 'take',   label: 'TAKE A WEAPON' },
-      { id: 'store',  label: 'PRE-RUN STORE' },
-      { id: 'bank',   label: 'BANK' },
-    ];
-    if (this.stashSubTab === 'armory') this.stashSubTab = 'take';
-    const subBar = document.createElement('div');
-    subBar.className = 'hideout-substabs';
-    for (const t of SUB_TABS) {
-      const b = document.createElement('button');
-      b.type = 'button';
-      b.className = `hideout-subtab${this.stashSubTab === t.id ? ' active' : ''}`;
-      b.textContent = t.label;
-      b.addEventListener('click', () => { this.stashSubTab = t.id; this.render(); });
-      subBar.appendChild(b);
-    }
-    wrap.appendChild(subBar);
-
-    const cols = document.createElement('div');
-    cols.className = 'hideout-stash-twocol';
-    // Left column — sub-section content.
-    const leftCol = document.createElement('div');
-    leftCol.className = 'hideout-stash-leftcol';
-    if (this.stashSubTab === 'take')        leftCol.appendChild(this._renderTakeSection());
-    else if (this.stashSubTab === 'store')  leftCol.appendChild(this._renderStoreSection());
-    else if (this.stashSubTab === 'bank')   leftCol.appendChild(this._renderBankSection());
-    cols.appendChild(leftCol);
-    // Right column — paperdoll preview of next-run loadout.
-    const rightCol = document.createElement('div');
-    rightCol.className = 'hideout-paperdoll-col';
-    rightCol.appendChild(this._renderPaperdoll());
-    cols.appendChild(rightCol);
-    wrap.appendChild(cols);
-    return wrap;
+    // Stash IS the loadout view — paperdoll + armory + pre-run store —
+    // matching the contractor-stage's mission-prep step. The contract
+    // banner, confirm-loadout cta, and back-to-contracts buttons all
+    // belong to the contractor flow, so the standalone Stash tab
+    // suppresses them. The bottom-right Start Run cluster remains
+    // visible and handles run launches from here.
+    return this._renderMissionPrepSection({
+      withBanner: false,
+      withConfirm: false,
+      withBackButton: false,
+    });
   }
 
   // ----- TAKE A WEAPON section --------------------------------------
@@ -998,6 +973,25 @@ export class HideoutUI {
       };
     }
     return null;
+  }
+
+  // ----- VAULT tab — full-screen wrapper around the bank section.
+  // Bank holds extracted items + a chip-buyable slot grid (the Vault).
+  // Top-level tab so the player has a clear home for between-run
+  // item storage. Tabs entering 'vault' point at the same scene
+  // station as 'stash' since they're conceptually adjacent.
+  _renderVaultTab() {
+    const wrap = document.createElement('div');
+    wrap.className = 'hideout-tab-body';
+    const head = document.createElement('div');
+    head.className = 'hideout-section-head';
+    head.innerHTML = `
+      <div class="hideout-section-title">VAULT</div>
+      <div class="hideout-section-sub">Persistent item storage between runs. Items here survive death and can be loaded into your loadout for the next run.</div>
+    `;
+    wrap.appendChild(head);
+    wrap.appendChild(this._renderBankSection());
+    return wrap;
   }
 
   // ----- BANK section (legacy stash grid + extracted items) --------
@@ -1665,20 +1659,27 @@ export class HideoutUI {
   // with paperdoll equipment slots arranged around them, weapon list
   // on the right, Confirm Loadout button centered. Click a weapon to
   // select it as the run's primary; click Confirm to fire close().
-  _renderMissionPrepSection() {
+  // opts.withBanner    — show the contract banner (true on contractor stage)
+  // opts.withConfirm   — show the inline CONFIRM LOADOUT cta
+  // opts.withBackButton — show the "Back to contracts" button
+  // Stash tab calls this with all three off; contractor stage with all on.
+  _renderMissionPrepSection(opts = {}) {
+    const { withBanner = true, withConfirm = true, withBackButton = true } = opts;
     const wrap = document.createElement('div');
     wrap.className = 'contractor-loadout';
 
-    const ac = getActiveContract();
-    const def = ac ? defForId(ac.activeContractId) : null;
-    const banner = document.createElement('div');
-    banner.className = 'prep-banner';
-    banner.innerHTML = `
-      <div class="prep-eyebrow">MISSION PREP</div>
-      <div class="prep-title">${def ? def.label.toUpperCase() : 'NO CONTRACT ACTIVE'}</div>
-      ${def ? `<div class="prep-sub">${def.targetCount} × ${this._targetLabel(def.targetType, def.targetCount)}</div>` : ''}
-    `;
-    wrap.appendChild(banner);
+    if (withBanner) {
+      const ac = getActiveContract();
+      const def = ac ? defForId(ac.activeContractId) : null;
+      const banner = document.createElement('div');
+      banner.className = 'prep-banner';
+      banner.innerHTML = `
+        <div class="prep-eyebrow">MISSION PREP</div>
+        <div class="prep-title">${def ? def.label.toUpperCase() : 'NO CONTRACT ACTIVE'}</div>
+        ${def ? `<div class="prep-sub">${def.targetCount} × ${this._targetLabel(def.targetType, def.targetCount)}</div>` : ''}
+      `;
+      wrap.appendChild(banner);
+    }
 
     const selected = getSelectedStarterWeapon();
     const unlocked = getUnlockedWeapons();
@@ -1925,22 +1926,25 @@ export class HideoutUI {
     storeCol.appendChild(footer);
     wrap.appendChild(storeCol);
 
-    // ----- Confirm CTA + back -----
-    const confirm = document.createElement('button');
-    confirm.className = 'loadout-confirm';
-    confirm.type = 'button';
-    confirm.textContent = 'CONFIRM LOADOUT';
-    confirm.disabled = !selected;
-    confirm.addEventListener('click', () => {
-      if (!getSelectedStarterWeapon()) return;
-      this.close();
-    });
-    wrap.appendChild(confirm);
+    if (withConfirm) {
+      const confirm = document.createElement('button');
+      confirm.className = 'loadout-confirm';
+      confirm.type = 'button';
+      confirm.textContent = 'CONFIRM LOADOUT';
+      confirm.disabled = !selected;
+      confirm.addEventListener('click', () => {
+        if (!getSelectedStarterWeapon()) return;
+        this.close();
+      });
+      wrap.appendChild(confirm);
+    }
 
-    wrap.appendChild(this._renderBackButton('Back to contracts', () => {
-      this.contractorStep = 'cards';
-      this.render();
-    }));
+    if (withBackButton) {
+      wrap.appendChild(this._renderBackButton('Back to contracts', () => {
+        this.contractorStep = 'cards';
+        this.render();
+      }));
+    }
 
     return wrap;
   }
