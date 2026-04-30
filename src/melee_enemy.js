@@ -302,7 +302,7 @@ export class MeleeEnemyManager {
       // don't subtract from this pool because ranged hits to the shield
       // are absorbed entirely (fullBlock); melee/shotgun shatters it
       // outright. ~6-8 melee swings to break, exposing the 50-HP chassis.
-      e.shield = { mesh: shieldMesh, visor, hp: 110, maxHp: 110, fullBlock: true };
+      e.shield = { mesh: shieldMesh, visor, hp: 200, maxHp: 200, fullBlock: true };
     }
 
     this.enemies.push(e);
@@ -380,14 +380,29 @@ export class MeleeEnemyManager {
       const fx = Math.sin(e.group.rotation.y), fz = Math.cos(e.group.rotation.y);
       const frontDot = hitDir ? -hitDir.x * fx - hitDir.z * fz : 1;
       if (zone === 'shield' || frontDot > 0.2) {
-        if (opts.weaponClass === 'melee' || opts.shieldBreaker) {
+        if (opts.weaponClass === 'melee') {
           e.shield.hp = 0;
           this._disableShield(e);
           return { drops, blocked: false, shieldBroke: true };
         }
-        // Bullets — fully blocked. No HP chip, no damage to chassis.
+        if (opts.shieldBreaker) {
+          // Magnum-class hits chip the shield's 200 HP pool. Damage
+          // already includes any crit roll from the bullet path so a
+          // crit landing on the shield does 2× chip damage. No
+          // weakspot — flat dmg = damage.
+          e.shield.hp -= damage;
+          e.flashT = tunables.enemy.hitFlashTime;
+          if (e.shield.hp <= 0) {
+            e.shield.hp = 0;
+            this._disableShield(e);
+            return { drops, blocked: false, shieldBroke: true, shieldDamage: damage };
+          }
+          return { drops, blocked: true, shieldHit: true, shieldDamage: damage };
+        }
+        // Non-breaker bullet — fully blocked. Shield flash + show
+        // 0 dmg so the player sees the shot landed but did nothing.
         e.flashT = tunables.enemy.hitFlashTime;
-        return { drops, blocked: true, shieldHit: true };
+        return { drops, blocked: true, shieldHit: true, shieldBlocked: true, shieldDamage: 0 };
       }
     }
 

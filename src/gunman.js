@@ -414,8 +414,8 @@ export class GunmanManager {
     g.shield = {
       mesh: plate,
       decorRoot: root,
-      hp: full ? 220 : 80,
-      maxHp: full ? 220 : 80,
+      hp: full ? 200 : 80,
+      maxHp: full ? 200 : 80,
       fullBlock: full,
     };
   }
@@ -884,17 +884,29 @@ export class GunmanManager {
       const frontDot = hitDir ? -hitDir.x * fx - hitDir.z * fz : 1;
       if (zone === 'shield' || frontDot > 0.2) {
         const wClass = opts.weaponClass;
-        if (wClass === 'melee' || opts.shieldBreaker) {
+        if (wClass === 'melee') {
           g.shield.hp = 0;
           this._disableShield(g);
           return { drops, blocked: false, shieldBroke: true };
         }
         if (g.shield.fullBlock) {
-          // Bullets bounce off — visual flash only, no HP touched on
-          // either the shield or the chassis behind it.
+          if (opts.shieldBreaker) {
+            // Magnum-class hits chip the 200-HP shield pool. Damage
+            // already includes any crit roll from the bullet path.
+            g.shield.hp -= damage;
+            g.flashT = tunables.enemy.hitFlashTime;
+            if (g.state === STATE.IDLE) g.state = STATE.ALERTED;
+            if (g.shield.hp <= 0) {
+              g.shield.hp = 0;
+              this._disableShield(g);
+              return { drops, blocked: false, shieldBroke: true, shieldDamage: damage };
+            }
+            return { drops, blocked: true, shieldHit: true, shieldDamage: damage };
+          }
+          // Non-breaker bullet — fully blocked. Flash + 0 damage.
           g.flashT = tunables.enemy.hitFlashTime;
           if (g.state === STATE.IDLE) g.state = STATE.ALERTED;
-          return { drops, blocked: true, shieldHit: true };
+          return { drops, blocked: true, shieldHit: true, shieldBlocked: true, shieldDamage: 0 };
         }
         // Partial shield — old chip-through behaviour. 60% absorbed,
         // remainder bleeds onto the chassis.

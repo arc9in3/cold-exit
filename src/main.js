@@ -5989,8 +5989,19 @@ function fireOneShot(playerInfo, weapon, aimPoint, isADS, aimOwner, aimZone) {
         dmg = Math.max(dmg, (hit.owner.hp || 1) + 1);
       }
       const wasAlive = hit.owner.alive;
-      runStats.addDamage(dmg);
       const result = hit.owner.manager.applyHit(hit.owner, dmg, hit.zone, dir, { weaponClass: weapon.class, shieldBreaker: !!weapon.shieldBreaker });
+      // Shield interactions short-circuit the body-damage path. The
+      // shield itself shows its own damage number (0 for a fully
+      // blocked shot, the chip amount for a shield-breaker hit) and
+      // skips the body aggregator + bloodburst + runStats credit.
+      if (result.shieldHit) {
+        const shieldDmg = result.shieldDamage | 0;
+        spawnDamageNumber(hit.point, camera, shieldDmg, null);
+        combat.spawnImpact(hit.point);
+        if (shieldDmg > 0) runStats.addDamage(shieldDmg);
+        continue;
+      }
+      runStats.addDamage(dmg);
       for (const drop of result.drops) loot.spawnItem(drop.position, wrapWeapon(drop.weapon));
       // Tutorial step ticks on hit-zone — landing the right zone on a
       // tutorial dummy proves the lesson. The arm zone has a random
