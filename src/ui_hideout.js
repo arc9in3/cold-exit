@@ -757,8 +757,14 @@ export class HideoutUI {
     wrap.appendChild(head);
 
     const unlocked = getUnlockedWeapons();
+    // A weapon shows up in the chip-buy locked column if it's flagged
+    // worldDrop:false (locked from world entirely) OR it carries an
+    // explicit unlockRank (rank-gated chip-buy that ALSO drops in
+    // runs — the iconic 5). Mythics and artifacts are excluded.
     const locked = tunables.weapons.filter(w =>
-      w.worldDrop === false && !w.artifact && !unlocked.has(w.name));
+      (w.worldDrop === false || (w.unlockRank | 0) > 0)
+      && !w.mythic && w.rarity !== 'mythic'
+      && !w.artifact && !unlocked.has(w.name));
     if (!locked.length) {
       const p = document.createElement('div');
       p.className = 'hideout-placeholder';
@@ -1824,9 +1830,14 @@ export class HideoutUI {
     // they actually have, categorized by class.
     const armoryCol = document.createElement('div');
     armoryCol.className = 'loadout-armorycol loadout-panel';
+    // Locked column = either world-locked (worldDrop:false) OR
+    // rank-gated (explicit unlockRank). The iconic 5 sit in the
+    // second bucket so they remain chip-buyable for permanent stash
+    // access even though they also drop in runs.
     const lockedAll = tunables.weapons.filter(w =>
       !w.mythic && w.rarity !== 'mythic'
-      && w.worldDrop === false && !unlocked.has(w.name));
+      && (w.worldDrop === false || (w.unlockRank | 0) > 0)
+      && !unlocked.has(w.name));
 
     const RARITY_COSTS = { common: 150, uncommon: 350, rare: 800, epic: 2000, legendary: 5000 };
     const rank = getContractRank();
