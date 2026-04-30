@@ -1507,6 +1507,9 @@ const hideoutUI = new HideoutUI({
   // WebGLRenderer so we don't spin up a second GL context. main.js
   // tick swaps which scene is being rendered based on hideoutUI.visible.
   getRenderer: () => renderer,
+  // Leaderboard accessor — hideout's contractor leaderboard block
+  // + full-screen leaderboards step read top entries via this.
+  getLeaderboard: () => Leaderboard,
   applyCharacterStyle: (v) => {
     // Pushes the silhouette change to the live rig so the change is
     // visible the moment the player closes the hideout, not just on
@@ -1534,13 +1537,23 @@ const hideoutUI = new HideoutUI({
     return wrapWeapon({ ...pick, rarity });
   },
   onClose: () => {
-    // Hideout's "Start New Run" — kick the existing class-picker
-    // flow so the player can choose loadout. Once the diegetic
-    // stash-room weapon-pick lands this becomes the camera-zoom
-    // path; for now it surfaces the existing class picker via the
-    // main-menu Play hook.
+    // Hideout's "Start Run" / "Confirm Loadout" — the player has
+    // already chosen a contract + weapon in the mission-prep screen,
+    // so launch directly into gameplay with that loadout. Skip the
+    // legacy rolled-store + class-picker flow entirely.
     mainMenuUI.hide();
-    if (mainMenuUI.onPlay) mainMenuUI.onPlay();
+    const selectedName = getSelectedStarterWeapon();
+    const def = selectedName
+      ? tunables.weapons.find(w => w.name === selectedName)
+      : null;
+    if (def) {
+      input.clearMouseState();
+      startRunWithWeaponDef({ ...def, rarity: 'common' });
+    } else if (mainMenuUI.onPlay) {
+      // Fallback — no weapon selected somehow; route through the
+      // legacy picker so the player isn't stranded.
+      mainMenuUI.onPlay();
+    }
   },
   onExitToTitle: () => {
     // Back button — return to the main menu without starting a run.

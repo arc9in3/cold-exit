@@ -362,7 +362,11 @@ export function getStoreState() {
     slots: Math.max(STORE_SLOT_MIN, Math.min(STORE_SLOT_MAX, (raw.slots | 0) || STORE_SLOT_MIN)),
     ceiling: Math.max(0, Math.min(STORE_CEILING_MAX, raw.ceiling | 0)),
     refreshMs: Math.max(STORE_REFRESH_MIN_MS, (raw.refreshMs | 0) || STORE_REFRESH_DEFAULT_MS),
-    lastRefreshAt: raw.lastRefreshAt | 0,
+    // ms timestamps overflow int32 (Date.now() ~1.76 trillion). Use
+    // Number coercion + Math.max so we never apply the `| 0` truncation
+    // that previously zeroed the timestamp on every save and caused
+    // the store to reroll on every render.
+    lastRefreshAt: Math.max(0, Number(raw.lastRefreshAt) || 0),
     stock: Array.isArray(raw.stock) ? raw.stock : [],
   };
 }
@@ -371,7 +375,8 @@ export function setStoreState(state) {
     slots: Math.max(STORE_SLOT_MIN, Math.min(STORE_SLOT_MAX, state?.slots | 0 || STORE_SLOT_MIN)),
     ceiling: Math.max(0, Math.min(STORE_CEILING_MAX, state?.ceiling | 0)),
     refreshMs: Math.max(STORE_REFRESH_MIN_MS, state?.refreshMs | 0 || STORE_REFRESH_DEFAULT_MS),
-    lastRefreshAt: state?.lastRefreshAt | 0,
+    // See note in getStoreState — keep the full ms timestamp.
+    lastRefreshAt: Math.max(0, Number(state?.lastRefreshAt) || 0),
     stock: Array.isArray(state?.stock) ? state.stock : [],
   });
 }
@@ -607,18 +612,19 @@ export function getActiveContract() {
   if (!v || typeof v !== 'object') return null;
   return {
     activeContractId: typeof v.activeContractId === 'string' ? v.activeContractId : null,
-    expiresAt: v.expiresAt | 0,
+    // ms timestamps overflow int32 — Number-coerce instead of `| 0`.
+    expiresAt: Math.max(0, Number(v.expiresAt) || 0),
     progress: v.progress && typeof v.progress === 'object' ? v.progress : {},
-    claimedAt: v.claimedAt | 0,
+    claimedAt: Math.max(0, Number(v.claimedAt) || 0),
   };
 }
 export function setActiveContract(c) {
   if (!c) { _write(CONTRACTS_KEY, null); return; }
   _write(CONTRACTS_KEY, {
     activeContractId: c.activeContractId || null,
-    expiresAt: c.expiresAt | 0,
+    expiresAt: Math.max(0, Number(c.expiresAt) || 0),
     progress: c.progress || {},
-    claimedAt: c.claimedAt | 0,
+    claimedAt: Math.max(0, Number(c.claimedAt) || 0),
   });
 }
 export function clearActiveContract() { _write(CONTRACTS_KEY, null); }

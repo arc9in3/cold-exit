@@ -1737,45 +1737,76 @@ export class HideoutUI {
     // bandages.
     const charCol = document.createElement('div');
     charCol.className = 'loadout-charcol';
-    // Paperdoll mirrors the in-game inventory's slot order — top-to-
-    // bottom: head row → torso row → mid row → legs row → weapons
-    // row. Vertical stack matches what the player sees in-game; the
-    // figure sits in its own dedicated band so the slots read
-    // straight down without a square-frame layout.
+    // Paperdoll laid out per the in-game equipment screen: three
+    // columns (left slots, center figure + callout panels, right
+    // slots). Each slot tile is a label-top + icon-centered card
+    // matching the in-game look. Center column has the character
+    // silhouette plus three info panels: GEAR BONUSES (top), RELICS
+    // (mid), SKILLS (bottom). Pre-run defaults pre-fill chest /
+    // pants / backpack / primary weapon when set.
     const bandageIcon = iconForItem(CONSUMABLE_DEFS?.bandage) || '';
+    const selectedDef = selected
+      ? tunables.weapons.find(w => w.name === selected)
+      : null;
+    const selectedIcon = selectedDef ? iconForItem({
+      name: selectedDef.name, baseName: selectedDef.name,
+      type: selectedDef.type, class: selectedDef.class,
+    }) : '';
+    const slotTile = (key, label, item, iconUrl, glyph) => {
+      const filled = !!item;
+      const art = filled && iconUrl
+        ? `<img class="pd-tile-art" src="${iconUrl}" alt="">`
+        : (filled
+          ? `<div class="pd-tile-name">${item}</div>`
+          : `<div class="pd-tile-glyph">${glyph || ''}</div>`);
+      return `
+        <div class="pd-tile pd-${key}${filled ? ' filled' : ''}">
+          <div class="pd-tile-label">${label}</div>
+          <div class="pd-tile-icon">${art}</div>
+        </div>
+      `;
+    };
     charCol.innerHTML = `
-      <div class="prep-section-head">PAPERDOLL</div>
-      <div class="paperdoll-vstack">
-        <div class="pd-figure-tall"><div class="pd-figure-glyph">◇</div></div>
-        <div class="pd-row">
-          <div class="pd-slot pd-head"   data-slot="head">HEAD</div>
-          <div class="pd-slot pd-face"   data-slot="face">FACE</div>
-          <div class="pd-slot pd-ears"   data-slot="ears">EARS</div>
+      <div class="prep-section-head">EQUIPMENT</div>
+      <div class="paperdoll-grid3">
+        <div class="pd-col pd-col-left">
+          ${slotTile('head',  'HEAD',  null, null, '◐')}
+          ${slotTile('face',  'FACE',  null, null, '◉')}
+          ${slotTile('ears',  'EARS',  null, null, '◜◝')}
+          ${slotTile('chest', 'CHEST', 'Shirt', null, '◧')}
+          ${slotTile('hands', 'HANDS', null, null, '✋')}
         </div>
-        <div class="pd-row">
-          <div class="pd-slot pd-chest filled"  data-slot="chest">CHEST<br><b>Shirt</b></div>
-          <div class="pd-slot pd-hands"          data-slot="hands">HANDS</div>
-          <div class="pd-slot pd-backpack filled" data-slot="backpack">PACK<br><b>Small</b></div>
-        </div>
-        <div class="pd-row">
-          <div class="pd-slot pd-belt"   data-slot="belt">BELT</div>
-          <div class="pd-slot pd-pants filled" data-slot="pants">PANTS<br><b>Combat</b></div>
-          <div class="pd-slot pd-boots"  data-slot="boots">BOOTS</div>
-        </div>
-        <div class="pd-row">
-          <div class="pd-slot pd-primary ${selected ? 'filled' : ''}" data-slot="weapon1">
-            PRIMARY<br><b>${selected ? selected : '—'}</b>
+        <div class="pd-col pd-col-center">
+          <div class="pd-callout pd-callout-bonus">
+            <div class="pd-callout-label">GEAR BONUSES</div>
+            <div class="pd-callout-body">No set bonuses, perks, or affixes yet — equip gear to grow your power.</div>
           </div>
-          <div class="pd-slot" data-slot="weapon2">SLOT 2</div>
-          <div class="pd-slot pd-melee" data-slot="melee">MELEE</div>
+          <div class="pd-figure-frame"><div class="pd-figure-glyph">◇</div></div>
+          <div class="pd-callout pd-callout-relics">
+            <div class="pd-callout-label">RELICS</div>
+            <div class="pd-callout-body">No relics yet — finish encounters or buy from the relic-seller.</div>
+          </div>
+          <div class="pd-callout pd-callout-skills">
+            <div class="pd-callout-label">SKILLS</div>
+            <div class="pd-callout-body">No skills yet — kill enemies to level up.</div>
+          </div>
         </div>
+        <div class="pd-col pd-col-right">
+          ${slotTile('backpack', 'BACKPACK', 'Small', null, '⊞')}
+          ${slotTile('weapon1',  'WEAPON 1', selected || null, selectedIcon, '▶')}
+          ${slotTile('weapon2',  'WEAPON 2', null, null, '▶')}
+          ${slotTile('melee',    'MELEE',    null, null, '✕')}
+          ${slotTile('belt',     'BELT',     null, null, '━')}
+          ${slotTile('pants',    'PANTS',    'Combat', null, '⊓')}
+          ${slotTile('boots',    'BOOTS',    null, null, '◣')}
+        </div>
+      </div>
 
-        <div class="pd-starter-strip" title="Run starts with these items in your pockets.">
-          <div class="pd-starter-label">STARTING POCKETS</div>
-          <div class="pd-starter-icons">
-            ${bandageIcon ? `<div class="pd-starter-ico"><img src="${bandageIcon}" alt="Bandage"></div>`.repeat(3) : '<div class="pd-starter-ico empty">×3</div>'}
-            <div class="pd-starter-ico throwable">⊕</div>
-          </div>
+      <div class="pd-starter-strip" title="Run starts with these items in your pockets.">
+        <div class="pd-starter-label">STARTING POCKETS</div>
+        <div class="pd-starter-icons">
+          ${bandageIcon ? `<div class="pd-starter-ico"><img src="${bandageIcon}" alt="Bandage"></div>`.repeat(3) : '<div class="pd-starter-ico empty">×3</div>'}
+          <div class="pd-starter-ico throwable">⊕</div>
         </div>
       </div>
     `;
@@ -1821,14 +1852,15 @@ export class HideoutUI {
     availCol.innerHTML = `<div class="armory-half-head">AVAILABLE</div>`;
     const availGrid = document.createElement('div');
     availGrid.className = 'armory-tile-grid';
+    // Stable sort — class first, then rarity, then name. Selecting
+    // a weapon does NOT promote it to the front; the highlight reads
+    // entirely via CSS state so tiles don't visibly reshuffle on
+    // every click.
     const availSorted = available.slice().sort((a, b) => {
-      if (a.name === selected) return -1;
-      if (b.name === selected) return 1;
+      if (a.class !== b.class) return (a.class || '').localeCompare(b.class || '');
       const ar = RARITY_RANK[a.rarity || 'common'] ?? 5;
       const br = RARITY_RANK[b.rarity || 'common'] ?? 5;
       if (ar !== br) return ar - br;
-      // Then by class so similar weapons cluster, then alphabetical.
-      if (a.class !== b.class) return (a.class || '').localeCompare(b.class || '');
       return a.name.localeCompare(b.name);
     });
     for (const w of availSorted) {
@@ -2204,39 +2236,52 @@ export class HideoutUI {
     return tile;
   }
 
-  // Mini-tile — same compact size as the pre-mission store tiles
-  // for visual consistency. Four states: 'owned' (selectable),
-  // 'taking' (currently selected, gold), 'buyable' (chip cost,
-  // click to unlock), 'locked' (silhouette + rank requirement).
+  // Armory mini-tile — same shape + size as the pre-mission store
+  // tiles. Icon on top, name, class·rarity meta, stat snippet, then
+  // an optional state badge or unlock button at the bottom. Four
+  // states: 'owned' (click to select), 'taking' (currently selected,
+  // gold border), 'buyable' (Unlock button with chip cost), 'locked'
+  // (silhouette + "Rank N to unlock"). Stats are always shown so
+  // the player can compare weapons at a glance.
   _buildArmoryMiniTile(weapon, state, cost, onClick, reqRank) {
-    const tile = document.createElement('button');
-    tile.type = 'button';
+    const tile = document.createElement('div');
     tile.className = `armory-mini rarity-${weapon.rarity || 'common'} state-${state}`;
     tile.style.borderColor = rarityColor({ rarity: weapon.rarity });
     const icon = state === 'locked' ? null : iconForItem({
       name: weapon.name, baseName: weapon.name, type: weapon.type, class: weapon.class,
     });
-    let badge = '';
-    if (state === 'taking')      badge = `<div class="amini-badge taking">TAKING</div>`;
-    else if (state === 'buyable')badge = `<div class="amini-badge buy">${cost}c</div>`;
-    else if (state === 'locked') badge = `<div class="amini-badge locked">RANK ${reqRank}</div>`;
+    const dmg = weapon.damage != null ? `<span class="amini-stat">DMG ${weapon.damage}</span>` : '';
+    const rps = weapon.fireRate != null ? `<span class="amini-stat">RPS ${weapon.fireRate}</span>` : '';
+    const range = weapon.range != null ? `<span class="amini-stat">RNG ${weapon.range}</span>` : '';
+    const showStats = state !== 'locked';
+
+    let action = '';
+    if (state === 'taking')       action = `<div class="amini-cta taking">TAKING</div>`;
+    else if (state === 'owned')   action = `<button type="button" class="amini-cta select">Take</button>`;
+    else if (state === 'buyable') action = `<button type="button" class="amini-cta buy">Unlock · ${cost}c</button>`;
+    else if (state === 'locked')  action = `<div class="amini-cta locked">Rank ${reqRank} to reveal</div>`;
 
     tile.innerHTML = `
-      ${badge}
       <div class="amini-icon">
         ${icon
           ? `<img src="${icon}" alt="">`
           : `<div class="amini-icon-fallback">?</div>`}
       </div>
       <div class="amini-name">${state === 'locked' ? '???' : weapon.name}</div>
+      <div class="amini-meta">${weapon.class || ''}${weapon.rarity ? ` · ${weapon.rarity}` : ''}</div>
+      <div class="amini-stats">${showStats ? (dmg + rps + range) : ''}</div>
+      ${action}
     `;
     tile.title = state === 'locked'
       ? `Locked — reach Rank ${reqRank} to unlock for purchase.`
       : state === 'buyable'
         ? `Unlock ${weapon.name} for ${cost}c (${weapon.rarity || 'common'} ${weapon.class || ''})`
         : `${weapon.name} · ${weapon.rarity || 'common'} ${weapon.class || ''}`;
-    if (state === 'locked') tile.disabled = true;
-    else if (onClick) tile.addEventListener('click', onClick);
+    const cta = tile.querySelector('button.amini-cta');
+    if (cta && onClick && state !== 'locked') {
+      if (state === 'buyable') cta.disabled = getPersistentChips() < cost;
+      cta.addEventListener('click', (e) => { e.stopPropagation(); onClick(); });
+    }
     return tile;
   }
 
@@ -3232,59 +3277,50 @@ export class HideoutUI {
         padding: 16px 8px; text-align: center;
         grid-column: 1 / -1;
       }
+      /* Tile grid — cells stay top-aligned, never stretch to fill
+         empty vertical space. */
       .armory-tile-grid {
         flex: 1; min-height: 0; overflow-y: auto;
         display: grid;
-        grid-template-columns: repeat(auto-fill, minmax(70px, 1fr));
-        gap: 6px; padding-right: 2px;
+        grid-template-columns: repeat(auto-fill, minmax(120px, 1fr));
+        gap: 8px; padding-right: 2px;
+        align-content: start;
       }
 
-      /* Mini tile — same scale as the pre-mission store tiles */
+      /* Mini tile — same shape + scale as the pre-mission store
+         tiles. Icon on top, name, meta, stat snippet, action CTA. */
       .armory-mini {
-        position: relative;
-        background: linear-gradient(180deg, rgba(26,29,36,0.92), rgba(14,16,24,0.94));
+        background: linear-gradient(180deg, #1a1d24, #131720);
         border: 1px solid #2a2f3a; border-radius: 4px;
-        padding: 4px;
-        cursor: pointer; font: inherit; color: #e8dfc8;
-        text-align: center;
-        display: flex; flex-direction: column; align-items: center; gap: 2px;
-        transition: transform 0.12s, box-shadow 0.12s;
-      }
-      .armory-mini:hover:not(:disabled) {
-        transform: translateY(-2px);
-        box-shadow: 0 4px 10px rgba(0,0,0,0.6);
+        padding: 8px;
+        font: inherit; color: #e8dfc8;
+        display: flex; flex-direction: column; gap: 4px;
       }
       .armory-mini.state-taking {
         background: linear-gradient(180deg, rgba(40,32,12,0.98), rgba(24,18,6,0.98));
-        box-shadow: 0 0 14px rgba(242,192,96,0.35);
+        box-shadow: 0 0 12px rgba(242,192,96,0.35);
       }
       .armory-mini.state-locked {
-        opacity: 0.5; cursor: not-allowed; filter: grayscale(0.6);
+        opacity: 0.55; filter: grayscale(0.5);
       }
       .armory-mini.rarity-uncommon  { background: linear-gradient(180deg, rgba(18,28,20,0.92), rgba(10,16,12,0.92)); }
       .armory-mini.rarity-rare      { background: linear-gradient(180deg, rgba(18,26,38,0.92), rgba(10,14,24,0.92)); }
       .armory-mini.rarity-epic      { background: linear-gradient(180deg, rgba(26,16,38,0.92), rgba(14,8,24,0.92)); }
       .armory-mini.rarity-legendary { background: linear-gradient(180deg, rgba(38,26,10,0.95), rgba(22,16,6,0.95)); }
-      .amini-badge {
-        position: absolute; top: -5px; right: -3px;
-        background: #4a505a; color: #c9a87a;
-        font-size: 8px; font-weight: 800; letter-spacing: 0.6px;
-        padding: 2px 5px; border-radius: 2px;
-        box-shadow: 0 1px 4px rgba(0,0,0,0.5);
-      }
-      .amini-badge.taking { background: #f2c060; color: #1a1408; letter-spacing: 1.2px; }
-      .amini-badge.buy    { background: #5a8acf; color: #fff; }
-      .amini-badge.locked { background: #2a2f3a; color: #6f6754; font-size: 8px; }
+
       .amini-icon {
-        width: 100%; aspect-ratio: 1;
-        background: rgba(0,0,0,0.35); border-radius: 3px;
+        height: 56px;
+        background: rgba(0,0,0,0.3); border-radius: 3px;
         display: flex; align-items: center; justify-content: center;
       }
-      .amini-icon img { max-width: 84%; max-height: 84%; image-rendering: pixelated; object-fit: contain; }
-      .amini-icon-fallback { font-size: 22px; color: rgba(155,139,106,0.4); font-weight: 700; }
+      .amini-icon img {
+        max-width: 100%; max-height: 100%;
+        image-rendering: pixelated; object-fit: contain;
+      }
+      .amini-icon-fallback { font-size: 28px; color: rgba(155,139,106,0.45); font-weight: 700; }
       .amini-name {
-        font-size: 9px; font-weight: 700; letter-spacing: 0.2px;
-        color: #e8dfc8; line-height: 1.15;
+        font-size: 12px; font-weight: 700; letter-spacing: 0.4px;
+        line-height: 1.2;
         max-width: 100%; overflow: hidden;
         white-space: nowrap; text-overflow: ellipsis;
       }
@@ -3292,6 +3328,44 @@ export class HideoutUI {
       .armory-mini.rarity-rare      .amini-name { color: #5a8acf; }
       .armory-mini.rarity-epic      .amini-name { color: #b870e0; }
       .armory-mini.rarity-legendary .amini-name { color: #f2a040; }
+      .amini-meta {
+        font-size: 9px; color: #9b8b6a; letter-spacing: 0.4px;
+        text-transform: uppercase;
+      }
+      .amini-stats {
+        display: flex; gap: 6px; flex-wrap: wrap;
+        font-size: 10px; min-height: 13px;
+      }
+      .amini-stat { color: #c9a87a; }
+      .amini-cta {
+        margin-top: 2px; padding: 5px;
+        font: inherit; font-size: 10px; font-weight: 700;
+        letter-spacing: 1px; text-transform: uppercase;
+        border: 1px solid #4a505a; border-radius: 3px;
+        text-align: center; cursor: pointer;
+        background: linear-gradient(180deg, #2a2f3a, #1a1d24);
+        color: #c9a87a;
+      }
+      button.amini-cta:hover:not(:disabled) {
+        background: linear-gradient(180deg, #3a3f4a, #2a2d34);
+        color: #e8dfc8;
+      }
+      button.amini-cta:disabled { opacity: 0.45; cursor: not-allowed; }
+      .amini-cta.taking {
+        background: linear-gradient(180deg, #f2c060, #c98a3a);
+        color: #1a1408; border-color: #f2c060;
+      }
+      .amini-cta.buy {
+        background: linear-gradient(180deg, #2a4a6e, #1e3450);
+        color: #e8dfc8; border-color: #5a8acf;
+      }
+      button.amini-cta.buy:hover:not(:disabled) {
+        background: linear-gradient(180deg, #3a5a7e, #2e4460);
+      }
+      .amini-cta.locked {
+        background: rgba(20,24,32,0.5); color: #6f6754;
+        border-style: dashed;
+      }
 
       /* Store sub-blurb */
       .store-blurb {
@@ -3448,38 +3522,78 @@ export class HideoutUI {
         display: flex; flex-direction: column; gap: 14px;
         overflow-y: auto;
       }
-      /* Vertical paperdoll stack — figure on top, slot rows beneath
-         in head→torso→legs→weapons order. Mirrors the in-game
-         inventory's column-down read. */
-      .paperdoll-vstack {
-        display: flex; flex-direction: column; gap: 8px;
-      }
-      .pd-figure-tall {
-        background: radial-gradient(ellipse at 50% 30%, #2a2030 0%, #0a0a14 80%);
-        border: 1px solid rgba(178,112,224,0.3);
-        border-radius: 6px;
-        display: flex; align-items: center; justify-content: center;
-        height: 130px;
-      }
-      .pd-row {
-        display: grid; grid-template-columns: repeat(3, 1fr);
+      /* Paperdoll — 3-column layout matching the in-game equipment
+         screen. Left + right columns hold slot tiles; center holds
+         the character figure plus three callout panels. */
+      .paperdoll-grid3 {
+        display: grid;
+        grid-template-columns: 1fr 1.4fr 1fr;
         gap: 6px;
       }
-      .pd-slot {
-        background: rgba(20,24,32,0.88); border: 1px solid #2a2f3a;
-        border-radius: 4px; padding: 6px 6px;
-        font-size: 9px; letter-spacing: 1px; color: #6f6754;
-        text-align: center; line-height: 1.3;
-        display: flex; flex-direction: column; align-items: center; justify-content: center;
+      .pd-col { display: flex; flex-direction: column; gap: 4px; }
+
+      .pd-tile {
+        position: relative;
+        background: linear-gradient(180deg, rgba(27,30,36,0.82), rgba(20,23,29,0.82));
+        border: 1px solid #2c323c; border-radius: 5px;
+        padding: 6px 4px;
+        display: flex; flex-direction: column; align-items: center;
+        gap: 4px;
+        min-height: 56px;
       }
-      .pd-slot b {
-        color: #e8dfc8; font-weight: 700;
-        font-size: 11px; letter-spacing: 0.4px;
+      .pd-tile.filled {
+        background: linear-gradient(180deg, rgba(38,43,52,0.95), rgba(28,32,40,0.95));
+        border-color: #4a5968;
       }
-      .pd-slot.filled { border-color: #5a8acf; background: rgba(20,30,46,0.85); color: #9b8b6a; }
-      .pd-primary.filled { border-color: #f2c060; }
+      .pd-tile.pd-weapon1.filled { border-color: #f2c060; }
+      .pd-tile-label {
+        font-size: 9px; letter-spacing: 1.4px; color: #7a6f54;
+      }
+      .pd-tile.filled .pd-tile-label { color: #c9a87a; }
+      .pd-tile-icon {
+        flex: 1;
+        display: flex; align-items: center; justify-content: center;
+        min-height: 26px; max-height: 36px;
+      }
+      .pd-tile-glyph {
+        font-size: 16px; color: #4a505a; opacity: 0.7;
+      }
+      .pd-tile-art {
+        max-width: 100%; max-height: 100%;
+        object-fit: contain; image-rendering: pixelated;
+      }
+      .pd-tile-name {
+        font-size: 10px; color: #e8dfc8; font-weight: 700;
+        letter-spacing: 0.4px; text-align: center;
+        overflow: hidden; white-space: nowrap; text-overflow: ellipsis;
+        max-width: 100%;
+      }
+
+      /* Center column callouts + figure */
+      .pd-col-center { gap: 6px; }
+      .pd-figure-frame {
+        flex: 1; min-height: 140px;
+        background: radial-gradient(ellipse at 50% 35%, #20232c 0%, #0c0f15 80%);
+        border: 1px solid #2c323c; border-radius: 5px;
+        display: flex; align-items: center; justify-content: center;
+      }
       .pd-figure-glyph {
-        font-size: 64px; color: rgba(201,168,122,0.55);
+        font-size: 56px; color: rgba(155,139,106,0.45);
+      }
+      .pd-callout {
+        background: rgba(20,23,29,0.85);
+        border: 1px solid #2c323c; border-radius: 5px;
+        padding: 6px 8px; text-align: center;
+      }
+      .pd-callout-label {
+        font-size: 10px; letter-spacing: 1.6px; font-weight: 700;
+        color: #c9a87a; margin-bottom: 2px;
+      }
+      .pd-callout-relics .pd-callout-label { color: #b870e0; }
+      .pd-callout-skills .pd-callout-label { color: #6abf78; }
+      .pd-callout-body {
+        font-size: 9px; color: #6f6754; line-height: 1.35;
+        font-style: italic;
       }
 
       /* Starter pocket icon strip — replaces the bigger pockets/
