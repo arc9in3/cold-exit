@@ -338,12 +338,12 @@ export function setSelectedStarterWeapon(name) {
 // `kind` is one of: 'weapon' | 'armor' | 'consumable' | 'ammo' | 'buff'
 // ---------------------------------------------------------------------
 const STORE_KEY = 'tacticalrogue:preRunStore:v1';
-export const STORE_SLOT_MIN = 4;
-export const STORE_SLOT_MAX = 8;
+export const STORE_SLOT_MIN = 6;
+export const STORE_SLOT_MAX = 10;
 export const STORE_CEILING_MAX = 4;
 export const STORE_REFRESH_DEFAULT_MS = 4 * 60 * 60 * 1000;   // 4h
 export const STORE_REFRESH_MIN_MS     = 1 * 60 * 60 * 1000;   // 1h floor
-export const STORE_SLOT_COSTS    = [200, 400, 700, 1100];     // buying slot 5..8
+export const STORE_SLOT_COSTS    = [400, 700, 1100, 1700];    // buying slot 7..10
 export const STORE_CEILING_COSTS = [250, 500, 900, 1500];     // ceiling 1..4
 export const STORE_REFRESH_COSTS = [300, 600, 1200];          // refresh tier upgrades
 

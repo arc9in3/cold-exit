@@ -61,6 +61,11 @@ const STORE_KINDS = [
   { kind: 'armor',      weight: 45 },
 ];
 const STORE_ARMOR_CATALOG = [
+  // Common-tier entries — small, cheap pieces so a starting player at
+  // ceiling 0 always has something to buy in the store.
+  { id: 'chest_light',        name: 'Light Vest',      kind: 'armor', slot: 'chest',    rarity: 'common',   basePrice: 80  },
+  { id: 'helmet_cap',         name: 'Padded Cap',      kind: 'armor', slot: 'head',     rarity: 'common',   basePrice: 50  },
+  { id: 'backpack_small',     name: 'Small Pack',      kind: 'armor', slot: 'backpack', rarity: 'common',   basePrice: 70  },
   { id: 'chest_med',          name: 'Combat Vest',     kind: 'armor', slot: 'chest',    rarity: 'uncommon', basePrice: 220 },
   { id: 'chest_heavy',        name: 'Heavy Plate',     kind: 'armor', slot: 'chest',    rarity: 'rare',     basePrice: 480 },
   { id: 'helmet_kevlar',      name: 'Kevlar Helmet',   kind: 'armor', slot: 'head',     rarity: 'uncommon', basePrice: 180 },
@@ -68,9 +73,13 @@ const STORE_ARMOR_CATALOG = [
   { id: 'backpack_large',     name: 'Large Pack',      kind: 'armor', slot: 'backpack', rarity: 'rare',     basePrice: 420 },
 ];
 const STORE_CONSUMABLE_CATALOG = [
-  { id: 'medkit',  name: 'Medkit',  kind: 'consumable', rarity: 'common',   basePrice: 60,  qty: 2 },
-  { id: 'bandage', name: 'Bandage', kind: 'consumable', rarity: 'common',   basePrice: 25,  qty: 3 },
-  { id: 'stim',    name: 'Stim',    kind: 'consumable', rarity: 'uncommon', basePrice: 90,  qty: 1 },
+  // Smaller / cheaper entries first so the rolled stock has a lot of
+  // affordable filler at game start.
+  { id: 'bandage', name: 'Bandage',       kind: 'consumable', rarity: 'common',   basePrice: 18,  qty: 2 },
+  { id: 'bandage', name: 'Bandage Pack',  kind: 'consumable', rarity: 'common',   basePrice: 40,  qty: 5 },
+  { id: 'medkit',  name: 'Medkit',        kind: 'consumable', rarity: 'common',   basePrice: 55,  qty: 1 },
+  { id: 'medkit',  name: 'Medkit Pack',   kind: 'consumable', rarity: 'common',   basePrice: 95,  qty: 2 },
+  { id: 'stim',    name: 'Stim',          kind: 'consumable', rarity: 'uncommon', basePrice: 90,  qty: 1 },
 ];
 const STORE_AMMO_CATALOG = [
   { id: 'ammo_pistol', name: 'Pistol Ammo Pack', kind: 'ammo', rarity: 'common', basePrice: 35 },
@@ -1891,10 +1900,11 @@ export class HideoutUI {
     const refreshBtn = document.createElement('button');
     refreshBtn.type = 'button';
     refreshBtn.className = 'store-refresh-btn';
-    refreshBtn.textContent = `Refresh now · 200c`;
-    refreshBtn.disabled = getPersistentChips() < 200;
+    const REFRESH_COST = 10;
+    refreshBtn.textContent = `Refresh now · ${REFRESH_COST}c`;
+    refreshBtn.disabled = getPersistentChips() < REFRESH_COST;
     refreshBtn.addEventListener('click', () => {
-      if (!this.ctx.spendChips || !this.ctx.spendChips(200)) return;
+      if (!this.ctx.spendChips || !this.ctx.spendChips(REFRESH_COST)) return;
       this._refreshStore(true);
       this.render();
     });
