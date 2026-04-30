@@ -373,6 +373,39 @@ export const ARTIFACT_DEFS = {
     synthetic: true,
     apply(s) { s.bleedImmune = true; },
   },
+
+  // -------------------------------------------------------------
+  // Durability-overhaul relic pair — Patcher (gear) + Charlene
+  // (weapons) both halve the relevant drain. Owning both auto-grants
+  // Covetous, a synthetic that flips the indestructible flags.
+  // Mirrors the Opening Act / Closing Act → Magnum Opus chain in
+  // ArtifactCollection.acquire below.
+  // -------------------------------------------------------------
+  patcher: {
+    id: 'patcher', name: 'Patcher',
+    lore: 'A roll of olive-drab tape and three needles. He swore by patches over plates.',
+    short: '−50% armor durability drain',
+    tint: 0x80c8a0,
+    price: 90000,
+    apply(s) { s.armorDurabilityMult = (s.armorDurabilityMult || 1) * 0.5; },
+  },
+  charlene: {
+    id: 'charlene', name: 'Charlene',
+    lore: 'this is my weapon, there are many like it but this one is mine.',
+    short: '−50% weapon durability drain',
+    tint: 0xa88060,
+    price: 90000,
+    apply(s) { s.weaponDurabilityMult = (s.weaponDurabilityMult || 1) * 0.5; },
+  },
+  covetous: {
+    id: 'covetous', name: 'Covetous',
+    lore: 'He knew how to take care of his things.',
+    short: 'All gear and weapons are indestructible',
+    tint: 0xe6c870,
+    price: 0,
+    synthetic: true,
+    apply(s) { s.indestructibleGear = true; s.indestructibleWeapons = true; },
+  },
 };
 
 export const ALL_ARTIFACTS = Object.values(ARTIFACT_DEFS);
@@ -391,6 +424,14 @@ export class ArtifactCollection {
         && this.owned.has('closing_act')
         && !this.owned.has('magnum_opus')) {
       this.owned.add('magnum_opus');
+    }
+    // Synth chain — owning Patcher + Charlene auto-grants Covetous,
+    // which flips the indestructible flags on every drain site.
+    if ((id === 'patcher' || id === 'charlene')
+        && this.owned.has('patcher')
+        && this.owned.has('charlene')
+        && !this.owned.has('covetous')) {
+      this.owned.add('covetous');
     }
     return true;
   }

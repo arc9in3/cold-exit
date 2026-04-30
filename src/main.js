@@ -46,6 +46,7 @@ import {
   GEAR_DEFS, JUNK_DEFS, TOY_DEFS,
   wrapWeapon, withAffixes, randomArmor, randomGear, randomConsumable, randomJunk, randomToy, setLootLevel,
   randomThrowable, THROWABLE_DEFS, makeThrowable, forceMastercraft,
+  randomEitherRepairKit,
 } from './inventory.js';
 import { ALL_ATTACHMENTS, ATTACHMENT_DEFS, effectiveWeapon, randomAttachment, rollAttachmentRarity } from './attachments.js';
 import { CustomizeUI } from './ui_customize.js';
@@ -4304,6 +4305,10 @@ function _applyTrainerUnlocks(s) {
 
 function recomputeStats() {
   derivedStats = BASE_STATS();
+  // Expose to window so external systems (Inventory.applyRepairKit
+  // reads .repairKitPotency, the durability HUD reads thresholds)
+  // don't need to thread the bag through every call site.
+  if (typeof window !== 'undefined') window.__derivedStats = derivedStats;
   // Expose level depth so ui_shop's relic price ramp can read it
   // without threading level through every priceFor call site.
   if (typeof window !== 'undefined') window.__levelIndex = (level && level.index) | 0;
@@ -5079,9 +5084,10 @@ function tickFlame(dt, playerInfo, weapon, inputState, aimInfo) {
     // of the normal ammo cost (2 bullets per pull total).
     weapon.ammo = Math.max(0, weapon.ammo - 1);
   }
-  if (weapon.durability) {
+  if (weapon.durability && !derivedStats.indestructibleWeapons) {
+    const _wMult = derivedStats.weaponDurabilityMult || 1;
     weapon.durability.current = Math.max(
-      0, weapon.durability.current - tunables.durability.weaponDecayPerShot * 0.4,
+      0, weapon.durability.current - tunables.durability.weaponDecayPerShot * 0.4 * _wMult,
     );
   }
 
@@ -5293,9 +5299,10 @@ function firePlayerProjectile(playerInfo, weapon, aimPoint) {
   alertEnemiesFromShot(playerInfo.muzzleWorld);
   if (player.kickRecoil) player.kickRecoil();
   triggerShake(0.28, 0.22);
-  if (weapon.durability) {
+  if (weapon.durability && !derivedStats.indestructibleWeapons) {
+    const _wMult = derivedStats.weaponDurabilityMult || 1;
     weapon.durability.current = Math.max(
-      0, weapon.durability.current - tunables.durability.weaponDecayPerShot,
+      0, weapon.durability.current - tunables.durability.weaponDecayPerShot * _wMult,
     );
   }
 
@@ -5828,9 +5835,10 @@ function fireOneShot(playerInfo, weapon, aimPoint, isADS, aimOwner, aimZone) {
                      : weapon.class === 'flame'   ? 0.05
                      : 0.08;                  // pistol / smg / default
   triggerShake(shakeByClass, 0.18);
-  if (weapon.durability) {
+  if (weapon.durability && !derivedStats.indestructibleWeapons) {
+    const _wMult = derivedStats.weaponDurabilityMult || 1;
     weapon.durability.current = Math.max(
-      0, weapon.durability.current - tunables.durability.weaponDecayPerShot,
+      0, weapon.durability.current - tunables.durability.weaponDecayPerShot * _wMult,
     );
   }
 
@@ -6675,6 +6683,15 @@ function buildBodyLoot(enemy) {
     if (Math.random() < 0.18) items.push(randomJunk());
     if (Math.random() < 0.05) items.push(randomThrowable());
   }
+  // Repair-kit drop — independent of the empty-body roll so a clean
+  // grunt corpse can still surface a kit. Chance scales with tier:
+  //   boss     45% (almost always)
+  //   subBoss  18%
+  //   normal    7% (skipped on empty bodies)
+  const repairKitChance = tier === 'boss' ? 0.45
+    : tier === 'subBoss' ? 0.18
+    : (isEmptyBody ? 0 : 0.07);
+  if (Math.random() < repairKitChance) items.push(randomEitherRepairKit());
   return items;
 }
 
@@ -6995,12 +7012,17 @@ function damagePlayer(amount, damageType = 'generic', srcCtx = null) {
   if ((derivedStats.highHpReduction || 0) > 0 && lastHpRatio > 0.8) {
     amount *= (1 - Math.min(0.85, derivedStats.highHpReduction));
   }
+  // Covetous relic short-circuits the entire gear-drain branch; the
+  // multiplier (Patcher = 0.5) scales remaining drain otherwise.
   const ratio = tunables.durability.armorDamageRatio;
-  for (const slot of SLOT_IDS) {
+  const _aMult = derivedStats.armorDurabilityMult || 1;
+  if (derivedStats.indestructibleGear) {
+    // skip the per-slot drain entirely
+  } else for (const slot of SLOT_IDS) {
     const item = inventory.equipment[slot];
     if (!item || !item.reduction || !item.durability) continue;
     if (item.durability.current <= 0) continue;
-    item.durability.current = Math.max(0, item.durability.current - amount * ratio);
+    item.durability.current = Math.max(0, item.durability.current - amount * ratio * _aMult);
     // First time a piece of armour breaks, surface the repair
     // mechanic — players might not realise broken gear gives no
     // bonuses + needs a shop visit.

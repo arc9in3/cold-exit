@@ -35,6 +35,36 @@ const TYPE_TO_SLOT = {
   melee: 'melee',
 };
 
+// Body-side repair-kit application. The kit lives in body.loot (not
+// in any inventory grid), so Inventory.applyRepairKit can't decrement
+// the stack itself. Mirrors the validation + durability bump portion
+// of that method, returning true when the caller should consume one
+// charge from the body-side stack. Pulls repairKitPotency from
+// window.__derivedStats when present.
+const _BODY_REPAIR_PCT_BY_RARITY = {
+  common: 0.15, uncommon: 0.25, rare: 0.40,
+  epic: 0.55, legendary: 0.65, mythic: 0.75,
+};
+function _bodyApplyRepairKit(kit, target) {
+  if (!kit || kit.type !== 'repairkit' || !target) return false;
+  const isWeaponTarget = target.type === 'ranged' || target.type === 'melee';
+  const isArmorTarget = target.type === 'armor' || target.type === 'gear';
+  if (kit.target === 'weapon' && !isWeaponTarget) return false;
+  if (kit.target === 'armor' && !isArmorTarget) return false;
+  if (!target.durability) return false;
+  const cur = target.durability.current | 0;
+  const max = target.durability.max | 0;
+  if (max <= 0 || cur >= max) return false;
+  const pct = (typeof kit.repairPct === 'number')
+    ? kit.repairPct
+    : (_BODY_REPAIR_PCT_BY_RARITY[kit.rarity || 'common'] || 0.15);
+  const ds = (typeof window !== 'undefined' && window.__derivedStats) || null;
+  const mult = ds && typeof ds.repairKitPotency === 'number' ? ds.repairKitPotency : 1;
+  const amount = pct * max * (mult || 1);
+  target.durability.current = Math.min(max, cur + amount);
+  return true;
+}
+
 function classifyItem(item) {
   if (!item) return 'misc';
   // Items explicitly dumped into the "pockets" of the body via a
@@ -1814,6 +1844,26 @@ export class LootUI {
           return;
         }
       }
+      // Repair kit dragged out of the body onto an inventory cell
+      // holding an armor / gear / weapon → repair the target. Body-
+      // side path is special-cased: kit lives in target.loot, not in
+      // any inventory grid, so we manually mirror the durability bump
+      // applyRepairKit performs and remove the kit (or decrement count).
+      if (item.type === 'repairkit') {
+        const cellEntry = blk.grid.at(x, y);
+        const cellItem = cellEntry?.item;
+        if (cellItem) {
+          const consumed = _bodyApplyRepairKit(item, cellItem);
+          if (consumed) {
+            const count = (item.count | 0) || 1;
+            if (count > 1) item.count = count - 1;
+            else removeFromBody();
+            this.inventory._bump?.();
+            this.render();
+            return;
+          }
+        }
+      }
       stampItemDims(item);
       let placed = blk.grid.canPlace(item, x, y, false);
       if (placed) blk.grid.place(item, x, y, false);
@@ -1837,6 +1887,23 @@ export class LootUI {
             this.render();
           }
           return;
+        }
+      }
+      // Repair kit dragged out of the body onto an equipped paperdoll
+      // slot → repair the equipped item. Same body-side consumption
+      // path as the grid-cell branch above.
+      if (item.type === 'repairkit') {
+        const equipped = this.inventory.equipment[slotId];
+        if (equipped) {
+          const consumed = _bodyApplyRepairKit(item, equipped);
+          if (consumed) {
+            const count = (item.count | 0) || 1;
+            if (count > 1) item.count = count - 1;
+            else removeFromBody();
+            this.inventory._bump?.();
+            this.render();
+            return;
+          }
         }
       }
       if (!this.inventory.canSlotHold(slotId, item)) return;

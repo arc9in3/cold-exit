@@ -845,6 +845,17 @@ export class InventoryUI {
           return;
         }
       }
+      // Repair kit dropped on a grid cell containing a compatible
+      // armor / gear / weapon → consume the kit + bump the target's
+      // durability. applyRepairKit handles full validation.
+      if (item.type === 'repairkit') {
+        const targetEntry = blk.grid.at(x, y);
+        const targetItem = targetEntry?.item;
+        if (targetItem && this.inventory.applyRepairKit(item, targetItem)) {
+          this.render();
+          return;
+        }
+      }
       const ok = this.inventory.moveInGrid(item, blk.grid, x, y, false);
       if (!ok && srcGrid !== blk.grid) {
         // Target cell occupied — remove from source then autoPlace
@@ -873,6 +884,15 @@ export class InventoryUI {
           srcGrid.remove(item);
           const ok = this.inventory.attachToWeapon(equippedItem, item.slot, item);
           if (!ok) this.inventory.add(item);
+          this.render();
+          return;
+        }
+      }
+      // Repair kit dropped on an equipped paperdoll item → consume +
+      // repair the worn piece. Same intercept as the grid path above.
+      if (item.type === 'repairkit') {
+        const equippedItem = this.inventory.equipment[slotId];
+        if (equippedItem && this.inventory.applyRepairKit(item, equippedItem)) {
           this.render();
           return;
         }

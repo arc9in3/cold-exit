@@ -453,6 +453,11 @@ export function iconForItem(item) {
     // the cell at least has a bomb-silhouette. Replace per-id later.
     return ICON_BASE + 'ICON_MilitaryCombat_Inventory_Minerals_01_Underlay.png';
   }
+  if (item.type === 'repairkit') {
+    // Reuse a tool/wrench-shaped Items category icon so the kit
+    // reads as utility rather than ammo.
+    return ICON_BASE + 'ICON_MilitaryCombat_Inventory_Items_01_Underlay.png';
+  }
   if (item.type === 'junk') {
     const render = JUNK_RENDER_BY_ID[item.id];
     if (render) return render;
@@ -1597,6 +1602,63 @@ export const CONSUMABLE_DEFS = {
 // as long as charges < max. Share `type: 'throwable'` so the
 // inventory / action-bar flow can special-case them (different icon,
 // separate use path from heal consumables). Each defines a
+// ---------------------------------------------------------------------
+// Repair kits — drag onto an armor / gear / weapon (paperdoll slot OR
+// grid cell OR body loot pile) to restore a percentage of its max
+// durability. Two flavors: armor kit covers all gear+armor slots,
+// weapon kit covers ranged + melee weapons. Stack of 5; per-instance
+// rolled rarity drives repair %.
+//
+//   repair % by rarity:
+//     common 15% / uncommon 25% / rare 40% / epic 55% / legendary 65%
+//     mythic 75% (bossdrop tier; not in normal pool)
+//
+// Drop tables: ~7% on grunt, 18% on subBoss, 45% on boss bodies (see
+// buildBodyLoot in main.js). Only the def lives here; spawn instances
+// via randomRepairKit / randomEitherRepairKit which stamp rarity +
+// repairPct on each instance.
+// ---------------------------------------------------------------------
+export const REPAIRKIT_DEFS = {
+  armor_repair_kit: {
+    id: 'armor_repair_kit', name: 'Armor Repair Kit',
+    type: 'repairkit', target: 'armor',
+    stackMax: 5, tint: 0x80c8a0,
+    description: 'Drag onto any armor / gear piece to repair durability',
+  },
+  weapon_repair_kit: {
+    id: 'weapon_repair_kit', name: 'Weapon Repair Kit',
+    type: 'repairkit', target: 'weapon',
+    stackMax: 5, tint: 0xa88060,
+    description: 'Drag onto any weapon to repair durability',
+  },
+};
+export const ALL_REPAIRKITS = Object.values(REPAIRKIT_DEFS);
+
+const REPAIRKIT_PCT_BY_RARITY = {
+  common: 0.15, uncommon: 0.25, rare: 0.40,
+  epic: 0.55, legendary: 0.65, mythic: 0.75,
+};
+
+// Spawn a fresh repair-kit instance with a rolled rarity. Common is
+// the floor (~50% weight); legendary tail is rare. `targetType` is
+// 'armor' or 'weapon'.
+export function randomRepairKit(targetType) {
+  const def = targetType === 'weapon'
+    ? REPAIRKIT_DEFS.weapon_repair_kit
+    : REPAIRKIT_DEFS.armor_repair_kit;
+  const r = Math.random();
+  let rarity = 'common';
+  if (r < 0.005)      rarity = 'legendary';
+  else if (r < 0.04)  rarity = 'epic';
+  else if (r < 0.18)  rarity = 'rare';
+  else if (r < 0.50)  rarity = 'uncommon';
+  const repairPct = REPAIRKIT_PCT_BY_RARITY[rarity] || REPAIRKIT_PCT_BY_RARITY.common;
+  return stampItemDims({ ...def, rarity, repairPct, count: 1 });
+}
+export function randomEitherRepairKit() {
+  return randomRepairKit(Math.random() < 0.5 ? 'armor' : 'weapon');
+}
+
 // `throwKind` that main.js dispatches at throw time to produce the
 // correct on-landing effect.
 //
@@ -2128,6 +2190,46 @@ export class Inventory {
     return it;
   }
 
+  // Apply a repair kit to a target item. Validates kit/target match,
+  // computes repair %, bumps target.durability.current, decrements
+  // the kit stack, and removes the kit when it hits zero. potencyMult
+  // reads from window.__derivedStats.repairKitPotency when available
+  // so skill-tree perks that boost kit potency apply automatically.
+  // Returns true on success, false on validation fail.
+  applyRepairKit(kit, target, potencyMult) {
+    if (!kit || kit.type !== 'repairkit' || !target) return false;
+    const isWeaponTarget = target.type === 'ranged' || target.type === 'melee';
+    const isArmorTarget = target.type === 'armor' || target.type === 'gear';
+    if (kit.target === 'weapon' && !isWeaponTarget) return false;
+    if (kit.target === 'armor' && !isArmorTarget) return false;
+    if (!target.durability) return false;
+    const cur = target.durability.current | 0;
+    const max = target.durability.max | 0;
+    if (max <= 0 || cur >= max) return false;
+    const pct = (typeof kit.repairPct === 'number')
+      ? kit.repairPct
+      : (REPAIRKIT_PCT_BY_RARITY[kit.rarity || 'common'] || 0.15);
+    let mult = potencyMult;
+    if (typeof mult !== 'number') {
+      const ds = (typeof window !== 'undefined' && window.__derivedStats) || null;
+      mult = ds && typeof ds.repairKitPotency === 'number' ? ds.repairKitPotency : 1;
+    }
+    const amount = pct * max * (mult || 1);
+    target.durability.current = Math.min(max, cur + amount);
+    const count = (kit.count | 0) || 1;
+    if (count > 1) {
+      kit.count = count - 1;
+    } else {
+      const g = this.gridOf(kit);
+      if (g) g.remove(kit);
+      for (let i = 0; i < this.actionBar.length; i++) {
+        if (this.actionBar[i] === kit) this.actionBar[i] = null;
+      }
+    }
+    this._bump();
+    return true;
+  }
+
   // Walk every grid + the pouch looking for a consumable matching
   // `like.id` (same item kind). Returns the first match or null.
   // Used by consumeActionSlot's auto-refill path.
@@ -2350,7 +2452,9 @@ export class Inventory {
     // Toys, throwables, and attachments deliberately don't stack:
     // toys are unique souvenirs, throwables use charges, attachments
     // each carry their own rolled stats.
-    if (item.type === 'consumable' || (item.type === 'junk' && item.stackMax)) {
+    if (item.type === 'consumable'
+        || (item.type === 'junk' && item.stackMax)
+        || item.type === 'repairkit') {
       const cap = item.type === 'consumable'
         ? CONSUMABLE_STACK_MAX
         : Math.max(1, item.stackMax | 0);
@@ -2359,6 +2463,11 @@ export class Inventory {
         for (const e of g.entries()) {
           const ex = e.item;
           if (!ex || ex.id !== item.id || ex.type !== item.type) continue;
+          // Repair kits roll a per-instance rarity that drives
+          // repairPct, so two stacks of different rarities can't
+          // merge — otherwise a single stack would contain mixed
+          // potency kits and use-order would be ambiguous.
+          if (item.type === 'repairkit' && ex.rarity !== item.rarity) continue;
           const exCount = (ex.count | 0) || 1;
           if (exCount >= cap) continue;
           const room = cap - exCount;
