@@ -2285,19 +2285,21 @@ export class HideoutUI {
     const tile = document.createElement('div');
     tile.className = `armory-mini rarity-${weapon.rarity || 'common'} state-${state}`;
     tile.style.borderColor = rarityColor({ rarity: weapon.rarity });
-    const icon = state === 'locked' ? null : iconForItem({
+    // Show the real icon + name + stats in every state, including
+    // 'locked' — players want to see the weapon they're working
+    // toward, not a `???` placeholder.
+    const icon = iconForItem({
       name: weapon.name, baseName: weapon.name, type: weapon.type, class: weapon.class,
     });
     const dmg = weapon.damage != null ? `<span class="amini-stat">DMG ${weapon.damage}</span>` : '';
     const rps = weapon.fireRate != null ? `<span class="amini-stat">RPS ${weapon.fireRate}</span>` : '';
     const range = weapon.range != null ? `<span class="amini-stat">RNG ${weapon.range}</span>` : '';
-    const showStats = state !== 'locked';
 
     let action = '';
     if (state === 'taking')       action = `<div class="amini-cta taking">TAKING</div>`;
     else if (state === 'owned')   action = `<button type="button" class="amini-cta select">Take</button>`;
     else if (state === 'buyable') action = `<button type="button" class="amini-cta buy">Unlock · ${cost}c</button>`;
-    else if (state === 'locked')  action = `<div class="amini-cta locked">Rank ${reqRank} to reveal</div>`;
+    else if (state === 'locked')  action = `<div class="amini-cta locked">Rank ${reqRank} to unlock</div>`;
 
     tile.innerHTML = `
       <div class="amini-icon">
@@ -2305,13 +2307,13 @@ export class HideoutUI {
           ? `<img src="${icon}" alt="">`
           : `<div class="amini-icon-fallback">?</div>`}
       </div>
-      <div class="amini-name">${state === 'locked' ? '???' : weapon.name}</div>
+      <div class="amini-name">${weapon.name}</div>
       <div class="amini-meta">${weapon.class || ''}${weapon.rarity ? ` · ${weapon.rarity}` : ''}</div>
-      <div class="amini-stats">${showStats ? (dmg + rps + range) : ''}</div>
+      <div class="amini-stats">${dmg + rps + range}</div>
       ${action}
     `;
     tile.title = state === 'locked'
-      ? `Locked — reach Rank ${reqRank} to unlock for purchase.`
+      ? `${weapon.name} · Locked — reach Rank ${reqRank} to unlock for purchase.`
       : state === 'buyable'
         ? `Unlock ${weapon.name} for ${cost}c (${weapon.rarity || 'common'} ${weapon.class || ''})`
         : `${weapon.name} · ${weapon.rarity || 'common'} ${weapon.class || ''}`;
