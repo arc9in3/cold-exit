@@ -302,7 +302,14 @@ export class MeleeEnemyManager {
       // don't subtract from this pool because ranged hits to the shield
       // are absorbed entirely (fullBlock); melee/shotgun shatters it
       // outright. ~6-8 melee swings to break, exposing the 50-HP chassis.
-      e.shield = { mesh: shieldMesh, visor, hp: 200, maxHp: 200, fullBlock: true };
+      const _baseShieldEmissive = (shieldMat && shieldMat.emissive)
+        ? shieldMat.emissive.clone()
+        : null;
+      e.shield = {
+        mesh: shieldMesh, visor,
+        hp: 200, maxHp: 200, fullBlock: true,
+        baseEmissive: _baseShieldEmissive,
+      };
     }
 
     this.enemies.push(e);
@@ -525,7 +532,20 @@ export class MeleeEnemyManager {
         const k = e.shield.flashT / tunables.enemy.hitFlashTime;
         const mat = e.shield.mesh && e.shield.mesh.material;
         if (mat && mat.emissive) {
-          mat.emissive.setRGB(k * 0.9, k * 0.85, k * 0.6);
+          // Lerp from cached baseline toward the warm spark color so
+          // the emissive decays back to its baked-in value instead of
+          // permanently going dark.
+          const base = e.shield.baseEmissive;
+          const sparkR = 0.9, sparkG = 0.85, sparkB = 0.6;
+          if (base) {
+            mat.emissive.setRGB(
+              base.r + (sparkR - base.r) * k,
+              base.g + (sparkG - base.g) * k,
+              base.b + (sparkB - base.b) * k,
+            );
+          } else {
+            mat.emissive.setRGB(k * sparkR, k * sparkG, k * sparkB);
+          }
         }
       }
 

@@ -4312,10 +4312,6 @@ function _applyTrainerUnlocks(s) {
 
 function recomputeStats() {
   derivedStats = BASE_STATS();
-  // Expose to window so external systems (Inventory.applyRepairKit
-  // reads .repairKitPotency, the durability HUD reads thresholds)
-  // don't need to thread the bag through every call site.
-  if (typeof window !== 'undefined') window.__derivedStats = derivedStats;
   // Expose level depth so ui_shop's relic price ramp can read it
   // without threading level through every priceFor call site.
   if (typeof window !== 'undefined') window.__levelIndex = (level && level.index) | 0;
@@ -4406,6 +4402,13 @@ function recomputeStats() {
       derivedStats.maxHealthBonus = target - baseMax2;
     }
   }
+  // Expose to window AFTER all modifiers have applied (skills, perks,
+  // artifacts, equipment, buffs, trainer unlocks, contract mults,
+  // equip-mods). Reading window.__derivedStats during recompute used
+  // to return the bag mid-fill; publishing at the end means external
+  // readers (Inventory.applyRepairKit, durability HUD) always see the
+  // final values for the frame.
+  if (typeof window !== 'undefined') window.__derivedStats = derivedStats;
 }
 
 // XP / level. Crossing threshold queues a mid-run skill pick.
@@ -5583,8 +5586,19 @@ function _fireDjinnShot(weapon, eff, aimTarget, hitTargets) {
     const critChance = derivedStats.critChance || 0;
     const isCrit = Math.random() < critChance;
     if (isCrit) dmg *= (derivedStats.critDamageMult || 2);
+    // Djinn shots are non-breaker bullets — pass shieldBreaker:false
+    // explicitly + honor the shield result so a blocked orb shot
+    // shows a 0 / shield-chip number, never a fake body number.
+    const result = hit.owner.manager.applyHit(hit.owner, dmg, hit.zone, dir,
+      { weaponClass: weapon.class, shieldBreaker: false });
+    if (result && result.shieldHit) {
+      const shieldDmg = result.shieldDamage | 0;
+      spawnDamageNumber(endPoint, camera, shieldDmg, null);
+      combat.spawnImpact(endPoint);
+      if (shieldDmg > 0) runStats.addDamage(shieldDmg);
+      return;
+    }
     runStats.addDamage(dmg);
-    hit.owner.manager.applyHit(hit.owner, dmg, hit.zone, dir, { weaponClass: weapon.class });
     spawnDamageNumber(endPoint, camera, dmg, hit.zone, isCrit || hit.zone === 'head');
     combat.spawnImpact(endPoint);
   } else if (hit) {

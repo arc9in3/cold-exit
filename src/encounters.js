@@ -2054,6 +2054,7 @@ export const ENCOUNTER_DEFS = {
           s.chosenSurvivor = null;
           s.relicSpawned = true;
           s.complete = true;
+          s.needsTick = false;
           // Lay both NPCs down (quick rotation; they're dummies the
           // raycast targets are already invisible). keepDead pins
           // them so the dummies system doesn't auto-respawn.

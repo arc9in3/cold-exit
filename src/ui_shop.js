@@ -162,6 +162,11 @@ export function repairPriceFor(item, shopMult = 1) {
 const BROKEN_SELL_MULT = 0.15;
 export function sellPriceFor(item) {
   const count = (item?.count | 0) || 1;
+  // Encounter-only items (Brian's Hat, Beary Doll, Unused Rocket
+  // Ticket, etc.) shouldn't have a sell price — they're rewards
+  // from specific encounters with their own narrative arcs and
+  // shouldn't be insta-cashed for chips.
+  if (item._encounter) return 0;
   if (item.type === 'junk' && typeof item.sellValue === 'number') {
     return Math.max(1, item.sellValue * count);
   }

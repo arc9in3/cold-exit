@@ -411,12 +411,19 @@ export class GunmanManager {
     handle.position.set(0, yMid, z - 0.08);
     root.add(handle);
 
+    // Cache the baseline emissive so the per-frame flash decay can
+    // restore it instead of writing (0,0,0) — without this the shield
+    // permanently loses its baked-in glow after the first absorbed hit.
+    const _baseEmissive = (plate.material && plate.material.emissive)
+      ? plate.material.emissive.clone()
+      : null;
     g.shield = {
       mesh: plate,
       decorRoot: root,
       hp: full ? 200 : 80,
       maxHp: full ? 200 : 80,
       fullBlock: full,
+      baseEmissive: _baseEmissive,
     };
   }
   _disableShield(g) {
@@ -1115,7 +1122,20 @@ export class GunmanManager {
         const k = g.shield.flashT / tunables.enemy.hitFlashTime;
         const mat = g.shield.mesh && g.shield.mesh.material;
         if (mat && mat.emissive) {
-          mat.emissive.setRGB(k * 0.9, k * 0.85, k * 0.6);
+          // Lerp from the baseline emissive (cached at spawn) toward
+          // the warm spark color, scaled by k. Decays back to baseline
+          // when flashT hits 0 — no permanent drift.
+          const base = g.shield.baseEmissive;
+          const sparkR = 0.9, sparkG = 0.85, sparkB = 0.6;
+          if (base) {
+            mat.emissive.setRGB(
+              base.r + (sparkR - base.r) * k,
+              base.g + (sparkG - base.g) * k,
+              base.b + (sparkB - base.b) * k,
+            );
+          } else {
+            mat.emissive.setRGB(k * sparkR, k * sparkG, k * sparkB);
+          }
         } else if (mat && mat.color) {
           mat.color.lerpColors(mat.color, this._hurt, k * 0.6);
         }
