@@ -1028,8 +1028,12 @@ export const ARMOR_DEFS = {
   // protection from fire (apply hook bumps fireResist by 0.9). The
   // resistance cap in damagePlayer is bumped to 0.95 to let the hat
   // actually deliver the 90% it advertises.
+  // _encounter: true keeps it out of ALL_ARMOR + the world-drop pool +
+  // The Crow's bigger-backpack pick. Only acquisition path is the
+  // Brian encounter (the 'how much was the hat' branch).
   brians_hat: { id: 'brians_hat', name: "Brian's Hat", slot: 'head', type: 'gear',
     tint: 0x6a6a72, durability: dur(40, 0.95), rarity: 'common',
+    _encounter: true,
     description: '90% fire resistance',
     apply(s) { s.fireResist = (s.fireResist || 0) + 0.9; } },
 
