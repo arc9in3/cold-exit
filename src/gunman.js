@@ -1095,7 +1095,37 @@ export class GunmanManager {
     if (this._frame === undefined) this._frame = 0;
     this._frame++;
     const odd = (this._frame & 1) === 1;
+    // Multi-target AI for coop — `ctx.players` is the full list of
+    // local + remote players on the host. Per-enemy, we swap
+    // ctx.playerPos to the closest one before the AI logic reads it.
+    // The targeted peerId is stamped onto the entity so downstream
+    // damage callbacks can route via RPC instead of damaging host.
+    // Single-player and joiner-side calls leave ctx.players empty
+    // and the swap is a no-op.
+    const __origPlayerPos = ctx.playerPos;
+    const __coopPlayers = ctx.players;
     for (const g of this.gunmen) {
+      // Multi-target target selection (coop). Pick the closest
+      // player from the array; swap ctx.playerPos to that one's
+      // position so the entire AI tick (suspicion, fire, face,
+      // strafe, cover) uses it. _coopTargetPeerId is consumed by
+      // main.js's onPlayerHit / aiFire callbacks to route damage
+      // via RPC instead of hitting the local host player.
+      if (__coopPlayers && __coopPlayers.length > 1) {
+        let best = __origPlayerPos;
+        let bestD = Infinity;
+        const ex = g.group.position.x, ez = g.group.position.z;
+        for (let pi = 0; pi < __coopPlayers.length; pi++) {
+          const p = __coopPlayers[pi];
+          const dx = p.x - ex, dz = p.z - ez;
+          const d2 = dx * dx + dz * dz;
+          if (d2 < bestD) { bestD = d2; best = p; }
+        }
+        ctx.playerPos = best;
+        g._coopTargetPeerId = best.peerId || null;
+      } else {
+        g._coopTargetPeerId = null;
+      }
       // Hidden ambush bosses + minions are visually + behaviourally
       // dormant until revealHiddenAmbush flips them. Skip the entire
       // per-frame tick — animation, AI, perception — until then.
@@ -2823,5 +2853,8 @@ export class GunmanManager {
         }
       }
     }
+    // Restore the caller's playerPos so subsequent code outside the
+    // gunmen loop (separateEnemies, etc.) sees the original ref.
+    ctx.playerPos = __origPlayerPos;
   }
 }

@@ -24,9 +24,36 @@
 // drop out-of-order packets and a future tick can do interpolation
 // between two snapshots.
 
-const _scratch = { gunmen: [], melees: [] };
+const _scratch = { gunmen: [], melees: [], loot: [] };
 
-export function encodeEnemySnapshot(gunmen, melees, seq, t) {
+// Loot snapshot — host serializes alive ground-loot items so joiners
+// can render mirror representations. Item shape on the wire stays
+// minimal (netId / position / display tint / display name) — the
+// full item data is not synced; pickup will resolve the full item
+// via a separate RPC in a follow-up session. For now, joiners SEE
+// loot but can't pick it up (the local mirror is flagged
+// _coopRemote so the joiner's pickup loop should skip it).
+function _encodeLoot(loot) {
+  _scratch.loot.length = 0;
+  if (!loot || !loot.items) return _scratch.loot.slice();
+  for (const e of loot.items) {
+    if (!e || !e.group || !e.item) continue;
+    if (e.group.visible === false) continue;
+    _scratch.loot.push({
+      n: e.netId | 0,
+      x: +(e.group.position.x.toFixed(3)),
+      z: +(e.group.position.z.toFixed(3)),
+      // Mirror just enough to render the right colored cube label.
+      t: e.item.tint | 0,
+      r: e.item.rarity || 'common',
+      nm: String(e.item.name || 'item').slice(0, 32),
+      ty: e.item.type || '',
+    });
+  }
+  return _scratch.loot.slice();
+}
+
+export function encodeEnemySnapshot(gunmen, melees, seq, t, loot = null) {
   // Reuse scratch arrays so a 20Hz publish doesn't allocate a fresh
   // outer object each frame; per-entity payloads are still per-call.
   _scratch.gunmen.length = 0;
@@ -60,6 +87,7 @@ export function encodeEnemySnapshot(gunmen, melees, seq, t) {
     t: t | 0,
     gunmen: _scratch.gunmen.slice(),
     melees: _scratch.melees.slice(),
+    loot: loot ? _encodeLoot(loot) : [],
   };
 }
 
@@ -126,4 +154,77 @@ function _findByNetId(list, netId) {
     if (list[i].netId === netId) return list[i];
   }
   return null;
+}
+
+// Apply the loot section of a snapshot to the joiner's local loot
+// manager. For each entry in the snapshot, find the local mirror by
+// netId; spawn one if missing. For local entries marked _coopRemote
+// that aren't in the snapshot, drop them (host removed it — pickup,
+// despawn timeout, etc).
+//
+// `lootMgr` is the LootManager. `spawnFn` is a closure provided by
+// main.js that wraps `loot.spawnItem(pos, item)` to set _coopRemote
+// + the snapshot-derived netId on the entry. Encapsulating it keeps
+// snapshot.js free of LootManager internals.
+export function applyLootSnapshot(snap, lootMgr, spawnFn) {
+  if (!snap || !snap.loot) return;
+  if (!lootMgr || !lootMgr.items) return;
+  // First apply on a fresh joiner — wipe any locally-spawned loot
+  // (from pre-coop solo play) so snapshot mirroring isn't fighting
+  // a non-authoritative entry. _coopRemote items from prior applies
+  // are kept; the live-set sweep below prunes ones the host removed.
+  if (!lootMgr._coopWipedOnFirstApply) {
+    for (let i = lootMgr.items.length - 1; i >= 0; i--) {
+      const e = lootMgr.items[i];
+      if (!e || e._coopRemote) continue;
+      if (e.slot) { e.slot.inUse = false; e.group.visible = false; }
+      lootMgr.items.splice(i, 1);
+    }
+    lootMgr._netIdCounter = 0;
+    lootMgr._coopWipedOnFirstApply = true;
+  }
+  const live = new Set();
+  for (const sl of snap.loot) {
+    live.add(sl.n);
+    let entry = null;
+    for (const e of lootMgr.items) { if (e.netId === sl.n) { entry = e; break; } }
+    if (entry) {
+      // Already mirrored; just keep position synced (loot doesn't
+      // move on host today, but defensive).
+      entry.group.position.x = sl.x;
+      entry.group.position.z = sl.z;
+      continue;
+    }
+    // Spawn a fresh mirror entry. Item is a stub with just the fields
+    // needed to render — enough for the colored cube + nametag. Real
+    // item data lands via the pickup RPC when that ships.
+    const stubItem = {
+      name: sl.nm,
+      type: sl.ty || 'gear',
+      tint: sl.t || 0xaaaaaa,
+      rarity: sl.r || 'common',
+    };
+    const newEntry = spawnFn({ x: sl.x, y: 0.4, z: sl.z }, stubItem);
+    if (newEntry) {
+      newEntry.netId = sl.n;
+      newEntry._coopRemote = true;
+    }
+  }
+  // Despawn locals the host says are gone. Only despawn entries that
+  // were spawned via snapshot (_coopRemote) — local-original entries
+  // (host's own spawns, single-player drops) stay put.
+  for (let i = lootMgr.items.length - 1; i >= 0; i--) {
+    const e = lootMgr.items[i];
+    if (!e || !e._coopRemote) continue;
+    if (live.has(e.netId)) continue;
+    // Drop via the manager's release path so the slot returns to the
+    // pool. Some loot managers expose a remove(); fall back to the
+    // splice + slot.inUse=false pattern if not.
+    if (lootMgr.remove) lootMgr.remove(e);
+    else if (e.slot) {
+      e.slot.inUse = false;
+      e.group.visible = false;
+      lootMgr.items.splice(i, 1);
+    }
+  }
 }

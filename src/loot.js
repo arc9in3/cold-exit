@@ -25,6 +25,7 @@ export class LootManager {
   constructor(scene) {
     this.scene = scene;
     this.items = [];
+    this._netIdCounter = 0;
     // --- Loot pool -------------------------------------------------
     // Pre-allocate N "slots" for standard (non-toy) ground loot.
     // Each slot owns its own Group, Mesh (cube), PointLight, and
@@ -243,6 +244,14 @@ export class LootManager {
     slot.group.visible = true;
 
     const entry = {
+      // Coop net ID for snapshot reconciliation. Host assigns from
+      // a monotonic counter; joiners apply the same id on their
+      // mirror entries so pickup RPCs can target the right item.
+      // _coopRemote means the entry was spawned by the joiner from
+      // a host snapshot — the joiner shouldn't pick it up locally
+      // (next session adds the rpc-pickup flow).
+      netId: ++this._netIdCounter,
+      _coopRemote: false,
       slot,
       group: slot.group, box: slot.mesh, light: slot.light,
       nameTag: null,

@@ -102,7 +102,7 @@ import { setCursorForWeapon } from './cursor.js';
 import { DroneManager } from './drones.js';
 import { CoopLobbyUI, isCoopEnabled } from './coop/lobby.js';
 import { getCoopTransport } from './coop/transport.js';
-import { encodeEnemySnapshot, applyEnemySnapshot } from './coop/snapshot.js';
+import { encodeEnemySnapshot, applyEnemySnapshot, applyLootSnapshot } from './coop/snapshot.js';
 import { resetNetIds } from './gunman.js';
 window.__resetHints = resetHints;
 
@@ -110,7 +110,7 @@ window.__resetHints = resetHints;
 // "I'm on build XYZ" without inspecting the bundle. Date stamps the
 // version so a quick glance tells you how stale the build is. Both
 // values render into the bottom-right #build-version label.
-const BUILD_VERSION = '3ca3a48+coop-seedhud';
+const BUILD_VERSION = '7d1bfd2+coop-mt-loot';
 // Build date intentionally bumped each deploy so the corner label
 // reflects the current snapshot.
 const BUILD_DATE    = '2026-05-01';
@@ -8060,7 +8060,9 @@ function _tickCoop(dt) {
     if (_coopSnapshotT <= 0) {
       _coopSnapshotT = 1 / 20;
       _coopSnapshotSeq = (_coopSnapshotSeq + 1) | 0;
-      const snap = encodeEnemySnapshot(gunmen, melees, _coopSnapshotSeq, performance.now() | 0);
+      const snap = encodeEnemySnapshot(
+        gunmen, melees, _coopSnapshotSeq, performance.now() | 0, loot,
+      );
       transport.send('snapshot', snap);
     }
   } else if (!transport.isHost && _coopPendingSnapshot) {
@@ -8068,6 +8070,13 @@ function _tickCoop(dt) {
     // factor is dt / 0.06 so the snap-to-target interpolation settles
     // ~60ms after a fresh packet (~one snapshot interval).
     applyEnemySnapshot(_coopPendingSnapshot, gunmen, melees, Math.min(1, dt / 0.06));
+    // Loot mirror — same snapshot also carries host's loot list.
+    // The closure here adapts the joiner's local loot manager spawn
+    // call so snapshot.js doesn't reach into LootManager internals.
+    applyLootSnapshot(_coopPendingSnapshot, loot, (pos, stubItem) => {
+      try { return loot.spawnItem(pos, stubItem); }
+      catch (_) { return null; }
+    });
   }
   // Sync ghost meshes — create/update per-peer, prune disconnected.
   const seen = new Set();
@@ -13768,7 +13777,23 @@ function tick() {
     return t.isOpen && !t.isHost;
   })();
   if (!_coopJoiner) {
+  // Build the multi-target player list once per frame for the AI.
+  // Host AI uses this to pick whichever player is closest to each
+  // enemy. Single-player runs leave the array length 1 (just host),
+  // and the manager's per-enemy swap is a no-op.
+  const _coopPlayers = [];
+  _coopPlayers.push({
+    x: player.mesh.position.x,
+    z: player.mesh.position.z,
+    peerId: null,
+  });
+  if (coopLobby && getCoopTransport().isHost) {
+    for (const [pid, ghost] of coopLobby.ghosts) {
+      _coopPlayers.push({ x: ghost.x, z: ghost.z, peerId: pid });
+    }
+  }
   gunmen.update({
+    players: _coopPlayers,
     dt,
     playerPos: playerInfo.position,
     playerFacing: playerInfo.facing,   // used by Evasive Gunner archetype
@@ -13804,6 +13829,7 @@ function tick() {
   });
   melees.update({
     dt,
+    players: _coopPlayers,           // multi-target AI; see gunman.js
     playerPos: playerInfo.position,
     playerRoomId,                   // assassin uncloak trigger
     combat,
@@ -13853,6 +13879,33 @@ function tick() {
     spawnAssassinKnives: (x, y, z, dx, dz, n, owner) =>
       spawnAssassinKnives(x, y, z, dx, dz, n, owner),
     onPlayerHit: (d, enemy) => {
+      // Multi-target route: if the AI was swinging at a joiner (their
+      // peerId stamped via the per-enemy target swap in melees.update),
+      // forward the primary swing damage as RPC instead of hitting
+      // the host. The joiner's rpc-player-damage handler runs
+      // damagePlayer locally with the same amount.
+      const targetPeer = enemy?._coopTargetPeerId || null;
+      const isHostCoop = !!coopLobby && getCoopTransport().isHost;
+      if (targetPeer && isHostCoop) {
+        _coopSendPlayerDamage(targetPeer, d, 'melee', { zone: 'torso' });
+        // Other joiners caught in the swing radius (not the targeted
+        // peer) also eat the swing. Host is skipped — the AI wasn't
+        // aiming at the host this swing.
+        if (enemy?.group) {
+          const ex = enemy.group.position.x;
+          const ez = enemy.group.position.z;
+          const swingR = (tunables.meleeEnemy?.swingRange || 1.5) * 1.15;
+          for (const [peerId, ghost] of coopLobby.ghosts) {
+            if (peerId === targetPeer) continue;
+            const jdx = ghost.x - ex;
+            const jdz = ghost.z - ez;
+            if (jdx * jdx + jdz * jdz <= swingR * swingR) {
+              _coopSendPlayerDamage(peerId, d, 'melee', { zone: 'torso' });
+            }
+          }
+        }
+        return;
+      }
       if (playerInfo.blocking) {
         const hitPt = new THREE.Vector3(
           player.mesh.position.x, 1.0, player.mesh.position.z,

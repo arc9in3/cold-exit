@@ -677,7 +677,28 @@ export class MeleeEnemyManager {
     if (this._frame === undefined) this._frame = 0;
     this._frame++;
     const odd = (this._frame & 1) === 1;
+    // Multi-target target selection (coop). Same scheme as gunman.js:
+    // each enemy picks the closest player from ctx.players (host +
+    // joiners) and the AI tick reads ctx.playerPos.x/z to drive its
+    // logic. Restore the caller's pos after the loop.
+    const __origPlayerPos = ctx.playerPos;
+    const __coopPlayers = ctx.players;
     for (const e of this.enemies) {
+      if (__coopPlayers && __coopPlayers.length > 1) {
+        let best = __origPlayerPos;
+        let bestD = Infinity;
+        const ex = e.group.position.x, ez = e.group.position.z;
+        for (let pi = 0; pi < __coopPlayers.length; pi++) {
+          const p = __coopPlayers[pi];
+          const dx = p.x - ex, dz = p.z - ez;
+          const d2 = dx * dx + dz * dz;
+          if (d2 < bestD) { bestD = d2; best = p; }
+        }
+        ctx.playerPos = best;
+        e._coopTargetPeerId = best.peerId || null;
+      } else {
+        e._coopTargetPeerId = null;
+      }
       // Hidden ambush minions skip the whole tick until revealed.
       if (e.alive && e.hidden) continue;
       if (e.alive && e.state === STATE.IDLE) {
@@ -922,6 +943,9 @@ export class MeleeEnemyManager {
         }
       }
     }
+    // Restore caller's playerPos after the multi-target swap inside
+    // the loop. See gunman.js update() for the rationale.
+    ctx.playerPos = __origPlayerPos;
   }
 
   _respawn(e) {
