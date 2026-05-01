@@ -110,7 +110,7 @@ window.__resetHints = resetHints;
 // "I'm on build XYZ" without inspecting the bundle. Date stamps the
 // version so a quick glance tells you how stale the build is. Both
 // values render into the bottom-right #build-version label.
-const BUILD_VERSION = '4a099cc+coop-roomcode';
+const BUILD_VERSION = '3ca3a48+coop-seedhud';
 // Build date intentionally bumped each deploy so the corner label
 // reflects the current snapshot.
 const BUILD_DATE    = '2026-05-01';
@@ -1707,17 +1707,21 @@ function _ensureCoopLobby() {
     transport.send('level-seed', { seed: _runSeed, levelIndex: lv });
     console.log('[coop] re-broadcasting level-seed on peer-in', { seed: _runSeed, levelIndex: lv });
   });
-  // Once the WS handshake completes, retry any deferred regen. The
-  // host now has the readiness it needed (isOpen=true + isHost=true);
-  // a joiner still has to wait for the seed message but the level-
-  // seed listener fires that path. This catches the case where the
-  // user clicked Play before the WS finished handshaking.
+  // Once the WS handshake completes, regenerate the level on the
+  // host side if we don't yet have a run seed. This covers the very
+  // common UX flow where the player already clicked Play (level
+  // built un-seeded) BEFORE opening the lobby and clicking Host;
+  // without this, the host's level stays solo-random and the seed
+  // never gets generated/broadcast. Also catches the legacy
+  // _coopRegenPending case (user clicked Play during the WS
+  // handshake race).
   transport.addEventListener('open', () => {
-    if (_coopRegenPending && transport.isHost) {
-      console.log('[coop] retrying deferred regen on host open');
-      try { regenerateLevel(); }
-      catch (err) { console.warn('[coop] deferred-regen retry failed', err); }
-    }
+    if (!transport.isHost) return;
+    if (_runSeed && !_coopRegenPending) return;   // already seeded, nothing to do
+    console.log('[coop] host connected — regenerating to mint + broadcast seed',
+      { runSeed: _runSeed, pending: _coopRegenPending });
+    try { regenerateLevel(); }
+    catch (err) { console.warn('[coop] host-connect regen failed', err); }
   });
   // Joiner-side message handler — apply incoming level-seed messages
   // by setting _runSeed and calling regenerateLevel so the joiner's
@@ -1733,6 +1737,20 @@ function _ensureCoopLobby() {
       if (!body || (body.seq | 0) <= _coopLatestSeq) return;
       _coopLatestSeq = body.seq | 0;
       _coopPendingSnapshot = body;
+      return;
+    }
+    if (kind === 'rpc-player-damage') {
+      // Joiner-only — host says one of its enemies hit our player.
+      // Just apply the damage locally; the host has already done the
+      // hit detection (LoS, range, cone) so we trust the call.
+      if (transport.isHost || !body) return;
+      const dmg = Math.max(0, body.d | 0);
+      const type = body.type || 'generic';
+      try {
+        damagePlayer(dmg, type, { source: 'remote', zone: body.z || 'torso' });
+      } catch (err) {
+        console.warn('[coop] rpc-player-damage apply failed', err);
+      }
       return;
     }
     if (kind === 'rpc-shoot') {
@@ -8152,9 +8170,15 @@ function _renderCoopHud() {
   }
   const px = player?.mesh?.position?.x ?? 0;
   const pz = player?.mesh?.position?.z ?? 0;
+  const seedHex = _runSeed ? `0x${(_runSeed >>> 0).toString(16).padStart(8, '0')}` : 'NOT SET';
+  const lvIdx = (level?.index | 0);
+  const room = transport.roomCode || '—';
+  const role = transport.isHost ? 'HOST' : (transport.peerId ? 'JOIN' : '?');
   const lines = [
-    `<div style="color:#f2c060;font-weight:700;letter-spacing:1.4px">CO-OP · ${transport.peers.size} peer(s)</div>`,
-    `<div style="color:#6f7990;font-size:10px">you @ ${px.toFixed(1)}, ${pz.toFixed(1)}</div>`,
+    `<div style="color:#f2c060;font-weight:700;letter-spacing:1.4px">CO-OP · ${role} · room ${room}</div>`,
+    `<div style="color:#9b8b6a;font-size:10px">peers: ${transport.peers.size}, you=${transport.peerId || '?'}, host=${transport.hostId || '?'}</div>`,
+    `<div style="color:#6f7990;font-size:10px">you @ ${px.toFixed(1)}, ${pz.toFixed(1)} · F${lvIdx}</div>`,
+    `<div style="color:${_runSeed ? '#a0c0a0' : '#f08080'};font-size:10px">seed: ${seedHex}</div>`,
   ];
   const seen = new Set();
   for (const [peerId, ghost] of coopLobby.ghosts) {
@@ -9324,6 +9348,46 @@ function spawnKillBlast(pos, radius, dmg) {
   pushAll(melees.enemies);
 }
 
+// Coop joiner hit-test for an AI bullet ray. Host-only. Projects each
+// connected joiner ghost onto the ray; if the perpendicular distance
+// is under the player hit radius AND the projection is within range
+// AND closer than any wall-hit, treats it as a joiner hit and sends
+// `rpc-player-damage` to that peer instead of damaging the host's
+// local player. Returns the peerId hit (or null).
+function _coopJoinerBulletHitCheck(origin, dir, range, wallHitDist) {
+  if (!coopLobby) return null;
+  const transport = getCoopTransport();
+  if (!transport.isOpen || !transport.isHost) return null;
+  const cap = wallHitDist != null ? Math.min(range, wallHitDist) : range;
+  let bestPeer = null;
+  let bestDist = Infinity;
+  for (const [peerId, ghost] of coopLobby.ghosts) {
+    const dx = ghost.x - origin.x;
+    const dz = ghost.z - origin.z;
+    const proj = dx * dir.x + dz * dir.z;   // along-ray distance
+    if (proj <= 0 || proj > cap) continue;
+    const perpX = dx - dir.x * proj;
+    const perpZ = dz - dir.z * proj;
+    const perp = Math.hypot(perpX, perpZ);
+    if (perp < 0.55 && proj < bestDist) {
+      bestDist = proj;
+      bestPeer = peerId;
+    }
+  }
+  return bestPeer;
+}
+// Send a targeted player-damage RPC to a specific joiner. Wraps the
+// send call so call-sites stay tiny.
+function _coopSendPlayerDamage(peerId, amount, type, srcInfo = null) {
+  const transport = getCoopTransport();
+  if (!transport.isOpen || !transport.isHost || !peerId) return;
+  transport.send('rpc-player-damage', {
+    d: Math.round(amount),
+    type,
+    z: srcInfo?.zone || 'torso',
+  }, peerId);
+}
+
 function aiFire(origin, dir, weapon, damageMult = 1, source = null) {
   if (!weapon) return; // defensive: parry redirect can disarm mid-burst
   if (weapon.fireMode === 'flame' || weapon.class === 'flame') {
@@ -9348,9 +9412,18 @@ function aiFire(origin, dir, weapon, damageMult = 1, source = null) {
   const hit = combat.raycast(origin, dir, targets, weapon.range);
   let endPoint;
   let hitPlayer = false;
+  let wallHitDist = null;
   if (hit) {
     endPoint = hit.point;
     if (hit.mesh.userData?.isPlayer) hitPlayer = true;
+    else {
+      // Wall / prop hit. Cap joiner-hit-test by this distance so a
+      // bullet doesn't damage a joiner standing behind a wall.
+      const dx = hit.point.x - origin.x;
+      const dy = hit.point.y - origin.y;
+      const dz = hit.point.z - origin.z;
+      wallHitDist = Math.sqrt(dx * dx + dy * dy + dz * dz);
+    }
   } else {
     endPoint = origin.clone().addScaledVector(dir, weapon.range);
   }
@@ -9360,7 +9433,17 @@ function aiFire(origin, dir, weapon, damageMult = 1, source = null) {
   // mesh + tracer still read clearly.
   combat.spawnShot(origin, endPoint, weapon.tracerColor, { light: false });
 
-  if (!hitPlayer) return;
+  if (!hitPlayer) {
+    // Coop — host's enemies can also clip a joiner whose ghost is
+    // along the ray. The joiner takes damage via RPC; the host
+    // doesn't apply anything locally.
+    const joinerHit = _coopJoinerBulletHitCheck(origin, dir, weapon.range, wallHitDist);
+    if (joinerHit) {
+      _coopSendPlayerDamage(joinerHit, weapon.damage * damageMult, 'ballistic',
+        { zone: 'torso' });
+    }
+    return;
+  }
 
   if (player.isBlocking()) {
     if (player.isParryActive()) {
@@ -9431,6 +9514,24 @@ function aiFireFlame(origin, dir, weapon, damageMult = 1, source = null) {
     }
   }
   combat.spawnFlameParticles(origin, dir, drawRange, angleRad);
+  // Coop — joiners caught in the cone (with LoS) also take a flame
+  // tick. Same cap formula as the host below; per-tick send so the
+  // joiner's `damagePlayer` accumulates the fire stack the same way
+  // standing in a fire pool would.
+  if (coopLobby && getCoopTransport().isHost) {
+    const ENEMY_FLAME_DAMAGE_MULT = 0.17;
+    const flameAmount = (weapon.damage || 5) * damageMult * ENEMY_FLAME_DAMAGE_MULT;
+    for (const [peerId, ghost] of coopLobby.ghosts) {
+      const jdx = ghost.x - origin.x;
+      const jdz = ghost.z - origin.z;
+      const jd = Math.hypot(jdx, jdz);
+      if (jd > range || jd < 0.0001) continue;
+      const jnx = jdx / jd, jnz = jdz / jd;
+      if (jnx * dir.x + jnz * dir.z < halfCos) continue;
+      if (!_segClear(origin.x, origin.z, ghost.x, ghost.z)) continue;
+      _coopSendPlayerDamage(peerId, flameAmount, 'fire', { zone: 'torso' });
+    }
+  }
   if (!hitsPlayer) return;
   if (player.isBlocking()) {
     combat.spawnDeflectFlash(new THREE.Vector3(ppos.x, 1.0, ppos.z), 0xffd07a);
@@ -13778,6 +13879,23 @@ function tick() {
         _meleeDist = Math.hypot(dx, dz);
       }
       damagePlayer(d, 'melee', { source: enemy, zone: 'torso', distance: _meleeDist });
+      // Coop — any joiner ghost within swing radius of the enemy
+      // also eats the swing. The AI targets the host's player, so
+      // this is a "stand close to a swinging enemy and get caught"
+      // effect rather than the AI deliberately targeting joiners
+      // (multi-target AI is later work).
+      if (coopLobby && getCoopTransport().isHost && enemy?.group) {
+        const ex = enemy.group.position.x;
+        const ez = enemy.group.position.z;
+        const swingR = (tunables.meleeEnemy?.swingRange || 1.5) * 1.15;
+        for (const [peerId, ghost] of coopLobby.ghosts) {
+          const jdx = ghost.x - ex;
+          const jdz = ghost.z - ez;
+          if (jdx * jdx + jdz * jdz <= swingR * swingR) {
+            _coopSendPlayerDamage(peerId, d, 'melee', { zone: 'torso' });
+          }
+        }
+      }
       // Thread Cuts Both Ways relic — reflect 25% of incoming melee
       // damage back on the attacker. Modeled as instant counter-damage
       // (no enemy bleed-DoT system exists, so this is the closest
