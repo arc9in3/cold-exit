@@ -1822,4 +1822,48 @@ export const tunables = {
       description: 'Adventure 360° prototype. Hits an enemy → reels them in. Hits a wall → reels you to it. One shot, long reload.',
     },
   ],
+  // Mega-boss tuning. Each block maps to one mega-boss class so the
+  // values driving phase HP thresholds, attack cadence, beam damage,
+  // and loot-drop geometry can be retuned without re-reading the boss
+  // module. Both bosses share the same arena geometry (level.js
+  // HALF = 15), so `megaboss.arenaInner` below is reused by both
+  // bosses' loot-drop clamp.
+  megaboss: {
+    arenaInner: 13,                  // clamp drops to ±13 (arena half 15 − 2m wall buffer)
+  },
+  megabossEcho: {
+    maxHp: 35000,
+    // HP-fraction thresholds that flip the phase: >75% = 1, 35-75% = 2, <35% = 3.
+    phase2HpRatio: 0.75,
+    phase3HpRatio: 0.35,
+    // Player-movement recording — RECORD_HZ samples per second over
+    // RECORD_LEN samples = 8s rolling window.
+    recordHz: 10,
+    recordLen: 80,
+    // Ghost replicas spawned per phase + cadence between spawns.
+    ghostCountPerPhase:        [1,   2,   4],     // index = phase − 1
+    ghostSpawnIntervalSec:     [5.0, 4.0, 3.0],
+    // Per-phase ghost fire-cooldown base (seconds between shots) + jitter.
+    ghostFireIntervalSec:      [1.5, 1.1, 0.8],
+    ghostFireIntervalJitter:   0.4,
+    ghostFirstShotDelayMin:    0.8,
+    ghostFirstShotDelayJitter: 0.8,
+    ghostFireRange:            18,    // max distance at which a ghost will fire
+    ghostHitChanceBase:        0.85,  // accuracy = max(min, base − falloff·dist)
+    ghostHitChanceFalloffPerM: 0.04,
+    ghostHitChanceMin:         0.25,
+    ghostDamagePerPhase:       [18, 22, 26],
+    // Phase-3 sweep beam.
+    beamRotationRadPerSec: 0.65,
+    beamDamageTickSec:     0.25,
+    beamRange:             14,
+    beamHalfConeRad:       0.06,      // ~3.4° half-angle
+    beamDamage:            14,
+    // Loot drop ring geometry inside the mega-arena.
+    lootDropRadiusBase:   1.2,
+    lootDropRadiusJitter: 0.4,
+    lootDropY:            0.4,
+    // Bark de-dup — minimum seconds between any two barks.
+    barkCooldownSec: 1.0,
+  },
 };

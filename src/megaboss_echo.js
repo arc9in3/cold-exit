@@ -27,7 +27,15 @@
 // magnetism patch maps to the core's center.
 
 import * as THREE from 'three';
+import { buildRig, initAnim, updateAnim } from './actor_rig.js';
 import { spawnSpeechBubble } from './hud.js';
+import { tunables } from './tunables.js';
+
+// Tuning lives in `tunables.megabossEcho` — see balance pass note. All
+// damage / range / cadence / phase-threshold values are sourced through
+// `_T()` so a single retune happens in one place.
+const _T = () => tunables.megabossEcho;
+const _Tarena = () => tunables.megaboss;
 
 const _BAR_TINT = '#7a4abf';
 
@@ -49,16 +57,15 @@ const BARKS_PHASE3 = [
   'COMPLIANCE: ENFORCED.',
 ];
 
-// Recording: 80 samples × 0.1s spacing = 8s of player movement.
-const RECORD_HZ = 10;
-const RECORD_LEN = 80;
+// Recording window — `recordHz` samples per second × `recordLen` samples
+// = ~8s of player movement at the defaults. See tunables.megabossEcho.
 
 export class MegaBossEcho {
   constructor(ctx) {
     this.ctx = ctx;
     this.scene = ctx.scene;
 
-    this.maxHp = 35000;
+    this.maxHp = _T().maxHp;
     this.hp = this.maxHp;
     this.alive = false;
     this.phase = 1;
@@ -159,15 +166,23 @@ export class MegaBossEcho {
     g.add(core);
 
     // Eye — glowing ring at the top. Rotates slowly. Pulses on phase.
+    // Tagged as a head-zone hittable so bullets aimed at the visually
+    // dominant pulse sphere actually register damage. Without this the
+    // raycast passed through the eye into empty air above the core
+    // cylinder and the player couldn't damage the boss from iso angles.
     const eyeGeo = new THREE.SphereGeometry(0.55, 24, 16);
     const eyeMat = new THREE.MeshBasicMaterial({ color: 0xb892f0 });
     const eye = new THREE.Mesh(eyeGeo, eyeMat);
     eye.position.y = 4.1;
+    eye.userData.zone = 'head';
+    eye.userData.owner = this;
+    eye.userData.megaBoss = true;
     g.add(eye);
     this.eyeMesh = eye;
     this.eyeMat = eyeMat;
 
     // Halo ring — additive, gives the eye a bloom-friendly aura.
+    // Hittable too so a near-miss on the eye still registers.
     const ringGeo = new THREE.TorusGeometry(0.85, 0.06, 8, 32);
     const ringMat = new THREE.MeshBasicMaterial({
       color: 0xb892f0, transparent: true, opacity: 0.7,
@@ -176,6 +191,9 @@ export class MegaBossEcho {
     const ring = new THREE.Mesh(ringGeo, ringMat);
     ring.position.y = 4.1;
     ring.rotation.x = Math.PI / 2;
+    ring.userData.zone = 'torso';
+    ring.userData.owner = this;
+    ring.userData.megaBoss = true;
     g.add(ring);
     this.ringMesh = ring;
 
@@ -223,7 +241,8 @@ export class MegaBossEcho {
     if (this.eyeMat) this.eyeMat.color.setHex(targetHex);
 
     // Phase transitions.
-    const nextPhase = hpRatio > 0.75 ? 1 : hpRatio > 0.35 ? 2 : 3;
+    const T = _T();
+    const nextPhase = hpRatio > T.phase2HpRatio ? 1 : hpRatio > T.phase3HpRatio ? 2 : 3;
     if (nextPhase !== this.phase) {
       this.phase = nextPhase;
       const lib = nextPhase === 2 ? BARKS_PHASE2 : BARKS_PHASE3;
@@ -232,21 +251,26 @@ export class MegaBossEcho {
       if (this.beamMat) this.beamMat.opacity = nextPhase === 3 ? 0.65 : 0;
     }
 
-    // Record the player's position once per RECORD_HZ.
+    // Record the player's position once per recordHz.
     this.recordT += dt;
-    if (this.recordT >= 1 / RECORD_HZ) {
+    if (this.recordT >= 1 / T.recordHz) {
       this.recordT = 0;
       const p = this.ctx.getPlayerPos();
       if (p) {
         this.recording.push({ x: p.x, z: p.z });
-        if (this.recording.length > RECORD_LEN) this.recording.shift();
+        if (this.recording.length > T.recordLen) this.recording.shift();
       }
     }
 
-    // Ghost spawning — phase-controlled count + interval.
-    const wantCount = this.phase === 1 ? 1 : this.phase === 2 ? 2 : 4;
-    const spawnInterval = this.phase === 1 ? 5.0 : this.phase === 2 ? 4.0 : 3.0;
+    // Ghost spawning — phase-controlled count + interval. Indexed
+    // (phase − 1) into the per-phase tunable arrays.
+    const phaseIdx = this.phase - 1;
+    const wantCount     = T.ghostCountPerPhase[phaseIdx];
+    const spawnInterval = T.ghostSpawnIntervalSec[phaseIdx];
     this.spawnT -= dt;
+    // Min recording length to spawn ghost — 30 samples ≈ 3s of movement
+    // history. Held inline as an algorithm minimum (insufficient samples
+    // would give a degenerate path, not a tuning value).
     if (this.ghosts.length < wantCount && this.spawnT <= 0 && this.recording.length >= 30) {
       this._spawnGhost();
       this.spawnT = spawnInterval;
@@ -263,11 +287,11 @@ export class MegaBossEcho {
 
     // Phase 3 sweep beam — rotate slowly + raycast for hits.
     if (this.phase === 3 && this.beamMesh) {
-      this.sweepAngle += dt * 0.65;
+      this.sweepAngle += dt * T.beamRotationRadPerSec;
       this.beamMesh.rotation.y = this.sweepAngle;
       this.sweepT -= dt;
       if (this.sweepT <= 0) {
-        this.sweepT = 0.25;        // 4 Hz sweep damage tick
+        this.sweepT = T.beamDamageTickSec;
         this._sweepDamageCheck();
       }
     }
@@ -279,36 +303,46 @@ export class MegaBossEcho {
   // through the buffer at real-time pace, lagging the player by 8s.
   _spawnGhost() {
     if (!this.recording.length) return;
+    const T = _T();
     const start = this.recording[0];
-    const mesh = this._buildGhostMesh();
-    mesh.position.set(start.x, 0.9, start.z);
-    this.scene.add(mesh);
+    const rig = this._buildGhostRig();
+    rig.group.position.set(start.x, 0, start.z);
+    this.scene.add(rig.group);
     this.ghosts.push({
-      mesh,
-      pathIdx: 0,            // float — fractional sample index
-      pathSpeed: RECORD_HZ,  // samples per second (replays in real time)
-      fireT: 0.8 + Math.random() * 0.8,
+      rig,
+      pathIdx: 0,                        // float — fractional sample index
+      pathSpeed: T.recordHz,             // samples per second (replays in real time)
+      fireT: T.ghostFirstShotDelayMin + Math.random() * T.ghostFirstShotDelayJitter,
       bornT: this._t,
+      lastX: start.x,
+      lastZ: start.z,
     });
   }
 
-  _buildGhostMesh() {
-    const g = new THREE.Group();
-    // Translucent humanoid silhouette: pelvis box + torso box + head sphere.
-    const mat = new THREE.MeshBasicMaterial({
-      color: 0xb892f0, transparent: true, opacity: 0.55,
-      depthWrite: false,
+  _buildGhostRig() {
+    // The "echo" replays the player's recorded movement — so the
+    // visual must read as a haunted player figure, not a generic blob.
+    // Reuses the canonical buildRig (same rig system as the player and
+    // gunmen) and converts every material to translucent additive so
+    // the silhouette reads ghostly without losing the recognizable
+    // humanoid shape. Animation is driven by frame-to-frame ground
+    // speed in _tickGhost so the legs actually walk.
+    const rig = buildRig({
+      scale: 0.77,
+      bodyColor: 0x4a3878, headColor: 0x6850a0,
+      legColor:  0x3a2860, armColor:  0x4a3878,
+      handColor: 0x2a1840, gearColor: 0x301848,
+      bootColor: 0x180c20,
     });
-    const pelvis = new THREE.Mesh(new THREE.BoxGeometry(0.32, 0.28, 0.22), mat);
-    pelvis.position.y = -0.5;
-    g.add(pelvis);
-    const torso = new THREE.Mesh(new THREE.CylinderGeometry(0.18, 0.22, 0.5, 12), mat);
-    torso.position.y = -0.18;
-    g.add(torso);
-    const head = new THREE.Mesh(new THREE.SphereGeometry(0.16, 12, 10), mat);
-    head.position.y = 0.2;
-    g.add(head);
-    return g;
+    initAnim(rig);
+    rig.group.traverse((o) => {
+      if (o.isMesh && o.material) {
+        o.material.transparent = true;
+        o.material.opacity = 0.55;
+        o.material.depthWrite = false;
+      }
+    });
+    return rig;
   }
 
   // Returns true to keep ghost alive, false to retire it.
@@ -322,28 +356,41 @@ export class MegaBossEcho {
     const f = ghost.pathIdx - idx;
     const x = a.x + (b.x - a.x) * f;
     const z = a.z + (b.z - a.z) * f;
-    ghost.mesh.position.x = x;
-    ghost.mesh.position.z = z;
+    const grp = ghost.rig.group;
+    grp.position.x = x;
+    grp.position.z = z;
     // Face the actual player.
     const p = this.ctx.getPlayerPos();
     if (p) {
       const dx = p.x - x, dz = p.z - z;
-      ghost.mesh.rotation.y = Math.atan2(dx, dz);
+      grp.rotation.y = Math.atan2(dx, dz);
     }
+    // Drive rig animation from real frame-to-frame ground speed so the
+    // ghost's gait matches the recorded movement (idle → walk → run).
+    const stepDx = x - ghost.lastX;
+    const stepDz = z - ghost.lastZ;
+    const speed  = Math.hypot(stepDx, stepDz) / Math.max(0.001, dt);
+    ghost.lastX = x; ghost.lastZ = z;
+    updateAnim(ghost.rig, { speed, dying: false }, dt);
     // Fire on cooldown — slow tracking pistol shot.
     ghost.fireT -= dt;
     if (ghost.fireT <= 0) {
-      const fireInterval = this.phase === 1 ? 1.5 : this.phase === 2 ? 1.1 : 0.8;
-      ghost.fireT = fireInterval + Math.random() * 0.4;
+      const T = _T();
+      const fireInterval = T.ghostFireIntervalSec[this.phase - 1];
+      ghost.fireT = fireInterval + Math.random() * T.ghostFireIntervalJitter;
       this._ghostFire(ghost);
     }
     return true;
   }
 
   _destroyGhost(ghost) {
-    if (!ghost?.mesh) return;
-    if (ghost.mesh.parent) ghost.mesh.parent.remove(ghost.mesh);
-    ghost.mesh.traverse((o) => { if (o.geometry?.dispose) o.geometry.dispose(); });
+    if (!ghost?.rig) return;
+    const grp = ghost.rig.group;
+    if (grp.parent) grp.parent.remove(grp);
+    grp.traverse((o) => {
+      if (o.geometry?.dispose) o.geometry.dispose();
+      if (o.material?.dispose) o.material.dispose();
+    });
   }
 
   // Fire a hitscan-style pistol shot from the ghost toward the player.
@@ -351,22 +398,27 @@ export class MegaBossEcho {
   _ghostFire(ghost) {
     const ctx = this.ctx;
     const p = ctx.getPlayerPos();
-    if (!p || !ghost?.mesh) return;
-    const dx = p.x - ghost.mesh.position.x;
-    const dz = p.z - ghost.mesh.position.z;
+    if (!p || !ghost?.rig) return;
+    const T = _T();
+    const grp = ghost.rig.group;
+    const dx = p.x - grp.position.x;
+    const dz = p.z - grp.position.z;
     const dist = Math.hypot(dx, dz);
-    if (dist > 18) return;     // out of effective range
+    if (dist > T.ghostFireRange) return;     // out of effective range
     // Visual tracer — reuse combat.spawnShot.
-    const from = new THREE.Vector3(ghost.mesh.position.x, 1.0, ghost.mesh.position.z);
+    const from = new THREE.Vector3(grp.position.x, 1.0, grp.position.z);
     const to   = new THREE.Vector3(p.x, 1.0, p.z);
     if (ctx.combat && ctx.combat.spawnShot) {
       ctx.combat.spawnShot(from, to, 0xb892f0, { light: false, flash: false });
     }
-    // Hit check — 70% accuracy, drops with distance. Iframes ignore.
+    // Hit check — accuracy = max(min, base − falloffPerM·dist). Iframes ignore.
     if (ctx.playerHasIFrames && ctx.playerHasIFrames()) return;
-    const hitChance = Math.max(0.25, 0.85 - dist * 0.04);
+    const hitChance = Math.max(
+      T.ghostHitChanceMin,
+      T.ghostHitChanceBase - dist * T.ghostHitChanceFalloffPerM,
+    );
     if (Math.random() > hitChance) return;
-    const dmg = this.phase === 1 ? 12 : this.phase === 2 ? 14 : 16;
+    const dmg = T.ghostDamagePerPhase[this.phase - 1];
     ctx.damagePlayer(dmg, 'echo-ghost', { source: 'megaboss-echo' });
   }
 
@@ -378,18 +430,18 @@ export class MegaBossEcho {
     if (!ctx.getPlayerPos || (ctx.playerHasIFrames && ctx.playerHasIFrames())) return;
     const p = ctx.getPlayerPos();
     if (!this.group || !p) return;
+    const T = _T();
     const cx = this.group.position.x;
     const cz = this.group.position.z;
     const dx = p.x - cx, dz = p.z - cz;
     const distSq = dx * dx + dz * dz;
-    if (distSq > 14 * 14) return;          // out of beam range
+    if (distSq > T.beamRange * T.beamRange) return;          // out of beam range
     const angToPlayer = Math.atan2(dx, dz);
     let delta = angToPlayer - this.sweepAngle;
     while (delta >  Math.PI) delta -= Math.PI * 2;
     while (delta < -Math.PI) delta += Math.PI * 2;
-    const halfBeam = 0.06;                  // ~3.4° half-cone
-    if (Math.abs(delta) < halfBeam) {
-      ctx.damagePlayer(8, 'echo-beam', { source: 'megaboss-echo-beam' });
+    if (Math.abs(delta) < T.beamHalfConeRad) {
+      ctx.damagePlayer(T.beamDamage, 'echo-beam', { source: 'megaboss-echo-beam' });
     }
   }
 
@@ -415,22 +467,37 @@ export class MegaBossEcho {
     this.ghosts.length = 0;
     // Hide HUD bar after a beat.
     setTimeout(() => { if (this._barEl) this._barEl.style.display = 'none'; }, 1800);
-    // Drop loot at base.
+    // Drop loot at base. Arena half-size = 15m (level.js); clamp to
+    // megaboss.arenaInner so an edge-of-arena death never flings drops
+    // behind a wall.
     if (this.ctx.lootRolls && this.ctx.loot && this.group) {
       try {
+        const T = _T();
+        const inner = _Tarena().arenaInner;
         const drops = this.ctx.lootRolls(0) || [];
         const cx = this.group.position.x, cz = this.group.position.z;
         for (let i = 0; i < drops.length; i++) {
           const a = (i / Math.max(1, drops.length)) * Math.PI * 2;
-          const r = 1.2 + Math.random() * 0.4;
-          this.ctx.loot.spawnItem({ x: cx + Math.cos(a) * r, y: 0.4, z: cz + Math.sin(a) * r }, drops[i]);
+          const r = T.lootDropRadiusBase + Math.random() * T.lootDropRadiusJitter;
+          let lx = cx + Math.cos(a) * r;
+          let lz = cz + Math.sin(a) * r;
+          lx = Math.max(-inner, Math.min(inner, lx));
+          lz = Math.max(-inner, Math.min(inner, lz));
+          this.ctx.loot.spawnItem({ x: lx, y: T.lootDropY, z: lz }, drops[i]);
         }
       } catch (_) { /* swallow — loot is best-effort */ }
     }
     if (this.ctx.onMegaBossDead) this.ctx.onMegaBossDead(this);
   }
 
-  hittables() { return this.alive && this.coreMesh ? [this.coreMesh] : []; }
+  hittables() {
+    if (!this.alive) return [];
+    const out = [];
+    if (this.coreMesh) out.push(this.coreMesh);
+    if (this.eyeMesh)  out.push(this.eyeMesh);
+    if (this.ringMesh) out.push(this.ringMesh);
+    return out;
+  }
 
   // ---------- Cleanup ----------
   destroy() {
@@ -455,7 +522,7 @@ export class MegaBossEcho {
   _bark(text) {
     if (!text) return;
     const now = this._t;
-    if (now - this._lastBarkT < 1.0) return;
+    if (now - this._lastBarkT < _T().barkCooldownSec) return;
     this._lastBarkT = now;
     if (!this.group || !this.ctx.camera) return;
     spawnSpeechBubble(text, {
