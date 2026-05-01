@@ -1829,7 +1829,40 @@ export const tunables = {
   // HALF = 15), so `megaboss.arenaInner` below is reused by both
   // bosses' loot-drop clamp.
   megaboss: {
-    arenaInner: 13,                  // clamp drops to ±13 (arena half 15 − 2m wall buffer)
+    arenaInner:        13,            // clamp drops to ±13 (arena half 15 − 2m wall buffer)
+    bossClampRadius:   12,            // hard-clamp boss chassis to ±12 so it never intersects the wall
+  },
+  megabossArboter: {
+    // Per-encounter scaling. All `*ScalePerEncounter` values are slope
+    // factors applied to k (the run's mega-boss-encounter index) so a
+    // 3rd-time fight is meaningfully harder than the first.
+    maxHpBase:               50000,
+    maxHpScalePerEncounter:  0.4,     // hp = base × (1 + slope·k)
+    dmgScalePerEncounter:    0.25,
+    freqScalePerEncounter:   0.10,    // attack-cadence speedup per encounter
+    spreadScalePerEncounter: 0.08,    // spread tightens by this much per encounter
+    freqScaleMin:            0.35,
+    spreadScaleMin:          0.35,
+    // Damage baselines (scaled by 1 + dmgScalePerEncounter·k at runtime).
+    damage: {
+      sweepBullet: 28,
+      artillery:   50,
+      slam:        70,
+      grenade:     35,
+      bodyCrush:   60,
+      charge:      75,
+      groundFire:   8,                // per-tick (fires ~3×/sec)
+      gas:          6,                // per-tick
+    },
+    // HP-fraction phase thresholds. Phase 1 → 2 at this remaining HP.
+    phase2HpRatio: 0.75,
+    phase3HpRatio: 0.25,
+    // Loot drop ring geometry (boss chassis is 4×5m so the ring sits
+    // outside it). Final positions are clamped to megaboss.arenaInner.
+    lootDropRadiusBase:   5.5,
+    lootDropRadiusJitter: 2.5,
+    lootDropAngleJitter:  0.5,
+    lootDropY:            0.4,
   },
   megabossEcho: {
     maxHp: 35000,

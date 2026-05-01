@@ -21,6 +21,13 @@
 
 import * as THREE from 'three';
 import { spawnSpeechBubble } from './hud.js';
+import { tunables } from './tunables.js';
+
+// Tuning lives in tunables.megabossArboter / tunables.megaboss — see
+// the balance pass note. Helper closures so future retunes happen in
+// one file instead of being scattered through the action FSM.
+const _T = () => tunables.megabossArboter;
+const _Tarena = () => tunables.megaboss;
 
 // --- Levels that get the boss --------------------------------------
 export function isMegaBossLevel(idx) {
@@ -142,27 +149,29 @@ export class MegaBoss {
     this.encounterIndex = getEncounterCount();
 
     const k = this.encounterIndex;
-    const hpScale     = 1 + 0.4 * k;
-    const dmgScale    = 1 + 0.25 * k;
-    const freqScale   = Math.max(0.35, 1 - 0.10 * k);  // lower = faster
-    const spreadScale = Math.max(0.35, 1 - 0.08 * k);
+    const T = _T();
+    const hpScale     = 1 + T.maxHpScalePerEncounter * k;
+    const dmgScale    = 1 + T.dmgScalePerEncounter * k;
+    const freqScale   = Math.max(T.freqScaleMin,   1 - T.freqScalePerEncounter   * k);  // lower = faster
+    const spreadScale = Math.max(T.spreadScaleMin, 1 - T.spreadScalePerEncounter * k);
     this.dmgScale = dmgScale;
     this.freqScale = freqScale;
     this.spreadScale = spreadScale;
 
-    this.maxHp = Math.round(50000 * hpScale);
+    this.maxHp = Math.round(T.maxHpBase * hpScale);
     this.hp = this.maxHp;
 
-    // Damage baselines (scaled per encounter).
+    // Damage baselines (scaled per encounter from tunables.megabossArboter.damage).
+    const D = T.damage;
     this.dmg = {
-      sweepBullet: Math.round(28 * dmgScale),
-      artillery:   Math.round(50 * dmgScale),
-      slam:        Math.round(70 * dmgScale),
-      grenade:     Math.round(35 * dmgScale),
-      bodyCrush:   Math.round(60 * dmgScale),
-      charge:      Math.round(75 * dmgScale),
-      groundFire:  Math.round(8  * dmgScale),    // per-tick (fires ~3x/sec)
-      gas:         Math.round(6  * dmgScale),    // per-tick
+      sweepBullet: Math.round(D.sweepBullet * dmgScale),
+      artillery:   Math.round(D.artillery   * dmgScale),
+      slam:        Math.round(D.slam        * dmgScale),
+      grenade:     Math.round(D.grenade     * dmgScale),
+      bodyCrush:   Math.round(D.bodyCrush   * dmgScale),
+      charge:      Math.round(D.charge      * dmgScale),
+      groundFire:  Math.round(D.groundFire  * dmgScale),
+      gas:         Math.round(D.gas         * dmgScale),
     };
 
     this.alive = false;
@@ -178,8 +187,8 @@ export class MegaBoss {
     this.phaseTransitioning = false;
     this.phaseTransitionT = 0;
     this.phaseTransitionUntil = 0;
-    this.phase2Threshold = 0.75;
-    this.phase3Threshold = 0.25;
+    this.phase2Threshold = T.phase2HpRatio;
+    this.phase3Threshold = T.phase3HpRatio;
     // Damage-emitter pools are lazy-allocated inside _addSmokeEffect
     // and _addFireEffect when phase 2/3 transitions fire.
     this._smokePuffPool = null;
@@ -966,8 +975,10 @@ export class MegaBoss {
         if (this.ctx.shake) this.ctx.shake(0.7, 0.25);
       }
     }
-    // Stop short if we'd leave the arena.
-    const arenaR = 18;
+    // Stop short if we'd leave the arena. Matches the 30×30m mega-arena
+    // (HALF=15 in level.js) minus chassis-radius buffer so the boss body
+    // never intersects the perimeter wall.
+    const arenaR = _Tarena().bossClampRadius;
     if (Math.abs(this.boss.position.x) > arenaR || Math.abs(this.boss.position.z) > arenaR) {
       this.boss.position.x = Math.max(-arenaR, Math.min(arenaR, this.boss.position.x));
       this.boss.position.z = Math.max(-arenaR, Math.min(arenaR, this.boss.position.z));
@@ -1310,14 +1321,20 @@ export class MegaBoss {
     const items = this.ctx.lootRolls(this.encounterIndex);
     // Wider ring — boss chassis is 4×5m. Drops at 1.5-2.7m landed
     // INSIDE the body geometry; player couldn't see / pick them up.
-    // 5.5-8m radius puts everything in clear floor space.
+    // tunables.megabossArboter.lootDropRadius* puts everything in clear
+    // floor space, then clamped to megaboss.arenaInner so an edge-of-
+    // arena death doesn't fling drops behind a wall.
+    const T = _T();
+    const inner = _Tarena().arenaInner;
     let i = 0;
     for (const item of items) {
-      const ang = (i / items.length) * Math.PI * 2 + Math.random() * 0.5;
-      const r = 5.5 + Math.random() * 2.5;
-      const dx = Math.cos(ang) * r;
-      const dz = Math.sin(ang) * r;
-      this.ctx.loot.spawnItem({ x: cx + dx, y: 0.4, z: cz + dz }, item);
+      const ang = (i / items.length) * Math.PI * 2 + Math.random() * T.lootDropAngleJitter;
+      const r = T.lootDropRadiusBase + Math.random() * T.lootDropRadiusJitter;
+      let lx = cx + Math.cos(ang) * r;
+      let lz = cz + Math.sin(ang) * r;
+      lx = Math.max(-inner, Math.min(inner, lx));
+      lz = Math.max(-inner, Math.min(inner, lz));
+      this.ctx.loot.spawnItem({ x: lx, y: T.lootDropY, z: lz }, item);
       i += 1;
     }
   }
