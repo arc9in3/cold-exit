@@ -442,7 +442,16 @@ function _applyCorpseSection(snap, gunmen, melees) {
     // the cooldown elapses so the just-taken item doesn't briefly
     // re-appear in the modal.
     if (entity._coopBodyLootCooldown && entity._coopBodyLootCooldown > now) continue;
-    entity.loot = c.l || [];
+    // CRITICAL: mutate entity.loot in place rather than replacing
+    // the reference. lootUI.open() installs a splice wrap on the
+    // open target's array; replacing the array orphans the wrap,
+    // which means subsequent takes skip the rpc-body-take broadcast
+    // and the joiner can re-loot the body indefinitely until the
+    // host walks up and looks at it. (REGRESSION: bug-coop-bodyloot)
+    if (!Array.isArray(entity.loot)) entity.loot = [];
+    const incoming = c.l || [];
+    entity.loot.length = 0;
+    for (let i = 0; i < incoming.length; i++) entity.loot.push(incoming[i]);
     entity.looted = false;
   }
   for (const list of [gunmen.gunmen, melees.enemies]) {

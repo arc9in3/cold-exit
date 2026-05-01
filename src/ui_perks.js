@@ -176,7 +176,7 @@ export class PerkUI {
     const W = container.offsetWidth;
     const H = container.offsetHeight;
     const svg = document.createElementNS('http://www.w3.org/2000/svg', 'svg');
-    svg.className = 'pt-svg';
+    svg.setAttribute('class', 'pt-svg');
     svg.setAttribute('viewBox', `0 0 ${W} ${H}`);
     svg.style.cssText = `position:absolute;top:0;left:0;width:${W}px;height:${H}px;pointer-events:none;overflow:visible`;
     for (const { fx, fy, tx, ty } of lines) {

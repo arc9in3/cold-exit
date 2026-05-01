@@ -117,7 +117,7 @@ window.__resetHints = resetHints;
 // "I'm on build XYZ" without inspecting the bundle. Date stamps the
 // version so a quick glance tells you how stale the build is. Both
 // values render into the bottom-right #build-version label.
-const BUILD_VERSION = 'd042002+joiner-stash+gunman-perf';
+const BUILD_VERSION = '6dde905+bodyloot+encounters+throwables+fixes';
 // Build date intentionally bumped each deploy so the corner label
 // reflects the current snapshot.
 const BUILD_DATE    = '2026-05-01';
@@ -1738,6 +1738,62 @@ function _enterDownedState() {
   // Surface a HUD message so the player understands.
   try { transientHudMsg('DOWN — bleedout 60s — teammate must revive', 6.0); } catch (_) {}
 }
+// Coop throwable sync. Throwables are spawned via projectiles.spawn
+// on the thrower's machine only — without this, teammates see no
+// grenade flying / no explosion visual. Damage attribution stays
+// per-peer for v1 (each peer's own throwable damages their LOCAL
+// view; the host's auth state can drift). Visual-only is enough
+// to read each other's plays.
+function _coopBroadcastThrowable(opts) {
+  const t = getCoopTransport();
+  if (!t.isOpen) return;
+  if (!t.peers || t.peers.size === 0) return;
+  try {
+    t.send('fx-throwable', {
+      px: +opts.pos.x.toFixed(2),
+      py: +opts.pos.y.toFixed(2),
+      pz: +opts.pos.z.toFixed(2),
+      vx: +opts.vel.x.toFixed(2),
+      vy: +opts.vel.y.toFixed(2),
+      vz: +opts.vel.z.toFixed(2),
+      lt: +(opts.lifetime ?? 2.0).toFixed(2),
+      r:  +(opts.radius ?? 0.07).toFixed(3),
+      c:  (opts.color | 0) || 0xb04030,
+      er: +((opts.explosion?.radius) ?? 3.5).toFixed(2),
+      es: +((opts.explosion?.shake)  ?? 0.35).toFixed(2),
+      g:  +(opts.gravity ?? 9.8).toFixed(2),
+      b:  +(opts.bounciness ?? 0).toFixed(2),
+      tk: opts.throwKind || 'frag',
+      fl: opts.fuseAfterLand ? 1 : 0,
+    });
+  } catch (_) {}
+}
+
+// Coop encounter sync. The unseeded Math.random in
+// pickEncounterForLevel + per-peer differences in completedEncounters /
+// runCompletedEncounters made the host and joiner roll different
+// encounters into the same rooms. Host owns the canonical pick; the
+// joiner consumes the ids in order from a queue. Reset on every
+// regenerateLevel call so a stale queue from a prior floor doesn't
+// leak. Broadcast the host's picks at the end of regen.
+let _coopHostEncounterIds = [];
+let _coopForcedEncounterQueue = [];
+function _coopPickEncounter(levelIndex) {
+  // Joiner — pop the next host-chosen id off the queue. Fall back to
+  // the local roll only if the host didn't broadcast (legacy peer).
+  const t = getCoopTransport();
+  if (t.isOpen && !t.isHost && _coopForcedEncounterQueue.length > 0) {
+    const id = _coopForcedEncounterQueue.shift();
+    if (id && ENCOUNTER_DEFS[id]) return ENCOUNTER_DEFS[id];
+  }
+  const def = pickEncounterForLevel(
+    levelIndex, _runCompletedEncounters, runStats, artifacts, inventory,
+  );
+  // Host — track the id so the post-regen broadcast can mirror it.
+  if (t.isOpen && t.isHost && def) _coopHostEncounterIds.push(def.id);
+  return def;
+}
+
 // Joiner-side stash persistence. Cold Exit's transport can drop on a
 // network blip / browser-tab swap; without persistence the joiner
 // re-joins with a fresh starter loadout. Snapshots equipment + grids
@@ -2023,14 +2079,14 @@ function _tickReviveInteract(dt) {
   // to the hold-based 30% revive if none are carried. The heal
   // press is consumed BEFORE tryUseMedkit so it doesn't double-fire.
   _refreshDefibHint(target);
-  if (target && inputState && inputState.healPressed) {
+  if (target && lastSampledInput && lastSampledInput.healPressed) {
     // Try instant revive first; fall through to tourniquet (bleedout
     // extender) if no revive item is carried but a tourniquet is.
     const revive = _findBestReviveItem();
     const tourni = revive ? null : _findTourniquet();
     const found = revive || tourni;
     if (found) {
-      inputState.healPressed = false;
+      lastSampledInput.healPressed = false;
       const stackCount = (found.entry.item.count | 0) || 1;
       if (stackCount > 1) {
         found.entry.item.count = stackCount - 1;
@@ -2284,8 +2340,12 @@ function _ensureCoopLobby() {
   transport.addEventListener('peer-in', () => {
     if (!transport.isHost || !_runSeed) return;
     const lv = (level?.index | 0);
-    transport.send('level-seed', { seed: _runSeed, levelIndex: lv });
-    console.log('[coop] re-broadcasting level-seed on peer-in', { seed: _runSeed, levelIndex: lv });
+    transport.send('level-seed', {
+      seed: _runSeed, levelIndex: lv,
+      enc: _coopHostEncounterIds.slice(),
+    });
+    console.log('[coop] re-broadcasting level-seed on peer-in',
+      { seed: _runSeed, levelIndex: lv, encounters: _coopHostEncounterIds });
   });
   // Once the WS handshake completes, regenerate the level on the
   // host side if we don't yet have a run seed. This covers the very
@@ -2510,6 +2570,35 @@ function _ensureCoopLobby() {
         };
         requestAnimationFrame(tick);
       } catch (_) {}
+      return;
+    }
+    if (kind === 'fx-throwable') {
+      // A peer threw a grenade / molotov / etc. Spawn a visual-only
+      // projectile so we see the arc + explosion. Damage zeroed —
+      // host's auth enemies are damaged via the thrower's local
+      // explosion, not via this mirror. Skip if WE are the sender
+      // (server already excludes; defensive).
+      if (!body || from === transport.peerId) return;
+      try {
+        projectiles.spawn({
+          pos: new THREE.Vector3(+body.px || 0, +body.py || 1, +body.pz || 0),
+          vel: new THREE.Vector3(+body.vx || 0, +body.vy || 0, +body.vz || 0),
+          type: 'grenade',
+          lifetime: +body.lt || 2.0,
+          radius: +body.r || 0.07,
+          color: (body.c | 0) || 0xb04030,
+          explosion: {
+            radius: +body.er || 3.5,
+            damage: 0,                      // visual mirror — no damage
+            shake: +body.es || 0.35,
+          },
+          owner: 'remote',
+          gravity: +body.g || 9.8,
+          bounciness: +body.b || 0,
+          fuseAfterLand: !!body.fl,
+          throwKind: body.tk || 'frag',
+        });
+      } catch (e) { console.warn('[coop] fx-throwable apply failed', e); }
       return;
     }
     if (kind === 'fx-tracer-self') {
@@ -2744,6 +2833,11 @@ function _ensureCoopLobby() {
       currentSeed: _runSeed, currentLv: level?.index | 0,
     });
     _runSeed = incomingSeed;
+    // Stash the host's chosen encounter ids so _coopPickEncounter
+    // pops them in order during the joiner's regen. Resetting the
+    // queue here (vs preserving across messages) means a duplicate
+    // level-seed broadcast doesn't double-stack the queue.
+    _coopForcedEncounterQueue = Array.isArray(body.enc) ? body.enc.slice() : [];
     if (needsRegen && level) {
       // Drop-in mid-run — joiner connected from the menu without
       // having clicked Play first. Auto-start a default run so they
@@ -3766,13 +3860,22 @@ function regenerateLevel() {
     _runSeed = (Math.random() * 0xFFFFFFFF) >>> 0 || 1;
     console.log('[coop] generated run seed', _runSeed);
   }
+  // Coop encounter sync — reset the host's per-floor pick log before
+  // regen runs so it accumulates only this floor's choices.
+  if (transport.isOpen && transport.isHost) _coopHostEncounterIds = [];
   const result = _withRunSeed(_getEffectiveSeed(), () => _regenerateLevelImpl());
   // Broadcast AFTER generation so joiners apply the seed for their
   // own regen call. _runSeed is per-run, level.index is per-floor.
+  // Encounter ids attached so joiner doesn't roll its own (their
+  // unseeded Math.random + per-peer completedSet diverged).
   if (transport.isOpen && transport.isHost && _runSeed) {
     const lv = (level?.index | 0);
-    transport.send('level-seed', { seed: _runSeed, levelIndex: lv });
-    console.log('[coop] broadcasting level-seed', { seed: _runSeed, levelIndex: lv });
+    transport.send('level-seed', {
+      seed: _runSeed, levelIndex: lv,
+      enc: _coopHostEncounterIds.slice(),
+    });
+    console.log('[coop] broadcasting level-seed',
+      { seed: _runSeed, levelIndex: lv, encounters: _coopHostEncounterIds });
   } else if (transport.isOpen) {
     console.log('[coop] skipped broadcast (not host or no seed)',
       { isHost: transport.isHost, runSeed: _runSeed });
@@ -4334,7 +4437,7 @@ function _regenerateLevelImpl() {
     // pickEncounterForLevel returned null because everything was
     // already completed). _runCompletedEncounters resets in
     // _resetEncounterCompletionForRun on every new run.
-    const def = pickEncounterForLevel(level.index | 0, _runCompletedEncounters, runStats, artifacts, inventory);
+    const def = _coopPickEncounter(level.index | 0);
     if (!def) {
       r.type = 'combat';   // demote — main UI stays consistent
       continue;
@@ -12568,7 +12671,7 @@ function throwItem(item) {
     const flen = Math.hypot(fdx, fdz) || 1;
     const SPEED = 28;
     const fvel = new THREE.Vector3((fdx / flen) * SPEED, 0, (fdz / flen) * SPEED);
-    projectiles.spawn({
+    const flatOpts = {
       pos: muzzle, vel: fvel,
       type: 'grenade',
       lifetime: item.fuse ?? 1.5,
@@ -12585,7 +12688,9 @@ function throwItem(item) {
       fuseAfterLand: false,
       throwKind: item.throwKind || 'elvenKnife',
       throwDirX: fdx, throwDirZ: fdz,
-    });
+    };
+    projectiles.spawn(flatOpts);
+    _coopBroadcastThrowable(flatOpts);
     sfx.uiAccept();
     return true;
   }
@@ -12611,7 +12716,7 @@ function throwItem(item) {
   const MAX_APEX = item.throwKind === 'molotov' ? 1.2 : 2.7;
   const apex = MIN_APEX + (MAX_APEX - MIN_APEX) * Math.min(1, throwDist / 14);
   const vel = ProjectileManager.ballisticVelocityApex(muzzle, aim, apex, gravity);
-  projectiles.spawn({
+  const arcOpts = {
     pos: muzzle,
     vel,
     type: 'grenade',
@@ -12658,7 +12763,9 @@ function throwItem(item) {
     // direction, so a player flicking left places a mine that fires left.
     throwDirX: dx,
     throwDirZ: dz,
-  });
+  };
+  projectiles.spawn(arcOpts);
+  _coopBroadcastThrowable(arcOpts);
   sfx.uiAccept();
   return true;
 }
