@@ -117,7 +117,7 @@ window.__resetHints = resetHints;
 // "I'm on build XYZ" without inspecting the bundle. Date stamps the
 // version so a quick glance tells you how stale the build is. Both
 // values render into the bottom-right #build-version label.
-const BUILD_VERSION = '8cb76f9+coop-no-freeze';
+const BUILD_VERSION = '712a7b0+deferred-picks-tunables';
 // Build date intentionally bumped each deploy so the corner label
 // reflects the current snapshot.
 const BUILD_DATE    = '2026-05-01';
@@ -2374,6 +2374,16 @@ window.addEventListener('keydown', (e) => {
     if (!lobby) return;
     if (lobby.isOpen()) lobby.hide();
     else lobby.show();
+  }
+  // K — spend the next queued level-up / mastery pick. Surfaces the
+  // banner-deferred picker on demand; player chooses a safe moment.
+  if (!e.ctrlKey && !e.metaKey && !e.altKey && (e.key === 'K' || e.key === 'k')) {
+    // Skip if a text input is focused (don't steal typing keys).
+    const focused = document.activeElement;
+    if (focused && (focused.tagName === 'INPUT' || focused.tagName === 'TEXTAREA')) return;
+    if (_pendingLevelUpPicks > 0 || _pendingMasteryPicks.length > 0) {
+      _openNextDeferredPick();
+    }
   }
 });
 // Auto-open on first load if URL carries ?coop=1 — players following
@@ -14036,32 +14046,122 @@ function executeTarget(target) {
   return true;
 }
 
+// Deferred-pick queue. Both single-player and coop now surface the
+// banner + a "ready" HUD pill instead of force-popping the picker
+// mid-fight. Player chooses when to spend by clicking the pill (or
+// pressing K). Stops the muscle-memory mis-click of locking in a
+// skill while LMB-spamming through a wave.
+let _pendingLevelUpPicks = 0;
+let _pendingMasteryPicks = [];   // queue of mastery offers, FIFO
+let _pickQueueHudEl = null;
+let _pickPickerOpen = false;
+
 async function runLevelUp() {
-  // In coop, freezing the world while one player picks a skill
-  // would stall the other player's gameplay. Keep ticking; the
-  // banner + picker overlay locally without setting paused.
+  // Banner still pops — the player wants the dopamine hit + a
+  // visual cue that the threshold crossed. The PICKER is deferred
+  // to a clickable HUD pill so an in-fight level-up doesn't
+  // interrupt or steal a panicked click.
+  input.clearMouseState();
+  await _showLevelUpBanner(1800);
+  _pendingLevelUpPicks += 1;
+  _refreshPickQueueHud();
+}
+
+async function runMasteryOffer() {
+  const offer = pendingMasteryOffers.shift();
+  if (!offer) return;
+  input.clearMouseState();
+  await _showClassLevelUpBanner(1800);
+  _pendingMasteryPicks.push(offer);
+  _refreshPickQueueHud();
+}
+
+// Open the next deferred pick from the queue. Skill-pick takes
+// priority since it's most often what the player wants to spend on
+// first. Only one picker at a time; we serialize so the player
+// closes one before the next surfaces.
+async function _openNextDeferredPick() {
+  if (_pickPickerOpen) return;
+  if (_pendingLevelUpPicks <= 0 && _pendingMasteryPicks.length === 0) return;
+  _pickPickerOpen = true;
+  // Coop / single-player: in coop the world keeps running (no
+  // paused=true); single-player still pauses for back-compat.
   const _coopOnly = (() => {
     const t = getCoopTransport();
     return t && t.isOpen && t.peers && t.peers.size > 0;
   })();
   if (!_coopOnly) paused = true;
-  input.clearMouseState();
   inventoryUI.hide();
-  // Show a glowing "LEVEL UP" banner BEFORE the skill picker so a
-  // player who happens to be clicking through a fight at the
-  // moment of level-up gets a visible heads-up + a short
-  // input-eating window. Players were accidentally locking in
-  // skill picks because the picker surfaced under their cursor
-  // while they were still firing.
-  await _showLevelUpBanner(1800);
-  // Eat any clicks queued during the banner display before
-  // surfacing the picker, so a mid-fight LMB doesn't slam-click
-  // through the panel as soon as it opens.
   input.clearMouseState();
-  await skillPickUI.show();
-  input.clearMouseState();
-  if (!_coopOnly) paused = false;
-  recomputeStats();
+  try {
+    if (_pendingLevelUpPicks > 0) {
+      _pendingLevelUpPicks -= 1;
+      _refreshPickQueueHud();
+      await skillPickUI.show();
+    } else if (_pendingMasteryPicks.length > 0) {
+      const offer = _pendingMasteryPicks.shift();
+      _refreshPickQueueHud();
+      await masteryPickUI.show(offer);
+    }
+  } finally {
+    input.clearMouseState();
+    if (!_coopOnly) paused = false;
+    recomputeStats();
+    _pickPickerOpen = false;
+    // If there's still queue, keep the HUD pill visible. We don't
+    // chain-open automatically — the player picks when ready.
+    _refreshPickQueueHud();
+  }
+}
+
+function _refreshPickQueueHud() {
+  if (!_pickQueueHudEl) {
+    const el = document.createElement('div');
+    el.id = 'pick-queue-hud';
+    Object.assign(el.style, {
+      position: 'fixed', top: '14px', left: '50%',
+      transform: 'translateX(-50%)', zIndex: '7',
+      cursor: 'pointer', display: 'none',
+      font: '12px ui-monospace, Menlo, Consolas, monospace',
+      letterSpacing: '2px', textTransform: 'uppercase',
+      padding: '8px 16px',
+      background: 'linear-gradient(180deg, #1a2228, #0c1014)',
+      border: '1px solid #f2c060', borderRadius: '4px',
+      color: '#f2c060',
+      boxShadow: '0 0 24px rgba(255,200,80,0.4)',
+      animation: 'pick-queue-pulse 2.4s ease-in-out infinite',
+    });
+    el.addEventListener('click', () => {
+      try { _openNextDeferredPick(); } catch (e) { console.warn('[picker]', e); }
+    });
+    if (!document.getElementById('pick-queue-hud-style')) {
+      const s = document.createElement('style');
+      s.id = 'pick-queue-hud-style';
+      s.textContent = `
+        @keyframes pick-queue-pulse {
+          0%, 100% { box-shadow: 0 0 24px rgba(255,200,80,0.4); transform: translateX(-50%) scale(1); }
+          50%      { box-shadow: 0 0 38px rgba(255,200,80,0.7); transform: translateX(-50%) scale(1.04); }
+        }
+      `;
+      document.head.appendChild(s);
+    }
+    document.body.appendChild(el);
+    _pickQueueHudEl = el;
+  }
+  const total = _pendingLevelUpPicks + _pendingMasteryPicks.length;
+  if (total <= 0) {
+    _pickQueueHudEl.style.display = 'none';
+    return;
+  }
+  const parts = [];
+  if (_pendingLevelUpPicks > 0) {
+    parts.push(`<span style="color:#ffe070">${_pendingLevelUpPicks}× SKILL</span>`);
+  }
+  if (_pendingMasteryPicks.length > 0) {
+    parts.push(`<span style="color:#d090ff">${_pendingMasteryPicks.length}× MASTERY</span>`);
+  }
+  _pickQueueHudEl.innerHTML = `${parts.join(' · ')} <span style="opacity:0.7;font-size:10px">— click or [K]</span>`;
+  _pickQueueHudEl.style.display = 'block';
 }
 
 // Lazy-built level-up banner — glow-animated full-screen text

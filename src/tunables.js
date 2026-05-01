@@ -7,16 +7,17 @@ export const tunables = {
   // protect them through.
   coop: {
     // Seconds a downed teammate can be left bleeding before the
-    // bleedout completes and they truly die.
-    reviveBleedoutSec: 60,
+    // bleedout completes and they truly die. 5 minutes — gives a
+    // surviving teammate plenty of time to clear the room and
+    // make the rotation back to the body.
+    reviveBleedoutSec: 300,
     // Hold-interact seconds to fully revive (Phase 2 will let health
     // items knock chunks off this).
     reviveHoldSec: 20,
-    // Letting go of interact decays the progress bar. Decays back to
-    // zero over this many seconds (slower than the fill so the
-    // reviver can briefly let go to fight off a flanker without
-    // losing all their progress).
-    reviveDecaySec: 12,
+    // Letting go of interact decays the progress bar. Half-speed
+    // decay so a brief re-engage to fight a flanker doesn't wipe
+    // most of the bar — 24s back to zero from full.
+    reviveDecaySec: 24,
     // HP fraction the revivee respawns at (0.30 = 30% of maxHealth).
     // Phase 2: certain items (defib) override to 1.0 (full HP).
     reviveHpPct: 0.30,
