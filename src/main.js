@@ -117,7 +117,7 @@ window.__resetHints = resetHints;
 // "I'm on build XYZ" without inspecting the bundle. Date stamps the
 // version so a quick glance tells you how stale the build is. Both
 // values render into the bottom-right #build-version label.
-const BUILD_VERSION = '7b0f5b4+rpc-grant-rewards+throw-claimer';
+const BUILD_VERSION = '324ed1e+throwable-zone-sync';
 // Build date intentionally bumped each deploy so the corner label
 // reflects the current snapshot.
 const BUILD_DATE    = '2026-05-01';
@@ -1768,15 +1768,16 @@ function _coopSerializeThrowOpts(opts) {
     fl: opts.fuseAfterLand ? 1 : 0,
     // Effect-bearing flags so host's auth spawn matches the original
     // throw type (DoT durations, blind/stun timers, claymore radius).
-    fd: +(opts.fireDuration   || 0).toFixed(2),
-    ft: +(opts.fireTickDps    || 0).toFixed(0),
-    gd: +(opts.gasDuration    || 0).toFixed(2),
-    bd: +(opts.blindDuration  || 0).toFixed(2),
-    sd: +(opts.stunDuration   || 0).toFixed(2),
-    tr: +(opts.triggerRadius  || 0).toFixed(2),
-    tc: +(opts.triggerConeDeg || 0).toFixed(0),
-    dx: +(opts.throwDirX      || 0).toFixed(2),
-    dz: +(opts.throwDirZ      || 0).toFixed(2),
+    fd: +(opts.fireDuration    || 0).toFixed(2),
+    ft: +(opts.fireTickDps     || 0).toFixed(0),
+    gd: +(opts.gasDuration     || 0).toFixed(2),
+    smd: +(opts.smokeDuration  || 0).toFixed(2),
+    bd: +(opts.blindDuration   || 0).toFixed(2),
+    sd: +(opts.stunDuration    || 0).toFixed(2),
+    tr: +(opts.triggerRadius   || 0).toFixed(2),
+    tc: +(opts.triggerConeDeg  || 0).toFixed(0),
+    dx: +(opts.throwDirX       || 0).toFixed(2),
+    dz: +(opts.throwDirZ       || 0).toFixed(2),
   };
 }
 function _coopBroadcastThrowable(opts) {
@@ -1796,18 +1797,22 @@ function _coopBroadcastThrowable(opts) {
 }
 // Strip damage + effect timers from a throwable opts object so a
 // joiner's local mirror doesn't double-damage snapshot enemies. Host
-// holds the auth copy via rpc-throwable.
+// holds the auth copy via rpc-throwable. Visual zone durations
+// (fire/gas/smoke) are preserved so the joiner sees their own
+// landing effects; the zone tick gates damage on owner !== 'remote'.
 function _coopNeuterThrowOpts(opts) {
   const t = getCoopTransport();
   if (!t.isOpen || t.isHost) return opts;
   return {
     ...opts,
+    owner: 'remote',                        // gates DoT in zone ticks
     explosion: { ...(opts.explosion || {}), damage: 0 },
     fireTickDps: 0,
     blindDuration: 0,
     stunDuration: 0,
-    gasDuration: 0,
-    fireDuration: 0,
+    // Keep gasDuration / fireDuration / smokeDuration intact so the
+    // local mirror still spawns the visual zone. Owner='remote' on
+    // those zones blocks the damage tick.
   };
 }
 
@@ -2662,10 +2667,10 @@ function _ensureCoopLobby() {
     }
     if (kind === 'fx-throwable') {
       // A peer threw a grenade / molotov / etc. Spawn a visual-only
-      // projectile so we see the arc + explosion. Damage zeroed —
-      // host's auth enemies are damaged via the thrower's local
-      // explosion, not via this mirror. Skip if WE are the sender
-      // (server already excludes; defensive).
+      // projectile so we see the arc + explosion + lingering zone
+      // (gas / smoke / fire pool). Damage zeroed — owner='remote'
+      // gates spawnGasZone / spawnMolotovShatter to skip the DoT tick
+      // on local snapshot enemies. Host's auth handles real damage.
       if (!body || from === transport.peerId) return;
       try {
         projectiles.spawn({
@@ -2685,6 +2690,13 @@ function _ensureCoopLobby() {
           bounciness: +body.b || 0,
           fuseAfterLand: !!body.fl,
           throwKind: body.tk || 'frag',
+          // Lingering visual zones so molotov fire pools, gas clouds,
+          // and smoke disks show up for non-thrower peers. Damage is
+          // gated on owner === 'remote' inside the zone spawners.
+          fireDuration:  +body.fd  || undefined,
+          fireTickDps:   0,
+          gasDuration:   +body.gd  || undefined,
+          smokeDuration: +body.smd || undefined,
         });
       } catch (e) { console.warn('[coop] fx-throwable apply failed', e); }
       return;
@@ -10749,7 +10761,11 @@ function _onProjectileExplodeBody(pos, explosion, owner, p, radius, rSq) {
     // that each seed their own smaller burn zone where they land.
     // Reads as a real Molotov splash (multiple overlapping fire pools
     // along the trajectory) rather than a single perfect circle.
-    spawnMolotovShatter(pos, radius, p.fireDuration || 6.0, p.fireTickDps || 14);
+    // Coop: owner==='remote' is a fx-throwable visual mirror — render
+    // the visual zones but zero the burn DoT so we don't double-damage
+    // local snapshot enemies.
+    const dps = (owner === 'remote') ? 0 : (p.fireTickDps || 14);
+    spawnMolotovShatter(pos, radius, p.fireDuration || 6.0, dps);
     if (sfx.explode) sfx.explode();
     triggerShake(0.18, 0.15);
     return;
@@ -13355,8 +13371,11 @@ function _tickThrowableZones(dt) {
     z.ring.material.opacity = 0.40 * fade;
     z.dome.material.opacity = 0.32 * fade;
     const r2 = z.radius * z.radius;
-    // Player drain.
-    if (player && lastPlayerInfo) {
+    // Player drain — gated on owner !== 'remote' so a coop visual
+    // mirror of someone else's gas (or the local thrower's own
+    // damage-zeroed mirror) doesn't drain our own HP. Auth host
+    // damage to remote players flows via the ghost scan below.
+    if (player && lastPlayerInfo && z.owner !== 'remote') {
       const dx = player.mesh.position.x - z.x;
       const dz = player.mesh.position.z - z.z;
       if (dx * dx + dz * dz <= r2) {
@@ -13364,6 +13383,30 @@ function _tickThrowableZones(dt) {
         const stamDrain = (lastPlayerInfo.maxStamina || 100) * 0.10 * dt;
         damagePlayer(hpDrain, 'gas');
         if (player.consumeStamina) player.consumeStamina('gas', stamDrain);
+      }
+    }
+    // Coop: host-side ghost scan — joiners standing in this auth gas
+    // zone take damage via rpc-player-damage. Throttled per-(zone,
+    // peer) so the 0.4s tick rate matches the local player's
+    // perceived drain rate. owner==='player' gate skips remote
+    // mirrors automatically.
+    if (z.owner === 'player' && coopLobby) {
+      const tHost = getCoopTransport();
+      if (tHost.isOpen && tHost.isHost && coopLobby.ghosts.size > 0) {
+        if (!z._coopLastTick) z._coopLastTick = Object.create(null);
+        for (const [peerId, ghost] of coopLobby.ghosts) {
+          if (ghost.dead) continue;
+          const dx = ghost.x - z.x;
+          const dz = ghost.z - z.z;
+          if (dx * dx + dz * dz > r2) continue;
+          const ll = z._coopLastTick[peerId] || 0;
+          if ((z.t - ll) > 0.4) {
+            z._coopLastTick[peerId] = z.t;
+            // ~5% max-HP drain per 0.4s tick (matches host's local rate).
+            const dmg = ((lastPlayerInfo?.maxHealth || 100) * 0.05 * 0.4);
+            _coopSendPlayerDamage(peerId, dmg, 'gas', { zone: 'torso' });
+          }
+        }
       }
     }
     // Enemy drain — only from PLAYER-owned gas. Enemy-thrown gas
@@ -14113,13 +14156,35 @@ function _tickFireZones(dt) {
     apply(melees.enemies);
     // Player burn — same disc test, routed through damagePlayer so
     // fire-resist + cumulative fire stacking + recap entry all apply.
-    if (player) {
+    // Coop: dps=0 mirrors (fx-throwable visual or joiner's local
+    // neutered mirror) skip damage; host's auth zone routes joiner
+    // damage via the ghost scan below.
+    if (player && z.dps > 0) {
       const pdx = player.mesh.position.x - z.x;
       const pdz = player.mesh.position.z - z.z;
       if (pdx * pdx + pdz * pdz < rSq) {
         const tickDmg = z.dps * dt;
         damagePlayer(tickDmg, 'fire', { source: 'fireZone' });
         window.__playerBurnT = Math.max(window.__playerBurnT || 0, 1.0);
+      }
+    }
+    // Coop: host-side ghost scan for fire-zone DoT. Same throttle as
+    // the megaboss fire pool helper. Skipped when dps=0 (visual mirror).
+    if (z.dps > 0 && coopLobby) {
+      const tHost = getCoopTransport();
+      if (tHost.isOpen && tHost.isHost && coopLobby.ghosts.size > 0) {
+        if (!z._coopLastTick) z._coopLastTick = Object.create(null);
+        for (const [peerId, ghost] of coopLobby.ghosts) {
+          if (ghost.dead) continue;
+          const dx = ghost.x - z.x;
+          const dz = ghost.z - z.z;
+          if (dx * dx + dz * dz > rSq) continue;
+          const ll = z._coopLastTick[peerId] || 0;
+          if ((z.t - ll) > 0.33) {
+            z._coopLastTick[peerId] = z.t;
+            _coopSendPlayerDamage(peerId, z.dps * 0.33, 'fire', { zone: 'torso' });
+          }
+        }
       }
     }
     if (z.t >= z.life) _fireZones.splice(i, 1);
