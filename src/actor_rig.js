@@ -670,6 +670,25 @@ export function buildRig(opts = {}) {
   jawMesh.userData.zone = 'head';
   head.add(jawMesh);
 
+  // Head-zone halo — invisible cap sitting just above the cranium so
+  // shots that clip slightly over the top still register as head
+  // hits. Diameter is intentionally narrower than the cranium so the
+  // extension only forgives VERTICAL aim error; widening would let
+  // body shots cheese into headshots from iso angles. ~0.05m tall at
+  // player scale = a small generosity band, not a free pass.
+  const _haloR = H.craniumR * 0.85;
+  const _haloH = H.craniumR * 0.40;
+  const headHalo = new THREE.Mesh(
+    new THREE.CylinderGeometry(_haloR * scale, _haloR * scale, _haloH * scale, 10),
+    new THREE.MeshBasicMaterial({
+      transparent: true, opacity: 0, depthWrite: false,
+    }),
+  );
+  headHalo.position.y = (H.craniumY + H.craniumR * H.craniumStretchY + _haloH * 0.5) * scale;
+  headHalo.castShadow = false;
+  headHalo.userData.zone = 'head';
+  head.add(headHalo);
+
   // Expose every pivot + mesh by name so callers can grab what they
   // need. `torso` is an alias of the chest group (most callers care
   // about where to parent the weapon / health bar / tag cones).
@@ -692,7 +711,7 @@ export function buildRig(opts = {}) {
     // Includes gear accents so they flash with the body on hit.
     meshes: [
       pelvis, stomach.mesh, chest.mesh, chestPlate, belt, collar,
-      neck.mesh, headMesh, jawMesh,
+      neck.mesh, headMesh, jawMesh, headHalo,
       leftLeg.thigh.mesh, leftLeg.hipBulge, leftLeg.thighRig,
       leftLeg.kneeBulge, leftLeg.kneePad,
       leftLeg.calf.mesh, leftLeg.bootTop, leftLeg.foot.mesh,
@@ -1599,13 +1618,28 @@ export function updateAnim(rig, state, dt) {
   // the weapon arm so both hands rise together; rotation.z rotates the
   // arm inward across the torso so the support hand meets the weapon
   // at centerline. Sign is flipped for left-handed hold.
-  const supportShoulderYaw = 0.55 * supportYawSign;
+  //
+  // Akimbo override (state.akimbo=true): the support arm holds its
+  // OWN weapon. Both arms must aim the cursor in parallel — yaw=0
+  // (straight forward in chest's local frame) so the support gun
+  // tracks the cursor exactly the way the weapon arm does. The
+  // chest's aim-twist already swings BOTH arms toward target via
+  // parent-of-arm rotation; ANY non-zero shoulder yaw here would
+  // offset the off-hand gun off-cursor.
+  const supportShoulderYaw = state.akimbo
+    ? 0                          // parallel forward — track cursor
+    : 0.55 * supportYawSign;     // inward — two-hand-grip default
+  // Pitch — match the weapon arm so both hands rise together. Same
+  // formula in both modes; akimbo only differs in yaw + elbow bend.
   supportArm.shoulder.pivot.rotation.x = rightShoulder - armLeanComp + supportSideSway - idleShoulderDrop + idleWeaponDrift;
   supportArm.shoulder.pivot.rotation.z = supportShoulderYaw;
-  // Support elbow a touch more bent so the hand meets the weapon a
-  // bit further inboard without over-extending.
+  // Support elbow — match the weapon arm's elbow bend for parallel
+  // arm shape in akimbo. Normal mode keeps the existing tighter
+  // tuck-toward-centerline bend (-0.18 + pump).
   const supportElbowPump = Math.abs(supportSideSway) * 0.4;
-  supportArm.elbow.rotation.x = rightElbow - 0.18 - supportElbowPump + idleWeaponDrift * 0.4;
+  supportArm.elbow.rotation.x = state.akimbo
+    ? rightElbow + idleWeaponDrift * 0.4
+    : rightElbow - 0.18 - supportElbowPump + idleWeaponDrift * 0.4;
 
   // Grip curl — rotate each hand pivot forward so the hand reads as
   // a closed fist on the weapon grip, not a flat palm hanging off
@@ -1725,9 +1759,33 @@ export function updateAnim(rig, state, dt) {
     apply(weaponArm.shoulder.pivot,  H.domShoulder, A.domShoulder, recoilExtra);
     apply(weaponArm.elbow,           H.domElbow,    A.domElbow,    elbowExtra);
     apply(weaponArm.wrist,           H.domWrist,    A.domWrist);
-    apply(supportArm.shoulder.pivot, H.supShoulder, A.supShoulder, -armLeanComp);
-    apply(supportArm.elbow,          H.supElbow,    A.supElbow);
-    apply(supportArm.wrist,          H.supWrist,    A.supWrist);
+    // Support arm in akimbo — manually MIRROR the dominant pose
+    // across the YZ plane (negate y + z, keep x). The pose data is
+    // authored canonically for the dominant side; applying the raw
+    // values to the support arm via apply() (which uses m=+1 for
+    // right-handed) produced a wrong-direction rotation because
+    // y/z weren't being mirrored to the other side. By manually
+    // negating y/z here, the support arm gets the mirror image of
+    // the dominant pose — same forward pitch (x), opposite yaw +
+    // roll. Both wrists end up oriented for the gun-mount's
+    // forward-pointing direction.
+    if (state.akimbo) {
+      const ab = a.aimBlend, hb = 1 - ab;
+      const lerp = (h, x) => h * hb + x * ab;
+      const setMirror = (target, hipJ, aimJ, extraRX = 0) => {
+        if (!target) return;
+        target.rotation.x = lerp(hipJ.rx, aimJ.rx) + extraRX;
+        target.rotation.y = -lerp(hipJ.ry, aimJ.ry);
+        target.rotation.z = -lerp(hipJ.rz, aimJ.rz);
+      };
+      setMirror(supportArm.shoulder.pivot, H.domShoulder, A.domShoulder, recoilExtra);
+      setMirror(supportArm.elbow,          H.domElbow,    A.domElbow,    elbowExtra);
+      setMirror(supportArm.wrist,          H.domWrist,    A.domWrist);
+    } else {
+      apply(supportArm.shoulder.pivot, H.supShoulder, A.supShoulder, -armLeanComp);
+      apply(supportArm.elbow,          H.supElbow,    A.supElbow);
+      apply(supportArm.wrist,          H.supWrist,    A.supWrist);
+    }
     // Spine — additive on top of locomotion / aim writes earlier
     // in updateAnim (so chestAimYaw / breath / etc. still layer).
     rig.stomach.rotation.y += lerp(H.stomach.ry, A.stomach.ry) * m;

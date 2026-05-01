@@ -332,7 +332,7 @@ export const tunables = {
       rarity: 'common',
       attachmentSlots: ['muzzle', 'sideRail', 'topRail', 'grip', 'trigger', 'magazine'],
       fireMode: 'semi',
-      fireRate: 4.0,
+      fireRate: 5.0,
       damage: 28,
       range: 28,
       hipSpread: 0.075,
@@ -482,6 +482,88 @@ export const tunables = {
       reloadTime: 3.6,
       noiseRange: 42,
     },
+    {
+      // Grenade Launcher — mid-tier exotic. Lobbed-arc projectile that
+      // fuse-detonates after ~1.4s OR on contact. Smaller AoE than
+      // the Widowmaker but bigger mag and faster fire so it plays as
+      // a proper area-denial tool instead of a one-shot panic
+      // button. Was in an earlier weapon list and got dropped during
+      // a pool prune; restored here.
+      unlockRank: 12, unlockCost: 900,
+      name: 'Grenade Launcher',
+      type: 'ranged',
+      class: 'exotic',
+      rarity: 'rare',
+      attachmentSlots: ['underRail', 'sideRail', 'topRail', 'stock', 'magazine'],
+      fireMode: 'projectile',
+      projectile: 'grenade',
+      projectileSpeed: 18,
+      projectileGrav: 9.8,        // arcs like a grenade, not a rocket
+      projectileFuse: 1.4,        // detonate mid-air if no impact
+      projectileBounce: 0.25,     // small bounce on terrain before fuse pops
+      aoeRadius: 4.4,
+      aoeDamage: 130,
+      aoeShake: 0.55,
+      fireRate: 1.2,              // 1.2 grenades / sec held trigger
+      damage: 130,                // direct-impact (rare; mostly the AoE matters)
+      range: 50,
+      hipSpread: 0.10,
+      adsSpread: 0.04,
+      adsZoom: 0.72,
+      adsPeekDistance: 5.0,
+      tracerColor: 0x70a040,
+      muzzleLength: 1.05,
+      muzzleGirth: 0.20,
+      pelletCount: 1,
+      burstCount: 1,
+      burstInterval: 0,
+      magSize: 6,
+      reloadTime: 2.6,
+      noiseRange: 36,
+      description: 'Six grenades in a revolver drum. Arcs over cover.',
+    },
+    {
+      // Harpoon Gun — single-shot exotic. Massive direct-impact
+      // damage, slow projectile that the player can lead by sight.
+      // Pull-the-target mechanic is a future hook (the projectile
+      // path supports it via spec.onImpact); for now it's a
+      // very-hard-hitting, one-shot, slow-reload fish-spear.
+      unlockRank: 14,
+      name: 'Harpoon Gun',
+      type: 'ranged',
+      class: 'exotic',
+      rarity: 'epic',
+      attachmentSlots: ['sideRail', 'topRail', 'stock'],
+      fireMode: 'projectile',
+      projectile: 'rocket',         // reuses rocket-style straight projectile
+      projectileSpeed: 30,
+      projectileGrav: 0,
+      projectileFuse: 4.0,
+      projectileBounce: 0,
+      aoeRadius: 0.8,               // point-target — the harpoon is the damage
+      aoeDamage: 180,
+      aoeShake: 0.30,
+      fireRate: 0.45,
+      damage: 180,
+      range: 60,
+      hipSpread: 0.05,
+      adsSpread: 0.012,
+      adsZoom: 0.55,
+      adsPeekDistance: 7.0,
+      tracerColor: 0xa8d8d0,
+      muzzleLength: 1.20,
+      muzzleGirth: 0.16,
+      pelletCount: 1,
+      burstCount: 1,
+      burstInterval: 0,
+      magSize: 1,
+      reloadTime: 3.4,
+      noiseRange: 30,
+      // Future-mechanic flag — pull the hit enemy 4-5m toward the
+      // muzzle. Ignored by current projectile path.
+      pullOnHit: 4.5,
+      description: 'Hook on a chain. Leaves a hole the size of a fist.',
+    },
     // --- Extended pistol lineup ---
     {
       // Iconic early unlock — chip-buyable at rank 1 for permanent
@@ -489,7 +571,7 @@ export const tunables = {
       unlockRank: 1, unlockCost: 100,
       name: 'Glock 17', type: 'ranged', class: 'pistol', rarity: 'common',
       attachmentSlots: ['muzzle', 'sideRail', 'topRail', 'grip', 'trigger', 'magazine'],
-      fireMode: 'semi', fireRate: 5.0, damage: 32, range: 34,
+      fireMode: 'semi', fireRate: 6.25, damage: 32, range: 34,
       hipSpread: 0.07, adsSpread: 0.008,
       adsZoom: 0.82, adsPeekDistance: 3.2,
       tracerColor: 0xe0d080, muzzleLength: 0.48, muzzleGirth: 0.12,
@@ -503,7 +585,7 @@ export const tunables = {
       name: 'UMP45', type: 'ranged', class: 'smg', rarity: 'common',
       attachmentSlots: ['muzzle', 'underRail', 'sideRail', 'topRail', 'stock', 'grip', 'trigger', 'magazine'],
       fireMode: 'auto', fireRate: 10, damage: 22, range: 28,
-      hipSpread: 0.17, adsSpread: 0.040,
+      hipSpread: 0.161, adsSpread: 0.038,
       adsZoom: 0.75, adsPeekDistance: 4.4,
       tracerColor: 0xc0cbd8, muzzleLength: 0.7, muzzleGirth: 0.13,
       pelletCount: 1, burstCount: 1, burstInterval: 0,
@@ -513,7 +595,7 @@ export const tunables = {
       name: 'PDW', type: 'ranged', class: 'smg', rarity: 'common',
       attachmentSlots: ['muzzle', 'underRail', 'sideRail', 'topRail', 'stock', 'grip', 'trigger', 'magazine'],
       fireMode: 'auto', fireRate: 14, damage: 15, range: 28,
-      hipSpread: 0.18, adsSpread: 0.044,
+      hipSpread: 0.170, adsSpread: 0.041,
       adsZoom: 0.72, adsPeekDistance: 4.6,
       tracerColor: 0xdbe5f0, muzzleLength: 0.72, muzzleGirth: 0.13,
       pelletCount: 1, burstCount: 1, burstInterval: 0,
@@ -524,7 +606,7 @@ export const tunables = {
       name: 'P90', type: 'ranged', class: 'smg', rarity: 'rare',
       attachmentSlots: ['muzzle', 'underRail', 'sideRail', 'topRail', 'stock', 'grip', 'magazine'],
       fireMode: 'auto', fireRate: 15, damage: 14, range: 30,
-      hipSpread: 0.16, adsSpread: 0.038,
+      hipSpread: 0.151, adsSpread: 0.036,
       adsZoom: 0.74, adsPeekDistance: 4.2,
       tracerColor: 0xeaf0d0, muzzleLength: 0.6, muzzleGirth: 0.15,
       pelletCount: 1, burstCount: 1, burstInterval: 0,
@@ -614,7 +696,7 @@ export const tunables = {
     {
       name: 'M1911', type: 'ranged', class: 'pistol', rarity: 'common',
       attachmentSlots: ['muzzle', 'sideRail', 'topRail', 'grip', 'trigger', 'magazine'],
-      fireMode: 'semi', fireRate: 4.0, damage: 44, range: 34,
+      fireMode: 'semi', fireRate: 5.0, damage: 44, range: 34,
       hipSpread: 0.068, adsSpread: 0.007,
       adsZoom: 0.8, adsPeekDistance: 3.4,
       tracerColor: 0xe8c878, muzzleLength: 0.55, muzzleGirth: 0.13,
@@ -771,6 +853,104 @@ export const tunables = {
       burstCount: 1, burstInterval: 0,
       magSize: 6, reloadTime: 2.1,
     },
+    {
+      // The Memorial — bolt-action mythic sniper. One round, one
+      // exit. Magazine 1 forces a meaningful reload between shots,
+      // so the player can't spam it; the trade is per-shot damage
+      // higher than any non-mythic in the game.
+      worldDrop: false,
+      name: 'The Memorial',
+      type: 'ranged', class: 'sniper', rarity: 'mythic',
+      mythic: true,
+      attachmentSlots: ['muzzle', 'barrel', 'topRail', 'stock', 'magazine'],
+      fireMode: 'semi',
+      fireRate: 0.6,
+      damage: 220,
+      range: 110,
+      hipSpread: 0.14, adsSpread: 0.0008,
+      adsZoom: 0.36, adsPeekDistance: 9.0,
+      tracerColor: 0xfff0a0,
+      muzzleLength: 1.18, muzzleGirth: 0.16,
+      pelletCount: 1, burstCount: 1, burstInterval: 0,
+      magSize: 1, reloadTime: 2.6,
+      description: 'Etched with names you don\'t recognize.',
+    },
+    {
+      // Heartbeat — mythic SMG. Fastest cyclic in the pool, tight
+      // for an SMG, large mag. Mechanical hook (homing on miss) is
+      // tagged below for future wire-up; current behavior is pure
+      // stats so the weapon still drops + feels distinct.
+      worldDrop: false,
+      name: 'Heartbeat',
+      type: 'ranged', class: 'smg', rarity: 'mythic',
+      mythic: true,
+      attachmentSlots: ['muzzle', 'underRail', 'sideRail', 'topRail', 'stock', 'grip', 'trigger', 'magazine'],
+      fireMode: 'auto',
+      fireRate: 22,
+      damage: 16,
+      range: 32,
+      hipSpread: 0.10, adsSpread: 0.020,
+      adsZoom: 0.74, adsPeekDistance: 5.0,
+      tracerColor: 0xff70a0,
+      muzzleLength: 0.66, muzzleGirth: 0.13,
+      pelletCount: 1, burstCount: 1, burstInterval: 0,
+      magSize: 60, reloadTime: 1.4,
+      // Future-mechanic flag — bullets that whiff curve toward the
+      // nearest enemy mid-flight. Ignored by current fire path.
+      homingOnMiss: true,
+      description: 'Hums in your hand. Doesn\'t stop.',
+    },
+    {
+      // The Mourner — mythic rifle that snowballs through a magazine.
+      // Each kill stacks damage for the rest of the mag (resets on
+      // reload). Future-mechanic flag below; baseline stats already
+      // place it above any uncommon rifle.
+      worldDrop: false,
+      name: 'The Mourner',
+      type: 'ranged', class: 'rifle', rarity: 'mythic',
+      mythic: true,
+      attachmentSlots: ['muzzle', 'barrel', 'underRail', 'sideRail', 'topRail', 'stock', 'grip', 'trigger', 'magazine'],
+      fireMode: 'auto',
+      fireRate: 9,
+      damage: 36,
+      range: 68,
+      hipSpread: 0.10, adsSpread: 0.012,
+      adsZoom: 0.55, adsPeekDistance: 7.6,
+      tracerColor: 0xc8b0d0,
+      muzzleLength: 0.86, muzzleGirth: 0.14,
+      pelletCount: 1, burstCount: 1, burstInterval: 0,
+      magSize: 25, reloadTime: 1.5,
+      // Future-mechanic flag — +X damage per kill, resets on reload.
+      killStackDamageMult: 0.10,
+      description: 'Carved with last names. The list is long.',
+    },
+    {
+      // The Conductor — mythic pistol with a chain-lightning kicker.
+      // Every Nth shot arcs to nearby enemies. Until the chain logic
+      // ships, the weapon already feels distinct on stats alone:
+      // highest pistol damage in the game with tight grouping.
+      worldDrop: false,
+      name: 'The Conductor',
+      type: 'ranged', class: 'pistol', rarity: 'mythic',
+      mythic: true,
+      attachmentSlots: ['muzzle', 'sideRail', 'topRail', 'grip', 'trigger', 'magazine'],
+      fireMode: 'semi',
+      fireRate: 4.5,
+      damage: 65,
+      range: 38,
+      hipSpread: 0.04, adsSpread: 0.006,
+      adsZoom: 0.60, adsPeekDistance: 5.5,
+      tracerColor: 0xa8d8ff,
+      muzzleLength: 0.78, muzzleGirth: 0.15,
+      pelletCount: 1, burstCount: 1, burstInterval: 0,
+      magSize: 14, reloadTime: 1.5,
+      // Future-mechanic flag — every Nth shot chains to N nearby
+      // enemies for a flat damage value. Ignored by current path.
+      chainEveryN: 7,
+      chainTargets: 5,
+      chainDamage: 50,
+      description: 'Coppers in the grip click when something\'s alive nearby.',
+    },
 
     // Low-tier melee — common drops from basic enemies. Shorter range and
     // weaker combos than the katana; shared combo structure so the player
@@ -782,6 +962,10 @@ export const tunables = {
       tracerColor: 0xc0c0c8,
       muzzleLength: 0.55, muzzleGirth: 0.05,
       adsZoom: 0.8, adsPeekDistance: 2.4,
+      // Knife profile — fast strikes that bleed targets. Routed via
+      // `bleedOnHit` flag in main.resolveComboHit; bleeds tick on
+      // burnT/burnDps fields the manager already supports.
+      bleedOnHit: { dps: 6, durationSec: 3 },
       combo: [
         { close: { damage: 10, range: 1.8, angleDeg: 90,  advance: 0.5,
                    startup: 0.04, active: 0.07, recovery: 0.14, window: 0.32, knockback: 1.2 },
@@ -804,6 +988,11 @@ export const tunables = {
       tracerColor: 0x8a6a3c,
       muzzleLength: 0.8, muzzleGirth: 0.08,
       adsZoom: 0.82, adsPeekDistance: 2.6,
+      // Heavy profile — finisher knocks back every enemy in a
+      // small radius (no extra damage; the heavy step's own damage
+      // is already huge). Reads in main.resolveComboHit only on
+      // the FINAL combo step.
+      staggerOnFinisher: { radius: 2.6, knockback: 4.5 },
       combo: [
         { close: { damage: 14, range: 2.0, angleDeg: 95,  advance: 0.55,
                    startup: 0.06, active: 0.10, recovery: 0.20, window: 0.34, knockback: 2.2 },
@@ -1003,6 +1192,9 @@ export const tunables = {
       name: 'Sledgehammer',
       type: 'melee', class: 'melee', rarity: 'rare',
       meleeThreshold: 3.3,
+      // Heaviest swinger — wider AoE stagger + bigger knockback
+      // than the basic Hammer.
+      staggerOnFinisher: { radius: 3.6, knockback: 6.0 },
       tracerColor: 0x505868,
       muzzleLength: 1.1, muzzleGirth: 0.12,
       adsZoom: 0.76, adsPeekDistance: 2.8,
@@ -1129,7 +1321,7 @@ export const tunables = {
       rarity: 'uncommon',
       attachmentSlots: ['grip', 'trigger'],
       fireMode: 'semi',
-      fireRate: 2.4,
+      fireRate: 3.0,
       damage: 58,
       range: 32,
       hipSpread: 0.07,
@@ -1159,8 +1351,8 @@ export const tunables = {
       fireRate: 14,
       damage: 16,
       range: 26,
-      hipSpread: 0.17,
-      adsSpread: 0.040,
+      hipSpread: 0.161,
+      adsSpread: 0.038,
       adsZoom: 0.74,
       adsPeekDistance: 4.4,
       tracerColor: 0xc8d0e0,
@@ -1186,8 +1378,8 @@ export const tunables = {
       fireRate: 19,
       damage: 12,
       range: 18,
-      hipSpread: 0.20,
-      adsSpread: 0.050,
+      hipSpread: 0.189,
+      adsSpread: 0.048,
       adsZoom: 0.78,
       adsPeekDistance: 4.0,
       tracerColor: 0xb8c0d0,
@@ -1210,8 +1402,8 @@ export const tunables = {
       fireRate: 13,
       damage: 18,
       range: 32,
-      hipSpread: 0.15,
-      adsSpread: 0.034,
+      hipSpread: 0.142,
+      adsSpread: 0.032,
       adsZoom: 0.72,
       adsPeekDistance: 4.8,
       tracerColor: 0xc0c8d8,
@@ -1352,7 +1544,7 @@ export const tunables = {
       name: 'Kriss Vector', type: 'ranged', class: 'smg', rarity: 'rare',
       attachmentSlots: ['muzzle', 'underRail', 'sideRail', 'topRail', 'stock', 'grip', 'trigger', 'magazine'],
       fireMode: 'auto', fireRate: 20, damage: 22, range: 28,
-      hipSpread: 0.18, adsSpread: 0.042,
+      hipSpread: 0.170, adsSpread: 0.040,
       adsZoom: 0.74, adsPeekDistance: 4.5,
       tracerColor: 0xc8d2e0, muzzleLength: 0.66, muzzleGirth: 0.13,
       pelletCount: 1, burstCount: 1, burstInterval: 0,
@@ -1514,6 +1706,11 @@ export const tunables = {
       class: 'melee',
       rarity: 'uncommon',
       meleeThreshold: 3.1,
+      // Curved-blade weapon — bleed-tier between Combat Knife and
+      // Survival Knife, but much wider per-step arc (per its combo
+      // angles below) so the bleed propagates across multiple
+      // targets in a sweep.
+      bleedOnHit: { dps: 5, durationSec: 3 },
       tracerColor: 0xd8d0a8,
       muzzleLength: 1.0,
       muzzleGirth: 0.06,
@@ -1541,6 +1738,8 @@ export const tunables = {
       name: 'Pocket Knife',
       type: 'melee', class: 'melee', rarity: 'common',
       meleeThreshold: 2.4,
+      // Smaller bleed than Combat Knife (shorter blade, less wound).
+      bleedOnHit: { dps: 4, durationSec: 2 },
       tracerColor: 0xb0b0b8,
       muzzleLength: 0.40, muzzleGirth: 0.04,
       adsZoom: 0.85, adsPeekDistance: 2.0,
@@ -1565,6 +1764,9 @@ export const tunables = {
       name: 'Survival Knife',
       type: 'melee', class: 'melee', rarity: 'uncommon',
       meleeThreshold: 2.7,
+      // Bigger blade → deeper wound: longest-lasting bleed of the
+      // knife trio.
+      bleedOnHit: { dps: 7, durationSec: 4 },
       tracerColor: 0xc0c4cc,
       muzzleLength: 0.62, muzzleGirth: 0.05,
       adsZoom: 0.82, adsPeekDistance: 2.4,
@@ -1639,7 +1841,7 @@ export const tunables = {
       unlockRank: 11,
       name: 'Draco NAK9', type: 'ranged', class: 'pistol', rarity: 'uncommon',
       attachmentSlots: ['muzzle', 'underRail', 'sideRail', 'topRail', 'grip', 'trigger', 'magazine'],
-      fireMode: 'auto', fireRate: 14, damage: 20, range: 32,
+      fireMode: 'auto', fireRate: 17.5, damage: 20, range: 32,
       hipSpread: 0.18, adsSpread: 0.030,
       adsZoom: 0.72, adsPeekDistance: 4.6,
       tracerColor: 0xe89040, muzzleLength: 0.58, muzzleGirth: 0.13,
@@ -1722,7 +1924,7 @@ export const tunables = {
       name: 'SPCA3', type: 'ranged', class: 'smg', rarity: 'common',
       attachmentSlots: ['muzzle', 'barrel', 'underRail', 'sideRail', 'topRail', 'stock', 'grip', 'trigger', 'magazine'],
       fireMode: 'auto', fireRate: 13, damage: 18, range: 38,
-      hipSpread: 0.20, adsSpread: 0.038,
+      hipSpread: 0.189, adsSpread: 0.036,
       adsZoom: 0.66, adsPeekDistance: 5.6,
       tracerColor: 0xd8c060, muzzleLength: 0.78, muzzleGirth: 0.12,
       pelletCount: 1, burstCount: 1, burstInterval: 0,
@@ -1736,7 +1938,7 @@ export const tunables = {
       name: 'SPC223', type: 'ranged', class: 'smg', rarity: 'uncommon',
       attachmentSlots: ['muzzle', 'barrel', 'underRail', 'sideRail', 'topRail', 'stock', 'grip', 'trigger', 'magazine'],
       fireMode: 'auto', fireRate: 12, damage: 22, range: 48,
-      hipSpread: 0.16, adsSpread: 0.030,
+      hipSpread: 0.151, adsSpread: 0.029,
       adsZoom: 0.62, adsPeekDistance: 6.2,
       tracerColor: 0xeacb70, muzzleLength: 0.84, muzzleGirth: 0.12,
       pelletCount: 1, burstCount: 1, burstInterval: 0,
@@ -1836,8 +2038,8 @@ export const tunables = {
     // Per-encounter scaling. All `*ScalePerEncounter` values are slope
     // factors applied to k (the run's mega-boss-encounter index) so a
     // 3rd-time fight is meaningfully harder than the first.
-    maxHpBase:               50000,
-    maxHpScalePerEncounter:  0.4,     // hp = base × (1 + slope·k)
+    maxHpBase:               15000,
+    maxHpScalePerEncounter:  0.8,     // hp = base × (1 + slope·k); k=0:15k, k=1:27k, k=2:39k, k=3:51k
     dmgScalePerEncounter:    0.25,
     freqScalePerEncounter:   0.10,    // attack-cadence speedup per encounter
     spreadScalePerEncounter: 0.08,    // spread tightens by this much per encounter

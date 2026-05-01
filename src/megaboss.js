@@ -22,12 +22,14 @@
 import * as THREE from 'three';
 import { spawnSpeechBubble } from './hud.js';
 import { tunables } from './tunables.js';
+import { BALANCE } from './balance.js';
 
 // Tuning lives in tunables.megabossArboter / tunables.megaboss — see
 // the balance pass note. Helper closures so future retunes happen in
 // one file instead of being scattered through the action FSM.
 const _T = () => tunables.megabossArboter;
 const _Tarena = () => tunables.megaboss;
+const _Tsummon = () => BALANCE.megaboss.arboterSummon;
 
 // --- Levels that get the boss --------------------------------------
 export function isMegaBossLevel(idx) {
@@ -36,15 +38,19 @@ export function isMegaBossLevel(idx) {
 }
 
 // --- Persistent encounter counter ---------------------------------
+// Exported so sibling megabosses (Echo, General) can read the same
+// "lifetime mega-boss kills" index and scale their HP / wave caps
+// off it. Bumped from this module on Arboter death; sibling bosses
+// bump from their own _die paths via main.js.
 const STORAGE_KEY = 'tacticalrogue_megaboss_encounters';
-function getEncounterCount() {
+export function getEncounterCount() {
   try {
     const raw = localStorage.getItem(STORAGE_KEY);
     const n = parseInt(raw, 10);
     return Number.isFinite(n) && n >= 0 ? n : 0;
   } catch (_) { return 0; }
 }
-function bumpEncounterCount() {
+export function bumpEncounterCount() {
   try { localStorage.setItem(STORAGE_KEY, String(getEncounterCount() + 1)); }
   catch (_) {}
 }
@@ -751,6 +757,11 @@ export class MegaBoss {
       // Stack base attacks heavier — phase 3 is the panic dance.
       choices.push({ id: 'grenade', w: 0.6 });
     }
+    // Summon melee — available all phases when the ctx hook is
+    // present. Weighted moderately so it shows up roughly once per
+    // 4-5 attack cycles. Skipped if the boss has no spawnMelee
+    // hook wired (older save / debug context).
+    if (this.ctx.spawnMelee) choices.push({ id: 'summon_melee', w: 0.9 });
     let total = 0;
     for (const c of choices) total += c.w;
     let pick = Math.random() * total;
@@ -774,9 +785,11 @@ export class MegaBoss {
     else if (attackId === 'charge')       this.stateUntil = 1.4 * this.freqScale + 0.5;
     else if (attackId === 'ground_fire')  this.stateUntil = 0.8 * this.freqScale + 0.3;
     else if (attackId === 'gas')          this.stateUntil = 0.7 * this.freqScale + 0.3;
+    else if (attackId === 'summon_melee') this.stateUntil = _Tsummon().telegraphSec * this.freqScale;
     if (attackId === 'cover_artillery')   this._beginCoverPose();
     if (attackId === 'slam')              this._buildSlamTelegraph();
     if (attackId === 'charge')            this._buildChargeTelegraph();
+    if (attackId === 'summon_melee')      this._bark('REINFORCEMENTS DEPLOYED.');
   }
 
   _buildSlamTelegraph() {
@@ -888,6 +901,13 @@ export class MegaBoss {
       this._gasSpawnTickT = 0;
       this._gasLaunched = 0;
       this._gasBudget = 4;
+    } else if (this.currentAttack === 'summon_melee') {
+      // Spawn the full count in one short window (no per-tick drip);
+      // _tickSummonMelee runs the burst on its first tick and then
+      // just waits out the timer.
+      const T = _Tsummon();
+      this.stateUntil = T.attackSec;
+      this._summonFired = false;
     }
   }
 
@@ -899,6 +919,34 @@ export class MegaBoss {
     else if (this.currentAttack === 'charge') this._tickCharge(dt, playerPos);
     else if (this.currentAttack === 'ground_fire') this._tickGroundFire(dt, playerPos);
     else if (this.currentAttack === 'gas') this._tickGas(dt, playerPos);
+    else if (this.currentAttack === 'summon_melee') this._tickSummonMelee(dt, playerPos);
+  }
+
+  // Spawns a ring of basic melee grunts around the boss. Count =
+  // baseCount + perEncounterScale × encounterIndex, capped at
+  // maxCount. Grunts are tagged via ctx.spawnMelee so they drop
+  // nothing + give no XP — they're pressure, not loot.
+  _tickSummonMelee(_dt, _playerPos) {
+    if (this._summonFired) return;
+    this._summonFired = true;
+    const T = _Tsummon();
+    const count = Math.min(
+      T.maxCount,
+      T.baseCount + T.perEncounterScale * (this.encounterIndex | 0),
+    );
+    const cx = this.boss.position.x;
+    const cz = this.boss.position.z;
+    for (let i = 0; i < count; i++) {
+      const ang = (i / count) * Math.PI * 2 + Math.random() * 0.4;
+      const r   = T.ringRadius + (Math.random() - 0.5) * T.ringJitter;
+      const sx = cx + Math.cos(ang) * r;
+      const sz = cz + Math.sin(ang) * r;
+      this.ctx.spawnMelee?.(sx, sz, {
+        hpMult:     T.hpMult,
+        damageMult: T.damageMult,
+      });
+    }
+    if (this.ctx.shake) this.ctx.shake(0.35, 0.2);
   }
 
   _tickSweep(dt) {

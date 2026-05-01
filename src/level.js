@@ -3034,7 +3034,22 @@ export class Level {
       // none so the player isn't overwhelmed by cover before they know
       // how to deal with it.
       const shieldChance = 0.02 + variantBoost * 0.18;
-      return Math.random() < shieldChance ? 'shieldBearer' : 'standard';
+      // Cloaked-assassin rate — gated to level > 3 (i.e. lv >= 4) so
+      // the early-game teaches basic melee patterns before the
+      // teleport variant shows up. Caps around ~12% so they stay a
+      // notable threat rather than the default melee.
+      const cloakedChance = lv >= 4 ? Math.min(0.12, 0.04 + (lv - 4) * 0.015) : 0;
+      // Knife-thrower variant — same archetype as the cloaked
+      // assassin but ranged. Gated one level higher (lv >= 6) so the
+      // player meets the melee version first and recognises the
+      // hood/cloak silhouette before the ranged twist shows up.
+      // Caps around ~8%.
+      const throwerChance = lv >= 6 ? Math.min(0.08, 0.03 + (lv - 6) * 0.012) : 0;
+      const r = Math.random();
+      if (r < throwerChance) return 'cloakedAssassinThrower';
+      if (r < throwerChance + cloakedChance) return 'cloakedAssassin';
+      if (r < throwerChance + cloakedChance + shieldChance) return 'shieldBearer';
+      return 'standard';
     };
 
     if (room.type === 'combat') {
@@ -3112,26 +3127,50 @@ export class Level {
       // `bulletHell` fat-target volley thrower; `assassin` dash-melee
       // (spawns as a melee enemy below); `elite` constant fire + dash.
       const archRoll = Math.random();
-      // Eight archetypes in rotation — droneSummoner ("THE HIVEMASTER")
-      // is temporarily disabled because the drone swarm tanks frame
-      // rate. Re-enable once drone perf is reworked. Other eight share
-      // roughly equal probability. Necromancer (`spawner`) is gated
-      // to runs deeper than level 5 — early runs substitute berserker
-      // so the bucket isn't lost.
-      let bossArchetype = archRoll < 0.14 ? 'evasive'
-                        : archRoll < 0.28 ? 'bulletHell'
-                        : archRoll < 0.42 ? 'elite'
-                        : archRoll < 0.56 ? 'assassin'
-                        : archRoll < 0.70 ? 'flamer'
-                        : archRoll < 0.84 ? 'grenadier'
-                        : archRoll < 0.93 ? 'spawner'
-                        :                   'berserker';
+      // Nine archetypes in rotation. droneSummoner ("THE HIVEMASTER")
+      // is back online after the drones.js pool refactor (shared geom
+      // + materials, slot pool, no per-spawn allocs / disposals).
+      // Necromancer (`spawner`) is gated to runs deeper than level 5
+      // — early runs substitute berserker so the bucket isn't lost.
+      let bossArchetype = archRoll < 0.11 ? 'evasive'
+                        : archRoll < 0.22 ? 'bulletHell'
+                        : archRoll < 0.33 ? 'elite'
+                        : archRoll < 0.44 ? 'assassin'
+                        : archRoll < 0.55 ? 'flamer'
+                        : archRoll < 0.66 ? 'grenadier'
+                        : archRoll < 0.76 ? 'droneSummoner'
+                        : archRoll < 0.85 ? 'spawner'
+                        : archRoll < 0.93 ? 'berserker'
+                        :                   'shinigami';
       if (bossArchetype === 'spawner' && this.index <= 5) {
         bossArchetype = 'berserker';
       }
+      // Hivemaster (drone summoner) is also lv-5+ gated — early runs
+      // shouldn't face the swarm. Substitutes berserker on level <= 5
+      // so the rotation slot isn't wasted.
+      if (bossArchetype === 'droneSummoner' && this.index <= 5) {
+        bossArchetype = 'berserker';
+      }
+      // Cloaked Assassin major boss — gated to level > 3 so the
+      // teleport-cloak boss archetype doesn't show up in the
+      // early-game rotation. Substitutes elite (close-range
+      // pressure with steady fire) so the bucket isn't lost.
+      if (bossArchetype === 'assassin' && this.index <= 3) {
+        bossArchetype = 'elite';
+      }
+      // SHINIGAMI — late-game megaboss assassin variant. Gated to
+      // lv >= 8 so the player has met the regular Cloaked Assassin
+      // major boss + several encounter cycles before the named
+      // teleport-shower-of-knives megaboss appears. Substitutes
+      // the regular assassin archetype (which is already lv > 3
+      // gated) on lv 4-7, falls back to elite below 4.
+      if (bossArchetype === 'shinigami' && this.index < 8) {
+        bossArchetype = this.index <= 3 ? 'elite' : 'assassin';
+      }
       const archVariant =
         bossArchetype === 'bulletHell'    ? 'tank'
-      : bossArchetype === 'assassin'      ? 'standard'    // melee variant slot
+      : bossArchetype === 'shinigami'     ? 'cloakedAssassinThrower'   // always knife-thrower
+      : bossArchetype === 'assassin'      ? (Math.random() < 0.5 ? 'cloakedAssassinThrower' : 'cloakedAssassin')
       : bossArchetype === 'elite'         ? 'dasher'
       : bossArchetype === 'flamer'        ? 'tank'        // beefy rush
       : bossArchetype === 'grenadier'     ? 'dasher'      // fast + dashy
@@ -3142,7 +3181,7 @@ export class Level {
       const bossVariant = archVariant;
       // Berserker spawns as a melee enemy (close-quarters tank).
       // Other archetypes use the gunman manager.
-      const bossKind = (bossArchetype === 'assassin' || bossArchetype === 'berserker') ? 'melee' : 'gunman';
+      const bossKind = (bossArchetype === 'assassin' || bossArchetype === 'shinigami' || bossArchetype === 'berserker') ? 'melee' : 'gunman';
       this.enemySpawns.push({
         x: p.x, z: p.z,
         kind: bossKind, tier: 'boss', roomId: room.id,
@@ -4084,7 +4123,7 @@ export class Level {
   // the normal random-walk generator. Called by main.js when
   // `isMegaBossLevel(level.index + 1)` would be true at the next
   // generate(). Bumps level.index like the regular generator and
-  // produces a 44×44m square room with a single virtual room entry
+  // produces a 30×30m square room with a single virtual room entry
   // so roomAt() / vision blockers / lighting still work. No enemy
   // spawns, no doors, no encounters — main.js handles boss spawn
   // separately.
@@ -4100,7 +4139,7 @@ export class Level {
         this.ground.material.color.setHex(this.theme.floor);
       }
     }
-    const HALF = 22;     // arena is 44m × 44m
+    const HALF = 15;     // arena is 30m × 30m
     const W = HALF * 2 + WALL_THICK * 2;
     // Perimeter walls — four boxes thick enough that bullets stop here.
     this._addObstacle(0, WALL_HEIGHT / 2, -HALF - WALL_THICK / 2, W, WALL_HEIGHT, WALL_THICK, OUTER_WALL_COLOR);

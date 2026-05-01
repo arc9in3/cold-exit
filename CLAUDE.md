@@ -147,3 +147,106 @@ run them liberally — that's the whole point of the queue.
 Still do creative / cross-cutting / interactive work yourself. The
 queue is for parallelizable grunt work that benefits from a second
 brain running in the background.
+
+## Coding standards (game-dev hygiene)
+
+Five rules. Apply when writing new code; don't churn old code unless
+the file is already being touched for unrelated reasons. The pre-commit
+hook at `.git/hooks/pre-commit` flags violations as warnings (not
+blockers) — read its output but proceed if the rule doesn't apply.
+
+### 1. No hardcoded gameplay values
+
+Numbers that *tune* the game (damage, health, fire rate, drop weights,
+cooldowns, speeds, ranges) live in a config file, not inline. Inline
+numbers that describe *physics* (gravity = 9.8, fixed-tick = 1/60) or
+*math constants* (Math.PI, 0, 1, 2) are fine.
+
+```js
+// BAD — magic damage value buried in code
+weapon.damage = 25;
+
+// GOOD — sourced from config; swappable without edits to combat code
+weapon.damage = BALANCE.weapons.flamethrower.damage;
+```
+
+If a new system doesn't have a config block yet, add one to
+`src/balance.js` (or the appropriate data file) and wire to it from the
+start. Don't write the magic number "just for now."
+
+### 2. Delta time everywhere
+
+Anything that should evolve over time uses `dt` (or whatever the system
+passes as elapsed seconds). Never tie behaviour to frame count.
+
+```js
+// BAD — 5 units per frame; runs different speed at 60Hz vs 144Hz
+position.x += 5;
+
+// GOOD — 5 units per second, frame-rate independent
+position.x += 5 * dt;
+```
+
+Easing / lerp toward target uses the dt-aware form:
+`current = current + (target - current) * (1 - Math.exp(-rate * dt))`,
+not the framerate-dependent `current += (target - current) * 0.1`.
+
+### 3. Events / signals between systems, not direct cross-imports
+
+UI doesn't reach into combat to change health. Combat publishes a
+`damage-dealt` event; the HUD subscribes. Same for inventory ↔ UI,
+encounters ↔ HUD, save-system ↔ everything.
+
+This pays off the first time you redesign UI, swap save format, or want
+to A/B a different HUD. A small pub/sub (`emit(name, payload)` /
+`on(name, handler)` over a single shared bus) is enough — no library.
+
+### 4. State machines have explicit transition tables
+
+Player state, enemy AI, screen flow, game phase — anywhere you find
+yourself writing `if (state === 'X' && condition) state = 'Y'` more
+than twice, write the states + transitions in a table at the top of the
+file:
+
+```js
+// PlayerState transitions:
+//   idle    → moving (input)        | aiming (RMB)        | dead (hp<=0)
+//   moving  → idle (no input)       | aiming (RMB)        | dead
+//   aiming  → moving (RMB release)  | shooting (LMB)      | dead
+//   shooting→ aiming (LMB release)  | reloading (R)       | dead
+//   reloading→ aiming (timer ends) | dead
+//   dead    → (terminal)
+const TRANSITIONS = { ... };
+```
+
+Reading the comment block + the transition table tells you what the
+system does. Reading scattered ifs across 200 lines doesn't.
+
+### 5. Bug fixes get a regression test (or at minimum, a regression note)
+
+Cold Exit doesn't have a unit test framework yet — that's fine. But
+when you fix a bug, do one of:
+
+- **Best**: drop a `.test.js` next to the file with a node:test case
+  that exercises the bug's code path, asserting the bug condition
+  doesn't recur. Wire to a `test` script in tools/ later.
+- **Acceptable**: add a `// REGRESSION: bug-NN — <one-line description>`
+  comment on the line that holds the fix, so the next person editing
+  knows there's a constraint they shouldn't violate.
+
+The Mission Control bug pipeline already enforces this culture
+(regression-status sweep, audit-then-fix-then-verify). Cold Exit should
+inherit the discipline even without the full pipeline.
+
+---
+
+### What's deliberately NOT a rule here
+
+- **No "every system implements an interface"** — JS doesn't have
+  interfaces; class shape conventions are fine at solo scale.
+- **No "no static singletons"** — DI overhead doesn't pay for itself in
+  a solo Three.js game. Singletons (the input manager, the audio bus)
+  are pragmatic.
+- **No mandatory unit tests** — would create more friction than value
+  on a mid-flight game. Tests come at bug-fix time per rule 5; broader
+  coverage when the codebase stabilizes.

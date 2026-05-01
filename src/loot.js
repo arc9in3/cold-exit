@@ -37,7 +37,12 @@ export class LootManager {
     // stable (no recompile spikes on disarm / kill-drop).
     this._pool = [];
     this._sharedBoxGeom = new THREE.BoxGeometry(0.35, 0.35, 0.35);
-    const POOL_SIZE = 24;
+    // Doubled from 24 → 48 once the per-slot PointLight (and its
+    // shader-recompile cost on every drop) was removed; the static
+    // cost per slot is now ~80KB GPU + ~80KB RAM, so 48 slots adds
+    // ~2MB total and gives headroom for late-game body-pile scenes
+    // (sub-boss + 8 grunts dying together) before eviction kicks in.
+    const POOL_SIZE = 48;
     // Only the first half of slots get a per-drop PointLight. The box
     // mesh is already emissive (tinted ~0.75× on spawn) and reads
     // through bloom on its own; the PointLight just adds a small warm

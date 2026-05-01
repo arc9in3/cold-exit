@@ -337,7 +337,11 @@ export function setSelectedStarterWeapon(name) {
 //
 // `kind` is one of: 'weapon' | 'armor' | 'consumable' | 'ammo' | 'buff'
 // ---------------------------------------------------------------------
-const STORE_KEY = 'tacticalrogue:preRunStore:v1';
+// v2 — catalog now pulls from full ARMOR_DEFS (gloves / belts / boots /
+// helmets / etc.). Bumping the key wipes any v1-era stock so the new
+// pool actually appears on the next render instead of waiting for the
+// 4-hour refresh cycle to expire.
+const STORE_KEY = 'tacticalrogue:preRunStore:v2';
 export const STORE_SLOT_MIN = 6;
 export const STORE_SLOT_MAX = 10;
 export const STORE_CEILING_MAX = 4;

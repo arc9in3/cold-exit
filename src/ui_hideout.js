@@ -37,6 +37,7 @@ import {
   getRerollUnlocked, setRerollUnlocked, REROLL_UNLOCK_COST,
 } from './prefs.js';
 import { tunables } from './tunables.js';
+import { BALANCE } from './balance.js';
 import { HideoutScene } from './scene_hideout.js';
 import {
   CONTRACT_DEFS, defForId, contractExpired,
@@ -65,23 +66,27 @@ const BASELINE_STARTERS = ['Makarov', 'M1911', 'PDW', 'SPCA3', 'Mini-14', 'Mossb
 const STORE_KINDS = [
   { kind: 'armor', weight: 100 },
 ];
-// IDs in this catalog must match real ARMOR_DEFS entries in
-// inventory.js — the materialize step looks the def up by id, so
-// a typo here will silently spawn an unequippable item.
-const STORE_ARMOR_CATALOG = [
-  // Common-tier entries — small, cheap pieces so a starting player at
-  // ceiling 0 always has something to buy in the store.
-  { id: 'chest_light',        name: 'Light Vest',      kind: 'armor', slot: 'chest',    rarity: 'common',   basePrice: 80  },
-  { id: 'mask_balaclava',     name: 'Balaclava',       kind: 'armor', slot: 'face',     rarity: 'common',   basePrice: 40  },
-  { id: 'backpack_small',     name: 'Small Pack',      kind: 'armor', slot: 'backpack', rarity: 'common',   basePrice: 70  },
-  { id: 'backpack_satchel',   name: 'Field Satchel',   kind: 'armor', slot: 'backpack', rarity: 'common',   basePrice: 110 },
-  { id: 'chest_med',          name: 'Tactical Vest',   kind: 'armor', slot: 'chest',    rarity: 'uncommon', basePrice: 220 },
-  { id: 'chest_heavy',        name: 'Plate Armor',     kind: 'armor', slot: 'chest',    rarity: 'rare',     basePrice: 480 },
-  { id: 'helmet_kevlar',      name: 'Kevlar Helmet',   kind: 'armor', slot: 'head',     rarity: 'uncommon', basePrice: 180 },
-  { id: 'helmet_tactical',    name: 'Tactical Helmet', kind: 'armor', slot: 'head',     rarity: 'uncommon', basePrice: 260 },
-  { id: 'backpack_med',       name: 'Combat Pack',     kind: 'armor', slot: 'backpack', rarity: 'uncommon', basePrice: 200 },
-  { id: 'backpack_large',     name: 'Large Rucksack',  kind: 'armor', slot: 'backpack', rarity: 'rare',     basePrice: 420 },
-];
+// Catalog is built dynamically from ARMOR_DEFS so EVERY armor / gear
+// piece (head, face, ears, chest, hands, belt, pants, boots, backpack)
+// can roll into the pre-mission store. Filters out:
+//   - encounter-only rewards (`_encounter: true`) so unique pieces
+//     stay encounter-locked (Brian's Hat, magical backpack, etc.)
+//   - mythic rarity — beyond the store ceiling
+// Base price defaults from rarity since most ARMOR_DEFS entries don't
+// carry an explicit basePrice. Existing manual prices win when present.
+const _RARITY_BASE_PRICE = {
+  common: 80, uncommon: 200, rare: 480, epic: 1100, legendary: 2400,
+};
+const STORE_ARMOR_CATALOG = Object.values(ARMOR_DEFS || {})
+  .filter((d) => d && d.id && d.slot && !d._encounter && d.rarity !== 'mythic')
+  .map((d) => ({
+    id: d.id,
+    name: d.name || d.id,
+    kind: 'armor',
+    slot: d.slot,
+    rarity: d.rarity || 'common',
+    basePrice: d.basePrice || _RARITY_BASE_PRICE[d.rarity || 'common'] || 80,
+  }));
 const STORE_CONSUMABLE_CATALOG = [
   // Smaller / cheaper entries first so the rolled stock has a lot of
   // affordable filler at game start.
@@ -141,25 +146,74 @@ export const KEYSTONES = {
 // the same; structural unlocks are now ALL classes (NPC unlocks
 // removed). Class definitions land in a follow-up — for now these
 // rows are placeholders that flag the class as available at run start.
+// Build-time helper: stitch each stat-tier label + blurb together with
+// the cost + magnitude pulled from BALANCE.trainer. Effect magnitudes
+// live in src/balance.js so a retune is one file edit. Existing IDs
+// (vit_1/2/3, end_1/2, comp_1) preserved for save-compat.
+const _T = BALANCE.trainer;
+const _pct = (v) => `${Math.round(v * 100)}%`;
 export const RECRUITER_UNLOCKS = {
-  // Stat tiers — small per-purchase, capped at +30 max HP across the
-  // three rows so curve stays bounded.
-  vit_1:        { id: 'vit_1',        label: 'Vitality I',         blurb: '+10 max HP, permanent.', cost: 60 },
-  vit_2:        { id: 'vit_2',        label: 'Vitality II',        blurb: '+10 max HP, permanent.', cost: 140, requires: ['vit_1'] },
-  vit_3:        { id: 'vit_3',        label: 'Vitality III',       blurb: '+10 max HP, permanent.', cost: 280, requires: ['vit_2'] },
-  end_1:        { id: 'end_1',        label: 'Endurance I',        blurb: '+10% stamina recovery, permanent.', cost: 80 },
-  end_2:        { id: 'end_2',        label: 'Endurance II',       blurb: '+10% stamina recovery, permanent.', cost: 180, requires: ['end_1'] },
-  comp_1:       { id: 'comp_1',       label: 'Composure I',        blurb: '−10% stagger duration, permanent.', cost: 90 },
-  // Class unlocks — each one opens a new starting class for run-start
-  // selection. Demolisher + Marksman were the original two; Heavy /
-  // Recon / Medic / Pyro are placeholder rows ready for class
-  // definitions to land in a follow-up pass.
-  class_demolisher: { id: 'class_demolisher', label: 'Class: Demolisher', blurb: 'Explosives + AoE specialist. Starts with grenades.',           cost: 260 },
-  class_marksman:   { id: 'class_marksman',   label: 'Class: Marksman',   blurb: 'Long-range precision. Starts with a marksman rifle.',           cost: 260 },
-  class_heavy:      { id: 'class_heavy',      label: 'Class: Heavy',      blurb: 'LMG + plate carrier. More HP, slower move.',                    cost: 320 },
-  class_recon:      { id: 'class_recon',      label: 'Class: Recon',      blurb: 'Silenced loadout. Faster move, stealth bonus.',                 cost: 320 },
-  class_medic:      { id: 'class_medic',      label: 'Class: Medic',      blurb: 'Heal kits at start, faster bandage cast.',                      cost: 380 },
-  class_pyro:       { id: 'class_pyro',       label: 'Class: Pyro',       blurb: 'Flame + burn DoT focus. Starts with a flamethrower.',           cost: 420 },
+  // Vitality (max HP).
+  vit_1: { id: 'vit_1', label: 'Vitality I',   blurb: `+${_T.vit_1.maxHpBonus} max HP, permanent.`, cost: _T.vit_1.cost },
+  vit_2: { id: 'vit_2', label: 'Vitality II',  blurb: `+${_T.vit_2.maxHpBonus} max HP, permanent.`, cost: _T.vit_2.cost, requires: ['vit_1'] },
+  vit_3: { id: 'vit_3', label: 'Vitality III', blurb: `+${_T.vit_3.maxHpBonus} max HP, permanent.`, cost: _T.vit_3.cost, requires: ['vit_2'] },
+  vit_4: { id: 'vit_4', label: 'Vitality IV',  blurb: `+${_T.vit_4.maxHpBonus} max HP, permanent.`, cost: _T.vit_4.cost, requires: ['vit_3'] },
+  vit_5: { id: 'vit_5', label: 'Vitality V',   blurb: `+${_T.vit_5.maxHpBonus} max HP, permanent.`, cost: _T.vit_5.cost, requires: ['vit_4'] },
+
+  // Endurance (stamina regen).
+  end_1: { id: 'end_1', label: 'Endurance I',   blurb: `+${_pct(_T.end_1.staminaRegenAdd)} stamina regen, permanent.`, cost: _T.end_1.cost },
+  end_2: { id: 'end_2', label: 'Endurance II',  blurb: `+${_pct(_T.end_2.staminaRegenAdd)} stamina regen, permanent.`, cost: _T.end_2.cost, requires: ['end_1'] },
+  end_3: { id: 'end_3', label: 'Endurance III', blurb: `+${_pct(_T.end_3.staminaRegenAdd)} stamina regen, permanent.`, cost: _T.end_3.cost, requires: ['end_2'] },
+  end_4: { id: 'end_4', label: 'Endurance IV',  blurb: `+${_pct(_T.end_4.staminaRegenAdd)} stamina regen, permanent.`, cost: _T.end_4.cost, requires: ['end_3'] },
+
+  // Conditioning — flat max-stamina bonus.
+  stam_1: { id: 'stam_1', label: 'Conditioning I',   blurb: `+${_T.stam_1.maxStaminaBonus} max stamina, permanent.`, cost: _T.stam_1.cost },
+  stam_2: { id: 'stam_2', label: 'Conditioning II',  blurb: `+${_T.stam_2.maxStaminaBonus} max stamina, permanent.`, cost: _T.stam_2.cost, requires: ['stam_1'] },
+  stam_3: { id: 'stam_3', label: 'Conditioning III', blurb: `+${_T.stam_3.maxStaminaBonus} max stamina, permanent.`, cost: _T.stam_3.cost, requires: ['stam_2'] },
+
+  // Composure (stagger duration).
+  comp_1: { id: 'comp_1', label: 'Composure I',   blurb: `−${_pct(1 - _T.comp_1.staggerDurationMult)} stagger duration, permanent.`, cost: _T.comp_1.cost },
+  comp_2: { id: 'comp_2', label: 'Composure II',  blurb: `−${_pct(1 - _T.comp_2.staggerDurationMult)} stagger duration, permanent.`, cost: _T.comp_2.cost, requires: ['comp_1'] },
+  comp_3: { id: 'comp_3', label: 'Composure III', blurb: `−${_pct(1 - _T.comp_3.staggerDurationMult)} stagger duration, permanent.`, cost: _T.comp_3.cost, requires: ['comp_2'] },
+
+  // Quick Hands — reload speed.
+  reload_1: { id: 'reload_1', label: 'Quick Hands I',   blurb: `+${_pct(_T.reload_1.reloadSpeedAdd)} reload speed, permanent.`, cost: _T.reload_1.cost },
+  reload_2: { id: 'reload_2', label: 'Quick Hands II',  blurb: `+${_pct(_T.reload_2.reloadSpeedAdd)} reload speed, permanent.`, cost: _T.reload_2.cost, requires: ['reload_1'] },
+  reload_3: { id: 'reload_3', label: 'Quick Hands III', blurb: `+${_pct(_T.reload_3.reloadSpeedAdd)} reload speed, permanent.`, cost: _T.reload_3.cost, requires: ['reload_2'] },
+
+  // Marksmanship — spread reduction.
+  aim_1: { id: 'aim_1', label: 'Marksmanship I',   blurb: `−${_pct(1 - _T.aim_1.spreadMult)} spread, permanent.`, cost: _T.aim_1.cost },
+  aim_2: { id: 'aim_2', label: 'Marksmanship II',  blurb: `−${_pct(1 - _T.aim_2.spreadMult)} spread, permanent.`, cost: _T.aim_2.cost, requires: ['aim_1'] },
+  aim_3: { id: 'aim_3', label: 'Marksmanship III', blurb: `−${_pct(1 - _T.aim_3.spreadMult)} spread, permanent.`, cost: _T.aim_3.cost, requires: ['aim_2'] },
+
+  // Eye for Detail — crit chance.
+  crit_1: { id: 'crit_1', label: 'Eye for Detail I',  blurb: `+${_pct(_T.crit_1.critChanceBonus)} crit chance, permanent.`, cost: _T.crit_1.cost },
+  crit_2: { id: 'crit_2', label: 'Eye for Detail II', blurb: `+${_pct(_T.crit_2.critChanceBonus)} crit chance, permanent.`, cost: _T.crit_2.cost, requires: ['crit_1'] },
+
+  // Footwork — move speed.
+  move_1: { id: 'move_1', label: 'Footwork I',  blurb: `+${_pct(_T.move_1.moveSpeedAdd)} move speed, permanent.`, cost: _T.move_1.cost },
+  move_2: { id: 'move_2', label: 'Footwork II', blurb: `+${_pct(_T.move_2.moveSpeedAdd)} move speed, permanent.`, cost: _T.move_2.cost, requires: ['move_1'] },
+
+  // Scavenger — credit drop bonus.
+  carry_1: { id: 'carry_1', label: 'Scavenger I',  blurb: `+${_pct(_T.carry_1.creditDropAdd)} credits from kills, permanent.`, cost: _T.carry_1.cost },
+  carry_2: { id: 'carry_2', label: 'Scavenger II', blurb: `+${_pct(_T.carry_2.creditDropAdd)} credits from kills, permanent.`, cost: _T.carry_2.cost, requires: ['carry_1'] },
+
+  // Field Recovery — out-of-combat regen + delay shave.
+  regen_1:     { id: 'regen_1',     label: 'Field Recovery I',  blurb: `+${_pct(_T.regen_1.healthRegenAdd)} out-of-combat HP regen, permanent.`, cost: _T.regen_1.cost },
+  regen_2:     { id: 'regen_2',     label: 'Field Recovery II', blurb: `+${_pct(_T.regen_2.healthRegenAdd)} out-of-combat HP regen, permanent.`, cost: _T.regen_2.cost, requires: ['regen_1'] },
+  regen_delay: { id: 'regen_delay', label: 'Quick Recovery',    blurb: `−${_T.regen_delay.healthRegenDelayBonus}s out-of-combat regen delay, permanent.`, cost: _T.regen_delay.cost },
+
+  // ---- Class unlocks ------------------------------------------------
+  // Each one opens a new starting class for run-start selection.
+  // Demolisher + Marksman were the original two; Heavy / Recon / Medic
+  // / Pyro are placeholder rows ready for class definitions to land in
+  // a follow-up pass.
+  class_demolisher: { id: 'class_demolisher', label: 'Class: Demolisher', blurb: 'Explosives + AoE specialist. Starts with grenades.', cost: _T.class_demolisher.cost },
+  class_marksman:   { id: 'class_marksman',   label: 'Class: Marksman',   blurb: 'Long-range precision. Starts with a marksman rifle.', cost: _T.class_marksman.cost },
+  class_heavy:      { id: 'class_heavy',      label: 'Class: Heavy',      blurb: 'LMG + plate carrier. More HP, slower move.',          cost: _T.class_heavy.cost },
+  class_recon:      { id: 'class_recon',      label: 'Class: Recon',      blurb: 'Silenced loadout. Faster move, stealth bonus.',       cost: _T.class_recon.cost },
+  class_medic:      { id: 'class_medic',      label: 'Class: Medic',      blurb: 'Heal kits at start, faster bandage cast.',            cost: _T.class_medic.cost },
+  class_pyro:       { id: 'class_pyro',       label: 'Class: Pyro',       blurb: 'Flame + burn DoT focus. Starts with a flamethrower.', cost: _T.class_pyro.cost },
 };
 
 export class HideoutUI {

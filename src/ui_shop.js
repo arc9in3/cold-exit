@@ -793,12 +793,34 @@ export class ShopUI {
       if (!it || it.markedKeep) continue;
       if (it.type === 'junk' || it.markedJunk) sellIdxs.push(i);
     }
+    let bearTrades = 0;
     for (let k = sellIdxs.length - 1; k >= 0; k--) {
       const idx = sellIdxs[k];
       const item = this.inventory.backpack[idx];
       if (!item) continue;
       if (item.markedKeep) continue;
       if (!(item.type === 'junk' || item.markedJunk)) continue;
+      // Bear-merchant special trades — same gate as _sell(idx). The
+      // sell-all path was bypassing this and selling the Rocket
+      // Ticket / Demon Bear / The Gift for raw chips, silently
+      // skipping the relic / mythic-unlock the player was supposed
+      // to get. Mirror the per-item check so quest items always
+      // trigger their reward when sold to the bear.
+      const isBearSpecial = this.merchant?.kind === 'bearMerchant'
+        && (item.id === 'thr_the_gift'
+            || item.id === 'junk_rocket_ticket'
+            || item.id === 'toy_demon_bear');
+      if (isBearSpecial) {
+        if (this.onSpecialBearTrade(item)) {
+          this.inventory.takeFromBackpack(idx);
+          if (item.id === 'thr_the_gift') this.earnCredits(1);
+          bearTrades += 1;
+          continue;       // skip the normal sell flow / buyback push
+        }
+        // Trade refused (e.g. relic already owned). Fall through to
+        // the regular sell so the player isn't stuck with an item
+        // they can't use.
+      }
       const price = sellPriceFor(item);
       this.inventory.takeFromBackpack(idx);
       this.earnCredits(price);
@@ -806,7 +828,12 @@ export class ShopUI {
       if (this.buyback.length > 12) this.buyback.pop();
       sold += 1; totalCredits += price;
     }
-    if (sold > 0) this._flash(`Sold ${sold} item${sold === 1 ? '' : 's'} · +${totalCredits}c`);
+    if (sold > 0 || bearTrades > 0) {
+      const parts = [];
+      if (sold > 0) parts.push(`Sold ${sold} item${sold === 1 ? '' : 's'} · +${totalCredits}c`);
+      if (bearTrades > 0) parts.push(`${bearTrades} bear trade${bearTrades === 1 ? '' : 's'} executed`);
+      this._flash(parts.join(' · '));
+    }
     this.render();
   }
 

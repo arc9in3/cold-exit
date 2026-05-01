@@ -152,6 +152,135 @@ export function createPlayer(scene) {
   inHandModel.visible = false;
   handPivot.add(inHandModel);
 
+  // Off-hand mount — used by akimbo dual-wield. Mirrors the dominant-
+  // hand setup but parented to the LEFT wrist. Carries both a
+  // primitive placeholder box AND an FBX clone group, so akimbo
+  // weapons render with the same model the dominant hand uses
+  // (pistols / SMGs) instead of a stub box.
+  const offhandPivot = rig.leftArm.wrist;
+  const offhandGunMat = new THREE.MeshStandardMaterial({
+    color: 0x151515, roughness: 0.4, metalness: 0.6, emissive: 0x000000,
+  });
+  const offhandGunMesh = new THREE.Mesh(new THREE.BoxGeometry(0.12, 0.12, 0.5), offhandGunMat);
+  offhandGunMesh.scale.setScalar(WEAPON_SCALE);
+  offhandGunMesh.castShadow = true;
+  offhandGunMesh.rotation.x = Math.PI / 2;
+  offhandGunMesh.position.set(0, -(0.1 + 0.25) * WEAPON_SCALE, 0);
+  offhandGunMesh.visible = false;
+  offhandPivot.add(offhandGunMesh);
+  const offhandInHandModel = new THREE.Group();
+  offhandInHandModel.scale.setScalar(WEAPON_SCALE);
+  offhandInHandModel.rotation.x = Math.PI / 2;
+  offhandInHandModel.position.copy(offhandGunMesh.position);
+  offhandInHandModel.visible = false;
+  offhandPivot.add(offhandInHandModel);
+  // Off-hand muzzle anchor — Object3D at the barrel tip on the left
+  // weapon, used by main.js to spawn tracers from the correct hand
+  // when akimbo's RMB fires weapon2. Tracker world position
+  // surfaced via playerInfo.offhandMuzzleWorld each tick.
+  const offhandMuzzle = new THREE.Object3D();
+  offhandMuzzle.position.set(0, -(0.1 + 0.5) * WEAPON_SCALE, 0);
+  offhandPivot.add(offhandMuzzle);
+  // Per-clone cache for off-hand. Independent of the dominant-hand
+  // cache so the same gun model can sit in both at once (akimbo with
+  // the same weapon in both slots — duplicate item, separate clones).
+  const _offhandCloneCache = new Map();
+  let offhandLoadSerial = 0;
+
+  function _clearOffhandModel() {
+    for (const clone of _offhandCloneCache.values()) clone.visible = false;
+    while (offhandInHandModel.children.length) {
+      const c = offhandInHandModel.children[0];
+      if (!_offhandCloneCache.has(c.userData?.modelUrl)) {
+        offhandInHandModel.remove(c);
+        c.traverse?.((o) => {
+          o.geometry?.dispose?.();
+          o.material?.dispose?.();
+        });
+      } else {
+        offhandInHandModel.remove(c);
+      }
+    }
+    // Re-parent cached clones (kept alive across swaps) — reverse the
+    // detach we did above so the cache survives the visibility flip.
+    for (const clone of _offhandCloneCache.values()) {
+      offhandInHandModel.add(clone);
+    }
+  }
+
+  function setOffhandWeapon(weapon) {
+    if (!weapon) {
+      offhandGunMesh.visible = false;
+      offhandInHandModel.visible = false;
+      _clearOffhandModel();
+      state.offhandEquipped = null;
+      return;
+    }
+    state.offhandEquipped = weapon;
+    const len = weapon.muzzleLength || 0.4;
+    const g = weapon.muzzleGirth || 0.10;
+    offhandGunMesh.geometry.dispose();
+    offhandGunMesh.geometry = new THREE.BoxGeometry(g, g, len);
+    if (weapon.tracerColor != null) {
+      offhandGunMat.emissive.setHex(weapon.tracerColor).multiplyScalar(0.15);
+    }
+    const ws = WEAPON_SCALE;
+    offhandGunMesh.rotation.set(Math.PI / 2, 0, 0);
+    offhandGunMesh.position.set(0, -(0.1 + len / 2) * ws, 0);
+    offhandInHandModel.rotation.set(Math.PI / 2, 0, 0);
+    offhandInHandModel.position.copy(offhandGunMesh.position);
+    offhandMuzzle.position.set(0, -(0.1 + len) * ws, 0);
+    // Show primitive immediately as placeholder; FBX swap below
+    // hides it once the clone lands. Failures keep the primitive.
+    _clearOffhandModel();
+    offhandGunMesh.visible = true;
+    offhandInHandModel.visible = false;
+
+    const mySerial = ++offhandLoadSerial;
+    const modelUrl = modelForItem(weapon);
+    if (!modelUrl) return;
+    const cached = _offhandCloneCache.get(modelUrl);
+    if (cached) {
+      cached.visible = true;
+      offhandInHandModel.visible = true;
+      offhandGunMesh.visible = false;
+      return;
+    }
+    loadModelClone(modelUrl).then(clone => {
+      if (!clone || mySerial !== offhandLoadSerial) return;
+      const CLASS_SCALE = {
+        pistol: 0.45, smg: 0.65, rifle: 0.75, shotgun: 0.75,
+        lmg: 0.75, flame: 0.7, melee: 0.7,
+      };
+      const cs = CLASS_SCALE[weapon.class] ?? 0.9;
+      fitToRadius(clone, len * cs * scaleForModelPath(modelUrl));
+      const r = weapon.modelRotation;
+      const rotOverride = rotationOverrideForModelPath(modelUrl);
+      if (rotOverride) {
+        clone.rotation.set(rotOverride.x || 0, rotOverride.y || 0, rotOverride.z || 0);
+      } else if (r) {
+        clone.rotation.set(r.x || 0, r.y || 0, r.z || 0);
+      } else {
+        clone.rotation.set(0, Math.PI / 2, 0);
+      }
+      // Off-hand uses the SAME mirror flip as the dominant hand —
+      // the model is authored facing forward when shouldMirrorInHand
+      // says so; the wrist anchor on the left arm carries the same
+      // local-frame orientation as the right wrist (rig is symmetric),
+      // so the same flip yields a forward-pointing barrel.
+      if (shouldMirrorInHand(weapon)) clone.scale.x = -clone.scale.x;
+      const gripOff = gripOffsetForModelPath(modelUrl);
+      if (gripOff) {
+        clone.position.set(gripOff.x || 0, gripOff.y || 0, gripOff.z || 0);
+      }
+      clone.userData.modelUrl = modelUrl;
+      offhandInHandModel.add(clone);
+      _offhandCloneCache.set(modelUrl, clone);
+      offhandInHandModel.visible = true;
+      offhandGunMesh.visible = false;
+    }).catch(() => { /* swallow — primitive remains visible */ });
+  }
+
   // Serial for each setWeapon call so a slow model load can't clobber
   // the weapon the player swapped to in the meantime.
   let weaponLoadSerial = 0;
@@ -561,9 +690,13 @@ export function createPlayer(scene) {
       if (nextStep >= weapon.combo.length) nextStep = 0;
     } else if ((a.phase === 'startup' || a.phase === 'active' || a.phase === 'recovery')
       && a.weapon === weapon) {
-      // Branch — but only if current step is not the final.
-      if (a.step >= weapon.combo.length - 1) return false;
-      nextStep = a.step + 1;
+      // Branch — chain to next step. Final step now wraps back to
+      // step 0 instead of locking the player into the finisher's
+      // recovery; gives combat freedom without breaking the
+      // committed-finisher feel (the player paid for the heavy
+      // step's startup + active, they just don't sit through the
+      // entire wind-down before swinging again).
+      nextStep = (a.step + 1) % weapon.combo.length;
     } else {
       return false;
     }
@@ -842,6 +975,13 @@ export function createPlayer(scene) {
         attackEvent = {
           attack: a.current,
           step: a.step,
+          // Read by main.resolveComboHit's per-weapon finisher hooks
+          // (e.g. heavy-weapon AoE stagger fires on the last step
+          // only). a.weapon is the active combo's weapon; we read
+          // .combo.length defensively in case a weapon swap mid-
+          // attack ever happens.
+          isFinalStep: !!(a.weapon && a.weapon.combo
+            && a.step === a.weapon.combo.length - 1),
           facing: a.facing.clone(),
           origin: new THREE.Vector3(group.position.x, 1.1, group.position.z),
           isCrit: !!a.isCrit,
@@ -901,13 +1041,22 @@ export function createPlayer(scene) {
     // Parry window countdown.
     if (state.parryT > 0) state.parryT = Math.max(0, state.parryT - dt);
 
-    // Block — only valid with a melee weapon equipped, while grounded, not
-    // attacking, and with stamina available.
-    const wantsBlock = input.adsHeld
+    // Block — only valid with a melee weapon equipped, while
+    // grounded, with stamina available. Block input during the
+    // RECOVERY phase of an in-progress swing cancels the swing's
+    // wind-down so the player gets a defensive escape mid-combo.
+    // Startup + active stay committed (the strike already happened
+    // / is happening; canceling there would be swing-cheese).
+    const wantsBlockRaw = input.adsHeld
       && state.equipped?.type === 'melee'
-      && !attackLocked
       && state.mode === MODE.GROUND
       && !state.airborne;
+    if (wantsBlockRaw && a.phase === 'recovery') {
+      cancelCombo();
+    }
+    const wantsBlock = wantsBlockRaw
+      && a.phase !== 'startup'
+      && a.phase !== 'active';
     if (wantsBlock && state.stamina > 0) {
       state.blocking = true;
     } else {
@@ -1318,6 +1467,14 @@ export function createPlayer(scene) {
     // pushes the shoulder UP (the muzzle ends up at chest level
     // pointing down). Adding it to rifleHold uses the corrected
     // recoil direction below.
+    //
+    // SMGs in akimbo: keep rifleHold = true so the DOMINANT arm
+    // still uses the shouldered SMG pose (otherwise the FBX mount
+    // tilts toward the floor — the model is authored to suit the
+    // shouldered wrist orientation). The support-arm half of the
+    // rifleHold pose is skipped inside actor_rig.js when
+    // state.akimbo is set, so the off-hand still gets the parallel
+    // pistol-style pose.
     const rifleHold = cls2 === 'rifle' || cls2 === 'shotgun'
       || cls2 === 'lmg' || cls2 === 'sniper' || cls2 === 'smg';
     // Aim pitch — vertical angle from the fire origin (chest) to the
@@ -1354,11 +1511,19 @@ export function createPlayer(scene) {
     // hold.
     const inQuickMelee = state.equipped?.type === 'ranged' && state.attack.phase !== 'idle';
     const meleeStance = (state.equipped?.type === 'melee' || inQuickMelee) && !blockPose;
+    // Akimbo pose — when an off-hand weapon is equipped (player has
+    // dual pistols / SMGs), force a meaningful aim-blend so BOTH
+    // arms come up to near-shoulder level even though ADS is
+    // suppressed. The rig's existing two-arm aim blend already
+    // covers the symmetric pose; we just need a nonzero target.
+    const akimboAimBlend = state.offhandEquipped ? 0.75 : 0;
     updateAnim(rig, {
       speed: planarSpeed,
       // Pass adsAmount directly so the chest→head-level raise eases
       // smoothly with the ADS zoom, not stepped at a threshold.
-      aiming: state.adsAmount,
+      // Akimbo forces a 0.75 floor so the off-hand reads as
+      // actively aiming.
+      aiming: Math.max(state.adsAmount || 0, akimboAimBlend),
       crouched: state.crouched,
       handedness: state.handedness,
       dashing: state.mode === MODE.DASH || state.mode === MODE.SLIDE,
@@ -1369,6 +1534,11 @@ export function createPlayer(scene) {
       weaponClass: cls2,
       blockPose,
       meleeStance,
+      // Akimbo flag drives the support-arm pose override in
+      // actor_rig: outward yaw + straighter elbow so the off-hand
+      // gun extends forward in parallel instead of crossing the
+      // chest into a two-hand grip.
+      akimbo: !!state.offhandEquipped,
       attacking: state.attack.phase !== 'idle',
       swingProgress,
       swingStyle,
@@ -1487,6 +1657,12 @@ export function createPlayer(scene) {
       aim: aimPoint || null,
       facing: facing.clone(),
       muzzleWorld: muzzle.getWorldPosition(new THREE.Vector3()),
+      // Off-hand muzzle world position — used by main.js's akimbo
+      // path so RMB tracers spawn from weapon2's muzzle instead of
+      // weapon1's. Always populated even if akimbo isn't active so
+      // consumers don't need to null-check; main.js only reads it
+      // when firing the off-hand weapon.
+      offhandMuzzleWorld: offhandMuzzle.getWorldPosition(new THREE.Vector3()),
       fireOrigin,
       adsAmount: state.adsAmount,
       mode: state.mode,
@@ -1735,7 +1911,7 @@ export function createPlayer(scene) {
   }
 
   return {
-    mesh: group, body, rig, update, setWeapon, prewarmWeapon, takeDamage, heal, applyStatus,
+    mesh: group, body, rig, update, setWeapon, setOffhandWeapon, prewarmWeapon, takeDamage, heal, applyStatus,
     tryMeleeAttack, tryQuickMelee, cancelCombo,
     tryParry, isBlocking, isParryActive,
     consumeStamina, refundStamina, applyDerivedStats, restoreFullHealth,

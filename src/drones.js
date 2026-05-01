@@ -21,45 +21,114 @@ const DRONE_CONTACT_RADIUS = 0.7;     // detonate within this distance from play
 const DRONE_AOE_RADIUS    = 2.4;
 const DRONE_AOE_DAMAGE    = 22;
 const DRONE_AOE_SHAKE     = 0.32;
+const POOL_SIZE           = 16;       // covers a Hivemaster swarm (2-3/summon × 5 summons)
+
+// Shared geometry + materials. The Hivemaster swarm previously paid a
+// fresh OctahedronGeometry + SphereGeometry + MeshStandardMaterial +
+// MeshBasicMaterial per spawn AND a fresh dispose chain per kill —
+// 4 GPU uploads + 4 disposals per drone, every drone, in a tight
+// 8-drone-per-second loop. Hoisted to module scope so every spawn is
+// just a slot reuse.
+const _BODY_GEOM = new THREE.OctahedronGeometry(0.32, 0);
+const _CORE_GEOM = new THREE.SphereGeometry(0.14, 10, 8);
+const _BODY_MAT  = new THREE.MeshStandardMaterial({
+  color: 0x301010, roughness: 0.45, metalness: 0.55,
+  emissive: 0xff3030, emissiveIntensity: 0.55,
+});
+const _CORE_MAT  = new THREE.MeshBasicMaterial({
+  color: 0xff6020, transparent: true, opacity: 0.95,
+});
+// Per-frame scratch reused by every drone — was allocated per drone
+// in the old shape (1 Vector3 per spawn).
+const _DIR_TMP = new THREE.Vector3();
+
+// Drones hover at 1.35m, well above couches / crates / containers, so
+// they shouldn't pay collision cost for any of them. Only full-height
+// walls + closed doors should block. This filter mirrors visionBlockers
+// in level.js (props skipped) but keeps the cheap AABB shape so we
+// don't allocate per-frame.
+//
+// `level.solidObstacles()` is cached behind a dirty flag, so calling
+// it every frame is essentially free — the per-frame cost was the
+// inner loop iterating short props the drone could fly over anyway.
+function _droneCollidesAt(level, x, z, radius) {
+  const obstacles = level.solidObstacles ? level.solidObstacles() : null;
+  if (!obstacles) return false;
+  for (let i = 0; i < obstacles.length; i++) {
+    const o = obstacles[i];
+    const ud = o.userData;
+    if (ud.isProp) continue;          // skip cover / decor
+    if (ud.containerRef) continue;    // skip lootable containers
+    const b = ud.collisionXZ;
+    if (!b) continue;
+    if (x > b.minX - radius && x < b.maxX + radius
+     && z > b.minZ - radius && z < b.maxZ + radius) return true;
+  }
+  return false;
+}
+function _droneResolveCollision(level, oldX, oldZ, newX, newZ, radius) {
+  let x = newX, z = oldZ;
+  if (_droneCollidesAt(level, x, z, radius)) x = oldX;
+  let nz = newZ;
+  if (_droneCollidesAt(level, x, nz, radius)) nz = oldZ;
+  return { x, z: nz };
+}
 
 export class DroneManager {
   constructor(scene) {
     this.scene = scene;
     this.drones = [];
+    // Pre-allocate POOL_SIZE slots up front. Each slot owns its own
+    // Group + body Mesh + core Mesh, but all share _BODY_GEOM /
+    // _CORE_GEOM / _BODY_MAT / _CORE_MAT — neither material is
+    // mutated per-drone, so sharing is safe. `inUse` flips on
+    // spawn / `_returnSlot`.
+    this._pool = [];
+    for (let i = 0; i < POOL_SIZE; i++) {
+      const group = new THREE.Group();
+      const body = new THREE.Mesh(_BODY_GEOM, _BODY_MAT);
+      body.castShadow = false;
+      body.userData.zone = 'torso';
+      group.add(body);
+      const core = new THREE.Mesh(_CORE_GEOM, _CORE_MAT);
+      group.add(core);
+      group.position.set(0, -1000, 0);
+      group.visible = false;
+      this.scene.add(group);
+      this._pool.push({ group, body, core, inUse: false });
+    }
   }
 
   // Spawn a drone at the given world position, owned by `ownerId`
   // (currently unused, available if we want kill credit later).
+  // Reuses an idle pool slot — zero allocations on the hot path.
   spawn(x, y, z, ownerId = null) {
-    const group = new THREE.Group();
-    // Body — emissive diamond. Octahedron silhouette reads distinct
-    // from spheres so the player spots a drone instantly across the
-    // room.
-    const bodyMat = new THREE.MeshStandardMaterial({
-      color: 0x301010, roughness: 0.45, metalness: 0.55,
-      emissive: 0xff3030, emissiveIntensity: 0.55,
-    });
-    const body = new THREE.Mesh(new THREE.OctahedronGeometry(0.32, 0), bodyMat);
-    body.castShadow = false;
-    body.userData.zone = 'torso';
-    body.userData.owner = null;        // filled in below
-    group.add(body);
-    // Inner glowing core — visual interest + reads as "armed".
-    // Bumped to fully-saturated emissive (was MeshBasicMaterial which
-    // is already unlit). Replaces the per-drone PointLight underglow:
-    // drones swarm 8+ at a time and each PointLight forced a per-mesh
-    // shader recompile path, so the swarm tanked the frame. Bloom in
-    // postfx gives the moving glow effect for free.
-    const coreMat = new THREE.MeshBasicMaterial({
-      color: 0xff6020, transparent: true, opacity: 0.95,
-    });
-    const core = new THREE.Mesh(new THREE.SphereGeometry(0.14, 10, 8), coreMat);
-    group.add(core);
-    group.position.set(x, y || DRONE_HOVER_Y, z);
-    this.scene.add(group);
+    let slot = null;
+    for (const s of this._pool) {
+      if (!s.inUse) { slot = s; break; }
+    }
+    if (!slot) {
+      // Pool full — evict the oldest live drone so a Hivemaster
+      // overspawn doesn't silently fail. Mirrors the loot-pool /
+      // tracer-pool eviction pattern.
+      const oldest = this.drones[0];
+      if (oldest && oldest.slot) {
+        this._removeMesh(oldest);
+        oldest.alive = false;
+      }
+      for (const s of this._pool) {
+        if (!s.inUse) { slot = s; break; }
+      }
+      if (!slot) return null;
+    }
+    slot.inUse = true;
+    slot.group.position.set(x, y || DRONE_HOVER_Y, z);
+    slot.group.visible = true;
     const drone = {
-      group,
-      body, core,
+      slot,
+      group: slot.group,
+      body: slot.body,
+      core: slot.core,
       // `light` slot retained as null so any ticker that previously
       // animated the underglow intensity becomes a no-op instead of
       // a TypeError.
@@ -70,14 +139,13 @@ export class DroneManager {
       alive: true,
       dead: false,
       ownerId,
-      _tmpDir: new THREE.Vector3(),
       // Mirror the gunman/melee shape just enough that downstream
       // hit / aim code treats this as a hittable enemy. `hittable`
       // is the array allHittables() will pull body parts from; for
       // drones it's just the body mesh.
-      hittables: [body],
+      hittables: [slot.body],
     };
-    body.userData.owner = drone;
+    slot.body.userData.owner = drone;
     drone.manager = this;
     this.drones.push(drone);
     return drone;
@@ -116,12 +184,15 @@ export class DroneManager {
       const dz = pz - gz;
       const dist = Math.hypot(dx, dz);
       if (dist > 0.001) {
-        d._tmpDir.set(dx / dist, 0, dz / dist);
+        _DIR_TMP.set(dx / dist, 0, dz / dist);
         const step = DRONE_SPEED * dt;
-        const nx = gx + d._tmpDir.x * step;
-        const nz = gz + d._tmpDir.z * step;
-        if (ctx.level && ctx.level.resolveCollision) {
-          const r = ctx.level.resolveCollision(gx, gz, nx, nz, 0.25);
+        const nx = gx + _DIR_TMP.x * step;
+        const nz = gz + _DIR_TMP.z * step;
+        if (ctx.level) {
+          // Drone-specific collision — only walls + doors block, props
+          // are flown over. ~80% reduction in obstacle iterations vs
+          // level.resolveCollision in a typical late-game room.
+          const r = _droneResolveCollision(ctx.level, gx, gz, nx, nz, 0.25);
           d.group.position.x = r.x;
           d.group.position.z = r.z;
         } else {
@@ -179,24 +250,23 @@ export class DroneManager {
     this._removeMesh(drone);
   }
 
+  // Return a slot to the idle pool. Geometry + material are shared
+  // across all slots — never dispose them.
+  _returnSlot(slot) {
+    slot.inUse = false;
+    slot.group.visible = false;
+    slot.group.position.set(0, -1000, 0);
+    slot.body.userData.owner = null;
+  }
+
   _removeMesh(drone) {
     drone.dead = true;
-    if (drone.group && drone.group.parent) {
-      drone.group.parent.remove(drone.group);
-    }
-    drone.body.geometry.dispose();
-    drone.body.material.dispose();
-    drone.core.geometry.dispose();
-    drone.core.material.dispose();
+    if (drone.slot) this._returnSlot(drone.slot);
   }
 
   removeAll() {
     for (const d of this.drones) {
-      if (d.group && d.group.parent) d.group.parent.remove(d.group);
-      d.body?.geometry.dispose();
-      d.body?.material.dispose();
-      d.core?.geometry.dispose();
-      d.core?.material.dispose();
+      if (d.slot) this._returnSlot(d.slot);
     }
     this.drones.length = 0;
   }

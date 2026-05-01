@@ -152,18 +152,24 @@ export class Combat {
       slot.mat.opacity = 0.95;
       // Per-particle scale jitter — sphere geometry is shared so we
       // vary perceived size via mesh.scale instead of a fresh geom.
-      const sc = 0.75 + Math.random() * 0.6;
+      // Halved from 0.75-1.35 so the droplets read as a fine spray
+      // instead of fat globs; the speed bump below replaces the
+      // visual mass with motion.
+      const sc = 0.375 + Math.random() * 0.30;
       slot.mesh.scale.setScalar(sc);
       slot.mesh.position.copy(point);
       slot.mesh.visible = true;
-      const speed = 1.5 + Math.random() * 2.5;
+      // Faster radial + vertical exit so the burst reads as a more
+      // violent spray. Was 1.5-4.0 horizontal / 2.5-5.0 vertical /
+      // ±1.5 jitter — now 4-9 / 4-8 / ±3.5.
+      const speed = 4 + Math.random() * 5;
       // Reuse the slot's persistent vel Vector3 instead of allocating
       // a fresh one per particle.
       if (!slot.vel) slot.vel = new THREE.Vector3();
       slot.vel.set(
-        d.x * speed + (Math.random() - 0.5) * 1.5,
-        2.5 + Math.random() * 2.5,
-        d.z * speed + (Math.random() - 0.5) * 1.5,
+        d.x * speed + (Math.random() - 0.5) * 3.5,
+        4 + Math.random() * 4,
+        d.z * speed + (Math.random() - 0.5) * 3.5,
       );
       this.bloods.push({
         slot, mesh: slot.mesh, vel: slot.vel,

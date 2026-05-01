@@ -461,6 +461,9 @@ export class MegaBossEcho {
 
   _die() {
     this.alive = false;
+    if (this.ctx.bumpEncounterCount) {
+      try { this.ctx.bumpEncounterCount(); } catch (_) {}
+    }
     this._bark('PLAYBACK ENDED.');
     // Vanish ghosts immediately.
     for (const g of this.ghosts) this._destroyGhost(g);
@@ -519,18 +522,17 @@ export class MegaBossEcho {
   }
 
   // ---------- Barks ----------
+  // hud.spawnSpeechBubble takes positional (worldPos, camera, text, life)
+  // — the (text, opts) call shape that lived here was a holdover from
+  // a different bubble API and was silently no-op'ing every Echo bark.
   _bark(text) {
     if (!text) return;
     const now = this._t;
     if (now - this._lastBarkT < _T().barkCooldownSec) return;
     this._lastBarkT = now;
     if (!this.group || !this.ctx.camera) return;
-    spawnSpeechBubble(text, {
-      worldPos: this.group.position.clone().add(new THREE.Vector3(0, 4.6, 0)),
-      camera: this.ctx.camera,
-      durationMs: 3000,
-      tint: '#b892f0',
-    });
+    const wp = this.group.position.clone().add(new THREE.Vector3(0, 4.6, 0));
+    spawnSpeechBubble(wp, this.ctx.camera, text, 3.0);
   }
 }
 
