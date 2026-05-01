@@ -234,8 +234,13 @@ export const sfx = {
   },
   headshot() {
     if (!_rateOk('headshot')) return;
+    // Layered impact: noise thud + low sub for body weight, plus a
+    // bright metallic ping on top so the headshot reads as "premium
+    // hit" vs a regular thud. Ping uses a high triangle with a
+    // short downward sweep — short bell-like envelope.
     burstNoise({ dur: 0.12, lp: 500, gain: 0.6, lpDecay: true });
     tone({ freq: 80, dur: 0.1, type: 'sine', gain: 0.3, sweep: -30 });
+    tone({ freq: 1800, dur: 0.07, type: 'triangle', gain: 0.18, sweep: -600 });
   },
   pickup() {
     tone({ freq: 680, dur: 0.06, type: 'triangle', gain: 0.2, sweep: 200 });

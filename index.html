@@ -4388,10 +4388,19 @@
       </div>
       <div id="death-recap" style="display:none">
         <div id="death-recap-title">KILLED BY</div>
-        <div class="death-stat-row"><span class="death-stat-label">Unit</span><span id="death-recap-unit" class="death-stat-val">—</span></div>
-        <div class="death-stat-row"><span class="death-stat-label">Total damage</span><span id="death-recap-dmg" class="death-stat-val">—</span></div>
         <div class="death-stat-row"><span class="death-stat-label">Killing blow</span><span id="death-recap-zone" class="death-stat-val">—</span></div>
-        <div class="death-stat-row"><span class="death-stat-label">Distance</span><span id="death-recap-dist" class="death-stat-val">—</span></div>
+        <div id="death-recap-list" style="display:flex; flex-direction:column; gap:3px; margin-top:6px;"></div>
+      </div>
+      <div id="death-rewards" style="display:none; margin-top:10px; padding-top:8px; border-top:1px solid #4a3a2a;">
+        <div id="death-rewards-title" style="color:#f2c060; font-weight:700; font-size:12px; letter-spacing:2px; text-transform:uppercase; margin-bottom:6px;">Rewards</div>
+        <div class="death-stat-row"><span class="death-stat-label">Marks earned</span><span id="death-stat-marks" class="death-stat-val">—</span></div>
+        <div class="death-stat-row"><span class="death-stat-label">Sigils earned</span><span id="death-stat-sigils" class="death-stat-val">—</span></div>
+        <div class="death-stat-row"><span class="death-stat-label">Chips earned</span><span id="death-stat-chips" class="death-stat-val">—</span></div>
+        <div class="death-stat-row"><span class="death-stat-label">Accuracy</span><span id="death-stat-accuracy" class="death-stat-val">—</span></div>
+        <div id="death-rankup" style="display:none; margin-top:6px; padding:6px 10px; background:rgba(242,192,96,0.12); border:1px solid rgba(242,192,96,0.55); border-radius:3px;">
+          <div style="color:#f2c060; font-weight:700; font-size:11px; letter-spacing:1.5px;">RANK UP</div>
+          <div id="death-rankup-text" style="color:#f2e7c9; font-size:12px; margin-top:2px;">—</div>
+        </div>
       </div>
       <div id="death-note">Restarting voids this run on the leaderboard and scales down chip earnings for the rest of the run.</div>
       <div id="death-slots" style="display:flex; gap:4px; justify-content:center; margin:4px 0 6px; flex-wrap:wrap;"></div>

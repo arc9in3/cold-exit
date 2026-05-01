@@ -62,6 +62,12 @@ export class RunStats {
     // contracts (firedShots === 0 = ranged-free). Incremented at the
     // same fire-path sites that already call noteFireWeaponClass().
     this.firedShots = 0;
+    // Shots that landed on an enemy (for the death-screen accuracy
+    // readout). Incremented at the main bullet-hit application sites.
+    // Approximate — pellets count per-pellet vs the firedShots
+    // per-trigger count, so shotgun accuracy reads >100%; that's a
+    // known limitation, not worth a full fan-out for v1.
+    this.landedShots = 0;
     // Megabosses killed this run — set by main.js's onMegaBossDead
     // hook. Drives the lethal_megaboss_hunt contract.
     this.megabossKillsThisRun = 0;
@@ -101,6 +107,7 @@ export class RunStats {
     this.firedShots = (this.firedShots | 0) + 1;
     if (cls && cls !== 'pistol') this.pistolOnly = false;
   }
+  noteShotHit() { this.landedShots = (this.landedShots | 0) + 1; }
   // Bump an archetype counter on enemy kill. main.js calls this at
   // each kill site with the enemy's tier/variant — any unknown key
   // is ignored so we don't grow the map unboundedly.

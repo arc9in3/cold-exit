@@ -75,7 +75,7 @@ import { StartUI } from './ui_start.js';
 import { MainMenuUI } from './ui_main_menu.js';
 import { HideoutUI } from './ui_hideout.js';
 import { tryClaimContract, defForId, buildModifiers, evaluateContract,
-         rankRewardFor, rankPerKillFor } from './contracts.js';
+         rankRewardFor, rankPerKillFor, CONTRACT_DEFS } from './contracts.js';
 import {
   getActiveContract, setActiveContract, awardMarks, bumpContractRank, bumpMegabossKills,
   bumpRunCount, queueEncounterFollowup,
@@ -119,7 +119,7 @@ window.__resetHints = resetHints;
 // "I'm on build XYZ" without inspecting the bundle. Date stamps the
 // version so a quick glance tells you how stale the build is. Both
 // values render into the bottom-right #build-version label.
-const BUILD_VERSION = 'c29c64d+debug-currency-rank-encounter';
+const BUILD_VERSION = '5539a09+headshots+death-summary+contract-chain';
 // Build date intentionally bumped each deploy so the corner label
 // reflects the current snapshot.
 const BUILD_DATE    = '2026-05-01';
@@ -987,6 +987,11 @@ function _applyContractPerKillReward(arch) {
       if (parts.length) {
         transientHudMsg(`Contract complete: ${parts.join(' · ')}`, 3.0);
       }
+      // Mark this run as eligible for a "pick a new contract" choice
+      // at the next floor extract. Counter accumulates across multi-
+      // contract runs so the player gets repeated offers.
+      _runStartContractCompletions = (_runStartContractCompletions | 0) + 1;
+      _pendingContractOfferOnExtract = true;
       // Rank-up beat — fires after the contract toast so the
       // player sees the progression land. Each rank-up may also
       // open new weapons for purchase at the Stash Armory.
@@ -1118,7 +1123,26 @@ window.__diagAim = () => {
   console.groupEnd();
 };
 
+// Run-start baselines for the death-screen rewards readout. Captured
+// at startNewRun so we can show "+N" deltas at run end rather than
+// the absolute totals.
+let _runStartChips = 0;
+let _runStartSigils = 0;
+let _runStartRank = 0;
+let _runStartRankPoints = 0;
+let _runStartContractCompletions = 0;
+// Set to true when a contract is claimed mid-run; consumed by
+// advanceFloor to show a "pick another contract" 3-choice modal
+// before the level regenerates.
+let _pendingContractOfferOnExtract = false;
 function startNewRun(weaponClass) {
+  try {
+    _runStartChips = getPersistentChips();
+    _runStartSigils = getSigils();
+    _runStartRank = getContractRank();
+    _runStartRankPoints = getRankPoints();
+    _runStartContractCompletions = 0;
+  } catch (_) {}
   _resetEncounterCompletionForRun();
   // Clear restart-snapshot stack — last run's checkpoints don't apply
   // to this run. The first floor's saveLevelStart will repopulate.
@@ -3081,6 +3105,18 @@ function _ensureCoopLobby() {
 // beforeunload). Idempotent + no-op on host.
 window.addEventListener('pagehide', () => {
   try { _coopSaveJoinerState(); } catch (_) {}
+});
+// F4 — toggle the lil-gui dev/multiplier panel without flipping the
+// persisted setting. Quick hide for screenshots / playtest cleanliness.
+window.addEventListener('keydown', (e) => {
+  if (e.key === 'F4' || e.code === 'F4') {
+    if (debugGui?.domElement) {
+      const cur = debugGui.domElement.style.display;
+      const next = cur === 'none' ? '' : 'none';
+      setDebugPanelVisible(debugGui, next !== 'none');
+    }
+    e.preventDefault();
+  }
 });
 window.addEventListener('keydown', (e) => {
   // Shift+C — toggle coop lobby. Cheap to gate on isCoopEnabled
@@ -7720,8 +7756,17 @@ function _fireDjinnShot(weapon, eff, aimTarget, hitTargets) {
       return;
     }
     runStats.addDamage(dmg);
+    runStats.noteShotHit();
     spawnDamageNumber(endPoint, camera, dmg, hit.zone, isCrit || hit.zone === 'head');
     combat.spawnImpact(endPoint);
+    // Headshot polish — bigger shake, brief hit-stop, gold burst at
+    // the cranium, plus the metallic-ping SFX layered over the thud.
+    if (hit.zone === 'head') {
+      try { triggerShake(0.50, 0.10); } catch (_) {}
+      try { hitStopT = Math.max(hitStopT, 0.05); } catch (_) {}
+      try { spawnHeadshotBurst(endPoint); } catch (_) {}
+      try { sfx.headshot?.(); } catch (_) {}
+    }
   } else if (hit) {
     combat.spawnImpact(hit.point);
   }
@@ -10500,6 +10545,54 @@ function _tickFlashDomes(dt) {
 //            flames and grow as they fade. Only spawned in the second
 //            half of a tongue's life so it reads as smoke trailing
 //            the flame, not stacked underneath.
+// Headshot burst — small gold sparks erupting from the cranium on a
+// successful headshot. Reuses the kill-coin pool since the visual
+// (small emissive gold spheres flying outward) is essentially the
+// same. Caps at 5 sparks so the screen doesn't get cluttered on
+// rapid-fire headshot strings.
+const _headshotSparkGeom = (() => {
+  // Single shared sphere, small enough to read as a spark, big
+  // enough to register at iso distance. Cached.
+  return new THREE.SphereGeometry(0.05, 6, 5);
+})();
+function spawnHeadshotBurst(pos) {
+  if (!pos) return;
+  const count = 5;
+  for (let i = 0; i < count; i++) {
+    const ang = (i / count) * Math.PI * 2 + (Math.random() - 0.5) * 0.6;
+    const speed = 3.6 + Math.random() * 1.4;
+    const mat = new THREE.MeshBasicMaterial({
+      color: 0xfff0a0,
+      transparent: true, opacity: 0.95,
+      depthWrite: false,
+      blending: THREE.AdditiveBlending,
+    });
+    const mesh = new THREE.Mesh(_headshotSparkGeom, mat);
+    const yJitter = (Math.random() - 0.5) * 0.15;
+    mesh.position.set(pos.x, (pos.y || 1.5) + yJitter, pos.z);
+    mesh.frustumCulled = false;
+    scene.add(mesh);
+    _coinFx.push({
+      mesh, mat,
+      vx: Math.sin(ang) * speed,
+      vy: 1.4 + Math.random() * 1.4,
+      vz: Math.cos(ang) * speed,
+      spinY: 0,
+      phase: 'burst',
+      t: 0,
+      // Short-lived spark — never enters fly-to-player phase.
+      // Despawn at burstUntil; coin tick will handle it because
+      // phase != 'fly' falls into burst arc + the safety
+      // 'else if (phase === fly)' returns; we add a sentinel by
+      // setting burstUntil very long but adding _isHeadshotSpark
+      // for the tick to despawn early.
+      burstUntil: 10,
+      _isHeadshotSpark: true,
+      _despawnAt: 0.45 + Math.random() * 0.15,
+    });
+  }
+}
+
 // Kill-coin VFX. On enemy death, spawn 4-8 small emissive gold coins
 // that burst outward (radial + slight upward arc) and then home in
 // on the player. The "+N" floater spawns at the kill point so the
@@ -10570,7 +10663,16 @@ function _tickCoinFx(dt) {
         c.vy = Math.abs(c.vy) * 0.35;
         c.vx *= 0.6; c.vz *= 0.6;
       }
-      if (c.t >= c.burstUntil) c.phase = 'fly';
+      // Headshot sparks fade + despawn instead of homing.
+      if (c._isHeadshotSpark) {
+        if (c.mat) c.mat.opacity = Math.max(0, 0.95 * (1 - c.t / c._despawnAt));
+        if (c.t >= c._despawnAt) {
+          scene.remove(c.mesh); c.mat?.dispose(); _coinFx.splice(i, 1);
+          continue;
+        }
+      } else if (c.t >= c.burstUntil) {
+        c.phase = 'fly';
+      }
     } else if (c.phase === 'fly') {
       if (!target) {
         // No player to home to (death / extract) — just despawn.
@@ -14810,6 +14912,124 @@ _wireHotbarCluster('.action-slot', 4, renderActionBar);
 window.__renderActionBar = renderActionBar;
 window.__renderWeaponBar = renderWeaponBar;
 
+// Mid-run "pick another contract" chooser. Surfaces 3 random
+// contract picks (filtered to ones the player isn't currently
+// running) when _pendingContractOfferOnExtract is set. Player picks
+// one → it becomes the active contract for the rest of the run.
+// Skipping is allowed via the close button. Resolves when the user
+// makes a choice or skips.
+function _showMidRunContractOffer() {
+  return new Promise((resolve) => {
+    try {
+      const allContracts = Object.values(CONTRACT_DEFS).filter(c => c && c.id);
+      // Filter out current contract + already-completed/claimed ones.
+      const cur = getActiveContract();
+      const curId = cur?.activeContractId || null;
+      const pool = allContracts.filter(c => c.id !== curId && c.kind !== 'weekly');
+      if (pool.length === 0) { resolve(null); return; }
+      // 3 unique picks (or fewer if the pool is small).
+      const picks = [];
+      const used = new Set();
+      while (picks.length < 3 && picks.length < pool.length) {
+        const idx = Math.floor(Math.random() * pool.length);
+        const def = pool[idx];
+        if (used.has(def.id)) continue;
+        used.add(def.id);
+        picks.push(def);
+      }
+      const root = document.createElement('div');
+      Object.assign(root.style, {
+        position: 'fixed', inset: '0', zIndex: '120',
+        background: 'rgba(8,12,16,0.85)',
+        display: 'flex', alignItems: 'center', justifyContent: 'center',
+        font: '13px ui-monospace, Menlo, Consolas, monospace',
+      });
+      const card = document.createElement('div');
+      Object.assign(card.style, {
+        background: 'linear-gradient(180deg, #1a2228, #0c1014)',
+        border: '1px solid #f2c060', borderRadius: '6px',
+        padding: '24px 28px', maxWidth: '560px', width: '90%',
+        boxShadow: '0 0 48px rgba(255,200,80,0.35)',
+        color: '#f2e7c9',
+      });
+      const title = document.createElement('div');
+      Object.assign(title.style, {
+        color: '#f2c060', fontWeight: '700', fontSize: '14px',
+        letterSpacing: '3px', textTransform: 'uppercase',
+        textAlign: 'center', marginBottom: '6px',
+      });
+      title.textContent = 'CONTRACT COMPLETE';
+      card.appendChild(title);
+      const sub = document.createElement('div');
+      Object.assign(sub.style, {
+        color: '#a89070', fontSize: '11px', textAlign: 'center',
+        marginBottom: '18px', letterSpacing: '1.5px',
+      });
+      sub.textContent = 'Pick another to take on for the rest of the run';
+      card.appendChild(sub);
+      const close = (chosen) => {
+        try { document.body.removeChild(root); } catch (_) {}
+        resolve(chosen || null);
+      };
+      for (const def of picks) {
+        const btn = document.createElement('button');
+        Object.assign(btn.style, {
+          display: 'block', width: '100%', textAlign: 'left',
+          padding: '12px 14px', marginBottom: '8px',
+          background: 'rgba(40,30,16,0.55)',
+          border: '1px solid #6a4a2a', borderRadius: '4px',
+          color: '#f2e7c9', font: 'inherit', cursor: 'pointer',
+        });
+        btn.onmouseenter = () => { btn.style.background = 'rgba(80,60,30,0.75)'; btn.style.borderColor = '#f2c060'; };
+        btn.onmouseleave = () => { btn.style.background = 'rgba(40,30,16,0.55)'; btn.style.borderColor = '#6a4a2a'; };
+        const name = document.createElement('div');
+        Object.assign(name.style, { fontWeight: '700', fontSize: '13px', color: '#ffd070' });
+        name.textContent = def.title || def.id;
+        const desc = document.createElement('div');
+        Object.assign(desc.style, { fontSize: '11px', color: '#b8a890', marginTop: '4px', lineHeight: '1.4' });
+        desc.textContent = def.description || '—';
+        const reward = document.createElement('div');
+        Object.assign(reward.style, { fontSize: '10px', color: '#80c0e0', marginTop: '4px', letterSpacing: '1px', textTransform: 'uppercase' });
+        const r = [];
+        if (def.chipReward)  r.push(`${def.chipReward} chips`);
+        if (def.markReward)  r.push(`${def.markReward} marks`);
+        if (def.sigilReward) r.push(`${def.sigilReward} sigils`);
+        reward.textContent = r.length ? r.join(' · ') : '';
+        btn.appendChild(name);
+        btn.appendChild(desc);
+        if (r.length) btn.appendChild(reward);
+        btn.addEventListener('click', () => {
+          setActiveContract({
+            activeContractId: def.id,
+            expiresAt: Date.now() + 7 * 24 * 60 * 60 * 1000,
+            progress: {},
+            claimedAt: 0,
+          });
+          _refreshActiveModifiers();
+          close(def);
+        });
+        card.appendChild(btn);
+      }
+      const skipBtn = document.createElement('button');
+      Object.assign(skipBtn.style, {
+        display: 'block', width: '100%', marginTop: '6px', padding: '8px',
+        background: 'transparent', border: '1px solid #4a3a2a',
+        borderRadius: '3px', color: '#a89070', font: 'inherit',
+        cursor: 'pointer', letterSpacing: '1.5px', textTransform: 'uppercase',
+        fontSize: '11px',
+      });
+      skipBtn.textContent = 'Skip';
+      skipBtn.addEventListener('click', () => close(null));
+      card.appendChild(skipBtn);
+      root.appendChild(card);
+      document.body.appendChild(root);
+    } catch (e) {
+      console.warn('[contract-offer] failed', e);
+      resolve(null);
+    }
+  });
+}
+
 async function advanceFloor() {
   paused = true;
   input.clearMouseState();
@@ -14846,6 +15066,16 @@ async function advanceFloor() {
   } catch (_) { /* prefs / inventory unavailable */ }
   await skillPickUI.show();
   input.clearMouseState();
+  // Mid-run contract chain — if a contract was claimed since the last
+  // extract, offer 3 fresh picks before regen. Resolves with the
+  // chosen def (or null on skip); _refreshActiveModifiers fires
+  // inside the modal so the new contract's modifiers apply on the
+  // next floor.
+  if (_pendingContractOfferOnExtract) {
+    _pendingContractOfferOnExtract = false;
+    try { await _showMidRunContractOffer(); } catch (_) {}
+    input.clearMouseState();
+  }
   paused = false;
   recomputeStats();
   regenerateLevel();
@@ -16617,31 +16847,83 @@ function tick() {
     setDS('death-stat-credits', `${Math.round(runStats.credits || 0)}c`);
     setDS('death-stat-time', `${mins}m ${secs}s`);
 
-    // Death recap — pick the attacker by largest cumulative damage,
-    // overlay the killing-blow's zone + distance from the fatal-hit
-    // snapshot. Falls back to the fatal hit's source when no tally
-    // entry exists (e.g. one-shot kill from an untracked source).
+    // Death recap — list the top attackers by cumulative damage with
+    // hit count + total damage each. Killing-blow zone shown above
+    // the list. Buckets attackers by name so 3 melees show as
+    // "Melee × 3" rather than three separate rows.
     const recapEl = document.getElementById('death-recap');
-    let topAttacker = null;
-    let topDmg = -1;
-    for (const [, stats] of _attackerStats) {
-      if (stats.dmg > topDmg) { topDmg = stats.dmg; topAttacker = stats; }
-    }
     const fatal = _lastFatalHit;
-    const showRecap = topAttacker || fatal;
+    const showRecap = (_attackerStats.size > 0) || fatal;
     if (recapEl) recapEl.style.display = showRecap ? 'grid' : 'none';
     if (showRecap) {
-      const unitName = (topAttacker && topAttacker.name) || (fatal && fatal.name) || 'Unknown';
-      const dmgTotal = topAttacker ? Math.round(topAttacker.dmg) : Math.round(fatal?.amount || 0);
-      const zone = (fatal && fatal.zone) || (topAttacker && topAttacker.zone) || '—';
-      const dist = (fatal && typeof fatal.distance === 'number') ? fatal.distance
-                  : (topAttacker && typeof topAttacker.distance === 'number') ? topAttacker.distance
-                  : null;
-      setDS('death-recap-unit', unitName);
-      setDS('death-recap-dmg', `${dmgTotal}`);
+      const zone = (fatal && fatal.zone) || '—';
       setDS('death-recap-zone', zone === '—' ? '—' : `${zone}`);
-      setDS('death-recap-dist', dist != null ? `${dist.toFixed(1)}m` : '—');
+      // Bucket per-attacker entries by display name. Each tally has
+      // {name, dmg, hits, distance, type}. Group hits + dmg for
+      // multiple instances of the same enemy archetype.
+      const byName = new Map();
+      for (const [, st] of _attackerStats) {
+        const key = st.name || 'Unknown';
+        const grouped = byName.get(key) || { name: key, dmg: 0, hits: 0, count: 0 };
+        grouped.dmg += st.dmg || 0;
+        grouped.hits += st.hits || 0;
+        grouped.count += 1;
+        byName.set(key, grouped);
+      }
+      const sorted = [...byName.values()].sort((a, b) => b.dmg - a.dmg).slice(0, 5);
+      const listEl = document.getElementById('death-recap-list');
+      if (listEl) {
+        listEl.innerHTML = '';
+        for (const e of sorted) {
+          const row = document.createElement('div');
+          row.className = 'death-stat-row';
+          const label = document.createElement('span');
+          label.className = 'death-stat-label';
+          label.textContent = e.count > 1 ? `${e.name} × ${e.count}` : e.name;
+          const val = document.createElement('span');
+          val.className = 'death-stat-val';
+          val.textContent = `${Math.round(e.dmg)} dmg · ${e.hits} hit${e.hits === 1 ? '' : 's'}`;
+          row.appendChild(label);
+          row.appendChild(val);
+          listEl.appendChild(row);
+        }
+        if (sorted.length === 0 && fatal) {
+          const row = document.createElement('div');
+          row.className = 'death-stat-row';
+          row.innerHTML = `<span class="death-stat-label">${fatal.name || 'Unknown'}</span><span class="death-stat-val">${Math.round(fatal.amount || 0)} dmg</span>`;
+          listEl.appendChild(row);
+        }
+      }
     }
+    // Rewards block — marks earned this run (already set above),
+    // sigils / chips / rank deltas vs run-start baselines, plus an
+    // accuracy approximation. Rank-up callout shown if the player
+    // crossed at least one contract-rank threshold during this run.
+    try {
+      const rewardsEl = document.getElementById('death-rewards');
+      if (rewardsEl) rewardsEl.style.display = 'block';
+      const sigilsDelta = Math.max(0, getSigils() - _runStartSigils);
+      const chipsDelta = Math.max(0, getPersistentChips() - _runStartChips);
+      const rankAfter = getContractRank();
+      const rankDelta = Math.max(0, rankAfter - _runStartRank);
+      const fired = runStats.firedShots | 0;
+      const landed = runStats.landedShots | 0;
+      const acc = fired > 0 ? Math.round((landed / fired) * 100) : null;
+      setDS('death-stat-marks', `${runStats.marksEarned | 0}`);
+      setDS('death-stat-sigils', sigilsDelta > 0 ? `+${sigilsDelta}` : '0');
+      setDS('death-stat-chips', chipsDelta > 0 ? `+${chipsDelta}` : '0');
+      setDS('death-stat-accuracy', acc != null ? `${acc}% (${landed}/${fired})` : '—');
+      const rankupEl = document.getElementById('death-rankup');
+      const rankupTxt = document.getElementById('death-rankup-text');
+      if (rankupEl) {
+        if (rankDelta > 0 && rankupTxt) {
+          rankupTxt.textContent = `Contract rank ${_runStartRank} → ${rankAfter}`;
+          rankupEl.style.display = 'block';
+        } else {
+          rankupEl.style.display = 'none';
+        }
+      }
+    } catch (e) { console.warn('[death] rewards panel failed', e); }
     if (deathRootEl) deathRootEl.style.display = 'flex';
     _activeRestartSlot = 0;
     _refreshRestartSlotsUI();
