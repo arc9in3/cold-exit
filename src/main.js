@@ -117,7 +117,7 @@ window.__resetHints = resetHints;
 // "I'm on build XYZ" without inspecting the bundle. Date stamps the
 // version so a quick glance tells you how stale the build is. Both
 // values render into the bottom-right #build-version label.
-const BUILD_VERSION = '7c47507+revive-tourni-bandage+coop-polish';
+const BUILD_VERSION = 'd042002+joiner-stash+gunman-perf';
 // Build date intentionally bumped each deploy so the corner label
 // reflects the current snapshot.
 const BUILD_DATE    = '2026-05-01';
@@ -1738,6 +1738,111 @@ function _enterDownedState() {
   // Surface a HUD message so the player understands.
   try { transientHudMsg('DOWN — bleedout 60s — teammate must revive', 6.0); } catch (_) {}
 }
+// Joiner-side stash persistence. Cold Exit's transport can drop on a
+// network blip / browser-tab swap; without persistence the joiner
+// re-joins with a fresh starter loadout. Snapshots equipment + grids
+// + class progression keyed by roomId so a re-join inside the TTL
+// restores everything. Host's state persists naturally in their own
+// browser session and skips this flow.
+const _COOP_STASH_KEY = 'tacticalrogue:coop-joiner-stash:v1';
+const _COOP_STASH_TTL_MS = 30 * 60 * 1000;     // 30min — disconnect window
+let _coopStashSaveT = 0;                       // periodic-save throttle
+
+function _coopSaveJoinerState() {
+  if (!coopLobby) return;
+  const t = getCoopTransport();
+  if (!t.isOpen || t.isHost) return;
+  if (!t.roomId) return;
+  try {
+    const payload = {
+      ts: Date.now(),
+      roomId: t.roomId,
+      levelIndex: level?.index | 0,
+      credits: playerCredits,
+      skillPoints: playerSkillPoints,
+      charLevel: playerLevel,
+      xp: playerXp,
+      skills: { ...skills.levels },
+      classXp: { ...classMastery.xp },
+      specialPerks: [...specialPerks.unlocked],
+      skillTree: { ...skillTree.levels },
+      artifacts: [...artifacts.owned],
+      inventory: snapshotInventory(),
+      currentWeaponIndex,
+      pendingLevelUpPicks: _pendingLevelUpPicks | 0,
+    };
+    localStorage.setItem(_COOP_STASH_KEY, JSON.stringify(payload));
+  } catch (e) {
+    console.warn('[coop] save joiner state failed', e);
+  }
+}
+
+function _coopRestoreJoinerState() {
+  const t = getCoopTransport();
+  if (!t.isOpen || t.isHost || !t.roomId) return false;
+  let payload;
+  try {
+    const raw = localStorage.getItem(_COOP_STASH_KEY);
+    if (!raw) return false;
+    payload = JSON.parse(raw);
+  } catch (_) { return false; }
+  if (!payload || payload.roomId !== t.roomId) return false;
+  if (Date.now() - payload.ts > _COOP_STASH_TTL_MS) {
+    localStorage.removeItem(_COOP_STASH_KEY);
+    return false;
+  }
+  try {
+    playerCredits = payload.credits || 0;
+    playerSkillPoints = payload.skillPoints || 0;
+    playerLevel = payload.charLevel || 1;
+    playerXp = payload.xp || 0;
+    skills.levels = { ...payload.skills };
+    classMastery.xp = { ...payload.classXp };
+    classMastery.fillMissing();
+    specialPerks.unlocked = new Set(payload.specialPerks || []);
+    skillTree.levels = { ...(payload.skillTree || {}) };
+    artifacts.owned = new Set(payload.artifacts || []);
+    // Inventory restore — same shape as restoreFromSnapshot but
+    // inlined so we don't pollute the restart-slot stack.
+    for (const slot in payload.inventory.equipment) {
+      inventory.equipment[slot] = snapshotItem(payload.inventory.equipment[slot]);
+    }
+    inventory._recomputeCapacity();
+    const loadInto = (grid, snap) => {
+      if (!grid || !snap) return;
+      grid.clear();
+      if (snap.w && snap.h && (snap.w !== grid.w || snap.h !== grid.h)) {
+        grid.resize(snap.w, snap.h);
+      }
+      for (const e of snap.entries || []) {
+        const it = snapshotItem(e.item);
+        if (!it) continue;
+        if (!grid.place(it, e.x, e.y, !!e.rotated)) grid.autoPlace(it);
+      }
+    };
+    inventory.pocketsGrid.clear();
+    if (payload.inventory.pockets) {
+      loadInto(inventory.pocketsGrid, payload.inventory.pockets);
+      if (inventory.rigGrid)      loadInto(inventory.rigGrid,      payload.inventory.rig);
+      if (inventory.backpackGrid) loadInto(inventory.backpackGrid, payload.inventory.backpackGrid);
+    }
+    if (typeof currentWeaponIndex !== 'undefined' && typeof payload.currentWeaponIndex === 'number') {
+      currentWeaponIndex = payload.currentWeaponIndex;
+    }
+    _pendingLevelUpPicks = payload.pendingLevelUpPicks || 0;
+    inventory._bump?.();
+    try { recomputeStats(); } catch (_) {}
+    try { inventoryUI.render(); } catch (_) {}
+    try { _refreshPickQueueHud(); } catch (_) {}
+    transientHudMsg('STASH RESTORED', 3.0);
+    localStorage.removeItem(_COOP_STASH_KEY);
+    return true;
+  } catch (e) {
+    console.warn('[coop] restore joiner state failed', e);
+    return false;
+  }
+}
+
 // Broadcast that the local player has truly died (post-bleedout, or
 // solo death with no living teammate). Receivers strip the downed
 // overlay, hide the dead peer's rig, and surface a toast. Idempotent
@@ -2162,6 +2267,11 @@ function _ensureCoopLobby() {
   transport.addEventListener('open', _publishHostFlag);
   transport.addEventListener('close', _publishHostFlag);
   transport.addEventListener('host', _publishHostFlag);   // host migration
+  // Joiner stash persistence — write our state when the transport
+  // drops so a re-join inside the TTL restores it. Also write on
+  // pagehide (browser tab close / refresh).
+  transport.addEventListener('close', () => { try { _coopSaveJoinerState(); } catch (_) {} });
+  transport.addEventListener('host-lost', () => { try { _coopSaveJoinerState(); } catch (_) {} });
   // Clear interp buffer on disconnect so a stale snapshot can't
   // briefly drive the apply path when the next session opens.
   transport.addEventListener('close', () => clearSnapshotBuffer());
@@ -2645,7 +2755,12 @@ function _ensureCoopLobby() {
         try {
           startNewRun('pistol');
           mainMenuUI.hide();
-          transientHudMsg('JOINED MID-RUN', 3.0);
+          // Try restoring a stashed joiner state (re-join inside TTL)
+          // before falling back to the JOINED MID-RUN toast. The
+          // restore overrides the starter loadout we just minted.
+          if (!_coopRestoreJoinerState()) {
+            transientHudMsg('JOINED MID-RUN', 3.0);
+          }
         } catch (e) {
           console.warn('[coop] drop-in startNewRun failed', e);
         }
@@ -2680,6 +2795,12 @@ function _ensureCoopLobby() {
   });
   return coopLobby;
 }
+// Browser tab close / refresh — flush any pending joiner stash to
+// localStorage. pagehide fires reliably on tab close (more so than
+// beforeunload). Idempotent + no-op on host.
+window.addEventListener('pagehide', () => {
+  try { _coopSaveJoinerState(); } catch (_) {}
+});
 window.addEventListener('keydown', (e) => {
   // Shift+C — toggle coop lobby. Cheap to gate on isCoopEnabled
   // because most players don't have the flag on; the listener stays
@@ -15703,6 +15824,13 @@ function tick() {
     runMasteryOffer();
   }
   _refreshExitWaitHud();
+  // Joiner stash autosave — every 30s while in coop. Cheap (one
+  // JSON.stringify of inventory + pure-data fields). Host skips.
+  _coopStashSaveT -= rawDt;
+  if (_coopStashSaveT <= 0) {
+    _coopStashSaveT = 30;
+    _coopSaveJoinerState();
+  }
 
   const weapon = currentWeapon();
   const effWeapon = weapon ? effectiveWeapon(weapon) : null;

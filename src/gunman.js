@@ -1364,7 +1364,16 @@ export class GunmanManager {
         }
       }
 
-      this._updateRanged(g, ctx, dt);
+      // Coop joiner skips AI decision-making — host runs the
+      // authoritative sim and we mirror via snapshots. The rig
+      // animation block below still fires, so death poses /
+      // walk cycles / aim sway driven by snapshot-set position
+      // deltas all render correctly. Death physics in the
+      // !g.alive branch above also continues to run, so corpses
+      // collapse and settle.
+      if (!ctx.coopJoiner) {
+        this._updateRanged(g, ctx, dt);
+      }
 
       // Procedural animation layer — pose the limbs on top of whatever
       // position/yaw _updateRanged just resolved. Speed is derived from
@@ -2355,7 +2364,7 @@ export class GunmanManager {
       // perpendicular whenever the muzzle is lined up on the boss.
       // Pauses evasion during reload (vulnerable window, with chatter).
       if (g.archetype === 'evasive' && ctx.playerFacing && g.archReloadT <= 0) {
-        const toBoss = new THREE.Vector3(
+        const toBoss = _g_toPlayer.set(
           g.group.position.x - ctx.playerPos.x, 0,
           g.group.position.z - ctx.playerPos.z,
         );
@@ -2485,12 +2494,15 @@ export class GunmanManager {
             // player's chest, every frame, so it tracks perfectly
             // and reads as "I am aiming at you right now."
             if (g.snipLaser) {
-              const from = new THREE.Vector3();
+              const from = _g_eye;
               g.muzzle.getWorldPosition(from);
-              const to = new THREE.Vector3(ctx.playerPos.x, 1.0, ctx.playerPos.z);
-              const mid = from.clone().add(to).multiplyScalar(0.5);
+              const to = _g_target.set(ctx.playerPos.x, 1.0, ctx.playerPos.z);
               const len = from.distanceTo(to);
-              g.snipLaser.position.copy(mid);
+              g.snipLaser.position.set(
+                (from.x + to.x) * 0.5,
+                (from.y + to.y) * 0.5,
+                (from.z + to.z) * 0.5,
+              );
               g.snipLaser.lookAt(to);
               g.snipLaser.scale.set(1, 1, len);
               g.snipLaser.material.opacity = 0.55 + Math.sin(performance.now() * 0.018) * 0.2;
