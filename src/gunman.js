@@ -1531,7 +1531,20 @@ export class GunmanManager {
       g.huntActive = true;
     }
     if (g.huntsPlayer && g.huntActive && ctx.playerPos) {
-      canSee = true;
+      // Smoke still blinds hunters — players burn smoke grenades to
+      // *break* boss tracking, not just to hide from grunts. If the
+      // player is in smoke, OR smoke is on the segment between us,
+      // refuse the through-walls auto-detect.
+      const huntPlayerInSmoke = ctx.isInsideSmoke
+        ? ctx.isInsideSmoke(ctx.playerPos.x, ctx.playerPos.z)
+        : false;
+      const huntSmokeOnSeg = ctx.smokeOnSegment
+        ? !!ctx.smokeOnSegment(g.group.position.x, g.group.position.z,
+                                ctx.playerPos.x, ctx.playerPos.z)
+        : false;
+      if (!huntPlayerInSmoke && !huntSmokeOnSeg) {
+        canSee = true;
+      }
     }
     // Chatter — idle enemies occasionally mutter to themselves. Uses
     // a per-enemy cooldown so squads don't all speak at once, and

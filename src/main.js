@@ -2543,6 +2543,21 @@ function regenerateLevel() {
       damagePlayer,
       getPlayerPos: () => player.mesh.position,
       playerHasIFrames: () => (lastPlayerInfo?.iFrames | 0) > 0,
+      // Smoke-zone queries — let the boss respect smoke grenades the
+      // way regular gunmen / melees do. Without these the megaboss
+      // tracks the player's exact position through any smoke wall.
+      smokeContaining,
+      smokeOnSegment,
+      // Wall LoS query — used by attack-spawn paths to refuse firing
+      // when the boss has no line of sight to the player. Prevents
+      // flame-cone / projectile attacks from clipping through walls.
+      hasLineOfSight: (ax, az, bx, bz) => {
+        if (!level || !level._segmentClear) return true;
+        // Use a thin radius so corner geometry / pillars don't false-
+        // negative the boss's sight line at long range, but still
+        // catches honest wall obstructions.
+        return level._segmentClear(ax, az, bx, bz, 0.25);
+      },
       // Boss-driven minion spawn (Arboter "summon melee" attack).
       // Returns the spawned minion (or null) so callers can tag it.
       // Skips if the spawn point is collision-blocked.
@@ -2742,9 +2757,23 @@ function regenerateLevel() {
     }
   }
   for (const s of level.enemySpawns) {
+    // Early-floor sub-boss damage softener — at low levels sub-bosses
+    // were oppressive: same weapon pool as grunts, but with 20% faster
+    // fire / 15% faster move / 25% sharper reaction. Scale damageMult
+    // down on floors 1-5 so early sub-bosses pressure-test rather than
+    // delete the player. Full damage from floor 6 onward.
+    let perSpawnDmg = diff.damageMult;
+    if (s.tier === 'subBoss' && !s.majorBoss) {
+      const lv = Math.max(1, level.index | 0);
+      const subDmgMult = lv <= 2 ? 0.65
+                       : lv <= 4 ? 0.78
+                       : lv <= 5 ? 0.90
+                       : 1.0;
+      perSpawnDmg *= subDmgMult;
+    }
     const opts = {
       tier: s.tier, roomId: s.roomId,
-      hpMult: diff.hpMult, damageMult: diff.damageMult,
+      hpMult: diff.hpMult, damageMult: perSpawnDmg,
       reactionMult: diff.reactionMult,
       aimSpreadMult: diff.aimSpreadMult,
       aggression: diff.aggression,
@@ -8717,31 +8746,29 @@ function aiFireFlame(origin, dir, weapon, damageMult = 1, source = null) {
   }
   // Line-of-sight gate — was missing, which let "The Burn" boss
   // torch the player from offscreen / through walls the moment they
-  // came within range + cone. Mirrors the bullet aiFire raycast at
-  // line ~5970 against level.obstacles. Also clamps the visual to
-  // the wall so the flame cone doesn't render past the obstruction.
+  // came within range + cone. Now goes through level._segmentClear
+  // (same AABB system as movement collision) so partial-height meshes
+  // can't false-pass a y=1.1 raycast. Also clamps the visual cone to
+  // the wall so the player doesn't see flame leaking past it.
   let drawRange = range;
+  const _segClear = level && level._segmentClear
+    ? (ax, az, bx, bz) => level._segmentClear(ax, az, bx, bz, 0.25)
+    : () => true;
   if (hitsPlayer) {
-    const _flameLosFrom = new THREE.Vector3(origin.x, 1.1, origin.z);
-    const _flameLosTo   = new THREE.Vector3(ppos.x, 1.1, ppos.z);
-    if (!combat.hasLineOfSight(_flameLosFrom, _flameLosTo, level.obstacles)) {
+    if (!_segClear(origin.x, origin.z, ppos.x, ppos.z)) {
       hitsPlayer = false;
     }
   }
   if (!hitsPlayer) {
-    // Also LOS-clip the visible cone so the player doesn't see a
-    // flame sheet leaking through walls when the boss is in the
-    // adjacent room. Cheap raycast straight along `dir`.
-    const _coneFrom = new THREE.Vector3(origin.x, 1.1, origin.z);
-    const _coneTo   = new THREE.Vector3(origin.x + dir.x * range, 1.1, origin.z + dir.z * range);
-    if (!combat.hasLineOfSight(_coneFrom, _coneTo, level.obstacles)) {
-      // Find approximate wall distance via a half-step probe — cheap
-      // bisection at quarter / half so the cone doesn't punch through.
-      // 3 quick samples is enough for the visual; misses close-up
-      // partial obstructions but those are visually close enough.
-      for (const t of [0.25, 0.5, 0.75]) {
-        const pt = new THREE.Vector3(origin.x + dir.x * range * t, 1.1, origin.z + dir.z * range * t);
-        if (!combat.hasLineOfSight(_coneFrom, pt, level.obstacles)) {
+    const endX = origin.x + dir.x * range;
+    const endZ = origin.z + dir.z * range;
+    if (!_segClear(origin.x, origin.z, endX, endZ)) {
+      // Bisect outward to find wall distance — quick 4-sample probe so
+      // the visual flame stops at the obstruction.
+      for (const t of [0.2, 0.4, 0.6, 0.8]) {
+        const px = origin.x + dir.x * range * t;
+        const pz = origin.z + dir.z * range * t;
+        if (!_segClear(origin.x, origin.z, px, pz)) {
           drawRange = range * t;
           break;
         }
@@ -12415,12 +12442,77 @@ function _showLevelUpBanner(durationMs = 1800) {
   });
 }
 
+// Class level-up banner — same shape as the gold level-up banner but
+// purple-tinted so the player reads it as a different progression
+// channel. Surfaced before the mastery picker for the same anti-
+// misclick reason.
+let _classLevelUpBannerEl = null;
+function _ensureClassLevelUpBanner() {
+  if (_classLevelUpBannerEl) return _classLevelUpBannerEl;
+  if (!document.getElementById('class-level-up-banner-style')) {
+    const style = document.createElement('style');
+    style.id = 'class-level-up-banner-style';
+    style.textContent = `
+      @keyframes classlvlup-glow {
+        0%   { text-shadow: 0 0 12px #d090ff, 0 0 28px #a040e0, 0 0 60px #6020a0; transform: translate(-50%, -50%) scale(0.85); opacity: 0; }
+        12%  { transform: translate(-50%, -50%) scale(1.06); opacity: 1; }
+        20%  { transform: translate(-50%, -50%) scale(1.0); }
+        80%  { text-shadow: 0 0 14px #e0a0ff, 0 0 32px #a040e0, 0 0 70px #6020a0; opacity: 1; }
+        100% { text-shadow: 0 0 12px #d090ff, 0 0 28px #a040e0, 0 0 60px #6020a0; transform: translate(-50%, -50%) scale(1.04); opacity: 0; }
+      }
+      #class-level-up-banner {
+        position: fixed; top: 38%; left: 50%;
+        transform: translate(-50%, -50%);
+        z-index: 60; pointer-events: none;
+        font-family: ui-monospace, Menlo, Consolas, monospace;
+        font-weight: 700; font-size: 76px; letter-spacing: 12px;
+        color: #f0d8ff;
+        opacity: 0; display: none; user-select: none;
+        text-shadow: 0 0 12px #d090ff, 0 0 28px #a040e0, 0 0 60px #6020a0;
+      }
+      #class-level-up-banner.show { display: block; }
+      #class-level-up-banner .sub {
+        display: block; margin-top: 6px;
+        font-size: 16px; letter-spacing: 5px;
+        color: #d8a8ff; text-shadow: 0 0 8px #8030c0;
+      }
+    `;
+    document.head.appendChild(style);
+  }
+  const el = document.createElement('div');
+  el.id = 'class-level-up-banner';
+  el.innerHTML = 'CLASS LEVEL UP<span class="sub">choose a mastery</span>';
+  document.body.appendChild(el);
+  _classLevelUpBannerEl = el;
+  return el;
+}
+function _showClassLevelUpBanner(durationMs = 1800) {
+  return new Promise((resolve) => {
+    const el = _ensureClassLevelUpBanner();
+    el.classList.add('show');
+    el.style.animation = 'none';
+    void el.offsetWidth;
+    el.style.animation = `classlvlup-glow ${durationMs}ms ease-out forwards`;
+    if (sfx?.uiAccept) sfx.uiAccept();
+    setTimeout(() => {
+      el.classList.remove('show');
+      el.style.animation = 'none';
+      resolve();
+    }, durationMs);
+  });
+}
+
 async function runMasteryOffer() {
   const offer = pendingMasteryOffers.shift();
   if (!offer) return;
   paused = true;
   input.clearMouseState();
   inventoryUI.hide();
+  // Same anti-misclick beat as runLevelUp's banner — display a glowing
+  // "CLASS LEVEL UP" overlay (purple variant) before the picker so a
+  // mid-fight click can't lock in a mastery node by accident.
+  await _showClassLevelUpBanner(1800);
+  input.clearMouseState();
   await masteryPickUI.show(offer);
   input.clearMouseState();
   paused = false;

@@ -649,12 +649,18 @@ export function createPlayer(scene) {
     // and parries. `kind` is an optional tag — 'melee' covers swings,
     // combos, parry, deflect; other kinds bypass the melee multiplier.
     // Carbon Cycle (relic) applies a flat multiplier to every kind.
+    // Self-heal: if any prior path corrupted stamina to NaN/Infinity
+    // (level-up pause + a multi-frame race could land here with a
+    // bad staminaRegenMult), recover to full so the player isn't
+    // stuck with infinite actions.
+    if (!Number.isFinite(state.stamina)) state.stamina = state.maxStamina ?? tunables.stamina.max;
     let cost = amount;
-    if (kind === 'melee' && (state.meleeStaminaMult ?? 1) < 1) {
+    if (kind === 'melee' && Number.isFinite(state.meleeStaminaMult) && state.meleeStaminaMult < 1) {
       cost = cost * state.meleeStaminaMult;
     }
-    if ((state.staminaCostMult ?? 1) !== 1) {
-      cost = cost * state.staminaCostMult;
+    const scm = state.staminaCostMult;
+    if (Number.isFinite(scm) && scm !== 1) {
+      cost = cost * scm;
     }
     cost = Math.max(1, Math.round(cost));
     if (state.stamina < cost) return false;
@@ -904,13 +910,17 @@ export function createPlayer(scene) {
     // Floor of 1 (not 10) so The Gift's sacrifice can drop max past
     // the normal min. Main.js already clamps the bonus so the
     // resulting max can never go below 1.
-    state.maxHealth = Math.max(1, tunables.player.maxHealth + (s.maxHealthBonus || 0));
-    state.maxStamina = Math.max(10, tunables.stamina.max + (s.maxStaminaBonus || 0));
-    state.moveSpeedMult = s.moveSpeedMult || 1;
-    state.crouchMoveBonus = s.crouchMoveBonus || 1;
-    state.healthRegenMult = s.healthRegenMult || 1;
-    state.healthRegenDelayBonus = s.healthRegenDelayBonus || 0;
-    state.staminaRegenMult = s.staminaRegenMult || 1;
+    // Defensive coerce — any of these multipliers landing as NaN/Infinity
+    // would propagate to state.stamina via consume / regen and break the
+    // game. Always fall back to the safe default.
+    const _num = (v, dflt) => (Number.isFinite(v) ? v : dflt);
+    state.maxHealth = Math.max(1, tunables.player.maxHealth + _num(s.maxHealthBonus, 0));
+    state.maxStamina = Math.max(10, tunables.stamina.max + _num(s.maxStaminaBonus, 0));
+    state.moveSpeedMult = _num(s.moveSpeedMult, 1);
+    state.crouchMoveBonus = _num(s.crouchMoveBonus, 1);
+    state.healthRegenMult = _num(s.healthRegenMult, 1);
+    state.healthRegenDelayBonus = _num(s.healthRegenDelayBonus, 0);
+    state.staminaRegenMult = _num(s.staminaRegenMult, 1);
     state.dmgReduction = s.dmgReduction || 0;
     // Encounter-artifact flags. Innocent Heart suspends the
     // damage-shrinks-regen-cap rule; Unused Rocket Ticket scales
@@ -1029,7 +1039,13 @@ export function createPlayer(scene) {
       );
     }
 
-    // Stamina regen — same pattern as health.
+    // Stamina regen — same pattern as health. Defensive: if a derived
+    // multiplier landed as NaN/Infinity (corruption observed after
+    // level-up pause), reset to 1 before the multiply so the regen
+    // tick can't propagate NaN into state.stamina.
+    if (!Number.isFinite(state.staminaRegenMult)) state.staminaRegenMult = 1;
+    if (!Number.isFinite(state.maxStamina)) state.maxStamina = tunables.stamina.max;
+    if (!Number.isFinite(state.stamina)) state.stamina = state.maxStamina;
     if (state.staminaRegenT > 0) state.staminaRegenT = Math.max(0, state.staminaRegenT - dt);
     else if (state.stamina < state.maxStamina) {
       state.stamina = Math.min(
@@ -1065,7 +1081,8 @@ export function createPlayer(scene) {
     }
     if (state.blocking) {
       // Carbon Cycle relic — block drain pays the same staminaCostMult.
-      const drain = tunables.stamina.blockDrainRate * (state.staminaCostMult ?? 1) * dt;
+      const scm = Number.isFinite(state.staminaCostMult) ? state.staminaCostMult : 1;
+      const drain = tunables.stamina.blockDrainRate * scm * dt;
       state.stamina = Math.max(0, state.stamina - drain);
       state.staminaRegenT = tunables.stamina.regenDelay;
       if (state.stamina <= 0) state.blocking = false;
