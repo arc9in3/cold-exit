@@ -639,7 +639,17 @@ export class ShopUI {
   // false. Kept as a stub so existing call sites (e.g. backpack-cell
   // mode picker in render()) don't blow up; broken items just sell as
   // normal at every shop now.
-  _canRepair(_item) {
+  // Per-merchant repair specialty. Gunsmiths repair weapons (ranged
+  // + melee); armorers handle armor + body gear (chest, head, hands,
+  // belt, pants, boots, ears, face, backpack). The general merchant
+  // and other shops can't repair anything — players have to seek out
+  // the right specialist.
+  _canRepair(item) {
+    if (!this.merchant || !item || !item.durability) return false;
+    const kind = this.merchant.kind;
+    const t = item.type;
+    if (kind === 'gunsmith') return t === 'ranged' || t === 'melee';
+    if (kind === 'armorer')  return t === 'armor'  || t === 'gear' || t === 'backpack' || item.slot === 'backpack';
     return false;
   }
 
@@ -896,11 +906,41 @@ export class ShopUI {
   render() {
     if (!this.merchant) return;
     this.creditsEl.textContent = `${this.getCredits()}c`;
-    // Repair buttons are permanently hidden — gunsmith / armorer now
-    // do affix transfer instead, and no other vendor ever repaired.
+    // Bulk-action button visibility — Repair All + Repair Item only
+    // surface at the gunsmith / armorer who can actually do the work.
+    // Hidden buttons keep their layout slot via display:none so the
+    // row doesn't reflow when switching between merchants.
     const kind = this.merchant.kind;
-    if (this.repairAllBtn) this.repairAllBtn.style.display = 'none';
-    if (this.repairItemBtn) this.repairItemBtn.style.display = 'none';
+    const canShowRepair = (kind === 'gunsmith' || kind === 'armorer');
+    if (this.repairAllBtn) {
+      this.repairAllBtn.style.display = canShowRepair ? '' : 'none';
+      const baseLabel = kind === 'gunsmith' ? 'Repair All Weapons'
+                      : kind === 'armorer'  ? 'Repair All Armor'
+                      : 'Repair All';
+      const damaged = canShowRepair ? this._damagedRepairables() : [];
+      const total = damaged.reduce((s, e) => s + e.cost, 0);
+      this.repairAllBtn.textContent = damaged.length === 0
+        ? baseLabel
+        : `${baseLabel} · ${total}c`;
+      const credits = this.getCredits();
+      const cantAfford = total > 0 && credits < total;
+      this.repairAllBtn.disabled = damaged.length === 0;
+      this.repairAllBtn.style.opacity = (damaged.length === 0 || cantAfford) ? '0.55' : '1';
+      this.repairAllBtn.style.cursor = damaged.length === 0 ? 'default' : 'pointer';
+      this.repairAllBtn.title = cantAfford
+        ? `Need ${total}c (you have ${credits}c). Items will be repaired in order until credits run out.`
+        : '';
+    }
+    if (this.repairItemBtn) {
+      this.repairItemBtn.style.display = canShowRepair ? '' : 'none';
+      const damaged = canShowRepair ? this._damagedRepairables() : [];
+      this.repairItemBtn.disabled = damaged.length === 0;
+      this.repairItemBtn.style.opacity = damaged.length === 0 ? '0.55' : '1';
+      this.repairItemBtn.style.cursor = damaged.length === 0 ? 'default' : 'pointer';
+      this.repairItemBtn.textContent = damaged.length === 0
+        ? 'Repair Item'
+        : `Repair Item (${damaged.length})`;
+    }
     // Reroll: only when the unlock has been purchased AND this visit
     // hasn't burned its single use. Disabled-greyed if used so the
     // player still sees the affordance.
