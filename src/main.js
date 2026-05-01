@@ -102,6 +102,7 @@ import { setCursorForWeapon } from './cursor.js';
 import { DroneManager } from './drones.js';
 import { CoopLobbyUI, isCoopEnabled } from './coop/lobby.js';
 import { getCoopTransport } from './coop/transport.js';
+import { buildRig as _buildAllyRig, initAnim as _initAllyAnim, updateAnim as _updateAllyAnim } from './actor_rig.js';
 import {
   encodeEnemySnapshot, encodeSnapshotsPerPeer,
   applyEnemySnapshot, applyLootSnapshot, applyDroneSnapshot,
@@ -116,7 +117,7 @@ window.__resetHints = resetHints;
 // "I'm on build XYZ" without inspecting the bundle. Date stamps the
 // version so a quick glance tells you how stale the build is. Both
 // values render into the bottom-right #build-version label.
-const BUILD_VERSION = '3b60e44+downed-stub-fix';
+const BUILD_VERSION = '9a53d4b+ally-rig-aggro';
 // Build date intentionally bumped each deploy so the corner label
 // reflects the current snapshot.
 const BUILD_DATE    = '2026-05-01';
@@ -2244,6 +2245,26 @@ function _ensureCoopLobby() {
       if (target && target.alive && target.manager) {
         const dmg = Math.max(0, body.d | 0);
         const zone = body.z || 'torso';
+        // Force-aggro the target so joiner shots actually wake the
+        // AI. The local bullet path on host triggers this naturally
+        // via canSee + alertEnemiesFromShot; the RPC path doesn't
+        // see the joiner's position as a "player to spot," so
+        // suspicion never crests on its own.
+        try {
+          target.suspicion = 1.2;
+          if (target.state === 'idle' || target.state === 'IDLE'
+              || target.state === 'sleep' || target.state === 'SLEEP') {
+            // gunman.js / melee_enemy.js use string state values via
+            // the STATE constant; setting a sensible alerted name is
+            // safe — the per-enemy AI tick will read it next frame.
+            target.state = (target.kind === 'melee') ? 'chase' : 'alerted';
+            target.reactionT = 0.18;
+          }
+          if (target.huntsPlayer && !target.huntActive) target.huntActive = true;
+          // Propagate to nearby allies so a single joiner sniper
+          // shot doesn't have to one-tap each grunt independently.
+          try { propagateAggro(target); } catch (_) {}
+        } catch (_) { /* defensive: never crash on aggro flagging */ }
         // Set the implicit claimedBy thread-local so any loot spawned
         // during the death chain (disarm drops, body loot, mirror
         // clone reward) inherits this joiner as the owner —
@@ -8638,25 +8659,35 @@ function _tickCoop(dt) {
     seen.add(peerId);
     let m = _coopGhostMeshes.get(peerId);
     if (!m) {
-      const group = new THREE.Group();
-      // Cyan-tinted humanoid stand-in. Kept deliberately simple so
-      // it reads as "remote peer" and not a real game entity.
-      const bodyMat = new THREE.MeshStandardMaterial({
-        color: 0x4080ff, transparent: true, opacity: 0.65, roughness: 0.6,
-        emissive: 0x2050d0, emissiveIntensity: 0.7,
+      // Real ally rig — same skeleton + animation as the gunmen so
+      // walk / idle pose is identical to the player's silhouette.
+      // Per-peer tint: hash peerId to one of a friendly palette so
+      // teammates are visually distinct at iso distance.
+      const palette = [
+        { body: 0x3a6ab0, head: 0xd0a070 },   // blue
+        { body: 0x6a9b4a, head: 0xc8a880 },   // green
+        { body: 0xa05030, head: 0xc89070 },   // copper
+        { body: 0x7a4ab0, head: 0xb09070 },   // violet
+      ];
+      let h = 0;
+      for (let i = 0; i < (peerId?.length || 0); i++) {
+        h = ((h << 5) - h + peerId.charCodeAt(i)) | 0;
+      }
+      const tone = palette[((h % palette.length) + palette.length) % palette.length];
+      const rig = _buildAllyRig({
+        scale: 0.77,
+        bodyColor: tone.body,
+        headColor: tone.head,
+        legColor:  0x1a1f28,
+        armColor:  tone.body,
+        handColor: 0x2a1612,
+        gearColor: 0x1a1f28,
+        bootColor: 0x0a0a0a,
       });
-      const torso = new THREE.Mesh(new THREE.CylinderGeometry(0.22, 0.22, 1.3, 10), bodyMat);
-      torso.position.y = 0.65;
-      torso.renderOrder = 4;
-      group.add(torso);
-      const head = new THREE.Mesh(new THREE.SphereGeometry(0.22, 12, 8), bodyMat);
-      head.position.y = 1.5;
-      head.renderOrder = 4;
-      group.add(head);
-      // Vertical beacon — bright additive cylinder that punches
-      // through walls and reads from across the level. Without this
-      // a ghost on the opposite side of a wall is invisible at iso
-      // distance and players think the connection is broken.
+      _initAllyAnim(rig);
+      const group = rig.group;
+      // Through-wall beacon — additive cylinder above the head so the
+      // teammate is findable across the room/walls.
       const beamMat = new THREE.MeshBasicMaterial({
         color: 0x6abfff, transparent: true, opacity: 0.35,
         depthWrite: false, depthTest: false,
@@ -8667,17 +8698,49 @@ function _tickCoop(dt) {
       beam.renderOrder = 5;
       group.add(beam);
       coopGhostRoot.add(group);
-      m = { group, lastX: ghost.x, lastZ: ghost.z };
+      m = {
+        group, rig,
+        lastX: ghost.x, lastZ: ghost.z,
+        lastAnimT: (typeof performance !== 'undefined') ? performance.now() / 1000 : 0,
+      };
       _coopGhostMeshes.set(peerId, m);
     }
     // Lerp 1/0.2s toward the most-recent reported position. Catches
     // up smoothly without feeling rubber-bandy at typical packet
-    // jitter. Heading omitted from the lerp — we'd need an extra
-    // shortest-arc helper for yaw, deferred to gameplay-sync work.
+    // jitter.
     const k = Math.min(1, dt / 0.18);
+    const prevX = m.lastX, prevZ = m.lastZ;
     m.lastX += (ghost.x - m.lastX) * k;
     m.lastZ += (ghost.z - m.lastZ) * k;
     m.group.position.set(m.lastX, 0, m.lastZ);
+    // Rig animation — derive speed from position delta, face the
+    // movement heading. updateAnim drives the walk / idle blend
+    // identically to gunmen, so the ally reads as a real player
+    // rather than a placeholder. Idle pose when standing still.
+    if (m.rig) {
+      const mvx = m.lastX - prevX;
+      const mvz = m.lastZ - prevZ;
+      const moveLen = Math.hypot(mvx, mvz);
+      const speed = moveLen / Math.max(0.001, dt);
+      // Face the direction of motion when moving; hold last yaw
+      // when still so we don't whip back to facing 0.
+      if (moveLen > 0.005) {
+        const targetYaw = Math.atan2(mvx, mvz);
+        // Shortest-arc lerp to the target yaw.
+        let dyaw = targetYaw - m.group.rotation.y;
+        while (dyaw > Math.PI) dyaw -= Math.PI * 2;
+        while (dyaw < -Math.PI) dyaw += Math.PI * 2;
+        m.group.rotation.y += dyaw * Math.min(1, dt / 0.12);
+      }
+      try {
+        _updateAllyAnim(m.rig, {
+          speed,
+          rifleHold: false,
+          aimYaw: 0,
+          aimPitch: 0,
+        }, dt);
+      } catch (_) { /* defensive — animation should never crash a frame */ }
+    }
   }
   for (const peerId of [..._coopGhostMeshes.keys()]) {
     if (seen.has(peerId)) continue;
@@ -11336,6 +11399,11 @@ function updateLootPrompt() {
 }
 
 function tryInteract({ nearItem, body, bodies, npc, container }) {
+  // Coop downed lock — a downed player can't search bodies, open
+  // containers, talk to NPCs, etc. Their input dispatch is gated in
+  // player.update; this catches the tryInteract path which routes
+  // through the input flag separately.
+  if (_localDowned) return;
   // Coop revive priority — if a downed teammate is in revive range,
   // skip every other interact (body search, container open, etc).
   // The hold-to-revive system in _tickReviveInteract takes over.
