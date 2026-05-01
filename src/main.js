@@ -116,7 +116,7 @@ window.__resetHints = resetHints;
 // "I'm on build XYZ" without inspecting the bundle. Date stamps the
 // version so a quick glance tells you how stale the build is. Both
 // values render into the bottom-right #build-version label.
-const BUILD_VERSION = '077893c+ui-polish-1';
+const BUILD_VERSION = '4f7c9b9+death-polish-bodyloot-flicker';
 // Build date intentionally bumped each deploy so the corner label
 // reflects the current snapshot.
 const BUILD_DATE    = '2026-05-01';
@@ -1681,6 +1681,16 @@ if (typeof window !== 'undefined') {
     const t = getCoopTransport();
     if (!t.isOpen || t.isHost) return;
     t.send('rpc-body-take', { n: netId | 0, i: idx | 0 });
+    // Anti-flicker cooldown — defer corpse-loot snapshot apply on
+    // this entity for ~200ms so a stale snapshot can't briefly
+    // un-take the item before host's RPC reflection arrives.
+    let target = null;
+    if (gunmen?.gunmen) for (const g of gunmen.gunmen) if (g.netId === netId) { target = g; break; }
+    if (!target && melees?.enemies) for (const m of melees.enemies) if (m.netId === netId) { target = m; break; }
+    if (target) {
+      const now = (typeof performance !== 'undefined') ? performance.now() : Date.now();
+      target._coopBodyLootCooldown = now + 220;
+    }
   };
 
   window.__coopOnEnemyHit = (owner, dmg, zone, hitDir, opts) => {

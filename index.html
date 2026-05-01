@@ -3361,12 +3361,31 @@
     .bear-trade-btn:hover { background: linear-gradient(180deg, #4a3020, #2a1c10); transform: translateY(-1px); }
 
     /* Death modal */
+    /* Death screen — slow vignette ramp + card zoom + title-letter
+       breath. Reads as a "you died" gut-punch instead of a pop-in. */
+    @keyframes death-vignette {
+      from { background: radial-gradient(ellipse at center, rgba(40, 0, 0, 0.0), rgba(0, 0, 0, 0.0)); }
+      to   { background: radial-gradient(ellipse at center, rgba(40, 0, 0, 0.7), rgba(0, 0, 0, 0.9)); }
+    }
+    @keyframes death-card-rise {
+      from { opacity: 0; transform: translateY(28px) scale(0.92); filter: blur(4px); }
+      to   { opacity: 1; transform: translateY(0)    scale(1);    filter: blur(0); }
+    }
+    @keyframes death-title-breath {
+      0%, 100% { letter-spacing: 6px; text-shadow: 0 0 16px rgba(224,72,72,0.55); }
+      50%      { letter-spacing: 7.5px; text-shadow: 0 0 32px rgba(224,72,72,0.8), 0 0 56px rgba(160,48,56,0.4); }
+    }
+    @keyframes death-stat-pop {
+      from { opacity: 0; transform: translateX(-8px); }
+      to   { opacity: 1; transform: translateX(0); }
+    }
     #death-root {
       position: fixed; inset: 0;
       background: radial-gradient(ellipse at center, rgba(40, 0, 0, 0.7), rgba(0, 0, 0, 0.9));
       display: flex; align-items: center; justify-content: center;
       z-index: 20;
       font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+      animation: death-vignette 1.2s ease-out both;
     }
     #death-card {
       background: #15070a;
@@ -3376,13 +3395,24 @@
       text-align: center;
       color: #f2e7c9;
       box-shadow: 0 0 60px rgba(160, 48, 56, 0.5);
+      animation: death-card-rise 800ms 200ms cubic-bezier(0.22, 0.61, 0.36, 1) both;
     }
+    #death-card .death-stat-row {
+      animation: death-stat-pop 320ms ease-out both;
+    }
+    #death-card .death-stat-row:nth-of-type(1) { animation-delay: 700ms; }
+    #death-card .death-stat-row:nth-of-type(2) { animation-delay: 800ms; }
+    #death-card .death-stat-row:nth-of-type(3) { animation-delay: 900ms; }
+    #death-card .death-stat-row:nth-of-type(4) { animation-delay: 1000ms; }
+    #death-card .death-stat-row:nth-of-type(5) { animation-delay: 1100ms; }
     #death-title {
       font-size: 36px;
       font-weight: 700;
       color: #e04848;
       letter-spacing: 6px;
       margin-bottom: 12px;
+      text-shadow: 0 0 16px rgba(224,72,72,0.55);
+      animation: death-title-breath 3.4s ease-in-out 600ms infinite;
     }
     #death-sub {
       font-size: 12px;

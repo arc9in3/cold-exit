@@ -411,17 +411,24 @@ export function applyInterpolated(gunmen, melees, lootMgr, spawnFn) {
 
 function _applyCorpseSection(snap, gunmen, melees) {
   if (!snap || !snap.corpses) return;
+  const now = (typeof performance !== 'undefined') ? performance.now() : Date.now();
   const seen = new Set();
   for (const c of snap.corpses) {
     seen.add(c.n);
     let entity = _findByNetId(gunmen.gunmen, c.n);
     if (!entity) entity = _findByNetId(melees.enemies, c.n);
     if (!entity) continue;
+    // Anti-flicker: just took an item locally and the host hasn't
+    // ack'd via the next snapshot yet. Skip the loot replace until
+    // the cooldown elapses so the just-taken item doesn't briefly
+    // re-appear in the modal.
+    if (entity._coopBodyLootCooldown && entity._coopBodyLootCooldown > now) continue;
     entity.loot = c.l || [];
     entity.looted = false;
   }
   for (const list of [gunmen.gunmen, melees.enemies]) {
     for (const e of list) {
+      if (e._coopBodyLootCooldown && e._coopBodyLootCooldown > now) continue;
       if (!e.alive && e.netId && !seen.has(e.netId) && !e.looted) {
         e.looted = true;
         e.loot = [];
