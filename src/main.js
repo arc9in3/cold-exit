@@ -104,8 +104,10 @@ import { CoopLobbyUI, isCoopEnabled } from './coop/lobby.js';
 import { getCoopTransport } from './coop/transport.js';
 import {
   encodeEnemySnapshot, encodeSnapshotsPerPeer,
-  applyEnemySnapshot, applyLootSnapshot,
-  pushSnapshotForInterp, applyInterpolated,
+  applyEnemySnapshot, applyLootSnapshot, applyDroneSnapshot,
+  applyMegaBossSnapshot,
+  pushSnapshotForInterp, pickInterpSnapshots, applyInterpolated,
+  clearSnapshotBuffer,
 } from './coop/snapshot.js';
 import { resetNetIds } from './gunman.js';
 window.__resetHints = resetHints;
@@ -114,7 +116,7 @@ window.__resetHints = resetHints;
 // "I'm on build XYZ" without inspecting the bundle. Date stamps the
 // version so a quick glance tells you how stale the build is. Both
 // values render into the bottom-right #build-version label.
-const BUILD_VERSION = 'd927fa1+coop-bodyloot';
+const BUILD_VERSION = '15a3383+coop-drone-mega';
 // Build date intentionally bumped each deploy so the corner label
 // reflects the current snapshot.
 const BUILD_DATE    = '2026-05-01';
@@ -1726,6 +1728,10 @@ function _ensureCoopLobby() {
   transport.addEventListener('open', _publishHostFlag);
   transport.addEventListener('close', _publishHostFlag);
   transport.addEventListener('host', _publishHostFlag);   // host migration
+  // Clear interp buffer on disconnect so a stale snapshot can't
+  // briefly drive the apply path when the next session opens.
+  transport.addEventListener('close', () => clearSnapshotBuffer());
+  transport.addEventListener('host-lost', () => clearSnapshotBuffer());
   // Host re-broadcasts the current seed whenever a peer joins. Without
   // this the joiner has to wait for the host's NEXT regenerateLevel
   // call (next floor extract) before they can sync. Since regen is
@@ -8290,7 +8296,8 @@ function _tickCoop(dt) {
         // packet per snapshot tick on a host-alone room.
       } else {
         const perPeer = encodeSnapshotsPerPeer(
-          gunmen, melees, _coopSnapshotSeq, performance.now() | 0, loot, peerIds,
+          gunmen, melees, _coopSnapshotSeq, performance.now() | 0,
+          loot, peerIds, drones, megaBoss,
         );
         for (const [peerId, snap] of perPeer) {
           transport.send('snapshot', snap, peerId);
@@ -8305,6 +8312,15 @@ function _tickCoop(dt) {
       try { return loot.spawnItem(pos, stubItem); }
       catch (_) { return null; }
     });
+    // Drones — same interp pair, separate apply since the manager
+    // isn't part of the gunmen/melees aggregate.
+    const dpair = pickInterpSnapshots();
+    if (dpair && drones) {
+      applyDroneSnapshot(dpair.a, dpair.b, drones, (x, y, z) => {
+        try { return drones.spawn(x, y, z); }
+        catch (_) { return null; }
+      }, dpair.alpha);
+    }
   }
   // Sync ghost meshes — create/update per-peer, prune disconnected.
   const seen = new Set();
@@ -14246,6 +14262,7 @@ function tick() {
   // hittables() in alongside gunmen + melees), so bullets damage
   // them through the standard hit pipeline.
   drones.update(dt, {
+    coopJoiner: _coopJoiner,
     playerPos: playerInfo.position,
     level,
     onDroneExplode: (pos, explosion) => {
@@ -14260,8 +14277,19 @@ function tick() {
   // FSM, hazard tick, and HUD bar render. Player position is needed
   // for facing + body-collision damage; we pass the live position
   // (not snapshot) so charge attack tracking is correct.
+  //
+  // Coop joiner: skip the FSM (host runs it) and pull position +
+  // HP from the latest snapshot. Hazards (fires, bullets, gas) are
+  // not yet synced — joiner sees the boss move + take damage but
+  // its attacks render only on host. v1 acceptable; full hazard
+  // sync is a follow-up.
   if (megaBoss) {
-    megaBoss.update(dt, player.mesh.position);
+    if (_coopJoiner) {
+      const pair = pickInterpSnapshots();
+      if (pair) applyMegaBossSnapshot(pair.b, megaBoss);
+    } else {
+      megaBoss.update(dt, player.mesh.position);
+    }
   }
 
   // Keep enemies from stacking so crowd counts read at a glance.

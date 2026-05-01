@@ -11,6 +11,7 @@
 // light. Cheap geometry; no shadow casting.
 
 import * as THREE from 'three';
+import { _nextNetId } from './gunman.js';
 
 const DRONE_HP            = 24;       // ~2 pistol shots, 1 SMG burst
 const DRONE_SPEED         = 3.4;      // m/s — slower than player sprint, faster than walk
@@ -125,6 +126,11 @@ export class DroneManager {
     slot.group.position.set(x, y || DRONE_HOVER_Y, z);
     slot.group.visible = true;
     const drone = {
+      // Coop net ID — assigned at spawn from the shared monotonic
+      // counter (re-uses the gunman/melee one to avoid id collisions
+      // across networked entity types). Joiner mirrors by netId via
+      // the snapshot.
+      netId: _nextNetId(),
       slot,
       group: slot.group,
       body: slot.body,
@@ -167,6 +173,11 @@ export class DroneManager {
     if (!ctx) return;
     const px = ctx.playerPos?.x ?? 0;
     const pz = ctx.playerPos?.z ?? 0;
+    // Coop joiner — host runs the authoritative drone AI; we mirror
+    // positions via snapshot. Skip pursuit + collision + contact
+    // detection but KEEP bob + rotation so drones still read as
+    // alive locally.
+    const coopJoiner = !!ctx.coopJoiner;
     for (let i = this.drones.length - 1; i >= 0; i--) {
       const d = this.drones[i];
       if (!d.alive) {
@@ -174,42 +185,50 @@ export class DroneManager {
         this.drones.splice(i, 1);
         continue;
       }
-      // Track player at constant speed. Drones float — no gravity,
-      // no collision with low cover (they fly over). They DO try to
-      // avoid running through walls by clamping motion against
-      // level.resolveCollision so they don't phase through doors.
-      const gx = d.group.position.x;
-      const gz = d.group.position.z;
-      const dx = px - gx;
-      const dz = pz - gz;
-      const dist = Math.hypot(dx, dz);
-      if (dist > 0.001) {
-        _DIR_TMP.set(dx / dist, 0, dz / dist);
-        const step = DRONE_SPEED * dt;
-        const nx = gx + _DIR_TMP.x * step;
-        const nz = gz + _DIR_TMP.z * step;
-        if (ctx.level) {
-          // Drone-specific collision — only walls + doors block, props
-          // are flown over. ~80% reduction in obstacle iterations vs
-          // level.resolveCollision in a typical late-game room.
-          const r = _droneResolveCollision(ctx.level, gx, gz, nx, nz, 0.25);
-          d.group.position.x = r.x;
-          d.group.position.z = r.z;
-        } else {
-          d.group.position.x = nx;
-          d.group.position.z = nz;
+      if (!coopJoiner) {
+        // Track player at constant speed. Drones float — no gravity,
+        // no collision with low cover (they fly over). They DO try to
+        // avoid running through walls by clamping motion against
+        // level.resolveCollision so they don't phase through doors.
+        const gx = d.group.position.x;
+        const gz = d.group.position.z;
+        const dx = px - gx;
+        const dz = pz - gz;
+        const dist = Math.hypot(dx, dz);
+        if (dist > 0.001) {
+          _DIR_TMP.set(dx / dist, 0, dz / dist);
+          const step = DRONE_SPEED * dt;
+          const nx = gx + _DIR_TMP.x * step;
+          const nz = gz + _DIR_TMP.z * step;
+          if (ctx.level) {
+            // Drone-specific collision — only walls + doors block, props
+            // are flown over. ~80% reduction in obstacle iterations vs
+            // level.resolveCollision in a typical late-game room.
+            const r = _droneResolveCollision(ctx.level, gx, gz, nx, nz, 0.25);
+            d.group.position.x = r.x;
+            d.group.position.z = r.z;
+          } else {
+            d.group.position.x = nx;
+            d.group.position.z = nz;
+          }
+        }
+        // Contact check — close enough → detonate.
+        if (dist < DRONE_CONTACT_RADIUS) {
+          this._detonate(d, ctx);
+          continue;
         }
       }
-      // Bob the body for "alive" read.
+      // Bob the body for "alive" read. Always-on so joiner-mirrored
+      // drones don't visually freeze.
       d.bobT += dt * DRONE_BOB_FREQ;
-      d.group.position.y = DRONE_HOVER_Y + Math.sin(d.bobT) * DRONE_BOB_AMPLITUDE;
+      // On host (or single-player), bob drives Y position. On joiner,
+      // snapshot apply already sets Y; skip overwriting to avoid
+      // fighting the lerp.
+      if (!coopJoiner) {
+        d.group.position.y = DRONE_HOVER_Y + Math.sin(d.bobT) * DRONE_BOB_AMPLITUDE;
+      }
       d.body.rotation.y += dt * 1.6;
       d.body.rotation.x += dt * 0.9;
-      // Contact check — close enough → detonate.
-      if (dist < DRONE_CONTACT_RADIUS) {
-        this._detonate(d, ctx);
-        continue;
-      }
     }
   }
 

@@ -24,7 +24,45 @@
 // drop out-of-order packets and a future tick can do interpolation
 // between two snapshots.
 
-const _scratch = { gunmen: [], melees: [], loot: [], corpses: [] };
+const _scratch = { gunmen: [], melees: [], drones: [], loot: [], corpses: [] };
+
+// Megaboss snapshot — single optional object since at most one
+// megaboss exists per arena. Mirrors position + yaw + hp so the
+// joiner sees the boss move + damage progress. v1: AI / hazards
+// (fires, bullets, gas) are NOT synced — that needs hazard-list
+// snapshotting which we'll layer on next pass.
+function _encodeMegaBoss(megaBoss) {
+  if (!megaBoss || !megaBoss.alive || !megaBoss.boss) return null;
+  return {
+    x: +(megaBoss.boss.position.x.toFixed(3)),
+    z: +(megaBoss.boss.position.z.toFixed(3)),
+    y: +(megaBoss.facing?.toFixed?.(3) ?? 0),
+    h: Math.round(megaBoss.hp),
+    m: Math.round(megaBoss.maxHp),
+    p: megaBoss.phase | 0,
+    s: megaBoss.state || 'idle',
+  };
+}
+
+// Drone snapshot — same shape as gunmen/melees minus the state
+// string (drones don't have a meaningful AI state worth syncing).
+// Joiner mirrors via netId; missing entries despawn locally.
+function _encodeDrones(droneMgr) {
+  _scratch.drones.length = 0;
+  if (!droneMgr || !droneMgr.drones) return _scratch.drones.slice();
+  for (const d of droneMgr.drones) {
+    if (!d || !d.alive || !d.group) continue;
+    _scratch.drones.push({
+      n: d.netId | 0,
+      x: +(d.group.position.x.toFixed(3)),
+      y: +(d.group.position.y.toFixed(3)),
+      z: +(d.group.position.z.toFixed(3)),
+      h: Math.round(d.hp),
+      m: Math.round(d.maxHp),
+    });
+  }
+  return _scratch.drones.slice();
+}
 
 // Body-loot snapshot — per dead+unlooted enemy, mirror their full
 // `enemy.loot` array so joiners can search corpses without a
@@ -91,8 +129,8 @@ function _encodeLootForPeer(loot, forPeerId) {
 // Build the snapshot once per peer (loot section is per-recipient).
 // Returns a Map<peerId, snapshot>. Caller iterates and sends targeted.
 // Enemy section is the same across recipients so we build it once.
-export function encodeSnapshotsPerPeer(gunmen, melees, seq, t, loot, peerIds) {
-  const enemyPart = encodeEnemySnapshot(gunmen, melees, seq, t, null);
+export function encodeSnapshotsPerPeer(gunmen, melees, seq, t, loot, peerIds, droneMgr = null, megaBoss = null) {
+  const enemyPart = encodeEnemySnapshot(gunmen, melees, seq, t, null, droneMgr, megaBoss);
   const out = new Map();
   if (!peerIds || !peerIds.length) return out;
   for (const peerId of peerIds) {
@@ -104,7 +142,7 @@ export function encodeSnapshotsPerPeer(gunmen, melees, seq, t, loot, peerIds) {
   return out;
 }
 
-export function encodeEnemySnapshot(gunmen, melees, seq, t, loot = null) {
+export function encodeEnemySnapshot(gunmen, melees, seq, t, loot = null, droneMgr = null, megaBoss = null) {
   // Reuse scratch arrays so a 20Hz publish doesn't allocate a fresh
   // outer object each frame; per-entity payloads are still per-call.
   _scratch.gunmen.length = 0;
@@ -138,6 +176,8 @@ export function encodeEnemySnapshot(gunmen, melees, seq, t, loot = null) {
     t: t | 0,
     gunmen: _scratch.gunmen.slice(),
     melees: _scratch.melees.slice(),
+    drones: _encodeDrones(droneMgr),
+    boss: _encodeMegaBoss(megaBoss),
     // Note: loot section is empty here. Per-peer fanout via
     // encodeSnapshotsPerPeer is the path that includes loot,
     // so each recipient sees only their instanced items + shared.
@@ -156,6 +196,9 @@ export function encodeEnemySnapshot(gunmen, melees, seq, t, loot = null) {
 const _snapBuffer = [];
 const SNAPSHOT_BUFFER_MAX = 6;          // ~300ms of history at 20Hz
 const RENDER_DELAY_MS = 100;            // render T - 100ms
+// Reset snapshot buffer on disconnect so a stale frame doesn't
+// briefly drive the apply path on the next session.
+export function clearSnapshotBuffer() { _snapBuffer.length = 0; }
 export function pushSnapshotForInterp(snap) {
   if (!snap) return;
   // Stamp local-receive time so we can derive interpolation T from
@@ -386,6 +429,74 @@ function _applyCorpseSection(snap, gunmen, melees) {
     }
   }
 }
+// Megaboss apply — pulls position + hp off the latest snapshot
+// (interpolation isn't worth the bookkeeping for one entity).
+// Joiner's local megaBoss instance was spawned via the same
+// regenerateLevel path (seeded), so the reference exists.
+export function applyMegaBossSnapshot(snap, megaBoss) {
+  if (!snap || !megaBoss) return;
+  if (!snap.boss) {
+    // No boss info — host says boss is gone or not spawned.
+    return;
+  }
+  const b = snap.boss;
+  if (megaBoss.boss?.position) {
+    megaBoss.boss.position.x = b.x;
+    megaBoss.boss.position.z = b.z;
+  }
+  if (typeof megaBoss.facing === 'number') {
+    megaBoss.facing = b.y;
+    if (megaBoss.boss) megaBoss.boss.rotation.y = b.y;
+  }
+  megaBoss.hp = b.h;
+  if (b.m) megaBoss.maxHp = b.m;
+  if (typeof b.p === 'number') megaBoss.phase = b.p;
+  if (b.s) megaBoss.state = b.s;
+}
+
+// Drone apply for the interpolation path. droneMgr is the joiner's
+// local DroneManager. spawnFn is a closure that wraps droneMgr.spawn
+// and stamps the netId from the snapshot. Same shape as the loot
+// path so we don't reach into manager internals here.
+export function applyDroneSnapshot(snapA, snapB, droneMgr, spawnFn, alpha) {
+  if (!snapB || !droneMgr) return;
+  const live = new Set();
+  const aMap = new Map();
+  if (snapA && snapA.drones) for (const d of snapA.drones) aMap.set(d.n, d);
+  for (const sb of (snapB.drones || [])) {
+    live.add(sb.n);
+    let local = null;
+    for (const d of droneMgr.drones) { if (d.netId === sb.n) { local = d; break; } }
+    if (!local) {
+      // Spawn a mirror; stamp the netId from snapshot.
+      local = spawnFn(sb.x, sb.y, sb.z);
+      if (local) local.netId = sb.n;
+      if (local) local._coopRemote = true;
+      continue;
+    }
+    // Lerp position. Drones have a y axis (hover), so include it.
+    const sa = aMap.get(sb.n) || sb;
+    local.group.position.x = sa.x + (sb.x - sa.x) * alpha;
+    local.group.position.y = sa.y + (sb.y - sa.y) * alpha;
+    local.group.position.z = sa.z + (sb.z - sa.z) * alpha;
+    local.hp = sb.h;
+    if (sb.m) local.maxHp = sb.m;
+  }
+  // Despawn drones missing from latest snapshot.
+  for (let i = droneMgr.drones.length - 1; i >= 0; i--) {
+    const d = droneMgr.drones[i];
+    if (!d || !d._coopRemote) continue;
+    if (live.has(d.netId)) continue;
+    d.alive = false;
+    if (d.slot) {
+      d.slot.inUse = false;
+      d.group.visible = false;
+      d.group.position.set(0, -1000, 0);
+    }
+    droneMgr.drones.splice(i, 1);
+  }
+}
+
 function _applyInterp(entity, a, b, alpha) {
   const ax = a.x, az = a.z, ay = a.y;
   const bx = b.x, bz = b.z, by = b.y;
