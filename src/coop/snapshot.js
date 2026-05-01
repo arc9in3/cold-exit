@@ -24,7 +24,36 @@
 // drop out-of-order packets and a future tick can do interpolation
 // between two snapshots.
 
-const _scratch = { gunmen: [], melees: [], loot: [] };
+const _scratch = { gunmen: [], melees: [], loot: [], corpses: [] };
+
+// Body-loot snapshot — per dead+unlooted enemy, mirror their full
+// `enemy.loot` array so joiners can search corpses without a
+// request/response round-trip. Loot pieces are inlined since their
+// total size per body is small (~3-5 items, ~50 bytes each). Host
+// drives ownership; joiners send rpc-body-take to remove an item
+// after pickup, host applies + the next snapshot reflects.
+function _encodeCorpses(gunmen, melees) {
+  _scratch.corpses.length = 0;
+  const collect = (list) => {
+    for (const e of list) {
+      if (!e || e.alive) continue;
+      if (e.looted) continue;
+      if (!e.loot || !e.loot.length) continue;
+      _scratch.corpses.push({
+        n: e.netId | 0,
+        x: +(e.group.position.x.toFixed(2)),
+        z: +(e.group.position.z.toFixed(2)),
+        // Loot items shipped verbatim — they're the full item defs
+        // already; serializing once at packet build is cheaper than
+        // round-tripping per-take RPCs.
+        l: e.loot,
+      });
+    }
+  };
+  collect(gunmen.gunmen);
+  collect(melees.enemies);
+  return _scratch.corpses.slice();
+}
 
 // Loot snapshot — host serializes alive ground-loot items so joiners
 // can render mirror representations. Item shape on the wire stays
@@ -113,7 +142,52 @@ export function encodeEnemySnapshot(gunmen, melees, seq, t, loot = null) {
     // encodeSnapshotsPerPeer is the path that includes loot,
     // so each recipient sees only their instanced items + shared.
     loot: [],
+    // Corpses with searchable body-loot. Shared across all peers
+    // (anyone in the room can search any body).
+    corpses: _encodeCorpses(gunmen, melees),
   };
+}
+
+// Snapshot buffer for interpolation — joiners render at a fixed
+// delay behind the latest received snapshot, blending between two
+// known-good frames. Gives smooth motion at any snapshot rate
+// (Quake/CS approach). Without this, lerp-toward-latest produces
+// visible chase-stutter at 20Hz packets / 60Hz render.
+const _snapBuffer = [];
+const SNAPSHOT_BUFFER_MAX = 6;          // ~300ms of history at 20Hz
+const RENDER_DELAY_MS = 100;            // render T - 100ms
+export function pushSnapshotForInterp(snap) {
+  if (!snap) return;
+  // Stamp local-receive time so we can derive interpolation T from
+  // the client's wall clock — server t is unsynchronized.
+  snap._recvT = (typeof performance !== 'undefined') ? performance.now() : Date.now();
+  _snapBuffer.push(snap);
+  if (_snapBuffer.length > SNAPSHOT_BUFFER_MAX) _snapBuffer.shift();
+}
+export function pickInterpSnapshots() {
+  // Returns { a, b, alpha } where the rendered state is
+  // lerp(a, b, alpha) at render-time T = now - delay. If we don't
+  // have two frames straddling that time, fall back to the latest.
+  if (_snapBuffer.length === 0) return null;
+  if (_snapBuffer.length === 1) return { a: _snapBuffer[0], b: _snapBuffer[0], alpha: 1 };
+  const now = (typeof performance !== 'undefined') ? performance.now() : Date.now();
+  const target = now - RENDER_DELAY_MS;
+  // Find the most recent pair (a, b) where a._recvT <= target <= b._recvT.
+  for (let i = _snapBuffer.length - 1; i >= 1; i--) {
+    const b = _snapBuffer[i];
+    const a = _snapBuffer[i - 1];
+    if (a._recvT <= target && target <= b._recvT) {
+      const span = Math.max(1, b._recvT - a._recvT);
+      const alpha = Math.max(0, Math.min(1, (target - a._recvT) / span));
+      return { a, b, alpha };
+    }
+  }
+  // Outside the buffered range — clamp to extrapolation: use the
+  // latest two frames at alpha=1 so we always render SOMETHING and
+  // catch up cleanly if delivery hiccups.
+  const b = _snapBuffer[_snapBuffer.length - 1];
+  const a = _snapBuffer[_snapBuffer.length - 2];
+  return { a, b, alpha: 1 };
 }
 
 // Apply a received snapshot to the joiner's local enemy lists.
@@ -139,19 +213,72 @@ export function applyEnemySnapshot(snap, gunmen, melees, lerp = 1) {
     _applyTo(e, sm, lerp);
   }
   // Kill locals the host didn't include — they died on the host's
-  // sim and the joiner needs to mirror. We set hp/alive directly
-  // rather than going through the damage path so death VFX don't
-  // double-fire (the host already played them on its end).
+  // sim and the joiner needs to mirror the death pose / corpse
+  // collapse. Driving the death through applyHit (with overkill
+  // damage) triggers the rig pose, deathT, alert hide, and the
+  // other visual side effects locally. The {coopVisualOnly: true}
+  // flag tells main.js's hit interceptor to skip the rpc-shoot
+  // forwarding and lets the local applyHit run; managers ignore
+  // the flag, but `silent: true` suppresses death sfx and witness
+  // alerts (we're already remote, no witness logic should fire).
+  // Loot / XP side effects live in the CALLER of applyHit (not
+  // inside it) so they don't fire here — joiner stays read-only.
+  // Synthetic hit direction — pokeDeath() inside applyHit gates the
+  // rig pose on `hitDir` being non-null, so passing null leaves the
+  // corpse standing upright. Any non-zero vector triggers the
+  // corpse collapse + ragdoll-lite physics. Forward-facing default;
+  // hit direction doesn't matter much for a remote-mirrored death.
+  const _coopHitDir = { x: 0, z: -1 };
   for (const g of gunmen.gunmen) {
     if (g.alive && !liveG.has(g.netId)) {
-      g.hp = 0; g.alive = false;
+      try {
+        g.manager.applyHit(g, (g.hp | 0) + 1, 'torso', _coopHitDir,
+          { silent: true, coopVisualOnly: true });
+      } catch (_) {
+        g.hp = 0; g.alive = false;
+      }
     }
   }
   for (const e of melees.enemies) {
     if (e.alive && !liveM.has(e.netId)) {
-      e.hp = 0; e.alive = false;
+      try {
+        e.manager.applyHit(e, (e.hp | 0) + 1, 'torso', _coopHitDir,
+          { silent: true, coopVisualOnly: true });
+      } catch (_) {
+        e.hp = 0; e.alive = false;
+      }
     }
   }
+  // Body loot mirror — host's corpses with unlooted items send the
+  // full item array. Joiner copies onto the local entity so the
+  // search-body interact uses the host's authoritative list. The
+  // looted flag flips when host's enemy.loot empties (corpse
+  // disappears from the corpses[] section).
+  const corpseSeen = new Set();
+  for (const c of (snap.corpses || [])) {
+    corpseSeen.add(c.n);
+    let entity = _findByNetId(gunmen.gunmen, c.n);
+    if (!entity) entity = _findByNetId(melees.enemies, c.n);
+    if (!entity) continue;
+    entity.loot = c.l || [];
+    entity.looted = false;
+  }
+  // Any local dead entity that ISN'T in the snapshot's corpse list
+  // is either (a) host already had it looted (host dropped it from
+  // loot) or (b) been around long enough that snapshots stopped
+  // including it — flag looted so the search prompt hides.
+  const flagLooted = (list) => {
+    for (const e of list) {
+      if (!e.alive && e.netId && !corpseSeen.has(e.netId)) {
+        if (!e.looted) {
+          e.looted = true;
+          e.loot = [];
+        }
+      }
+    }
+  };
+  flagLooted(gunmen.gunmen);
+  flagLooted(melees.enemies);
 }
 
 function _applyTo(entity, snap, lerp) {
@@ -172,6 +299,105 @@ function _applyTo(entity, snap, lerp) {
   entity.hp = snap.h;
   if (snap.m) entity.maxHp = snap.m;
   if (snap.s) entity.state = snap.s;
+}
+
+// Apply via interpolation between two buffered snapshots — the
+// standard Quake/Source approach. Picks the entity record from
+// `a` and `b`, lerps position + yaw at `alpha`. Smoother than
+// chasing a single moving target since we render strictly between
+// known-good frames at the cost of a fixed render-time lag.
+export function applyInterpolated(gunmen, melees, lootMgr, spawnFn) {
+  const pair = pickInterpSnapshots();
+  if (!pair) return;
+  const { a, b, alpha } = pair;
+  const liveG = new Set();
+  const liveM = new Set();
+  // Build netId → entry map for `a` so we can pair without nested
+  // search. Cheap: ~10-20 entries per snapshot.
+  const aGmap = new Map();
+  for (const g of a.gunmen || []) aGmap.set(g.n, g);
+  const aMmap = new Map();
+  for (const m of a.melees || []) aMmap.set(m.n, m);
+  for (const sb of b.gunmen || []) {
+    liveG.add(sb.n);
+    const g = _findByNetId(gunmen.gunmen, sb.n);
+    if (!g) continue;
+    const sa = aGmap.get(sb.n) || sb;
+    _applyInterp(g, sa, sb, alpha);
+  }
+  for (const sb of b.melees || []) {
+    liveM.add(sb.n);
+    const e = _findByNetId(melees.enemies, sb.n);
+    if (!e) continue;
+    const sa = aMmap.get(sb.n) || sb;
+    _applyInterp(e, sa, sb, alpha);
+  }
+  // Death sweep — same as applyEnemySnapshot. Locals alive but
+  // missing from the LATEST snapshot get killed visually.
+  const _coopHitDir = { x: 0, z: -1 };
+  for (const g of gunmen.gunmen) {
+    if (g.alive && !liveG.has(g.netId)) {
+      try {
+        g.manager.applyHit(g, (g.hp | 0) + 1, 'torso', _coopHitDir,
+          { silent: true, coopVisualOnly: true });
+      } catch (_) {
+        g.hp = 0; g.alive = false;
+      }
+    }
+  }
+  for (const e of melees.enemies) {
+    if (e.alive && !liveM.has(e.netId)) {
+      try {
+        e.manager.applyHit(e, (e.hp | 0) + 1, 'torso', _coopHitDir,
+          { silent: true, coopVisualOnly: true });
+      } catch (_) {
+        e.hp = 0; e.alive = false;
+      }
+    }
+  }
+  // Loot section — apply from the latest snapshot directly. Loot
+  // doesn't move on host today (drops are stationary), so
+  // interpolation buys nothing for it.
+  if (lootMgr && spawnFn) {
+    applyLootSnapshot(b, lootMgr, spawnFn);
+  }
+  // Body-loot mirror — also from latest snapshot. Pulled out into a
+  // helper so applyEnemySnapshot can share the pruning logic.
+  _applyCorpseSection(b, gunmen, melees);
+}
+
+function _applyCorpseSection(snap, gunmen, melees) {
+  if (!snap || !snap.corpses) return;
+  const seen = new Set();
+  for (const c of snap.corpses) {
+    seen.add(c.n);
+    let entity = _findByNetId(gunmen.gunmen, c.n);
+    if (!entity) entity = _findByNetId(melees.enemies, c.n);
+    if (!entity) continue;
+    entity.loot = c.l || [];
+    entity.looted = false;
+  }
+  for (const list of [gunmen.gunmen, melees.enemies]) {
+    for (const e of list) {
+      if (!e.alive && e.netId && !seen.has(e.netId) && !e.looted) {
+        e.looted = true;
+        e.loot = [];
+      }
+    }
+  }
+}
+function _applyInterp(entity, a, b, alpha) {
+  const ax = a.x, az = a.z, ay = a.y;
+  const bx = b.x, bz = b.z, by = b.y;
+  entity.group.position.x = ax + (bx - ax) * alpha;
+  entity.group.position.z = az + (bz - az) * alpha;
+  let dy = by - ay;
+  while (dy > Math.PI) dy -= Math.PI * 2;
+  while (dy < -Math.PI) dy += Math.PI * 2;
+  entity.group.rotation.y = ay + dy * alpha;
+  entity.hp = b.h;
+  if (b.m) entity.maxHp = b.m;
+  if (b.s) entity.state = b.s;
 }
 
 function _findByNetId(list, netId) {

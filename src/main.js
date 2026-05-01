@@ -102,7 +102,11 @@ import { setCursorForWeapon } from './cursor.js';
 import { DroneManager } from './drones.js';
 import { CoopLobbyUI, isCoopEnabled } from './coop/lobby.js';
 import { getCoopTransport } from './coop/transport.js';
-import { encodeEnemySnapshot, encodeSnapshotsPerPeer, applyEnemySnapshot, applyLootSnapshot } from './coop/snapshot.js';
+import {
+  encodeEnemySnapshot, encodeSnapshotsPerPeer,
+  applyEnemySnapshot, applyLootSnapshot,
+  pushSnapshotForInterp, applyInterpolated,
+} from './coop/snapshot.js';
 import { resetNetIds } from './gunman.js';
 window.__resetHints = resetHints;
 
@@ -110,7 +114,7 @@ window.__resetHints = resetHints;
 // "I'm on build XYZ" without inspecting the bundle. Date stamps the
 // version so a quick glance tells you how stale the build is. Both
 // values render into the bottom-right #build-version label.
-const BUILD_VERSION = '22fa2cf+coop-instanced';
+const BUILD_VERSION = 'd927fa1+coop-bodyloot';
 // Build date intentionally bumped each deploy so the corner label
 // reflects the current snapshot.
 const BUILD_DATE    = '2026-05-01';
@@ -1666,10 +1670,25 @@ let _coopRegenPending = false;
 // false means "host or single-player; apply normally". Lives on window
 // so the entity managers can hit it without importing main.js.
 if (typeof window !== 'undefined') {
+  // Coop body-loot take — fires once per item taken from a synced
+  // corpse via lootUI. Sends rpc-body-take to host so the canonical
+  // enemy.loot stays in sync; next snapshot reflects to both peers.
+  // No-op when not in coop, or when called by the host (host's
+  // local splice already moved the canonical state).
+  window.__coopOnBodyTake = (netId, idx, item) => {
+    const t = getCoopTransport();
+    if (!t.isOpen || t.isHost) return;
+    t.send('rpc-body-take', { n: netId | 0, i: idx | 0 });
+  };
+
   window.__coopOnEnemyHit = (owner, dmg, zone, hitDir, opts) => {
     const t = getCoopTransport();
     if (!t.isOpen || t.isHost) return false;
     if (!owner || !owner.netId) return false;
+    // Visual-only applyHit (driven by snapshot.js for synced enemy
+    // deaths) bypasses the RPC forwarding — we WANT the local rig
+    // pose / deathT side effects to run on the joiner side.
+    if (opts && opts.coopVisualOnly) return false;
     // Send RPC. dir omitted from the wire payload — host doesn't need
     // it for damage calc; knockback would matter but the host is
     // running its own AI anyway and a tiny knockback delta from a
@@ -1696,6 +1715,17 @@ function _ensureCoopLobby() {
   coopGhostRoot.name = 'coop-ghosts';
   scene.add(coopGhostRoot);
   const transport = getCoopTransport();
+  // Publish coop-host flag to window so non-imported modules
+  // (loot.js, etc.) can branch on it without forming a circular
+  // import. Updated on every state change below.
+  const _publishHostFlag = () => {
+    if (typeof window !== 'undefined') {
+      window.__coopIsHost = transport.isOpen && transport.isHost;
+    }
+  };
+  transport.addEventListener('open', _publishHostFlag);
+  transport.addEventListener('close', _publishHostFlag);
+  transport.addEventListener('host', _publishHostFlag);   // host migration
   // Host re-broadcasts the current seed whenever a peer joins. Without
   // this the joiner has to wait for the host's NEXT regenerateLevel
   // call (next floor extract) before they can sync. Since regen is
@@ -1732,11 +1762,15 @@ function _ensureCoopLobby() {
     if (kind === 'snapshot') {
       // Joiner-only — host's snapshot of authoritative enemy state.
       // Drop older / equal sequence numbers; the network can reorder
-      // and we don't want to briefly rewind a dead enemy.
+      // and we don't want to briefly rewind a dead enemy. The
+      // interp buffer renders at T-100ms, blending between two
+      // frames straddling that time — smoother than chasing a
+      // single moving target at 20Hz.
       if (transport.isHost) return;
       if (!body || (body.seq | 0) <= _coopLatestSeq) return;
       _coopLatestSeq = body.seq | 0;
       _coopPendingSnapshot = body;
+      pushSnapshotForInterp(body);
       return;
     }
     if (kind === 'rpc-player-damage') {
@@ -1750,6 +1784,60 @@ function _ensureCoopLobby() {
         damagePlayer(dmg, type, { source: 'remote', zone: body.z || 'torso' });
       } catch (err) {
         console.warn('[coop] rpc-player-damage apply failed', err);
+      }
+      return;
+    }
+    if (kind === 'rpc-grant-xp') {
+      // Joiner-only — host attributed a kill to us and is sending
+      // the XP value. Run awardXp locally so OUR playerXp /
+      // playerLevel ladder advances. Triggers the level-up banner
+      // if the threshold crosses.
+      if (transport.isHost || !body) return;
+      const amount = body.amount | 0;
+      if (amount <= 0) return;
+      try { awardXp(amount); }
+      catch (err) { console.warn('[coop] rpc-grant-xp apply failed', err); }
+      return;
+    }
+    if (kind === 'rpc-body-take') {
+      // Host-only — joiner took an item from a synced corpse.
+      // Splice it from the authoritative enemy.loot and mark looted
+      // when empty. Validate distance to prevent stale/spoofed
+      // takes after a body has migrated.
+      if (!transport.isHost || !body) return;
+      const netId = body.n | 0;
+      const idx = body.i | 0;
+      let target = null;
+      for (const g of (gunmen?.gunmen || [])) {
+        if (g.netId === netId && !g.alive) { target = g; break; }
+      }
+      if (!target) {
+        for (const m of (melees?.enemies || [])) {
+          if (m.netId === netId && !m.alive) { target = m; break; }
+        }
+      }
+      if (!target || !Array.isArray(target.loot)) return;
+      if (idx < 0 || idx >= target.loot.length) return;
+      target.loot.splice(idx, 1);
+      if (target.loot.length === 0) target.looted = true;
+      return;
+    }
+    if (kind === 'rpc-drop') {
+      // Host-only — joiner is dropping an item from their inventory.
+      // Spawn into host's authoritative loot list as SHARED loot
+      // (claimedBy = null) so both players can see it on the ground
+      // and either can pick it back up. Matches host's own drop
+      // behavior — drops are intentionally shared as a "pass to
+      // teammate" channel; instanced is reserved for kill drops.
+      if (!transport.isHost || !body || !body.item) return;
+      try {
+        loot.spawnItem(
+          { x: +body.x || 0, y: 0.4, z: +body.z || 0 },
+          body.item,
+          { claimedBy: null },
+        );
+      } catch (err) {
+        console.warn('[coop] rpc-drop spawn failed', err);
       }
       return;
     }
@@ -1841,15 +1929,38 @@ function _ensureCoopLobby() {
         const dmg = Math.max(0, body.d | 0);
         const zone = body.z || 'torso';
         // Set the implicit claimedBy thread-local so any loot spawned
-        // during applyHit's death chain (drop-on-disarm, chest break,
-        // etc.) inherits this joiner as the owner — instanced loot.
-        // Always restore in finally so a thrown applyHit can't leak
-        // ownership into subsequent host-local spawns.
+        // during the death chain (disarm drops, body loot, mirror
+        // clone reward) inherits this joiner as the owner —
+        // instanced loot. Always restore in finally so a thrown
+        // applyHit can't leak ownership into subsequent host-local
+        // spawns.
         const _prevClaimer = (typeof window !== 'undefined') ? window.__coopCurrentClaimer : null;
+        const wasAlive = target.alive;
+        let result = null;
         try {
           if (typeof window !== 'undefined') window.__coopCurrentClaimer = from;
-          target.manager.applyHit(target, dmg, zone, null,
+          result = target.manager.applyHit(target, dmg, zone, null,
             { weaponClass: body.w || 'rpc', shieldBreaker: !!body.sb });
+          // Fire the local kill pipeline if this hit dropped the
+          // enemy. Without this, joiner kills never generated body
+          // loot or attribution side effects (XP / credits go to
+          // host, but loot would be missing entirely on host's end
+          // and the joiner would never see the drop snapshot).
+          if (wasAlive && !target.alive) {
+            try { onEnemyKilled(target); }
+            catch (e) { console.warn('[coop] rpc-shoot onEnemyKilled failed', e); }
+          }
+          // Ground-drop disarm path mirrors the host's bullet-hit
+          // logic at line ~6920 — drops on the death frame become
+          // ground items. Same claimedBy thread-local applies.
+          if (result?.drops) {
+            for (const drop of result.drops) {
+              try {
+                if (drop.weapon) loot.spawnItem(drop.position, wrapWeapon(drop.weapon));
+                else if (drop.item) loot.spawnItem(drop.position, drop.item);
+              } catch (_) {}
+            }
+          }
         } catch (err) {
           console.warn('[coop] rpc-shoot apply failed', err);
         } finally {
@@ -2185,9 +2296,22 @@ const customizeUI = new CustomizeUI({
   onDrop: (item) => {
     const p = player.mesh.position;
     if (tryEncounterItemDrop(item, p.x, p.z)) return;
-    loot.spawnItem(p.clone(), item);
+    _coopDropOrLocal(p.clone(), item);
   },
 });
+
+// Coop-aware inventory drop. Joiner sends rpc-drop to the host;
+// host spawns the item in its authoritative loot list as SHARED
+// (claimedBy=null) so both peers see it on the ground and either
+// can pick it back up. Host / single-player just spawn locally.
+function _coopDropOrLocal(p, item) {
+  const t = getCoopTransport();
+  if (t.isOpen && !t.isHost) {
+    t.send('rpc-drop', { x: p.x, z: p.z, item });
+    return;
+  }
+  loot.spawnItem(p, item);
+}
 
 // Auto-grant relic pickups. Encounter rewards (and any
 // relic the player walks over) are consumed on contact: the artifact
@@ -2220,7 +2344,7 @@ const lootUI = new LootUI({
   onDrop: (item) => {
     const p = player.mesh.position;
     if (tryEncounterItemDrop(item, p.x, p.z)) return;
-    loot.spawnItem(p.clone(), item);
+    _coopDropOrLocal(p.clone(), item);
   },
   onAcquireArtifact: _tryAcquireRelic,
 });
@@ -2593,7 +2717,7 @@ const inventoryUI = new InventoryUI({
   onDrop: (item) => {
     const p = player.mesh.position;
     if (tryEncounterItemDrop(item, p.x, p.z)) return;
-    loot.spawnItem(p.clone(), item);
+    _coopDropOrLocal(p.clone(), item);
   },
   getActiveWeapon: () => currentWeapon(),
   onOpenCustomize: (item) => {
@@ -5313,7 +5437,22 @@ function awardXp(amount) {
 }
 function awardKillXp(enemy) {
   const inGunmen = gunmen.gunmen.includes(enemy);
-  awardXp(inGunmen ? tunables.xp.killValue.gunman : tunables.xp.killValue.melee);
+  const value = inGunmen ? tunables.xp.killValue.gunman : tunables.xp.killValue.melee;
+  // Coop attribution: rpc-shoot wraps applyHit in a thread-local that
+  // names the killing joiner. When set, route the XP via RPC instead
+  // of awarding host-locally — same instancing model as loot drops.
+  // The joiner's rpc-grant-xp handler runs awardXp on their side.
+  const claimer = (typeof window !== 'undefined') ? window.__coopCurrentClaimer : null;
+  if (claimer) {
+    try {
+      const t = getCoopTransport();
+      if (t.isOpen && t.isHost) {
+        t.send('rpc-grant-xp', { amount: value }, claimer);
+        return;
+      }
+    } catch (_) { /* fall through to local */ }
+  }
+  awardXp(value);
 }
 function syncInventoryIfChanged() {
   if (inventory.version !== lastInventoryVersion) {
@@ -8158,15 +8297,11 @@ function _tickCoop(dt) {
         }
       }
     }
-  } else if (!transport.isHost && _coopPendingSnapshot) {
-    // Joiner — apply the most recent snapshot we received. Lerp
-    // factor is dt / 0.06 so the snap-to-target interpolation settles
-    // ~60ms after a fresh packet (~one snapshot interval).
-    applyEnemySnapshot(_coopPendingSnapshot, gunmen, melees, Math.min(1, dt / 0.06));
-    // Loot mirror — same snapshot also carries host's loot list.
-    // The closure here adapts the joiner's local loot manager spawn
-    // call so snapshot.js doesn't reach into LootManager internals.
-    applyLootSnapshot(_coopPendingSnapshot, loot, (pos, stubItem) => {
+  } else if (!transport.isHost) {
+    // Joiner — render at T-100ms by interpolating between two
+    // adjacent received snapshots. Smoother than chasing a single
+    // moving target with a per-frame lerp at 20Hz packets.
+    applyInterpolated(gunmen, melees, loot, (pos, stubItem) => {
       try { return loot.spawnItem(pos, stubItem); }
       catch (_) { return null; }
     });
@@ -13892,23 +14027,28 @@ function tick() {
     const t = getCoopTransport();
     return t.isOpen && !t.isHost;
   })();
-  if (!_coopJoiner) {
-  // Build the multi-target player list once per frame for the AI.
-  // Host AI uses this to pick whichever player is closest to each
-  // enemy. Single-player runs leave the array length 1 (just host),
-  // and the manager's per-enemy swap is a no-op.
+  // Multi-target player list (host only — joiners pass empty so the
+  // manager's swap is a no-op). The managers also receive a
+  // coopJoiner flag that gates the AI decision call (_updateRanged /
+  // _updateAI) while letting rig animation + death physics + corpse
+  // settling continue. Without that, joiner corpses stayed upright
+  // and walk cycles froze.
   const _coopPlayers = [];
-  _coopPlayers.push({
-    x: player.mesh.position.x,
-    z: player.mesh.position.z,
-    peerId: null,
-  });
-  if (coopLobby && getCoopTransport().isHost) {
-    for (const [pid, ghost] of coopLobby.ghosts) {
-      _coopPlayers.push({ x: ghost.x, z: ghost.z, peerId: pid });
+  if (!_coopJoiner) {
+    _coopPlayers.push({
+      x: player.mesh.position.x,
+      z: player.mesh.position.z,
+      peerId: null,
+    });
+    if (coopLobby && getCoopTransport().isHost) {
+      for (const [pid, ghost] of coopLobby.ghosts) {
+        _coopPlayers.push({ x: ghost.x, z: ghost.z, peerId: pid });
+      }
     }
   }
+  {
   gunmen.update({
+    coopJoiner: _coopJoiner,
     players: _coopPlayers,
     dt,
     playerPos: playerInfo.position,
@@ -13945,6 +14085,7 @@ function tick() {
   });
   melees.update({
     dt,
+    coopJoiner: _coopJoiner,
     players: _coopPlayers,           // multi-target AI; see gunman.js
     playerPos: playerInfo.position,
     playerRoomId,                   // assassin uncloak trigger
@@ -14096,7 +14237,9 @@ function tick() {
     playerBlocking: playerInfo.blocking,
     resolveCollision: enemyResolveCollision,
   });
-  }   // end !_coopJoiner gate around gunmen/melees update
+  }   // end of gunmen/melees update block — coopJoiner flag inside the
+      // managers gates the AI, not this outer wrapper, so death physics
+      // + rig anim still run on joiner.
   // Drone tick — the suicide drones float toward the player at
   // a fixed speed and detonate on contact. Player-aim raycasts
   // already see them via allHittables (the manager plugged its

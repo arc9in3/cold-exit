@@ -213,6 +213,12 @@ export class CoopLobbyUI {
       this._setStatus('Disconnected.');
       this.ghosts.clear();
     });
+    t.addEventListener('host-lost', (e) => {
+      this._setStatus(`Host disconnected — run ended. ${e.detail?.message || ''}`, true);
+      this.ghosts.clear();
+      // Surface the lobby so the player can host a new room or rejoin.
+      this.show();
+    });
     t.addEventListener('error', (e) => this._setStatus(`Error: ${e.detail.message}`, true));
 
     // Echo demo — receive 'pos' messages and feed the ghost map.

@@ -241,6 +241,26 @@ export class LootUI {
   open(target) {
     this.target = target;
     this.bodyHidden = false;
+    // Coop body-loot — when a synced enemy corpse is opened, wrap
+    // its loot array so each splice fires window.__coopOnBodyTake.
+    // The hook routes through main.js to send rpc-body-take; host
+    // applies + the next snapshot reflects, keeping both peers'
+    // body.loot lists in sync. Safe / no-op for ground piles,
+    // containers, and single-player bodies.
+    if (target?.netId != null && target.loot && !target.loot._coopWrapped) {
+      const arr = target.loot;
+      const origSplice = arr.splice.bind(arr);
+      arr.splice = function(start, deleteCount, ...rest) {
+        if (deleteCount > 0 && start >= 0 && start < arr.length) {
+          if (typeof window !== 'undefined' && window.__coopOnBodyTake) {
+            try { window.__coopOnBodyTake(target.netId, start, arr[start]); }
+            catch (_) {}
+          }
+        }
+        return origSplice(start, deleteCount, ...rest);
+      };
+      arr._coopWrapped = true;
+    }
     // Register the workspace as the inventory's overflow sink. Any
     // swap that displaces an item that doesn't fit in pockets/rig/
     // backpack now falls into the workspace (which grows as needed)

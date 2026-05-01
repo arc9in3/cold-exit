@@ -126,6 +126,15 @@ export class CoopTransport extends EventTarget {
       this._dispatch('close', { code: evt.code, reason: evt.reason });
       if (this._heartbeat) { clearInterval(this._heartbeat); this._heartbeat = null; }
       this.ws = null;
+      // Stale-state purge — server assigns a fresh peerId on
+      // reconnect, so clearing here prevents a brief window where
+      // application messages route against the OLD peerId between
+      // close and the next welcome. peerCount reads also stay
+      // consistent (no phantom peer-self).
+      this.peerId = null;
+      this.hostId = null;
+      this.peers.clear();
+      this.rtt = null;
       if (!this._closing && this._reconnects < MAX_RECONNECTS) {
         const delay = Math.min(RECONNECT_MAX_MS,
           RECONNECT_BASE_MS * Math.pow(1.7, this._reconnects));
@@ -172,6 +181,18 @@ export class CoopTransport extends EventTarget {
       case 'host': {
         this.hostId = msg.host;
         this._dispatch('host', { host: msg.host });
+        return;
+      }
+      case 'host-lost': {
+        // Server killed the room because the host disconnected.
+        // Per the architecture: we don't fake host-migration; the
+        // remaining peer falls back to single-player. Stop the
+        // reconnect loop so we don't dial right back into a dead
+        // room, and dispatch close so the lobby can show a notice.
+        console.warn('[coop] host-lost — run ended');
+        this._closing = true;
+        this._dispatch('host-lost', { message: msg.message || 'host disconnected' });
+        try { this.ws?.close(); } catch (_) {}
         return;
       }
       case 'msg': {
