@@ -46,6 +46,7 @@ const KIND_ALLOWED_FROM_HOST = new Set([
   'rpc-grant-item',   // pickup approval
   'rpc-grant-xp',
   'rpc-grant-rewards', // credits + skill points + contract progress for a joiner kill
+  'rpc-consume-med',   // host tells a downed peer to consume a medical item from their pack
   'rpc-player-damage',
   'fx-tracer',        // host's AI bullet trace; broadcast for visuals
   'fx-ring',          // host's hazard telegraph ring (artillery / aoe)

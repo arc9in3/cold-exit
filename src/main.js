@@ -121,7 +121,7 @@ window.__resetHints = resetHints;
 // "I'm on build XYZ" without inspecting the bundle. Date stamps the
 // version so a quick glance tells you how stale the build is. Both
 // values render into the bottom-right #build-version label.
-const BUILD_VERSION = '6ff52c8+coins-direct-to-player';
+const BUILD_VERSION = '0c7e751+medical-menu+per-run-encounters';
 // Build date intentionally bumped each deploy so the corner label
 // reflects the current snapshot.
 const BUILD_DATE    = '2026-05-01';
@@ -1818,11 +1818,11 @@ function _enterDownedState() {
         reviverPeerId: null,
         isHostSelf: true,
       });
-      t.send('rpc-downed', { p: t.peerId, b: _localBleedoutT });
+      t.send('rpc-downed', { p: t.peerId, b: _localBleedoutT, meds: _coopMyMedicalIds() });
     } else {
       // Joiner went down — tell host via the joiner-allowed kind.
       // Host re-broadcasts as rpc-downed (host-only kind on the wire).
-      t.send('rpc-self-down', { b: _localBleedoutT });
+      t.send('rpc-self-down', { b: _localBleedoutT, meds: _coopMyMedicalIds() });
     }
   }
   // Surface a HUD message so the player understands.
@@ -2236,63 +2236,22 @@ function _tickReviveInteract(dt) {
     const d2 = dx * dx + dz * dz;
     if (d2 < bestD) { bestD = d2; target = peerId; }
   }
-  const isHolding = !!(input && input._isHeld && input._isHeld(ACTIONS.INTERACT));
   const totalHold = tunables.coop?.reviveHoldSec ?? 20;
   const decaySec  = tunables.coop?.reviveDecaySec ?? 12;
-  // Phase 2: heal-item bypass. While in revive range with a downed
-  // peer, pressing F (HEAL) consumes the best revive item carried
-  // and applies its effect. Priority order matches potency — defib
-  // (100%) > trauma (90%) > IFAK (70%) > medkit (60%). Falls through
-  // to the hold-based 30% revive if none are carried. The heal
-  // press is consumed BEFORE tryUseMedkit so it doesn't double-fire.
-  _refreshDefibHint(target);
-  if (target && lastSampledInput && lastSampledInput.healPressed) {
-    // Try instant revive first; fall through to tourniquet (bleedout
-    // extender) if no revive item is carried but a tourniquet is.
-    const revive = _findBestReviveItem();
-    const tourni = revive ? null : _findTourniquet();
-    const found = revive || tourni;
-    if (found) {
-      lastSampledInput.healPressed = false;
-      const stackCount = (found.entry.item.count | 0) || 1;
-      if (stackCount > 1) {
-        found.entry.item.count = stackCount - 1;
-        inventory._bump?.();
-      } else {
-        inventory.takeFromBackpack(found.entry.idx);
-      }
-      inventoryUI.render();
-      try { sfx.uiAccept?.(); } catch (_) {}
-      if (found.kind === 'tourniquet') {
-        // Bleedout extender — refresh the downed peer's timer to full.
-        // Does NOT take them out of downed state.
-        const fullBleedout = tunables.coop?.reviveBleedoutSec ?? 300;
-        transientHudMsg('TOURNIQUET — bleedout reset', 2.5);
-        if (t.isHost) {
-          // Host applies + rebroadcasts so the revivee's HUD updates.
-          const st = _coopPeerDowned.get(target);
-          if (st) st.bleedoutT = fullBleedout;
-          t.send('rpc-downed', { p: target, b: fullBleedout });
-          if (t.peerId === target) _localBleedoutT = fullBleedout;
-        } else {
-          t.send('rpc-revive-item', { t: target, k: 'tourniquet' });
-        }
-      } else {
-        // Instant revive at the item's hpPct.
-        transientHudMsg(`${found.label} — revive`, 2.5);
-        if (t.isHost) {
-          t.send('rpc-revived', { p: target, hp: found.hpPct });
-          _coopPeerDowned.delete(target);
-          _reviveTargetPeerId = null;
-          _reviveHoldT = 0;
-        } else {
-          t.send('rpc-revive-item', { t: target, k: found.kind });
-        }
-      }
-      return;
-    }
+  // E-press while in range opens the medical menu (overlay) listing
+  // both peers' revive items. Selecting one consumes from that pack
+  // and applies the effect. The menu pauses the input swap (closing
+  // returns input control). Closed via Escape or click-outside.
+  if (target && lastSampledInput && lastSampledInput.interactPressed && !_medicalMenuOpen) {
+    lastSampledInput.interactPressed = false;     // consume so tryInteract skips
+    _openMedicalMenu(target);
+    return;
   }
-  if (target && isHolding) {
+  // Auto-revive — proximity alone fills the bar. No hold required.
+  // Closing the medical menu doesn't reset the bar; the player can
+  // walk up, get partial fill, peek the menu, walk back to keep
+  // filling. Bleedout pauses while reviveT > 0 (already host-side).
+  if (target) {
     if (_reviveTargetPeerId !== target) {
       _reviveTargetPeerId = target;
       _reviveHoldT = 0;
@@ -2302,7 +2261,6 @@ function _tickReviveInteract(dt) {
     if (_reviveLastSendT <= 0) {
       _reviveLastSendT = 0.2;
       if (t.isHost) {
-        // Host is its own authority. Apply revive on completion.
         if (_reviveHoldT >= totalHold) {
           const hpPct = tunables.coop?.reviveHpPct ?? 0.30;
           t.send('rpc-revived', { p: target, hp: hpPct });
@@ -2310,12 +2268,9 @@ function _tickReviveInteract(dt) {
           _reviveTargetPeerId = null;
           _reviveHoldT = 0;
         } else {
-          // Broadcast progress so the revivee's HUD bar fills.
           t.send('rpc-revive-progress', { p: target, t: _reviveHoldT, a: true });
         }
       } else {
-        // Joiner: notify host of the hold state. Host runs the auth
-        // timer + broadcasts completion.
         t.send('rpc-revive-hold', { t: target, h: true });
       }
     }
@@ -2323,15 +2278,212 @@ function _tickReviveInteract(dt) {
     if (_reviveTargetPeerId) {
       if (!t.isHost) t.send('rpc-revive-hold', { t: _reviveTargetPeerId, h: false });
       else {
-        // Host: also tell everyone we stopped progressing this
-        // target so the revivee's HUD bar starts decaying.
         t.send('rpc-revive-progress', { p: _reviveTargetPeerId, t: _reviveHoldT, a: false });
       }
     }
-    // Decay slower than fill (decay over reviveDecaySec).
     _reviveHoldT = Math.max(0, _reviveHoldT - dt * (totalHold / Math.max(0.1, decaySec)));
     if (_reviveHoldT <= 0) _reviveTargetPeerId = null;
   }
+}
+
+// Medical menu — modal that lists revive items in BOTH the local
+// reviver's pack and the downed peer's pack (sent in rpc-downed.meds).
+// Selecting an item sends rpc-revive-item with srcPack indicating
+// which side gives up the consumable. Auto-closes on revive complete.
+let _medicalMenuOpen = false;
+let _medicalMenuRoot = null;
+let _medicalMenuTarget = null;
+function _openMedicalMenu(targetPeer) {
+  if (_medicalMenuOpen) return;
+  const downed = _coopPeerDowned.get(targetPeer);
+  if (!downed) return;
+  _medicalMenuOpen = true;
+  _medicalMenuTarget = targetPeer;
+  if (!_medicalMenuRoot) {
+    const root = document.createElement('div');
+    Object.assign(root.style, {
+      position: 'fixed', inset: '0', zIndex: '110',
+      background: 'rgba(8,12,16,0.78)',
+      display: 'none', alignItems: 'center', justifyContent: 'center',
+      font: '13px ui-monospace, Menlo, Consolas, monospace',
+    });
+    root.id = 'medical-menu';
+    root.addEventListener('click', (e) => { if (e.target === root) _closeMedicalMenu(); });
+    document.body.appendChild(root);
+    _medicalMenuRoot = root;
+  }
+  const root = _medicalMenuRoot;
+  root.innerHTML = '';
+  const card = document.createElement('div');
+  Object.assign(card.style, {
+    background: 'linear-gradient(180deg, #1a2228, #0c1014)',
+    border: '1px solid #c0e0ff', borderRadius: '6px',
+    padding: '20px 24px', maxWidth: '520px', width: '90%',
+    boxShadow: '0 0 36px rgba(120,200,255,0.35)',
+    color: '#f2e7c9',
+  });
+  const title = document.createElement('div');
+  Object.assign(title.style, {
+    color: '#a0d8ff', fontWeight: '700', fontSize: '14px',
+    letterSpacing: '3px', textTransform: 'uppercase',
+    textAlign: 'center', marginBottom: '4px',
+  });
+  title.textContent = 'MEDICAL';
+  card.appendChild(title);
+  const sub = document.createElement('div');
+  Object.assign(sub.style, {
+    color: '#a89070', fontSize: '11px', textAlign: 'center',
+    marginBottom: '14px', letterSpacing: '1.5px',
+  });
+  sub.textContent = 'Pick a revive item — auto-revive continues meanwhile';
+  card.appendChild(sub);
+  const myMeds = _coopMyMedicalIds();
+  const theirMeds = Array.isArray(downed.meds) ? downed.meds.slice() : [];
+  const sectionTitle = (label, count) => {
+    const el = document.createElement('div');
+    Object.assign(el.style, {
+      color: '#80c0e0', fontSize: '11px', letterSpacing: '2px',
+      textTransform: 'uppercase', margin: '10px 0 6px',
+      borderBottom: '1px solid rgba(120,200,255,0.25)', paddingBottom: '3px',
+    });
+    el.textContent = `${label} — ${count} item${count === 1 ? '' : 's'}`;
+    return el;
+  };
+  const groupCounts = (ids) => {
+    const m = new Map();
+    for (const id of ids) m.set(id, (m.get(id) || 0) + 1);
+    return m;
+  };
+  const buildRow = (id, count, srcPack) => {
+    const meta = _MEDICAL_LABELS[id];
+    if (!meta) return null;
+    const btn = document.createElement('button');
+    Object.assign(btn.style, {
+      display: 'flex', alignItems: 'center', justifyContent: 'space-between',
+      width: '100%', textAlign: 'left',
+      padding: '10px 14px', marginBottom: '6px',
+      background: 'rgba(20,36,52,0.55)',
+      border: '1px solid #4a6a82', borderRadius: '4px',
+      color: '#f2e7c9', font: 'inherit', cursor: 'pointer',
+    });
+    btn.onmouseenter = () => { btn.style.background = 'rgba(40,72,104,0.75)'; btn.style.borderColor = '#a0d8ff'; };
+    btn.onmouseleave = () => { btn.style.background = 'rgba(20,36,52,0.55)'; btn.style.borderColor = '#4a6a82'; };
+    const left = document.createElement('span');
+    Object.assign(left.style, { fontWeight: '700', color: '#ffd070' });
+    left.textContent = `${meta.label}${count > 1 ? ` × ${count}` : ''}`;
+    const right = document.createElement('span');
+    Object.assign(right.style, { fontSize: '11px', color: '#b8a890' });
+    right.textContent = meta.kind === 'tourniquet'
+      ? 'Reset bleedout'
+      : `Revive ${Math.round(meta.hpPct * 100)}%`;
+    btn.appendChild(left);
+    btn.appendChild(right);
+    btn.addEventListener('click', () => _useMedicalItem(targetPeer, id, srcPack));
+    return btn;
+  };
+  // Reviver's pack
+  if (myMeds.length) card.appendChild(sectionTitle('Your pack', myMeds.length));
+  else {
+    const empty = document.createElement('div');
+    Object.assign(empty.style, { color: '#7a6650', fontSize: '11px', fontStyle: 'italic', marginBottom: '6px' });
+    empty.textContent = 'Your pack — empty';
+    card.appendChild(empty);
+  }
+  for (const [id, count] of groupCounts(myMeds)) {
+    const row = buildRow(id, count, 'self');
+    if (row) card.appendChild(row);
+  }
+  // Downed peer's pack
+  if (theirMeds.length) card.appendChild(sectionTitle('Their pack', theirMeds.length));
+  else {
+    const empty = document.createElement('div');
+    Object.assign(empty.style, { color: '#7a6650', fontSize: '11px', fontStyle: 'italic', margin: '6px 0' });
+    empty.textContent = 'Their pack — empty';
+    card.appendChild(empty);
+  }
+  for (const [id, count] of groupCounts(theirMeds)) {
+    const row = buildRow(id, count, 'down');
+    if (row) card.appendChild(row);
+  }
+  const closeBtn = document.createElement('button');
+  Object.assign(closeBtn.style, {
+    display: 'block', width: '100%', marginTop: '8px', padding: '8px',
+    background: 'transparent', border: '1px solid #4a3a2a',
+    borderRadius: '3px', color: '#a89070', font: 'inherit',
+    cursor: 'pointer', letterSpacing: '1.5px', textTransform: 'uppercase',
+    fontSize: '11px',
+  });
+  closeBtn.textContent = 'Close (Esc)';
+  closeBtn.addEventListener('click', _closeMedicalMenu);
+  card.appendChild(closeBtn);
+  root.appendChild(card);
+  root.style.display = 'flex';
+}
+function _closeMedicalMenu() {
+  if (!_medicalMenuOpen) return;
+  _medicalMenuOpen = false;
+  _medicalMenuTarget = null;
+  if (_medicalMenuRoot) _medicalMenuRoot.style.display = 'none';
+}
+window.addEventListener('keydown', (e) => {
+  if (_medicalMenuOpen && (e.key === 'Escape' || e.code === 'Escape')) {
+    _closeMedicalMenu();
+    e.preventDefault();
+  }
+});
+function _useMedicalItem(targetPeer, itemId, srcPack) {
+  const meta = _MEDICAL_LABELS[itemId];
+  if (!meta) { _closeMedicalMenu(); return; }
+  const t = getCoopTransport();
+  if (srcPack === 'self') {
+    // Reviver's pack — consume locally first.
+    const found = inventory.findFirstConsumable?.(it => it.id === itemId);
+    if (!found) { _closeMedicalMenu(); return; }
+    const stack = (found.item.count | 0) || 1;
+    if (stack > 1) { found.item.count = stack - 1; inventory._bump?.(); }
+    else inventory.takeFromBackpack(found.idx);
+    inventoryUI.render();
+  }
+  try { sfx.uiAccept?.(); } catch (_) {}
+  // Apply the effect. Tourniquet is a bleedout extender; everything
+  // else is an instant revive at the item's hpPct.
+  if (meta.kind === 'tourniquet') {
+    const fullBleedout = tunables.coop?.reviveBleedoutSec ?? 300;
+    transientHudMsg('TOURNIQUET — bleedout reset', 2.5);
+    if (t.isHost) {
+      const st = _coopPeerDowned.get(targetPeer);
+      if (st) st.bleedoutT = fullBleedout;
+      t.send('rpc-downed', { p: targetPeer, b: fullBleedout, meds: st?.meds || [] });
+      if (t.peerId === targetPeer) _localBleedoutT = fullBleedout;
+    } else {
+      t.send('rpc-revive-item', { t: targetPeer, k: 'tourniquet', src: srcPack });
+    }
+  } else {
+    transientHudMsg(`${meta.label} — revive`, 2.5);
+    if (t.isHost) {
+      // Host self-pack consumption already applied above. For 'down'
+      // pack, host strips the item from the downed peer's snapshot
+      // meds list (the actual local inventory is on the downed peer's
+      // client; they'll consume on their side via the revived flow).
+      if (srcPack === 'down') {
+        const st = _coopPeerDowned.get(targetPeer);
+        if (st && Array.isArray(st.meds)) {
+          const i = st.meds.indexOf(itemId);
+          if (i >= 0) st.meds.splice(i, 1);
+        }
+        // Tell the downed peer to consume the item from their own
+        // inventory (they'll reach this branch via rpc-consume-med).
+        t.send('rpc-consume-med', { id: itemId }, targetPeer);
+      }
+      t.send('rpc-revived', { p: targetPeer, hp: meta.hpPct });
+      _coopPeerDowned.delete(targetPeer);
+      _reviveTargetPeerId = null;
+      _reviveHoldT = 0;
+    } else {
+      t.send('rpc-revive-item', { t: targetPeer, k: meta.kind, src: srcPack, id: itemId });
+    }
+  }
+  _closeMedicalMenu();
 }
 
 function _tickDowned(dt) {
@@ -2570,12 +2722,14 @@ function _ensureCoopLobby() {
       // broadcast as the host-only kind so every other peer sees it.
       if (!transport.isHost || !body) return;
       const bleedout = +body.b || (tunables.coop?.reviveBleedoutSec ?? 60);
+      const meds = Array.isArray(body.meds) ? body.meds.slice() : [];
       _coopPeerDowned.set(from, {
         bleedoutT: bleedout,
         reviveT: 0,
         reviverPeerId: null,
+        meds,
       });
-      transport.send('rpc-downed', { p: from, b: bleedout });
+      transport.send('rpc-downed', { p: from, b: bleedout, meds });
       return;
     }
     if (kind === 'rpc-downed') {
@@ -2587,6 +2741,7 @@ function _ensureCoopLobby() {
         bleedoutT: body.b || 60,
         reviveT: 0,
         reviverPeerId: null,
+        meds: Array.isArray(body.meds) ? body.meds.slice() : [],
       });
       // Visual: add a translucent red overlay child to the ghost
       // group so the downed state reads urgent without mutating
@@ -2599,16 +2754,40 @@ function _ensureCoopLobby() {
       // Host-only: a joiner used a health item on a downed peer.
       // Kind maps to a revive HP fraction via _REVIVE_KIND_TO_HP,
       // OR is the special 'tourniquet' kind which extends bleedout
-      // without reviving.
+      // without reviving. body.src is 'self' (reviver's pack —
+      // already consumed on their side) or 'down' (downed peer's
+      // pack — host tells the downed client to consume via
+      // rpc-consume-med).
       if (!transport.isHost || !body || !body.t) return;
       const targetPeer = body.t;
       const itemKind = body.k || 'defib';
+      const srcPack = body.src || 'self';
+      const itemId = body.id || null;
       const st = _coopPeerDowned.get(targetPeer);
       if (!st || st.bleedoutT <= 0) return;     // not downed / already gone
+      if (srcPack === 'down' && itemId && Array.isArray(st.meds)) {
+        const i = st.meds.indexOf(itemId);
+        if (i >= 0) st.meds.splice(i, 1);
+        if (transport.peerId === targetPeer) {
+          // Host is the revivee — consume from our own pack locally;
+          // can't WS-send to self.
+          try {
+            const found = inventory.findFirstConsumable?.(it => it.id === itemId);
+            if (found) {
+              const stack = (found.item.count | 0) || 1;
+              if (stack > 1) { found.item.count = stack - 1; inventory._bump?.(); }
+              else inventory.takeFromBackpack(found.idx);
+              inventoryUI.render();
+            }
+          } catch (_) {}
+        } else {
+          transport.send('rpc-consume-med', { id: itemId }, targetPeer);
+        }
+      }
       if (itemKind === 'tourniquet') {
         const fullBleedout = tunables.coop?.reviveBleedoutSec ?? 300;
         st.bleedoutT = fullBleedout;
-        transport.send('rpc-downed', { p: targetPeer, b: fullBleedout });
+        transport.send('rpc-downed', { p: targetPeer, b: fullBleedout, meds: st.meds || [] });
         if (transport.peerId === targetPeer) _localBleedoutT = fullBleedout;
         return;
       }
@@ -2621,6 +2800,23 @@ function _ensureCoopLobby() {
       if (transport.peerId === targetPeer) {
         try { _leaveDownedState(hpPct); } catch (_) {}
       }
+      return;
+    }
+    if (kind === 'rpc-consume-med') {
+      // Receiver-only — host tells us to consume a medical item from
+      // our own pack (because the reviver picked it from our pack).
+      // No-op if we don't have it; the host has already booked the
+      // effect on their side.
+      if (!body || !body.id) return;
+      try {
+        const found = inventory.findFirstConsumable?.(it => it.id === body.id);
+        if (found) {
+          const stack = (found.item.count | 0) || 1;
+          if (stack > 1) { found.item.count = stack - 1; inventory._bump?.(); }
+          else inventory.takeFromBackpack(found.idx);
+          inventoryUI.render();
+        }
+      } catch (e) { console.warn('[coop] rpc-consume-med apply failed', e); }
       return;
     }
     if (kind === 'rpc-revive-hold') {
@@ -5080,6 +5276,13 @@ function _regenerateLevelImpl() {
       ctx: _spawnCtx,
       ctxFactory: _ctxFactory,    // kept for any path that needs a fresh build (rare)
     };
+    // Per-run lock — once an encounter has been ASSIGNED to a room
+    // this run, take it out of the candidate pool for subsequent
+    // rooms / floors. Previously the lock fired only on completion,
+    // so an unfinished spicy_challenge could re-spawn floor after
+    // floor. The eligibility filter (encounter_tier.js) reads this
+    // set for every encounter id regardless of oncePerSave.
+    _runCompletedEncounters.add(def.id);
   }
   // Pity-timer roll — reset the bonus the moment an encounter ROOM
   // was rolled this level (even if no def was assignable and it got
@@ -13061,6 +13264,34 @@ function _findTourniquet() {
   return found ? { entry: found, kind: 'tourniquet', label: 'TOURNIQUET' } : null;
 }
 
+// All revive-relevant item ids (instant revives + tourniquet). Used
+// by the medical menu to enumerate what each peer is carrying.
+const _ALL_REVIVE_ITEM_IDS = [
+  ..._REVIVE_ITEMS.map(r => r.id),
+  'cons_tourniquet',
+];
+const _MEDICAL_LABELS = {
+  cons_defib:      { kind: 'defib',      label: 'DEFIB',      hpPct: 1.00 },
+  cons_trauma:     { kind: 'trauma',     label: 'TRAUMA',     hpPct: 0.90 },
+  cons_afak:       { kind: 'ifak',       label: 'IFAK',       hpPct: 0.70 },
+  cons_medkit:     { kind: 'medkit',     label: 'MEDKIT',     hpPct: 0.60 },
+  cons_bandage:    { kind: 'bandage',    label: 'BANDAGE',    hpPct: 0.40 },
+  cons_tourniquet: { kind: 'tourniquet', label: 'TOURNIQUET', hpPct: null },
+};
+// List the medical-relevant item ids in the local player's inventory.
+// Multi-stack stays as repeated ids so the menu shows count.
+function _coopMyMedicalIds() {
+  if (!inventory || !inventory.backpack) return [];
+  const ids = [];
+  for (const it of inventory.backpack) {
+    if (!it || it.type !== 'consumable') continue;
+    if (!_MEDICAL_LABELS[it.id]) continue;
+    const stack = (it.count | 0) || 1;
+    for (let i = 0; i < stack; i++) ids.push(it.id);
+  }
+  return ids;
+}
+
 // Sticky hint that surfaces while the local player is in revive range
 // of a downed peer AND carries any instant-revive item. Reads
 // "[F] <ITEM> — REVIVE" so the player knows the bypass exists.
@@ -13101,9 +13332,9 @@ function _refreshDefibHint(targetPeerId) {
     document.body.appendChild(el);
     _defibHintEl = el;
   }
-  const nextText = found.kind === 'tourniquet'
-    ? `[F] ${found.label} — RESET BLEEDOUT`
-    : `[F] ${found.label} — REVIVE ${Math.round(found.hpPct * 100)}%`;
+  // Auto-revive runs in the background; E opens the medical menu so
+  // the player can pick a specific item to skip the hold.
+  const nextText = `[E] MEDICAL — open pack`;
   if (_defibHintEl._lastTxt !== nextText) {
     _defibHintEl.textContent = nextText;
     _defibHintEl._lastTxt = nextText;

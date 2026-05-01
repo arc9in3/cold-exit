@@ -84,8 +84,12 @@ export function isEncounterEligible(def, completedSet, cooldownMap, currentRun, 
   // per-def `condition()` function, so they remain dependency-locked
   // even with the tier system off.
   // if ((def.tier | 0) > (currentTier | 0)) return false;
-  // Already-finished one-shot encounters.
-  if (def.oncePerSave && completedSet && completedSet.has(def.id)) return false;
+  // Once-per-run gate — every encounter that's already been spawned
+  // this run is filtered out, regardless of its def.oncePerSave flag.
+  // The flag remains in the data for legacy reasons but no longer
+  // discriminates between "lifetime" and "per-run" gating; per-run
+  // is now the canonical scope (no per-account encounter locks).
+  if (completedSet && completedSet.has(def.id)) return false;
   // Run-cooldown.
   const unsuppressAt = cooldownMap?.[def.id];
   if (typeof unsuppressAt === 'number' && currentRun < unsuppressAt) return false;
