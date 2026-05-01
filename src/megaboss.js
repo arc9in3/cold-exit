@@ -714,6 +714,15 @@ export class MegaBoss {
     if (this.ctx.knockbackPlayer && d > 0.0001) {
       this.ctx.knockbackPlayer((dx / d) * push, (dz / d) * push);
     }
+    // Coop: body-crush joiner ghosts touching the boss. The host's
+    // _HIT_GRACE_SEC throttle on _lastBodyHitT also caps how often
+    // this fires per-peer (boss-level grace, shared across all
+    // players — close enough; tightening per-peer would need a Map
+    // on the boss instance).
+    this.ctx.damageRemotePlayersInRadius?.(
+      this.boss.position.x, this.boss.position.z,
+      _BOSS_RADIUS + 0.7, this.dmg.bodyCrush, 'megaboss',
+    );
   }
 
   _faceToward(playerPos, dt) {
@@ -1021,6 +1030,10 @@ export class MegaBoss {
           { source: this, zone: 'torso', distance: Math.hypot(ldx, ldz) });
         if (this.ctx.knockbackPlayer) this.ctx.knockbackPlayer(f * 4, z * 4);
       }
+      // Coop: also damage joiner ghosts caught in the slam OBB
+      // (approximated as a circle around the slam center — the OBB
+      // is 4×9m so the bounding circle is ~4.9m radius).
+      this.ctx.damageRemotePlayersInRadius?.(cx, cz, 4.9, this.dmg.slam, 'megaboss');
       if (this._slamTelegraphMesh) this._slamTelegraphMesh.material.opacity = 1.0;
       if (this.ctx.sfx?.explode) this.ctx.sfx.explode();
       if (this.ctx.shake) this.ctx.shake(0.65, 0.3);
@@ -1066,6 +1079,16 @@ export class MegaBoss {
         }
         if (this.ctx.shake) this.ctx.shake(0.7, 0.25);
       }
+      // Coop: damage joiner ghosts in the charge corridor. The
+      // oncePerPeerSet gate matches the host's per-charge single-hit
+      // semantic (_chargeHit) — each peer takes damage at most once
+      // per charge. Reset on _endAttack so the next charge can hit
+      // the same peer again.
+      if (!this._coopChargeHitPeers) this._coopChargeHitPeers = new Set();
+      this.ctx.damageRemotePlayersInRadius?.(
+        this.boss.position.x, this.boss.position.z, 2.4,
+        this.dmg.charge, 'megaboss', this._coopChargeHitPeers,
+      );
     }
     // Stop short if we'd leave the arena. Matches the 30×30m mega-arena
     // (HALF=15 in level.js) minus chassis-radius buffer so the boss body
@@ -1160,6 +1183,8 @@ export class MegaBoss {
   }
 
   _endAttack() {
+    // Reset coop per-attack gates so the next attack can re-hit peers.
+    if (this._coopChargeHitPeers) this._coopChargeHitPeers.clear();
     if (this._slamTelegraphMesh) {
       this.scene.remove(this._slamTelegraphMesh);
       this._slamTelegraphMesh.geometry.dispose();
@@ -1199,6 +1224,15 @@ export class MegaBoss {
         this.ctx.damagePlayer(b.dmg, 'megaboss', { source: this, zone: 'torso', distance: 0 });
         b.t = b.life;
       }
+      // Coop: check joiner ghosts independently of the host hit. The
+      // bullet expires on first hit (host or joiner) so we don't
+      // double-fire on the same projectile.
+      if (b.t < b.life && this.ctx.damageRemotePlayersInRadius) {
+        const peerHit = this.ctx.damageRemotePlayersInRadius(
+          b.mesh.position.x, b.mesh.position.z, 0.55, b.dmg, 'megaboss',
+        );
+        if (peerHit) b.t = b.life;
+      }
       if (b.t >= b.life) {
         this.scene.remove(b.mesh);
         b.mesh.geometry.dispose();
@@ -1222,6 +1256,8 @@ export class MegaBoss {
           this.ctx.damagePlayer(s.dmg, 'megaboss',
             { source: this, zone: 'torso', distance: Math.sqrt(ddx * ddx + ddz * ddz) });
         }
+        // Coop: damage joiner ghosts in the explosion radius.
+        this.ctx.damageRemotePlayersInRadius?.(s.x, s.z, s.radius, s.dmg, 'megaboss');
         if (this.ctx.shake) this.ctx.shake(0.45, 0.22);
         if (this.ctx.sfx?.explode) this.ctx.sfx.explode();
         this.scene.remove(s.ringMesh);
@@ -1342,6 +1378,10 @@ export class MegaBoss {
             this.ctx.damagePlayer(g.dmg, 'megaboss',
               { source: this, zone: 'torso', distance: Math.sqrt(ddx * ddx + ddz * ddz) });
           }
+          // Coop: damage joiner ghosts in the frag radius.
+          this.ctx.damageRemotePlayersInRadius?.(
+            g.mesh.position.x, g.mesh.position.z, g.radius, g.dmg, 'megaboss',
+          );
           if (this.ctx.shake) this.ctx.shake(0.35, 0.18);
         }
         if (this.ctx.sfx?.explode) this.ctx.sfx.explode();

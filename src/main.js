@@ -117,7 +117,7 @@ window.__resetHints = resetHints;
 // "I'm on build XYZ" without inspecting the bundle. Date stamps the
 // version so a quick glance tells you how stale the build is. Both
 // values render into the bottom-right #build-version label.
-const BUILD_VERSION = '712a7b0+deferred-picks-tunables';
+const BUILD_VERSION = 'e5e0b5f+megaboss-hazard-sync';
 // Build date intentionally bumped each deploy so the corner label
 // reflects the current snapshot.
 const BUILD_DATE    = '2026-05-01';
@@ -1749,6 +1749,98 @@ function _leaveDownedState(restoreHpPct = 0.30) {
   }
   try { transientHudMsg('REVIVED', 3.0); } catch (_) {}
 }
+// Megaboss hazard sync (DoT half) — host-side scanner. Runs after
+// megaBoss.update each frame; iterates the long-lived DoT hazard
+// arrays (fire pools + gas clouds) and broadcasts rpc-player-damage
+// to any joiner ghost inside the danger zone, throttled per-(hazard,
+// peer). Burst hazards (bullets / shells / grenades / slam / charge)
+// are handled inside megaboss.js via the damageRemotePlayersInRadius
+// ctx callback so the joiner damage lands on the same frame the host
+// damage does — by the time this scanner runs, those entries have
+// already been spliced from their arrays.
+function _coopTickMegabossHazards() {
+  if (!megaBoss || !coopLobby) return;
+  const t = getCoopTransport();
+  if (!t.isOpen || !t.isHost) return;
+  if (coopLobby.ghosts.size === 0) return;
+  for (const f of megaBoss.firePools || []) {
+    if (!f._coopLastTick) f._coopLastTick = Object.create(null);
+    const r2 = (f.radius || 1) * (f.radius || 1);
+    for (const [peerId, ghost] of coopLobby.ghosts) {
+      const dx = ghost.x - f.x, dz = ghost.z - f.z;
+      if (dx * dx + dz * dz >= r2) continue;
+      const lastTick = f._coopLastTick[peerId] || 0;
+      if ((f.t - lastTick) > 0.33) {
+        f._coopLastTick[peerId] = f.t;
+        _coopSendPlayerDamage(peerId, f.dmg, 'fire', { zone: 'torso' });
+      }
+    }
+  }
+  for (const c of megaBoss.gasClouds || []) {
+    if (!c._coopLastTick) c._coopLastTick = Object.create(null);
+    const sc = 1 + (c.t / Math.max(0.001, c.life)) * 0.25;
+    const r = (c.radius || 1) * sc;
+    const r2 = r * r;
+    for (const [peerId, ghost] of coopLobby.ghosts) {
+      const dx = ghost.x - c.x, dz = ghost.z - c.z;
+      if (dx * dx + dz * dz >= r2) continue;
+      const lastTick = c._coopLastTick[peerId] || 0;
+      if ((c.t - lastTick) > 0.4) {
+        c._coopLastTick[peerId] = c.t;
+        _coopSendPlayerDamage(peerId, c.dmg, 'gas', { zone: 'torso' });
+      }
+    }
+  }
+}
+
+// Burst-hazard helper called from megaboss.js right after each host
+// damagePlayer site. Independent of the host hit (a joiner can be
+// inside the radius even when the host isn't), so the joiner check
+// runs unconditionally. Type maps to rpc-player-damage's `t` field —
+// `megaboss`, `fire`, `gas`, `melee`, `ballistic`. Pass an optional
+// `oncePerPeerSet` to gate repeat hits within a single attack (e.g.
+// charge attacks hit each peer at most once).
+function _coopDamageRemotePlayersInCone(cx, cz, dirAng, halfConeRad, range, dmg, type) {
+  if (!coopLobby) return false;
+  const t = getCoopTransport();
+  if (!t.isOpen || !t.isHost) return false;
+  if (coopLobby.ghosts.size === 0) return false;
+  const r2 = range * range;
+  let anyHit = false;
+  for (const [peerId, ghost] of coopLobby.ghosts) {
+    const dx = ghost.x - cx, dz = ghost.z - cz;
+    if (dx * dx + dz * dz > r2) continue;
+    const angToPeer = Math.atan2(dx, dz);
+    let delta = angToPeer - dirAng;
+    while (delta >  Math.PI) delta -= Math.PI * 2;
+    while (delta < -Math.PI) delta += Math.PI * 2;
+    if (Math.abs(delta) <= halfConeRad) {
+      _coopSendPlayerDamage(peerId, dmg, type || 'megaboss', { zone: 'torso' });
+      anyHit = true;
+    }
+  }
+  return anyHit;
+}
+
+function _coopDamageRemotePlayersInRadius(x, z, radius, dmg, type, oncePerPeerSet = null) {
+  if (!coopLobby) return false;
+  const t = getCoopTransport();
+  if (!t.isOpen || !t.isHost) return false;
+  if (coopLobby.ghosts.size === 0) return false;
+  const r2 = radius * radius;
+  let anyHit = false;
+  for (const [peerId, ghost] of coopLobby.ghosts) {
+    if (oncePerPeerSet && oncePerPeerSet.has(peerId)) continue;
+    const dx = ghost.x - x, dz = ghost.z - z;
+    if (dx * dx + dz * dz < r2) {
+      if (oncePerPeerSet) oncePerPeerSet.add(peerId);
+      _coopSendPlayerDamage(peerId, dmg, type || 'megaboss', { zone: 'torso' });
+      anyHit = true;
+    }
+  }
+  return anyHit;
+}
+
 // Reviver-side: detect downed teammate within range, accumulate
 // hold-progress while interact is held, send hold state to host (or
 // run auth locally if we are host). Phase 2 will surface a popup
@@ -3431,6 +3523,11 @@ function _regenerateLevelImpl() {
       scene, camera,
       combat, loot, sfx, projectiles,
       damagePlayer,
+      // Coop: route burst-hazard hits to joiner ghosts caught in the
+      // same blast / corridor / bullet path. No-op outside coop. See
+      // _coopDamageRemotePlayersInRadius for the broadcast logic.
+      damageRemotePlayersInRadius: _coopDamageRemotePlayersInRadius,
+      damageRemotePlayersInCone:   _coopDamageRemotePlayersInCone,
       getPlayerPos: () => player.mesh.position,
       playerHasIFrames: () => (lastPlayerInfo?.iFrames | 0) > 0,
       // Smoke-zone queries — let the boss respect smoke grenades the
@@ -14289,29 +14386,6 @@ function _showClassLevelUpBanner(durationMs = 1800) {
   });
 }
 
-async function runMasteryOffer() {
-  const offer = pendingMasteryOffers.shift();
-  if (!offer) return;
-  // Coop: same rationale as runLevelUp — don't freeze the other
-  // player's world while we pick a mastery.
-  const _coopOnly = (() => {
-    const t = getCoopTransport();
-    return t && t.isOpen && t.peers && t.peers.size > 0;
-  })();
-  if (!_coopOnly) paused = true;
-  input.clearMouseState();
-  inventoryUI.hide();
-  // Same anti-misclick beat as runLevelUp's banner — display a glowing
-  // "CLASS LEVEL UP" overlay (purple variant) before the picker so a
-  // mid-fight click can't lock in a mastery node by accident.
-  await _showClassLevelUpBanner(1800);
-  input.clearMouseState();
-  await masteryPickUI.show(offer);
-  input.clearMouseState();
-  if (!_coopOnly) paused = false;
-  recomputeStats();
-}
-
 function tick() {
   frameCounter = (frameCounter + 1) | 0;
   const rawDt = clock.getDelta();           // real elapsed since last frame
@@ -15078,16 +15152,17 @@ function tick() {
   // (not snapshot) so charge attack tracking is correct.
   //
   // Coop joiner: skip the FSM (host runs it) and pull position +
-  // HP from the latest snapshot. Hazards (fires, bullets, gas) are
-  // not yet synced — joiner sees the boss move + take damage but
-  // its attacks render only on host. v1 acceptable; full hazard
-  // sync is a follow-up.
+  // HP from the latest snapshot. Host runs the authoritative tick
+  // and then scans the megaboss's hazard arrays for any joiner
+  // ghosts caught in fires / gas / bullets / shells / grenades —
+  // see _coopTickMegabossHazards.
   if (megaBoss) {
     if (_coopJoiner) {
       const pair = pickInterpSnapshots();
       if (pair) applyMegaBossSnapshot(pair.b, megaBoss);
     } else {
       megaBoss.update(dt, player.mesh.position);
+      _coopTickMegabossHazards();
     }
   }
 

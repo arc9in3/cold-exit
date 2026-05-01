@@ -420,6 +420,10 @@ export class MegaBossEcho {
     if (Math.random() > hitChance) return;
     const dmg = T.ghostDamagePerPhase[this.phase - 1];
     ctx.damagePlayer(dmg, 'echo-ghost', { source: 'megaboss-echo' });
+    // Coop: ghost hitscan also hits joiner ghosts standing near the
+    // host's hit point. Loose 1.0m radius — Echo ghosts are aiming
+    // at the host position so this approximates "co-located" damage.
+    ctx.damageRemotePlayersInRadius?.(p.x, p.z, 1.0, dmg, 'megaboss');
   }
 
   // Phase 3 sweep beam damage check. The beam points along the eye's
@@ -443,6 +447,13 @@ export class MegaBossEcho {
     if (Math.abs(delta) < T.beamHalfConeRad) {
       ctx.damagePlayer(T.beamDamage, 'echo-beam', { source: 'megaboss-echo-beam' });
     }
+    // Coop: sweep beam also damages joiner ghosts inside the cone.
+    // Independent of the host hit (joiner can be in the cone when
+    // host isn't, and vice versa).
+    ctx.damageRemotePlayersInCone?.(
+      cx, cz, this.sweepAngle, T.beamHalfConeRad, T.beamRange,
+      T.beamDamage, 'megaboss',
+    );
   }
 
   // ---------- Bullet hits ----------
