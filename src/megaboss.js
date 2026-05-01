@@ -985,6 +985,16 @@ export class MegaBoss {
       mesh: m, vx: dirX * 11, vz: dirZ * 11,
       life: 1.7, t: 0, dmg: this.dmg.sweepBullet,
     });
+    // Coop: broadcast a one-shot tracer so the joiner sees a visible
+    // muzzle line for the bullet they can't otherwise see (the
+    // bullet mesh lives only on host). Endpoint approximates the
+    // bullet's max-life travel.
+    this.ctx.coopBroadcastTracer?.(
+      m.position.x, 1.6, m.position.z,
+      m.position.x + dirX * 11 * 1.7,
+      m.position.z + dirZ * 11 * 1.7,
+      0xffa040,
+    );
     if (this.ctx.sfx?.enemyFire) this.ctx.sfx.enemyFire('pistol', 0);
   }
 

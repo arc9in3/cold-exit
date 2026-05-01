@@ -117,7 +117,7 @@ window.__resetHints = resetHints;
 // "I'm on build XYZ" without inspecting the bundle. Date stamps the
 // version so a quick glance tells you how stale the build is. Both
 // values render into the bottom-right #build-version label.
-const BUILD_VERSION = '7233d24+coop-anims+glow+dropin+defib';
+const BUILD_VERSION = '57164c4+heal-items+megaboss-trace';
 // Build date intentionally bumped each deploy so the corner label
 // reflects the current snapshot.
 const BUILD_DATE    = '2026-05-01';
@@ -1814,6 +1814,21 @@ function _coopTickMegabossHazards() {
 // `megaboss`, `fire`, `gas`, `melee`, `ballistic`. Pass an optional
 // `oncePerPeerSet` to gate repeat hits within a single attack (e.g.
 // charge attacks hit each peer at most once).
+// Megaboss bullet tracer broadcast. Routes through the existing
+// fx-tracer kind so the joiner's combat.spawnShot renders the line
+// + flash. Cheap (one packet per bullet); host-only and only when
+// peers are connected.
+function _coopBroadcastMegabossTracer(x1, y1, z1, x2, z2, color) {
+  const t = getCoopTransport();
+  if (!t.isOpen || !t.isHost) return;
+  if (!t.peers || t.peers.size === 0) return;
+  t.send('fx-tracer', {
+    x1: +x1.toFixed(2), y1: +y1.toFixed(2), z1: +z1.toFixed(2),
+    x2: +x2.toFixed(2), y2: 1.0, z2: +z2.toFixed(2),
+    c: (color | 0) || 0xffa040,
+  });
+}
+
 function _coopDamageRemotePlayersInCone(cx, cz, dirAng, halfConeRad, range, dmg, type) {
   if (!coopLobby) return false;
   const t = getCoopTransport();
@@ -1879,36 +1894,34 @@ function _tickReviveInteract(dt) {
   const isHolding = !!(input && input._isHeld && input._isHeld(ACTIONS.INTERACT));
   const totalHold = tunables.coop?.reviveHoldSec ?? 20;
   const decaySec  = tunables.coop?.reviveDecaySec ?? 12;
-  // Phase 2: defib bypass. While in revive range with a downed peer,
-  // pressing F (HEAL action) consumes a defibrillator and instantly
-  // revives the target at full HP. Falls through to the hold-based
-  // path if the reviver has no defib. The healPressed flag is read
-  // and cleared here BEFORE the normal tryUseMedkit consumes it, so
-  // mid-revive heal presses route to the teammate, not self.
+  // Phase 2: heal-item bypass. While in revive range with a downed
+  // peer, pressing F (HEAL) consumes the best revive item carried
+  // and applies its effect. Priority order matches potency — defib
+  // (100%) > trauma (90%) > IFAK (70%) > medkit (60%). Falls through
+  // to the hold-based 30% revive if none are carried. The heal
+  // press is consumed BEFORE tryUseMedkit so it doesn't double-fire.
   _refreshDefibHint(target);
   if (target && inputState && inputState.healPressed) {
-    const found = inventory.findFirstConsumable?.(it => it.id === 'cons_defib');
+    const found = _findBestReviveItem();
     if (found) {
-      inputState.healPressed = false;     // consume so tryUseMedkit skips it
-      const stackCount = (found.item.count | 0) || 1;
+      inputState.healPressed = false;
+      const stackCount = (found.entry.item.count | 0) || 1;
       if (stackCount > 1) {
-        found.item.count = stackCount - 1;
+        found.entry.item.count = stackCount - 1;
         inventory._bump?.();
       } else {
-        inventory.takeFromBackpack(found.idx);
+        inventory.takeFromBackpack(found.entry.idx);
       }
       inventoryUI.render();
-      transientHudMsg('DEFIB — instant revive', 2.5);
+      transientHudMsg(`${found.label} — revive`, 2.5);
       try { sfx.uiAccept?.(); } catch (_) {}
       if (t.isHost) {
-        // Host is its own authority — apply directly + broadcast.
-        t.send('rpc-revived', { p: target, hp: 1.0 });
+        t.send('rpc-revived', { p: target, hp: found.hpPct });
         _coopPeerDowned.delete(target);
         _reviveTargetPeerId = null;
         _reviveHoldT = 0;
       } else {
-        // Joiner — host applies the revive and re-broadcasts.
-        t.send('rpc-revive-item', { t: target, k: 'defib' });
+        t.send('rpc-revive-item', { t: target, k: found.kind });
       }
       return;
     }
@@ -2209,22 +2222,21 @@ function _ensureCoopLobby() {
     }
     if (kind === 'rpc-revive-item') {
       // Host-only: a joiner used a health item on a downed peer.
-      // v1 supports defib (instant revive at full HP). Other kinds
-      // (medkit, tourniquet, bandage) reserved for follow-ups.
+      // Kind maps to a revive HP fraction via _REVIVE_KIND_TO_HP.
+      // Unknown kinds fall back to the standard 30%.
       if (!transport.isHost || !body || !body.t) return;
       const targetPeer = body.t;
       const itemKind = body.k || 'defib';
       const st = _coopPeerDowned.get(targetPeer);
       if (!st || st.bleedoutT <= 0) return;     // not downed / already gone
-      if (itemKind === 'defib') {
-        transport.send('rpc-revived', { p: targetPeer, hp: 1.0 });
-        _coopPeerDowned.delete(targetPeer);
-        // If WE are the host AND we are the revivee (joiner defibbed
-        // us), trigger our own _leaveDownedState since the server
-        // excludes the sender from the broadcast we just sent.
-        if (transport.peerId === targetPeer) {
-          try { _leaveDownedState(1.0); } catch (_) {}
-        }
+      const hpPct = _REVIVE_KIND_TO_HP[itemKind] || (tunables.coop?.reviveHpPct ?? 0.30);
+      transport.send('rpc-revived', { p: targetPeer, hp: hpPct });
+      _coopPeerDowned.delete(targetPeer);
+      // If WE are the host AND we are the revivee (joiner used an
+      // item on us), trigger our own _leaveDownedState since the
+      // server excludes the sender from the broadcast we just sent.
+      if (transport.peerId === targetPeer) {
+        try { _leaveDownedState(hpPct); } catch (_) {}
       }
       return;
     }
@@ -3648,6 +3660,7 @@ function _regenerateLevelImpl() {
       // _coopDamageRemotePlayersInRadius for the broadcast logic.
       damageRemotePlayersInRadius: _coopDamageRemotePlayersInRadius,
       damageRemotePlayersInCone:   _coopDamageRemotePlayersInCone,
+      coopBroadcastTracer:         _coopBroadcastMegabossTracer,
       getPlayerPos: () => player.mesh.position,
       playerHasIFrames: () => (lastPlayerInfo?.iFrames | 0) > 0,
       // Smoke-zone queries — let the boss respect smoke grenades the
@@ -12063,15 +12076,38 @@ function _coopAllPeersReadyToExtract() {
   return true;
 }
 
+// Revive-item priority table. Higher hpPct = stronger revive. The
+// first carried item by this order wins when F is pressed while
+// reviving. Bandage is intentionally absent — using a bandage on a
+// downed teammate is the hold-based path's default (30%).
+const _REVIVE_ITEMS = [
+  { id: 'cons_defib',       kind: 'defib',       hpPct: 1.00, label: 'DEFIB' },
+  { id: 'cons_trauma',      kind: 'trauma',      hpPct: 0.90, label: 'TRAUMA' },
+  { id: 'cons_afak',        kind: 'ifak',        hpPct: 0.70, label: 'IFAK' },
+  { id: 'cons_medkit',      kind: 'medkit',      hpPct: 0.60, label: 'MEDKIT' },
+];
+const _REVIVE_KIND_TO_HP = Object.fromEntries(
+  _REVIVE_ITEMS.map(r => [r.kind, r.hpPct]));
+function _findBestReviveItem() {
+  if (!inventory.findFirstConsumable) return null;
+  for (const r of _REVIVE_ITEMS) {
+    const found = inventory.findFirstConsumable(it => it.id === r.id);
+    if (found) return { entry: found, ...r };
+  }
+  return null;
+}
+
 // Sticky hint that surfaces while the local player is in revive range
-// of a downed peer AND carries a defibrillator. Pulses gold + reads
-// "[F] DEFIB — INSTANT REVIVE" so the player knows the bypass exists
-// without having to remember the keymap.
+// of a downed peer AND carries any instant-revive item. Reads
+// "[F] <ITEM> — REVIVE" so the player knows the bypass exists.
 let _defibHintEl = null;
 function _refreshDefibHint(targetPeerId) {
-  const has = !!targetPeerId
-    && !!inventory.findFirstConsumable?.(it => it.id === 'cons_defib');
-  if (!has) {
+  if (!targetPeerId) {
+    if (_defibHintEl) _defibHintEl.style.display = 'none';
+    return;
+  }
+  const found = _findBestReviveItem();
+  if (!found) {
     if (_defibHintEl) _defibHintEl.style.display = 'none';
     return;
   }
@@ -12090,10 +12126,11 @@ function _refreshDefibHint(targetPeerId) {
       color: '#ffe080',
       boxShadow: '0 0 18px rgba(255,200,80,0.45)',
     });
-    el.textContent = '[F] DEFIB — INSTANT REVIVE';
     document.body.appendChild(el);
     _defibHintEl = el;
   }
+  const pct = Math.round(found.hpPct * 100);
+  _defibHintEl.textContent = `[F] ${found.label} — REVIVE ${pct}%`;
   _defibHintEl.style.display = 'block';
 }
 
