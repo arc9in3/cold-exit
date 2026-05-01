@@ -826,6 +826,17 @@
        Full-screen splash PNG as backdrop, menu content left-aligned
        in a translucent rail. The image already has the atmosphere
        baked in; the overlay just adds menu interactivity. */
+    /* Main menu — gentle fade-in on first display so the splash
+       doesn't pop in. .menu-btn rows also stagger in via the
+       child-rule below. */
+    @keyframes mm-fadein {
+      from { opacity: 0; }
+      to   { opacity: 1; }
+    }
+    @keyframes mm-btn-rise {
+      from { opacity: 0; transform: translateX(-12px); }
+      to   { opacity: 1; transform: translateX(0); }
+    }
     #main-menu-root {
       position: fixed; inset: 0;
       background:
@@ -835,7 +846,16 @@
       z-index: 22;
       font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
       color: #e8eef6;
+      animation: mm-fadein 600ms ease-out both;
     }
+    #main-menu-root .menu-btn {
+      animation: mm-btn-rise 380ms cubic-bezier(0.22, 0.61, 0.36, 1) both;
+    }
+    #main-menu-root .menu-btn:nth-of-type(1) { animation-delay: 200ms; }
+    #main-menu-root .menu-btn:nth-of-type(2) { animation-delay: 280ms; }
+    #main-menu-root .menu-btn:nth-of-type(3) { animation-delay: 360ms; }
+    #main-menu-root .menu-btn:nth-of-type(4) { animation-delay: 440ms; }
+    #main-menu-root .menu-btn:nth-of-type(5) { animation-delay: 520ms; }
     #main-menu-card {
       width: 440px; max-width: 90vw;
       /* Pull the menu rail to the BOTTOM of the screen so the options

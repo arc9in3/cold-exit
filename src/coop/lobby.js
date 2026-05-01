@@ -65,19 +65,31 @@ export class CoopLobbyUI {
     const style = document.createElement('style');
     style.id = 'coop-lobby-style';
     style.textContent = `
+      @keyframes coop-backdrop-fade {
+        from { opacity: 0; }
+        to   { opacity: 1; }
+      }
+      @keyframes coop-card-enter {
+        from { opacity: 0; transform: translateY(18px) scale(0.96); }
+        to   { opacity: 1; transform: translateY(0)    scale(1); }
+      }
       #coop-lobby-root {
         position: fixed; inset: 0; z-index: 80;
         background: rgba(0,0,0,0.78);
         display: none; align-items: center; justify-content: center;
         font-family: ui-monospace, Menlo, Consolas, monospace;
         color: #e8dfc8;
+        backdrop-filter: blur(2px);
+        animation: coop-backdrop-fade 200ms ease-out both;
       }
       #coop-lobby-card {
         min-width: 420px; max-width: 580px;
         background: linear-gradient(180deg, #1a1d24, #0c0e14);
         border: 1px solid #2a4a6e; border-radius: 6px;
         padding: 22px 28px;
-        box-shadow: 0 16px 48px rgba(0,0,0,0.7);
+        box-shadow: 0 16px 48px rgba(0,0,0,0.7),
+                    0 0 32px rgba(80,140,255,0.18);
+        animation: coop-card-enter 280ms cubic-bezier(0.22, 0.61, 0.36, 1) both;
       }
       #coop-lobby-card h2 {
         margin: 0 0 12px; font-size: 16px; letter-spacing: 4px;

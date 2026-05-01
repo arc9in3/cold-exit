@@ -116,7 +116,7 @@ window.__resetHints = resetHints;
 // "I'm on build XYZ" without inspecting the bundle. Date stamps the
 // version so a quick glance tells you how stale the build is. Both
 // values render into the bottom-right #build-version label.
-const BUILD_VERSION = '15a3383+coop-drone-mega';
+const BUILD_VERSION = '077893c+ui-polish-1';
 // Build date intentionally bumped each deploy so the corner label
 // reflects the current snapshot.
 const BUILD_DATE    = '2026-05-01';
@@ -14039,10 +14039,9 @@ function tick() {
   // calls prevents double-simulation (host's snapshot positions would
   // fight the joiner's local pathing). The joiner still renders the
   // rig animations driven by snapshot 'state' tags + position lerp.
-  const _coopJoiner = (() => {
-    const t = getCoopTransport();
-    return t.isOpen && !t.isHost;
-  })();
+  // Inlined to avoid the per-frame closure alloc the IIFE produced.
+  const _coopT = getCoopTransport();
+  const _coopJoiner = _coopT.isOpen && !_coopT.isHost;
   // Multi-target player list (host only — joiners pass empty so the
   // manager's swap is a no-op). The managers also receive a
   // coopJoiner flag that gates the AI decision call (_updateRanged /

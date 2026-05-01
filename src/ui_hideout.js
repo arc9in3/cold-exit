@@ -4167,13 +4167,29 @@ export class HideoutUI {
         color: #6f6754; font-style: italic; padding: 16px;
       }
       /* Section heading above the contract cards. */
+      @keyframes contracts-heading-glow {
+        0%, 100% { text-shadow: 0 0 14px rgba(255,200,80,0.45); }
+        50%      { text-shadow: 0 0 22px rgba(255,200,80,0.75), 0 0 36px rgba(255,160,40,0.25); }
+      }
       .contracts-heading {
         position: absolute; top: 30%; left: 0; right: 0;
         text-align: center;
         font-family: ui-monospace, Menlo, Consolas, monospace;
         font-size: 18px; font-weight: 700; letter-spacing: 6px;
-        color: #f2c060; text-shadow: 0 0 14px rgba(255,200,80,0.45);
+        color: #f2c060;
+        text-shadow: 0 0 14px rgba(255,200,80,0.45);
         pointer-events: none;
+        animation: contracts-heading-glow 3.6s ease-in-out infinite;
+      }
+      .contracts-heading::before {
+        content: '◆';
+        margin-right: 14px; font-size: 12px; vertical-align: 3px;
+        color: #c98a3a;
+      }
+      .contracts-heading::after {
+        content: '◆';
+        margin-left: 14px; font-size: 12px; vertical-align: 3px;
+        color: #c98a3a;
       }
       /* Refresh button row — pinned to bottom-middle so it sits
          under the cards regardless of card-row width. */
@@ -4201,17 +4217,55 @@ export class HideoutUI {
         box-shadow: 0 4px 16px rgba(0,0,0,0.6);
       }
       .wanted-card { cursor: pointer; transition: transform 0.15s, box-shadow 0.15s, background 0.15s; font: inherit; }
-      .wanted-card:hover:not(:disabled) {
-        transform: translateY(-3px) scale(1.02);
-        box-shadow: 0 10px 26px rgba(0,0,0,0.7), 0 0 28px rgba(242,192,96,0.18);
+      /* Card entrance — staggered drop-in via nth-child delay so the
+         row reads as a hand of cards being dealt. */
+      @keyframes wanted-deal {
+        0%   { opacity: 0; transform: translateY(28px) rotate(-6deg) scale(0.85); }
+        70%  { opacity: 1; transform: translateY(-3px) rotate(0deg) scale(1.02); }
+        100% { opacity: 1; transform: translateY(0) rotate(0deg) scale(1); }
       }
-      .wanted-card:active:not(:disabled) { transform: translateY(-1px) scale(1.0); }
+      .wanted-card {
+        animation: wanted-deal 380ms cubic-bezier(0.22, 0.85, 0.36, 1) both;
+        will-change: transform, box-shadow;
+        transition: transform 160ms ease, box-shadow 160ms ease, border-color 160ms ease;
+      }
+      .wanted-card:nth-child(1) { animation-delay: 60ms; }
+      .wanted-card:nth-child(2) { animation-delay: 120ms; }
+      .wanted-card:nth-child(3) { animation-delay: 180ms; }
+      .wanted-card:nth-child(4) { animation-delay: 240ms; }
+      .wanted-card:nth-child(5) { animation-delay: 300ms; }
+      .wanted-card:nth-child(6) { animation-delay: 360ms; }
+      .wanted-card:hover:not(:disabled) {
+        transform: translateY(-6px) scale(1.04);
+        box-shadow: 0 14px 32px rgba(0,0,0,0.75), 0 0 36px rgba(242,192,96,0.28);
+      }
+      .wanted-card:active:not(:disabled) { transform: translateY(-2px) scale(1.01); }
       .wanted-card:disabled { cursor: not-allowed; }
+      /* Rarity tint — border PLUS a soft outer glow that reads even
+         when the card isn't hovered. Scales with rarity. */
       .wanted-card.rarity-common    { border-color: #c9a87a; }
-      .wanted-card.rarity-uncommon  { border-color: #6abf78; }
-      .wanted-card.rarity-rare      { border-color: #5a8acf; }
-      .wanted-card.rarity-epic      { border-color: #b870e0; }
-      .wanted-card.rarity-legendary { border-color: #f2a040; box-shadow: 0 4px 16px rgba(0,0,0,0.6), 0 0 20px rgba(242,160,64,0.3); }
+      .wanted-card.rarity-uncommon  {
+        border-color: #6abf78;
+        box-shadow: 0 4px 16px rgba(0,0,0,0.6), 0 0 12px rgba(106,191,120,0.18);
+      }
+      .wanted-card.rarity-rare      {
+        border-color: #5a8acf;
+        box-shadow: 0 4px 16px rgba(0,0,0,0.6), 0 0 16px rgba(90,138,207,0.25);
+      }
+      .wanted-card.rarity-epic      {
+        border-color: #b870e0;
+        box-shadow: 0 4px 16px rgba(0,0,0,0.6), 0 0 22px rgba(184,112,224,0.32);
+      }
+      .wanted-card.rarity-legendary {
+        border-color: #f2a040;
+        box-shadow: 0 4px 16px rgba(0,0,0,0.6), 0 0 28px rgba(242,160,64,0.4);
+        animation: wanted-deal 380ms cubic-bezier(0.22, 0.85, 0.36, 1) both,
+                   legendary-pulse 2400ms ease-in-out 700ms infinite;
+      }
+      @keyframes legendary-pulse {
+        0%, 100% { box-shadow: 0 4px 16px rgba(0,0,0,0.6), 0 0 28px rgba(242,160,64,0.4); }
+        50%      { box-shadow: 0 4px 16px rgba(0,0,0,0.6), 0 0 44px rgba(242,160,64,0.65); }
+      }
       .wanted-card.active   { background: linear-gradient(180deg, #2a2418 0%, #1a1408 100%); }
       .wanted-card.claimed  { opacity: 0.55; }
 
@@ -4350,8 +4404,23 @@ export class HideoutUI {
       }
 
       #hideout-body { flex: 1; overflow-y: auto; padding: 22px; }
-      .hideout-tab-body { max-width: 100%; }
-      .hideout-section-head { margin-bottom: 12px; }
+      /* Tab bodies fade + slide in when rendered, so swapping
+         between Stash / Quartermaster / Contracts / etc. doesn't
+         feel like a hard cut. Animation runs once per render via
+         a one-shot keyframe; subsequent frame writes don't retrigger
+         it because we re-create the element each render. */
+      @keyframes hideout-tab-enter {
+        from { opacity: 0; transform: translateY(6px); }
+        to   { opacity: 1; transform: translateY(0); }
+      }
+      .hideout-tab-body {
+        max-width: 100%;
+        animation: hideout-tab-enter 220ms cubic-bezier(0.22, 0.61, 0.36, 1) both;
+      }
+      .hideout-section-head {
+        margin-bottom: 12px;
+        animation: hideout-tab-enter 280ms 60ms ease-out both;
+      }
       .hideout-section-title {
         font-size: 13px; color: #5a8acf; letter-spacing: 2px;
         text-transform: uppercase; font-weight: 700;
