@@ -117,7 +117,7 @@ window.__resetHints = resetHints;
 // "I'm on build XYZ" without inspecting the bundle. Date stamps the
 // version so a quick glance tells you how stale the build is. Both
 // values render into the bottom-right #build-version label.
-const BUILD_VERSION = '78d967f+host-revive';
+const BUILD_VERSION = 'd13134b+pose-tracer-overlay';
 // Build date intentionally bumped each deploy so the corner label
 // reflects the current snapshot.
 const BUILD_DATE    = '2026-05-01';
@@ -2059,16 +2059,11 @@ function _ensureCoopLobby() {
         reviveT: 0,
         reviverPeerId: null,
       });
-      // Visual: drop the ghost mesh into a "downed" pose. Phase 1
-      // just tints the ghost cyan→red so it reads as urgent.
-      const m = _coopGhostMeshes?.get(body.p);
-      if (m && m.group) {
-        m.group.traverse?.((o) => {
-          if (o?.material?.color) {
-            try { o.material.color.setHex(0xd24868); } catch (_) {}
-          }
-        });
-      }
+      // Visual: add a translucent red overlay child to the ghost
+      // group so the downed state reads urgent without mutating
+      // the shared rig materials (mutating shared mats poisoned
+      // every other ally's tint).
+      _coopApplyDownedOverlay(body.p, true);
       return;
     }
     if (kind === 'rpc-revive-hold') {
@@ -2093,15 +2088,8 @@ function _ensureCoopLobby() {
       if (transport.peerId === body.p) {
         _leaveDownedState(body.hp || 0.30);
       }
-      // Restore ghost tint.
-      const m = _coopGhostMeshes?.get(body.p);
-      if (m && m.group) {
-        m.group.traverse?.((o) => {
-          if (o?.material?.color) {
-            try { o.material.color.setHex(0x4080ff); } catch (_) {}
-          }
-        });
-      }
+      // Strip the downed overlay child; rig materials stay untouched.
+      _coopApplyDownedOverlay(body.p, false);
       return;
     }
     if (kind === 'rpc-revive-progress') {
@@ -2124,10 +2112,23 @@ function _ensureCoopLobby() {
       // rendered the tracer via aiFire's local call).
       if (transport.isHost || !body) return;
       try {
-        const from = new THREE.Vector3(body.x1 || 0, body.y1 || 1, body.z1 || 0);
-        const to   = new THREE.Vector3(body.x2 || 0, body.y2 || 1, body.z2 || 0);
-        combat.spawnShot(from, to, body.c | 0, { light: false });
-      } catch (err) { /* defensive: never break a frame on a tracer */ }
+        const fp = new THREE.Vector3(body.x1 || 0, body.y1 || 1, body.z1 || 0);
+        const tp = new THREE.Vector3(body.x2 || 0, body.y2 || 1, body.z2 || 0);
+        combat.spawnShot(fp, tp, body.c | 0, { light: false });
+      } catch (_) { /* defensive: never break a frame on a tracer */ }
+      return;
+    }
+    if (kind === 'fx-tracer-self') {
+      // Anyone (host or joiner) — a teammate fired their own gun.
+      // Spawn the same tracer + muzzle flash locally so we see them
+      // shooting. Skip if the sender is US (server already excludes
+      // sender from broadcasts but defense in depth never hurts).
+      if (!body || from === transport.peerId) return;
+      try {
+        const fp = new THREE.Vector3(body.x1 || 0, body.y1 || 1, body.z1 || 0);
+        const tp = new THREE.Vector3(body.x2 || 0, body.y2 || 1, body.z2 || 0);
+        combat.spawnShot(fp, tp, body.c | 0xffd040, { light: false, flash: true });
+      } catch (_) {}
       return;
     }
     if (kind === 'rpc-grant-xp') {
@@ -7278,6 +7279,26 @@ function fireOneShot(playerInfo, weapon, aimPoint, isADS, aimOwner, aimZone) {
     // once before the loop so we pass flash:false here.
     combat.spawnShot(tracerFrom, endPoint, eff.tracerColor,
       { light: qualityFlags.muzzleLights, flash: false });
+    // Coop: broadcast the tracer so remote allies see our gunfire.
+    // Reuse the same fx-tracer kind the AI already uses; receivers
+    // spawn a local tracer + flash via combat.spawnShot. Per-pellet
+    // is fine — the joiner's per-frame fx-tracer budget caps total
+    // packets rendered. The cap is on the SENDER side; for player
+    // fire we send each pellet so shotguns read correctly.
+    {
+      const _coopT = getCoopTransport();
+      if (_coopT.isOpen && _coopT.peers && _coopT.peers.size > 0) {
+        _coopT.send('fx-tracer-self', {
+          x1: +tracerFrom.x.toFixed(2),
+          y1: +tracerFrom.y.toFixed(2),
+          z1: +tracerFrom.z.toFixed(2),
+          x2: +endPoint.x.toFixed(2),
+          y2: +endPoint.y.toFixed(2),
+          z2: +endPoint.z.toFixed(2),
+          c: eff.tracerColor | 0,
+        });
+      }
+    }
 
     // Knife intercept — assassin knives are hittable; a player shot
     // landing on a knife mesh destroys the knife in flight. No damage
@@ -8622,14 +8643,25 @@ function _tickCoop(dt) {
   }
   // Broadcast our position at 5Hz — cheap, fits in a packet, gives
   // each remote client enough samples to lerp smoothly between.
+  // Now also carries pose bits (crouched / aiming) so the remote
+  // ally rig can read them, plus a firing-event flag that fires a
+  // muzzle flash + tracer on the receiver. _coopFiredThisTick is
+  // set by the local fire path and consumed (cleared) here.
   _coopBroadcastT -= dt;
   if (_coopBroadcastT <= 0) {
     _coopBroadcastT = 0.2;
     if (player?.mesh?.position) {
+      const pi = lastPlayerInfo;
       transport.send('pos', {
         x: player.mesh.position.x,
         z: player.mesh.position.z,
         f: player.mesh.rotation.y || 0,
+        // Pose bits — crouched, aiming. Firing tracer is sent as a
+        // separate fx-tracer-coop event below for low-latency
+        // delivery (firing is a 80ms visual; can't wait for the
+        // 200ms position tick).
+        c: !!pi?.crouched ? 1 : 0,
+        a: ((pi?.adsAmount ?? 0) > 0.4) ? 1 : 0,
       });
     }
   }
@@ -8763,10 +8795,21 @@ function _tickCoop(dt) {
         m.group.rotation.y += dyaw * Math.min(1, dt / 0.12);
       }
       try {
+        // Pose bits arrive on every 'pos' broadcast (5Hz) — crouch
+        // and aiming flags drive the same animation states the local
+        // player uses, so a remote teammate visually crouches when
+        // they're crouched and ADSs when they're aiming. yaw from
+        // the broadcast also feeds aimYaw so the upper body twists
+        // toward where they're shooting.
+        const aiming = !!ghost.aiming;
+        const crouching = !!ghost.crouched;
+        const aimYaw = typeof ghost.yaw === 'number' ? ghost.yaw : 0;
         _updateAllyAnim(m.rig, {
           speed,
-          rifleHold: false,
-          aimYaw: 0,
+          rifleHold: aiming,
+          aiming,
+          crouching,
+          aimYaw,
           aimPitch: 0,
         }, dt);
       } catch (_) { /* defensive — animation should never crash a frame */ }
@@ -8940,6 +8983,37 @@ function _updatePeerEdgeArrow(peerId, name, dx, dz, dist) {
   el.style.display = 'block';
   void ang;
 }
+// Apply / strip a translucent red sphere as the downed marker on a
+// remote ally rig. We DON'T mutate the rig's shared materials —
+// buildRig caches MeshStandardMaterial instances across actors via
+// makeMat(), so writing to a single ally's body color poisons every
+// other ally + every gunman that shares the cached mat. Adding a
+// child overlay is per-rig and stripped cleanly on revive.
+function _coopApplyDownedOverlay(peerId, on) {
+  const m = _coopGhostMeshes?.get(peerId);
+  if (!m || !m.group) return;
+  if (on) {
+    if (m._downedOverlay) return;
+    const mat = new THREE.MeshBasicMaterial({
+      color: 0xd24868, transparent: true, opacity: 0.35,
+      depthWrite: false, blending: THREE.AdditiveBlending,
+    });
+    const overlay = new THREE.Mesh(new THREE.SphereGeometry(0.55, 12, 8), mat);
+    overlay.position.y = 0.6;
+    overlay.renderOrder = 6;
+    overlay.userData._coopDownedOverlay = true;
+    m.group.add(overlay);
+    m._downedOverlay = overlay;
+  } else {
+    if (m._downedOverlay) {
+      m.group.remove(m._downedOverlay);
+      try { m._downedOverlay.geometry.dispose(); } catch (_) {}
+      try { m._downedOverlay.material.dispose(); } catch (_) {}
+      m._downedOverlay = null;
+    }
+  }
+}
+
 // Downed/revive HUD — non-blocking overlay. Shows the local
 // bleedout bar when WE'RE down, and a directional + bar prompt
 // when a teammate is down nearby (so the reviver can find them).

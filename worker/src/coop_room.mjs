@@ -63,6 +63,7 @@ const KIND_ALLOWED_FROM_JOINER = new Set([
 // Free-form kinds anyone may send (no server-side gameplay impact).
 const KIND_ALLOWED_FROM_ANY = new Set([
   'pos', 'chat',
+  'fx-tracer-self',   // a peer fired their gun — purely visual
 ]);
 
 export class CoopRoom {

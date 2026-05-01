@@ -241,6 +241,12 @@ export class CoopLobbyUI {
       if (kind === 'pos' && body && typeof body.x === 'number' && typeof body.z === 'number') {
         this.ghosts.set(from, {
           x: body.x, z: body.z,
+          // Pose bits — crouched / aiming. Drive the ally rig's
+          // updateAnim flags so remote teammates show ADS / crouch
+          // poses instead of just walking around with the same idle.
+          crouched: !!body.c,
+          aiming:   !!body.a,
+          yaw:      typeof body.f === 'number' ? body.f : 0,
           name: this.transport.peers.get(from)?.name || 'peer',
           ts: performance.now(),
         });
