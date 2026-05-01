@@ -354,17 +354,31 @@ function _applyTo(entity, snap, lerp) {
 // `a` and `b`, lerps position + yaw at `alpha`. Smoother than
 // chasing a single moving target since we render strictly between
 // known-good frames at the cost of a fixed render-time lag.
+// Module-scope reusable scratch sets/maps for applyInterpolated.
+// Joiner runs this every frame at render rate; allocating fresh
+// Sets / Maps per call generated visible GC pressure on low-end
+// devices. clear() + repopulate sidesteps the alloc.
+const _SHARED_HIT_DIR = Object.freeze({ x: 0, z: -1 });
+const _droneLive = new Set();
+const _droneAMap = new Map();
+const _lootLive = new Set();
+const _interpLiveG = new Set();
+const _interpLiveM = new Set();
+const _interpAGmap = new Map();
+const _interpAMmap = new Map();
 export function applyInterpolated(gunmen, melees, lootMgr, spawnFn) {
   const pair = pickInterpSnapshots();
   if (!pair) return;
   const { a, b, alpha } = pair;
-  const liveG = new Set();
-  const liveM = new Set();
-  // Build netId → entry map for `a` so we can pair without nested
-  // search. Cheap: ~10-20 entries per snapshot.
-  const aGmap = new Map();
+  _interpLiveG.clear();
+  _interpLiveM.clear();
+  _interpAGmap.clear();
+  _interpAMmap.clear();
+  const liveG = _interpLiveG;
+  const liveM = _interpLiveM;
+  const aGmap = _interpAGmap;
   for (const g of a.gunmen || []) aGmap.set(g.n, g);
-  const aMmap = new Map();
+  const aMmap = _interpAMmap;
   for (const m of a.melees || []) aMmap.set(m.n, m);
   for (const sb of b.gunmen || []) {
     liveG.add(sb.n);
@@ -382,7 +396,7 @@ export function applyInterpolated(gunmen, melees, lootMgr, spawnFn) {
   }
   // Death sweep — same as applyEnemySnapshot. Locals alive but
   // missing from the LATEST snapshot get killed visually.
-  const _coopHitDir = { x: 0, z: -1 };
+  const _coopHitDir = _SHARED_HIT_DIR;
   for (const g of gunmen.gunmen) {
     if (g.alive && !liveG.has(g.netId)) {
       try {
@@ -472,8 +486,10 @@ export function applyMegaBossSnapshot(snap, megaBoss) {
 // path so we don't reach into manager internals here.
 export function applyDroneSnapshot(snapA, snapB, droneMgr, spawnFn, alpha) {
   if (!snapB || !droneMgr) return;
-  const live = new Set();
-  const aMap = new Map();
+  _droneLive.clear();
+  _droneAMap.clear();
+  const live = _droneLive;
+  const aMap = _droneAMap;
   if (snapA && snapA.drones) for (const d of snapA.drones) aMap.set(d.n, d);
   for (const sb of (snapB.drones || [])) {
     live.add(sb.n);
@@ -557,7 +573,8 @@ export function applyLootSnapshot(snap, lootMgr, spawnFn) {
     lootMgr._netIdCounter = 0;
     lootMgr._coopWipedOnFirstApply = true;
   }
-  const live = new Set();
+  _lootLive.clear();
+  const live = _lootLive;
   for (const sl of snap.loot) {
     live.add(sl.n);
     let entry = null;
