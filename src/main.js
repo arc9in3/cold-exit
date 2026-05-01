@@ -69,7 +69,8 @@ import { SkillTreeLoadout, makeMasteryOffers, SKILL_NODES } from './skill_tree.j
 import { ArtifactCollection, ARTIFACT_DEFS, ALL_ARTIFACTS, relicFor } from './artifacts.js';
 import { MasteryPickUI } from './ui_mastery.js';
 import { RelicsUI } from './ui_relics.js';
-import { sfx, attachUnlock, getMasterVolume, setMasterVolume } from './audio.js';
+import { sfx, attachUnlock, getMasterVolume, setMasterVolume,
+         setAudioMusicEnabled } from './audio.js';
 import { GameMenuUI } from './ui_menu.js';
 import { StartUI } from './ui_start.js';
 import { MainMenuUI } from './ui_main_menu.js';
@@ -91,6 +92,7 @@ import {
   getDemonBearGranted,
   getMarks, setMarks,
   getPersistentChips, setPersistentChips,
+  getMusicEnabled, setMusicEnabled,
 } from './prefs.js';
 import { StoreUpgradeUI, StoreRollUI, rollRarityForTier } from './ui_starting_store.js';
 import { getQualityPref, setQualityPref, applyQuality, qualityFlags } from './quality.js';
@@ -119,7 +121,7 @@ window.__resetHints = resetHints;
 // "I'm on build XYZ" without inspecting the bundle. Date stamps the
 // version so a quick glance tells you how stale the build is. Both
 // values render into the bottom-right #build-version label.
-const BUILD_VERSION = 'e570974+mortician-screen';
+const BUILD_VERSION = 'f413d0f+enc-rng-iso+downed-fixes+music-toggle';
 // Build date intentionally bumped each deploy so the corner label
 // reflects the current snapshot.
 const BUILD_DATE    = '2026-05-01';
@@ -1131,6 +1133,12 @@ let _runStartSigils = 0;
 let _runStartRank = 0;
 let _runStartRankPoints = 0;
 let _runStartContractCompletions = 0;
+// Last track requested via sfx.musicPlay — used to resume the right
+// track when the music toggle is flipped back on.
+let _currentMusicTrack = 'menu';
+// Sync the audio module's music-enabled flag from the persisted pref
+// at boot. Settings → Music toggle calls setAudioMusicEnabled too.
+try { setAudioMusicEnabled(getMusicEnabled()); } catch (_) {}
 // Set to true when a contract is claimed mid-run; consumed by
 // advanceFloor to show a "pick another contract" 3-choice modal
 // before the level regenerates.
@@ -1605,7 +1613,7 @@ const startUI = new StartUI({
     player.restoreFullHealth();
     regenerateLevel();
     sfx.ambientStart();
-    sfx.musicPlay?.('run');
+    _currentMusicTrack = 'run'; sfx.musicPlay?.('run');
   },
 });
 
@@ -1913,9 +1921,16 @@ function _coopPickEncounter(levelIndex) {
     const id = _coopForcedEncounterQueue.shift();
     if (id && ENCOUNTER_DEFS[id]) return ENCOUNTER_DEFS[id];
   }
-  const def = pickEncounterForLevel(
+  // Isolate the pick from the outer seeded RNG. Without this, host's
+  // pickEncounterForLevel consumes Math.random calls that the joiner
+  // skips (joiner pops from the forced queue), shifting host's
+  // seeded state vs joiner's for everything that runs AFTER the
+  // encounter conversion loop — e.g. encounter SPAWN POSITIONS were
+  // landing in different spots per peer because subsequent room
+  // prop / container scatter rolls diverged.
+  const def = _withOriginalRandom(() => pickEncounterForLevel(
     levelIndex, _runCompletedEncounters, runStats, artifacts, inventory,
-  );
+  ));
   if (t.isOpen && t.isHost && def) _coopHostEncounterIds.push(def.id);
   return def;
 }
@@ -2049,6 +2064,32 @@ function _leaveDownedState(restoreHpPct = 0.30) {
     player.restoreHealthPct(Math.max(0.05, Math.min(1, restoreHpPct)));
   }
   try { transientHudMsg('REVIVED', 3.0); } catch (_) {}
+  // Screen flash — bright cyan ramp-out so the player knows they're
+  // back up. Builds the overlay on first revive and reuses it.
+  try { _flashRevive(); } catch (_) {}
+  try { sfx.uiAccept?.(); } catch (_) {}
+}
+
+let _reviveFlashEl = null;
+function _flashRevive() {
+  if (!_reviveFlashEl) {
+    const el = document.createElement('div');
+    Object.assign(el.style, {
+      position: 'fixed', inset: '0', zIndex: '6',
+      background: 'radial-gradient(ellipse at center, rgba(120,220,255,0.55), rgba(60,120,200,0.25) 50%, rgba(0,0,0,0) 80%)',
+      pointerEvents: 'none', opacity: '0',
+      transition: 'opacity 1200ms ease-out',
+    });
+    document.body.appendChild(el);
+    _reviveFlashEl = el;
+  }
+  const el = _reviveFlashEl;
+  el.style.transition = 'none';
+  el.style.opacity = '1';
+  // Force reflow so the next opacity change actually animates.
+  void el.offsetWidth;
+  el.style.transition = 'opacity 1200ms ease-out';
+  el.style.opacity = '0';
 }
 // Megaboss hazard sync (DoT half) — host-side scanner. Runs after
 // megaBoss.update each frame; iterates the long-lived DoT hazard
@@ -3208,7 +3249,7 @@ const mainMenuUI = new MainMenuUI({
     player.restoreFullHealth();
     regenerateLevel();
     sfx.ambientStart();
-    sfx.musicPlay?.('run');
+    _currentMusicTrack = 'run'; sfx.musicPlay?.('run');
   },
   getLeaderboard: () => Leaderboard,
   getVolume: getMasterVolume,
@@ -3220,6 +3261,17 @@ const mainMenuUI = new MainMenuUI({
   },
   getDevTools: getDevToolsEnabled,
   setDevTools: (v) => { setDevToolsEnabled(v); setDebugPanelVisible(debugGui, v); },
+  getMusicEnabled,
+  setMusicEnabled: (on) => {
+    setMusicEnabled(on);
+    setAudioMusicEnabled(on);
+    if (on) {
+      // Resume the ambient track for the current context.
+      try { sfx.musicPlay(_currentMusicTrack || 'menu'); } catch (_) {}
+    } else {
+      try { sfx.musicStop(); } catch (_) {}
+    }
+  },
   getPlayerName,
   setPlayerName,
   getCharacterStyle,
@@ -3251,7 +3303,7 @@ const hideoutUI = new HideoutUI({
   // Also swaps to menu music while in the hideout.
   stopAmbient: () => {
     sfx.ambientStop?.();
-    sfx.musicPlay?.('menu');
+    _currentMusicTrack = 'menu'; sfx.musicPlay?.('menu');
   },
   // Renderer share — diegetic hideout scene reuses the game's
   // WebGLRenderer so we don't spin up a second GL context. main.js
@@ -4041,6 +4093,19 @@ function _getEffectiveSeed() {
 // generator. Cheaper than migrating 100+ Math.random() sites in the
 // generation pipeline. Async work that resolves AFTER fn returns is
 // not seeded — generation is synchronous so this is a non-issue.
+// Original (unseeded) Math.random captured at module load. Used by
+// _withOriginalRandom to run a closure WITHOUT consuming the outer
+// seeded RNG state — necessary for paths that the host runs but the
+// joiner skips (host's pickEncounterForLevel during regen) so both
+// peers' seeded state stays in lockstep through the rest of regen.
+const _origMathRandom = Math.random;
+function _withOriginalRandom(fn) {
+  const saved = Math.random;
+  Math.random = _origMathRandom;
+  try { return fn(); }
+  finally { Math.random = saved; }
+}
+
 function _withRunSeed(seed, fn) {
   if (!seed) return fn();
   const orig = Math.random;
@@ -4393,7 +4458,7 @@ function _regenerateLevelImpl() {
       },
     });
     megaBoss.spawn(level.megaArenaCenter || new THREE.Vector3(0, 0, 0));
-    sfx.musicPlay?.('boss');
+    _currentMusicTrack = 'boss'; sfx.musicPlay?.('boss');
   }
 
   // Keycard assignment — hand each level.keycardColors entry to a
@@ -8658,6 +8723,12 @@ function _tickAkimbo(dt, playerInfo, inputState, aimInfo) {
 }
 
 function tickShooting(dt, playerInfo, inputState, aimInfo) {
+  // Coop downed-state lock — a downed player can't fire, swap, or
+  // reload until revived. Player.update returns a stub (speed=0,
+  // adsAmount=0) but the fire path runs from main.js's input
+  // sample, so it needs its own gate. Without this the joiner
+  // could keep shooting while ragdolled.
+  if (_localDowned) return;
   // Akimbo branch fully replaces the normal fire loop when both
   // slots hold a pistol or both an SMG. Returns true when it's
   // active so the standard loop bails.
@@ -16372,13 +16443,21 @@ function tick() {
   // and walk cycles froze.
   const _coopPlayers = [];
   if (!_coopJoiner) {
-    _coopPlayers.push({
-      x: player.mesh.position.x,
-      z: player.mesh.position.z,
-      peerId: null,
-    });
+    // Skip the host's own entry when downed — AI shouldn't keep
+    // shooting the corpse. Downed players have _localDowned true.
+    if (!_localDowned) {
+      _coopPlayers.push({
+        x: player.mesh.position.x,
+        z: player.mesh.position.z,
+        peerId: null,
+      });
+    }
     if (coopLobby && getCoopTransport().isHost) {
       for (const [pid, ghost] of coopLobby.ghosts) {
+        // Skip downed + dead ghosts so AI retargets to a living
+        // teammate instead of attacking the corpse.
+        if (ghost.dead) continue;
+        if (_coopPeerDowned.has(pid)) continue;
         _coopPlayers.push({ x: ghost.x, z: ghost.z, peerId: pid });
       }
     }

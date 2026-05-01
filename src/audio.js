@@ -15,6 +15,13 @@ let ambientNodes = null;    // handles for the running ambient bed
 let unlocked = false;
 let masterVolume = 0.45;
 
+// Music enable flag — Settings → Music toggle calls
+// setAudioMusicEnabled to flip this. musicPlay short-circuits when
+// off so re-entering a screen doesn't restart the track.
+let _musicEnabled = true;
+export function setAudioMusicEnabled(on) { _musicEnabled = !!on; }
+export function getAudioMusicEnabled()    { return _musicEnabled; }
+
 export function setMasterVolume(v) {
   masterVolume = Math.max(0, Math.min(1, v));
   if (master) master.gain.value = masterVolume;
@@ -415,6 +422,7 @@ export const sfx = {
   // 'boss' (faster tempo, urgent). Volume is independent of master
   // so player can scale music separately if we add a slider later.
   musicPlay(track = 'menu') {
+    if (typeof _musicEnabled !== 'undefined' && !_musicEnabled) return;
     if (!unlocked || !ensureCtx()) return;
     if (musicNodes && musicNodes.track === track) return;
     if (musicNodes) this.musicStop();

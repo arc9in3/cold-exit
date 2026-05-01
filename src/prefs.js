@@ -633,6 +633,18 @@ export function setActiveContract(c) {
 }
 export function clearActiveContract() { _write(CONTRACTS_KEY, null); }
 
+// Music toggle — when off, sfx.musicPlay short-circuits and any
+// active track is stopped. Default: on.
+const MUSIC_ENABLED_KEY = 'tacticalrogue:musicEnabled:v1';
+export function getMusicEnabled() {
+  try { const v = localStorage.getItem(MUSIC_ENABLED_KEY); return v == null ? true : v === '1'; }
+  catch (_) { return true; }
+}
+export function setMusicEnabled(on) {
+  try { localStorage.setItem(MUSIC_ENABLED_KEY, on ? '1' : '0'); }
+  catch (_) {}
+}
+
 // Persistent contract chips — the meta currency. Mirrors the
 // `persistentChips` accessor in main.js so any module can read/write
 // without importing from main.js. Single source of truth for the key.

@@ -11,6 +11,7 @@ export class MainMenuUI {
   constructor({ onPlay, onQuickStart, onTutorial, onOpenStore, onOpenHideout,
                 getLeaderboard, getVolume, setVolume,
                 getQuality, setQuality, getDevTools, setDevTools,
+                getMusicEnabled, setMusicEnabled,
                 getPlayerName, setPlayerName,
                 getCharacterStyle, setCharacterStyle }) {
     this.onPlay = onPlay;
@@ -25,6 +26,8 @@ export class MainMenuUI {
     this.setQuality = setQuality || (() => {});
     this.getDevTools = getDevTools || (() => false);
     this.setDevTools = setDevTools || (() => {});
+    this.getMusicEnabled = getMusicEnabled || (() => true);
+    this.setMusicEnabled = setMusicEnabled || (() => {});
     this.getPlayerName = getPlayerName || (() => '');
     this.setPlayerName = setPlayerName || (() => {});
     this.getCharacterStyle = getCharacterStyle || (() => 'operator');
@@ -164,6 +167,24 @@ export class MainMenuUI {
       }
     });
     this.bodyEl.appendChild(muteRow);
+
+    // Music toggle — independent of master volume + mute. When off,
+    // sfx.musicPlay short-circuits + any active track is faded out.
+    const musicOn = this.getMusicEnabled();
+    const musicRow = document.createElement('div');
+    musicRow.className = 'menu-row';
+    musicRow.innerHTML = `
+      <label>Music <span class="menu-row-val">${musicOn ? 'On' : 'Off'}</span></label>
+      <input type="checkbox" class="menu-check" ${musicOn ? 'checked' : ''}>
+    `;
+    const musicCheck = musicRow.querySelector('input');
+    const musicVal = musicRow.querySelector('.menu-row-val');
+    musicCheck.addEventListener('change', () => {
+      const on = musicCheck.checked;
+      this.setMusicEnabled(on);
+      musicVal.textContent = on ? 'On' : 'Off';
+    });
+    this.bodyEl.appendChild(musicRow);
 
     const currentQ = this.getQuality();
     const qRow = document.createElement('div');
