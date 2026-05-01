@@ -117,7 +117,7 @@ window.__resetHints = resetHints;
 // "I'm on build XYZ" without inspecting the bundle. Date stamps the
 // version so a quick glance tells you how stale the build is. Both
 // values render into the bottom-right #build-version label.
-const BUILD_VERSION = '1a0d99e+burn-buff-encgate';
+const BUILD_VERSION = '80ca380+enc-spawn-deterministic';
 // Build date intentionally bumped each deploy so the corner label
 // reflects the current snapshot.
 const BUILD_DATE    = '2026-05-01';
@@ -4895,7 +4895,19 @@ function _regenerateLevelImpl() {
     // every active encounter every frame; that was the single
     // largest GC contributor on later floors.
     const _spawnCtx = _ctxFactory();
-    const _state = def.spawn(scene, r, _spawnCtx) || {};
+    // Coop determinism: derive a per-encounter seed from the run seed
+    // + level index + room id so def.spawn rolls (NPC pose offsets,
+    // initial dialogue picks, container loot inside encounter chests)
+    // land identically on both peers. Without this, host's earlier
+    // Math.random consumption inside pickEncounterForLevel would shift
+    // the RNG state relative to the joiner (who pops from the forced
+    // encounter queue and skips that call), so the host and joiner
+    // would otherwise see differently-positioned encounter NPCs even
+    // when the encounter id matched.
+    const _encSeed = ((_runSeed >>> 0)
+      ^ Math.imul((level.index | 0) + 1, 0x9E3779B1)
+      ^ Math.imul((r.id | 0) + 1, 0x85EBCA77)) >>> 0;
+    const _state = _withRunSeed(_encSeed, () => def.spawn(scene, r, _spawnCtx)) || {};
     if (_state.npc && _state.npc.position && !_state._noCollider) {
       const np = _state.npc.position;
       _state._collider = level.addEncounterCollider(np.x, np.z, 0.65, 0.65, 1.6);
