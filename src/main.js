@@ -82,13 +82,15 @@ import {
   getUnlockedWeapons, isWeaponUnlocked, unlockWeapon,
   consumeStarterInventory,
   getSelectedStarterWeapon,
-  getSigils, awardSigils,
+  getSigils, awardSigils, setSigils,
   consumeKeystoneQueue,
   getRelicPermits,
-  getContractRank,
+  getContractRank, setContractRank,
   getRecruiterUnlocks,
   getRankPoints, awardRankPoints, rankPointsForNext,
   getDemonBearGranted,
+  getMarks, setMarks,
+  getPersistentChips, setPersistentChips,
 } from './prefs.js';
 import { StoreUpgradeUI, StoreRollUI, rollRarityForTier } from './ui_starting_store.js';
 import { getQualityPref, setQualityPref, applyQuality, qualityFlags } from './quality.js';
@@ -117,7 +119,7 @@ window.__resetHints = resetHints;
 // "I'm on build XYZ" without inspecting the bundle. Date stamps the
 // version so a quick glance tells you how stale the build is. Both
 // values render into the bottom-right #build-version label.
-const BUILD_VERSION = 'e3c7235+coin-vfx+banner-sequence';
+const BUILD_VERSION = 'c29c64d+debug-currency-rank-encounter';
 // Build date intentionally bumped each deploy so the corner label
 // reflects the current snapshot.
 const BUILD_DATE    = '2026-05-01';
@@ -749,6 +751,62 @@ window.__debug = {
       }
     }
     return out;
+  },
+
+  // --- Currency / rank debug helpers ---------------------------------
+  // Pass a number to set the currency to that exact value, or call
+  // with no argument to read the current value. All four mutate the
+  // localStorage-backed prefs directly + log the result. Refresh any
+  // open UI (hideout / contract panels) to see the change land.
+
+  chips(n) {
+    if (typeof n === 'number') {
+      setPersistentChips(n);
+      // Mirror to the in-memory live var so the HUD pip updates next frame.
+      try { persistentChips = getPersistentChips(); } catch (_) {}
+    }
+    const cur = getPersistentChips();
+    console.log('[debug] persistent chips =', cur);
+    return cur;
+  },
+
+  marks(n) {
+    if (typeof n === 'number') setMarks(n);
+    const cur = getMarks();
+    console.log('[debug] marks =', cur);
+    return cur;
+  },
+
+  sigils(n) {
+    if (typeof n === 'number') setSigils(n);
+    const cur = getSigils();
+    console.log('[debug] sigils =', cur);
+    return cur;
+  },
+
+  rank(n) {
+    if (typeof n === 'number') setContractRank(n);
+    const cur = getContractRank();
+    console.log('[debug] contract rank =', cur);
+    return cur;
+  },
+
+  // Force a specific encounter id to spawn on the next floor. Pass no
+  // arg to print the available encounter ids so you know what to type.
+  // Example: __debug.forceEncounter('priest_disciple')
+  forceEncounter(id) {
+    const allIds = Object.keys(ENCOUNTER_DEFS).sort();
+    if (!id) {
+      console.log('[debug] available encounter ids:', allIds);
+      return allIds;
+    }
+    if (!ENCOUNTER_DEFS[id]) {
+      console.warn('[debug] unknown encounter id:', id, '— available:', allIds);
+      return null;
+    }
+    queueEncounterFollowup(id, 1);
+    console.log('[debug] queued encounter for next floor:', id);
+    return id;
   },
 };
 
