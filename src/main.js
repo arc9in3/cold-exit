@@ -117,7 +117,7 @@ window.__resetHints = resetHints;
 // "I'm on build XYZ" without inspecting the bundle. Date stamps the
 // version so a quick glance tells you how stale the build is. Both
 // values render into the bottom-right #build-version label.
-const BUILD_VERSION = '5783761+pose-fix-gun-mesh';
+const BUILD_VERSION = '8cb76f9+coop-no-freeze';
 // Build date intentionally bumped each deploy so the corner label
 // reflects the current snapshot.
 const BUILD_DATE    = '2026-05-01';
@@ -9087,13 +9087,26 @@ function _renderDownedHud() {
   if (_reviveTargetPeerId && _reviveHoldT > 0) {
     const rvPct = Math.max(0, Math.min(1, _reviveHoldT / holdTotal));
     const peerName = getCoopTransport().peers?.get(_reviveTargetPeerId)?.name || 'teammate';
+    // Pull the target's bleedout from _coopPeerDowned so the reviver
+    // knows how urgent the situation is — without this they'd hold
+    // interact blind, not knowing if the teammate is about to true-die.
+    const targetSt = _coopPeerDowned.get(_reviveTargetPeerId);
+    const blPct = targetSt
+      ? Math.max(0, Math.min(1, (targetSt.bleedoutT || 0) / total))
+      : 0;
     _coopDownedHudEl.innerHTML = `
       <div style="font-size:14px;color:#6abf78;letter-spacing:3px;margin-bottom:4px">REVIVING ${_escHtml(peerName)}</div>
       <div style="font-size:9px;color:#406040">hold INTERACT — release to pause</div>
       <div style="margin-top:6px;background:#0e2a18;height:8px;border-radius:3px;overflow:hidden">
         <div style="width:${(rvPct * 100).toFixed(1)}%;height:100%;background:linear-gradient(90deg,#3a7a48,#6abf78);transition:width 100ms linear"></div>
       </div>
-      <div style="font-size:9px;color:#406040;margin-top:2px">${_reviveHoldT.toFixed(1)}s / ${holdTotal}s</div>
+      <div style="font-size:9px;color:#406040;margin-top:2px">revive ${_reviveHoldT.toFixed(1)}s / ${holdTotal}s</div>
+      ${targetSt ? `
+      <div style="margin-top:6px;background:#2a0e10;height:5px;border-radius:3px;overflow:hidden">
+        <div style="width:${(blPct * 100).toFixed(1)}%;height:100%;background:linear-gradient(90deg,#a03038,#e04848);transition:width 200ms linear"></div>
+      </div>
+      <div style="font-size:9px;color:#9b6a6a;margin-top:2px">bleedout ${(targetSt.bleedoutT || 0).toFixed(1)}s</div>
+      ` : ''}
     `;
     _coopDownedHudEl.style.display = 'block';
     return;
@@ -14024,7 +14037,14 @@ function executeTarget(target) {
 }
 
 async function runLevelUp() {
-  paused = true;
+  // In coop, freezing the world while one player picks a skill
+  // would stall the other player's gameplay. Keep ticking; the
+  // banner + picker overlay locally without setting paused.
+  const _coopOnly = (() => {
+    const t = getCoopTransport();
+    return t && t.isOpen && t.peers && t.peers.size > 0;
+  })();
+  if (!_coopOnly) paused = true;
   input.clearMouseState();
   inventoryUI.hide();
   // Show a glowing "LEVEL UP" banner BEFORE the skill picker so a
@@ -14040,7 +14060,7 @@ async function runLevelUp() {
   input.clearMouseState();
   await skillPickUI.show();
   input.clearMouseState();
-  paused = false;
+  if (!_coopOnly) paused = false;
   recomputeStats();
 }
 
@@ -14172,7 +14192,13 @@ function _showClassLevelUpBanner(durationMs = 1800) {
 async function runMasteryOffer() {
   const offer = pendingMasteryOffers.shift();
   if (!offer) return;
-  paused = true;
+  // Coop: same rationale as runLevelUp — don't freeze the other
+  // player's world while we pick a mastery.
+  const _coopOnly = (() => {
+    const t = getCoopTransport();
+    return t && t.isOpen && t.peers && t.peers.size > 0;
+  })();
+  if (!_coopOnly) paused = true;
   input.clearMouseState();
   inventoryUI.hide();
   // Same anti-misclick beat as runLevelUp's banner — display a glowing
@@ -14182,7 +14208,7 @@ async function runMasteryOffer() {
   input.clearMouseState();
   await masteryPickUI.show(offer);
   input.clearMouseState();
-  paused = false;
+  if (!_coopOnly) paused = false;
   recomputeStats();
 }
 
@@ -14332,7 +14358,24 @@ function tick() {
   _tickReviveInteract(rawDt);
   _renderDownedHud();
 
-  if (paused || inventoryUI.visible || customizeUI.isOpen() || lootUI.isOpen() || shopUI.isOpen() || perkUI.isOpen() || gameMenuUI.isOpen() || playerDead) {
+  // Coop disables single-player time-freeze. Stopping the world while
+  // one player browses inventory / picks a skill / opens the shop
+  // would freeze the other player's enemies, projectiles, AI, and
+  // their own input — completely unplayable for the teammate. In
+  // coop the gameplay tick keeps running through every modal except
+  // the actual menu (which is always blocking) and player-dead
+  // (which is the run-end state).
+  const _coopActiveNow = (() => {
+    const t = getCoopTransport();
+    return t && t.isOpen && t.peers && t.peers.size > 0;
+  })();
+  const _modalPauseSP = paused || inventoryUI.visible
+    || customizeUI.isOpen() || lootUI.isOpen() || shopUI.isOpen()
+    || perkUI.isOpen() || gameMenuUI.isOpen() || playerDead;
+  // Coop-only pause shortlist: gameMenu always pauses (the player is
+  // explicitly choosing to step away). Everything else keeps ticking.
+  const _modalPauseCoop = gameMenuUI.isOpen() || playerDead;
+  if (_coopActiveNow ? _modalPauseCoop : _modalPauseSP) {
     // Modal pause — scene is frozen, so all the per-frame
     // recomputation (LoS mask raycasts, bloom mip chain, finisher
     // chroma/grain) is wasted work. Cut to a direct render and
