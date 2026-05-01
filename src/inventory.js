@@ -1036,6 +1036,26 @@ export const ARMOR_DEFS = {
   // _encounter: true keeps it out of ALL_ARMOR + the world-drop pool +
   // The Crow's bigger-backpack pick. Only acquisition path is the
   // Brian encounter (the 'how much was the hat' branch).
+  // Shini's Burden — encounter-only headband. Crippling debuffs
+  // across HP / move / stamina, but wearing it on level exit
+  // unlocks the chained Spicy Arena event and its relic reward.
+  // _encounter keeps it out of merchant stocks + world drops.
+  shinis_burden: { id: 'gear_shinis_burden', name: "Shini's Burden",
+    slot: 'head', type: 'gear',
+    tint: 0x802018, durability: dur(60, 0.95), rarity: 'rare',
+    _encounter: true,
+    description: 'damp and smells horrible · −50% HP, −50% move, −50% stamina',
+    apply(s) {
+      // Multiplicative debuffs — −50% across the board.
+      s.maxHealthMult   = (s.maxHealthMult   || 1) * 0.5;
+      s.moveSpeedMult   = (s.moveSpeedMult   || 1) * 0.5;
+      s.staminaRegenMult = (s.staminaRegenMult || 1) * 0.5;
+      // Halve max stamina too — the regen mult alone leaves the
+      // pool size unchanged. -50 is roughly half on the 100 base.
+      s.maxStaminaBonus = (s.maxStaminaBonus || 0) - 50;
+    },
+  },
+
   brians_hat: { id: 'brians_hat', name: "Brian's Hat", slot: 'head', type: 'gear',
     tint: 0x6a6a72, durability: dur(40, 0.95), rarity: 'common',
     _encounter: true,
@@ -1487,8 +1507,17 @@ export const JUNK_DEFS = {
   // the only way to find one is the encounter. Drop it on the puppet
   // in the chained 'Want to Play a Game' room to get Bloody Jigsaw.
   shittyBike: { id: 'junk_shitty_bike', name: 'Shitty Bike', type: 'junk', tint: 0xb02828, sellValue: 5, rarity: 'common', description: 'this really is a shitty bike', stackMax: 1, _encounter: true },
+  // SHINIGAMI guaranteed drop. Tagged _encounter so it doesn't bleed
+  // into the regular junk roller — the only legitimate source is
+  // killing the assassin megaboss variant.
+  spicyNoodles: { id: 'junk_spicy_noodles', name: 'Spicy Noodles', type: 'junk', tint: 0xc83020, sellValue: 1800, rarity: 'epic', description: "actually doesn't look that spicy...", stackMax: 1, _encounter: true },
 };
-export const ALL_JUNK = Object.values(JUNK_DEFS);
+// `_encounter`-tagged junk (Shitty Bike, Unused Rocket Ticket) is
+// filtered out of the public list so merchant stocks, world drops,
+// and pickN() draws don't accidentally surface quest items. The few
+// paths that legitimately want encounter items look them up by id
+// from JUNK_DEFS directly.
+export const ALL_JUNK = Object.values(JUNK_DEFS).filter(d => !d._encounter);
 
 // Randomize a junk drop's sellValue by ±15% so identical items vary.
 export function jitterJunkValue(item) {
@@ -1519,7 +1548,11 @@ export const TOY_DEFS = {
   // the only legitimate way to get one is the priest chain.
   demonBear:  { id: 'toy_demon_bear',  name: 'Demon Bear',  type: 'junk', shape: 'bear', tint: 0xc81a1a, sellValue: 1, rarity: 'mythic', description: 'A little red bear with grey devil horns and squinty black eyes. When looking at his little face you swear you can hear him giggling.', _encounter: true },
 };
-export const ALL_TOYS = Object.values(TOY_DEFS);
+// `_encounter`-tagged toys (Beary Doll, Demon Bear) excluded from
+// the public list. _RANDOM_TOY_POOL below repeats the filter
+// defensively, but with this exclusion at the source any future
+// caller of ALL_TOYS gets the safe pool by default.
+export const ALL_TOYS = Object.values(TOY_DEFS).filter(d => !d._encounter);
 // Encounter-only toys (e.g. Demon Bear) are filtered out of the
 // random pool so they can't dupe-drop from Sleepy Beauty etc.
 const _RANDOM_TOY_POOL = ALL_TOYS.filter(t => !t._encounter);
@@ -1676,29 +1709,29 @@ export const THROWABLE_DEFS = {
     // Fuse runs from first ground contact now (fuseAfterLand). 1.5s
     // gives the grenade visible bounce + settle before going off.
     fuse: 1.5,
-    maxCharges: 1, cooldownSec: 90,
-    description: 'Timed fragmentation grenade · 5m blast · 90s cooldown',
+    maxCharges: 1, cooldownSec: 45,
+    description: 'Timed fragmentation grenade · 5m blast · 45s cooldown',
   },
   molotov: {
     id: 'thr_molotov', name: 'Molotov Cocktail', type: 'throwable', rarity: 'uncommon',
     tint: 0xc86830,
     throwKind: 'molotov',
     aoeRadius: 3.5, fuse: 0.6,   // shatters on impact
-    fireDuration: 6.0, fireTickDps: 14,
-    maxCharges: 2, cooldownSec: 60,
-    description: 'Pool of fire on impact · 6s burn zone · 2 charges, 60s each',
+    fireDuration: 6.0, fireTickDps: 21,
+    maxCharges: 2, cooldownSec: 30,
+    description: 'Pool of fire on impact · 6s burn zone · 2 charges, 30s each',
   },
   maotai_molotov: {
     // Glass Maotai bottle filled with accelerant. Bigger pool, longer
-    // burn than the standard molotov but lower DPS — meant for area
-    // denial / herding, not pure damage. Rarer (single charge).
+    // burn than the standard molotov — same per-tick DPS as the base
+    // molotov, traded for narrower charges and a wider footprint.
     id: 'thr_maotai', name: 'Maotai Molotov', type: 'throwable', rarity: 'rare',
     tint: 0xe8c060,
     throwKind: 'molotov',
     aoeRadius: 4.4, fuse: 0.6,
-    fireDuration: 9.0, fireTickDps: 10,
-    maxCharges: 1, cooldownSec: 75,
-    description: 'Wide burn pool · 9s denial zone · 1 charge, 75s',
+    fireDuration: 9.0, fireTickDps: 15,
+    maxCharges: 1, cooldownSec: 38,
+    description: 'Wide burn pool · 9s denial zone · 1 charge, 38s',
   },
   flashbang: {
     id: 'thr_flash', name: 'Flashbang', type: 'throwable', rarity: 'uncommon',
@@ -1706,8 +1739,8 @@ export const THROWABLE_DEFS = {
     throwKind: 'flash',
     aoeRadius: 7.5, fuse: 1.0,   // counts from landing (fuseAfterLand)
     blindDuration: 4.0,
-    maxCharges: 2, cooldownSec: 60,
-    description: 'Blinds enemies in radius for 4s · 2 charges, 60s each',
+    maxCharges: 2, cooldownSec: 30,
+    description: 'Blinds enemies in radius for 4s · 2 charges, 30s each',
   },
   stunGrenade: {
     id: 'thr_stun', name: 'Stun Grenade', type: 'throwable', rarity: 'uncommon',
@@ -1715,8 +1748,8 @@ export const THROWABLE_DEFS = {
     throwKind: 'stun',
     aoeRadius: 5.5, fuse: 1.2,   // counts from landing (fuseAfterLand)
     stunDuration: 2.5,
-    maxCharges: 1, cooldownSec: 30,
-    description: 'Dazes enemies in radius for 2.5s · 30s cooldown',
+    maxCharges: 1, cooldownSec: 15,
+    description: 'Dazes enemies in radius for 2.5s · 15s cooldown',
   },
   gasGrenade: {
     id: 'thr_gas', name: 'Gas Grenade', type: 'throwable', rarity: 'uncommon',
@@ -1724,8 +1757,8 @@ export const THROWABLE_DEFS = {
     throwKind: 'gas',
     aoeRadius: 4.0, fuse: 0.4,            // detonates on impact
     gasDuration: 6.0,
-    maxCharges: 1, cooldownSec: 75,
-    description: 'Poison cloud lingers 6s · drains HP + stamina · 75s cooldown',
+    maxCharges: 1, cooldownSec: 38,
+    description: 'Poison cloud lingers 6s · drains HP + stamina · 38s cooldown',
   },
   smokeGrenade: {
     id: 'thr_smoke', name: 'Smoke Grenade', type: 'throwable', rarity: 'uncommon',
@@ -1733,7 +1766,7 @@ export const THROWABLE_DEFS = {
     throwKind: 'smoke',
     aoeRadius: 4.5, fuse: 0.8,   // pops fast on land, then lingers
     smokeDuration: 9.0,
-    maxCharges: 2, cooldownSec: 60,
+    maxCharges: 2, cooldownSec: 30,
     description: 'Vision-blocking smoke for 9s · breaks enemy line of sight',
   },
   decoy: {
@@ -1742,7 +1775,7 @@ export const THROWABLE_DEFS = {
     throwKind: 'decoy',
     aoeRadius: 1.2, fuse: 0.8,   // arms quickly on land
     decoyDuration: 7.0,
-    maxCharges: 2, cooldownSec: 50,
+    maxCharges: 2, cooldownSec: 25,
     description: 'Audio + visual lure pulls enemies to a location for 7s',
     // Apr-26: pulled from loot pools while the AI hijack design is
     // sorted out (see git revert of de0eaca). The def stays so the
@@ -1774,8 +1807,8 @@ export const THROWABLE_DEFS = {
     aoeRadius: 4.5, aoeDamage: 110, aoeShake: 0.55, fuse: 0.4,
     triggerRadius: 2.6,                    // proximity sphere
     triggerConeDeg: 90,                    // detonates only for enemies in front
-    maxCharges: 2, cooldownSec: 60,
-    description: 'Place a directional mine · proximity-triggered cone blast · 2 charges, 60s each',
+    maxCharges: 2, cooldownSec: 30,
+    description: 'Place a directional mine · proximity-triggered cone blast · 2 charges, 30s each',
   },
   // "They Do Exist" encounter reward — flat-trajectory chest-height
   // dagger toss that instantly kills the enemy it touches. 1 charge,
@@ -1792,7 +1825,7 @@ export const THROWABLE_DEFS = {
     aoeRadius: 0.6, aoeDamage: 99999, aoeShake: 0,
     impactKill: true,
     fuse: 1.5,
-    maxCharges: 1, cooldownSec: 60,
+    maxCharges: 1, cooldownSec: 30,
     description: 'A blade so thin you can barely see it. Always finds its mark.',
   },
 };
@@ -1827,7 +1860,10 @@ if (typeof window !== 'undefined') {
 // hook. ARMOR_DEFS / GEAR_DEFS still expose them for direct id access.
 export const ALL_ARMOR = Object.values(ARMOR_DEFS).filter(d => !d._encounter);
 export const ALL_GEAR  = Object.values(GEAR_DEFS).filter(d => !d._encounter);
-export const ALL_CONSUMABLES = Object.values(CONSUMABLE_DEFS);
+// `_encounter`-tagged consumables (Cheesecake) excluded from the
+// public list. The Sleepy Beauty path that needs Cheesecake looks
+// it up by id from CONSUMABLE_DEFS directly.
+export const ALL_CONSUMABLES = Object.values(CONSUMABLE_DEFS).filter(d => !d._encounter);
 
 // Random pickers used by enemy drop logic.
 function clone(def) {

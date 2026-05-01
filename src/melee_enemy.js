@@ -294,6 +294,27 @@ export class MeleeEnemyManager {
       // pass to render the body at zero opacity until materializing.
       // Materialization happens in the suspicion ramp (see update).
       cloaked: opts.archetype === 'assassin',
+      // Cloaked-assassin variant — regular-grade enemy that stays
+      // translucent the entire fight, teleports on a 4-7s loop,
+      // wields a red emissive blade, and is silent to the noise
+      // detection layer. Spawn-gated to lv >= 3 in level.js's
+      // pickMeleeVariant.
+      cloakedAssassin:  variant === 'cloakedAssassin' || variant === 'cloakedAssassinThrower',
+      cloakedThrower:   variant === 'cloakedAssassinThrower',
+      silentToHearing:  variant === 'cloakedAssassin' || variant === 'cloakedAssassinThrower',
+      teleportT:        (variant === 'cloakedAssassin' || variant === 'cloakedAssassinThrower')
+                          ? 4 + Math.random() * 3 : undefined,
+      // Knife-thrower fire cooldown — fan goes off every 2.0-3.5s
+      // post-teleport. Boss variant fires faster.
+      knifeFireT: variant === 'cloakedAssassinThrower'
+                    ? 0.8 + Math.random() * 0.6
+                    : undefined,
+      // SHINIGAMI flag — set in level.js via opts.archetype. Drives
+      // multi-wave knife volleys + post-melee molotov ring + a
+      // larger silhouette. Frequency + wave count scale with floor.
+      shinigami: opts.archetype === 'shinigami',
+      _shinigamiWavesRemaining: 0,
+      _shinigamiPostMeleeT: 0,
     };
     e.manager = this;
     if (rig) for (const m of rig.meshes) m.userData.owner = e;
@@ -350,6 +371,107 @@ export class MeleeEnemyManager {
         hp: 200, maxHp: 200, fullBlock: true,
         baseEmissive: _baseShieldEmissive,
       };
+    }
+
+    // SPICY_BOSS override — chunky obese man, 2500 HP, brown body
+    // with red accent stripe. Always flees the player (CHASE branch
+    // flips approach via the `archetype === 'spicy_boss'` check).
+    // Drops Way of the Worrier on death; spawned by the spicy_arena
+    // encounter only.
+    if (opts.archetype === 'spicy_boss') {
+      e.hp = 2500;
+      e.maxHp = 2500;
+      e.spicyBoss = true;
+      // Wide-and-short silhouette so the boss reads as the same fat
+      // guy from the Spicy Challenge encounter, just hostile now.
+      group.scale.set(scale * 1.55, scale * 1.0, scale * 1.55);
+      // Re-tint the body — bodyMat / legMat / headMat were captured
+      // from the rig at build time; mutating their color pushes the
+      // chassis to the spicy palette without rebuilding meshes.
+      try {
+        if (bodyMat && bodyMat.color) bodyMat.color.setHex(0x101010);
+        if (legMat && legMat.color) legMat.color.setHex(0x801818);
+        if (headMat && headMat.color) headMat.color.setHex(0xc89070);
+      } catch (_) { /* materials may be shared via the rig pool */ }
+    }
+
+    // SHINIGAMI override — 8000 HP baseline plus a per-floor ramp
+    // (15% per level past 8). Slightly larger silhouette so the
+    // megaboss reads as a distinct named encounter at a glance,
+    // not just "another cloaked assassin major boss".
+    if (opts.archetype === 'shinigami') {
+      const lvIdx = Math.max(8, opts.gearLevel | 0);
+      e.hp = 8000 * (1 + 0.15 * (lvIdx - 8));
+      e.maxHp = e.hp;
+      // Bump silhouette ~12% above the boss-tier base scale.
+      group.scale.set(scale * 1.12, scale * 1.12, scale * 1.12);
+    }
+    if (variant === 'cloakedAssassin' || variant === 'cloakedAssassinThrower') {
+      // All-black silhouette under the cloak. Body / arm / leg meshes
+      // tinted to near-pure black so the cloak silhouette dominates.
+      group.traverse((o) => {
+        if (!o.isMesh || !o.material || o === blade) return;
+        if (o.material.color) o.material.color.setHex(0x050608);
+        if (o.material.emissive) o.material.emissive.setHex(0x000000);
+      });
+
+      // Cloak — tapered cylinder draped from shoulders to ankle.
+      // Slightly transparent so it reads as fabric, not stone.
+      const cloakMat = new THREE.MeshStandardMaterial({
+        color: 0x080a10, roughness: 0.95, metalness: 0.05,
+        transparent: true, opacity: 0.92,
+        side: THREE.DoubleSide,
+      });
+      // Top radius narrower, bottom wider — flares at the hem.
+      const cloak = new THREE.Mesh(
+        new THREE.CylinderGeometry(0.30, 0.50, 1.55, 14, 1, true),
+        cloakMat,
+      );
+      cloak.position.y = 0.95;
+      cloak.castShadow = true;
+      cloak.userData.zone = 'torso';
+      group.add(cloak);
+
+      // Hood — half-sphere over the head. Sits forward of the cranium
+      // so the front edge silhouettes as a deep cowl.
+      const hoodMat = new THREE.MeshStandardMaterial({
+        color: 0x05060a, roughness: 0.9, metalness: 0.05,
+        side: THREE.DoubleSide,
+      });
+      const hood = new THREE.Mesh(
+        new THREE.SphereGeometry(0.21, 12, 8, 0, Math.PI * 2, 0, Math.PI * 0.55),
+        hoodMat,
+      );
+      hood.position.set(0, 0.05, -0.02);
+      hood.scale.set(1.05, 1.10, 1.20);
+      hood.castShadow = true;
+      hood.userData.zone = 'head';
+      // Parent to the rig's head so the hood tracks the head's animation.
+      rig.head.add(hood);
+      e.hoodMesh = hood;
+      e.cloakMesh = cloak;
+
+      // Translucent body — keeps the "ghost" feel through the cloak,
+      // but only on body meshes (not the cloak/hood/blade).
+      group.traverse((o) => {
+        if (!o.isMesh || !o.material) return;
+        if (o === blade || o === cloak || o === hood) return;
+        o.material.transparent = true;
+        o.material.opacity = 0.55;
+        o.material.depthWrite = false;
+      });
+
+      if (variant === 'cloakedAssassin') {
+        // Red emissive sword. Mutates the local blade material that
+        // was just allocated for this enemy in spawn() (it's not
+        // pooled), so overriding it here is safe.
+        blade.material.color.setHex(0xff2030);
+        if (blade.material.emissive) blade.material.emissive.setHex(0xff2030);
+        blade.material.emissiveIntensity = 1.4;
+      } else {
+        // Knife thrower — hide the long blade; they fight at range.
+        blade.visible = false;
+      }
     }
 
     this.enemies.push(e);
@@ -811,6 +933,14 @@ export class MeleeEnemyManager {
     // alert / propagate paths in main.js also skip them so neither
     // sound nor a visible player can wake them. On expiry they snap
     // back to IDLE patrol with zero suspicion (dart wiped it at hit).
+    // Boss-controlled enemies (e.g. The General's phalanx) bypass
+    // their own AI entirely — the boss class drives their position
+    // each frame. They still take damage, die normally, and contribute
+    // to hittables(); the AI tick is just a no-op for them.
+    if (e.controlledByBoss) {
+      if (e.rig && !e._animSkip) updateAnim(e.rig, { speed: 0, meleeStance: true }, dt);
+      return;
+    }
     if (e.deepSleepT && e.deepSleepT > 0) {
       e.deepSleepT -= dt;
       e.state = STATE.IDLE;
@@ -835,14 +965,118 @@ export class MeleeEnemyManager {
     // Melee boss teleport — every 9-14s of engaged combat, the boss
     // blinks to a random open spot in its room. Counters kiting at
     // range. Skips while idle (no aggro yet) or stunned.
+    //
+    // SHINIGAMI override: prefer teleportBehindPlayer so the megaboss
+    // re-engages right behind the player's facing — a horror-movie
+    // beat that pairs with his post-melee molotov ring.
     if (e.tier === 'boss' && ctx.bossTeleport && (e.stunT || 0) <= 0
         && e.state !== STATE.IDLE && e.state !== STATE.DEAD) {
       e.teleportT = (e.teleportT === undefined)
         ? (9 + Math.random() * 5)
         : e.teleportT - dt;
       if (e.teleportT <= 0) {
-        if (ctx.bossTeleport(e)) e.teleportT = 9 + Math.random() * 5;
-        else e.teleportT = 1.0;   // retry shortly if no open spot
+        let ok = false;
+        if (e.shinigami && ctx.teleportBehindPlayer) {
+          ok = ctx.teleportBehindPlayer(e);
+        } else {
+          ok = ctx.bossTeleport(e);
+        }
+        e.teleportT = ok ? (9 + Math.random() * 5) : 1.0;
+      }
+    }
+    // Cloaked-assassin variant teleport — faster cycle than the boss
+    // (4-7s) so the player has to track them mid-fight. Skipped while
+    // idle / stunned / dead.
+    //
+    // Throwers prefer ctx.teleportBehindPlayer — drops them ~7-9m
+    // behind the player's facing so the player has time to spin and
+    // see the incoming knife fan. Sword variant uses random
+    // bossTeleport (in-room blink) since they want to close to melee.
+    if (e.cloakedAssassin && (e.stunT || 0) <= 0
+        && e.state !== STATE.IDLE && e.state !== STATE.DEAD) {
+      e.teleportT -= dt;
+      if (e.teleportT <= 0) {
+        let ok = false;
+        if (e.cloakedThrower && ctx.teleportBehindPlayer) {
+          ok = ctx.teleportBehindPlayer(e);
+        } else if (ctx.bossTeleport) {
+          ok = ctx.bossTeleport(e);
+        }
+        e.teleportT = ok ? (4 + Math.random() * 3) : 0.5;
+        // Reset the thrower's fire cooldown post-teleport so the
+        // first shot lands ~0.8s after re-appearing — gives the
+        // player a beat to react.
+        if (ok && e.cloakedThrower) {
+          e.knifeFireT = 0.8 + Math.random() * 0.4;
+        }
+      }
+    }
+    // Knife thrower attack — fan of red knives at the player on
+    // cooldown. Skips melee swing path entirely (the blade is
+    // hidden). Pre-emptively returns AFTER the knife handler to skip
+    // the windup→swing→recovery FSM that follows in this method.
+    if (e.cloakedThrower && (e.stunT || 0) <= 0
+        && e.state !== STATE.IDLE && e.state !== STATE.DEAD
+        && ctx.spawnAssassinKnives) {
+      if (e.knifeFireT === undefined) e.knifeFireT = 1.5;
+      e.knifeFireT -= dt;
+      if (e.knifeFireT <= 0) {
+        const px = ctx.playerPos?.x;
+        const pz = ctx.playerPos?.z;
+        if (px !== undefined && pz !== undefined) {
+          const ex = e.group.position.x;
+          const ez = e.group.position.z;
+          const adx = px - ex;
+          const adz = pz - ez;
+          const ad = Math.hypot(adx, adz) || 1;
+          const dirX = adx / ad;
+          const dirZ = adz / ad;
+          // SHINIGAMI fans bigger AND comes in multi-wave bursts —
+          // 3 waves at 0.4s intervals. Wave count + per-wave fan
+          // scale with floor depth (more pressure later).
+          let fanCount = e.tier === 'boss' ? 7 : 5;
+          let wavesThisAttack = 1;
+          if (e.shinigami) {
+            const lvIdx = Math.max(8, ctx.levelIndex | 0);
+            wavesThisAttack = Math.min(5, 3 + Math.floor((lvIdx - 8) / 4));
+            fanCount = 9;
+          }
+          ctx.spawnAssassinKnives(ex, 1.2, ez, dirX, dirZ, fanCount, e);
+          if (e.shinigami) {
+            // First wave fired now; remaining ones cycle on the
+            // shorter fire cooldown until exhausted.
+            e._shinigamiWavesRemaining = wavesThisAttack - 1;
+          }
+        }
+        if (e.shinigami && e._shinigamiWavesRemaining > 0) {
+          // Quick follow-up wave in 0.4s.
+          e.knifeFireT = 0.40 + Math.random() * 0.10;
+          e._shinigamiWavesRemaining -= 1;
+        } else if (e.shinigami) {
+          // All waves fired — long pause that scales tighter on
+          // higher floors (caps at 0.8s base).
+          const lvIdx = Math.max(8, ctx.levelIndex | 0);
+          const base = Math.max(0.8, 1.6 - (lvIdx - 8) * 0.05);
+          e.knifeFireT = base + Math.random() * 0.5;
+        } else {
+          e.knifeFireT = e.tier === 'boss'
+            ? 1.6 + Math.random() * 0.6
+            : 2.4 + Math.random() * 1.0;
+        }
+      }
+    }
+    // SHINIGAMI post-melee molotov ring — armed inside the WINDUP→
+    // RECOVERY transition below (e._shinigamiPostMeleeT). When the
+    // timer hits zero, drop a ring of small fire pools at the
+    // boss's feet. Uses ctx.spawnShinigamiMolotovRing (main.js).
+    if (e.shinigami && e._shinigamiPostMeleeT > 0) {
+      e._shinigamiPostMeleeT -= dt;
+      if (e._shinigamiPostMeleeT <= 0 && ctx.spawnShinigamiMolotovRing) {
+        ctx.spawnShinigamiMolotovRing(
+          e.group.position.x,
+          e.group.position.z,
+          ctx.levelIndex || 8,
+        );
       }
     }
     // Smoke confusion: same logic as gunman.js — when the player is
@@ -1032,6 +1266,11 @@ export class MeleeEnemyManager {
       // door-graph lookup — just run.
       if (e.archetype === 'assassin' && e.assassinPhase === 'disengaging') {
         approach = _m_approach.set(-dir2d.x, 0, -dir2d.z);
+      } else if (e.archetype === 'spicy_boss') {
+        // Spicy boss flees the player permanently. Same retreat
+        // pattern as the disengaging assassin — invert dir2d so
+        // chase-branch movement runs straight away.
+        approach = _m_approach.set(-dir2d.x, 0, -dir2d.z);
       } else
       if (ctx.level && ctx.playerPos) {
         const here = ctx.level.roomAt(e.group.position.x, e.group.position.z);
@@ -1147,8 +1386,10 @@ export class MeleeEnemyManager {
       }
 
       // Skip windup while disengaging — the assassin is in escape
-      // phase and shouldn't stop to strike.
-      const disengaging = e.archetype === 'assassin' && e.assassinPhase === 'disengaging';
+      // phase and shouldn't stop to strike. Spicy boss never strikes;
+      // he's a runaway fight, not a brawl.
+      const disengaging = (e.archetype === 'assassin' && e.assassinPhase === 'disengaging')
+                         || e.archetype === 'spicy_boss';
       if (!disengaging
           && dist <= tunables.meleeEnemy.swingRange
           && e.cooldownT <= 0 && e.dazzleT <= 0 && e.surpriseT <= 0) {
@@ -1180,6 +1421,13 @@ export class MeleeEnemyManager {
         e.recoveryT = 0.22 * cooldownMult;
         e.cooldownT = tunables.meleeEnemy.swingCooldown * cooldownMult;
         e.telMat.opacity = 0;
+        // SHINIGAMI: a swing attempt — landed or whiffed — drops a
+        // ring of molotovs at the boss's feet 0.3s after the swing
+        // resolves. Forces the player out of melee range or eats a
+        // burn DoT for greedy follow-up.
+        if (e.shinigami) {
+          e._shinigamiPostMeleeT = 0.3;
+        }
       }
     } else if (e.state === STATE.RECOVERY) {
       e.recoveryT -= dt;

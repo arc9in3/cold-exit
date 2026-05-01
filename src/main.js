@@ -23,8 +23,13 @@ import { ENCOUNTER_DEFS, pickEncounterForLevel } from './encounters.js';
 import { spawnSpeechBubble } from './hud.js';
 import { makeContainer, buildContainerMesh, pickContainerType, pickContainerSize } from './containers.js';
 import { Level } from './level.js';
-import { MegaBoss, isMegaBossLevel, buildMegaBossLoot } from './megaboss.js';
+import {
+  MegaBoss, isMegaBossLevel, buildMegaBossLoot,
+  getEncounterCount as getMegaBossEncounterCount,
+  bumpEncounterCount as bumpMegaBossEncounterCount,
+} from './megaboss.js';
 import { MegaBossEcho, buildEchoLoot } from './megaboss_echo.js';
+import { MegaBossGeneral, buildGeneralLoot } from './megaboss_general.js';
 import { ProjectileManager } from './projectiles.js';
 import { spawnDamageNumber } from './hud.js';
 import { initDebugPanel, setDebugPanelVisible } from './debug.js';
@@ -40,6 +45,7 @@ import { getDevToolsEnabled, setDevToolsEnabled, getPlayerName, setPlayerName,
          getShrineTiers, setShrineTierPurchased, resetShrineTiersForRun,
          getMythicRunUnlocked, setMythicRunUnlocked } from './prefs.js';
 import { tunables } from './tunables.js';
+import { BALANCE } from './balance.js';
 import {
   Inventory, SLOT_IDS,
   ALL_GEAR, ALL_ARMOR, ALL_CONSUMABLES, CONSUMABLE_DEFS, ALL_JUNK, ALL_TOYS, ARMOR_DEFS,
@@ -142,6 +148,50 @@ function transientHudMsg(msg, duration = 1.5) {
   toastFadeT = duration;
 }
 
+// Skill-point reminder pip — small fixed badge in the HUD that
+// glows whenever the player has unspent skill points. Updated by
+// _refreshSkillPointPip every time playerSkillPoints changes (kill,
+// reward, spend). The toast fires from a separate path on each
+// fresh point earned so the player sees both the moment-of and the
+// persistent reminder.
+const skillPointPipEl = (() => {
+  const el = document.createElement('div');
+  el.id = 'hud-skill-pip';
+  Object.assign(el.style, {
+    position: 'fixed',
+    top: '70px',
+    right: '24px',
+    padding: '6px 12px',
+    background: 'rgba(40, 20, 70, 0.85)',
+    border: '1px solid #b894ff',
+    borderRadius: '4px',
+    color: '#e0c8ff',
+    fontFamily: 'ui-monospace, Menlo, Consolas, monospace',
+    fontSize: '12px',
+    letterSpacing: '1px',
+    textTransform: 'uppercase',
+    zIndex: 18,
+    pointerEvents: 'none',
+    boxShadow: '0 0 12px rgba(184, 148, 255, 0.4)',
+    display: 'none',
+  });
+  document.body.appendChild(el);
+  return el;
+})();
+function _refreshSkillPointPip() {
+  const n = (typeof playerSkillPoints === 'number') ? playerSkillPoints : 0;
+  if (n > 0) {
+    skillPointPipEl.textContent = `★ ${n} skill point${n === 1 ? '' : 's'} unspent`;
+    skillPointPipEl.style.display = 'block';
+  } else {
+    skillPointPipEl.style.display = 'none';
+  }
+}
+function _showSkillPointToast(amount = 1) {
+  transientHudMsg(`+${amount} skill point${amount === 1 ? '' : 's'} — press K to spend`, 2.5);
+  _refreshSkillPointPip();
+}
+
 // Red hurt-flash overlay — full-screen tint that pops when the
 // player takes a heavy hit (melee, explosion), then fades in ~250ms.
 // Kept subtle: peaks at 35% opacity so it colours the scene without
@@ -221,6 +271,7 @@ const BOSS_NAMES = {
   droneSummoner: 'THE HIVEMASTER',
   spawner:       'THE NECROMANT',
   berserker:     'THE FROTH',
+  shinigami:     'SHINIGAMI',
 };
 function renderBossBar() {
   // Find the live major boss nearest the player (there's almost
@@ -358,8 +409,9 @@ if (deathBtnEl) {
       // If we never captured an entry snapshot (fresh-after-boot edge
       // case), fall through to regenerating the current level so the
       // restart still produces a playable state instead of a stuck one.
-      if (levelStartSnapshot) {
-        restoreFromSnapshot();
+      const slot = _activeRestartSlot | 0;
+      if (_levelStartSnapshots[slot] || levelStartSnapshot) {
+        restoreFromSnapshot(slot);
       } else {
         console.warn('[restart] no snapshot — regenerating current level');
         recomputeStats();
@@ -367,6 +419,7 @@ if (deathBtnEl) {
         player.restoreFullHealth();
         regenerateLevel();
       }
+      _activeRestartSlot = 0;
       // Belt-and-suspenders: recomputeStats again so HP bar / derived
       // stats reflect the restored loadout before the next tick runs.
       recomputeStats();
@@ -397,6 +450,7 @@ if (deathMenuBtnEl) {
     playerSkillPoints = 0;
     playerLevel = 1;
     playerXp = 0;
+    _refreshSkillPointPip();
     skills.levels = Object.create(null);
     classMastery.xp = Object.fromEntries(Object.keys(classMastery.xp).map(k => [k, 0]));
     specialPerks.unlocked = new Set();
@@ -760,8 +814,10 @@ function _seedStarterKit() {
 // a few runs. Now we start each run with a fresh empty set so every
 // `oncePerSave` encounter is once-per-RUN rather than once-per-save.
 const _runCompletedEncounters = new Set();
+let _trialPromptedThisRun = new Set();
 function _resetEncounterCompletionForRun() {
   _runCompletedEncounters.clear();
+  _trialPromptedThisRun = new Set();
   // Per-encounter "appears N times per run" counters live on the
   // ENCOUNTER_DEFS singletons so they persist across multiple
   // spawns within a run. Wipe them here so each new run starts
@@ -812,6 +868,16 @@ function _applyContractPerKillReward(arch) {
   const perKillRank = rankPerKillFor(def);
   if (perKillRank > 0 && counted <= (def.targetCount | 0)) {
     awardRankPoints(perKillRank);
+  }
+  // Progress toast — fire on every kill that advances the counter
+  // (skip the completing kill; that's covered by the longer-lived
+  // "Contract complete: …" toast below). Short 1.2s duration so a
+  // sweep through a room doesn't stack up tons of overlapping
+  // bubbles.
+  const targetCount = def.targetCount | 0;
+  if (counted > 0 && counted < targetCount) {
+    const labelStr = def.label || 'Contract';
+    transientHudMsg(`${labelStr}: ${counted}/${targetCount}`, 1.2);
   }
   // Fire the completion claim the moment the counter reaches the
   // target. Mid-run, no floor-transition wait.
@@ -969,6 +1035,12 @@ window.__diagAim = () => {
 
 function startNewRun(weaponClass) {
   _resetEncounterCompletionForRun();
+  // Clear restart-snapshot stack — last run's checkpoints don't apply
+  // to this run. The first floor's saveLevelStart will repopulate.
+  _levelStartSnapshots.length = 0;
+  levelStartSnapshot = null;
+  _activeRestartSlot = 0;
+  _refreshRestartSlotsUI();
   // Reset any pending starter-buff floor counters from a prior run
   // so a buff bought for the previous (now-ended) run doesn't bleed
   // into this one. _applyStarterBuffs below repopulates from the
@@ -1381,6 +1453,7 @@ const gameMenuUI = new GameMenuUI({
     playerSkillPoints = 0;
     playerLevel = 1;
     playerXp = 0;
+    _refreshSkillPointPip();
     skills.levels = Object.create(null);
     classMastery.xp = Object.fromEntries(Object.keys(classMastery.xp).map(k => [k, 0]));
     specialPerks.unlocked = new Set();
@@ -1676,7 +1749,12 @@ const hideoutUI = new HideoutUI({
     // pipeline. Pull a non-mythic weapon at the requested rarity.
     const rarities = ['common', 'uncommon', 'rare', 'epic', 'legendary'];
     const rarity = rarities[Math.max(0, Math.min(rarities.length - 1, tier | 0))];
-    const pool = tunables.weapons.filter(w => w.rarity !== 'mythic');
+    // Exclude artifact weapons (Jessica's Rage) so the Quartermaster
+    // never offers the apex pistol — its only acquisition path is the
+    // bear's 4-toy trade. `worldDrop !== false` covers any future
+    // weapons explicitly tagged as non-droppable.
+    const pool = tunables.weapons.filter(w =>
+      w.rarity !== 'mythic' && !w.artifact && w.worldDrop !== false);
     const candidates = pool.filter(w => (w.rarity || 'common') === rarity);
     const pick = (candidates.length ? candidates : pool)[Math.floor(Math.random() * (candidates.length ? candidates.length : pool.length))];
     if (!pick) return null;
@@ -1782,6 +1860,9 @@ function onInventoryChanged() {
   // rotation entirely (e.g. dropping Pain). Without a recompute the
   // last weapon's `equipMods` (Pain's −50% max HP) would persist.
   recomputeStats();
+  // Akimbo eligibility may have just changed (player picked up /
+  // dropped / swapped a slot weapon). Re-sync the off-hand visual.
+  _syncAkimboVisuals();
 }
 
 // Shared drag-state so both InventoryUI and CustomizeUI can see what's being
@@ -1847,7 +1928,12 @@ const lootUI = new LootUI({
 const perkUI = new PerkUI({
   tree: skillTree,
   getPoints: () => playerSkillPoints,
-  spendPoints: (n) => { if (playerSkillPoints < n) return false; playerSkillPoints -= n; return true; },
+  spendPoints: (n) => {
+    if (playerSkillPoints < n) return false;
+    playerSkillPoints -= n;
+    _refreshSkillPointPip();
+    return true;
+  },
   classMastery,
   onClose: () => { inventoryUI.render(); recomputeStats(); },
 });
@@ -2373,10 +2459,9 @@ function regenerateLevel() {
   // here moves it into the level-transition window where the
   // player's already paying for regen + asset loads.
   if (combat._ensurePools) combat._ensurePools();
-  // Encounter chance pinned to 90% — the encounter pool brings the
-  // variety we want most floors, but a 1-in-10 plain combat floor
-  // keeps the rhythm from feeling overscripted.
-  level._encounterChance = 0.9;
+  // Encounter chance pinned to 100% — every floor rolls one. The pool
+  // is large enough that variety holds up at full saturation.
+  level._encounterChance = 1.0;
   // Mega-boss milestone floors get a custom generator: a single open
   // arena, no random walk, no encounter rolls, no AI spawns. The boss
   // itself is allocated below after BVHs build. Detect by the index
@@ -2433,19 +2518,108 @@ function regenerateLevel() {
   // attack FSM, hazards, and HUD bar. The dormant intro ritual runs
   // first, leaving the player free to position before combat starts.
   if (isMegaFloor) {
-    // Pick which mega-boss runs this floor. THE ECHO is currently
-    // disabled while we fix his fight; every mega-floor spawns ARBOTER
-    // until Echo is re-enabled. (Previous rotation: ARBOTER on
-    // floors 10/20/30, Echo on 15/25/35.)
-    const useEcho = false;
-    const MegaCtor = useEcho ? MegaBossEcho : MegaBoss;
-    const lootFn   = useEcho ? buildEchoLoot : buildMegaBossLoot;
+    // Pick which mega-boss runs this floor. Three-way rotation
+    // across mega-floors (10/15/20/25/...) cycling Arboter → Echo →
+    // General. `idx` indexes successive mega-floors so the cycle
+    // works regardless of whether the player skipped any.
+    //   floor 10 = idx 0 = ARBOTER
+    //   floor 15 = idx 1 = ECHO
+    //   floor 20 = idx 2 = GENERAL
+    //   floor 25 = idx 3 = ARBOTER (cycle)
+    //   ...
+    const _megaIdx = Math.max(0, Math.floor(((level.index | 0) - 10) / 5));
+    const _megaPick = _megaIdx % 3;
+    const useEcho    = _megaPick === 1;
+    const useGeneral = _megaPick === 2;
+    const MegaCtor = useGeneral ? MegaBossGeneral
+                  : useEcho     ? MegaBossEcho
+                  :               MegaBoss;
+    const lootFn   = useGeneral ? buildGeneralLoot
+                  : useEcho     ? buildEchoLoot
+                  :               buildMegaBossLoot;
     megaBoss = new MegaCtor({
       scene, camera,
       combat, loot, sfx, projectiles,
       damagePlayer,
       getPlayerPos: () => player.mesh.position,
       playerHasIFrames: () => (lastPlayerInfo?.iFrames | 0) > 0,
+      // Boss-driven minion spawn (Arboter "summon melee" attack).
+      // Returns the spawned minion (or null) so callers can tag it.
+      // Skips if the spawn point is collision-blocked.
+      spawnMelee: (x, z, opts = {}) => {
+        if (level._collidesAt && level._collidesAt(x, z, 0.5)) return null;
+        const m = melees.spawn(x, z, {
+          tier: 'normal',
+          roomId: level.megaArenaCenter ? 0 : -1,
+          hpMult:   opts.hpMult   ?? 0.6,
+          damageMult: opts.damageMult ?? 0.8,
+          aggression: 1.2,
+          gearLevel:  level.index | 0,
+        });
+        if (m) {
+          m.summoned = true;
+          m.noDrops  = true;
+          m.noXp     = true;
+        }
+        return m;
+      },
+      // The General — phalanx + wave hooks. Phalanx members are
+      // shield-bearers with controlledByBoss=true so the AI tick
+      // skips their motion (the General class drives position).
+      spawnPhalanxBearer: (x, z, hpMult) => {
+        if (level._collidesAt && level._collidesAt(x, z, 0.5)) return null;
+        const m = melees.spawn(x, z, {
+          tier: 'normal',
+          variant: 'shieldBearer',
+          roomId: 0,
+          hpMult: hpMult || 3.0,
+          damageMult: 1.0,
+          gearLevel: level.index | 0,
+        });
+        if (m) {
+          m.summoned        = true;
+          m.noDrops         = true;
+          m.noXp            = true;
+          m.controlledByBoss = true;
+        }
+        return m;
+      },
+      // General's wave troops — regular grunts with optional
+      // swordsman promotion (double HP + cosmetic scale bump).
+      spawnGeneralTroop: (x, z, isSwordsman, troopHpMult) => {
+        if (level._collidesAt && level._collidesAt(x, z, 0.5)) return null;
+        const T = (typeof BALANCE !== 'undefined') ? BALANCE.megaboss.general : null;
+        const baseHp  = troopHpMult || 0.6;
+        const hpMult  = isSwordsman && T
+          ? baseHp * T.swordsmanHpFactor
+          : baseHp;
+        const m = melees.spawn(x, z, {
+          tier: 'normal',
+          variant: 'standard',
+          roomId: 0,
+          hpMult,
+          damageMult: 0.8,
+          aggression: 1.4,
+          gearLevel:  level.index | 0,
+        });
+        if (m) {
+          m.summoned = true;
+          m.noDrops  = true;
+          m.noXp     = true;
+          if (isSwordsman && m.group && T) {
+            m.group.scale.set(T.swordsmanScale, T.swordsmanScale, T.swordsmanScale);
+          }
+        }
+        return m;
+      },
+      // Lifetime mega-boss-encounter index. Each megaboss class reads
+      // this on construct to scale HP / wave caps over repeat fights.
+      encounterIndex: getMegaBossEncounterCount(),
+      // Echo + General call this from their _die path so the
+      // counter ticks regardless of which boss the player kills.
+      // Arboter's MegaBoss._die calls the function directly (it's
+      // the original site) so we don't double-bump there.
+      bumpEncounterCount: () => bumpMegaBossEncounterCount(),
       knockbackPlayer: (dx, dz) => {
         // Best-effort displacement — bypass collision. Player physics
         // smooths the next tick.
@@ -2478,12 +2652,16 @@ function regenerateLevel() {
           }
         }
       },
-      lootRolls: (encIdx) => lootFn({
+      lootRolls: (encIdx) => {
+        const drops = lootFn({
         randomWeapon: (rarity) => {
           // Pull from the existing weapon roll pipeline. randomWeapon
           // doesn't exist here; we synthesize via wrapWeapon over the
-          // tunables pool, biased to the requested rarity.
-          const pool = tunables.weapons.filter(w => w.rarity !== 'mythic');
+          // tunables pool, biased to the requested rarity. Excludes
+          // artifact weapons (Jessica's Rage) — apex pistol is bear-
+          // trade-only — and any weapon flagged worldDrop:false.
+          const pool = tunables.weapons.filter(w =>
+            w.rarity !== 'mythic' && !w.artifact && w.worldDrop !== false);
           const candidates = pool.filter(w => w.rarity === rarity);
           const pick = (candidates.length ? candidates : pool)[Math.floor(Math.random() * (candidates.length ? candidates.length : pool.length))];
           if (!pick) return null;
@@ -2509,7 +2687,15 @@ function regenerateLevel() {
           if (typeof randomJunk === 'function') return randomJunk();
           return null;
         },
-      }, encIdx),
+        }, encIdx);
+        // Universal megaboss drop: 1-3 repair kits (mix of armor + weapon).
+        // Megabosses are long fights that chew durability, so the player
+        // is in a different repair-budget bracket than after a regular
+        // floor. Stack appears alongside the standard rolls.
+        const kitCount = 1 + Math.floor(Math.random() * 3);   // 1..3
+        for (let i = 0; i < kitCount; i++) drops.push(randomEitherRepairKit());
+        return drops;
+      },
     });
     megaBoss.spawn(level.megaArenaCenter || new THREE.Vector3(0, 0, 0));
     sfx.musicPlay?.('boss');
@@ -2772,7 +2958,7 @@ function regenerateLevel() {
     // pickEncounterForLevel returned null because everything was
     // already completed). _runCompletedEncounters resets in
     // _resetEncounterCompletionForRun on every new run.
-    const def = pickEncounterForLevel(level.index | 0, _runCompletedEncounters, runStats, artifacts);
+    const def = pickEncounterForLevel(level.index | 0, _runCompletedEncounters, runStats, artifacts, inventory);
     if (!def) {
       r.type = 'combat';   // demote — main UI stays consistent
       continue;
@@ -2943,7 +3129,9 @@ function regenerateLevel() {
         getProjectiles: () => projectiles.projectiles,
         // Tome encounter — hand the player a skill point.
         grantSkillPoint: (n = 1) => {
-          playerSkillPoints += Math.max(1, n | 0);
+          const add = Math.max(1, n | 0);
+          playerSkillPoints += add;
+          _showSkillPointToast(add);
         },
         // Random non-mythic, non-artifact weapon for Target Practice.
         rollRandomWeapon: () => {
@@ -3022,13 +3210,26 @@ function regenerateLevel() {
         // ctx.spawnSpeech instead, which auto-applies the camera.
         camera,
         getKillCount: () => runStats.kills | 0,
-        markEncounterComplete: (id) => { if (id) _runCompletedEncounters.add(id); },
+        markEncounterComplete: (id) => {
+          if (!id) return;
+          _runCompletedEncounters.add(id);
+          // Lifetime "ever finished" set — feeds the unseen-bias in
+          // pickEncounterForLevel so brand-new encounters keep their
+          // 5× selection weight until the player has actually done
+          // them once across any run. Per-run set still gates repeats
+          // within a single run.
+          try { markEncounterDone(id); } catch (_) { /* prefs unavailable */ }
+        },
         // Smoke puff at world XZ — used by Glass Case telegraph.
         // Cheap: a few additive grey spheres rising and fading.
         spawnPuffAt: (x, z) => _spawnSmokePuff(x, z),
         // Elite gunman spawn at world XZ tagged to the encounter
         // room. Uses the standard gunman manager.
         spawnEliteAt: (x, z, room) => _spawnEliteAtPos(x, z, room),
+        // Spicy Arena boss — chunky obese melee with flee AI. Real
+        // melee enemy so existing damage / hit / death paths apply;
+        // the encounter polls .alive to spawn the relic on death.
+        spawnSpicyBossAt: (x, z, room) => _spawnSpicyBossAt(x, z, room),
         // The Button — spawn a real random-rolled container at XZ.
         spawnRandomContainerAt: (x, z) => _spawnRandomContainerAt(x, z),
         // Sus — chest dressed up as a premium drop that's actually
@@ -3498,7 +3699,10 @@ function tryEncounterItemDrop(item, x, z) {
   const result = ent.def.onItemDropped(item, ctx);
   if (!result) return false;
   if (result.complete) {
-    if (ent.def.oncePerSave) _runCompletedEncounters.add(ent.def.id);
+    if (ent.def.oncePerSave) {
+      _runCompletedEncounters.add(ent.def.id);
+      try { markEncounterDone(ent.def.id); } catch (_) { /* prefs unavailable */ }
+    }
     // Forced-followup queue — encounter requested a continuation in
     // the next 1-2 floors. Fires once per completion. The queue is
     // persistent (prefs) so a save/load mid-thread doesn't drop it.
@@ -3603,7 +3807,15 @@ const _perf = (() => {
   return { start, end, toggle, render, isVisible: () => visible };
 })();
 window.__perf = _perf;
+// Restart-snapshot stack — most recent first. Capped at MAX_RESTART_SLOTS;
+// older entries fall off the end. Restart Level defaults to slot 0 (newest);
+// the death-screen slot picker exposes [0..n-1] so you can rewind further
+// when iterating as a dev tool. `levelStartSnapshot` is kept as a thin
+// alias for the most-recent slot so legacy reads keep working.
+const MAX_RESTART_SLOTS = 8;
+const _levelStartSnapshots = [];
 let levelStartSnapshot = null;
+let _activeRestartSlot = 0;
 
 function snapshotItem(item) {
   if (!item) return null;
@@ -3641,7 +3853,7 @@ function snapshotInventory() {
 }
 function resetRunState() { secondWindUsed = 0; }
 function saveLevelStart() {
-  levelStartSnapshot = {
+  const snap = {
     levelIndex: level.index,
     credits: playerCredits,
     skillPoints: playerSkillPoints,
@@ -3655,11 +3867,62 @@ function saveLevelStart() {
     inventory: snapshotInventory(),
     currentWeaponIndex,
   };
+  // Push to head, trim tail. Most-recent is always slot 0.
+  _levelStartSnapshots.unshift(snap);
+  if (_levelStartSnapshots.length > MAX_RESTART_SLOTS) {
+    _levelStartSnapshots.length = MAX_RESTART_SLOTS;
+  }
+  levelStartSnapshot = snap;
+  _refreshRestartSlotsUI();
 }
-function restoreFromSnapshot() {
-  if (!levelStartSnapshot) return;
+
+// Death-screen restart-slot picker — one button per stacked snapshot,
+// labeled with that snapshot's floor number. Clicking selects the slot
+// (highlighted) so the next "Restart Level" press rewinds to that
+// floor. Defaults to slot 0 (newest) on each death.
+function _refreshRestartSlotsUI() {
+  const root = document.getElementById('death-slots');
+  if (!root) return;
+  root.innerHTML = '';
+  if (_levelStartSnapshots.length <= 1) return;   // no picker needed for a single slot
+  const label = document.createElement('div');
+  label.textContent = 'RESTART FROM:';
+  Object.assign(label.style, {
+    fontSize: '10px', letterSpacing: '1.2px', color: '#9b8b6a',
+    width: '100%', textAlign: 'center', marginBottom: '2px',
+  });
+  root.appendChild(label);
+  _levelStartSnapshots.forEach((snap, idx) => {
+    const btn = document.createElement('button');
+    btn.type = 'button';
+    btn.textContent = `F${(snap.levelIndex | 0) + 1}`;
+    const isActive = idx === _activeRestartSlot;
+    Object.assign(btn.style, {
+      background: isActive ? '#3a1520' : '#1a1d24',
+      border: `1px solid ${isActive ? '#cf5a5a' : '#4a505a'}`,
+      color: isActive ? '#f2c060' : '#c9a87a',
+      padding: '4px 10px', borderRadius: '3px',
+      font: 'inherit', fontSize: '11px', letterSpacing: '1px',
+      cursor: 'pointer', textTransform: 'uppercase',
+    });
+    btn.addEventListener('click', () => {
+      _activeRestartSlot = idx;
+      _refreshRestartSlotsUI();
+    });
+    root.appendChild(btn);
+  });
+}
+function restoreFromSnapshot(slotIdx = 0) {
+  const s = _levelStartSnapshots[Math.max(0, slotIdx | 0)] || levelStartSnapshot;
+  if (!s) return;
   resetRunState();
-  const s = levelStartSnapshot;
+  // Drop snapshots ahead of the chosen slot — restoring back to floor
+  // N invalidates the floor-N+1 / N+2 entries since you're rewinding
+  // past them. Keep the chosen slot at index 0.
+  if (slotIdx > 0) {
+    _levelStartSnapshots.splice(0, slotIdx);
+    levelStartSnapshot = _levelStartSnapshots[0] || null;
+  }
   playerCredits = s.credits;
   playerSkillPoints = s.skillPoints;
   playerLevel = s.charLevel;
@@ -3668,8 +3931,15 @@ function restoreFromSnapshot() {
   classMastery.xp = { ...s.classXp };
   classMastery.fillMissing();
   specialPerks.unlocked = new Set(s.specialPerks || []);
+  _refreshSkillPointPip();
   skillTree.levels = { ...(s.skillTree || {}) };
-  artifacts.owned = new Set(s.artifacts || []);
+  // Relics are sticky across restart — the player's current owned set
+  // is unioned with the snapshot's, so any relic picked up since the
+  // checkpoint survives the rewind. Restart is a dev tool right now;
+  // losing relics on rewind makes it useless for testing them.
+  const restoredRelics = new Set(s.artifacts || []);
+  for (const id of artifacts.owned) restoredRelics.add(id);
+  artifacts.owned = restoredRelics;
   for (const slot in s.inventory.equipment) {
     inventory.equipment[slot] = snapshotItem(s.inventory.equipment[slot]);
   }
@@ -4312,14 +4582,63 @@ let _flawlessAtFull = false;
 function _applyTrainerUnlocks(s) {
   const owned = getRecruiterUnlocks();
   if (!owned || !owned.size) return;
-  if (owned.has('vit_1')) s.maxHealthBonus = (s.maxHealthBonus || 0) + 10;
-  if (owned.has('vit_2')) s.maxHealthBonus = (s.maxHealthBonus || 0) + 10;
-  if (owned.has('vit_3')) s.maxHealthBonus = (s.maxHealthBonus || 0) + 10;
-  if (owned.has('end_1')) s.staminaRegenMult = (s.staminaRegenMult || 1) * 1.10;
-  if (owned.has('end_2')) s.staminaRegenMult = (s.staminaRegenMult || 1) * 1.10;
-  // comp_1 — −10% stagger duration. Stagger isn't a derived stat
-  // today; flag it for the staggered fire path to read.
-  if (owned.has('comp_1')) s.staggerDurationMult = (s.staggerDurationMult || 1) * 0.90;
+  const T = BALANCE.trainer;
+  // Helper closures — read each tier's tuning from BALANCE.trainer
+  // and apply the matching stat field. Adding a new tier is one
+  // entry in balance.js + one line here.
+  const flatHp     = (id, key) => { if (owned.has(id)) s.maxHealthBonus    = (s.maxHealthBonus    || 0) + (T[id]?.[key] || 0); };
+  const flatStam   = (id, key) => { if (owned.has(id)) s.maxStaminaBonus   = (s.maxStaminaBonus   || 0) + (T[id]?.[key] || 0); };
+  const flatCrit   = (id, key) => { if (owned.has(id)) s.critChance        = (s.critChance        || 0) + (T[id]?.[key] || 0); };
+  const flatDelay  = (id, key) => { if (owned.has(id)) s.healthRegenDelayBonus = (s.healthRegenDelayBonus || 0) + (T[id]?.[key] || 0); };
+  const multAdd    = (id, key, field) => { if (owned.has(id)) s[field] = (s[field] || 1) * (1 + (T[id]?.[key] || 0)); };
+  const multScale  = (id, key, field) => { if (owned.has(id)) s[field] = (s[field] || 1) * (T[id]?.[key] ?? 1); };
+
+  // Vitality — flat HP.
+  flatHp('vit_1', 'maxHpBonus'); flatHp('vit_2', 'maxHpBonus'); flatHp('vit_3', 'maxHpBonus');
+  flatHp('vit_4', 'maxHpBonus'); flatHp('vit_5', 'maxHpBonus');
+
+  // Endurance — multiplicative stamina-regen add.
+  multAdd('end_1', 'staminaRegenAdd', 'staminaRegenMult');
+  multAdd('end_2', 'staminaRegenAdd', 'staminaRegenMult');
+  multAdd('end_3', 'staminaRegenAdd', 'staminaRegenMult');
+  multAdd('end_4', 'staminaRegenAdd', 'staminaRegenMult');
+
+  // Conditioning — flat max stamina.
+  flatStam('stam_1', 'maxStaminaBonus'); flatStam('stam_2', 'maxStaminaBonus'); flatStam('stam_3', 'maxStaminaBonus');
+
+  // Composure — stagger duration multiplier (each tier multiplies in).
+  multScale('comp_1', 'staggerDurationMult', 'staggerDurationMult');
+  multScale('comp_2', 'staggerDurationMult', 'staggerDurationMult');
+  multScale('comp_3', 'staggerDurationMult', 'staggerDurationMult');
+
+  // Quick Hands — reload speed mult.
+  multAdd('reload_1', 'reloadSpeedAdd', 'reloadSpeedMult');
+  multAdd('reload_2', 'reloadSpeedAdd', 'reloadSpeedMult');
+  multAdd('reload_3', 'reloadSpeedAdd', 'reloadSpeedMult');
+
+  // Marksmanship — spread mult (compounds; <1 tightens).
+  multScale('aim_1', 'spreadMult', 'rangedSpreadMult');
+  multScale('aim_2', 'spreadMult', 'rangedSpreadMult');
+  multScale('aim_3', 'spreadMult', 'rangedSpreadMult');
+
+  // Eye for Detail — flat crit chance.
+  flatCrit('crit_1', 'critChanceBonus'); flatCrit('crit_2', 'critChanceBonus');
+
+  // Footwork — move speed mult.
+  multAdd('move_1', 'moveSpeedAdd', 'moveSpeedMult');
+  multAdd('move_2', 'moveSpeedAdd', 'moveSpeedMult');
+
+  // Scavenger — credit-drop mult.
+  multAdd('carry_1', 'creditDropAdd', 'creditDropMult');
+  multAdd('carry_2', 'creditDropAdd', 'creditDropMult');
+
+  // Field Recovery — health regen rate + delay shave.
+  multAdd('regen_1', 'healthRegenAdd', 'healthRegenMult');
+  multAdd('regen_2', 'healthRegenAdd', 'healthRegenMult');
+  // Delay bonus is subtractive — store as positive, the regen tick
+  // reads `delay -= s.healthRegenDelayBonus`. flatDelay adds the
+  // BALANCE value (positive seconds) into the bonus accumulator.
+  flatDelay('regen_delay', 'healthRegenDelayBonus');
 }
 
 function recomputeStats() {
@@ -4588,7 +4907,7 @@ let _hittablesCache = null;
 let _hittablesFrame = -1;
 function allHittables() {
   if (_hittablesFrame === frameCounter && _hittablesCache) return _hittablesCache;
-  _hittablesCache = [...dummies.hittables(), ...gunmen.hittables(), ...melees.hittables(), ...drones.hittables()];
+  _hittablesCache = [...dummies.hittables(), ...gunmen.hittables(), ...melees.hittables(), ...drones.hittables(), ..._allAssassinKnifeMeshes()];
   // Mega boss meshes — only present on mega-boss floors. The boss tags
   // every hit mesh with userData.owner = the boss instance + a
   // megaBoss flag so the player fire path can branch on it.
@@ -4794,6 +5113,30 @@ function _spawnCnCPair(cx, cz, room) {
 // Spawn one elite gunman at world XZ for a given encounter room.
 // Standard gunman manager + opts; the encounter handler treats the
 // resulting kills as normal kills (XP, drops, room clearance).
+// Spicy Arena boss — spawned by the spicy_arena encounter when the
+// player exits a level wearing Shini's Burden. Uses the standard
+// melee manager so damage / hit / death routing all just work; the
+// archetype flag drives the flee AI override in melee_enemy.js.
+function _spawnSpicyBossAt(x, z, room) {
+  const opts = {
+    tier: 'boss', roomId: room ? room.id : -1,
+    hpMult: 1.0, damageMult: 1.0,
+    reactionMult: 1.0, aimSpreadMult: 1.0,
+    aggression: 1.0,
+    variant: 'standard',
+    archetype: 'spicy_boss',
+    gearLevel: (level?.index || 0),
+  };
+  const e = melees.spawn(x, z, opts);
+  if (e) {
+    // Drop straight into CHASE so flee AI engages without an idle
+    // bark or detection ramp — he's already running.
+    e.state = 'chase';
+    e.reactionT = 0;
+  }
+  return e;
+}
+
 function _spawnEliteAtPos(x, z, room) {
   const diff = difficultyScale();
   const opts = {
@@ -5957,6 +6300,16 @@ function fireOneShot(playerInfo, weapon, aimPoint, isADS, aimOwner, aimZone) {
     combat.spawnShot(tracerFrom, endPoint, eff.tracerColor,
       { light: qualityFlags.muzzleLights, flash: false });
 
+    // Knife intercept — assassin knives are hittable; a player shot
+    // landing on a knife mesh destroys the knife in flight. No damage
+    // routing, no number popup; just a tiny impact spark + sfx so the
+    // player knows the parry-shot landed.
+    if (hit && hit.mesh?.userData?.knife && hit.owner) {
+      destroyAssassinKnife(hit.owner);
+      combat.spawnImpact(hit.point);
+      if (sfx?.hit) sfx.hit();
+      continue;
+    }
     // Mega-boss hits go through a parallel path — boss owns its own
     // HP + applyHit + visual flash. Damage computation reuses the
     // same zone + crit + falloff pipeline as normal enemies.
@@ -6292,12 +6645,16 @@ function fireOneShot(playerInfo, weapon, aimPoint, isADS, aimOwner, aimZone) {
       if (dx * dx + dz * dz <= r2) g.slowT = Math.max(g.slowT || 0, dur);
     }
   }
-  // Flush aggregated target effects. One blood burst + one floating
-  // damage number + at most one hit sfx per shot, head-priority.
+  // Flush aggregated target effects. One floating damage number + at
+  // most one hit sfx per shot, head-priority. Blood burst is HEAD-
+  // ONLY now — body / limb hits stay clean (the impact pool's
+  // muzzle / spark FX still fire per pellet via the inner shot
+  // loop). Blood reads as the headshot signal at a glance.
   let anyHead = false;
   for (const agg of hitAgg.values()) {
-    const burstAmount = agg.hadHead ? 10 : 5;
-    combat.spawnBloodBurst(agg.point, agg.dir, burstAmount);
+    if (agg.hadHead) {
+      combat.spawnBloodBurst(agg.point, agg.dir, 10);
+    }
     spawnDamageNumber(agg.point, camera, agg.totalDmg, agg.zone, agg.hadCrit || agg.hadHead);
     if (agg.hadHead) anyHead = true;
   }
@@ -6316,7 +6673,164 @@ let _brokenToastT = 0;
 // Last empty-magazine dry-fire click timestamp (ms). Held-trigger
 // clicks throttle off this; tap-trigger clicks reset it.
 let _emptyClickT = 0;
+// ============================================================
+// Akimbo dual-wield — when the player has the same lightweight
+// class (pistol or SMG) in BOTH weapon slots, LMB fires the
+// weapon1 hand and RMB fires the weapon2 hand. ADS is suppressed
+// (no aim-down-sights animation, no ADS-spread reduction); shots
+// are pure hipfire. Per-hand fire cooldowns let the player
+// double-tap both triggers in alternation.
+// ============================================================
+function _isAkimbo() {
+  const w1 = inventory?.equipment?.weapon1;
+  const w2 = inventory?.equipment?.weapon2;
+  if (!w1 || !w2) return false;
+  if (w1.type !== 'ranged' || w2.type !== 'ranged') return false;
+  const c1 = w1.class || '';
+  const c2 = w2.class || '';
+  if (c1 !== c2) return false;
+  return c1 === 'pistol' || c1 === 'smg';
+}
+let _akimboLeftCdT  = 0;
+let _akimboRightCdT = 0;
+let _akimboRmbWasHeld = false;
+// Tracks whether the off-hand weapon mesh is currently shown so we
+// only call setOffhandWeapon on transitions (cheap, but the geom
+// dispose inside that path isn't free either).
+let _akimboVisualState = null;
+function _syncAkimboVisuals() {
+  if (!player || !player.setOffhandWeapon) return;
+  const active = _isAkimbo();
+  // Track the offhand's identity so a slot swap (e.g. player picks
+  // up a different pistol into weapon2) re-attaches the visual.
+  const w2 = active ? inventory.equipment.weapon2 : null;
+  const key = active ? (w2.id || w2.name || 'akimbo') : 'off';
+  if (key === _akimboVisualState) return;
+  _akimboVisualState = key;
+  if (active) {
+    // Force the dominant-hand weapon to weapon1 so the LMB / RMB
+    // mapping reads cleanly (left → weapon1, right → weapon2).
+    if (currentWeaponIndex !== 0) setWeaponIndex(0);
+    player.setOffhandWeapon(w2);
+    // Defensive — make sure both weapons have ammo initialized (a
+    // freshly-equipped weapon picked up off the floor would have
+    // `ammo` undefined until first reload, which broke akimbo's
+    // "fire on RMB" path because fireOneShot's reload-trigger
+    // branch saw `weapon.ammo === undefined` and skipped fire).
+    const eff1 = effectiveWeapon(inventory.equipment.weapon1);
+    const eff2 = effectiveWeapon(inventory.equipment.weapon2);
+    if (typeof inventory.equipment.weapon1.ammo !== 'number') {
+      inventory.equipment.weapon1.ammo = eff1.magSize | 0;
+    }
+    if (typeof inventory.equipment.weapon2.ammo !== 'number') {
+      inventory.equipment.weapon2.ammo = eff2.magSize | 0;
+    }
+    // Reset per-hand cooldowns + RMB rising-edge tracker so akimbo
+    // engages cleanly on the very next tick, regardless of stale
+    // state from a prior session.
+    _akimboLeftCdT  = 0;
+    _akimboRightCdT = 0;
+    _akimboRmbWasHeld = false;
+  } else {
+    player.setOffhandWeapon(null);
+  }
+  // Re-render the HUD weapon bar so the L/R labels + dual-active
+  // highlight track the akimbo transition.
+  if (typeof renderWeaponBar === 'function') renderWeaponBar();
+}
+function _tickAkimbo(dt, playerInfo, inputState, aimInfo) {
+  // Sync the off-hand visual every tick (cheap — early-returns if
+  // nothing changed, only re-runs the mesh attach on transitions).
+  _syncAkimboVisuals();
+  if (!_isAkimbo()) {
+    _akimboLeftCdT  = 0;
+    _akimboRightCdT = 0;
+    _akimboRmbWasHeld = false;
+    return false;
+  }
+  // Reload timers tick HERE because the early-return below skips the
+  // tickShooting reload loop. Without this both weapons would freeze
+  // their reload mid-cycle the moment akimbo engages.
+  const _w1 = inventory.equipment.weapon1;
+  const _w2 = inventory.equipment.weapon2;
+  if (_w1 && _w1.type === 'ranged') tickWeaponReload(_w1);
+  if (_w2 && _w2.type === 'ranged') tickWeaponReload(_w2);
+  // Reload key — pressing R reloads BOTH guns (whichever needs it).
+  // Single press handles the common case where the player has been
+  // alternating fire and both mags want a top-up. Skips guns that are
+  // already reloading or already full.
+  if (inputState.reloadPressed) {
+    let triggered = false;
+    if (_w1 && _w1.type === 'ranged') {
+      const eff1 = effectiveWeapon(_w1);
+      if ((_w1.ammo | 0) < (eff1.magSize | 0) && !(_w1.reloadingT > 0)) {
+        tryReload(_w1); triggered = true;
+      }
+    }
+    if (_w2 && _w2.type === 'ranged') {
+      const eff2 = effectiveWeapon(_w2);
+      if ((_w2.ammo | 0) < (eff2.magSize | 0) && !(_w2.reloadingT > 0)) {
+        tryReload(_w2); triggered = true;
+      }
+    }
+    if (triggered && sfx.reload) sfx.reload();
+  }
+  // Mirror the same combo-attack lockout the regular tickShooting
+  // applies so a melee swing doesn't blast both pistols at once.
+  const phase = playerInfo?.attackPhase;
+  if (phase === 'startup' || phase === 'active' || phase === 'recovery') {
+    return true;       // consumed input — block the regular tickShooting too
+  }
+  const w1 = _w1;
+  const w2 = _w2;
+  _akimboLeftCdT  = Math.max(0, _akimboLeftCdT  - dt);
+  _akimboRightCdT = Math.max(0, _akimboRightCdT - dt);
+  // RMB rising-edge — needed for semi-auto pistols. SMG fires on
+  // held trigger, pistol on tap.
+  const rmbHeld = !!inputState.adsHeld;
+  const rmbPressed = rmbHeld && !_akimboRmbWasHeld;
+  _akimboRmbWasHeld = rmbHeld;
+  // Left hand (weapon1) — LMB.
+  if (aimInfo.point) {
+    const lWants = w1.fireMode === 'auto' ? inputState.attackHeld : inputState.attackPressed;
+    if (lWants && _akimboLeftCdT <= 0) {
+      const eff1 = effectiveWeapon(w1);
+      // Hipfire only — pass adsHeld=false regardless of input.
+      fireOneShot(playerInfo, w1, aimInfo.point, false, aimInfo.owner, aimInfo.zone);
+      _akimboLeftCdT = 1 / Math.max(0.001, eff1.fireRate || w1.fireRate || 5);
+    }
+    // Right hand (weapon2) — RMB. Tracer + visual fire origin is
+    // swapped to the off-hand muzzle for this single fireOneShot
+    // call so the bullet line spawns from weapon2's barrel instead
+    // of weapon1's. fireOneShot reads `playerInfo.muzzleWorld` for
+    // the tracer start; we restore the dominant-hand muzzle right
+    // after.
+    const rWants = w2.fireMode === 'auto' ? rmbHeld : rmbPressed;
+    if (rWants && _akimboRightCdT <= 0) {
+      const eff2 = effectiveWeapon(w2);
+      const _origMuzzle = playerInfo.muzzleWorld;
+      const _origFireOrigin = playerInfo.fireOrigin;
+      if (playerInfo.offhandMuzzleWorld) {
+        playerInfo.muzzleWorld = playerInfo.offhandMuzzleWorld;
+        // fireOrigin defaults to muzzleWorld via the `||` chain in
+        // fireOneShot, so swapping muzzleWorld is enough. Leave the
+        // explicit fireOrigin path alone (it's a higher-priority
+        // override that some weapons set elsewhere).
+      }
+      fireOneShot(playerInfo, w2, aimInfo.point, false, aimInfo.owner, aimInfo.zone);
+      playerInfo.muzzleWorld = _origMuzzle;
+      playerInfo.fireOrigin = _origFireOrigin;
+      _akimboRightCdT = 1 / Math.max(0.001, eff2.fireRate || w2.fireRate || 5);
+    }
+  }
+  return true;
+}
+
 function tickShooting(dt, playerInfo, inputState, aimInfo) {
+  // Akimbo branch fully replaces the normal fire loop when both
+  // slots hold a pistol or both an SMG. Returns true when it's
+  // active so the standard loop bails.
+  if (_tickAkimbo(dt, playerInfo, inputState, aimInfo)) return;
   // Reload timers tick for EVERY weapon the player has rotated in, not
   // only the active one. Otherwise swapping away from a reloading gun
   // freezes its timer — the reload appears to take much longer than the
@@ -6526,11 +7040,61 @@ function resolveComboHit(attackEvent) {
     if (derivedStats.lifestealMeleePercent > 0) {
       player.heal(dmg * derivedStats.lifestealMeleePercent * 0.01);
     }
+    // Per-weapon "feel" hooks — read from the equipped weapon def.
+    // Each adds a small mechanical wrinkle so blades / hammers /
+    // knuckles play distinctly.
+    const _wDef = currentWeapon();
+    if (_wDef) {
+      // Bleed-on-hit (knives, scimitars). Stamps a bleed timer on
+      // the target via the existing burn/bleed enemy fields. Re-
+      // applied per swing — ticks via the manager's burn handler
+      // (we co-opt burnT since both are simple DoT timers).
+      if (_wDef.bleedOnHit && c.alive) {
+        const dur = _wDef.bleedOnHit.durationSec || 2;
+        c.burnT = Math.max(c.burnT || 0, dur);
+        c.burnDps = Math.max(c.burnDps || 0, _wDef.bleedOnHit.dps || 4);
+      }
+      // Crit-on-head bonus (brass knuckles). Already routed through
+      // resolveComboHit's isCrit; the weapon flag adds a flat bump
+      // to the player's crit chance for THIS swing-resolution pass.
+      // Skip per-target — crit decision was made at swing-start.
+    }
     if (wasAlive && !c.alive) {
       onEnemyKilled(c);
       awardClassXp('melee', c.tier, c);
       if (skillTree.level('bloodlust') > 0) buffs.grant('bloodlust', { moveSpeedMult: 1.55 }, 4);
     }
+  }
+  // Per-weapon finisher AoE — heavy weapons (hammers, sledgehammers)
+  // shock-stagger every enemy in a small radius on the FINAL combo
+  // step. Different shape from `attack.shockwaveRadius` (which is
+  // already per-step on Pain): this one is opt-in via a weapon flag
+  // and only fires on the last step of the combo. Knockback only,
+  // no extra damage — the heavy step's own damage is the kill blow.
+  const _wFinisher = currentWeapon();
+  const _isFinalStep = attackEvent.isFinalStep;
+  if (_isFinalStep && _wFinisher && _wFinisher.staggerOnFinisher && _meleeHitLanded) {
+    const radius = _wFinisher.staggerOnFinisher.radius || 3.0;
+    const r2 = radius * radius;
+    const kb = (_wFinisher.staggerOnFinisher.knockback || 4.5)
+      * derivedStats.knockbackMult;
+    for (const c of candidates) {
+      if (!c.alive) continue;
+      const dx = c.group.position.x - origin.x;
+      const dz = c.group.position.z - origin.z;
+      if (dx * dx + dz * dz > r2) continue;
+      const d = Math.hypot(dx, dz);
+      if (d < 0.001) continue;
+      c.manager.applyKnockback?.(c, {
+        x: (dx / d) * kb,
+        z: (dz / d) * kb,
+      });
+    }
+    combat.spawnShockwave?.(
+      new THREE.Vector3(origin.x, 0, origin.z),
+      radius,
+      0xc8c0a0,
+    );
   }
   // Dervish Prayer relic — melee swing (incl. quick melee with a
   // ranged weapon equipped) slows nearby gunmen on hit. Same sweep
@@ -6596,6 +7160,14 @@ function buildBodyLoot(enemy) {
   const levelIdx = (level && level.index) || 0;
   const isMeleeEnemy = melees.enemies.includes(enemy);
 
+  // SHINIGAMI guaranteed drop — Spicy Noodles. Pushed first so it
+  // always lands in the body's loot pile regardless of the rest of
+  // the roll. Looked up by id from JUNK_DEFS directly since the
+  // public ALL_JUNK list filters _encounter items.
+  if (enemy.archetype === 'shinigami' && JUNK_DEFS && JUNK_DEFS.spicyNoodles) {
+    items.push({ ...JUNK_DEFS.spicyNoodles });
+  }
+
   // Drop economy is intentionally lean — containers + lootable props
   // carry the bulk of the items, so bodies are mostly weapon + maybe
   // a single extra. Most grunts come up entirely empty: late-game
@@ -6629,15 +7201,15 @@ function buildBodyLoot(enemy) {
   }
 
   // Armor — bosses drop two pieces, sub-bosses one, grunts almost
-  // never. Containers handle most armor distribution now.
+  // never. Containers handle most armor distribution now. Upgrade
+  // odds scale with floor index (BALANCE.loot.armorUpgrade).
   let armorCount = 0;
   if (tier === 'boss')         armorCount = 2;
   else if (tier === 'subBoss') armorCount = 1;
   else if (!isEmptyBody && Math.random() < 0.10) armorCount = 1;
-  const upgradeChance = Math.min(
-    0.25,
-    (levelIdx * 0.025) + (tier === 'boss' ? 0.18 : tier === 'subBoss' ? 0.08 : 0),
-  );
+  const _LU = BALANCE.loot.armorUpgrade;
+  const tierBonus = tier === 'boss' ? _LU.bossBonus : tier === 'subBoss' ? _LU.subBossBonus : 0;
+  const upgradeChance = Math.min(_LU.cap, (levelIdx * _LU.perFloorSlope) + tierBonus);
   for (let i = 0; i < armorCount; i++) {
     const base = randomArmor();
     const piece = {
@@ -6647,9 +7219,10 @@ function buildBodyLoot(enemy) {
     if (Math.random() < upgradeChance) {
       const roll = Math.random();
       if (tier === 'boss') {
-        piece.rarity = roll < 0.10 ? 'epic' : roll < 0.40 ? 'rare' : 'uncommon';
+        const tbl = _LU.bossRoll;
+        piece.rarity = roll < tbl.epic ? 'epic' : roll < tbl.rare ? 'rare' : 'uncommon';
       } else if (tier === 'subBoss') {
-        piece.rarity = roll < 0.15 ? 'rare' : 'uncommon';
+        piece.rarity = roll < _LU.subBossRoll.rare ? 'rare' : 'uncommon';
       } else {
         piece.rarity = 'uncommon';
       }
@@ -6674,17 +7247,35 @@ function buildBodyLoot(enemy) {
   // 70% empty roll above already strips most of them), so to keep
   // total run loot roughly flat we push more onto the bosses + sub-
   // bosses. Each elite kill should feel like opening a small chest.
+  //
+  // Floor-gated rarity rolls — see BALANCE.loot. Floor-1 sub-bosses
+  // were dropping forced epics; this scales the rates up gradually
+  // and caps them late-game.
+  const _gateBoss     = BALANCE.loot.bossGear;
+  const _gateBoss2    = BALANCE.loot.bossSecondGear;
+  const _gateSubBoss  = BALANCE.loot.subBossGear;
+  const _floorEpic    = (g) => Math.min(g.epicCap, (g.epicBase || 0) + g.epicSlope * levelIdx);
+  const _floorRare    = (g) => Math.min(g.rareCap, (g.rareBase || 0) + g.rareSlope * levelIdx);
+  const _floorLegend  = (g) => Math.min(g.legendaryCap, g.legendarySlope * levelIdx);
   if (tier === 'boss') {
     const g = randomGear();
     const gearR = Math.random();
-    items.push({ ...g, rarity: gearR < 0.22 ? 'legendary' : gearR < 0.60 ? 'epic' : 'rare',
+    let bossRarity;
+    if (gearR < _floorLegend(_gateBoss))                           bossRarity = 'legendary';
+    else if (gearR < _floorLegend(_gateBoss) + _floorEpic(_gateBoss)) bossRarity = 'epic';
+    else                                                           bossRarity = 'rare';   // boss primary always at least rare
+    items.push({ ...g, rarity: bossRarity,
       durability: { ...(g.durability || { current: 100, max: 100, repairability: 0.9 }) } });
     // Extra gear roll on bosses — second piece is rarely legendary
     // but reads as "boss room actually pays out."
     if (Math.random() < 0.55) {
       const g2 = randomGear();
       const r2 = Math.random();
-      items.push({ ...g2, rarity: r2 < 0.10 ? 'epic' : r2 < 0.50 ? 'rare' : 'uncommon',
+      let g2Rarity;
+      if (r2 < _floorEpic(_gateBoss2))                          g2Rarity = 'epic';
+      else if (r2 < _floorEpic(_gateBoss2) + _floorRare(_gateBoss2)) g2Rarity = 'rare';
+      else                                                      g2Rarity = 'uncommon';
+      items.push({ ...g2, rarity: g2Rarity,
         durability: { ...(g2.durability || { current: 100, max: 100, repairability: 0.9 }) } });
     }
     if (Math.random() < 0.18) items.push(randomAttachment());
@@ -6695,7 +7286,11 @@ function buildBodyLoot(enemy) {
     if (Math.random() < 0.80) {
       const g = randomGear();
       const r = Math.random();
-      items.push({ ...g, rarity: r < 0.20 ? 'epic' : r < 0.65 ? 'rare' : 'uncommon',
+      let sbRarity;
+      if (r < _floorEpic(_gateSubBoss))                          sbRarity = 'epic';
+      else if (r < _floorEpic(_gateSubBoss) + _floorRare(_gateSubBoss)) sbRarity = 'rare';
+      else                                                       sbRarity = 'uncommon';
+      items.push({ ...g, rarity: sbRarity,
         durability: { ...(g.durability || { current: 100, max: 100, repairability: 0.9 }) } });
     }
     if (Math.random() < 0.14) items.push(randomAttachment());
@@ -6802,7 +7397,10 @@ function onEnemyKilled(enemy, opts = {}) {
     // doesn't pay forever on overkill.
     _applyContractPerKillReward(arch);
   } catch (e) { /* defensive — contract path must never break a kill */ }
-  if (enemy.tier === 'subBoss') playerSkillPoints += 1;
+  if (enemy.tier === 'subBoss') {
+    playerSkillPoints += 1;
+    _showSkillPointToast(1);
+  }
   // Corpse position fix-up — if the body's last position landed inside
   // a wall / pillar / prop AABB, push it out so the loot prompt can
   // actually see it. Bosses ragdolling at the moment of death sometimes
@@ -7017,6 +7615,14 @@ runStats.reset = function () {
 
 function damagePlayer(amount, damageType = 'generic', srcCtx = null) {
   if (amount <= 0) return;
+  // Way of the Worrier relic — N% chance the whole damage event is
+  // dodged outright. Player flinches and the bullet "misses".
+  // Applies BEFORE any damage-mods so the dodge replaces the entire
+  // event (no partial damage, no durability tick, no recap entry).
+  if ((derivedStats.flinchDodgeChance || 0) > 0
+      && Math.random() < derivedStats.flinchDodgeChance) {
+    return;
+  }
   // Active contract modifier: playerDamageTakenMult (Glass Cannon
   // and similar). 1.0 = neutral. Applied first so subsequent
   // resistances scale over the modified base.
@@ -7047,19 +7653,31 @@ function damagePlayer(amount, damageType = 'generic', srcCtx = null) {
   }
   // Covetous relic short-circuits the entire gear-drain branch; the
   // multiplier (Patcher = 0.5) scales remaining drain otherwise.
+  // Damage routes to ONE random equipped piece per damage event so
+  // wear spreads across the loadout — previously the loop touched
+  // every slot with `reduction`, which meant the chest plate
+  // shouldered 100% of the wear (helmet / hands / pants drain ranged
+  // alongside it but the chest's higher reduction made it the
+  // visible-failure piece). Now any equipped item with durability
+  // (armor OR gear — straps and packs wear too) is eligible.
   const ratio = tunables.durability.armorDamageRatio;
   const _aMult = derivedStats.armorDurabilityMult || 1;
-  if (derivedStats.indestructibleGear) {
-    // skip the per-slot drain entirely
-  } else for (const slot of SLOT_IDS) {
-    const item = inventory.equipment[slot];
-    if (!item || !item.reduction || !item.durability) continue;
-    if (item.durability.current <= 0) continue;
-    item.durability.current = Math.max(0, item.durability.current - amount * ratio * _aMult);
-    // First time a piece of armour breaks, surface the repair
-    // mechanic — players might not realise broken gear gives no
-    // bonuses + needs a shop visit.
-    if (item.durability.current <= 0) fireHint('brokenItem');
+  if (!derivedStats.indestructibleGear) {
+    const _drainable = [];
+    for (const slot of SLOT_IDS) {
+      const item = inventory.equipment[slot];
+      if (!item || !item.durability) continue;
+      if (item.durability.current <= 0) continue;
+      _drainable.push(item);
+    }
+    if (_drainable.length) {
+      const pick = _drainable[Math.floor(Math.random() * _drainable.length)];
+      pick.durability.current = Math.max(0, pick.durability.current - amount * ratio * _aMult);
+      // First time a piece of armour breaks, surface the repair
+      // mechanic — players might not realise broken gear gives no
+      // bonuses + needs a shop visit.
+      if (pick.durability.current <= 0) fireHint('brokenItem');
+    }
   }
   // Second Wind — intercept damage that would kill and spend a charge to
   // revive at 40% of max HP instead.
@@ -8373,8 +8991,8 @@ function projectToScreen(pos, yOffset = 2.4) {
     behind: _proj.z > 1,
   };
 }
-function spawnRing(pos, pct, isEnemy = false) {
-  const p = projectToScreen(pos, 2.3);
+function spawnRing(pos, pct, isEnemy = false, yOffset = 2.3) {
+  const p = projectToScreen(pos, yOffset);
   if (p.behind) return;
   const el = acquireOverhead(`overhead-ring${isEnemy ? ' enemy' : ''}`);
   el.style.left = `${p.x}px`;
@@ -8414,8 +9032,25 @@ function updateOverhead(weapon, effWeapon, playerInfo, stealthMult) {
     }
   }
 
-  // Player reload.
-  if (weapon && weapon.type === 'ranged' && weapon.reloadingT > 0) {
+  // Player reload — ring above player. Akimbo shows TWO rings
+  // (one per weapon) stacked vertically so each hand's reload
+  // progress is visible. Bottom ring = weapon1 (LMB / left), top
+  // ring = weapon2 (RMB / right) — matches the L/R label
+  // convention in the bottom HUD.
+  if (_isAkimbo()) {
+    const w1ak = inventory.equipment.weapon1;
+    const w2ak = inventory.equipment.weapon2;
+    if (w1ak && w1ak.reloadingT > 0) {
+      const eff1 = effectiveWeapon(w1ak);
+      const total1 = (eff1?.reloadTime || w1ak.reloadTime || 1.5);
+      spawnRing(player.mesh.position, 1 - w1ak.reloadingT / total1, false, 2.3);
+    }
+    if (w2ak && w2ak.reloadingT > 0) {
+      const eff2 = effectiveWeapon(w2ak);
+      const total2 = (eff2?.reloadTime || w2ak.reloadTime || 1.5);
+      spawnRing(player.mesh.position, 1 - w2ak.reloadingT / total2, false, 2.9);
+    }
+  } else if (weapon && weapon.type === 'ranged' && weapon.reloadingT > 0) {
     const total = (effWeapon?.reloadTime || weapon.reloadTime || 1.5);
     const pct = 1 - weapon.reloadingT / total;
     spawnRing(player.mesh.position, pct, false);
@@ -9045,7 +9680,24 @@ function updateWeaponInfoHud(weapon, effWeapon) {
   // only on weapon swap; ammo only changes per shot / reload tick.
   // Most frames everything is identical — touch DOM only on change.
   let nm, cls, ammo;
-  if (!weapon) {
+  // Akimbo override — show BOTH weapons' ammo simultaneously so the
+  // player tracks both mags. Format: "L 12/15  R 8/15" with reload
+  // markers when the corresponding weapon is reloading.
+  if (_isAkimbo()) {
+    const w1 = inventory.equipment.weapon1;
+    const w2 = inventory.equipment.weapon2;
+    nm = `${w1.name || w1.class} + ${w2.name || w2.class}`;
+    cls = `AKIMBO ${(w1.class || '').toUpperCase()}`;
+    const eff1 = effectiveWeapon(w1);
+    const eff2 = effectiveWeapon(w2);
+    const fmt = (w, e) => {
+      if (w.infiniteAmmo) return '∞';
+      if (w.reloadingT > 0) return '↺';
+      const mag = (e && e.magSize) || w.magSize || '—';
+      return `${w.ammo}/${mag}`;
+    };
+    ammo = `L ${fmt(w1, eff1)}   R ${fmt(w2, eff2)}`;
+  } else if (!weapon) {
     nm = '—'; cls = 'no weapon'; ammo = '—';
   } else {
     nm = weapon.name || weapon.class || weapon.type || '—';
@@ -9060,7 +9712,11 @@ function updateWeaponInfoHud(weapon, effWeapon) {
     }
   }
   if (weaponInfoNameEl._lastTxt !== nm) {
-    weaponInfoNameEl.textContent = nm;
+    if (typeof nm === 'string' && nm.indexOf('<span') !== -1) {
+      weaponInfoNameEl.innerHTML = nm;
+    } else {
+      weaponInfoNameEl.textContent = nm;
+    }
     weaponInfoNameEl._lastTxt = nm;
   }
   if (weaponInfoClassEl._lastTxt !== cls) {
@@ -9501,10 +10157,15 @@ function throwItem(item) {
   // at ~1.5 × player height (~2.7m). Lerp between them so mid-range
   // throws feel natural. Cap the apex so the grenade can never loft
   // absurdly high regardless of distance.
+  //
+  // Molotovs (incl. Maotai variant) get a flatter ceiling — bottle
+  // arcs were clipping low ceilings on long throws and detonating
+  // mid-air against an invisible obstacle. 1.2m apex keeps the
+  // bottle well below the ~3m ceiling skip line.
   const dx = aim.x - muzzle.x, dz = aim.z - muzzle.z;
   const throwDist = Math.hypot(dx, dz);
   const MIN_APEX = 0.35;
-  const MAX_APEX = 2.7;
+  const MAX_APEX = item.throwKind === 'molotov' ? 1.2 : 2.7;
   const apex = MIN_APEX + (MAX_APEX - MIN_APEX) * Math.min(1, throwDist / 14);
   const vel = ProjectileManager.ballisticVelocityApex(muzzle, aim, apex, gravity);
   projectiles.spawn({
@@ -10334,6 +10995,166 @@ function bossTeleport(boss) {
   return false;
 }
 
+// Cloaked-assassin variant — teleport BEHIND the player so the
+// thrower has a clean line of sight to the player's back AND the
+// player has a reaction window to spin. Picks a point opposite the
+// player's aim direction at ~7-9m, with collision + open-ground
+// validation. Fires smoke puffs at both endpoints.
+function teleportBehindPlayer(enemy) {
+  if (!enemy || !enemy.alive || !player) return false;
+  const room = level.rooms?.find(r => r.id === enemy.roomId);
+  if (!room) return false;
+  const px = player.mesh.position.x;
+  const pz = player.mesh.position.z;
+  // "Behind" = opposite the player's aim. Falls back to opposite
+  // facing if aim isn't defined.
+  let bx, bz;
+  if (lastAim && (lastAim.x !== px || lastAim.z !== pz)) {
+    bx = px - lastAim.x;
+    bz = pz - lastAim.z;
+  } else {
+    bx = -Math.sin(player.mesh.rotation.y);
+    bz = -Math.cos(player.mesh.rotation.y);
+  }
+  const bd = Math.hypot(bx, bz) || 1;
+  bx /= bd; bz /= bd;
+  const b = room.bounds;
+  for (let attempt = 0; attempt < 20; attempt++) {
+    const dist = 7 + Math.random() * 2.5;       // 7-9.5m behind player
+    const jitter = (Math.random() - 0.5) * 1.6;
+    const tx = px + bx * dist + bz * jitter;
+    const tz = pz + bz * dist - bx * jitter;
+    if (tx < b.minX + 1 || tx > b.maxX - 1) continue;
+    if (tz < b.minZ + 1 || tz > b.maxZ - 1) continue;
+    if (level._collidesAt && level._collidesAt(tx, tz, 0.6)) continue;
+    const oldX = enemy.group.position.x;
+    const oldZ = enemy.group.position.z;
+    enemy.group.position.x = tx;
+    enemy.group.position.z = tz;
+    _spawnSmokePuff(oldX, oldZ);
+    _spawnSmokePuff(tx, tz);
+    return true;
+  }
+  return false;
+}
+
+// Knife-thrower projectile system. Each fan spawn lays a 5-7 knife
+// arc aimed at the player's last known position. Each knife is a
+// small red emissive elongated box that flies in a straight line at
+// constant speed, damages on player contact, expires on wall hit or
+// after 1.6s, and is HITTABLE — included in allHittables() with
+// userData.zone = 'knife' so the player can shoot them out of the
+// air. Shared geometry + per-instance material (each knife mutates
+// emissive on hit).
+const _ASSASSIN_KNIVES = [];
+const _KNIFE_GEOM = new THREE.BoxGeometry(0.06, 0.04, 0.42);
+const _KNIFE_TRAIL_GEOM = new THREE.CylinderGeometry(0.025, 0.005, 1.0, 6, 1, true);
+const _KNIFE_HIT_RADIUS = 0.45;     // player contact radius
+const _KNIFE_SPEED      = 11;       // m/s
+const _KNIFE_DAMAGE     = 14;
+const _KNIFE_LIFE       = 1.6;
+function spawnAssassinKnives(originX, originY, originZ, dirX, dirZ, count, owner) {
+  // Fan-out angles: ±15° per side from the central aim, spaced evenly.
+  const fanArc = (count - 1) * 0.13;     // ~7.5° per knife step
+  const baseAng = Math.atan2(dirX, dirZ);
+  for (let i = 0; i < count; i++) {
+    const t = (count > 1) ? (i / (count - 1) - 0.5) : 0;
+    const a = baseAng + t * fanArc;
+    const vx = Math.sin(a) * _KNIFE_SPEED;
+    const vz = Math.cos(a) * _KNIFE_SPEED;
+    const mat = new THREE.MeshBasicMaterial({
+      color: 0xff2030,
+    });
+    const mesh = new THREE.Mesh(_KNIFE_GEOM, mat);
+    mesh.position.set(originX, originY, originZ);
+    mesh.rotation.y = a;
+    mesh.userData.zone   = 'knife';
+    mesh.userData.knife  = true;
+    scene.add(mesh);
+    // Per-knife trail — narrow stretched cylinder behind the body,
+    // additive red so bloom carries the streak. scale.y maps to
+    // travel-distance so the streak is short on first frame and
+    // grows.
+    const trailMat = new THREE.MeshBasicMaterial({
+      color: 0xff2030, transparent: true, opacity: 0.55,
+      depthWrite: false, blending: THREE.AdditiveBlending,
+    });
+    const trail = new THREE.Mesh(_KNIFE_TRAIL_GEOM, trailMat);
+    trail.rotation.z = Math.PI / 2;       // lay it horizontal
+    trail.rotation.y = a + Math.PI / 2;
+    trail.scale.set(1, 0.01, 1);          // start collapsed; grows in tick
+    scene.add(trail);
+    const knife = {
+      mesh, trail, trailMat, mat,
+      x: originX, y: originY, z: originZ,
+      startX: originX, startZ: originZ,
+      vx, vz, t: 0, dead: false, owner,
+    };
+    mesh.userData.owner = knife;
+    _ASSASSIN_KNIVES.push(knife);
+  }
+}
+function _tickAssassinKnives(dt) {
+  for (let i = _ASSASSIN_KNIVES.length - 1; i >= 0; i--) {
+    const k = _ASSASSIN_KNIVES[i];
+    if (k.dead) {
+      _disposeAssassinKnife(k);
+      _ASSASSIN_KNIVES.splice(i, 1);
+      continue;
+    }
+    k.t += dt;
+    if (k.t >= _KNIFE_LIFE) { k.dead = true; continue; }
+    k.x += k.vx * dt;
+    k.z += k.vz * dt;
+    k.mesh.position.x = k.x;
+    k.mesh.position.z = k.z;
+    // Trail follows the knife's tail. Scaled to travel distance,
+    // capped at 1.4m so it doesn't smear across the map.
+    const tdx = k.x - k.startX, tdz = k.z - k.startZ;
+    const tlen = Math.min(1.4, Math.hypot(tdx, tdz));
+    if (k.trail) {
+      const a = Math.atan2(k.vx, k.vz);
+      k.trail.position.set(
+        k.x - Math.sin(a) * tlen * 0.5,
+        k.y,
+        k.z - Math.cos(a) * tlen * 0.5,
+      );
+      k.trail.rotation.y = a + Math.PI / 2;
+      k.trail.scale.y = tlen;
+    }
+    // Wall collision — same drone-style filter (only walls, not props).
+    if (level._collidesAt && level._collidesAt(k.x, k.z, 0.1)) {
+      k.dead = true; continue;
+    }
+    // Player hit.
+    if (player && player.mesh) {
+      const dx = player.mesh.position.x - k.x;
+      const dz = player.mesh.position.z - k.z;
+      if (dx * dx + dz * dz < _KNIFE_HIT_RADIUS * _KNIFE_HIT_RADIUS) {
+        damagePlayer(_KNIFE_DAMAGE, 'knife', { source: k.owner });
+        k.dead = true; continue;
+      }
+    }
+  }
+}
+function _disposeAssassinKnife(k) {
+  if (k.mesh && k.mesh.parent) k.mesh.parent.remove(k.mesh);
+  if (k.mat && k.mat.dispose) k.mat.dispose();
+  if (k.trail && k.trail.parent) k.trail.parent.remove(k.trail);
+  if (k.trailMat && k.trailMat.dispose) k.trailMat.dispose();
+}
+// Player-shot a knife mid-flight — handled in fireOneShot's
+// hittables branch via knife.userData.knife flag.
+function destroyAssassinKnife(knife) {
+  if (!knife) return;
+  knife.dead = true;
+}
+function _allAssassinKnifeMeshes() {
+  const out = [];
+  for (const k of _ASSASSIN_KNIVES) if (!k.dead) out.push(k.mesh);
+  return out;
+}
+
 function spawnerTeleportAndSummon(boss) {
   if (!boss || !boss.alive) return;
   const room = level.rooms?.find(r => r.id === boss.roomId);
@@ -10446,7 +11267,12 @@ function spawnAiThrowable(g, kindOverride) {
     },
     owner: 'enemy',
     gravity,
-    bounciness: def.bounciness ?? 0.40,
+    // Enemy grenades were inheriting the player-throw bounciness
+    // (0.40), which let them skip past the player on a bad bounce
+    // and detonate well past the target. Tightened to 0.15 so they
+    // still bounce + roll a little but don't ricochet across the
+    // room. Gas keeps its lower per-def 0.05 (impact-detonate).
+    bounciness: def.bounciness ?? 0.15,
     fuseAfterLand: def.fuseAfterLand ?? true,
     throwKind: def.kind,
     blindDuration: def.blindDuration,
@@ -10788,6 +11614,11 @@ function renderWeaponBar() {
   if (!bar) return;
   const rotation = inventory.getWeaponRotation();
   const slots = bar.querySelectorAll('.weapon-slot');
+  // Akimbo mode highlights BOTH weapon1 (slot 0, LMB) and weapon2
+  // (slot 1, RMB) as active so the player can see at a glance which
+  // weapon answers each click. The active class drives the existing
+  // CSS glow + border treatment; both glow simultaneously.
+  const akimbo = _isAkimbo();
   slots.forEach((el, i) => {
     // Weapon-bar is now the lower 4 slots (0-3) of the unified hotbar.
     // If the player has bound an item to this slot via drag-to-bind,
@@ -10799,16 +11630,23 @@ function renderWeaponBar() {
     if (bound) {
       el.classList.remove('empty');
       // Active highlight only meaningful when the bound item IS the
-      // currently-active weapon in the rotation.
+      // currently-active weapon in the rotation. Akimbo also lights
+      // up slot 0 + slot 1 if the bound item matches one of those.
       const rotIdx = rotation.indexOf(bound);
-      el.classList.toggle('active', rotIdx >= 0 && rotIdx === currentWeaponIndex);
+      const isCurrent = rotIdx >= 0 && rotIdx === currentWeaponIndex;
+      const isAkimboHand = akimbo && (rotIdx === 0 || rotIdx === 1);
+      el.classList.toggle('active', isCurrent || isAkimboHand);
       _renderHotbarSlot(el, i, String(i + 1));
       return;
     }
     const w = rotation[i] || null;
-    const keyLabel = `<span class="action-key">${i + 1}</span>`;
-    const active = w && i === currentWeaponIndex;
-    el.classList.toggle('active', !!active);
+    const akimboHandLabel = akimbo && i === 0 ? ' L'
+                          : akimbo && i === 1 ? ' R'
+                          : '';
+    const keyLabel = `<span class="action-key">${i + 1}${akimboHandLabel}</span>`;
+    const isCurrent = w && i === currentWeaponIndex;
+    const isAkimboHand = akimbo && w && (i === 0 || i === 1);
+    el.classList.toggle('active', !!(isCurrent || isAkimboHand));
     el.classList.toggle('empty', !w);
     el.classList.remove('filled');
     if (!w) {
@@ -10972,6 +11810,18 @@ async function advanceFloor() {
   // The prompt is non-blocking (overlays the skill picker) so the
   // existing extract flow continues uninterrupted.
   _maybeShowLockedTrialPrompt();
+  // Spicy Arena trigger — wearing Shini's Burden through the level
+  // exit queues the boss arena as next floor's encounter. The
+  // encounter is oncePerSave so the lifetime-completed set blocks
+  // re-rolls automatically; queueEncounterFollowup is idempotent
+  // for the per-floor slot, so re-extracting with the headband on
+  // is harmless.
+  try {
+    const head = inventory.equipment.head;
+    if (head && head.id === 'gear_shinis_burden') {
+      queueEncounterFollowup('spicy_arena', 1);
+    }
+  } catch (_) { /* prefs / inventory unavailable */ }
   await skillPickUI.show();
   input.clearMouseState();
   paused = false;
@@ -10994,8 +11844,17 @@ function _maybeShowLockedTrialPrompt() {
       ...((inventory.rigGrid?.items?.()) || []),
       ...((inventory.backpackGrid?.items?.()) || []),
     ];
-    const trial = surfaces.find(it => it && it.lockedTrial && !isWeaponUnlocked(it.name));
+    // Per-run dedupe — once the player has been prompted for a given
+    // locked weapon and chose Skip (or bought it), don't surface the
+    // same item again on every subsequent floor extract. Keyed by
+    // weapon name; cleared in _resetEncounterCompletionForRun.
+    if (!_trialPromptedThisRun) _trialPromptedThisRun = new Set();
+    const trial = surfaces.find(it =>
+      it && it.lockedTrial
+        && !isWeaponUnlocked(it.name)
+        && !_trialPromptedThisRun.has(it.name));
     if (!trial) return;
+    _trialPromptedThisRun.add(trial.name);
     const cost = ({ common: 150, uncommon: 350, rare: 800, epic: 2000, legendary: 5000, mythic: 12000 })[trial.rarity || 'common'] || 150;
     const prompt = document.createElement('div');
     prompt.id = 'death-unlock-prompt';
@@ -11474,10 +12333,86 @@ async function runLevelUp() {
   paused = true;
   input.clearMouseState();
   inventoryUI.hide();
+  // Show a glowing "LEVEL UP" banner BEFORE the skill picker so a
+  // player who happens to be clicking through a fight at the
+  // moment of level-up gets a visible heads-up + a short
+  // input-eating window. Players were accidentally locking in
+  // skill picks because the picker surfaced under their cursor
+  // while they were still firing.
+  await _showLevelUpBanner(1800);
+  // Eat any clicks queued during the banner display before
+  // surfacing the picker, so a mid-fight LMB doesn't slam-click
+  // through the panel as soon as it opens.
+  input.clearMouseState();
   await skillPickUI.show();
   input.clearMouseState();
   paused = false;
   recomputeStats();
+}
+
+// Lazy-built level-up banner — glow-animated full-screen text
+// overlay. Pure DOM, no external resources. Returns a promise that
+// resolves after `durationMs` so the caller can await it.
+let _levelUpBannerEl = null;
+function _ensureLevelUpBanner() {
+  if (_levelUpBannerEl) return _levelUpBannerEl;
+  // Inject keyframes + base style once. Scoped via the element id
+  // so they can't leak into other UI.
+  if (!document.getElementById('level-up-banner-style')) {
+    const style = document.createElement('style');
+    style.id = 'level-up-banner-style';
+    style.textContent = `
+      @keyframes lvlup-glow {
+        0%   { text-shadow: 0 0 12px #ffe070, 0 0 28px #ffd040, 0 0 60px #ff9020; transform: translate(-50%, -50%) scale(0.85); opacity: 0; }
+        12%  { transform: translate(-50%, -50%) scale(1.06); opacity: 1; }
+        20%  { transform: translate(-50%, -50%) scale(1.0); }
+        80%  { text-shadow: 0 0 14px #ffe070, 0 0 32px #ffd040, 0 0 70px #ff9020; opacity: 1; }
+        100% { text-shadow: 0 0 12px #ffe070, 0 0 28px #ffd040, 0 0 60px #ff9020; transform: translate(-50%, -50%) scale(1.04); opacity: 0; }
+      }
+      #level-up-banner {
+        position: fixed; top: 38%; left: 50%;
+        transform: translate(-50%, -50%);
+        z-index: 60; pointer-events: none;
+        font-family: ui-monospace, Menlo, Consolas, monospace;
+        font-weight: 700; font-size: 96px; letter-spacing: 14px;
+        color: #fff5b8;
+        opacity: 0; display: none; user-select: none;
+        text-shadow: 0 0 12px #ffe070, 0 0 28px #ffd040, 0 0 60px #ff9020;
+      }
+      #level-up-banner.show { display: block; }
+      #level-up-banner .sub {
+        display: block; margin-top: 6px;
+        font-size: 18px; letter-spacing: 6px;
+        color: #ffd070; text-shadow: 0 0 8px #ffb030;
+      }
+    `;
+    document.head.appendChild(style);
+  }
+  const el = document.createElement('div');
+  el.id = 'level-up-banner';
+  el.innerHTML = 'LEVEL UP<span class="sub">choose an upgrade</span>';
+  document.body.appendChild(el);
+  _levelUpBannerEl = el;
+  return el;
+}
+function _showLevelUpBanner(durationMs = 1800) {
+  return new Promise((resolve) => {
+    const el = _ensureLevelUpBanner();
+    el.classList.add('show');
+    // Restart the animation cleanly each call.
+    el.style.animation = 'none';
+    // Force reflow so the browser registers the animation reset
+    // before re-applying — without this, a back-to-back level up
+    // wouldn't re-run the keyframes.
+    void el.offsetWidth;
+    el.style.animation = `lvlup-glow ${durationMs}ms ease-out forwards`;
+    if (sfx?.uiAccept) sfx.uiAccept();
+    setTimeout(() => {
+      el.classList.remove('show');
+      el.style.animation = 'none';
+      resolve();
+    }, durationMs);
+  });
 }
 
 async function runMasteryOffer() {
@@ -11701,7 +12636,19 @@ function tick() {
   tryStartCombo(inputState, aimInfo);
   tryStartQuickMelee(inputState, aimInfo);
 
+  // Akimbo override — RMB is repurposed as the off-hand fire input
+  // when both weapon slots hold a pistol (or both an SMG), so the
+  // ADS animation + spread reduction must NOT engage. Suppress
+  // adsHeld for the player.update pass (akimbo's own _tickAkimbo
+  // reads the original inputState above).
+  const _akimboActive = _isAkimbo();
+  const _origAdsHeld = inputState.adsHeld;
+  if (_akimboActive) inputState.adsHeld = false;
   const playerInfo = player.update(dt, inputState, aimInfo.point, resolveCollision);
+  // Restore so anything after player.update that reads adsHeld
+  // sees the player's actual mouse state. _tickAkimbo will be
+  // called later in this tick and needs the real RMB value.
+  if (_akimboActive) inputState.adsHeld = _origAdsHeld;
   _tickDjinnOrb(dt);
   if (playerInfo && playerInfo.maxHealth > 0) {
     lastHpRatio = Math.max(0, Math.min(1, playerInfo.health / playerInfo.maxHealth));
@@ -11891,6 +12838,7 @@ function tick() {
   _tickFireZones(dt);
   _tickFlashDomes(dt);
   _tickFireOrbs(dt);
+  _tickAssassinKnives(dt);
   _tickBurnReadouts(dt);
   _tickBuffAuras(dt);
   _tickThrowableZones(dt);
@@ -11992,6 +12940,7 @@ function tick() {
     combat,
     camera,                         // for chatter bubble projection
     level,                          // for room-graph pathing
+    levelIndex: level?.index | 0,   // SHINIGAMI scaling reads this
     obstacles: losObstacles,
     playerStealthMult: stealthMult,
     onAlert: (e) => propagateAggro(e),
@@ -12003,6 +12952,37 @@ function tick() {
     activeDecoy,
     droneSummonAt: (gx, gz) => spawnDronesAt(gx, gz),
     bossTeleport: (e) => bossTeleport(e),
+    // SHINIGAMI — drop a ring of small molotov pools around the boss
+    // after a melee swing attempt. Each pool seeds a short fire zone
+    // (DPS scaled by run depth) so the player has to clear out of the
+    // strike radius after eating the slash.
+    spawnShinigamiMolotovRing: (cx, cz, lvIdx) => {
+      const RING_R = 2.4;
+      const COUNT  = 6;
+      const lv = Math.max(1, lvIdx | 0);
+      // Per-pool DPS + duration scales modestly with floor depth.
+      const dps = 10 + Math.min(10, lv * 0.8);
+      const dur = 4.0 + Math.min(2.0, lv * 0.1);
+      for (let i = 0; i < COUNT; i++) {
+        const a = (i / COUNT) * Math.PI * 2 + Math.random() * 0.3;
+        const r = RING_R + (Math.random() - 0.5) * 0.4;
+        const x = cx + Math.cos(a) * r;
+        const z = cz + Math.sin(a) * r;
+        spawnFireZone({ x, z }, 1.1 + Math.random() * 0.3, dur, dps);
+        // Visual splash so the ring reads on impact instead of just
+        // appearing — reuse the existing fire-orb burst at each pool.
+        spawnFireOrbBurst({ x, z }, 1.0, 6);
+      }
+      if (sfx?.uiAccept) sfx.uiAccept();
+    },
+    // Cloaked assassins use this — places the enemy behind the
+    // player's aim line. Falls back to bossTeleport (random in-room
+    // open spot) if no behind-player spot validates after 20
+    // attempts so an assassin in a corner-cornered player never gets
+    // stuck without a teleport option.
+    teleportBehindPlayer: (e) => teleportBehindPlayer(e) || bossTeleport(e),
+    spawnAssassinKnives: (x, y, z, dx, dz, n, owner) =>
+      spawnAssassinKnives(x, y, z, dx, dz, n, owner),
     onPlayerHit: (d, enemy) => {
       if (playerInfo.blocking) {
         const hitPt = new THREE.Vector3(
@@ -12169,7 +13149,29 @@ function tick() {
   }
 
   updateHealthHud(playerInfo);
-  updateReloadHud(weapon, effWeapon);
+  // Akimbo override — point the reload bar at whichever off-hand
+  // weapon is mid-reload. When neither / both are, fall back to the
+  // dominant (weapon1). Prefers the weapon with MORE time remaining
+  // so the bar shows the one about to finish LAST (the player sees
+  // when they'll have both back).
+  if (_isAkimbo()) {
+    const w1ak = inventory.equipment.weapon1;
+    const w2ak = inventory.equipment.weapon2;
+    const r1 = w1ak?.reloadingT > 0;
+    const r2 = w2ak?.reloadingT > 0;
+    if (r1 && !r2) {
+      updateReloadHud(w1ak, effectiveWeapon(w1ak));
+    } else if (r2 && !r1) {
+      updateReloadHud(w2ak, effectiveWeapon(w2ak));
+    } else if (r1 && r2) {
+      const slower = (w1ak.reloadingT >= w2ak.reloadingT) ? w1ak : w2ak;
+      updateReloadHud(slower, effectiveWeapon(slower));
+    } else {
+      updateReloadHud(weapon, effWeapon);
+    }
+  } else {
+    updateReloadHud(weapon, effWeapon);
+  }
   updateWeaponInfoHud(weapon, effWeapon);
   updateOverhead(weapon, effWeapon, playerInfo, stealthMult);
   updateStealthStatus(playerInfo);
@@ -12306,6 +13308,8 @@ function tick() {
       setDS('death-recap-dist', dist != null ? `${dist.toFixed(1)}m` : '—');
     }
     if (deathRootEl) deathRootEl.style.display = 'flex';
+    _activeRestartSlot = 0;
+    _refreshRestartSlotsUI();
     _maybeShowLockedTrialPrompt();
   }
   if (hudStatsEl) {
@@ -12470,6 +13474,23 @@ function _warmShaders() {
     warmLootEntries.push(loot.spawnItem({ x: FAR, y: FAR, z: FAR },
       { name: 'WARM_COMMON', type: 'junk', tint: 0x808080, rarity: 'common' }));
   } catch (_) {}
+  // FX warmup — first throw of grenade / flashbang / molotov / smoke /
+  // decoy / gas, and first drone sighting, were each compiling their
+  // MeshBasicMaterial variants on the gameplay frame they fired
+  // (visible as a 30-80ms stutter the first time the player used the
+  // ability). Seed one of each at FAR so the compile pass below picks
+  // up their materials. Teardown is grouped with the rest below.
+  const _farPos = new THREE.Vector3(FAR, 0, FAR);
+  try { combat.spawnExplosion?.(_farPos, 1.0); } catch (_) {}
+  try { spawnFlashDome(_farPos, 1.0); } catch (_) {}
+  try { _spawnFlameTongue(FAR, 0, FAR); } catch (_) {}
+  try { _spawnEmber(FAR, FAR); } catch (_) {}
+  try { _spawnSmoke(FAR, 0, FAR); } catch (_) {}
+  try { _spawnFlungFireOrb({ x: FAR, z: FAR }, 1, 0, 1, 1, 1); } catch (_) {}
+  try { spawnSmokeZone({ x: FAR, z: FAR }, 1.0, 1.0); } catch (_) {}
+  try { spawnDecoyBeacon({ x: FAR, z: FAR }, 1.0); } catch (_) {}
+  try { spawnGasZone({ x: FAR, z: FAR }, 1.0, 1.0, 'player'); } catch (_) {}
+  try { drones.spawn(FAR, 1.4, FAR); } catch (_) {}
   // Compile every material currently in the scene. Costs the same
   // ~100-300ms hitch we wanted to avoid in gameplay, but here it
   // happens at boot before the player can interact, so it reads as
@@ -12489,6 +13510,36 @@ function _warmShaders() {
   for (const e of warmLootEntries) {
     if (e) { try { loot.remove(e); } catch (_) {} }
   }
+  // FX teardown — pool-backed entries (flash dome, explosion fireball+
+  // ring, sparks) get hidden + released; direct-allocated entries
+  // (fire orbs, smoke / decoy / gas zone meshes) get fully disposed.
+  try {
+    for (const o of _fireOrbs) {
+      scene.remove(o.mesh);
+      if (o.kind !== 'tongue') o.mesh.geometry.dispose();
+      o.mesh.material.dispose();
+    }
+    _fireOrbs.length = 0;
+    _fireZones.length = 0;
+    const disposeZone = (z) => {
+      if (z.ring) { scene.remove(z.ring); z.ring.geometry.dispose(); z.ring.material.dispose(); }
+      if (z.dome) { scene.remove(z.dome); z.dome.geometry.dispose(); z.dome.material.dispose(); }
+      if (z.rod)  { scene.remove(z.rod);  z.rod.geometry.dispose();  z.rod.material.dispose(); }
+    };
+    for (const z of _smokeZones) disposeZone(z);
+    _smokeZones.length = 0;
+    for (const z of _decoys) disposeZone(z);
+    _decoys.length = 0;
+    for (const z of _gasZones) disposeZone(z);
+    _gasZones.length = 0;
+    for (const d of _flashDomes) {
+      d.entry.mesh.visible = false;
+      d.entry.inUse = false;
+    }
+    _flashDomes.length = 0;
+    combat.clearAll?.();
+  } catch (_) {}
+  try { drones.removeAll(); } catch (_) {}
 }
 _warmShaders();
 // Warmup is over — every shader the game routinely needs has been

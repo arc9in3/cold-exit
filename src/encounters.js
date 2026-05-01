@@ -3106,7 +3106,7 @@ export const ENCOUNTER_DEFS = {
     id: 'hoop_dreams',
     name: 'Hoop Dreams',
     floorColor: 0xb05030,             // hardwood orange
-    oncePerSave: false,
+    oncePerSave: true,
     condition: (state) => state.levelIndex >= 1,
     spawn(scene, room, ctx) {
       const disc = _spawnFloorDisc(scene, room, this.floorColor);
@@ -3638,11 +3638,31 @@ export const ENCOUNTER_DEFS = {
                 [ 1.8,  1.6],
               ];
               const cursedIdx = Math.floor(Math.random() * 3);
+              // Resolve a clear spawn point near the requested offset.
+              // Tighter test radius (0.35 ≈ chest footprint) than the
+              // previous 0.6 plus a fan of fallback positions so a
+              // nearby prop / wall doesn't silently swallow one of the
+              // three chests. If everything inside the fan collides
+              // we still spawn at the original point — a slightly-
+              // clipped chest is better than no chest.
+              const _resolveSpawn = (bx, bz) => {
+                if (!(ctx.level && ctx.level._collidesAt)) return [bx, bz];
+                if (!ctx.level._collidesAt(bx, bz, 0.35)) return [bx, bz];
+                const fan = [
+                  [ 0.0,  0.0], [ 0.6,  0.0], [-0.6,  0.0],
+                  [ 0.0,  0.6], [ 0.0, -0.6], [ 0.5,  0.5],
+                  [-0.5,  0.5], [ 0.5, -0.5], [-0.5, -0.5],
+                  [ 1.0,  0.0], [-1.0,  0.0],
+                ];
+                for (const [jx, jz] of fan) {
+                  const tx = bx + jx, tz = bz + jz;
+                  if (!ctx.level._collidesAt(tx, tz, 0.35)) return [tx, tz];
+                }
+                return [bx, bz];
+              };
               for (let i = 0; i < offsets.length; i++) {
                 const [dx, dz] = offsets[i];
-                const cx = s.disc.cx + dx;
-                const cz = s.disc.cz + dz;
-                if (ctx.level && ctx.level._collidesAt && ctx.level._collidesAt(cx, cz, 0.6)) continue;
+                const [cx, cz] = _resolveSpawn(s.disc.cx + dx, s.disc.cz + dz);
                 if (i === cursedIdx) {
                   if (ctx.spawnCursedChest) ctx.spawnCursedChest(cx, cz, 'brass_prisoner');
                 } else {
@@ -3671,7 +3691,7 @@ export const ENCOUNTER_DEFS = {
     id: 'curse_breaker',
     name: 'Curse Breaker',
     floorColor: 0x6a3060,             // mystic violet dais
-    oncePerSave: false,
+    oncePerSave: true,
     condition: (state) => !!(state.artifacts && state.artifacts.has('brass_prisoner')),
     spawn(scene, room, ctx) {
       const disc = _spawnFloorDisc(scene, room, this.floorColor);
@@ -4680,7 +4700,13 @@ export const ENCOUNTER_DEFS = {
     name: 'Want To Play A Game',
     floorColor: 0x901020,             // dim blood red dais
     oncePerSave: true,
-    condition: (state) => state.levelIndex >= 1,
+    // Chain gate — only eligible if the player has already cleared
+    // Spaces Inbetween (the clown encounter that drops the Shitty
+    // Bike). Without that key the puppet's drop trigger never fires,
+    // so spawning him would be a dead room.
+    condition: (state) => state.levelIndex >= 1
+      && state.completed
+      && state.completed.has('spaces_inbetween'),
     spawn(scene, room, ctx) {
       const disc = _spawnFloorDisc(scene, room, this.floorColor);
       // Puppet — built from primitives, NOT the simple-NPC rig (he's
@@ -5033,6 +5059,338 @@ export const ENCOUNTER_DEFS = {
     },
     onItemDropped(_item, _ctx) { return { consume: false }; },
   },
+
+  // -----------------------------------------------------------------
+  // Spicy Challenge — chunky NPC in black-and-red barks "you wanna do
+  // a spicy challenge?" Drop the Spicy Noodles junk at his feet and
+  // he chants "OSU! OSU! OSU!" then drops Shini's Burden — a damp
+  // headband that wears like a curse (-50% HP / move / stamina). Wear
+  // it to a level exit and the Spicy Arena follow-up triggers.
+  spicy_challenge: {
+    id: 'spicy_challenge',
+    name: 'Spicy Challenge',
+    floorColor: 0x802020,            // chili red
+    oncePerSave: true,
+    condition: (state) => state.levelIndex >= 2,
+    barks: [
+      'you wanna do a spicy challenge?',
+      "i'll eat anything",
+      "feed me brother. feed me anything.",
+      'spicy. SPICY. spicy.',
+    ],
+    spawn(scene, room, ctx) {
+      const disc = _spawnFloorDisc(scene, room, this.floorColor);
+      const npc = _buildSimpleNpc({
+        bodyColor: 0x101010,          // black tank top
+        headColor: 0xc89070,          // ruddy skin
+        accentColor: 0xc02020,        // red accent stripe
+        pantsColor: 0x801818,         // dark red pants
+        hairColor: 0x080808,
+        bootColor: 0x080808,
+        height: 1.78,
+      });
+      // Chunky proportions — wider in X/Z reads as obese without
+      // re-rigging the simple-NPC stack. Y-scale stays at 1 so the
+      // head still sits at the right speech-anchor height.
+      npc.scale.set(1.55, 1.0, 1.55);
+      npc.position.set(disc.cx, 0, disc.cz);
+      scene.add(npc);
+      const label = _makeLabelSprite('SPICY CHALLENGE', '#ff7060');
+      label.position.set(disc.cx, 2.6, disc.cz);
+      scene.add(label);
+      return {
+        npc, label, disc,
+        barkT: 0,
+        nextBark: 0,
+        complete: false,
+        chantT: 0,
+        chantsLeft: 0,
+        rewardSpawned: false,
+      };
+    },
+    tick(dt, ctx) {
+      const s = ctx.state;
+      if (!s.npc) return;
+      // Heavy belly bob — bigger Y-jiggle than the slim NPCs sell the
+      // weight better at iso distance.
+      s.npc.position.y = Math.sin(performance.now() * 0.0015) * 0.06;
+      // Idle bark: only when player is close + not in OSU chant.
+      if (!s.complete && s.chantsLeft <= 0) {
+        const px = ctx.playerPos.x - s.disc.cx;
+        const pz = ctx.playerPos.z - s.disc.cz;
+        if (px * px + pz * pz < 36 && s.barkT <= 0) {
+          s.barkT = 4.5 + Math.random() * 2.5;
+          const def = ENCOUNTER_DEFS.spicy_challenge;
+          const line = def.barks[s.nextBark % def.barks.length];
+          s.nextBark++;
+          ctx.spawnSpeech(s.npc.position.clone().setY(2.4), line, 3.5);
+        }
+        s.barkT = Math.max(0, s.barkT - dt);
+      }
+      // OSU chant phase — three "OSU!" shouts in quick succession
+      // before the headband drops, so the reward feels earned.
+      if (s.chantsLeft > 0) {
+        s.chantT -= dt;
+        if (s.chantT <= 0) {
+          ctx.spawnSpeech(s.npc.position.clone().setY(2.4), 'OSU!', 1.0);
+          s.chantsLeft--;
+          s.chantT = 0.55;
+          if (s.chantsLeft <= 0 && !s.rewardSpawned) {
+            s.rewardSpawned = true;
+            const burden = ARMOR_DEFS && ARMOR_DEFS.shinis_burden;
+            if (burden && ctx.spawnLoot) {
+              ctx.spawnLoot(s.disc.cx + 0.8, s.disc.cz + 0.6, { ...burden });
+            }
+            s.complete = true;
+            if (ctx.markEncounterComplete) ctx.markEncounterComplete('spicy_challenge');
+          }
+        }
+      }
+    },
+    onItemDropped(item, ctx) {
+      const s = ctx.state;
+      if (s.complete) return { consume: false };
+      const isNoodles = item && (item.id === 'junk_spicy_noodles'
+                              || item.name === 'Spicy Noodles');
+      if (!isNoodles) return { consume: false };
+      // Kick off the OSU chant — actual headband drop happens at the
+      // end of the chant in tick() so the reveal lands with the beat.
+      s.chantsLeft = 3;
+      s.chantT = 0.0;
+      return { consume: true, complete: false };
+    },
+  },
+
+  // -----------------------------------------------------------------
+  // Spicy Arena — follow-up to spicy_challenge. The same obese man
+  // turns hostile, runs FROM the player (flee AI in melee_enemy.js
+  // via archetype='spicy_boss'), and drops the Way of the Worrier
+  // relic on death. Triggered when the player exits a level wearing
+  // Shini's Burden — see advanceFloor in main.js. oncePerSave so the
+  // chain only resolves one time per save file.
+  spicy_arena: {
+    id: 'spicy_arena',
+    name: 'Spicy Arena',
+    floorColor: 0x601010,            // deeper blood red
+    oncePerSave: true,
+    condition: (state) => state.levelIndex >= 2,
+    spawn(scene, room, ctx) {
+      const disc = _spawnFloorDisc(scene, room, this.floorColor);
+      const label = _makeLabelSprite('SPICY ARENA', '#ff5050');
+      label.position.set(disc.cx, 2.6, disc.cz);
+      scene.add(label);
+      // Spawn the spicy boss as a real melee enemy so the existing
+      // damage / death / hit-routing pipeline handles him. The
+      // archetype flag swaps his CHASE behavior to flee.
+      let boss = null;
+      if (ctx.spawnSpicyBossAt) {
+        boss = ctx.spawnSpicyBossAt(disc.cx, disc.cz, ctx.room);
+      }
+      if (boss) {
+        ctx.spawnSpeech(new THREE.Vector3(disc.cx, 2.4, disc.cz),
+          'NO MORE SPICY!! NO MORE!!', 4.0);
+      }
+      return {
+        boss, label, disc,
+        complete: false,
+        rewardSpawned: false,
+      };
+    },
+    tick(dt, ctx) {
+      const s = ctx.state;
+      if (s.complete || !s.boss) return;
+      // Watch for boss death — drop the relic at his last known
+      // position the frame after he flips to !alive.
+      if (!s.boss.alive && !s.rewardSpawned) {
+        s.rewardSpawned = true;
+        const bx = s.boss.group ? s.boss.group.position.x : s.disc.cx;
+        const bz = s.boss.group ? s.boss.group.position.z : s.disc.cz;
+        if (ctx.relicFor) {
+          const relic = ctx.relicFor('way_of_the_worrier');
+          if (relic && ctx.spawnLoot) ctx.spawnLoot(bx, bz, relic);
+        }
+        s.complete = true;
+        if (ctx.markEncounterComplete) ctx.markEncounterComplete('spicy_arena');
+      }
+    },
+    onItemDropped(_item, _ctx) { return { consume: false }; },
+  },
+
+  // -----------------------------------------------------------------
+  // Carmine — blocky man with tall white hair, pink shirt + rainbow
+  // vest, brown pants. Stands center of the room, shakes violently,
+  // spins, and rants through a fixed line list. After the last line
+  // he drops a chest. No interaction — purely a watch-the-character
+  // beat. oncePerSave; the chest lands once the rant resolves.
+  carmine: {
+    id: 'carmine',
+    name: 'Carmine',
+    floorColor: 0xc83080,            // pink dais
+    oncePerSave: true,
+    condition: (state) => state.levelIndex >= 1,
+    rant: [
+      'ITS TOO DAMNED HOT',
+      'WE DID TOO MUCH',
+      'SHUT UP',
+      "YOU DON'T KNOW",
+      "I'M GONNA RIP THE HEAD OFF",
+      "what's that do for the greater good!?",
+      'I thought it was interesting...',
+      "The prank is there's a real guy in here",
+      "I don't wanna be around anymore",
+      'yeah...',
+    ],
+    spawn(scene, room, ctx) {
+      const disc = _spawnFloorDisc(scene, room, this.floorColor);
+      // Body — pink shirt, brown pants. accentColor wired to the
+      // rainbow vest stripe added below; setting accent visible on
+      // the simple-NPC accent strip keeps the silhouette readable.
+      const npc = _buildSimpleNpc({
+        bodyColor: 0xff7da8,           // pink shirt
+        headColor: 0xe8c8a0,
+        accentColor: 0xff4080,
+        pantsColor: 0x4a2a14,          // brown pants
+        hairColor: 0xf2eedc,           // off-white hair (same tone as cap below)
+        bootColor: 0x2a1a10,
+        height: 1.85,
+        skipHair: true,                // hand-built tall hair below
+      });
+      // Make him visibly blocky — slight non-uniform scale so he
+      // reads as squarer than the slim NPCs.
+      npc.scale.set(1.20, 1.0, 1.20);
+
+      // Tall white hair — three stacked rounded boxes climbing off
+      // the head crown. Reads as a vertical pompadour at iso.
+      const hairMat = new THREE.MeshStandardMaterial({
+        color: 0xf6f2e6, roughness: 0.7,
+      });
+      const headTopY = npc.userData?.headTopY ?? 1.85 * 0.94;
+      for (let i = 0; i < 3; i++) {
+        const tier = new THREE.Mesh(
+          new THREE.BoxGeometry(0.22 - i * 0.04, 0.16, 0.22 - i * 0.04),
+          hairMat,
+        );
+        tier.position.set(0, headTopY + 0.08 + i * 0.14, 0);
+        tier.castShadow = true;
+        npc.add(tier);
+      }
+
+      // Rainbow vest — six tall thin stripes wrapped over the front
+      // of the torso. Uses MeshBasicMaterial so the colors stay
+      // saturated regardless of room lighting.
+      const vestColors = [0xff3030, 0xff8030, 0xffe030, 0x40c060, 0x4080e0, 0x9040c0];
+      const torsoTopY = 1.85 * 0.84;
+      const torsoBotY = 1.85 * 0.46;
+      const stripeH = torsoTopY - torsoBotY;
+      const stripeY = (torsoTopY + torsoBotY) / 2;
+      vestColors.forEach((hex, i) => {
+        const stripe = new THREE.Mesh(
+          new THREE.BoxGeometry(0.04, stripeH, 0.02),
+          new THREE.MeshBasicMaterial({ color: hex }),
+        );
+        // Spread stripes around the front half of the torso.
+        const t = (i / (vestColors.length - 1)) - 0.5;
+        stripe.position.set(t * 0.34, stripeY, 0.20);
+        npc.add(stripe);
+      });
+
+      npc.position.set(disc.cx, 0, disc.cz);
+      scene.add(npc);
+
+      const label = _makeLabelSprite('CARMINE', '#ffb0d8');
+      label.position.set(disc.cx, 2.6, disc.cz);
+      scene.add(label);
+
+      return {
+        npc, label, disc,
+        complete: false,
+        // Rant state machine.
+        rantIdx: 0,        // line index; -1 once the chest has dropped
+        nextLineT: 1.2,    // first line lands ~1.2s after sighting
+        triggered: false,  // becomes true once the player gets close
+        // Tic state — periodic violent shake + occasional spin.
+        shakeT: 0,         // counts down per active shake
+        shakeNext: 1.5 + Math.random() * 1.5,
+        spinT: 0,          // counts down per active spin
+        spinNext: 4.0 + Math.random() * 4.0,
+        baseY: 0,
+        chestSpawned: false,
+      };
+    },
+    tick(dt, ctx) {
+      const s = ctx.state;
+      if (!s.npc) return;
+      // Lazy-trigger: don't start the rant until the player is in
+      // sight, otherwise the lines spool out before they walk in.
+      if (!s.triggered) {
+        const px = ctx.playerPos.x - s.disc.cx;
+        const pz = ctx.playerPos.z - s.disc.cz;
+        if (px * px + pz * pz < 64) s.triggered = true;
+        else return;
+      }
+
+      const def = ENCOUNTER_DEFS.carmine;
+
+      // Violent shake — high-frequency body jitter on x/z + slight
+      // tremor in rotation. Each shake lasts ~0.45s.
+      s.shakeNext -= dt;
+      if (s.shakeNext <= 0 && s.shakeT <= 0) {
+        s.shakeT = 0.35 + Math.random() * 0.35;
+        s.shakeNext = 2.0 + Math.random() * 2.5;
+      }
+      if (s.shakeT > 0) {
+        s.shakeT -= dt;
+        const j = 0.06;
+        s.npc.position.x = s.disc.cx + (Math.random() - 0.5) * j;
+        s.npc.position.z = s.disc.cz + (Math.random() - 0.5) * j;
+        s.npc.rotation.z = (Math.random() - 0.5) * 0.18;
+      } else {
+        s.npc.position.x = s.disc.cx;
+        s.npc.position.z = s.disc.cz;
+        s.npc.rotation.z = 0;
+      }
+
+      // Spin — full ~360° rotation around y, twice per typical rant.
+      // Reads as dramatic flourish between barks.
+      s.spinNext -= dt;
+      if (s.spinNext <= 0 && s.spinT <= 0) {
+        s.spinT = 0.6;
+        s.spinNext = 6.0 + Math.random() * 5.0;
+      }
+      if (s.spinT > 0) {
+        s.spinT -= dt;
+        s.npc.rotation.y += (Math.PI * 2) * (dt / 0.6);
+      }
+
+      // Bark next line — paced ~2.4-3.2s apart so the rant has rhythm.
+      if (!s.complete && s.rantIdx >= 0 && s.rantIdx < def.rant.length) {
+        s.nextLineT -= dt;
+        if (s.nextLineT <= 0) {
+          const line = def.rant[s.rantIdx];
+          ctx.spawnSpeech(s.npc.position.clone().setY(2.4), line, 2.8);
+          s.rantIdx++;
+          s.nextLineT = 2.4 + Math.random() * 1.2;
+          // Last line just landed — wait one more beat, then drop the
+          // chest and mark complete.
+          if (s.rantIdx >= def.rant.length) {
+            s.rantIdx = -1;
+            s.nextLineT = 1.6;   // pause before chest drop
+          }
+        }
+      } else if (s.rantIdx === -1 && !s.chestSpawned) {
+        s.nextLineT -= dt;
+        if (s.nextLineT <= 0) {
+          s.chestSpawned = true;
+          if (ctx.spawnRandomContainerAt) {
+            ctx.spawnRandomContainerAt(s.disc.cx + 1.2, s.disc.cz);
+          }
+          s.complete = true;
+          if (ctx.markEncounterComplete) ctx.markEncounterComplete('carmine');
+        }
+      }
+    },
+    onItemDropped(_item, _ctx) { return { consume: false }; },
+  },
 };
 
 // -----------------------------------------------------------------
@@ -5205,7 +5563,7 @@ const _EPIC_SCRIPTS = {
 
 // Helper — pick one valid encounter for the given level state, or null.
 // Caller handles the "no encounter this level" outcome.
-export function pickEncounterForLevel(levelIndex, completedSet, runStats = null, artifacts = null) {
+export function pickEncounterForLevel(levelIndex, completedSet, runStats = null, artifacts = null, inventory = null) {
   // Forced followups jump the queue — when the previous floor's
   // encounter requested a continuation (`forceFollowup`), that id
   // is placed here regardless of the random pool. Returns null if
@@ -5223,9 +5581,28 @@ export function pickEncounterForLevel(levelIndex, completedSet, runStats = null,
   const tier = currentEncounterTier();
   const candidates = Object.values(ENCOUNTER_DEFS).filter((def) => {
     if (!isEncounterEligible(def, completedSet, cooldownMap, runCount, tier)) return false;
-    if (def.condition && !def.condition({ levelIndex, completed: completedSet, runStats, artifacts })) return false;
+    if (def.condition && !def.condition({ levelIndex, completed: completedSet, runStats, artifacts, inventory })) return false;
     return true;
   });
   if (!candidates.length) return null;
-  return candidates[Math.floor(Math.random() * candidates.length)];
+  // Weighted pick — encounters the player has never finished in their
+  // lifetime save (per prefs.getCompletedEncounters) get a 5× weight
+  // multiplier vs. ones already seen. Without this, a freshly added
+  // encounter has 1/N odds of rolling against a 27-item pool — testers
+  // and returning players almost never hit new content. Lifetime set is
+  // separate from `completedSet` (which is per-RUN) so this only biases
+  // toward genuinely-unseen content, not stuff already done this run.
+  const lifetimeDone = getCompletedEncounters();
+  let totalW = 0;
+  const weights = candidates.map((def) => {
+    const w = lifetimeDone && lifetimeDone.has(def.id) ? 1 : 5;
+    totalW += w;
+    return w;
+  });
+  let roll = Math.random() * totalW;
+  for (let i = 0; i < candidates.length; i++) {
+    roll -= weights[i];
+    if (roll <= 0) return candidates[i];
+  }
+  return candidates[candidates.length - 1];
 }

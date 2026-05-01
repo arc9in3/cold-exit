@@ -406,6 +406,18 @@ export const ARTIFACT_DEFS = {
     synthetic: true,
     apply(s) { s.indestructibleGear = true; s.indestructibleWeapons = true; },
   },
+  way_of_the_worrier: {
+    id: 'way_of_the_worrier', name: 'Way of the Worrier',
+    lore: "you're so worried you're constantly flinching at everything that comes your way",
+    short: '30% chance bullets miss you',
+    tint: 0xa07a8a,
+    price: 0,
+    encounterOnly: true,    // Spicy Arena reward only — no shop / merchant rotation
+    // Sets the dodge-chance derived stat. damagePlayer reads this
+    // and rolls before applying any incoming damage; on dodge, the
+    // entire damage event is voided (durability + recap untouched).
+    apply(s) { s.flinchDodgeChance = Math.max(s.flinchDodgeChance || 0, 0.30); },
+  },
 };
 
 export const ALL_ARTIFACTS = Object.values(ARTIFACT_DEFS);
