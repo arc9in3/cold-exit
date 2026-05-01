@@ -117,7 +117,7 @@ window.__resetHints = resetHints;
 // "I'm on build XYZ" without inspecting the bundle. Date stamps the
 // version so a quick glance tells you how stale the build is. Both
 // values render into the bottom-right #build-version label.
-const BUILD_VERSION = 'ded653e+coop-extract-gate+peer-died';
+const BUILD_VERSION = '7233d24+coop-anims+glow+dropin+defib';
 // Build date intentionally bumped each deploy so the corner label
 // reflects the current snapshot.
 const BUILD_DATE    = '2026-05-01';
@@ -1879,6 +1879,40 @@ function _tickReviveInteract(dt) {
   const isHolding = !!(input && input._isHeld && input._isHeld(ACTIONS.INTERACT));
   const totalHold = tunables.coop?.reviveHoldSec ?? 20;
   const decaySec  = tunables.coop?.reviveDecaySec ?? 12;
+  // Phase 2: defib bypass. While in revive range with a downed peer,
+  // pressing F (HEAL action) consumes a defibrillator and instantly
+  // revives the target at full HP. Falls through to the hold-based
+  // path if the reviver has no defib. The healPressed flag is read
+  // and cleared here BEFORE the normal tryUseMedkit consumes it, so
+  // mid-revive heal presses route to the teammate, not self.
+  _refreshDefibHint(target);
+  if (target && inputState && inputState.healPressed) {
+    const found = inventory.findFirstConsumable?.(it => it.id === 'cons_defib');
+    if (found) {
+      inputState.healPressed = false;     // consume so tryUseMedkit skips it
+      const stackCount = (found.item.count | 0) || 1;
+      if (stackCount > 1) {
+        found.item.count = stackCount - 1;
+        inventory._bump?.();
+      } else {
+        inventory.takeFromBackpack(found.idx);
+      }
+      inventoryUI.render();
+      transientHudMsg('DEFIB — instant revive', 2.5);
+      try { sfx.uiAccept?.(); } catch (_) {}
+      if (t.isHost) {
+        // Host is its own authority — apply directly + broadcast.
+        t.send('rpc-revived', { p: target, hp: 1.0 });
+        _coopPeerDowned.delete(target);
+        _reviveTargetPeerId = null;
+        _reviveHoldT = 0;
+      } else {
+        // Joiner — host applies the revive and re-broadcasts.
+        t.send('rpc-revive-item', { t: target, k: 'defib' });
+      }
+      return;
+    }
+  }
   if (target && isHolding) {
     if (_reviveTargetPeerId !== target) {
       _reviveTargetPeerId = target;
@@ -2171,6 +2205,27 @@ function _ensureCoopLobby() {
       // the shared rig materials (mutating shared mats poisoned
       // every other ally's tint).
       _coopApplyDownedOverlay(body.p, true);
+      return;
+    }
+    if (kind === 'rpc-revive-item') {
+      // Host-only: a joiner used a health item on a downed peer.
+      // v1 supports defib (instant revive at full HP). Other kinds
+      // (medkit, tourniquet, bandage) reserved for follow-ups.
+      if (!transport.isHost || !body || !body.t) return;
+      const targetPeer = body.t;
+      const itemKind = body.k || 'defib';
+      const st = _coopPeerDowned.get(targetPeer);
+      if (!st || st.bleedoutT <= 0) return;     // not downed / already gone
+      if (itemKind === 'defib') {
+        transport.send('rpc-revived', { p: targetPeer, hp: 1.0 });
+        _coopPeerDowned.delete(targetPeer);
+        // If WE are the host AND we are the revivee (joiner defibbed
+        // us), trigger our own _leaveDownedState since the server
+        // excludes the sender from the broadcast we just sent.
+        if (transport.peerId === targetPeer) {
+          try { _leaveDownedState(1.0); } catch (_) {}
+        }
+      }
       return;
     }
     if (kind === 'rpc-revive-hold') {
@@ -12006,6 +12061,40 @@ function _coopAllPeersReadyToExtract() {
     if (!g.inExit) return false;
   }
   return true;
+}
+
+// Sticky hint that surfaces while the local player is in revive range
+// of a downed peer AND carries a defibrillator. Pulses gold + reads
+// "[F] DEFIB — INSTANT REVIVE" so the player knows the bypass exists
+// without having to remember the keymap.
+let _defibHintEl = null;
+function _refreshDefibHint(targetPeerId) {
+  const has = !!targetPeerId
+    && !!inventory.findFirstConsumable?.(it => it.id === 'cons_defib');
+  if (!has) {
+    if (_defibHintEl) _defibHintEl.style.display = 'none';
+    return;
+  }
+  if (!_defibHintEl) {
+    const el = document.createElement('div');
+    el.id = 'defib-hint';
+    Object.assign(el.style, {
+      position: 'fixed', bottom: '110px', left: '50%',
+      transform: 'translateX(-50%)', zIndex: '7',
+      pointerEvents: 'none', display: 'none',
+      font: '12px ui-monospace, Menlo, Consolas, monospace',
+      letterSpacing: '2px', textTransform: 'uppercase',
+      padding: '7px 14px',
+      background: 'linear-gradient(180deg, #2a1c08, #100a02)',
+      border: '1px solid #ffd060', borderRadius: '4px',
+      color: '#ffe080',
+      boxShadow: '0 0 18px rgba(255,200,80,0.45)',
+    });
+    el.textContent = '[F] DEFIB — INSTANT REVIVE';
+    document.body.appendChild(el);
+    _defibHintEl = el;
+  }
+  _defibHintEl.style.display = 'block';
 }
 
 // Refresh the dual-opt-in extract HUD pill. Called every frame from
