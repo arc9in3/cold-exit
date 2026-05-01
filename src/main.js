@@ -117,7 +117,7 @@ window.__resetHints = resetHints;
 // "I'm on build XYZ" without inspecting the bundle. Date stamps the
 // version so a quick glance tells you how stale the build is. Both
 // values render into the bottom-right #build-version label.
-const BUILD_VERSION = '4eaf8be+repair-shop-fns-restored';
+const BUILD_VERSION = '7b0f5b4+rpc-grant-rewards+throw-claimer';
 // Build date intentionally bumped each deploy so the corner label
 // reflects the current snapshot.
 const BUILD_DATE    = '2026-05-01';
@@ -2647,6 +2647,10 @@ function _ensureCoopLobby() {
           triggerConeDeg: +body.tc || undefined,
           throwDirX: +body.dx || 0,
           throwDirZ: +body.dz || 0,
+          // Stamp the claimer onto the projectile so the explosion
+          // path can attribute credit / xp / skill points back to
+          // the joiner who threw it.
+          _coopClaimer: from,
         };
         projectiles.spawn(opts);
         // Mirror to other joiners (server excludes the sender from
@@ -2696,6 +2700,30 @@ function _ensureCoopLobby() {
         const tp = new THREE.Vector3(body.x2 || 0, body.y2 || 1, body.z2 || 0);
         combat.spawnShot(fp, tp, body.c | 0xffd040, { light: false, flash: true });
       } catch (_) {}
+      return;
+    }
+    if (kind === 'rpc-grant-rewards') {
+      // Joiner-only — host attributed a kill we caused and is sending
+      // the bundled rewards. Apply credits + skill points + kill +
+      // contract archetype locally so OUR run stats / wallet / skill
+      // ladder advance, not the host's.
+      if (transport.isHost || !body) return;
+      try {
+        const c = body.c | 0;
+        const sp = body.sp | 0;
+        const arch = body.a || null;
+        if (c > 0) { playerCredits += c; runStats.addCredits(c); }
+        if (sp > 0) {
+          playerSkillPoints += sp;
+          _showSkillPointToast(sp);
+        }
+        if (body.k) runStats.addKill();
+        if (arch) {
+          runStats.noteArchetypeKill(arch);
+          _applyContractPerKillReward(arch);
+        }
+        _refreshSkillPointPip();
+      } catch (e) { console.warn('[coop] rpc-grant-rewards apply failed', e); }
       return;
     }
     if (kind === 'rpc-grant-xp') {
@@ -9040,39 +9068,56 @@ function onEnemyKilled(enemy, opts = {}) {
     enemy.looted = true;
   }
   if (!enemy.noXp) awardKillXp(enemy);
-  if (!enemy.noXp) {
-    const gained = rollCredits(enemy.tier || 'normal');
-    if (gained > 0) { playerCredits += gained; runStats.addCredits(gained); }
-    // Lucky Dice — every kill rolls 2d6 (range 2-12) bonus credits
-    // on top of the base credit roll.
-    if (artifacts && artifacts.has('lucky_dice')) {
-      const dice = (1 + Math.floor(Math.random() * 6)) + (1 + Math.floor(Math.random() * 6));
-      playerCredits += dice;
-      runStats.addCredits(dice);
+  // Coop attribution: when a joiner caused this kill (rpc-shoot wraps
+  // applyHit in a thread-local that names the killing peer), route
+  // credits + skill points + contract archetype to them instead of
+  // to the host. Host self-kills run the local path as before.
+  const _coopT_kill = (typeof getCoopTransport === 'function') ? getCoopTransport() : null;
+  const _coopClaimer = (typeof window !== 'undefined') ? window.__coopCurrentClaimer : null;
+  // Resolve the kill's archetype once — contract evaluators read it.
+  let arch = null;
+  if (enemy.tier === 'boss' || enemy.tier === 'subBoss') arch = 'boss';
+  else if (enemy.kind === 'melee') arch = 'melee';
+  else if (enemy.variant === 'dasher') arch = 'dasher';
+  else if (enemy.variant === 'tank') arch = 'tank';
+  else if (enemy.kind === 'gunman') arch = 'gunman';
+  if (_coopClaimer && _coopT_kill?.isOpen && _coopT_kill.isHost) {
+    // Joiner kill — bundle every reward (credits + skill points +
+    // kill count + archetype for contract progress) into one rpc.
+    // Skip the host's local apply entirely so we don't double-credit.
+    const credits = (!enemy.noXp ? rollCredits(enemy.tier || 'normal') : 0)
+      + (!enemy.noXp && artifacts?.has('lucky_dice')
+          ? ((1 + Math.floor(Math.random() * 6)) + (1 + Math.floor(Math.random() * 6)))
+          : 0);
+    const skillPts = enemy.tier === 'subBoss' ? 1 : 0;
+    try {
+      _coopT_kill.send('rpc-grant-rewards', {
+        c: credits | 0,
+        sp: skillPts | 0,
+        a: arch || '',
+        k: 1,
+      }, _coopClaimer);
+    } catch (_) {}
+  } else {
+    // Host (or single-player) self-kill — run the local reward path.
+    if (!enemy.noXp) {
+      const gained = rollCredits(enemy.tier || 'normal');
+      if (gained > 0) { playerCredits += gained; runStats.addCredits(gained); }
+      if (artifacts && artifacts.has('lucky_dice')) {
+        const dice = (1 + Math.floor(Math.random() * 6)) + (1 + Math.floor(Math.random() * 6));
+        playerCredits += dice;
+        runStats.addCredits(dice);
+      }
     }
-  }
-  runStats.addKill();
-  // Per-archetype kill counter for contract evaluators. Map kind +
-  // tier + variant to a contract archetype: tier='boss' → boss,
-  // tier='subBoss' → boss too, kind='melee' → melee, kind='gunman'
-  // with variant='dasher' → dasher, etc. Contracts that track 'any'
-  // already read runStats.kills.
-  try {
-    let arch = null;
-    if (enemy.tier === 'boss' || enemy.tier === 'subBoss') arch = 'boss';
-    else if (enemy.kind === 'melee') arch = 'melee';
-    else if (enemy.variant === 'dasher') arch = 'dasher';
-    else if (enemy.variant === 'tank') arch = 'tank';
-    else if (enemy.kind === 'gunman') arch = 'gunman';
-    runStats.noteArchetypeKill(arch);
-    // Per-kill chip reward for active contracts that pay per-kill.
-    // Capped at the contract's targetCount so the perKillReward
-    // doesn't pay forever on overkill.
-    _applyContractPerKillReward(arch);
-  } catch (e) { /* defensive — contract path must never break a kill */ }
-  if (enemy.tier === 'subBoss') {
-    playerSkillPoints += 1;
-    _showSkillPointToast(1);
+    if (enemy.tier === 'subBoss') {
+      playerSkillPoints += 1;
+      _showSkillPointToast(1);
+    }
+    runStats.addKill();
+    try {
+      runStats.noteArchetypeKill(arch);
+      _applyContractPerKillReward(arch);
+    } catch (e) { /* defensive — contract path must never break a kill */ }
   }
   // Corpse position fix-up — if the body's last position landed inside
   // a wall / pillar / prop AABB, push it out so the loot prompt can
@@ -10650,6 +10695,25 @@ function onProjectileExplode(pos, explosion, owner, p) {
       && typeof _coopDamageRemotePlayersInRadius === 'function') {
     _coopDamageRemotePlayersInRadius(pos.x, pos.z, radius, explosion.damage, 'megaboss');
   }
+  // Coop kill attribution: when this is a joiner-thrown projectile
+  // (host applied via rpc-throwable, stamped p._coopClaimer), set
+  // the thread-local so any onEnemyKilled fired during damage
+  // application routes rewards via rpc-grant-rewards instead of to
+  // the host. Cleared in a finally below.
+  const _coopPrevClaimer = (typeof window !== 'undefined') ? window.__coopCurrentClaimer : null;
+  const _coopThrowClaimer = p?._coopClaimer || null;
+  if (_coopThrowClaimer && typeof window !== 'undefined') {
+    window.__coopCurrentClaimer = _coopThrowClaimer;
+  }
+  try {
+    return _onProjectileExplodeBody(pos, explosion, owner, p, radius, rSq);
+  } finally {
+    if (_coopThrowClaimer && typeof window !== 'undefined') {
+      window.__coopCurrentClaimer = _coopPrevClaimer;
+    }
+  }
+}
+function _onProjectileExplodeBody(pos, explosion, owner, p, radius, rSq) {
   // Sniper bullet — direct hit, no AoE, no fireball. Cheap path:
   // single impact spark + one distance check on the player. Skips
   // spawnExplosionFx (which allocates 16+ meshes + a PointLight per

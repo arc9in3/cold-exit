@@ -45,6 +45,7 @@ const KIND_ALLOWED_FROM_HOST = new Set([
   'level-seed',
   'rpc-grant-item',   // pickup approval
   'rpc-grant-xp',
+  'rpc-grant-rewards', // credits + skill points + contract progress for a joiner kill
   'rpc-player-damage',
   'fx-tracer',        // host's AI bullet trace; broadcast for visuals
   'fx-ring',          // host's hazard telegraph ring (artillery / aoe)
