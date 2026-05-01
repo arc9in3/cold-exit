@@ -117,7 +117,7 @@ window.__resetHints = resetHints;
 // "I'm on build XYZ" without inspecting the bundle. Date stamps the
 // version so a quick glance tells you how stale the build is. Both
 // values render into the bottom-right #build-version label.
-const BUILD_VERSION = '8d97453+enc-shared-spawn-local-state';
+const BUILD_VERSION = 'e3c7235+coin-vfx+banner-sequence';
 // Build date intentionally bumped each deploy so the corner label
 // reflects the current snapshot.
 const BUILD_DATE    = '2026-05-01';
@@ -2732,6 +2732,14 @@ function _ensureCoopLobby() {
           _applyContractPerKillReward(arch);
         }
         _refreshSkillPointPip();
+        // Coin burst at the kill position (host included it in the
+        // payload). Falls back to the local player if the host's
+        // client didn't include coords — better than no VFX.
+        if (c > 0) {
+          const cx = (typeof body.x === 'number') ? body.x : (player?.mesh?.position?.x ?? 0);
+          const cz = (typeof body.z === 'number') ? body.z : (player?.mesh?.position?.z ?? 0);
+          try { spawnKillCoins({ x: cx, y: 1.0, z: cz }, c); } catch (_) {}
+        }
       } catch (e) { console.warn('[coop] rpc-grant-rewards apply failed', e); }
       return;
     }
@@ -9104,6 +9112,8 @@ function onEnemyKilled(enemy, opts = {}) {
     // Joiner kill — bundle every reward (credits + skill points +
     // kill count + archetype for contract progress) into one rpc.
     // Skip the host's local apply entirely so we don't double-credit.
+    // Skip coin VFX too — the joiner's own client spawns it via the
+    // rpc-grant-rewards handler.
     const credits = (!enemy.noXp ? rollCredits(enemy.tier || 'normal') : 0)
       + (!enemy.noXp && artifacts?.has('lucky_dice')
           ? ((1 + Math.floor(Math.random() * 6)) + (1 + Math.floor(Math.random() * 6)))
@@ -9115,18 +9125,27 @@ function onEnemyKilled(enemy, opts = {}) {
         sp: skillPts | 0,
         a: arch || '',
         k: 1,
+        // Pass the kill position so the joiner's client can spawn the
+        // coin burst at the corpse, not at their own player.
+        x: +(enemy.group?.position?.x?.toFixed(2) ?? 0),
+        z: +(enemy.group?.position?.z?.toFixed(2) ?? 0),
       }, _coopClaimer);
     } catch (_) {}
   } else {
     // Host (or single-player) self-kill — run the local reward path.
+    let totalCredits = 0;
     if (!enemy.noXp) {
       const gained = rollCredits(enemy.tier || 'normal');
-      if (gained > 0) { playerCredits += gained; runStats.addCredits(gained); }
+      if (gained > 0) { playerCredits += gained; runStats.addCredits(gained); totalCredits += gained; }
       if (artifacts && artifacts.has('lucky_dice')) {
         const dice = (1 + Math.floor(Math.random() * 6)) + (1 + Math.floor(Math.random() * 6));
         playerCredits += dice;
         runStats.addCredits(dice);
+        totalCredits += dice;
       }
+    }
+    if (totalCredits > 0 && enemy.group?.position) {
+      try { spawnKillCoins(enemy.group.position, totalCredits); } catch (_) {}
     }
     if (enemy.tier === 'subBoss') {
       playerSkillPoints += 1;
@@ -10423,6 +10442,119 @@ function _tickFlashDomes(dt) {
 //            flames and grow as they fade. Only spawned in the second
 //            half of a tongue's life so it reads as smoke trailing
 //            the flame, not stacked underneath.
+// Kill-coin VFX. On enemy death, spawn 4-8 small emissive gold coins
+// that burst outward (radial + slight upward arc) and then home in
+// on the player. The "+N" floater spawns at the kill point so the
+// payout reads instantly; the coins themselves are pure flair on the
+// way to the wallet. Single shared geometry + material clones per
+// instance (rotation needs unique mat for emissive flicker).
+const _coinFx = [];
+let _coinGeom = null;
+function _getCoinGeom() {
+  if (!_coinGeom) {
+    // Squashed cylinder reads as a coin disc viewed at iso angle.
+    _coinGeom = new THREE.CylinderGeometry(0.08, 0.08, 0.025, 14);
+  }
+  return _coinGeom;
+}
+function spawnKillCoins(pos, amount) {
+  if (!amount || amount <= 0) return;
+  // Floater shows the count immediately so the player gets the
+  // payout signal even if the coin VFX is offscreen / occluded.
+  try { spawnDamageNumber(pos.clone ? pos.clone().setY(1.4) : new THREE.Vector3(pos.x, 1.4, pos.z), camera, amount, 'coin'); }
+  catch (_) {}
+  // Number of physical coins to spawn — caps so a 99-credit boss
+  // kill doesn't dump 99 coins on the screen. 4-8 reads as "money."
+  const count = Math.min(8, Math.max(4, Math.round(amount / 4)));
+  for (let i = 0; i < count; i++) {
+    const ang = (i / count) * Math.PI * 2 + (Math.random() - 0.5) * 0.4;
+    const speed = 2.8 + Math.random() * 1.6;
+    const mat = new THREE.MeshStandardMaterial({
+      color: 0xffd750,
+      roughness: 0.30, metalness: 0.85,
+      emissive: 0xffb830,
+      emissiveIntensity: 0.55,
+    });
+    const mesh = new THREE.Mesh(_getCoinGeom(), mat);
+    mesh.position.set(pos.x, 1.0, pos.z);
+    mesh.rotation.x = Math.PI / 2 + (Math.random() - 0.5) * 0.4;
+    mesh.castShadow = false;
+    mesh.frustumCulled = false;
+    scene.add(mesh);
+    _coinFx.push({
+      mesh, mat,
+      vx: Math.sin(ang) * speed,
+      vy: 3.4 + Math.random() * 1.4,
+      vz: Math.cos(ang) * speed,
+      spinY: (Math.random() < 0.5 ? -1 : 1) * (8 + Math.random() * 6),
+      phase: 'burst',
+      t: 0,
+      burstUntil: 0.30 + Math.random() * 0.10,
+    });
+  }
+}
+function _tickCoinFx(dt) {
+  if (_coinFx.length === 0) return;
+  const target = player?.mesh?.position;
+  for (let i = _coinFx.length - 1; i >= 0; i--) {
+    const c = _coinFx[i];
+    c.t += dt;
+    c.mesh.rotation.y += c.spinY * dt;
+    if (c.phase === 'burst') {
+      // Ballistic arc outward.
+      c.vy -= 9.8 * dt;
+      c.mesh.position.x += c.vx * dt;
+      c.mesh.position.y += c.vy * dt;
+      c.mesh.position.z += c.vz * dt;
+      // Don't punch through the floor.
+      if (c.mesh.position.y < 0.25) {
+        c.mesh.position.y = 0.25;
+        c.vy = Math.abs(c.vy) * 0.35;
+        c.vx *= 0.6; c.vz *= 0.6;
+      }
+      if (c.t >= c.burstUntil) c.phase = 'fly';
+    } else if (c.phase === 'fly') {
+      if (!target) {
+        // No player to home to (death / extract) — just despawn.
+        scene.remove(c.mesh); c.mat.dispose(); _coinFx.splice(i, 1);
+        continue;
+      }
+      // Steer toward player chest height. Acceleration grows with
+      // age so the path reads as "magnetized in" rather than a lazy
+      // drift. Cap top speed so a far-away coin doesn't streak.
+      const tx = target.x;
+      const ty = 1.1;
+      const tz = target.z;
+      const dx = tx - c.mesh.position.x;
+      const dy = ty - c.mesh.position.y;
+      const dz = tz - c.mesh.position.z;
+      const dist = Math.hypot(dx, dy, dz);
+      if (dist < 0.55) {
+        scene.remove(c.mesh); c.mat.dispose(); _coinFx.splice(i, 1);
+        continue;
+      }
+      const accel = 22 + (c.t - c.burstUntil) * 18;
+      const inv = 1 / Math.max(0.001, dist);
+      c.vx += dx * inv * accel * dt;
+      c.vy += dy * inv * accel * dt;
+      c.vz += dz * inv * accel * dt;
+      // Speed cap.
+      const speedSq = c.vx * c.vx + c.vy * c.vy + c.vz * c.vz;
+      const cap = 22;
+      if (speedSq > cap * cap) {
+        const scale = cap / Math.sqrt(speedSq);
+        c.vx *= scale; c.vy *= scale; c.vz *= scale;
+      }
+      c.mesh.position.x += c.vx * dt;
+      c.mesh.position.y += c.vy * dt;
+      c.mesh.position.z += c.vz * dt;
+      // Safety: if a coin's been in flight for >2.5s, despawn.
+      if (c.t > 3.0) {
+        scene.remove(c.mesh); c.mat.dispose(); _coinFx.splice(i, 1);
+      }
+    }
+  }
+}
 // All three share the `_fireOrbs` pool / tick loop so cleanup paths
 // don't multiply.
 const _fireOrbs = [];
@@ -15171,13 +15303,20 @@ let _pendingMasteryPicks = [];   // queue of mastery offers, FIFO
 let _pickQueueHudEl = null;
 let _pickPickerOpen = false;
 
+// Shared "banner currently animating" gate. Without this, a
+// runLevelUp + runMasteryOffer firing on adjacent frames produced
+// overlapping LEVEL UP + CLASS LEVEL UP banners. Tick reads this
+// flag to defer the second branch until the first banner finishes.
+let _pickBannerShowing = false;
 async function runLevelUp() {
   // Banner still pops — the player wants the dopamine hit + a
   // visual cue that the threshold crossed. The PICKER is deferred
   // to a clickable HUD pill so an in-fight level-up doesn't
   // interrupt or steal a panicked click.
   input.clearMouseState();
-  await _showLevelUpBanner(1800);
+  _pickBannerShowing = true;
+  try { await _showLevelUpBanner(1800); }
+  finally { _pickBannerShowing = false; }
   _pendingLevelUpPicks += 1;
   _refreshPickQueueHud();
 }
@@ -15186,7 +15325,9 @@ async function runMasteryOffer() {
   const offer = pendingMasteryOffers.shift();
   if (!offer) return;
   input.clearMouseState();
-  await _showClassLevelUpBanner(1800);
+  _pickBannerShowing = true;
+  try { await _showClassLevelUpBanner(1800); }
+  finally { _pickBannerShowing = false; }
   _pendingMasteryPicks.push(offer);
   _refreshPickQueueHud();
 }
@@ -15865,6 +16006,7 @@ function tick() {
   _tickFireZones(dt);
   _tickFlashDomes(dt);
   _tickFireOrbs(dt);
+  _tickCoinFx(dt);
   _tickAssassinKnives(dt);
   _tickBurnReadouts(dt);
   _tickBuffAuras(dt);
@@ -16206,10 +16348,10 @@ function tick() {
   if (extractPending) {
     extractPending = false;
     advanceFloor();
-  } else if (pendingLevelUps > 0 && !paused) {
+  } else if (pendingLevelUps > 0 && !paused && !_pickBannerShowing) {
     pendingLevelUps -= 1;
     runLevelUp();
-  } else if (pendingMasteryOffers.length > 0 && !paused) {
+  } else if (pendingMasteryOffers.length > 0 && !paused && !_pickBannerShowing) {
     runMasteryOffer();
   }
   _refreshExitWaitHud();

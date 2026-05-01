@@ -5,6 +5,7 @@ const ZONE_CLASS = {
   legs: 'legs',
   arm: 'arm',
   torso: '',
+  coin: 'coin',     // gold "+N" floater for kill-coin payouts
 };
 
 // Pooled damage-number nodes. Was creating + appending a fresh
