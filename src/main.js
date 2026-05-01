@@ -117,7 +117,7 @@ window.__resetHints = resetHints;
 // "I'm on build XYZ" without inspecting the bundle. Date stamps the
 // version so a quick glance tells you how stale the build is. Both
 // values render into the bottom-right #build-version label.
-const BUILD_VERSION = '815272b+per-peer-encounters';
+const BUILD_VERSION = '8d97453+enc-shared-spawn-local-state';
 // Build date intentionally bumped each deploy so the corner label
 // reflects the current snapshot.
 const BUILD_DATE    = '2026-05-01';
@@ -1816,21 +1816,26 @@ function _coopNeuterThrowOpts(opts) {
   };
 }
 
-// Coop encounter rolls are per-peer by design — each player gets
-// their own encounter (using their own lifetime completedEncounters,
-// their own runStats, their own artifacts/inventory state) and
-// interacts with their own NPCs/rewards. Encounter NPC state is
-// local to each peer; interaction-time mutations (priest refusal
-// counter, shrine activation, etc.) don't leak between peers.
-// Encounter rewards drop into local loot for the rolling peer only.
-// Encounters that spawn enemies via melees/gunmen managers (a few
-// megaboss-style ones) remain host-authoritative because those
-// enemies are snapshot-driven; for those, joiner sees host's
-// spawned enemies but rolls their own narrative encounter alongside.
+// Coop encounter sync. Both peers see the SAME encounter in the
+// same spot — host's pick is canonical, joiner pops it from a queue
+// keyed by room order. Spawn is wrapped in a stable per-encounter
+// seed so NPC pose / dialogue picks / chest loot rolls land
+// identically on both peers. Interaction-time state (priest refusal
+// counter, shrine activation, dialogue branch) stays local on each
+// peer's enc.state — they can talk to their own copy independently.
+let _coopHostEncounterIds = [];
+let _coopForcedEncounterQueue = [];
 function _coopPickEncounter(levelIndex) {
-  return pickEncounterForLevel(
+  const t = getCoopTransport();
+  if (t.isOpen && !t.isHost && _coopForcedEncounterQueue.length > 0) {
+    const id = _coopForcedEncounterQueue.shift();
+    if (id && ENCOUNTER_DEFS[id]) return ENCOUNTER_DEFS[id];
+  }
+  const def = pickEncounterForLevel(
     levelIndex, _runCompletedEncounters, runStats, artifacts, inventory,
   );
+  if (t.isOpen && t.isHost && def) _coopHostEncounterIds.push(def.id);
+  return def;
 }
 
 // Joiner-side stash persistence. Cold Exit's transport can drop on a
@@ -2379,9 +2384,12 @@ function _ensureCoopLobby() {
   transport.addEventListener('peer-in', () => {
     if (!transport.isHost || !_runSeed) return;
     const lv = (level?.index | 0);
-    transport.send('level-seed', { seed: _runSeed, levelIndex: lv });
+    transport.send('level-seed', {
+      seed: _runSeed, levelIndex: lv,
+      enc: _coopHostEncounterIds.slice(),
+    });
     console.log('[coop] re-broadcasting level-seed on peer-in',
-      { seed: _runSeed, levelIndex: lv });
+      { seed: _runSeed, levelIndex: lv, encounters: _coopHostEncounterIds });
   });
   // Once the WS handshake completes, regenerate the level on the
   // host side if we don't yet have a run seed. This covers the very
@@ -2946,6 +2954,11 @@ function _ensureCoopLobby() {
       currentSeed: _runSeed, currentLv: level?.index | 0,
     });
     _runSeed = incomingSeed;
+    // Stash the host's chosen encounter ids so _coopPickEncounter
+    // pops them in order during the joiner's regen. Resetting the
+    // queue here (vs preserving across messages) means a duplicate
+    // level-seed broadcast doesn't double-stack the queue.
+    _coopForcedEncounterQueue = Array.isArray(body.enc) ? body.enc.slice() : [];
     if (needsRegen && level) {
       // Drop-in mid-run — joiner connected from the menu without
       // having clicked Play first. Auto-start a default run so they
@@ -3976,14 +3989,21 @@ function regenerateLevel() {
     _runSeed = (Math.random() * 0xFFFFFFFF) >>> 0 || 1;
     console.log('[coop] generated run seed', _runSeed);
   }
+  // Coop encounter sync — reset the host's per-floor pick log before
+  // regen runs so it accumulates only this floor's choices.
+  if (transport.isOpen && transport.isHost) _coopHostEncounterIds = [];
   const result = _withRunSeed(_getEffectiveSeed(), () => _regenerateLevelImpl());
   // Broadcast AFTER generation so joiners apply the seed for their
-  // own regen call. _runSeed is per-run, level.index is per-floor.
-  // Encounters are NOT shared — each peer rolls + runs their own.
+  // own regen call. Encounter ids attached so both peers see the
+  // SAME encounter (interaction state stays per-peer locally).
   if (transport.isOpen && transport.isHost && _runSeed) {
     const lv = (level?.index | 0);
-    transport.send('level-seed', { seed: _runSeed, levelIndex: lv });
-    console.log('[coop] broadcasting level-seed', { seed: _runSeed, levelIndex: lv });
+    transport.send('level-seed', {
+      seed: _runSeed, levelIndex: lv,
+      enc: _coopHostEncounterIds.slice(),
+    });
+    console.log('[coop] broadcasting level-seed',
+      { seed: _runSeed, levelIndex: lv, encounters: _coopHostEncounterIds });
   } else if (transport.isOpen) {
     console.log('[coop] skipped broadcast (not host or no seed)',
       { isHost: transport.isHost, runSeed: _runSeed });
@@ -4871,7 +4891,18 @@ function _regenerateLevelImpl() {
     // every active encounter every frame; that was the single
     // largest GC contributor on later floors.
     const _spawnCtx = _ctxFactory();
-    const _state = def.spawn(scene, r, _spawnCtx) || {};
+    // Coop: per-encounter seed so def.spawn rolls (NPC pose offsets,
+    // initial dialogue picks, encounter-chest loot rolls) land
+    // identically on host + joiner. Without this, host's earlier
+    // pickEncounterForLevel call consumed Math.random while joiner
+    // popped from the forced queue and skipped that consumption,
+    // shifting RNG state. Interaction-time state mutates separately
+    // per peer (priest counter, shrine activation) — that's by
+    // design: each player interacts with their own copy of enc.state.
+    const _encSeed = ((_runSeed >>> 0)
+      ^ Math.imul((level.index | 0) + 1, 0x9E3779B1)
+      ^ Math.imul((r.id | 0) + 1, 0x85EBCA77)) >>> 0;
+    const _state = _withRunSeed(_encSeed, () => def.spawn(scene, r, _spawnCtx)) || {};
     if (_state.npc && _state.npc.position && !_state._noCollider) {
       const np = _state.npc.position;
       _state._collider = level.addEncounterCollider(np.x, np.z, 0.65, 0.65, 1.6);
