@@ -102,13 +102,15 @@ import { setCursorForWeapon } from './cursor.js';
 import { DroneManager } from './drones.js';
 import { CoopLobbyUI, isCoopEnabled } from './coop/lobby.js';
 import { getCoopTransport } from './coop/transport.js';
+import { encodeEnemySnapshot, applyEnemySnapshot } from './coop/snapshot.js';
+import { resetNetIds } from './gunman.js';
 window.__resetHints = resetHints;
 
 // Build identifier — bumped at deploy time so playtesters can report
 // "I'm on build XYZ" without inspecting the bundle. Date stamps the
 // version so a quick glance tells you how stale the build is. Both
 // values render into the bottom-right #build-version label.
-const BUILD_VERSION = '4c99544+coop-hide';
+const BUILD_VERSION = 'fedc864+coop-snap';
 // Build date intentionally bumped each deploy so the corner label
 // reflects the current snapshot.
 const BUILD_DATE    = '2026-05-01';
@@ -1638,6 +1640,14 @@ let coopLobby = null;
 let coopGhostRoot = null;
 const _coopGhostMeshes = new Map();   // peerId → { group, label }
 let _coopBroadcastT = 0;
+// Snapshot pacing — host publishes every 1/20s; joiner latches the
+// most recent snapshot it's seen and applies on the next tick. Older
+// snapshots are dropped (seq < latestSeq) so out-of-order packets
+// don't briefly rewind enemy state.
+let _coopSnapshotT = 0;
+let _coopSnapshotSeq = 0;
+let _coopPendingSnapshot = null;
+let _coopLatestSeq = -1;
 function _ensureCoopLobby() {
   if (coopLobby || !isCoopEnabled()) return null;
   coopLobby = new CoopLobbyUI({ getPlayerName });
@@ -1655,6 +1665,16 @@ function _ensureCoopLobby() {
   const transport = getCoopTransport();
   transport.addEventListener('msg', (e) => {
     const { kind, body, from } = e.detail;
+    if (kind === 'snapshot') {
+      // Joiner-only — host's snapshot of authoritative enemy state.
+      // Drop older / equal sequence numbers; the network can reorder
+      // and we don't want to briefly rewind a dead enemy.
+      if (transport.isHost) return;
+      if (!body || (body.seq | 0) <= _coopLatestSeq) return;
+      _coopLatestSeq = body.seq | 0;
+      _coopPendingSnapshot = body;
+      return;
+    }
     if (kind !== 'level-seed' || !body) return;
     if (transport.isHost) {
       console.log('[coop] ignoring level-seed (we are host)', body);
@@ -2603,6 +2623,11 @@ function regenerateLevel() {
   return result;
 }
 function _regenerateLevelImpl() {
+  // Coop net-ID counter reset — must run BEFORE the spawn loop in
+  // this function so each enemy gets the same netId on host and
+  // joiner (spawn order is deterministic via the seeded RNG, so
+  // a counter that resets here lines up on both ends).
+  resetNetIds();
   // Tear down old BVHs so the GC can reclaim them alongside the
   // dropped geometries. Called BEFORE level.generate which replaces
   // the obstacle list.
@@ -7896,6 +7921,25 @@ function _tickCoop(dt) {
         f: player.mesh.rotation.y || 0,
       });
     }
+  }
+  // Snapshot publish — host only. Authoritative enemy state goes out
+  // at 20Hz so joiners can lerp through the gap between packets. v1
+  // is full-state JSON; delta-encoding lands when bandwidth becomes
+  // a real constraint, which won't happen until we sync more entity
+  // types (projectiles, loot, doors).
+  if (transport.isHost && level && gunmen && melees) {
+    _coopSnapshotT -= dt;
+    if (_coopSnapshotT <= 0) {
+      _coopSnapshotT = 1 / 20;
+      _coopSnapshotSeq = (_coopSnapshotSeq + 1) | 0;
+      const snap = encodeEnemySnapshot(gunmen, melees, _coopSnapshotSeq, performance.now() | 0);
+      transport.send('snapshot', snap);
+    }
+  } else if (!transport.isHost && _coopPendingSnapshot) {
+    // Joiner — apply the most recent snapshot we received. Lerp
+    // factor is dt / 0.06 so the snap-to-target interpolation settles
+    // ~60ms after a fresh packet (~one snapshot interval).
+    applyEnemySnapshot(_coopPendingSnapshot, gunmen, melees, Math.min(1, dt / 0.06));
   }
   // Sync ghost meshes — create/update per-peer, prune disconnected.
   const seen = new Set();
@@ -13503,6 +13547,16 @@ function tick() {
   // doorways instead of hitting their flattened mesh.
   const losObstacles = level.solidObstacles();
   const isRoomActive = (roomId) => level.isRoomActive(roomId);
+  // Joiner-side AI gate — when we're a connected coop joiner (not
+  // host), enemy AI runs ONLY on the host. Skipping the local update
+  // calls prevents double-simulation (host's snapshot positions would
+  // fight the joiner's local pathing). The joiner still renders the
+  // rig animations driven by snapshot 'state' tags + position lerp.
+  const _coopJoiner = (() => {
+    const t = getCoopTransport();
+    return t.isOpen && !t.isHost;
+  })();
+  if (!_coopJoiner) {
   gunmen.update({
     dt,
     playerPos: playerInfo.position,
@@ -13645,6 +13699,7 @@ function tick() {
     playerBlocking: playerInfo.blocking,
     resolveCollision: enemyResolveCollision,
   });
+  }   // end !_coopJoiner gate around gunmen/melees update
   // Drone tick — the suicide drones float toward the player at
   // a fixed speed and detonate on contact. Player-aim raycasts
   // already see them via allHittables (the manager plugged its

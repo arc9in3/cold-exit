@@ -223,6 +223,13 @@ const VARIANT_PROFILES = {
   },
 };
 
+// Per-run net ID counter — bumped on every spawn so each gunman /
+// melee gets a stable handle for coop snapshot reconciliation. Reset
+// on regenerateLevel via resetNetIds().
+let _coopNetIdCounter = 0;
+export function _nextNetId() { return (++_coopNetIdCounter); }
+export function resetNetIds() { _coopNetIdCounter = 0; }
+
 export class GunmanManager {
   constructor(scene) {
     this.scene = scene;
@@ -703,6 +710,11 @@ export class GunmanManager {
       : 0;
 
     const g = {
+      // Coop net ID — assigned at spawn from a monotonic per-room
+      // counter so host + joiners have a stable handle for snapshot
+      // reconciliation. Same ID on both ends because spawn order is
+      // deterministic via the seeded RNG in regenerateLevel.
+      netId: _nextNetId(),
       group, leftLeg, rightLeg, torso, head, leftArm, rightArm, gun, muzzle,
       alert, alertMat, bodyMat, headMat, legMat,
       // Held weapon meshes — referenced for the on-death strip pass

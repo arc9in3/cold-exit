@@ -1,6 +1,7 @@
 import * as THREE from 'three';
 import { tunables } from './tunables.js';
 import { buildRig, initAnim, updateAnim, pokeHit, pokeDeath } from './actor_rig.js';
+import { _nextNetId } from './gunman.js';
 import { spawnSpeechBubble } from './hud.js';
 
 // Melee rusher: idle → chase → windup → recovery. Stockier than the
@@ -248,6 +249,10 @@ export class MeleeEnemyManager {
     this.scene.add(group);
 
     const e = {
+      // Coop net ID — see gunman.js for the rationale; the same
+      // counter feeds melees so every networked entity in the room
+      // has a unique handle.
+      netId: _nextNetId(),
       group, leftLeg, rightLeg, torso, head, weaponArm, blade, offArm, alert, alertMat,
       telMat,
       tipMarker,
