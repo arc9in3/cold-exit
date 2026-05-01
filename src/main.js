@@ -2476,6 +2476,21 @@ function _ensureCoopLobby() {
     });
     _runSeed = incomingSeed;
     if (needsRegen && level) {
+      // Drop-in mid-run — joiner connected from the menu without
+      // having clicked Play first. Auto-start a default run so they
+      // have a starter loadout (pistol class) and dismiss the menu.
+      // Without this, the level regenerates behind the menu and the
+      // player has no equipment, no spawn, and the menu is still up.
+      const dropInMidRun = mainMenuUI?.visible;
+      if (dropInMidRun) {
+        try {
+          startNewRun('pistol');
+          mainMenuUI.hide();
+          transientHudMsg('JOINED MID-RUN', 3.0);
+        } catch (e) {
+          console.warn('[coop] drop-in startNewRun failed', e);
+        }
+      }
       // Force the next regenerate to land on incomingLv. level.generate()
       // bumps index by 1 internally, so we set to one below.
       const wasMidRun = (level.index | 0) > 0;
@@ -2491,9 +2506,15 @@ function _ensureCoopLobby() {
       // advance, matching the host's advanceFloor flow. Routed
       // through the deferred-pick queue so the world keeps ticking
       // (coop never pauses for picks) — the gold HUD pill surfaces
-      // and the joiner spends when they're ready.
+      // and the joiner spends when they're ready. Drop-in counts:
+      // the host is on floor N, the joiner just landed on floor N
+      // and gets the same N picks the host has accumulated (capped
+      // at 5 to avoid an absurd queue on a deep mid-run join).
       if (isFloorAdvance) {
         _pendingLevelUpPicks += 1;
+        try { _refreshPickQueueHud(); } catch (_) {}
+      } else if (dropInMidRun && incomingLv > 0) {
+        _pendingLevelUpPicks += Math.min(5, incomingLv);
         try { _refreshPickQueueHud(); } catch (_) {}
       }
     }
