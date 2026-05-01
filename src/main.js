@@ -121,7 +121,7 @@ window.__resetHints = resetHints;
 // "I'm on build XYZ" without inspecting the bundle. Date stamps the
 // version so a quick glance tells you how stale the build is. Both
 // values render into the bottom-right #build-version label.
-const BUILD_VERSION = 'f413d0f+enc-rng-iso+downed-fixes+music-toggle';
+const BUILD_VERSION = '6ff52c8+coins-direct-to-player';
 // Build date intentionally bumped each deploy so the corner label
 // reflects the current snapshot.
 const BUILD_DATE    = '2026-05-01';
@@ -10689,8 +10689,6 @@ function spawnKillCoins(pos, amount) {
   // kill doesn't dump 99 coins on the screen. 4-8 reads as "money."
   const count = Math.min(8, Math.max(4, Math.round(amount / 4)));
   for (let i = 0; i < count; i++) {
-    const ang = (i / count) * Math.PI * 2 + (Math.random() - 0.5) * 0.4;
-    const speed = 2.8 + Math.random() * 1.6;
     const mat = new THREE.MeshStandardMaterial({
       color: 0xffd750,
       roughness: 0.30, metalness: 0.85,
@@ -10698,20 +10696,31 @@ function spawnKillCoins(pos, amount) {
       emissiveIntensity: 0.55,
     });
     const mesh = new THREE.Mesh(_getCoinGeom(), mat);
-    mesh.position.set(pos.x, 1.0, pos.z);
+    // Tiny pose jitter at the kill spot so the cluster doesn't read
+    // as one stacked coin; no outward velocity — coins fly straight
+    // to the player from the start.
+    const jitter = 0.18;
+    mesh.position.set(
+      pos.x + (Math.random() - 0.5) * jitter,
+      1.0 + (Math.random() - 0.5) * 0.25,
+      pos.z + (Math.random() - 0.5) * jitter,
+    );
     mesh.rotation.x = Math.PI / 2 + (Math.random() - 0.5) * 0.4;
     mesh.castShadow = false;
     mesh.frustumCulled = false;
     scene.add(mesh);
     _coinFx.push({
       mesh, mat,
-      vx: Math.sin(ang) * speed,
-      vy: 3.4 + Math.random() * 1.4,
-      vz: Math.cos(ang) * speed,
+      // Start with zero velocity — fly-tick accelerates toward player
+      // immediately. No ballistic arc, no floor bounce, no scatter.
+      vx: 0, vy: 0, vz: 0,
       spinY: (Math.random() < 0.5 ? -1 : 1) * (8 + Math.random() * 6),
-      phase: 'burst',
+      phase: 'fly',
       t: 0,
-      burstUntil: 0.30 + Math.random() * 0.10,
+      // Staggered launch so the cluster reads as a stream rather than
+      // a single packet. Each coin starts homing after a small delay.
+      flyDelay: i * 0.04,
+      burstUntil: 0,
     });
   }
 }
@@ -10750,6 +10759,9 @@ function _tickCoinFx(dt) {
         scene.remove(c.mesh); c.mat.dispose(); _coinFx.splice(i, 1);
         continue;
       }
+      // Stagger the launch so a cluster reads as a stream — each
+      // coin waits its tiny flyDelay before starting to home.
+      if (c.flyDelay && c.t < c.flyDelay) continue;
       // Steer toward player chest height. Acceleration grows with
       // age so the path reads as "magnetized in" rather than a lazy
       // drift. Cap top speed so a far-away coin doesn't streak.
@@ -10764,7 +10776,8 @@ function _tickCoinFx(dt) {
         scene.remove(c.mesh); c.mat.dispose(); _coinFx.splice(i, 1);
         continue;
       }
-      const accel = 22 + (c.t - c.burstUntil) * 18;
+      const flyT = Math.max(0, c.t - (c.flyDelay || 0));
+      const accel = 32 + flyT * 28;
       const inv = 1 / Math.max(0.001, dist);
       c.vx += dx * inv * accel * dt;
       c.vy += dy * inv * accel * dt;
