@@ -1022,6 +1022,12 @@ export class MegaBoss {
       dmg: this.dmg.artillery,
       t: 0, life: 1.2,
     });
+    // Coop: artillery telegraph ring exists only on host. Broadcast
+    // a one-shot marker so the joiner sees the danger zone in time
+    // to dodge. Routed through the same fx-tracer hook with a
+    // distinctive color (red) and the y2 sentinel +radius encoded
+    // so the receiver can render a ground ring instead of a tracer.
+    this.ctx.coopBroadcastRing?.(x, z, radius, 1.2, 0xff4040);
   }
 
   _tickSlam(dt, playerPos) {
@@ -1144,6 +1150,10 @@ export class MegaBoss {
       dmg: this.dmg.groundFire,
       lastTick: 0,
     });
+    // Coop: fire pool DoT lasts 5.5s on host; joiner needs the same
+    // visual to know where it's burning. Orange tint distinguishes
+    // it from artillery (red) and gas (green).
+    this.ctx.coopBroadcastRing?.(x, z, radius, 5.5, 0xff8030);
   }
 
   _tickGas(dt, playerPos) {
@@ -1355,6 +1365,16 @@ export class MegaBoss {
         g.mesh.position.y = 0.18;
         g.landed = true;
         g.vx *= 0.3; g.vz *= 0.3; g.vy = 0;
+        // Coop: telegraph the landing zone so the joiner has the
+        // same fuse window to dodge that the host does. Frag uses
+        // the existing red ring; gas uses a green tint to read as
+        // a different threat type.
+        const remainingLife = Math.max(0.1, g.fuseTime);
+        this.ctx.coopBroadcastRing?.(
+          g.mesh.position.x, g.mesh.position.z,
+          g.radius, remainingLife,
+          g.isGas ? 0x40ff40 : 0xff4040,
+        );
       }
     } else {
       const remaining = Math.max(0, g.fuseTime - (g.t - g.flightTime));

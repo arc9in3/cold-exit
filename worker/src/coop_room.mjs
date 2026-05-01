@@ -47,6 +47,7 @@ const KIND_ALLOWED_FROM_HOST = new Set([
   'rpc-grant-xp',
   'rpc-player-damage',
   'fx-tracer',        // host's AI bullet trace; broadcast for visuals
+  'fx-ring',          // host's hazard telegraph ring (artillery / aoe)
   'rpc-downed',       // peer entered downed state
   'rpc-revived',      // peer left downed state (revived/full HP)
   'rpc-revive-progress', // periodic broadcast of an active revive bar

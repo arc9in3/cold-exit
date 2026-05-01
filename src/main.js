@@ -117,7 +117,7 @@ window.__resetHints = resetHints;
 // "I'm on build XYZ" without inspecting the bundle. Date stamps the
 // version so a quick glance tells you how stale the build is. Both
 // values render into the bottom-right #build-version label.
-const BUILD_VERSION = '57164c4+heal-items+megaboss-trace';
+const BUILD_VERSION = 'acf59bd+telegraphs+hud-dedupe';
 // Build date intentionally bumped each deploy so the corner label
 // reflects the current snapshot.
 const BUILD_DATE    = '2026-05-01';
@@ -1814,6 +1814,23 @@ function _coopTickMegabossHazards() {
 // `megaboss`, `fire`, `gas`, `melee`, `ballistic`. Pass an optional
 // `oncePerPeerSet` to gate repeat hits within a single attack (e.g.
 // charge attacks hit each peer at most once).
+// Telegraph ring broadcast. Joiner spawns a transient ring at the
+// given world XZ that fades over `life` seconds — same visual the
+// host renders for artillery shells / aoe warnings. Without this,
+// the joiner only sees the boss's body move and has no warning of
+// where the strike will land.
+function _coopBroadcastTelegraphRing(x, z, radius, life, color) {
+  const t = getCoopTransport();
+  if (!t.isOpen || !t.isHost) return;
+  if (!t.peers || t.peers.size === 0) return;
+  t.send('fx-ring', {
+    x: +x.toFixed(2), z: +z.toFixed(2),
+    r: +radius.toFixed(2),
+    l: +Math.max(0.1, life).toFixed(2),
+    c: (color | 0) || 0xff4040,
+  });
+}
+
 // Megaboss bullet tracer broadcast. Routes through the existing
 // fx-tracer kind so the joiner's combat.spawnShot renders the line
 // + flash. Cheap (one packet per bullet); host-only and only when
@@ -2308,6 +2325,44 @@ function _ensureCoopLobby() {
         const tp = new THREE.Vector3(body.x2 || 0, body.y2 || 1, body.z2 || 0);
         combat.spawnShot(fp, tp, body.c | 0, { light: false });
       } catch (_) { /* defensive: never break a frame on a tracer */ }
+      return;
+    }
+    if (kind === 'fx-ring') {
+      // Joiner-only — host's hazard telegraph (artillery shell, aoe
+      // warning). Spawn a transient ring at ground level that fades
+      // over `l` seconds. Cheap one-shot; cleaned up via setTimeout.
+      if (transport.isHost || !body) return;
+      try {
+        const r = +body.r || 1.0;
+        const life = +body.l || 1.2;
+        const color = (body.c | 0) || 0xff4040;
+        const ringGeom = new THREE.RingGeometry(Math.max(0.05, r - 0.15), r, 28);
+        const ringMat = new THREE.MeshBasicMaterial({
+          color, transparent: true, opacity: 0.7,
+          depthWrite: false, side: THREE.DoubleSide,
+          blending: THREE.AdditiveBlending,
+        });
+        const ring = new THREE.Mesh(ringGeom, ringMat);
+        ring.rotation.x = -Math.PI / 2;
+        ring.position.set(+body.x || 0, 0.05, +body.z || 0);
+        scene.add(ring);
+        const startT = performance.now();
+        const tick = () => {
+          const t = (performance.now() - startT) / 1000;
+          if (t >= life) {
+            scene.remove(ring);
+            ringGeom.dispose();
+            ringMat.dispose();
+            return;
+          }
+          // Pulse + ramp opacity to peak near explosion frame.
+          const k = t / life;
+          const pulse = 0.4 + 0.5 * Math.abs(Math.sin(t * (8 + 4 * k)));
+          ringMat.opacity = (0.5 + 0.5 * k) * pulse;
+          requestAnimationFrame(tick);
+        };
+        requestAnimationFrame(tick);
+      } catch (_) {}
       return;
     }
     if (kind === 'fx-tracer-self') {
@@ -3661,6 +3716,7 @@ function _regenerateLevelImpl() {
       damageRemotePlayersInRadius: _coopDamageRemotePlayersInRadius,
       damageRemotePlayersInCone:   _coopDamageRemotePlayersInCone,
       coopBroadcastTracer:         _coopBroadcastMegabossTracer,
+      coopBroadcastRing:           _coopBroadcastTelegraphRing,
       getPlayerPos: () => player.mesh.position,
       playerHasIFrames: () => (lastPlayerInfo?.iFrames | 0) > 0,
       // Smoke-zone queries — let the boss respect smoke grenades the
@@ -9076,13 +9132,15 @@ function _tickCoop(dt) {
       }
     }
     // Reload indicator — visible while ghost.reloading; pulses via
-    // emissive opacity for legibility at iso distance.
+    // emissive opacity for legibility at iso distance. Skip the
+    // opacity write when invisible to avoid Three.js material
+    // dirty-flag work each frame.
     if (m.reloadDot) {
-      const isReloading = !!ghost.reloading;
-      m.reloadDot.visible = isReloading && !ghost.dead;
+      const isReloading = !!ghost.reloading && !ghost.dead;
+      if (m.reloadDot.visible !== isReloading) m.reloadDot.visible = isReloading;
       if (isReloading && m.reloadMat) {
-        const t = (typeof performance !== 'undefined') ? performance.now() / 1000 : 0;
-        m.reloadMat.opacity = 0.55 + 0.35 * Math.abs(Math.sin(t * 6));
+        const tnow = (typeof performance !== 'undefined') ? performance.now() / 1000 : 0;
+        m.reloadMat.opacity = 0.55 + 0.35 * Math.abs(Math.sin(tnow * 6));
       }
     }
     // Lerp 1/0.2s toward the most-recent reported position. Catches
@@ -12103,12 +12161,18 @@ function _findBestReviveItem() {
 let _defibHintEl = null;
 function _refreshDefibHint(targetPeerId) {
   if (!targetPeerId) {
-    if (_defibHintEl) _defibHintEl.style.display = 'none';
+    if (_defibHintEl && _defibHintEl._lastDisp !== 'none') {
+      _defibHintEl.style.display = 'none';
+      _defibHintEl._lastDisp = 'none';
+    }
     return;
   }
   const found = _findBestReviveItem();
   if (!found) {
-    if (_defibHintEl) _defibHintEl.style.display = 'none';
+    if (_defibHintEl && _defibHintEl._lastDisp !== 'none') {
+      _defibHintEl.style.display = 'none';
+      _defibHintEl._lastDisp = 'none';
+    }
     return;
   }
   if (!_defibHintEl) {
@@ -12130,8 +12194,15 @@ function _refreshDefibHint(targetPeerId) {
     _defibHintEl = el;
   }
   const pct = Math.round(found.hpPct * 100);
-  _defibHintEl.textContent = `[F] ${found.label} — REVIVE ${pct}%`;
-  _defibHintEl.style.display = 'block';
+  const nextText = `[F] ${found.label} — REVIVE ${pct}%`;
+  if (_defibHintEl._lastTxt !== nextText) {
+    _defibHintEl.textContent = nextText;
+    _defibHintEl._lastTxt = nextText;
+  }
+  if (_defibHintEl._lastDisp !== 'block') {
+    _defibHintEl.style.display = 'block';
+    _defibHintEl._lastDisp = 'block';
+  }
 }
 
 // Refresh the dual-opt-in extract HUD pill. Called every frame from
@@ -12145,7 +12216,10 @@ function _refreshExitWaitHud() {
   const t = getCoopTransport();
   const coopActive = t.isOpen && coopLobby.ghosts.size > 0;
   if (!coopActive || !_localInExit) {
-    if (_exitWaitHudEl) _exitWaitHudEl.style.display = 'none';
+    if (_exitWaitHudEl && _exitWaitHudEl._lastDisp !== 'none') {
+      _exitWaitHudEl.style.display = 'none';
+      _exitWaitHudEl._lastDisp = 'none';
+    }
     return;
   }
   // Count living peers + how many of them are also in exit (host
@@ -12186,19 +12260,28 @@ function _refreshExitWaitHud() {
     document.body.appendChild(el);
     _exitWaitHudEl = el;
   }
+  let nextText, nextDisplay;
   if (ready >= total) {
-    // Everyone in. Joiner shows "EXTRACTING..." until host's level-
-    // seed lands; host should never see this state because it would
-    // immediately fire advanceFloor.
     if (t.isHost) {
-      _exitWaitHudEl.style.display = 'none';
-      return;
+      nextText = '';
+      nextDisplay = 'none';
+    } else {
+      nextText = 'EXTRACTING…';
+      nextDisplay = 'block';
     }
-    _exitWaitHudEl.textContent = 'EXTRACTING…';
   } else {
-    _exitWaitHudEl.textContent = `WAITING FOR TEAMMATE — ${ready}/${total}`;
+    nextText = `WAITING FOR TEAMMATE — ${ready}/${total}`;
+    nextDisplay = 'block';
   }
-  _exitWaitHudEl.style.display = 'block';
+  // Dedupe DOM writes — these helpers run every frame.
+  if (_exitWaitHudEl._lastTxt !== nextText) {
+    _exitWaitHudEl.textContent = nextText;
+    _exitWaitHudEl._lastTxt = nextText;
+  }
+  if (_exitWaitHudEl._lastDisp !== nextDisplay) {
+    _exitWaitHudEl.style.display = nextDisplay;
+    _exitWaitHudEl._lastDisp = nextDisplay;
+  }
 }
 
 // Effective max charges / cooldown for a throwable, after Grenadier
