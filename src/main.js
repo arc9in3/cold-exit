@@ -100,7 +100,24 @@ import { fireHint, tickHints, resetHints } from './ui_hints.js';
 import { TutorialUI } from './ui_tutorial.js';
 import { setCursorForWeapon } from './cursor.js';
 import { DroneManager } from './drones.js';
+import { CoopLobbyUI, isCoopEnabled } from './coop/lobby.js';
+import { getCoopTransport } from './coop/transport.js';
 window.__resetHints = resetHints;
+
+// Build identifier — bumped at deploy time so playtesters can report
+// "I'm on build XYZ" without inspecting the bundle. Date stamps the
+// version so a quick glance tells you how stale the build is. Both
+// values render into the bottom-right #build-version label.
+const BUILD_VERSION = '4c99544+coop-hide';
+// Build date intentionally bumped each deploy so the corner label
+// reflects the current snapshot.
+const BUILD_DATE    = '2026-05-01';
+window.__BUILD_VERSION = BUILD_VERSION;
+window.__BUILD_DATE    = BUILD_DATE;
+try {
+  const _bvEl = document.getElementById('build-version');
+  if (_bvEl) _bvEl.textContent = `build ${BUILD_VERSION} · ${BUILD_DATE}`;
+} catch (_) { /* DOM not ready or label removed */ }
 
 // Tutorial mode flag — when true, the level generator builds a tiny
 // fixed practice room with no aggressive enemies and the
@@ -1613,6 +1630,84 @@ const storeRollUI = new StoreRollUI({
   onCancel: () => { mainMenuUI.show(); },
 });
 
+// Co-op lobby — created lazily, only if the feature flag is on. The
+// rest of the game runs unchanged when coop is off. Shift+C toggles
+// the overlay so the lobby is reachable from gameplay; players don't
+// need to drop back to the main menu to invite a friend.
+let coopLobby = null;
+let coopGhostRoot = null;
+const _coopGhostMeshes = new Map();   // peerId → { group, label }
+let _coopBroadcastT = 0;
+function _ensureCoopLobby() {
+  if (coopLobby || !isCoopEnabled()) return null;
+  coopLobby = new CoopLobbyUI({ getPlayerName });
+  // Ghost mesh root — parented to the scene so peer markers render
+  // alongside other world objects. One root, child groups per peer
+  // so we can tear them all down at run end without scanning the
+  // scene graph.
+  coopGhostRoot = new THREE.Group();
+  coopGhostRoot.name = 'coop-ghosts';
+  scene.add(coopGhostRoot);
+  // Joiner-side message handler — apply incoming level-seed messages
+  // by setting _runSeed and calling regenerateLevel so the joiner's
+  // layout matches the host's. Idempotent: bails when we're the host
+  // (we generated the seed) or when the seed is already current.
+  const transport = getCoopTransport();
+  transport.addEventListener('msg', (e) => {
+    const { kind, body, from } = e.detail;
+    if (kind !== 'level-seed' || !body) return;
+    if (transport.isHost) {
+      console.log('[coop] ignoring level-seed (we are host)', body);
+      return;
+    }
+    const incomingSeed = body.seed >>> 0;
+    const incomingLv = body.levelIndex | 0;
+    if (!incomingSeed) return;
+    const needsRegen = (_runSeed !== incomingSeed)
+      || ((level?.index | 0) !== incomingLv);
+    console.log('[coop] level-seed received', {
+      from, seed: incomingSeed, levelIndex: incomingLv,
+      needsRegen, currentSeed: _runSeed, currentLv: level?.index | 0,
+    });
+    _runSeed = incomingSeed;
+    if (needsRegen && level) {
+      // Force the next regenerate to land on incomingLv. level.generate()
+      // bumps index by 1 internally, so we set to one below.
+      level.index = incomingLv - 1;
+      try {
+        regenerateLevel();
+        console.log('[coop] regenerated to seed=', incomingSeed, 'lv=', level.index | 0);
+      } catch (err) {
+        console.warn('[coop] regen on level-seed failed', err);
+      }
+    }
+  });
+  return coopLobby;
+}
+window.addEventListener('keydown', (e) => {
+  // Shift+C — toggle coop lobby. Cheap to gate on isCoopEnabled
+  // because most players don't have the flag on; the listener stays
+  // attached but never builds the DOM.
+  if (e.shiftKey && (e.key === 'C' || e.key === 'c')) {
+    if (!isCoopEnabled()) return;
+    const lobby = _ensureCoopLobby();
+    if (!lobby) return;
+    if (lobby.isOpen()) lobby.hide();
+    else lobby.show();
+  }
+});
+// Auto-open on first load if URL carries ?coop=1 — players following
+// a shared invite URL land in the lobby instead of the main menu.
+try {
+  const params = new URLSearchParams(window.location.search);
+  if (params.get('coop') === '1') {
+    setTimeout(() => {
+      const lobby = _ensureCoopLobby();
+      if (lobby) lobby.show();
+    }, 200);
+  }
+} catch (_) {}
+
 const mainMenuUI = new MainMenuUI({
   onPlay: () => {
     const { slots, rarityTier } = getStartingStoreState();
@@ -2444,7 +2539,70 @@ function pickWeaponForAI(variant) {
   return { ...pick, attachments };
 }
 
+// Per-run seed used to make level generation deterministic across
+// peers. Set on host run-start, broadcast via the 'level-seed' coop
+// message, applied by joiners in their next regenerateLevel(). When
+// no run seed is set (single-player) the wrapper falls back to
+// real Math.random so behavior is unchanged.
+let _runSeed = 0;
+function _setRunSeed(seed) {
+  _runSeed = (seed >>> 0) || 0;
+}
+function _getEffectiveSeed() {
+  if (!_runSeed) return 0;
+  // Mix in the floor index so each level differs but stays
+  // deterministic per-floor across peers.
+  const lv = (level?.index | 0);
+  return ((_runSeed ^ Math.imul(lv + 1, 0x9E3779B1)) >>> 0) || 1;
+}
+// Run `fn` with Math.random temporarily replaced by a seeded mulberry32
+// generator. Cheaper than migrating 100+ Math.random() sites in the
+// generation pipeline. Async work that resolves AFTER fn returns is
+// not seeded — generation is synchronous so this is a non-issue.
+function _withRunSeed(seed, fn) {
+  if (!seed) return fn();
+  const orig = Math.random;
+  let s = seed >>> 0;
+  Math.random = () => {
+    s = (s + 0x6D2B79F5) >>> 0;
+    let t = s;
+    t = Math.imul(t ^ (t >>> 15), t | 1);
+    t ^= t + Math.imul(t ^ (t >>> 7), t | 61);
+    return ((t ^ (t >>> 14)) >>> 0) / 4294967296;
+  };
+  try { return fn(); }
+  finally { Math.random = orig; }
+}
+
 function regenerateLevel() {
+  // Coop seed sync — host generates a seed lazily on first level
+  // generation if one isn't set yet, so the broadcast below carries
+  // a valid value joiners can mirror. Single-player runs leave
+  // _runSeed = 0 and the seeded-RNG wrapper short-circuits to the
+  // real Math.random.
+  const transport = getCoopTransport();
+  console.log('[coop] regenerateLevel called',
+    { isOpen: transport.isOpen, isHost: transport.isHost,
+      peerId: transport.peerId, hostId: transport.hostId,
+      runSeed: _runSeed });
+  if (transport.isOpen && transport.isHost && !_runSeed) {
+    _runSeed = (Math.random() * 0xFFFFFFFF) >>> 0 || 1;
+    console.log('[coop] generated run seed', _runSeed);
+  }
+  const result = _withRunSeed(_getEffectiveSeed(), () => _regenerateLevelImpl());
+  // Broadcast AFTER generation so joiners apply the seed for their
+  // own regen call. _runSeed is per-run, level.index is per-floor.
+  if (transport.isOpen && transport.isHost && _runSeed) {
+    const lv = (level?.index | 0);
+    transport.send('level-seed', { seed: _runSeed, levelIndex: lv });
+    console.log('[coop] broadcasting level-seed', { seed: _runSeed, levelIndex: lv });
+  } else if (transport.isOpen) {
+    console.log('[coop] skipped broadcast (not host or no seed)',
+      { isHost: transport.isHost, runSeed: _runSeed });
+  }
+  return result;
+}
+function _regenerateLevelImpl() {
   // Tear down old BVHs so the GC can reclaim them alongside the
   // dropped geometries. Called BEFORE level.generate which replaces
   // the obstacle list.
@@ -4664,10 +4822,66 @@ function _applyTrainerUnlocks(s) {
   // Field Recovery — health regen rate + delay shave.
   multAdd('regen_1', 'healthRegenAdd', 'healthRegenMult');
   multAdd('regen_2', 'healthRegenAdd', 'healthRegenMult');
+  multAdd('regen_3', 'healthRegenAdd', 'healthRegenMult');
+  multAdd('regen_4', 'healthRegenAdd', 'healthRegenMult');
   // Delay bonus is subtractive — store as positive, the regen tick
   // reads `delay -= s.healthRegenDelayBonus`. flatDelay adds the
   // BALANCE value (positive seconds) into the bonus accumulator.
-  flatDelay('regen_delay', 'healthRegenDelayBonus');
+  // Legacy `regen_delay` id maps onto the first tier of the new
+  // `regen_delay_1/2` track to preserve save-compat.
+  flatDelay('regen_delay',   'healthRegenDelayBonus');
+  flatDelay('regen_delay_1', 'healthRegenDelayBonus');
+  flatDelay('regen_delay_2', 'healthRegenDelayBonus');
+
+  // Plate Carrier — flat ballistic resist add (clamped at 0.7 in damagePlayer).
+  const flatBallistic = (id) => { if (owned.has(id)) s.ballisticResist = (s.ballisticResist || 0) + (T[id]?.ballisticResist || 0); };
+  flatBallistic('ballistic_1'); flatBallistic('ballistic_2'); flatBallistic('ballistic_3');
+
+  // Asbestos Lung — flat fire resist add (clamped at 0.95 in damagePlayer).
+  const flatFire = (id) => { if (owned.has(id)) s.fireResist = (s.fireResist || 0) + (T[id]?.fireResist || 0); };
+  flatFire('fire_1'); flatFire('fire_2'); flatFire('fire_3');
+
+  // Iron Will — flat dmg-reduction add (clamped at 0.7 in damagePlayer).
+  const flatDmgRed = (id) => { if (owned.has(id)) s.dmgReduction = (s.dmgReduction || 0) + (T[id]?.dmgReductionAdd || 0); };
+  flatDmgRed('will_1'); flatDmgRed('will_2'); flatDmgRed('will_3');
+
+  // Cleaver — multiplicative melee damage.
+  multAdd('melee_1', 'meleeDmgAdd', 'meleeDmgMult');
+  multAdd('melee_2', 'meleeDmgAdd', 'meleeDmgMult');
+  multAdd('melee_3', 'meleeDmgAdd', 'meleeDmgMult');
+
+  // Heavy Hitter — multiplicative knockback.
+  multAdd('knock_1', 'knockbackAdd', 'knockbackMult');
+  multAdd('knock_2', 'knockbackAdd', 'knockbackMult');
+
+  // Killshot — flat headshot multiplier add.
+  const flatHead = (id) => { if (owned.has(id)) s.headMultBonus = (s.headMultBonus || 0) + (T[id]?.headMultAdd || 0); };
+  flatHead('head_1'); flatHead('head_2'); flatHead('head_3');
+
+  // Sight Discipline — multiplicative ADS speed.
+  multAdd('ads_1', 'adsSpeedAdd', 'adsSpeedMult');
+  multAdd('ads_2', 'adsSpeedAdd', 'adsSpeedMult');
+
+  // Quartermaster — flat pocket-slot count add.
+  const flatPockets = (id) => { if (owned.has(id)) s.pocketsBonus = (s.pocketsBonus || 0) + (T[id]?.pocketsAdd || 0); };
+  flatPockets('pockets_1'); flatPockets('pockets_2'); flatPockets('pockets_3');
+
+  // Bandolier — flat throwable charge bonus.
+  const flatThrow = (id) => { if (owned.has(id)) s.throwableChargeBonus = (s.throwableChargeBonus || 0) + (T[id]?.throwableChargeAdd || 0); };
+  flatThrow('throw_1'); flatThrow('throw_2');
+
+  // Ghost Step — multiplicative stealth detection mult (compounds).
+  multScale('stealth_1', 'stealthMult', 'stealthMult');
+  multScale('stealth_2', 'stealthMult', 'stealthMult');
+  multScale('stealth_3', 'stealthMult', 'stealthMult');
+
+  // Backpedal Drill — additive backpedal relief (clamped at 1 in player.js).
+  const flatBackpedal = (id) => { if (owned.has(id)) s.backpedalRelief = (s.backpedalRelief || 0) + (T[id]?.backpedalReliefAdd || 0); };
+  flatBackpedal('backpedal_1'); flatBackpedal('backpedal_2');
+
+  // Steady Aim — multiplicative sway dampener (compounds; <1 tightens).
+  multScale('sway_1', 'swayMult', 'swayMult');
+  multScale('sway_2', 'swayMult', 'swayMult');
 }
 
 function recomputeStats() {
@@ -7642,6 +7856,279 @@ runStats.reset = function () {
   }
 };
 
+// Fire-stack escalator — every consecutive second the player spends
+// taking 'fire' damage adds a flat +1× to the next fire tick, with
+// NO cap. Stops the "stand in the fire pool because it's only 4 dps"
+// play pattern: the longer you linger, the worse it gets, runaway.
+// Decays fast (0.6s half-life) when no fire damage lands so a brief
+// crossover doesn't carry stacks forever.
+let _playerFireStandT = 0;
+let _playerFireLastTickT = 0;
+const _PLAYER_FIRE_STACK_PER_SEC = 1.0;   // additive per second of exposure
+// Coop tick — broadcast local player XZ at 5Hz under kind='pos',
+// and lerp ghost meshes toward each peer's latest reported position.
+// THIS IS SCAFFOLDING — replaced by snapshot-driven rendering when
+// the authoritative simulation lands. Cheap no-op when coop is off
+// or the transport isn't connected.
+function _tickCoop(dt) {
+  if (!coopLobby || !coopGhostRoot) return;
+  const transport = getCoopTransport();
+  if (!transport.isOpen) {
+    // Tear down ghosts on disconnect so a stale peer marker doesn't
+    // sit in the scene forever.
+    if (_coopGhostMeshes.size) {
+      for (const [, m] of _coopGhostMeshes) {
+        if (m.group?.parent) m.group.parent.remove(m.group);
+      }
+      _coopGhostMeshes.clear();
+    }
+    return;
+  }
+  // Broadcast our position at 5Hz — cheap, fits in a packet, gives
+  // each remote client enough samples to lerp smoothly between.
+  _coopBroadcastT -= dt;
+  if (_coopBroadcastT <= 0) {
+    _coopBroadcastT = 0.2;
+    if (player?.mesh?.position) {
+      transport.send('pos', {
+        x: player.mesh.position.x,
+        z: player.mesh.position.z,
+        f: player.mesh.rotation.y || 0,
+      });
+    }
+  }
+  // Sync ghost meshes — create/update per-peer, prune disconnected.
+  const seen = new Set();
+  for (const [peerId, ghost] of coopLobby.ghosts) {
+    seen.add(peerId);
+    let m = _coopGhostMeshes.get(peerId);
+    if (!m) {
+      const group = new THREE.Group();
+      // Cyan-tinted humanoid stand-in. Kept deliberately simple so
+      // it reads as "remote peer" and not a real game entity.
+      const bodyMat = new THREE.MeshStandardMaterial({
+        color: 0x4080ff, transparent: true, opacity: 0.65, roughness: 0.6,
+        emissive: 0x2050d0, emissiveIntensity: 0.7,
+      });
+      const torso = new THREE.Mesh(new THREE.CylinderGeometry(0.22, 0.22, 1.3, 10), bodyMat);
+      torso.position.y = 0.65;
+      torso.renderOrder = 4;
+      group.add(torso);
+      const head = new THREE.Mesh(new THREE.SphereGeometry(0.22, 12, 8), bodyMat);
+      head.position.y = 1.5;
+      head.renderOrder = 4;
+      group.add(head);
+      // Vertical beacon — bright additive cylinder that punches
+      // through walls and reads from across the level. Without this
+      // a ghost on the opposite side of a wall is invisible at iso
+      // distance and players think the connection is broken.
+      const beamMat = new THREE.MeshBasicMaterial({
+        color: 0x6abfff, transparent: true, opacity: 0.35,
+        depthWrite: false, depthTest: false,
+        blending: THREE.AdditiveBlending,
+      });
+      const beam = new THREE.Mesh(new THREE.CylinderGeometry(0.10, 0.10, 12, 6), beamMat);
+      beam.position.y = 6;
+      beam.renderOrder = 5;
+      group.add(beam);
+      coopGhostRoot.add(group);
+      m = { group, lastX: ghost.x, lastZ: ghost.z };
+      _coopGhostMeshes.set(peerId, m);
+    }
+    // Lerp 1/0.2s toward the most-recent reported position. Catches
+    // up smoothly without feeling rubber-bandy at typical packet
+    // jitter. Heading omitted from the lerp — we'd need an extra
+    // shortest-arc helper for yaw, deferred to gameplay-sync work.
+    const k = Math.min(1, dt / 0.18);
+    m.lastX += (ghost.x - m.lastX) * k;
+    m.lastZ += (ghost.z - m.lastZ) * k;
+    m.group.position.set(m.lastX, 0, m.lastZ);
+  }
+  for (const peerId of [..._coopGhostMeshes.keys()]) {
+    if (seen.has(peerId)) continue;
+    const m = _coopGhostMeshes.get(peerId);
+    if (m?.group?.parent) m.group.parent.remove(m.group);
+    _coopGhostMeshes.delete(peerId);
+  }
+  // HUD compass — always-visible chip listing peers + their offset
+  // from the local player. Useful when the seed-sync hasn't landed
+  // yet and ghosts are off-camera in mismatched geometry, since
+  // the chip still updates per-frame and confirms the wire is alive.
+  _renderCoopHud();
+}
+
+let _coopHudEl = null;
+let _coopArrowsRoot = null;
+const _coopPeerArrows = new Map();   // peerId → div element
+function _renderCoopHud() {
+  if (!coopLobby) return;
+  if (!_coopHudEl) {
+    const el = document.createElement('div');
+    el.id = 'coop-hud';
+    Object.assign(el.style, {
+      position: 'fixed', right: '10px', top: '60px', zIndex: '6',
+      background: 'rgba(12,14,20,0.85)', border: '1px solid #4a8acf',
+      borderRadius: '4px', padding: '8px 12px',
+      color: '#a0c0ff', font: '12px ui-monospace, Menlo, Consolas, monospace',
+      letterSpacing: '0.6px', lineHeight: '1.5', pointerEvents: 'none',
+      minWidth: '200px', maxWidth: '260px', display: 'none',
+      boxShadow: '0 2px 12px rgba(0,0,0,0.6), 0 0 8px rgba(80,140,255,0.3)',
+    });
+    document.body.appendChild(el);
+    _coopHudEl = el;
+  }
+  // Screen-edge peer arrows — independent overlay that points toward
+  // each peer regardless of camera frustum or wall occlusion. One arrow
+  // div per peer, repositioned every frame.
+  if (!_coopArrowsRoot) {
+    const root = document.createElement('div');
+    root.id = 'coop-arrows-root';
+    Object.assign(root.style, {
+      position: 'fixed', inset: '0', zIndex: '5',
+      pointerEvents: 'none',
+    });
+    document.body.appendChild(root);
+    _coopArrowsRoot = root;
+  }
+  const transport = getCoopTransport();
+  if (!transport.isOpen) {
+    _coopHudEl.style.display = 'none';
+    for (const a of _coopPeerArrows.values()) a.style.display = 'none';
+    return;
+  }
+  const px = player?.mesh?.position?.x ?? 0;
+  const pz = player?.mesh?.position?.z ?? 0;
+  const lines = [
+    `<div style="color:#f2c060;font-weight:700;letter-spacing:1.4px">CO-OP · ${transport.peers.size} peer(s)</div>`,
+    `<div style="color:#6f7990;font-size:10px">you @ ${px.toFixed(1)}, ${pz.toFixed(1)}</div>`,
+  ];
+  const seen = new Set();
+  for (const [peerId, ghost] of coopLobby.ghosts) {
+    seen.add(peerId);
+    const dx = ghost.x - px;
+    const dz = ghost.z - pz;
+    const dist = Math.hypot(dx, dz);
+    // Screen-space heading: in iso top-down, +Z is "down" on screen,
+    // -Z is "up". So a peer with positive dx is east on screen, etc.
+    const angWorld = Math.atan2(dx, -dz);   // 0 = north
+    const arrow = _arrowForAngle(angWorld);
+    const name = transport.peers.get(peerId)?.name || 'peer';
+    lines.push(
+      `<div><span style="color:#6abfff;font-size:14px">${arrow}</span> `
+      + `${_escHtml(name)} <span style="color:#6f7990">${dist.toFixed(1)}m</span> `
+      + `<span style="color:#3a4458;font-size:10px">@ ${ghost.x.toFixed(1)}, ${ghost.z.toFixed(1)}</span></div>`,
+    );
+    _updatePeerEdgeArrow(peerId, name, dx, dz, dist);
+  }
+  if (transport.rtt != null) {
+    lines.push(`<div style="color:#6f7990;margin-top:2px;font-size:10px">rtt ${transport.rtt}ms</div>`);
+  }
+  // Prune stale edge arrows for peers that left.
+  for (const peerId of [..._coopPeerArrows.keys()]) {
+    if (!seen.has(peerId)) {
+      const a = _coopPeerArrows.get(peerId);
+      if (a?.parentNode) a.parentNode.removeChild(a);
+      _coopPeerArrows.delete(peerId);
+    }
+  }
+  _coopHudEl.innerHTML = lines.join('');
+  _coopHudEl.style.display = 'block';
+}
+function _updatePeerEdgeArrow(peerId, name, dx, dz, dist) {
+  // Screen-edge arrow — projects the peer's world-space offset onto
+  // the screen via the active camera. If the peer is on-screen, the
+  // arrow hides (the cyan ghost mesh + beacon are visible). Off-screen,
+  // the arrow clamps to the screen edge with the peer name + distance.
+  let el = _coopPeerArrows.get(peerId);
+  if (!el) {
+    el = document.createElement('div');
+    Object.assign(el.style, {
+      position: 'absolute', transform: 'translate(-50%, -50%)',
+      padding: '4px 8px',
+      background: 'rgba(12,14,20,0.85)',
+      border: '1px solid #6abfff', borderRadius: '14px',
+      color: '#a0d0ff', font: '11px ui-monospace, Menlo, Consolas, monospace',
+      letterSpacing: '0.6px', whiteSpace: 'nowrap',
+      boxShadow: '0 0 10px rgba(80,180,255,0.5)',
+      pointerEvents: 'none', display: 'none',
+    });
+    _coopArrowsRoot.appendChild(el);
+    _coopPeerArrows.set(peerId, el);
+  }
+  // Project peer world position to screen via camera. Reuse existing
+  // camera + renderer canvas. THREE projections require a Vector3.
+  if (!camera || !renderer || !player?.mesh?.position) {
+    el.style.display = 'none';
+    return;
+  }
+  const cnv = renderer.domElement;
+  const w = cnv.clientWidth || window.innerWidth;
+  const h = cnv.clientHeight || window.innerHeight;
+  const peerWorld = (_updatePeerEdgeArrow._v
+    || (_updatePeerEdgeArrow._v = new THREE.Vector3()));
+  peerWorld.set(player.mesh.position.x + dx, 0.5, player.mesh.position.z + dz);
+  peerWorld.project(camera);   // mutates to NDC (-1..+1)
+  // Convert NDC to screen pixels.
+  const sx = (peerWorld.x * 0.5 + 0.5) * w;
+  const sy = (-peerWorld.y * 0.5 + 0.5) * h;
+  const onScreen = peerWorld.x > -0.95 && peerWorld.x < 0.95
+                && peerWorld.y > -0.95 && peerWorld.y < 0.95
+                && peerWorld.z < 1;
+  if (onScreen) {
+    // Hide the edge arrow when peer is in the camera frustum — the
+    // 3D ghost + beacon takes over as the indicator.
+    el.style.display = 'none';
+    return;
+  }
+  // Clamp to screen edge. Direction from screen center to peer-NDC.
+  const cx = w * 0.5, cy = h * 0.5;
+  let vx = sx - cx, vy = sy - cy;
+  // If z>1 the peer is BEHIND the camera; flip the projection so the
+  // arrow points along the inverse direction (otherwise we'd send
+  // the player chasing the wrong way).
+  if (peerWorld.z > 1) { vx = -vx; vy = -vy; }
+  const len = Math.hypot(vx, vy) || 1;
+  const margin = 36;
+  const halfW = w * 0.5 - margin;
+  const halfH = h * 0.5 - margin;
+  // Clamp the line from center along (vx,vy) to the rectangular
+  // screen-margin box.
+  const tx = halfW / Math.abs(vx);
+  const ty = halfH / Math.abs(vy);
+  const t = Math.min(tx, ty);
+  const px = cx + vx * t;
+  const py = cy + vy * t;
+  const ang = Math.atan2(vy, vx);
+  const arrow = _arrowForAngle(Math.atan2(vx, -vy));   // world-aligned 8-way glyph
+  el.innerHTML = `${arrow} <strong>${_escHtml(name)}</strong> <span style="color:#6f7990">${dist.toFixed(1)}m</span>`;
+  el.style.left = `${px}px`;
+  el.style.top = `${py}px`;
+  el.style.display = 'block';
+  void ang;
+}
+function _arrowForAngle(rad) {
+  // 8-way arrow glyph based on world-space heading from local player.
+  const TAU = Math.PI * 2;
+  const norm = ((rad % TAU) + TAU) % TAU;
+  const idx = Math.round(norm / (TAU / 8)) & 7;
+  return ['↑', '↗', '→', '↘', '↓', '↙', '←', '↖'][idx];
+}
+function _escHtml(s) {
+  return String(s)
+    .replace(/&/g, '&amp;').replace(/</g, '&lt;')
+    .replace(/>/g, '&gt;').replace(/"/g, '&quot;');
+}
+
+function _decayFireStandStack(dt) {
+  // Called every frame from the main tick loop. If the player hasn't
+  // taken fire damage in the last 0.4s (slightly longer than a single
+  // megaboss fire-pool tick interval of 0.33s), bleed off the stack
+  // exponentially so it doesn't carry into the next fire encounter.
+  const now = (typeof performance !== 'undefined') ? performance.now() / 1000 : 0;
+  if (now - _playerFireLastTickT > 0.4 && _playerFireStandT > 0) {
+    _playerFireStandT = Math.max(0, _playerFireStandT - dt / 0.6);
+  }
+}
 function damagePlayer(amount, damageType = 'generic', srcCtx = null) {
   if (amount <= 0) return;
   // Way of the Worrier relic — N% chance the whole damage event is
@@ -7670,6 +8157,20 @@ function damagePlayer(amount, damageType = 'generic', srcCtx = null) {
     // Cap raised to 0.95 so Brian's Hat (+0.9) actually delivers
     // its advertised 90% fire protection.
     amount *= (1 - Math.min(0.95, derivedStats.fireResist));
+  }
+  // Cumulative fire stacking — each tick of fire damage drives the
+  // stack up. Multiplier is `1 + secondsOfExposure × stackPerSec`,
+  // uncapped: linger 5s and you eat 6× damage per tick, 10s = 11×.
+  // Approximate seconds of exposure by adding a fixed dt-equivalent
+  // on each tick (zone @ every frame, megaboss pool @ 0.33s, flame
+  // cone @ 12Hz). A flat 0.05s/tick increment lands at roughly
+  // "the longer you stand in fire, the more it hurts" without
+  // requiring tick-rate plumbing.
+  if (damageType === 'fire') {
+    const stackMult = 1 + _playerFireStandT * _PLAYER_FIRE_STACK_PER_SEC;
+    amount *= stackMult;
+    _playerFireStandT += 0.05;
+    _playerFireLastTickT = (typeof performance !== 'undefined') ? performance.now() / 1000 : 0;
   }
   // Cornered: extra reduction while below 30% HP (reads the last tick's
   // cached HP ratio since this runs from hit callbacks mid-frame).
@@ -11416,14 +11917,14 @@ function _tickFireZones(dt) {
     };
     apply(gunmen.gunmen);
     apply(melees.enemies);
-    // Player burn — same disc test, but routed through damagePlayer
-    // and the burn-flames signal so the visual matches the DoT.
+    // Player burn — same disc test, routed through damagePlayer so
+    // fire-resist + cumulative fire stacking + recap entry all apply.
     if (player) {
       const pdx = player.mesh.position.x - z.x;
       const pdz = player.mesh.position.z - z.z;
       if (pdx * pdx + pdz * pdz < rSq) {
         const tickDmg = z.dps * dt;
-        player.takeDamage(tickDmg);
+        damagePlayer(tickDmg, 'fire', { source: 'fireZone' });
         window.__playerBurnT = Math.max(window.__playerBurnT || 0, 1.0);
       }
     }
@@ -12636,6 +13137,13 @@ function tick() {
   // inventory / shop / loot.
   tickThrowableCooldowns(rawDt);
 
+  // Co-op broadcast + ghost render also runs before the modal gate.
+  // Without this, opening the lobby (or any pause UI) on either side
+  // freezes position broadcasts and remote ghosts disappear, which
+  // looks like "we connected but I can't see them" — the actual
+  // failure mode reported in playtest.
+  _tickCoop(rawDt);
+
   if (paused || inventoryUI.visible || customizeUI.isOpen() || lootUI.isOpen() || shopUI.isOpen() || perkUI.isOpen() || gameMenuUI.isOpen() || playerDead) {
     // Modal pause — scene is frozen, so all the per-frame
     // recomputation (LoS mask raycasts, bloom mip chain, finisher
@@ -12927,6 +13435,10 @@ function tick() {
   // get filtered out via the per-entry `alive` check.
   projectiles.enemyLists = [gunmen.gunmen, melees.enemies];
   projectiles.update(dt, level, onProjectileExplode);
+  _decayFireStandStack(dt);
+  // _tickCoop now runs above the modal-pause gate (line ~12862) so
+  // it stays active during lobby / inventory / shop screens and
+  // ghosts don't freeze when either peer opens a UI.
   _tickFireZones(dt);
   _tickFlashDomes(dt);
   _tickFireOrbs(dt);

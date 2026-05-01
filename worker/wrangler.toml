@@ -10,6 +10,25 @@ compatibility_date = "2025-01-01"
 binding = "LEADERBOARD"
 id = "c22f233f5d784fb4ba5ef29b93063df3"
 
+# Coop room state — one Durable Object per active room. Lazy-created
+# on first /coop/ws/:code WebSocket connection, garbage-collected by
+# Cloudflare after a period of inactivity. Persisted state isn't used
+# yet (host-peer is authoritative for gameplay) but `state.storage`
+# is available if we later want server-side anti-cheat checks.
+[[durable_objects.bindings]]
+name = "COOP_ROOM"
+class_name = "CoopRoom"
+
+# Migration manifest — lets Cloudflare track DO class additions /
+# renames across deploys. Bump the tag on each migration. We use
+# `new_sqlite_classes` (vs `new_classes`) because the Cloudflare free
+# plan requires SQLite-backed DOs; the storage API is identical so
+# this doesn't affect the relay code, and it leaves room for later
+# server-authoritative features that need persistent state.
+[[migrations]]
+tag = "v1-coop"
+new_sqlite_classes = ["CoopRoom"]
+
 # CORS origin allowlist — empty means "allow any origin" (handy while
 # you're iterating locally + on preview deploys). Tighten to your
 # pages.dev / custom domain once the URL stabilises.

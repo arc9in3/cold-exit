@@ -142,16 +142,265 @@ export const KEYSTONES = {
 };
 
 // Trainer — marks-spent permanent unlocks. Storage key stays
-// 'recruiter' so saved purchases survive the rename. Stat tiers stay
-// the same; structural unlocks are now ALL classes (NPC unlocks
-// removed). Class definitions land in a follow-up — for now these
-// rows are placeholders that flag the class as available at run start.
-// Build-time helper: stitch each stat-tier label + blurb together with
-// the cost + magnitude pulled from BALANCE.trainer. Effect magnitudes
-// live in src/balance.js so a retune is one file edit. Existing IDs
-// (vit_1/2/3, end_1/2, comp_1) preserved for save-compat.
+// 'recruiter' so saved purchases survive the rename. The unlock catalog
+// keeps per-tier IDs (vit_1, vit_2, …) for save-compat, but the UI
+// renders ONE button per track (TRAINER_TRACKS below) that levels up
+// in place: buying tier N flips its notch on and the button rolls to
+// "track Lv N+1 — next cost". Adding a new tier is one entry per side:
+// BALANCE.trainer + the track's `tiers` list here.
 const _T = BALANCE.trainer;
 const _pct = (v) => `${Math.round(v * 100)}%`;
+
+// Track-driven catalog. Each track lists its tier IDs in order; the
+// Nth tier corresponds to the Nth notch on the row. `desc(t)` builds
+// the per-tier blurb fragment from a BALANCE.trainer entry, so the
+// row can show both "current effect" and "next effect" without
+// duplicating tuning numbers in the UI string.
+//
+// `currentSummary(level)` produces the cumulative-effect text for the
+// notch row ("+30 max HP" after vit_3 etc).
+export const TRAINER_TRACKS = [
+  {
+    id: 'vit', label: 'Vitality', cat: 'survival',
+    tiers: ['vit_1', 'vit_2', 'vit_3', 'vit_4', 'vit_5'],
+    desc: (t) => `+${t.maxHpBonus} max HP`,
+    currentSummary: (lv, ids) => {
+      let total = 0;
+      for (let i = 0; i < lv; i++) total += _T[ids[i]]?.maxHpBonus || 0;
+      return total ? `+${total} max HP` : 'no levels yet';
+    },
+  },
+  {
+    id: 'regen', label: 'Field Recovery', cat: 'survival',
+    tiers: ['regen_1', 'regen_2', 'regen_3', 'regen_4'],
+    desc: (t) => `+${_pct(t.healthRegenAdd)} out-of-combat HP regen`,
+    currentSummary: (lv, ids) => {
+      let mult = 1;
+      for (let i = 0; i < lv; i++) mult *= 1 + (_T[ids[i]]?.healthRegenAdd || 0);
+      return lv ? `+${_pct(mult - 1)} HP regen` : 'no levels yet';
+    },
+  },
+  {
+    id: 'regen_delay', label: 'Quick Recovery', cat: 'survival',
+    tiers: ['regen_delay_1', 'regen_delay_2'],
+    desc: (t) => `−${t.healthRegenDelayBonus.toFixed(1)}s regen delay`,
+    currentSummary: (lv, ids) => {
+      let total = 0;
+      for (let i = 0; i < lv; i++) total += _T[ids[i]]?.healthRegenDelayBonus || 0;
+      return lv ? `−${total.toFixed(1)}s regen delay` : 'no levels yet';
+    },
+  },
+  {
+    id: 'ballistic', label: 'Plate Carrier', cat: 'survival',
+    tiers: ['ballistic_1', 'ballistic_2', 'ballistic_3'],
+    desc: (t) => `−${_pct(t.ballisticResist)} bullet damage`,
+    currentSummary: (lv, ids) => {
+      let total = 0;
+      for (let i = 0; i < lv; i++) total += _T[ids[i]]?.ballisticResist || 0;
+      return lv ? `−${_pct(Math.min(0.7, total))} bullet damage` : 'no levels yet';
+    },
+  },
+  {
+    id: 'fire', label: 'Asbestos Lung', cat: 'survival',
+    tiers: ['fire_1', 'fire_2', 'fire_3'],
+    desc: (t) => `−${_pct(t.fireResist)} fire damage`,
+    currentSummary: (lv, ids) => {
+      let total = 0;
+      for (let i = 0; i < lv; i++) total += _T[ids[i]]?.fireResist || 0;
+      return lv ? `−${_pct(Math.min(0.95, total))} fire damage` : 'no levels yet';
+    },
+  },
+  {
+    id: 'will', label: 'Iron Will', cat: 'survival',
+    tiers: ['will_1', 'will_2', 'will_3'],
+    desc: (t) => `−${_pct(t.dmgReductionAdd)} all damage`,
+    currentSummary: (lv, ids) => {
+      let total = 0;
+      for (let i = 0; i < lv; i++) total += _T[ids[i]]?.dmgReductionAdd || 0;
+      return lv ? `−${_pct(Math.min(0.7, total))} all damage` : 'no levels yet';
+    },
+  },
+  {
+    id: 'comp', label: 'Composure', cat: 'survival',
+    tiers: ['comp_1', 'comp_2', 'comp_3'],
+    desc: (t) => `−${_pct(1 - t.staggerDurationMult)} stagger duration`,
+    currentSummary: (lv, ids) => {
+      let mult = 1;
+      for (let i = 0; i < lv; i++) mult *= _T[ids[i]]?.staggerDurationMult ?? 1;
+      return lv ? `−${_pct(1 - mult)} stagger duration` : 'no levels yet';
+    },
+  },
+
+  {
+    id: 'stam', label: 'Conditioning', cat: 'mobility',
+    tiers: ['stam_1', 'stam_2', 'stam_3'],
+    desc: (t) => `+${t.maxStaminaBonus} max stamina`,
+    currentSummary: (lv, ids) => {
+      let total = 0;
+      for (let i = 0; i < lv; i++) total += _T[ids[i]]?.maxStaminaBonus || 0;
+      return lv ? `+${total} max stamina` : 'no levels yet';
+    },
+  },
+  {
+    id: 'end', label: 'Endurance', cat: 'mobility',
+    tiers: ['end_1', 'end_2', 'end_3', 'end_4'],
+    desc: (t) => `+${_pct(t.staminaRegenAdd)} stamina regen`,
+    currentSummary: (lv, ids) => {
+      let mult = 1;
+      for (let i = 0; i < lv; i++) mult *= 1 + (_T[ids[i]]?.staminaRegenAdd || 0);
+      return lv ? `+${_pct(mult - 1)} stamina regen` : 'no levels yet';
+    },
+  },
+  {
+    id: 'move', label: 'Footwork', cat: 'mobility',
+    tiers: ['move_1', 'move_2'],
+    desc: (t) => `+${_pct(t.moveSpeedAdd)} move speed`,
+    currentSummary: (lv, ids) => {
+      let mult = 1;
+      for (let i = 0; i < lv; i++) mult *= 1 + (_T[ids[i]]?.moveSpeedAdd || 0);
+      return lv ? `+${_pct(mult - 1)} move speed` : 'no levels yet';
+    },
+  },
+  {
+    id: 'backpedal', label: 'Backpedal Drill', cat: 'mobility',
+    tiers: ['backpedal_1', 'backpedal_2'],
+    desc: (t) => `+${_pct(t.backpedalReliefAdd)} backpedal speed restored`,
+    currentSummary: (lv, ids) => {
+      let total = 0;
+      for (let i = 0; i < lv; i++) total += _T[ids[i]]?.backpedalReliefAdd || 0;
+      return lv ? `+${_pct(Math.min(1, total))} backpedal speed restored` : 'no levels yet';
+    },
+  },
+  {
+    id: 'stealth', label: 'Ghost Step', cat: 'mobility',
+    tiers: ['stealth_1', 'stealth_2', 'stealth_3'],
+    desc: (t) => `−${_pct(1 - t.stealthMult)} enemy detection`,
+    currentSummary: (lv, ids) => {
+      let mult = 1;
+      for (let i = 0; i < lv; i++) mult *= _T[ids[i]]?.stealthMult ?? 1;
+      return lv ? `−${_pct(1 - mult)} enemy detection` : 'no levels yet';
+    },
+  },
+
+  {
+    id: 'aim', label: 'Marksmanship', cat: 'gunplay',
+    tiers: ['aim_1', 'aim_2', 'aim_3'],
+    desc: (t) => `−${_pct(1 - t.spreadMult)} spread`,
+    currentSummary: (lv, ids) => {
+      let mult = 1;
+      for (let i = 0; i < lv; i++) mult *= _T[ids[i]]?.spreadMult ?? 1;
+      return lv ? `−${_pct(1 - mult)} spread` : 'no levels yet';
+    },
+  },
+  {
+    id: 'reload', label: 'Quick Hands', cat: 'gunplay',
+    tiers: ['reload_1', 'reload_2', 'reload_3'],
+    desc: (t) => `+${_pct(t.reloadSpeedAdd)} reload speed`,
+    currentSummary: (lv, ids) => {
+      let mult = 1;
+      for (let i = 0; i < lv; i++) mult *= 1 + (_T[ids[i]]?.reloadSpeedAdd || 0);
+      return lv ? `+${_pct(mult - 1)} reload speed` : 'no levels yet';
+    },
+  },
+  {
+    id: 'crit', label: 'Eye for Detail', cat: 'gunplay',
+    tiers: ['crit_1', 'crit_2'],
+    desc: (t) => `+${_pct(t.critChanceBonus)} crit chance`,
+    currentSummary: (lv, ids) => {
+      let total = 0;
+      for (let i = 0; i < lv; i++) total += _T[ids[i]]?.critChanceBonus || 0;
+      return lv ? `+${_pct(total)} crit chance` : 'no levels yet';
+    },
+  },
+  {
+    id: 'head', label: 'Killshot', cat: 'gunplay',
+    tiers: ['head_1', 'head_2', 'head_3'],
+    desc: (t) => `+${_pct(t.headMultAdd)} headshot bonus`,
+    currentSummary: (lv, ids) => {
+      let total = 0;
+      for (let i = 0; i < lv; i++) total += _T[ids[i]]?.headMultAdd || 0;
+      return lv ? `+${_pct(total)} headshot bonus` : 'no levels yet';
+    },
+  },
+  {
+    id: 'ads', label: 'Sight Discipline', cat: 'gunplay',
+    tiers: ['ads_1', 'ads_2'],
+    desc: (t) => `+${_pct(t.adsSpeedAdd)} ADS speed`,
+    currentSummary: (lv, ids) => {
+      let mult = 1;
+      for (let i = 0; i < lv; i++) mult *= 1 + (_T[ids[i]]?.adsSpeedAdd || 0);
+      return lv ? `+${_pct(mult - 1)} ADS speed` : 'no levels yet';
+    },
+  },
+  {
+    id: 'sway', label: 'Steady Aim', cat: 'gunplay',
+    tiers: ['sway_1', 'sway_2'],
+    desc: (t) => `−${_pct(1 - t.swayMult)} sway`,
+    currentSummary: (lv, ids) => {
+      let mult = 1;
+      for (let i = 0; i < lv; i++) mult *= _T[ids[i]]?.swayMult ?? 1;
+      return lv ? `−${_pct(1 - mult)} sway` : 'no levels yet';
+    },
+  },
+
+  {
+    id: 'melee', label: 'Cleaver', cat: 'melee',
+    tiers: ['melee_1', 'melee_2', 'melee_3'],
+    desc: (t) => `+${_pct(t.meleeDmgAdd)} melee damage`,
+    currentSummary: (lv, ids) => {
+      let mult = 1;
+      for (let i = 0; i < lv; i++) mult *= 1 + (_T[ids[i]]?.meleeDmgAdd || 0);
+      return lv ? `+${_pct(mult - 1)} melee damage` : 'no levels yet';
+    },
+  },
+  {
+    id: 'knock', label: 'Heavy Hitter', cat: 'melee',
+    tiers: ['knock_1', 'knock_2'],
+    desc: (t) => `+${_pct(t.knockbackAdd)} knockback`,
+    currentSummary: (lv, ids) => {
+      let mult = 1;
+      for (let i = 0; i < lv; i++) mult *= 1 + (_T[ids[i]]?.knockbackAdd || 0);
+      return lv ? `+${_pct(mult - 1)} knockback` : 'no levels yet';
+    },
+  },
+
+  {
+    id: 'pockets', label: 'Quartermaster', cat: 'utility',
+    tiers: ['pockets_1', 'pockets_2', 'pockets_3'],
+    desc: (t) => `+${t.pocketsAdd} pocket slot`,
+    currentSummary: (lv, ids) => {
+      let total = 0;
+      for (let i = 0; i < lv; i++) total += _T[ids[i]]?.pocketsAdd || 0;
+      return lv ? `+${total} pocket slots` : 'no levels yet';
+    },
+  },
+  {
+    id: 'throw', label: 'Bandolier', cat: 'utility',
+    tiers: ['throw_1', 'throw_2'],
+    desc: (t) => `+${t.throwableChargeAdd} throwable charge`,
+    currentSummary: (lv, ids) => {
+      let total = 0;
+      for (let i = 0; i < lv; i++) total += _T[ids[i]]?.throwableChargeAdd || 0;
+      return lv ? `+${total} throwable charges` : 'no levels yet';
+    },
+  },
+  {
+    id: 'carry', label: 'Scavenger', cat: 'utility',
+    tiers: ['carry_1', 'carry_2'],
+    desc: (t) => `+${_pct(t.creditDropAdd)} credits from kills`,
+    currentSummary: (lv, ids) => {
+      let mult = 1;
+      for (let i = 0; i < lv; i++) mult *= 1 + (_T[ids[i]]?.creditDropAdd || 0);
+      return lv ? `+${_pct(mult - 1)} credits from kills` : 'no levels yet';
+    },
+  },
+];
+
+// Class unlock buttons stay one-shot — they don't have a level ladder.
+export const TRAINER_CLASS_UNLOCKS = [
+  'class_demolisher', 'class_marksman',
+  'class_heavy', 'class_recon', 'class_medic', 'class_pyro',
+];
 export const RECRUITER_UNLOCKS = {
   // Vitality (max HP).
   vit_1: { id: 'vit_1', label: 'Vitality I',   blurb: `+${_T.vit_1.maxHpBonus} max HP, permanent.`, cost: _T.vit_1.cost },
@@ -1697,10 +1946,11 @@ export class HideoutUI {
     }
 
     // Host portrait + speech (home + cards only — hidden on weapon).
+    // Both steps now pull from the rotating greeting pool — moved off
+    // the start screen onto the contracts surface so the dialogue
+    // changes whenever the player opens the cards view.
     if (this.contractorStep !== 'weapon') {
-      const greeting = this.contractorStep === 'cards'
-        ? "Here's what's available to you today. Pick one."
-        : this._pickHostGreeting();
+      const greeting = this._pickHostGreeting();
       const host = document.createElement('div');
       host.className = 'contractor-host';
       host.innerHTML = `
@@ -1723,6 +1973,11 @@ export class HideoutUI {
       wrap.appendChild(cta);
     } else if (this.contractorStep === 'cards') {
       this._refreshCardSlots(allDefs, activeId);
+      // "SELECT A CONTRACT" header above the cards grid.
+      const heading = document.createElement('div');
+      heading.className = 'contracts-heading';
+      heading.textContent = 'SELECT A CONTRACT';
+      wrap.appendChild(heading);
       const cards = document.createElement('div');
       cards.className = 'contractor-cards';
       for (let i = 0; i < this._cardSlots.length; i++) {
@@ -1737,6 +1992,25 @@ export class HideoutUI {
         cards.appendChild(empty);
       }
       wrap.appendChild(cards);
+
+      // Refresh button — bottom-middle of the cards view. Costs 10
+      // chips per refresh; clears _cardSlots so the next render
+      // re-fills with a fresh draw from the unlocked pool.
+      const refreshBar = document.createElement('div');
+      refreshBar.className = 'contracts-refresh-bar';
+      const refreshBtn = document.createElement('button');
+      refreshBtn.type = 'button';
+      refreshBtn.className = 'hideout-btn primary';
+      refreshBtn.textContent = 'REFRESH — 10 chips';
+      refreshBtn.disabled = !!claimed;
+      refreshBtn.addEventListener('click', () => {
+        if (claimed) return;
+        if (!this.ctx.spendChips || !this.ctx.spendChips(10)) return;
+        this._cardSlots = [];
+        this.render();
+      });
+      refreshBar.appendChild(refreshBtn);
+      wrap.appendChild(refreshBar);
 
       wrap.appendChild(this._renderBackButton('Back', () => {
         this.contractorStep = 'home';
@@ -2718,31 +2992,173 @@ export class HideoutUI {
     head.className = 'hideout-section-head';
     head.innerHTML = `
       <div class="hideout-section-title">TRAINER</div>
-      <div class="hideout-section-sub">Spend marks earned by dying. Permanent stat tiers + new starting classes. <b>${marks}</b> marks on file.</div>
+      <div class="hideout-section-sub">Spend marks earned by dying. Each track levels up in place — buy a tier, the notch lights, the next tier becomes available. <b>${marks}</b> marks on file.</div>
     `;
     wrap.appendChild(head);
 
-    const groups = [
-      { title: 'STAT TIERS',          ids: ['vit_1','vit_2','vit_3','end_1','end_2','comp_1'] },
-      { title: 'STRUCTURAL UNLOCKS',  ids: ['npc_engineer','npc_cartog','class_demolisher','class_marksman'] },
+    // Inject one-shot inline style for notch dots so we don't have to
+    // round-trip through the global stylesheet for a hideout-only widget.
+    if (!document.getElementById('trainer-notch-style')) {
+      const style = document.createElement('style');
+      style.id = 'trainer-notch-style';
+      style.textContent = `
+        /* Trainer track row — notches and per-tier text live on their
+           own lines below the title row so nothing overlaps the cost
+           pill on the right or the action button column. */
+        .trainer-row .row-head { flex-wrap: wrap; row-gap: 4px; }
+        .trainer-row .row-head .label { display: inline-block; max-width: 100%; }
+        .trainer-row .track-lv {
+          font-size: 10px; color: #9b8b6a; margin-left: 8px;
+          letter-spacing: 1.2px; font-weight: 600;
+        }
+        .trainer-row .trainer-notch-block {
+          grid-area: blurb;
+          display: flex; align-items: center; gap: 6px;
+          margin-top: 4px;
+        }
+        .trainer-row .trainer-notch-row { display: inline-flex; gap: 4px; }
+        .trainer-row .trainer-notch {
+          width: 10px; height: 10px; border-radius: 50%;
+          border: 1px solid #4a505a; background: #0c0e14;
+          transition: all 0.15s ease; flex: 0 0 auto;
+        }
+        .trainer-row .trainer-notch.filled {
+          background: #f2c060; border-color: #ffd070;
+          box-shadow: 0 0 6px rgba(255,200,80,0.55);
+        }
+        .trainer-row .trainer-notch.next {
+          border-color: #a0c0ff; box-shadow: 0 0 4px rgba(120,180,255,0.35);
+        }
+        /* Move blurbs to their own areas so each effect line gets its
+           own row. We claim the unused 'mods' grid area for current and
+           'offset' for next-tier preview to avoid touching the base
+           hideout-contract-row template. */
+        .trainer-row .track-current {
+          grid-area: mods;
+          color: #a0c0a0; font-size: 11px;
+          margin: 4px 0 0; padding: 0; letter-spacing: 0.4px;
+        }
+        .trainer-row .track-next {
+          grid-area: offset;
+          color: #c9a87a; font-size: 11px;
+          margin: 2px 0 0; letter-spacing: 0.4px;
+        }
+        .trainer-row.maxed .row-head .label { color: #ffd070; }
+        .trainer-row.maxed .track-next { color: #6abf78; }
+      `;
+      document.head.appendChild(style);
+    }
+
+    // Stat tracks grouped by category. Each track renders ONE button
+    // that levels up in place on purchase.
+    const cats = [
+      { id: 'survival', title: 'SURVIVAL' },
+      { id: 'mobility', title: 'MOBILITY' },
+      { id: 'gunplay',  title: 'GUNPLAY' },
+      { id: 'melee',    title: 'MELEE' },
+      { id: 'utility',  title: 'UTILITY' },
     ];
-    for (const grp of groups) {
+    for (const cat of cats) {
+      const tracks = TRAINER_TRACKS.filter(t => t.cat === cat.id);
+      if (!tracks.length) continue;
       const sec = document.createElement('div');
-      sec.style.marginTop = '8px';
+      sec.style.marginTop = '10px';
       const t = document.createElement('div');
       t.className = 'hideout-tier-head';
-      t.innerHTML = `<span class="t" style="color:#c9a87a">${grp.title}</span>`;
+      t.innerHTML = `<span class="t" style="color:#c9a87a">${cat.title}</span>`;
       sec.appendChild(t);
-      for (const id of grp.ids) {
-        const def = RECRUITER_UNLOCKS[id];
-        if (!def) continue;
-        sec.appendChild(this._renderRecruiterRow(def, owned, marks));
+      for (const track of tracks) {
+        sec.appendChild(this._renderTrainerTrackRow(track, owned, marks));
       }
       wrap.appendChild(sec);
     }
+
+    // Class-unlock rows — these stay one-shot (no ladder).
+    const classSec = document.createElement('div');
+    classSec.style.marginTop = '14px';
+    const ch = document.createElement('div');
+    ch.className = 'hideout-tier-head';
+    ch.innerHTML = `<span class="t" style="color:#c9a87a">CLASS UNLOCKS</span>`;
+    classSec.appendChild(ch);
+    for (const id of TRAINER_CLASS_UNLOCKS) {
+      const def = RECRUITER_UNLOCKS[id];
+      if (!def) continue;
+      classSec.appendChild(this._renderRecruiterRow(def, owned, marks));
+    }
+    wrap.appendChild(classSec);
+
     return wrap;
   }
 
+  // Track-aware row: shows current level, notch indicators, next-tier
+  // cost, and a single Buy button that purchases the next tier in the
+  // track's `tiers` list.
+  _renderTrainerTrackRow(track, owned, marks) {
+    const ids = track.tiers;
+    const maxLv = ids.length;
+    let level = 0;
+    while (level < maxLv && owned.has(ids[level])) level += 1;
+    const maxed = level >= maxLv;
+    const nextId = !maxed ? ids[level] : null;
+    const nextTune = nextId ? _T[nextId] : null;
+    const nextCost = nextTune?.cost ?? 0;
+    const affordable = marks >= nextCost;
+
+    const row = document.createElement('div');
+    row.className = 'hideout-contract-row trainer-row' + (maxed ? ' maxed' : '');
+
+    // Notch row — filled for owned tiers, "next" highlight for the
+    // tier the buy button targets, blank for higher tiers.
+    let notchHtml = '<span class="trainer-notch-row">';
+    for (let i = 0; i < maxLv; i++) {
+      const cls = i < level ? 'filled' : (i === level ? 'next' : '');
+      notchHtml += `<span class="trainer-notch ${cls}"></span>`;
+    }
+    notchHtml += '</span>';
+
+    const lvLabel = maxed ? `Lv ${maxLv}/${maxLv} · MAX`
+                          : `Lv ${level}/${maxLv}`;
+    const currentText = track.currentSummary(level, ids);
+    const nextText = nextTune ? `Next: ${track.desc(nextTune)}` : 'All tiers unlocked.';
+
+    // Layout (using the contract-row grid template):
+    //   head    | actions  → label (name + Lv) and cost pill
+    //   blurb   | actions  → notches block
+    //   mods    | actions  → current cumulative effect
+    //   offset  | actions  → next-tier preview
+    row.innerHTML = `
+      <div class="row-head">
+        <span class="label">${track.label}<span class="track-lv">${lvLabel}</span></span>
+        <span class="reward">${maxed ? '—' : `${nextCost} marks`}</span>
+      </div>
+      <div class="trainer-notch-block">${notchHtml}</div>
+      <div class="track-current">${currentText}</div>
+      <div class="track-next">${nextText}</div>
+      <div class="row-actions"></div>
+    `;
+    const actions = row.querySelector('.row-actions');
+    if (maxed) {
+      const tag = document.createElement('span');
+      tag.className = 'hideout-tag claimed';
+      tag.textContent = 'MAXED';
+      actions.appendChild(tag);
+    } else {
+      const btn = document.createElement('button');
+      btn.type = 'button';
+      btn.className = 'hideout-btn primary';
+      btn.textContent = level === 0 ? 'Buy' : `Upgrade to Lv ${level + 1}`;
+      btn.disabled = !affordable;
+      btn.addEventListener('click', () => {
+        if (!spendMarks(nextCost)) return;
+        setRecruiterUnlocked(nextId);
+        this.render();
+      });
+      actions.appendChild(btn);
+    }
+    return row;
+  }
+
+  // Legacy one-shot row — used only for the class-unlock buttons now.
   _renderRecruiterRow(def, owned, marks) {
     const row = document.createElement('div');
     row.className = 'hideout-contract-row';
@@ -3749,6 +4165,27 @@ export class HideoutUI {
       }
       .contractor-empty {
         color: #6f6754; font-style: italic; padding: 16px;
+      }
+      /* Section heading above the contract cards. */
+      .contracts-heading {
+        position: absolute; top: 30%; left: 0; right: 0;
+        text-align: center;
+        font-family: ui-monospace, Menlo, Consolas, monospace;
+        font-size: 18px; font-weight: 700; letter-spacing: 6px;
+        color: #f2c060; text-shadow: 0 0 14px rgba(255,200,80,0.45);
+        pointer-events: none;
+      }
+      /* Refresh button row — pinned to bottom-middle so it sits
+         under the cards regardless of card-row width. */
+      .contracts-refresh-bar {
+        position: absolute; bottom: 80px; left: 0; right: 0;
+        display: flex; justify-content: center;
+        pointer-events: none;
+      }
+      .contracts-refresh-bar .hideout-btn {
+        pointer-events: auto;
+        font-size: 12px; letter-spacing: 1.4px; font-weight: 700;
+        padding: 8px 18px;
       }
 
       /* Wanted-poster card — flexes between 200px (cramped 6-card

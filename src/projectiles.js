@@ -164,7 +164,15 @@ export class ProjectileManager {
       // until the first ground contact: those are designed to arc,
       // bounce, then explode. Mid-air pop on a chest-height enemy
       // contradicted the bounce-and-settle intent and felt buggy.
+      //
+      // Molotovs are also skipped here — they're glass bottles whose
+      // whole point is to break on a SURFACE and spread fire. Players
+      // throw them toward a chokepoint or group; popping mid-air on
+      // the first enemy in the arc looked like the bottle was
+      // detonating before reaching its destination. Floor contact
+      // remains the only trigger.
       if (armed && p.type === 'grenade' && p.owner === 'player'
+          && p.throwKind !== 'molotov'
           && !(p.fuseAfterLand && p.fuseStartT < 0)) {
         const close = this._nearbyEnemy(p.pos, 0.7);
         if (close) {

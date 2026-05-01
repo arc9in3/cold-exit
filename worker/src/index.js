@@ -20,6 +20,14 @@ const CATEGORIES = ['credits', 'levels', 'damage', 'kills'];
 const KEEP_TOP = 50;
 const MAX_NAME_LEN = 24;
 
+// 6-character room codes — A-Z + 2-9 (skipping 0/1/I/O/L for legibility).
+// 32^6 ≈ 1B distinct codes; collision odds inside the active-room set
+// are negligible and we retry-on-collision in `_freshRoomCode`.
+const ROOM_CODE_ALPHABET = 'ABCDEFGHJKMNPQRSTUVWXYZ23456789';
+const ROOM_CODE_LEN = 6;
+
+export { CoopRoom } from './coop_room.mjs';
+
 export default {
   async fetch(request, env) {
     const url = new URL(request.url);
@@ -33,6 +41,37 @@ export default {
     try {
       if (url.pathname === '/api/health') {
         return json({ ok: true, at: new Date().toISOString() }, 200, cors);
+      }
+      // Coop room creation — POST returns a fresh 6-char code; the
+      // client then opens a WS to /coop/ws/:code to actually join.
+      // Two-step so the host can share the URL before connecting.
+      if (url.pathname === '/coop/host' && request.method === 'POST') {
+        const code = _freshRoomCode();
+        return json({ code, expiresInSec: 600 }, 200, cors);
+      }
+      // Coop WebSocket — upgrades to a long-lived socket against the
+      // CoopRoom Durable Object for the given code. Both host and
+      // joiners hit this same endpoint; the DO decides who's host.
+      if (url.pathname.startsWith('/coop/ws/') && url.pathname.length > 9) {
+        const code = url.pathname.slice('/coop/ws/'.length).toUpperCase();
+        if (!_validRoomCode(code)) return json({ error: 'bad room code' }, 400, cors);
+        if (request.headers.get('Upgrade') !== 'websocket') {
+          return json({ error: 'expected websocket' }, 400, cors);
+        }
+        // Routes the WS to the per-room DO instance. idFromName gives
+        // a deterministic mapping from code → DO instance, so two
+        // peers with the same code land on the same object.
+        const id = env.COOP_ROOM.idFromName(code);
+        const stub = env.COOP_ROOM.get(id);
+        // Forward roomId so the DO can include it in welcome messages
+        // without re-parsing the URL pathname.
+        const fwd = new URL(request.url);
+        fwd.searchParams.set('roomId', code);
+        // Generate a server-side peerId so the client can't spoof.
+        if (!fwd.searchParams.has('peerId')) {
+          fwd.searchParams.set('peerId', _randomPeerId());
+        }
+        return stub.fetch(new Request(fwd.toString(), request));
       }
       if (url.pathname === '/api/scores/top' && request.method === 'GET') {
         const category = url.searchParams.get('category') || 'credits';
@@ -126,6 +165,36 @@ function json(obj, status, extraHeaders) {
       ...extraHeaders,
     },
   });
+}
+
+// Pick a fresh 6-char room code. The DO is created on first WS
+// connection (Cloudflare creates DO instances lazily), so we don't
+// have an "is this room already live?" check — collision risk is
+// 1 in 32^6 ≈ 1B per call, well below noise. If we ever need
+// stricter handling, swap to KV-tracked active codes.
+function _freshRoomCode() {
+  let code = '';
+  const alphabet = ROOM_CODE_ALPHABET;
+  for (let i = 0; i < ROOM_CODE_LEN; i++) {
+    const idx = Math.floor(Math.random() * alphabet.length);
+    code += alphabet[idx];
+  }
+  return code;
+}
+
+function _validRoomCode(code) {
+  if (typeof code !== 'string') return false;
+  if (code.length !== ROOM_CODE_LEN) return false;
+  for (const ch of code) {
+    if (ROOM_CODE_ALPHABET.indexOf(ch) < 0) return false;
+  }
+  return true;
+}
+
+function _randomPeerId() {
+  const bytes = new Uint8Array(6);
+  crypto.getRandomValues(bytes);
+  return Array.from(bytes).map(b => b.toString(36).padStart(2, '0')).join('').slice(0, 10);
 }
 
 function corsHeaders(origin, env) {
