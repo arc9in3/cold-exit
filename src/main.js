@@ -110,7 +110,7 @@ window.__resetHints = resetHints;
 // "I'm on build XYZ" without inspecting the bundle. Date stamps the
 // version so a quick glance tells you how stale the build is. Both
 // values render into the bottom-right #build-version label.
-const BUILD_VERSION = 'fedc864+coop-snap';
+const BUILD_VERSION = '4a099cc+coop-roomcode';
 // Build date intentionally bumped each deploy so the corner label
 // reflects the current snapshot.
 const BUILD_DATE    = '2026-05-01';
@@ -1648,6 +1648,43 @@ let _coopSnapshotT = 0;
 let _coopSnapshotSeq = 0;
 let _coopPendingSnapshot = null;
 let _coopLatestSeq = -1;
+// Joiner deferred-regen flag — set when a non-host calls regenerateLevel
+// before receiving the host's seed. The level-seed listener clears it
+// and runs a real regen so the layout matches the host.
+let _coopRegenPending = false;
+// Coop-intent signal — `transport.roomCode` is set the MOMENT the
+// user clicks Host or Join in the lobby (inside transport.host() /
+// transport.join() before the WebSocket even opens). It's cleared
+// only when the user explicitly hits Disconnect. So we use it as a
+// "user wants coop right now" flag that defers regenerateLevel
+// until the connection is up AND a seed is set. Page-load regen
+// + any pre-click Play falls through to the normal single-player
+// path (no roomCode → not in coop mode).
+// Joiner hit interceptor — gunman.js / melee_enemy.js applyHit calls
+// this hook BEFORE running their local damage logic. Returning true
+// means "I sent an RPC to the host; don't apply locally". Returning
+// false means "host or single-player; apply normally". Lives on window
+// so the entity managers can hit it without importing main.js.
+if (typeof window !== 'undefined') {
+  window.__coopOnEnemyHit = (owner, dmg, zone, hitDir, opts) => {
+    const t = getCoopTransport();
+    if (!t.isOpen || t.isHost) return false;
+    if (!owner || !owner.netId) return false;
+    // Send RPC. dir omitted from the wire payload — host doesn't need
+    // it for damage calc; knockback would matter but the host is
+    // running its own AI anyway and a tiny knockback delta from a
+    // distant joiner shot isn't worth a 24-byte packet bump.
+    t.send('rpc-shoot', {
+      n: owner.netId | 0,
+      d: Math.round(dmg) | 0,
+      z: zone || 'torso',
+      w: opts?.weaponClass,
+      sb: !!opts?.shieldBreaker,
+    });
+    return true;
+  };
+}
+
 function _ensureCoopLobby() {
   if (coopLobby || !isCoopEnabled()) return null;
   coopLobby = new CoopLobbyUI({ getPlayerName });
@@ -1658,11 +1695,34 @@ function _ensureCoopLobby() {
   coopGhostRoot = new THREE.Group();
   coopGhostRoot.name = 'coop-ghosts';
   scene.add(coopGhostRoot);
+  const transport = getCoopTransport();
+  // Host re-broadcasts the current seed whenever a peer joins. Without
+  // this the joiner has to wait for the host's NEXT regenerateLevel
+  // call (next floor extract) before they can sync. Since regen is
+  // synchronous and the seed is module-state, this is essentially
+  // free.
+  transport.addEventListener('peer-in', () => {
+    if (!transport.isHost || !_runSeed) return;
+    const lv = (level?.index | 0);
+    transport.send('level-seed', { seed: _runSeed, levelIndex: lv });
+    console.log('[coop] re-broadcasting level-seed on peer-in', { seed: _runSeed, levelIndex: lv });
+  });
+  // Once the WS handshake completes, retry any deferred regen. The
+  // host now has the readiness it needed (isOpen=true + isHost=true);
+  // a joiner still has to wait for the seed message but the level-
+  // seed listener fires that path. This catches the case where the
+  // user clicked Play before the WS finished handshaking.
+  transport.addEventListener('open', () => {
+    if (_coopRegenPending && transport.isHost) {
+      console.log('[coop] retrying deferred regen on host open');
+      try { regenerateLevel(); }
+      catch (err) { console.warn('[coop] deferred-regen retry failed', err); }
+    }
+  });
   // Joiner-side message handler — apply incoming level-seed messages
   // by setting _runSeed and calling regenerateLevel so the joiner's
   // layout matches the host's. Idempotent: bails when we're the host
   // (we generated the seed) or when the seed is already current.
-  const transport = getCoopTransport();
   transport.addEventListener('msg', (e) => {
     const { kind, body, from } = e.detail;
     if (kind === 'snapshot') {
@@ -1675,6 +1735,34 @@ function _ensureCoopLobby() {
       _coopPendingSnapshot = body;
       return;
     }
+    if (kind === 'rpc-shoot') {
+      // Host-only — joiner shot a synced enemy and is asking us to
+      // apply damage authoritatively. Find the entity by netId and
+      // route through the standard applyHit pipeline. The next 20Hz
+      // snapshot will mirror the new HP / alive flag back to the
+      // joiner. Skip silently if we're not host or the entity is gone
+      // (already dead, or netId doesn't resolve).
+      if (!transport.isHost || !body) return;
+      const netId = body.n | 0;
+      let target = null;
+      if (gunmen?.gunmen) {
+        for (const g of gunmen.gunmen) { if (g.netId === netId) { target = g; break; } }
+      }
+      if (!target && melees?.enemies) {
+        for (const m of melees.enemies) { if (m.netId === netId) { target = m; break; } }
+      }
+      if (target && target.alive && target.manager) {
+        const dmg = Math.max(0, body.d | 0);
+        const zone = body.z || 'torso';
+        try {
+          target.manager.applyHit(target, dmg, zone, null,
+            { weaponClass: body.w || 'rpc', shieldBreaker: !!body.sb });
+        } catch (err) {
+          console.warn('[coop] rpc-shoot apply failed', err);
+        }
+      }
+      return;
+    }
     if (kind !== 'level-seed' || !body) return;
     if (transport.isHost) {
       console.log('[coop] ignoring level-seed (we are host)', body);
@@ -1683,11 +1771,13 @@ function _ensureCoopLobby() {
     const incomingSeed = body.seed >>> 0;
     const incomingLv = body.levelIndex | 0;
     if (!incomingSeed) return;
-    const needsRegen = (_runSeed !== incomingSeed)
+    const needsRegen = _coopRegenPending
+      || (_runSeed !== incomingSeed)
       || ((level?.index | 0) !== incomingLv);
     console.log('[coop] level-seed received', {
       from, seed: incomingSeed, levelIndex: incomingLv,
-      needsRegen, currentSeed: _runSeed, currentLv: level?.index | 0,
+      needsRegen, pending: _coopRegenPending,
+      currentSeed: _runSeed, currentLv: level?.index | 0,
     });
     _runSeed = incomingSeed;
     if (needsRegen && level) {
@@ -2605,6 +2695,26 @@ function regenerateLevel() {
     { isOpen: transport.isOpen, isHost: transport.isHost,
       peerId: transport.peerId, hostId: transport.hostId,
       runSeed: _runSeed });
+  // COOP GATE — the user has picked coop (roomCode set, either via
+  // Host or Join button) but we're not yet ready to generate a level
+  // matching the host's layout. "Ready" means:
+  //   - transport.isOpen, AND
+  //   - we're host (we'll mint a seed below), OR _runSeed is set
+  //     (the joiner already received the host's seed).
+  // Anything else, defer. The level-seed listener / first host-side
+  // regen will retry once we're ready. This catches the page-load
+  // regen + any Play click that races ahead of the WS handshake.
+  const inCoop = !!transport.roomCode;
+  const ready = transport.isOpen && (transport.isHost || _runSeed > 0);
+  if (inCoop && !ready) {
+    console.log('[coop] regenerateLevel deferred',
+      { reason: !transport.isOpen ? 'transport not yet open'
+                                  : 'joiner waiting for level-seed',
+        isOpen: transport.isOpen, isHost: transport.isHost, runSeed: _runSeed });
+    _coopRegenPending = true;
+    return;
+  }
+  _coopRegenPending = false;
   if (transport.isOpen && transport.isHost && !_runSeed) {
     _runSeed = (Math.random() * 0xFFFFFFFF) >>> 0 || 1;
     console.log('[coop] generated run seed', _runSeed);

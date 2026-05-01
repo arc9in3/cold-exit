@@ -888,6 +888,16 @@ export class GunmanManager {
   applyHit(g, damage, zone, hitDir, opts = {}) {
     const drops = [];
     if (!g.alive) return { drops, blocked: false };
+    // Coop joiner short-circuit — if we're a connected joiner and this
+    // entity has a netId, the hit is forwarded to the authoritative
+    // host via RPC instead of applying locally. Returning a stub keeps
+    // call-site code (damage numbers, runStats, drops loop) working
+    // unchanged. Host-side: the snapshot mirrors back the new HP /
+    // alive state on the next 20Hz tick.
+    if (typeof window !== 'undefined' && window.__coopOnEnemyHit
+        && window.__coopOnEnemyHit(g, damage, zone, hitDir, opts)) {
+      return { drops, blocked: false, shieldHit: false };
+    }
     // Damage from the player aggros the boss → enters hunt mode. Lets
     // a stealth-execute opener take a boss out without ever
     // triggering the cross-room pursuit.

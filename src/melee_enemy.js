@@ -530,6 +530,14 @@ export class MeleeEnemyManager {
   applyHit(e, damage, zone, hitDir, opts = {}) {
     const drops = [];
     if (!e.alive) return { drops, blocked: false };
+    // Coop joiner short-circuit — see gunman.js applyHit for rationale.
+    // Damage on a netId entity is sent to the authoritative host;
+    // the snapshot mirrors the result back. Returning a stub keeps
+    // local call-site code (damage numbers, runStats) working.
+    if (typeof window !== 'undefined' && window.__coopOnEnemyHit
+        && window.__coopOnEnemyHit(e, damage, zone, hitDir, opts)) {
+      return { drops, blocked: false, shieldHit: false };
+    }
 
     // Assassin archetype — blocks bullets at range. Melee and shotgun
     // blows ignore the block (the player's counterplay is to close),
