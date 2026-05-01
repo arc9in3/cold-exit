@@ -117,7 +117,7 @@ window.__resetHints = resetHints;
 // "I'm on build XYZ" without inspecting the bundle. Date stamps the
 // version so a quick glance tells you how stale the build is. Both
 // values render into the bottom-right #build-version label.
-const BUILD_VERSION = '7beb74b+snap-dedupe-perf';
+const BUILD_VERSION = '093e7db+early-dmg-cushion';
 // Build date intentionally bumped each deploy so the corner label
 // reflects the current snapshot.
 const BUILD_DATE    = '2026-05-01';
@@ -3456,9 +3456,22 @@ function difficultyScale() {
   // each ~0.5× the previous values; caps unchanged so late-game
   // still tops out at the same ceiling, just reached later.
   const lv = Math.max(0, level.index - 1);
+  // Early-game damage cushion — floors 1-3 (lv 0-2) get a softer
+  // damage curve so a fresh-run player isn't immediately one-shot
+  // by elite enemies / sub-bosses on the opening floors. Ramps from
+  // 0.65× at floor 1 up to 1.0× at floor 4 where the standard
+  // +0.06/lv ramp takes over. Affects every enemy that reads
+  // diff.damageMult on spawn — gunmen, melees, sub-bosses, bosses.
+  // Megabosses (per-encounter scale) are unaffected; they're
+  // gated to floor 5+ anyway. (2026-05-01: playtest feedback —
+  // first 1-3 floors hit too hard across the board.)
+  const earlyMult = lv === 0 ? 0.65
+                  : lv === 1 ? 0.80
+                  : lv === 2 ? 0.92
+                  :            1.00;
   return {
     hpMult: 1 + 0.09 * lv,
-    damageMult: 1 + 0.06 * lv,
+    damageMult: (1 + 0.06 * lv) * earlyMult,
     rarityBias: Math.min(0.6, 0.04 * lv),
     // <1 means faster reaction. Cap at 0.45× so it never goes below
     // a reasonable "trained operator" floor.
