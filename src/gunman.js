@@ -1390,6 +1390,10 @@ export class GunmanManager {
         }, dt);
       }
     }
+    // Restore caller's playerPos after the multi-target swap inside
+    // the for-of. Subsequent code (separateEnemies, etc) reads the
+    // original ref. Only meaningful when ctx.players was provided.
+    ctx.playerPos = __origPlayerPos;
   }
 
   _respawn(g) {
@@ -2853,8 +2857,5 @@ export class GunmanManager {
         }
       }
     }
-    // Restore the caller's playerPos so subsequent code outside the
-    // gunmen loop (separateEnemies, etc.) sees the original ref.
-    ctx.playerPos = __origPlayerPos;
   }
 }

@@ -196,7 +196,17 @@ export class LootManager {
     slot.sprite.scale.set(worldH * (pillW / pillH), worldH, 1);
   }
 
-  spawnItem(position, item) {
+  spawnItem(position, item, opts = {}) {
+    // Coop: instanced-per-player ownership tag. Defaults to null
+    // (visible to every peer in the room — shared loot, e.g. host's
+    // own kills). When the killer is a joiner, the rpc-shoot handler
+    // sets window.__coopCurrentClaimer for the duration of applyHit;
+    // any loot spawned during that chain inherits it as claimedBy.
+    // Explicit opts.claimedBy overrides the implicit thread-local.
+    const _coopClaimer = (typeof window !== 'undefined') ? window.__coopCurrentClaimer : null;
+    const claimedBy = (opts && Object.prototype.hasOwnProperty.call(opts, 'claimedBy'))
+      ? opts.claimedBy
+      : (_coopClaimer || null);
     const tint = item.tint ?? 0xaaaaaa;
 
     // Bear / duck toys keep the hand-built primitive path — they're
@@ -248,10 +258,13 @@ export class LootManager {
       // a monotonic counter; joiners apply the same id on their
       // mirror entries so pickup RPCs can target the right item.
       // _coopRemote means the entry was spawned by the joiner from
-      // a host snapshot — the joiner shouldn't pick it up locally
-      // (next session adds the rpc-pickup flow).
+      // a host snapshot.
       netId: ++this._netIdCounter,
       _coopRemote: false,
+      // claimedBy: peerId of the player this loot is for (instanced
+      // drops). null = shared (visible to everyone). Encoded into
+      // snapshots so each peer only sees their own + shared items.
+      claimedBy,
       slot,
       group: slot.group, box: slot.mesh, light: slot.light,
       nameTag: null,

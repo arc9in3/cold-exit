@@ -33,12 +33,18 @@ const _scratch = { gunmen: [], melees: [], loot: [] };
 // via a separate RPC in a follow-up session. For now, joiners SEE
 // loot but can't pick it up (the local mirror is flagged
 // _coopRemote so the joiner's pickup loop should skip it).
-function _encodeLoot(loot) {
+function _encodeLootForPeer(loot, forPeerId) {
+  // Filter to entries this peer should see: their own claimed loot,
+  // plus any null-claimed (shared) entries. Loot claimed by other
+  // peers is invisible to this recipient — instanced co-op drops.
   _scratch.loot.length = 0;
   if (!loot || !loot.items) return _scratch.loot.slice();
   for (const e of loot.items) {
     if (!e || !e.group || !e.item) continue;
     if (e.group.visible === false) continue;
+    // null = shared. A non-null claimedBy that doesn't match the
+    // recipient is filtered out.
+    if (e.claimedBy != null && e.claimedBy !== forPeerId) continue;
     _scratch.loot.push({
       n: e.netId | 0,
       x: +(e.group.position.x.toFixed(3)),
@@ -51,6 +57,22 @@ function _encodeLoot(loot) {
     });
   }
   return _scratch.loot.slice();
+}
+
+// Build the snapshot once per peer (loot section is per-recipient).
+// Returns a Map<peerId, snapshot>. Caller iterates and sends targeted.
+// Enemy section is the same across recipients so we build it once.
+export function encodeSnapshotsPerPeer(gunmen, melees, seq, t, loot, peerIds) {
+  const enemyPart = encodeEnemySnapshot(gunmen, melees, seq, t, null);
+  const out = new Map();
+  if (!peerIds || !peerIds.length) return out;
+  for (const peerId of peerIds) {
+    out.set(peerId, {
+      ...enemyPart,
+      loot: _encodeLootForPeer(loot, peerId),
+    });
+  }
+  return out;
 }
 
 export function encodeEnemySnapshot(gunmen, melees, seq, t, loot = null) {
@@ -87,7 +109,10 @@ export function encodeEnemySnapshot(gunmen, melees, seq, t, loot = null) {
     t: t | 0,
     gunmen: _scratch.gunmen.slice(),
     melees: _scratch.melees.slice(),
-    loot: loot ? _encodeLoot(loot) : [],
+    // Note: loot section is empty here. Per-peer fanout via
+    // encodeSnapshotsPerPeer is the path that includes loot,
+    // so each recipient sees only their instanced items + shared.
+    loot: [],
   };
 }
 

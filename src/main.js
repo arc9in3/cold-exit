@@ -102,7 +102,7 @@ import { setCursorForWeapon } from './cursor.js';
 import { DroneManager } from './drones.js';
 import { CoopLobbyUI, isCoopEnabled } from './coop/lobby.js';
 import { getCoopTransport } from './coop/transport.js';
-import { encodeEnemySnapshot, applyEnemySnapshot, applyLootSnapshot } from './coop/snapshot.js';
+import { encodeEnemySnapshot, encodeSnapshotsPerPeer, applyEnemySnapshot, applyLootSnapshot } from './coop/snapshot.js';
 import { resetNetIds } from './gunman.js';
 window.__resetHints = resetHints;
 
@@ -110,7 +110,7 @@ window.__resetHints = resetHints;
 // "I'm on build XYZ" without inspecting the bundle. Date stamps the
 // version so a quick glance tells you how stale the build is. Both
 // values render into the bottom-right #build-version label.
-const BUILD_VERSION = '7d1bfd2+coop-mt-loot';
+const BUILD_VERSION = '22fa2cf+coop-instanced';
 // Build date intentionally bumped each deploy so the corner label
 // reflects the current snapshot.
 const BUILD_DATE    = '2026-05-01';
@@ -1753,6 +1753,74 @@ function _ensureCoopLobby() {
       }
       return;
     }
+    if (kind === 'rpc-pickup') {
+      // Host-only — joiner walked over a synced loot item and is
+      // asking to claim it. Validate distance, remove from host's
+      // loot list, and send rpc-grant-item with the full item data
+      // so the joiner can add it to their inventory. The next
+      // snapshot tick mirrors the missing entry to the joiner so
+      // their local visual cube despawns.
+      if (!transport.isHost || !body) return;
+      const netId = body.n | 0;
+      let entry = null;
+      if (loot?.items) {
+        for (const e of loot.items) { if (e.netId === netId) { entry = e; break; } }
+      }
+      if (!entry) return;
+      // Ownership check — instanced loot. claimedBy=null means shared
+      // (anyone can take). claimedBy=peerId means only that peer
+      // can claim. Anything else is rejected.
+      if (entry.claimedBy != null && entry.claimedBy !== from) {
+        console.log('[coop] rpc-pickup rejected — wrong owner', { netId, claimedBy: entry.claimedBy, from });
+        return;
+      }
+      // Distance check — the joiner's last broadcast pos lives in
+      // coopLobby.ghosts. Reject pickups farther than the radius
+      // a fairly lenient slop (network jitter + client-side lerp).
+      const ghost = coopLobby?.ghosts?.get(from);
+      if (ghost) {
+        const dx = ghost.x - entry.group.position.x;
+        const dz = ghost.z - entry.group.position.z;
+        const r = (tunables.loot?.pickupRadius || 2.0) + 1.0;
+        if (dx * dx + dz * dz > r * r) {
+          console.log('[coop] rpc-pickup rejected — joiner too far', { netId, dist: Math.hypot(dx, dz) });
+          return;
+        }
+      }
+      // Grant the item BEFORE removing locally so a transport-send
+      // failure doesn't lose the item permanently for both sides.
+      transport.send('rpc-grant-item', {
+        n: netId,
+        item: entry.item,
+      }, from);
+      try { loot.remove(entry); } catch (_) {}
+      return;
+    }
+    if (kind === 'rpc-grant-item') {
+      // Joiner-only — host approved a pickup we asked for. Apply the
+      // item to local inventory. Visual cleanup happens via the
+      // snapshot mirror once the host removes the entry from its loot
+      // list.
+      if (transport.isHost || !body || !body.item) return;
+      const incomingItem = body.item;
+      try {
+        if (_tryAcquireRelic && _tryAcquireRelic(incomingItem)) {
+          sfx?.pickup?.();
+          inventoryUI?.render?.();
+          return;
+        }
+        const result = inventory.add(incomingItem);
+        if (result?.placed) {
+          sfx?.pickup?.();
+          if (result.slot === 'primary' || result.slot === 'melee') onInventoryChanged();
+          recomputeStats();
+          inventoryUI?.render?.();
+        }
+      } catch (err) {
+        console.warn('[coop] rpc-grant-item apply failed', err);
+      }
+      return;
+    }
     if (kind === 'rpc-shoot') {
       // Host-only — joiner shot a synced enemy and is asking us to
       // apply damage authoritatively. Find the entity by netId and
@@ -1772,11 +1840,20 @@ function _ensureCoopLobby() {
       if (target && target.alive && target.manager) {
         const dmg = Math.max(0, body.d | 0);
         const zone = body.z || 'torso';
+        // Set the implicit claimedBy thread-local so any loot spawned
+        // during applyHit's death chain (drop-on-disarm, chest break,
+        // etc.) inherits this joiner as the owner — instanced loot.
+        // Always restore in finally so a thrown applyHit can't leak
+        // ownership into subsequent host-local spawns.
+        const _prevClaimer = (typeof window !== 'undefined') ? window.__coopCurrentClaimer : null;
         try {
+          if (typeof window !== 'undefined') window.__coopCurrentClaimer = from;
           target.manager.applyHit(target, dmg, zone, null,
             { weaponClass: body.w || 'rpc', shieldBreaker: !!body.sb });
         } catch (err) {
           console.warn('[coop] rpc-shoot apply failed', err);
+        } finally {
+          if (typeof window !== 'undefined') window.__coopCurrentClaimer = _prevClaimer;
         }
       }
       return;
@@ -8060,10 +8137,26 @@ function _tickCoop(dt) {
     if (_coopSnapshotT <= 0) {
       _coopSnapshotT = 1 / 20;
       _coopSnapshotSeq = (_coopSnapshotSeq + 1) | 0;
-      const snap = encodeEnemySnapshot(
-        gunmen, melees, _coopSnapshotSeq, performance.now() | 0, loot,
-      );
-      transport.send('snapshot', snap);
+      // Per-peer snapshots so each joiner only receives their
+      // instanced loot (claimedBy === self) plus shared loot
+      // (claimedBy === null). Enemy section is identical across
+      // recipients; the encoder builds it once and clones the
+      // outer object per peer.
+      const peerIds = [];
+      for (const pid of transport.peers.keys()) {
+        if (pid !== transport.peerId) peerIds.push(pid);
+      }
+      if (peerIds.length === 0) {
+        // No joiners yet — skip the broadcast entirely. Saves a
+        // packet per snapshot tick on a host-alone room.
+      } else {
+        const perPeer = encodeSnapshotsPerPeer(
+          gunmen, melees, _coopSnapshotSeq, performance.now() | 0, loot, peerIds,
+        );
+        for (const [peerId, snap] of perPeer) {
+          transport.send('snapshot', snap, peerId);
+        }
+      }
     }
   } else if (!transport.isHost && _coopPendingSnapshot) {
     // Joiner — apply the most recent snapshot we received. Lerp
@@ -10694,6 +10787,29 @@ function tryInteract({ nearItem, body, bodies, npc, container }) {
     }
   }
   if (nearItem) {
+    // Coop ownership gate.
+    {
+      const _coopT = getCoopTransport();
+      // Host: refuse to pick up loot claimed by a specific joiner.
+      // Their visual cube is still rendered locally because host
+      // owns the canonical loot.items list, but the in-world
+      // pickup is gated.
+      if (_coopT.isOpen && _coopT.isHost
+          && nearItem.claimedBy != null) {
+        return;
+      }
+      // Joiner: items mirrored from host's snapshot are flagged
+      // _coopRemote and are non-authoritative here. Forward the
+      // pickup intent as an RPC; host validates + sends
+      // rpc-grant-item which adds the full item data to our
+      // inventory. The local visual disappears on the next
+      // snapshot apply when host's loot list drops the entry.
+      if (nearItem._coopRemote && _coopT.isOpen && !_coopT.isHost) {
+        _coopT.send('rpc-pickup', { n: nearItem.netId | 0 });
+        sfx.pickup?.();
+        return;
+      }
+    }
     // Two or more items in the pickup radius — open the ground-loot modal
     // instead of auto-picking one. Otherwise fast single-item pickup.
     const nearby = loot.allWithin(player.mesh.position, tunables.loot.pickupRadius);
