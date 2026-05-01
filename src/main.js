@@ -117,7 +117,7 @@ window.__resetHints = resetHints;
 // "I'm on build XYZ" without inspecting the bundle. Date stamps the
 // version so a quick glance tells you how stale the build is. Both
 // values render into the bottom-right #build-version label.
-const BUILD_VERSION = 'd13134b+pose-tracer-overlay';
+const BUILD_VERSION = '5783761+pose-fix-gun-mesh';
 // Build date intentionally bumped each deploy so the corner label
 // reflects the current snapshot.
 const BUILD_DATE    = '2026-05-01';
@@ -8652,16 +8652,19 @@ function _tickCoop(dt) {
     _coopBroadcastT = 0.2;
     if (player?.mesh?.position) {
       const pi = lastPlayerInfo;
+      const wpn = currentWeapon?.();
       transport.send('pos', {
         x: player.mesh.position.x,
         z: player.mesh.position.z,
         f: player.mesh.rotation.y || 0,
-        // Pose bits — crouched, aiming. Firing tracer is sent as a
-        // separate fx-tracer-coop event below for low-latency
-        // delivery (firing is a 80ms visual; can't wait for the
-        // 200ms position tick).
-        c: !!pi?.crouched ? 1 : 0,
-        a: ((pi?.adsAmount ?? 0) > 0.4) ? 1 : 0,
+        // Pose bits — crouched (0/1), aim blend (0..1, eased), and
+        // weapon class so the remote rig adopts the right hold
+        // pose (rifle vs pistol vs sniper). Dashing is a momentary
+        // burst flag; rig anim treats it as a speed multiplier.
+        c: pi?.crouched ? 1 : 0,
+        a: +(pi?.adsAmount ?? 0).toFixed(2),
+        d: (pi?.mode === 'dash' || pi?.mode === 'slide') ? 1 : 0,
+        wc: wpn?.class || 'pistol',
       });
     }
   }
@@ -8748,24 +8751,39 @@ function _tickCoop(dt) {
       });
       _initAllyAnim(rig);
       const group = rig.group;
-      // Through-wall beacon — additive cylinder above the head so the
-      // teammate is findable across the room/walls.
-      const beamMat = new THREE.MeshBasicMaterial({
-        color: 0x6abfff, transparent: true, opacity: 0.35,
-        depthWrite: false, depthTest: false,
-        blending: THREE.AdditiveBlending,
+      // Gun box on the wrist — same mount + orientation as the local
+      // player's box gunMesh. Without this remote allies look like
+      // they're miming with empty hands. Class-driven sizing comes
+      // from the broadcast 'wc' field; we resize on each pos packet.
+      const gunMat = new THREE.MeshStandardMaterial({
+        color: 0x2a2a2a, roughness: 0.55, metalness: 0.4,
       });
-      const beam = new THREE.Mesh(new THREE.CylinderGeometry(0.10, 0.10, 12, 6), beamMat);
-      beam.position.y = 6;
-      beam.renderOrder = 5;
-      group.add(beam);
+      const gunMesh = new THREE.Mesh(new THREE.BoxGeometry(0.12, 0.12, 0.5), gunMat);
+      gunMesh.scale.setScalar(rig.scale || 0.77);
+      gunMesh.castShadow = true;
+      gunMesh.rotation.x = Math.PI / 2;
+      gunMesh.position.set(0, -(0.1 + 0.25) * (rig.scale || 0.77), 0);
+      if (rig.rightArm?.wrist) rig.rightArm.wrist.add(gunMesh);
       coopGhostRoot.add(group);
       m = {
-        group, rig,
+        group, rig, gunMesh,
         lastX: ghost.x, lastZ: ghost.z,
         lastAnimT: (typeof performance !== 'undefined') ? performance.now() / 1000 : 0,
       };
       _coopGhostMeshes.set(peerId, m);
+    }
+    // Per-class scale of the gun box — pistol is ~0.5×, rifle/shotgun
+    // ~0.9×. Matches the local-player CLASS_SCALE in player.js.
+    if (m.gunMesh) {
+      const cls = ghost.weaponClass || 'pistol';
+      const cs = (cls === 'pistol') ? 0.5
+              : (cls === 'smg') ? 0.75
+              : 0.9;
+      const target = cs * (m.rig?.scale || 0.77);
+      const cur = m.gunMesh.scale.x;
+      // Cheap lerp so weapon-swap doesn't pop.
+      const k = Math.min(1, dt / 0.18);
+      m.gunMesh.scale.setScalar(cur + (target - cur) * k);
     }
     // Lerp 1/0.2s toward the most-recent reported position. Catches
     // up smoothly without feeling rubber-bandy at typical packet
@@ -8795,22 +8813,27 @@ function _tickCoop(dt) {
         m.group.rotation.y += dyaw * Math.min(1, dt / 0.12);
       }
       try {
-        // Pose bits arrive on every 'pos' broadcast (5Hz) — crouch
-        // and aiming flags drive the same animation states the local
-        // player uses, so a remote teammate visually crouches when
-        // they're crouched and ADSs when they're aiming. yaw from
-        // the broadcast also feeds aimYaw so the upper body twists
-        // toward where they're shooting.
-        const aiming = !!ghost.aiming;
-        const crouching = !!ghost.crouched;
-        const aimYaw = typeof ghost.yaw === 'number' ? ghost.yaw : 0;
+        // Match the local player's updateAnim contract exactly.
+        // Field names matter: rig consumes `crouched` (not
+        // crouching), `aiming` as a 0..1 blend (not bool),
+        // `dashing` boolean, `rifleHold` boolean, `weaponClass`
+        // string, `aimYaw` radians.
+        const aiming = (typeof ghost.aiming === 'number')
+          ? ghost.aiming
+          : (ghost.aiming ? 1 : 0);
+        const cls = ghost.weaponClass || 'pistol';
+        const rifleHold = aiming > 0.05 || cls === 'rifle' || cls === 'sniper'
+          || cls === 'shotgun' || cls === 'lmg' || cls === 'smg';
         _updateAllyAnim(m.rig, {
           speed,
-          rifleHold: aiming,
           aiming,
-          crouching,
-          aimYaw,
+          crouched: !!ghost.crouched,
+          dashing:  !!ghost.dashing,
+          rifleHold,
+          weaponClass: cls,
+          aimYaw: typeof ghost.yaw === 'number' ? ghost.yaw : 0,
           aimPitch: 0,
+          handedness: 1,
         }, dt);
       } catch (_) { /* defensive — animation should never crash a frame */ }
     }
