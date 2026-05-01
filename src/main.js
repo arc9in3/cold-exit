@@ -117,7 +117,7 @@ window.__resetHints = resetHints;
 // "I'm on build XYZ" without inspecting the bundle. Date stamps the
 // version so a quick glance tells you how stale the build is. Both
 // values render into the bottom-right #build-version label.
-const BUILD_VERSION = 'e5e0b5f+megaboss-hazard-sync';
+const BUILD_VERSION = 'ded653e+coop-extract-gate+peer-died';
 // Build date intentionally bumped each deploy so the corner label
 // reflects the current snapshot.
 const BUILD_DATE    = '2026-05-01';
@@ -468,6 +468,7 @@ if (deathMenuBtnEl) {
     // the death screen without acting on it (or after acting).
     document.getElementById('death-unlock-prompt')?.remove();
     playerDead = false;
+    _coopSelfDeathBroadcast = false;
     input.clearMouseState();
     const runSnapshot = runStats.snapshot();
     // Mirror Quit-to-title's reset so a fresh Play from the main menu
@@ -1737,6 +1738,19 @@ function _enterDownedState() {
   // Surface a HUD message so the player understands.
   try { transientHudMsg('DOWN — bleedout 60s — teammate must revive', 6.0); } catch (_) {}
 }
+// Broadcast that the local player has truly died (post-bleedout, or
+// solo death with no living teammate). Receivers strip the downed
+// overlay, hide the dead peer's rig, and surface a toast. Idempotent
+// via _coopSelfDeathBroadcast — only fires once per run.
+let _coopSelfDeathBroadcast = false;
+function _coopBroadcastSelfDied() {
+  if (_coopSelfDeathBroadcast) return;
+  const t = getCoopTransport();
+  if (!t.isOpen) return;
+  _coopSelfDeathBroadcast = true;
+  try { t.send('rpc-peer-died', { p: t.peerId }); } catch (_) {}
+}
+
 function _leaveDownedState(restoreHpPct = 0.30) {
   if (!_localDowned) return;
   _localDowned = false;
@@ -1933,6 +1947,7 @@ function _tickDowned(dt) {
           // The death overlay will surface via the standard flow.
           playerDead = true;
           try { sfx.death(); } catch (_) {}
+          _coopBroadcastSelfDied();
         }
       }
     }
@@ -2170,6 +2185,24 @@ function _ensureCoopLobby() {
       } else if (st.reviverPeerId === from) {
         st.reviverPeerId = null;
       }
+      return;
+    }
+    if (kind === 'rpc-peer-died') {
+      // A peer's player truly died (post-bleedout or solo). Clean up
+      // their downed state, hide their rig, and surface a toast.
+      // Local death sets _coopSelfDeathBroadcast so the echo back
+      // from the server doesn't loop.
+      if (!body || !body.p) return;
+      _coopPeerDowned.delete(body.p);
+      _coopApplyDownedOverlay(body.p, false);
+      const ghost = coopLobby?.ghosts?.get(body.p);
+      if (ghost) ghost.dead = true;
+      // Hide the rig + gun mesh via the dedicated ghost-meshes map.
+      const m = _coopGhostMeshes.get(body.p);
+      if (m?.group) m.group.visible = false;
+      if (m?.gunMesh) m.gunMesh.visible = false;
+      const name = ghost?.name || 'Player';
+      try { transientHudMsg(`${name} has died`, 4.0); } catch (_) {}
       return;
     }
     if (kind === 'rpc-revived') {
@@ -2445,12 +2478,23 @@ function _ensureCoopLobby() {
     if (needsRegen && level) {
       // Force the next regenerate to land on incomingLv. level.generate()
       // bumps index by 1 internally, so we set to one below.
+      const wasMidRun = (level.index | 0) > 0;
+      const isFloorAdvance = wasMidRun && incomingLv > (level.index | 0);
       level.index = incomingLv - 1;
       try {
         regenerateLevel();
         console.log('[coop] regenerated to seed=', incomingSeed, 'lv=', level.index | 0);
       } catch (err) {
         console.warn('[coop] regen on level-seed failed', err);
+      }
+      // Coop: joiner gets a per-floor skill pick on every floor
+      // advance, matching the host's advanceFloor flow. Routed
+      // through the deferred-pick queue so the world keeps ticking
+      // (coop never pauses for picks) — the gold HUD pill surfaces
+      // and the joiner spends when they're ready.
+      if (isFloorAdvance) {
+        _pendingLevelUpPicks += 1;
+        try { _refreshPickQueueHud(); } catch (_) {}
       }
     }
   });
@@ -5494,6 +5538,11 @@ let lastAim = null;
 let lastAimZone = null;       // 'head' / 'torso' / 'leg' / 'arm' / null
 let paused = false;    // true while a modal (skill pick) is open
 let extractPending = false;
+// Coop dual-opt-in extract — true while local player is standing in
+// the exit zone. Broadcast every pos tick (xt bit). Host only fires
+// advanceFloor when this AND every joiner ghost's inExit bit are
+// true. Joiner only sets the bit + waits for the host's level-seed.
+let _localInExit = false;
 
 // Mega-boss handle — non-null only on milestone floors (10, 15, 20, …).
 // Allocated in regenerateLevel after `level.generateMegaArena()` runs.
@@ -8772,6 +8821,11 @@ function _tickCoop(dt) {
         a: +(pi?.adsAmount ?? 0).toFixed(2),
         d: (pi?.mode === 'dash' || pi?.mode === 'slide') ? 1 : 0,
         wc: wpn?.class || 'pistol',
+        // Dual-opt-in extract — peer is standing in the exit zone
+        // and ready to advance. Host gates advanceFloor on this
+        // being true for every joiner ghost. Cheap (single bit on
+        // the existing 5Hz pos packet, no new kind).
+        xt: _localInExit ? 1 : 0,
       });
     }
   }
@@ -11836,7 +11890,11 @@ function tryInteract({ nearItem, body, bodies, npc, container }) {
     }
     return;
   }
-  if (level.isPlayerInExit(player.mesh.position) && exitCooldown <= 0) {
+  const localInExit = level.isPlayerInExit(player.mesh.position) && exitCooldown <= 0;
+  // Track the bit even when not extracting — peers read it to gate
+  // their own advanceFloor + render the "waiting for teammate" HUD.
+  _localInExit = localInExit;
+  if (localInExit) {
     // Tutorial extract — bypass the normal advanceFloor flow and
     // bounce back to the main menu so the player doesn't roll into
     // a real run by accident.
@@ -11848,8 +11906,102 @@ function tryInteract({ nearItem, body, bodies, npc, container }) {
       mainMenuUI.show();
       return;
     }
-    extractPending = true;
+    // Coop: dual-opt-in. Host only triggers advanceFloor when every
+    // living joiner ghost is also flagged in-exit. Joiners just sit
+    // in the zone with the bit set and wait for the host's level-
+    // seed broadcast — see the level-seed handler for the joiner-
+    // side regen + skill-pick beat.
+    const t = getCoopTransport();
+    const coopActive = t.isOpen && coopLobby && coopLobby.ghosts.size > 0;
+    if (coopActive) {
+      if (t.isHost) {
+        if (_coopAllPeersReadyToExtract()) extractPending = true;
+        // Else: wait. HUD pill is rendered separately each frame.
+      }
+      // Joiners do nothing — broadcasting xt:1 is enough; the host
+      // will advance the floor and broadcast level-seed.
+    } else {
+      extractPending = true;
+    }
   }
+}
+
+// True when every living joiner ghost is standing in the exit zone.
+// Dead peers don't gate the extract — they're out of the run.
+function _coopAllPeersReadyToExtract() {
+  if (!coopLobby) return true;
+  for (const [, g] of coopLobby.ghosts) {
+    if (g.dead) continue;
+    if (!g.inExit) return false;
+  }
+  return true;
+}
+
+// Refresh the dual-opt-in extract HUD pill. Called every frame from
+// tick(). Builds the DOM lazily on first show.
+let _exitWaitHudEl = null;
+function _refreshExitWaitHud() {
+  if (!coopLobby) {
+    if (_exitWaitHudEl) _exitWaitHudEl.style.display = 'none';
+    return;
+  }
+  const t = getCoopTransport();
+  const coopActive = t.isOpen && coopLobby.ghosts.size > 0;
+  if (!coopActive || !_localInExit) {
+    if (_exitWaitHudEl) _exitWaitHudEl.style.display = 'none';
+    return;
+  }
+  // Count living peers + how many of them are also in exit (host
+  // doesn't appear in coopLobby.ghosts; we count ourselves separately).
+  let total = 1, ready = 1;     // local is in exit by definition here
+  for (const [, g] of coopLobby.ghosts) {
+    if (g.dead) continue;
+    total += 1;
+    if (g.inExit) ready += 1;
+  }
+  if (!_exitWaitHudEl) {
+    const el = document.createElement('div');
+    el.id = 'exit-wait-hud';
+    Object.assign(el.style, {
+      position: 'fixed', top: '54px', left: '50%',
+      transform: 'translateX(-50%)', zIndex: '7',
+      pointerEvents: 'none', display: 'none',
+      font: '12px ui-monospace, Menlo, Consolas, monospace',
+      letterSpacing: '2px', textTransform: 'uppercase',
+      padding: '8px 16px',
+      background: 'linear-gradient(180deg, #1a2228, #0c1014)',
+      border: '1px solid #60c0f2', borderRadius: '4px',
+      color: '#a0d8ff',
+      boxShadow: '0 0 24px rgba(80,200,255,0.4)',
+      animation: 'exit-wait-pulse 1.6s ease-in-out infinite',
+    });
+    if (!document.getElementById('exit-wait-hud-style')) {
+      const s = document.createElement('style');
+      s.id = 'exit-wait-hud-style';
+      s.textContent = `
+        @keyframes exit-wait-pulse {
+          0%, 100% { box-shadow: 0 0 24px rgba(80,200,255,0.4); }
+          50%      { box-shadow: 0 0 38px rgba(80,200,255,0.7); }
+        }
+      `;
+      document.head.appendChild(s);
+    }
+    document.body.appendChild(el);
+    _exitWaitHudEl = el;
+  }
+  if (ready >= total) {
+    // Everyone in. Joiner shows "EXTRACTING..." until host's level-
+    // seed lands; host should never see this state because it would
+    // immediately fire advanceFloor.
+    if (t.isHost) {
+      _exitWaitHudEl.style.display = 'none';
+      return;
+    }
+    _exitWaitHudEl.textContent = 'EXTRACTING…';
+  } else {
+    _exitWaitHudEl.textContent = `WAITING FOR TEAMMATE — ${ready}/${total}`;
+  }
+  _exitWaitHudEl.style.display = 'block';
 }
 
 // Effective max charges / cooldown for a throwable, after Grenadier
@@ -15194,6 +15346,7 @@ function tick() {
   } else if (pendingMasteryOffers.length > 0 && !paused) {
     runMasteryOffer();
   }
+  _refreshExitWaitHud();
 
   const weapon = currentWeapon();
   const effWeapon = weapon ? effectiveWeapon(weapon) : null;
@@ -15352,6 +15505,7 @@ function tick() {
   if (!playerDead && !_localDowned && playerInfo.health <= 0) {
     playerDead = true;
     sfx.death();
+    _coopBroadcastSelfDied();
     // Seal the run's stats and submit to the local leaderboard. Tainted
     // runs (save/load used) are silently dropped inside submitRun so
     // save-scummers can't climb the boards.

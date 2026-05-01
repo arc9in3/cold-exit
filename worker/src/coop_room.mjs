@@ -64,6 +64,7 @@ const KIND_ALLOWED_FROM_JOINER = new Set([
 const KIND_ALLOWED_FROM_ANY = new Set([
   'pos', 'chat',
   'fx-tracer-self',   // a peer fired their gun — purely visual
+  'rpc-peer-died',    // a peer's player truly died (post-bleedout / solo)
 ]);
 
 export class CoopRoom {

@@ -239,6 +239,8 @@ export class CoopLobbyUI {
     t.addEventListener('msg', (e) => {
       const { kind, from, body } = e.detail;
       if (kind === 'pos' && body && typeof body.x === 'number' && typeof body.z === 'number') {
+        // Preserve sticky per-peer flags (e.g. dead) across pos refreshes.
+        const prev = this.ghosts.get(from);
         this.ghosts.set(from, {
           x: body.x, z: body.z,
           // Pose bits — crouched (0/1), aiming (0..1 blend, NOT a
@@ -250,8 +252,17 @@ export class CoopLobbyUI {
           dashing:  !!body.d,
           weaponClass: body.wc || 'pistol',
           yaw:      typeof body.f === 'number' ? body.f : 0,
+          // Dual-opt-in extract bit — peer is standing in the exit
+          // zone and ready to advance. Host reads this each frame
+          // before triggering advanceFloor.
+          inExit:   !!body.xt,
           name: this.transport.peers.get(from)?.name || 'peer',
           ts: performance.now(),
+          // Sticky death flag survives pos refreshes — once a peer's
+          // rpc-peer-died fires, subsequent pos packets must not
+          // resurrect them. Visual hide of the rig/gunMesh is owned
+          // by main.js's _coopGhostMeshes map; we just track the bit.
+          dead: prev?.dead || false,
         });
       }
     });
