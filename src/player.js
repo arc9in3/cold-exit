@@ -990,9 +990,52 @@ export function createPlayer(scene) {
     state.slideStartedEvent = false;
     // Coop downed — player can't move, fire, dash, jump, etc. We
     // still tick a few timers (iFrames, hitFlash) above so a revived
-    // player isn't stuck with stale flags. Just early-out before
-    // input dispatch.
-    if (state.downed) return;
+    // player isn't stuck with stale flags. Return a minimal but
+    // well-formed playerInfo stub so callers reading
+    // playerInfo.dashStarted etc. don't NPE.
+    if (state.downed) {
+      return {
+        position: group.position,
+        aim: aimPoint || null,
+        facing: facing.clone ? facing.clone() : { x: 0, y: 0, z: -1 },
+        muzzleWorld: muzzle.getWorldPosition
+          ? muzzle.getWorldPosition(new THREE.Vector3())
+          : new THREE.Vector3(),
+        offhandMuzzleWorld: offhandMuzzle?.getWorldPosition
+          ? offhandMuzzle.getWorldPosition(new THREE.Vector3())
+          : new THREE.Vector3(),
+        fireOrigin: null,
+        adsAmount: 0,
+        mode: state.mode,
+        crouched: false,
+        crouchSprinting: false,
+        iFrames: state.iFrames > 0,
+        iFramesRemaining: state.iFrames,
+        speed: 0,
+        health: state.health,
+        regenCap: state.regenCap,
+        bleedT: state.bleedT,
+        brokenT: state.brokenT,
+        maxHealth: state.maxHealth,
+        stamina: state.stamina,
+        maxStamina: state.maxStamina,
+        blocking: false,
+        parryActive: false,
+        attackEvent: null,
+        attackPhase: 'idle',
+        attackStep: 0,
+        attackWeapon: null,
+        attackIsCrit: false,
+        dashStarted: false,
+        rollStarted: false,
+        slideStarted: false,
+        // Defensive: anything else readers might index. Empty/falsy
+        // values keep behaviour neutral.
+        airborne: false,
+        equipped: state.equipped || null,
+        downed: true,
+      };
+    }
     // Cooldowns and timers tick regardless of mode.
     state.dashCd = Math.max(0, state.dashCd - dt);
     state.rollCd = Math.max(0, state.rollCd - dt);
