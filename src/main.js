@@ -117,7 +117,7 @@ window.__resetHints = resetHints;
 // "I'm on build XYZ" without inspecting the bundle. Date stamps the
 // version so a quick glance tells you how stale the build is. Both
 // values render into the bottom-right #build-version label.
-const BUILD_VERSION = '9a53d4b+ally-rig-aggro';
+const BUILD_VERSION = '78d967f+host-revive';
 // Build date intentionally bumped each deploy so the corner label
 // reflects the current snapshot.
 const BUILD_DATE    = '2026-05-01';
@@ -1716,6 +1716,17 @@ function _enterDownedState() {
   const t = getCoopTransport();
   if (t.isOpen) {
     if (t.isHost) {
+      // Host's own entry into _coopPeerDowned so the rpc-revive-hold
+      // handler can find it when joiners try to revive us. Without
+      // this, the host is downed in _localDowned but invisible to
+      // the revive lookup. Reviver-tick on host already skips
+      // _localDowned so we won't try to revive ourselves.
+      _coopPeerDowned.set(t.peerId, {
+        bleedoutT: _localBleedoutT,
+        reviveT: 0,
+        reviverPeerId: null,
+        isHostSelf: true,
+      });
       t.send('rpc-downed', { p: t.peerId, b: _localBleedoutT });
     } else {
       // Joiner went down — tell host via the joiner-allowed kind.
@@ -1848,6 +1859,14 @@ function _tickDowned(dt) {
     // Host: drive the auth revive timer for joiner-initiated revives.
     if (t.isHost && st.reviverPeerId) {
       st.reviveT = Math.min(totalHold, (st.reviveT || 0) + dt);
+      // If the entity being revived IS the host (joiner reviving us),
+      // mirror the auth state into the local HUD vars so OUR
+      // revive bar fills + bleedout pauses (the rpc-revive-progress
+      // handler we'd normally use early-returns on host).
+      if (t.peerId === peerId) {
+        _localReviveT = st.reviveT;
+        _localReviveActive = true;
+      }
       // Throttle progress broadcast to 5Hz.
       st._sendT = (st._sendT || 0) - dt;
       if (st._sendT <= 0) {
@@ -1857,6 +1876,13 @@ function _tickDowned(dt) {
       if (st.reviveT >= totalHold) {
         t.send('rpc-revived', { p: peerId, hp: hpPct });
         _coopPeerDowned.delete(peerId);
+        // Server excludes sender from broadcasts, so the host
+        // doesn't receive its own rpc-revived. If the revive target
+        // IS the host (joiner just revived us), apply the revive
+        // locally here.
+        if (t.peerId === peerId && _localDowned) {
+          _leaveDownedState(hpPct);
+        }
       }
     } else if (t.isHost && (st.reviveT || 0) > 0) {
       // No active reviver — decay the bar.
@@ -2642,6 +2668,10 @@ const customizeUI = new CustomizeUI({
 // (claimedBy=null) so both peers see it on the ground and either
 // can pick it back up. Host / single-player just spawn locally.
 function _coopDropOrLocal(p, item) {
+  // Downed players can't drop items — stops them from dumping
+  // tagged loot pre-revive, and matches the "incapacitated"
+  // fiction. The drop just no-ops; the item stays in inventory.
+  if (_localDowned) return;
   const t = getCoopTransport();
   if (t.isOpen && !t.isHost) {
     t.send('rpc-drop', { x: p.x, z: p.z, item });
@@ -14156,9 +14186,22 @@ function tick() {
     return false;
   };
   if (inputState.inventoryToggled) {
-    if (!dismissTopModal()) inventoryUI.toggle();
+    // Coop downed lock — can't open inventory while bleeding out.
+    // Letting the player rearrange items / drop loot from the
+    // downed state breaks the "you're incapacitated" fiction and
+    // lets them dump tagged items pre-revive. Always allow
+    // dismissing an OPEN modal so they don't get stuck.
+    if (!dismissTopModal()) {
+      if (_localDowned) {
+        try { transientHudMsg('Cannot open inventory while down.', 1.5); } catch (_) {}
+      } else {
+        inventoryUI.toggle();
+      }
+    }
   }
-  if (inputState.perksToggled) perkUI.toggle();
+  if (inputState.perksToggled) {
+    if (!_localDowned) perkUI.toggle();
+  }
   if (inputState.menuToggled) {
     if (!dismissTopModal()) gameMenuUI.toggle();
   }
