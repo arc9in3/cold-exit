@@ -256,6 +256,10 @@ export class CoopLobbyUI {
           // zone and ready to advance. Host reads this each frame
           // before triggering advanceFloor.
           inExit:   !!body.xt,
+          // Reload-in-progress bit. Drives the floating sphere
+          // above the ally rig in main.js so teammates can read
+          // each other's reload windows.
+          reloading: !!body.r,
           name: this.transport.peers.get(from)?.name || 'peer',
           ts: performance.now(),
           // Sticky death flag survives pos refreshes — once a peer's

@@ -8826,6 +8826,11 @@ function _tickCoop(dt) {
         // being true for every joiner ghost. Cheap (single bit on
         // the existing 5Hz pos packet, no new kind).
         xt: _localInExit ? 1 : 0,
+        // Reload bit — drives the small "reloading" sphere above
+        // the ally's head. Source of truth is weapon.reloadingT.
+        // Weapon-swap is detected on the receiver as a change in
+        // `wc`; no extra field needed.
+        r: (wpn && wpn.reloadingT > 0) ? 1 : 0,
       });
     }
   }
@@ -8926,10 +8931,28 @@ function _tickCoop(dt) {
       gunMesh.position.set(0, -(0.1 + 0.25) * (rig.scale || 0.77), 0);
       if (rig.rightArm?.wrist) rig.rightArm.wrist.add(gunMesh);
       coopGhostRoot.add(group);
+      // Reload indicator — small emissive sphere parked above the
+      // ally's head. Hidden by default; flipped visible when their
+      // weapon.reloadingT > 0 (broadcast as the `r` pos bit).
+      const reloadMat = new THREE.MeshBasicMaterial({
+        color: 0xffd070, transparent: true, opacity: 0.85,
+        depthWrite: false,
+      });
+      const reloadDot = new THREE.Mesh(
+        new THREE.SphereGeometry(0.10, 10, 8), reloadMat,
+      );
+      reloadDot.position.y = (rig.scale || 0.77) * 2.5;
+      reloadDot.visible = false;
+      group.add(reloadDot);
       m = {
-        group, rig, gunMesh,
+        group, rig, gunMesh, reloadDot, reloadMat,
         lastX: ghost.x, lastZ: ghost.z,
         lastAnimT: (typeof performance !== 'undefined') ? performance.now() / 1000 : 0,
+        // Last-seen weapon class — used to detect swaps on the
+        // receiver. When this changes, kick a brief swap-pop
+        // animation on the gun mesh (lower + raise).
+        lastWc: ghost.weaponClass || 'pistol',
+        swapPopT: 0,
       };
       _coopGhostMeshes.set(peerId, m);
     }
@@ -8937,6 +8960,13 @@ function _tickCoop(dt) {
     // ~0.9×. Matches the local-player CLASS_SCALE in player.js.
     if (m.gunMesh) {
       const cls = ghost.weaponClass || 'pistol';
+      // Detect swap by comparing against last-seen class. Triggers
+      // a 0.35s pop where the gun mesh dips and rises — a quick
+      // visual cue the teammate just changed weapons.
+      if (cls !== m.lastWc) {
+        m.lastWc = cls;
+        m.swapPopT = 0.35;
+      }
       const cs = (cls === 'pistol') ? 0.5
               : (cls === 'smg') ? 0.75
               : 0.9;
@@ -8945,6 +8975,26 @@ function _tickCoop(dt) {
       // Cheap lerp so weapon-swap doesn't pop.
       const k = Math.min(1, dt / 0.18);
       m.gunMesh.scale.setScalar(cur + (target - cur) * k);
+      // Swap-pop offset on the wrist-relative position. Linear up-
+      // and-down sine over the popT window.
+      if (m.swapPopT > 0) {
+        m.swapPopT = Math.max(0, m.swapPopT - dt);
+        const phase = 1 - (m.swapPopT / 0.35);  // 0..1
+        const dip = Math.sin(phase * Math.PI) * 0.08;
+        m.gunMesh.position.y = -(0.1 + 0.25) * (m.rig?.scale || 0.77) - dip;
+      } else {
+        m.gunMesh.position.y = -(0.1 + 0.25) * (m.rig?.scale || 0.77);
+      }
+    }
+    // Reload indicator — visible while ghost.reloading; pulses via
+    // emissive opacity for legibility at iso distance.
+    if (m.reloadDot) {
+      const isReloading = !!ghost.reloading;
+      m.reloadDot.visible = isReloading && !ghost.dead;
+      if (isReloading && m.reloadMat) {
+        const t = (typeof performance !== 'undefined') ? performance.now() / 1000 : 0;
+        m.reloadMat.opacity = 0.55 + 0.35 * Math.abs(Math.sin(t * 6));
+      }
     }
     // Lerp 1/0.2s toward the most-recent reported position. Catches
     // up smoothly without feeling rubber-bandy at typical packet
