@@ -119,7 +119,7 @@ window.__resetHints = resetHints;
 // "I'm on build XYZ" without inspecting the bundle. Date stamps the
 // version so a quick glance tells you how stale the build is. Both
 // values render into the bottom-right #build-version label.
-const BUILD_VERSION = '5539a09+headshots+death-summary+contract-chain';
+const BUILD_VERSION = 'e570974+mortician-screen';
 // Build date intentionally bumped each deploy so the corner label
 // reflects the current snapshot.
 const BUILD_DATE    = '2026-05-01';
@@ -16924,6 +16924,57 @@ function tick() {
         }
       }
     } catch (e) { console.warn('[death] rewards panel failed', e); }
+    // Mortician flavor line — picks contextual copy based on what
+    // killed the player. Reads top-attacker name + zone + tier from
+    // the recap data assembled above.
+    try {
+      const lineEl = document.getElementById('mortician-line');
+      if (lineEl) {
+        const fatalForFlavor = _lastFatalHit;
+        let topAttackerName = null;
+        let topAttackerCount = 0;
+        const byNameForFlavor = new Map();
+        for (const [, st] of _attackerStats) {
+          const key = st.name || 'Unknown';
+          const grouped = byNameForFlavor.get(key) || { dmg: 0, count: 0 };
+          grouped.dmg += st.dmg || 0;
+          grouped.count += 1;
+          byNameForFlavor.set(key, grouped);
+        }
+        let topDmg = -1;
+        for (const [name, g] of byNameForFlavor) {
+          if (g.dmg > topDmg) { topDmg = g.dmg; topAttackerName = name; topAttackerCount = g.count; }
+        }
+        const zone = fatalForFlavor?.zone || null;
+        const dist = (typeof fatalForFlavor?.distance === 'number') ? fatalForFlavor.distance : null;
+        const lines = [];
+        if (topAttackerName) {
+          if (topAttackerCount >= 3) {
+            lines.push(`A pack of ${topAttackerName.toLowerCase()}s overwhelmed you. They always come in numbers.`);
+            lines.push(`${topAttackerCount} sets of teeth. They left little for me to bury.`);
+          } else if (zone === 'head') {
+            lines.push(`A clean shot through the head. ${topAttackerName} won't remember your face.`);
+            lines.push(`The skull is intact, mostly. I've seen worse come back.`);
+          } else if (zone === 'legs') {
+            lines.push(`Bled out from the legs. You forgot to keep them moving.`);
+          } else if (dist != null && dist > 18) {
+            lines.push(`Hit from ${dist.toFixed(0)} meters. You never saw the muzzle flash.`);
+          } else {
+            lines.push(`${topAttackerName} got close enough to do real work.`);
+            lines.push(`The wound was personal. ${topAttackerName} took their time.`);
+          }
+        } else {
+          lines.push(`Hard to say what finished you. The wound is shy.`);
+          lines.push(`I'll leave the cause of death blank. They always come back anyway.`);
+        }
+        // Add a mid-late floor or zero-credit jab.
+        const peak = (runStats.deathLevel | 0) + 1;
+        if (peak >= 8) lines.push(`Floor ${peak}. Further than most. Not far enough.`);
+        else if (peak <= 2) lines.push(`Floor ${peak}. Don't worry — the dirt is fresh.`);
+        if ((runStats.kills | 0) === 0) lines.push(`Zero kills. The hardest currency to earn here is blood that isn't yours.`);
+        lineEl.textContent = lines[Math.floor(Math.random() * lines.length)];
+      }
+    } catch (e) { console.warn('[mortician] flavor pick failed', e); }
     if (deathRootEl) deathRootEl.style.display = 'flex';
     _activeRestartSlot = 0;
     _refreshRestartSlotsUI();

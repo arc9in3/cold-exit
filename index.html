@@ -3391,11 +3391,64 @@
       background: #15070a;
       border: 1px solid #a03038;
       border-radius: 8px;
-      padding: 36px 44px;
-      text-align: center;
+      padding: 28px 36px;
       color: #f2e7c9;
       box-shadow: 0 0 60px rgba(160, 48, 56, 0.5);
       animation: death-card-rise 800ms 200ms cubic-bezier(0.22, 0.61, 0.36, 1) both;
+      display: flex;
+      flex-direction: row;
+      align-items: stretch;
+      gap: 28px;
+      max-width: 880px;
+      width: min(880px, 92vw);
+    }
+    @media (max-width: 720px) {
+      #death-card {
+        flex-direction: column;
+        align-items: center;
+        max-width: 92vw;
+      }
+    }
+    #death-mortician {
+      flex: 0 0 220px;
+      display: flex;
+      flex-direction: column;
+      align-items: center;
+      justify-content: flex-start;
+      gap: 6px;
+      padding-right: 14px;
+      border-right: 1px solid rgba(160, 48, 56, 0.35);
+    }
+    @media (max-width: 720px) {
+      #death-mortician { border-right: none; padding-right: 0; }
+    }
+    #mortician-figure {
+      width: 200px;
+      height: 280px;
+      filter: drop-shadow(0 4px 18px rgba(160, 48, 56, 0.5));
+    }
+    #mortician-name {
+      color: #d04848;
+      font-weight: 700;
+      letter-spacing: 4px;
+      font-size: 11px;
+      text-transform: uppercase;
+      text-shadow: 0 0 10px rgba(208, 72, 72, 0.45);
+    }
+    #mortician-line {
+      color: #c8b89a;
+      font-size: 12px;
+      line-height: 1.55;
+      font-style: italic;
+      text-align: center;
+      max-width: 220px;
+      min-height: 60px;
+      letter-spacing: 0.5px;
+    }
+    #death-info {
+      flex: 1 1 auto;
+      text-align: center;
+      min-width: 0;
     }
     #death-card .death-stat-row {
       animation: death-stat-pop 320ms ease-out both;
@@ -4377,8 +4430,62 @@
   </div>
   <div id="death-root" style="display:none">
     <div id="death-card">
+      <!-- Mortician silhouette + speech panel. Sits to the left of the
+           summary; collapses below it on narrow viewports via CSS. -->
+      <div id="death-mortician">
+        <svg id="mortician-figure" viewBox="0 0 220 320" preserveAspectRatio="xMidYMid meet" aria-hidden="true">
+          <!-- Backlight halo -->
+          <radialGradient id="mort-halo" cx="50%" cy="38%" r="55%">
+            <stop offset="0%"   stop-color="#a03038" stop-opacity="0.35"/>
+            <stop offset="60%"  stop-color="#400810" stop-opacity="0.10"/>
+            <stop offset="100%" stop-color="#000000" stop-opacity="0"/>
+          </radialGradient>
+          <ellipse cx="110" cy="120" rx="105" ry="125" fill="url(#mort-halo)"/>
+          <!-- Hood + cloak silhouette -->
+          <path d="M 110,32
+                   C 70,32 50,68 52,108
+                   C 52,128 56,142 64,158
+                   L 36,210
+                   L 18,310
+                   L 202,310
+                   L 184,210
+                   L 156,158
+                   C 164,142 168,128 168,108
+                   C 170,68 150,32 110,32 Z"
+                fill="#0a0608" stroke="#3a1a1c" stroke-width="1.5"/>
+          <!-- Inner hood shadow -->
+          <path d="M 110,52
+                   C 80,52 64,80 66,108
+                   C 66,128 72,144 84,156
+                   L 84,182
+                   L 136,182
+                   L 136,156
+                   C 148,144 154,128 154,108
+                   C 156,80 140,52 110,52 Z"
+                fill="#06030a"/>
+          <!-- Respirator mask (square mouthpiece) -->
+          <rect x="92" y="118" width="36" height="42" rx="3"
+                fill="#2a181a" stroke="#5a2a2a" stroke-width="1"/>
+          <!-- Filter canisters either side of mask -->
+          <rect x="78" y="124" width="14" height="22" rx="2"
+                fill="#1a0e10" stroke="#4a2020" stroke-width="1"/>
+          <rect x="128" y="124" width="14" height="22" rx="2"
+                fill="#1a0e10" stroke="#4a2020" stroke-width="1"/>
+          <!-- Eye lenses — dim glow -->
+          <circle cx="98" cy="104" r="6" fill="#5a1018"/>
+          <circle cx="122" cy="104" r="6" fill="#5a1018"/>
+          <circle cx="98" cy="104" r="2.2" fill="#ff6060"/>
+          <circle cx="122" cy="104" r="2.2" fill="#ff6060"/>
+          <!-- Cloak shoulders -->
+          <path d="M 64,158 L 36,210 L 56,180 Z" fill="#150a0c"/>
+          <path d="M 156,158 L 184,210 L 164,180 Z" fill="#150a0c"/>
+        </svg>
+        <div id="mortician-name">THE MORTICIAN</div>
+        <div id="mortician-line">—</div>
+      </div>
+      <div id="death-info">
       <div id="death-title">YOU DIED</div>
-      <div id="death-sub">Restart the level with what you had on entry, or bail back to the main menu.</div>
+      <div id="death-sub">The Mortician is taking inventory. Restart this floor or return to the menu.</div>
       <div id="death-summary">
         <div class="death-stat-row"><span class="death-stat-label">Floor reached</span><span id="death-stat-level" class="death-stat-val">—</span></div>
         <div class="death-stat-row"><span class="death-stat-label">Kills</span><span id="death-stat-kills" class="death-stat-val">—</span></div>
@@ -4387,12 +4494,12 @@
         <div class="death-stat-row"><span class="death-stat-label">Run time</span><span id="death-stat-time" class="death-stat-val">—</span></div>
       </div>
       <div id="death-recap" style="display:none">
-        <div id="death-recap-title">KILLED BY</div>
+        <div id="death-recap-title">CAUSE OF DEATH</div>
         <div class="death-stat-row"><span class="death-stat-label">Killing blow</span><span id="death-recap-zone" class="death-stat-val">—</span></div>
         <div id="death-recap-list" style="display:flex; flex-direction:column; gap:3px; margin-top:6px;"></div>
       </div>
       <div id="death-rewards" style="display:none; margin-top:10px; padding-top:8px; border-top:1px solid #4a3a2a;">
-        <div id="death-rewards-title" style="color:#f2c060; font-weight:700; font-size:12px; letter-spacing:2px; text-transform:uppercase; margin-bottom:6px;">Rewards</div>
+        <div id="death-rewards-title" style="color:#f2c060; font-weight:700; font-size:12px; letter-spacing:2px; text-transform:uppercase; margin-bottom:6px;">From the Body</div>
         <div class="death-stat-row"><span class="death-stat-label">Marks earned</span><span id="death-stat-marks" class="death-stat-val">—</span></div>
         <div class="death-stat-row"><span class="death-stat-label">Sigils earned</span><span id="death-stat-sigils" class="death-stat-val">—</span></div>
         <div class="death-stat-row"><span class="death-stat-label">Chips earned</span><span id="death-stat-chips" class="death-stat-val">—</span></div>
@@ -4406,6 +4513,7 @@
       <div id="death-slots" style="display:flex; gap:4px; justify-content:center; margin:4px 0 6px; flex-wrap:wrap;"></div>
       <button id="death-btn" type="button">Restart Level</button>
       <button id="death-menu-btn" type="button">Back to Main Menu</button>
+      </div>
     </div>
   </div>
 
