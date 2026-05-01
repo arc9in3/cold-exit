@@ -162,6 +162,10 @@ export function encodeEnemySnapshot(gunmen, melees, seq, t, loot = null, droneMg
       h: Math.round(g.hp),
       m: Math.round(g.maxHp),
       s: g.state || 'idle',
+      // Burn DoT visual — sent only when active (>0) so the typical
+      // snapshot stays small. Joiner reads this in _applyInterp to
+      // pose flame particles on the right enemy.
+      ...(g.burnT > 0 ? { bt: +g.burnT.toFixed(2), bs: g.burnStacks | 0 } : {}),
     });
   }
   for (const e of melees.enemies) {
@@ -174,6 +178,7 @@ export function encodeEnemySnapshot(gunmen, melees, seq, t, loot = null, droneMg
       h: Math.round(e.hp),
       m: Math.round(e.maxHp),
       s: e.state || 'idle',
+      ...(e.burnT > 0 ? { bt: +e.burnT.toFixed(2), bs: e.burnStacks | 0 } : {}),
     });
   }
   return {
@@ -546,6 +551,12 @@ function _applyInterp(entity, a, b, alpha) {
   entity.hp = b.h;
   if (b.m) entity.maxHp = b.m;
   if (b.s) entity.state = b.s;
+  // Burn DoT mirror — drives the per-actor flame particles in
+  // main.js. Setting burnT > 0 on a coop-mirror enemy spawns the
+  // same flame pose as a host-side burning enemy. Decays naturally
+  // in the next snapshot when the host clears burnT.
+  entity.burnT = +b.bt || 0;
+  entity.burnStacks = b.bs | 0;
 }
 
 function _findByNetId(list, netId) {

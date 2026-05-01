@@ -260,6 +260,9 @@ export class CoopLobbyUI {
           // above the ally rig in main.js so teammates can read
           // each other's reload windows.
           reloading: !!body.r,
+          // Active-buff bit — drives the cyan ground ring under
+          // the ally rig (adrenaline / stim / energy drink / etc.).
+          buffActive: !!body.bf,
           name: this.transport.peers.get(from)?.name || 'peer',
           ts: performance.now(),
           // Sticky death flag survives pos refreshes — once a peer's

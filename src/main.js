@@ -117,7 +117,7 @@ window.__resetHints = resetHints;
 // "I'm on build XYZ" without inspecting the bundle. Date stamps the
 // version so a quick glance tells you how stale the build is. Both
 // values render into the bottom-right #build-version label.
-const BUILD_VERSION = '324ed1e+throwable-zone-sync';
+const BUILD_VERSION = '1a0d99e+burn-buff-encgate';
 // Build date intentionally bumped each deploy so the corner label
 // reflects the current snapshot.
 const BUILD_DATE    = '2026-05-01';
@@ -9405,6 +9405,11 @@ function _tickCoop(dt) {
         // Weapon-swap is detected on the receiver as a change in
         // `wc`; no extra field needed.
         r: (wpn && wpn.reloadingT > 0) ? 1 : 0,
+        // Active-buff bit — drives a soft cyan ground ring under
+        // the ally rig. 1 = any buff in BuffState.buffs is live.
+        // Used for adrenaline / combat stim / energy drink / red
+        // string / bloodlust visibility at iso distance.
+        bf: (buffs && buffs.buffs.length > 0) ? 1 : 0,
       });
     }
   }
@@ -9523,8 +9528,24 @@ function _tickCoop(dt) {
       reloadDot.position.y = (rig.scale || 0.77) * 2.5;
       reloadDot.visible = false;
       group.add(reloadDot);
+      // Buff-active ring — soft cyan disc on the ground under the
+      // ally rig. Visible while any buff is live on the peer (the
+      // `bf` pos bit). Mirror of the local-player aura tells you
+      // your teammate just popped a stim / adrenaline / etc.
+      const buffMat = new THREE.MeshBasicMaterial({
+        color: 0x60d0ff, transparent: true, opacity: 0.35,
+        depthWrite: false, side: THREE.DoubleSide,
+      });
+      const buffRing = new THREE.Mesh(
+        new THREE.RingGeometry(0.45 * (rig.scale || 0.77), 0.55 * (rig.scale || 0.77), 24),
+        buffMat,
+      );
+      buffRing.rotation.x = -Math.PI / 2;
+      buffRing.position.y = 0.04;
+      buffRing.visible = false;
+      group.add(buffRing);
       m = {
-        group, rig, gunMesh, reloadDot, reloadMat,
+        group, rig, gunMesh, reloadDot, reloadMat, buffRing, buffMat,
         lastX: ghost.x, lastZ: ghost.z,
         lastAnimT: (typeof performance !== 'undefined') ? performance.now() / 1000 : 0,
         // Last-seen weapon class — used to detect swaps on the
@@ -9579,6 +9600,16 @@ function _tickCoop(dt) {
       if (isReloading && m.reloadMat) {
         const tnow = (typeof performance !== 'undefined') ? performance.now() / 1000 : 0;
         m.reloadMat.opacity = 0.55 + 0.35 * Math.abs(Math.sin(tnow * 6));
+      }
+    }
+    // Buff ring — visible while ghost.buffActive; subtle pulse so
+    // it reads as "ally just popped a stim" without being loud.
+    if (m.buffRing) {
+      const isBuffed = !!ghost.buffActive && !ghost.dead;
+      if (m.buffRing.visible !== isBuffed) m.buffRing.visible = isBuffed;
+      if (isBuffed && m.buffMat) {
+        const tnow = (typeof performance !== 'undefined') ? performance.now() / 1000 : 0;
+        m.buffMat.opacity = 0.25 + 0.18 * Math.abs(Math.sin(tnow * 3));
       }
     }
     // Lerp 1/0.2s toward the most-recent reported position. Catches
@@ -12404,6 +12435,19 @@ function tryInteract({ nearItem, body, bodies, npc, container }) {
   if (!hasPickup) {
     const enc = nearestInteractableEncounter();
     if (enc) {
+      // Coop: encounter NPCs hold per-instance state (priest refusal
+      // counter, shrine activation, sleeping-boss alertness, etc.)
+      // that isn't part of any snapshot. Joiner-side interaction
+      // would mutate joiner's local copy only, diverging from host.
+      // Gate to host-only for now; surface a hint so the joiner
+      // knows the host has to drive the interaction. Full sync via
+      // rpc-encounter-interact is a follow-up that needs per-encounter
+      // semantics modeling.
+      const _coopT = getCoopTransport();
+      if (_coopT.isOpen && !_coopT.isHost) {
+        try { transientHudMsg('Host needs to interact', 1.4); } catch (_) {}
+        return;
+      }
       const ctx = enc.ctx;
       ctx.playerSpeed = lastPlayerInfo ? (lastPlayerInfo.speed || 0) : 0;
       ctx.state = enc.state;
