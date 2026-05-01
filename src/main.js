@@ -52,7 +52,7 @@ import {
   GEAR_DEFS, JUNK_DEFS, TOY_DEFS,
   wrapWeapon, withAffixes, randomArmor, randomGear, randomConsumable, randomJunk, randomToy, setLootLevel,
   randomThrowable, THROWABLE_DEFS, makeThrowable, forceMastercraft,
-  randomEitherRepairKit,
+  randomEitherRepairKit, randomRepairKit,
 } from './inventory.js';
 import { ALL_ATTACHMENTS, ATTACHMENT_DEFS, effectiveWeapon, randomAttachment, rollAttachmentRarity } from './attachments.js';
 import { CustomizeUI } from './ui_customize.js';
@@ -117,7 +117,7 @@ window.__resetHints = resetHints;
 // "I'm on build XYZ" without inspecting the bundle. Date stamps the
 // version so a quick glance tells you how stale the build is. Both
 // values render into the bottom-right #build-version label.
-const BUILD_VERSION = '6dde905+bodyloot+encounters+throwables+fixes';
+const BUILD_VERSION = '4457045+repair-shop+rpc-throwable+ai-grenade-coop';
 // Build date intentionally bumped each deploy so the corner label
 // reflects the current snapshot.
 const BUILD_DATE    = '2026-05-01';
@@ -1738,35 +1738,77 @@ function _enterDownedState() {
   // Surface a HUD message so the player understands.
   try { transientHudMsg('DOWN — bleedout 60s — teammate must revive', 6.0); } catch (_) {}
 }
-// Coop throwable sync. Throwables are spawned via projectiles.spawn
-// on the thrower's machine only — without this, teammates see no
-// grenade flying / no explosion visual. Damage attribution stays
-// per-peer for v1 (each peer's own throwable damages their LOCAL
-// view; the host's auth state can drift). Visual-only is enough
-// to read each other's plays.
+// Coop throwable sync. Two routes:
+//  - Host throws  → fx-throwable broadcast to joiners (visual mirror,
+//    damage zeroed on receive — host's local projectile already
+//    applied auth damage to enemies).
+//  - Joiner throws → rpc-throwable to host. Host spawns the
+//    authoritative projectile + broadcasts fx-throwable to OTHER
+//    joiners (server excludes the sender so the original joiner
+//    doesn't see a duplicate). Joiner's local spawn is neutered to
+//    visual-only via _coopNeuterThrowOpts so it doesn't fight host's
+//    snapshot for enemy damage.
+function _coopSerializeThrowOpts(opts) {
+  return {
+    px: +opts.pos.x.toFixed(2),
+    py: +opts.pos.y.toFixed(2),
+    pz: +opts.pos.z.toFixed(2),
+    vx: +opts.vel.x.toFixed(2),
+    vy: +opts.vel.y.toFixed(2),
+    vz: +opts.vel.z.toFixed(2),
+    lt: +(opts.lifetime ?? 2.0).toFixed(2),
+    r:  +(opts.radius ?? 0.07).toFixed(3),
+    c:  (opts.color | 0) || 0xb04030,
+    er: +((opts.explosion?.radius) ?? 3.5).toFixed(2),
+    ed: +((opts.explosion?.damage) ?? 0).toFixed(0),
+    es: +((opts.explosion?.shake)  ?? 0.35).toFixed(2),
+    g:  +(opts.gravity ?? 9.8).toFixed(2),
+    b:  +(opts.bounciness ?? 0).toFixed(2),
+    tk: opts.throwKind || 'frag',
+    fl: opts.fuseAfterLand ? 1 : 0,
+    // Effect-bearing flags so host's auth spawn matches the original
+    // throw type (DoT durations, blind/stun timers, claymore radius).
+    fd: +(opts.fireDuration   || 0).toFixed(2),
+    ft: +(opts.fireTickDps    || 0).toFixed(0),
+    gd: +(opts.gasDuration    || 0).toFixed(2),
+    bd: +(opts.blindDuration  || 0).toFixed(2),
+    sd: +(opts.stunDuration   || 0).toFixed(2),
+    tr: +(opts.triggerRadius  || 0).toFixed(2),
+    tc: +(opts.triggerConeDeg || 0).toFixed(0),
+    dx: +(opts.throwDirX      || 0).toFixed(2),
+    dz: +(opts.throwDirZ      || 0).toFixed(2),
+  };
+}
 function _coopBroadcastThrowable(opts) {
   const t = getCoopTransport();
   if (!t.isOpen) return;
   if (!t.peers || t.peers.size === 0) return;
   try {
-    t.send('fx-throwable', {
-      px: +opts.pos.x.toFixed(2),
-      py: +opts.pos.y.toFixed(2),
-      pz: +opts.pos.z.toFixed(2),
-      vx: +opts.vel.x.toFixed(2),
-      vy: +opts.vel.y.toFixed(2),
-      vz: +opts.vel.z.toFixed(2),
-      lt: +(opts.lifetime ?? 2.0).toFixed(2),
-      r:  +(opts.radius ?? 0.07).toFixed(3),
-      c:  (opts.color | 0) || 0xb04030,
-      er: +((opts.explosion?.radius) ?? 3.5).toFixed(2),
-      es: +((opts.explosion?.shake)  ?? 0.35).toFixed(2),
-      g:  +(opts.gravity ?? 9.8).toFixed(2),
-      b:  +(opts.bounciness ?? 0).toFixed(2),
-      tk: opts.throwKind || 'frag',
-      fl: opts.fuseAfterLand ? 1 : 0,
-    });
+    const payload = _coopSerializeThrowOpts(opts);
+    if (t.isHost) {
+      t.send('fx-throwable', payload);
+    } else {
+      // Joiner — host applies auth, then re-broadcasts fx-throwable
+      // to other peers. Server excludes us from that fanout.
+      t.send('rpc-throwable', payload);
+    }
   } catch (_) {}
+}
+// Strip damage + effect timers from a throwable opts object so a
+// joiner's local mirror doesn't double-damage snapshot enemies. Host
+// holds the auth copy via rpc-throwable.
+function _coopNeuterThrowOpts(opts) {
+  const t = getCoopTransport();
+  if (!t.isOpen || t.isHost) return opts;
+  return {
+    ...opts,
+    explosion: { ...(opts.explosion || {}), damage: 0 },
+    fireTickDps: 0,
+    blindDuration: 0,
+    stunDuration: 0,
+    gasDuration: 0,
+    fireDuration: 0,
+  };
 }
 
 // Coop encounter sync. The unseeded Math.random in
@@ -2570,6 +2612,48 @@ function _ensureCoopLobby() {
         };
         requestAnimationFrame(tick);
       } catch (_) {}
+      return;
+    }
+    if (kind === 'rpc-throwable') {
+      // Host-only: a joiner threw a grenade. Spawn the authoritative
+      // projectile so the explosion damage actually lands on host's
+      // enemies, then broadcast fx-throwable to other joiners (server
+      // excludes the original sender so they don't see a duplicate).
+      if (!transport.isHost || !body) return;
+      try {
+        const opts = {
+          pos: new THREE.Vector3(+body.px || 0, +body.py || 1, +body.pz || 0),
+          vel: new THREE.Vector3(+body.vx || 0, +body.vy || 0, +body.vz || 0),
+          type: 'grenade',
+          lifetime: +body.lt || 2.0,
+          radius: +body.r || 0.07,
+          color: (body.c | 0) || 0xb04030,
+          explosion: {
+            radius: +body.er || 3.5,
+            damage: +body.ed || 0,
+            shake: +body.es || 0.35,
+          },
+          owner: 'player',                  // joiner-as-player damage rules
+          gravity: +body.g || 9.8,
+          bounciness: +body.b || 0,
+          fuseAfterLand: !!body.fl,
+          throwKind: body.tk || 'frag',
+          fireDuration:   +body.fd || undefined,
+          fireTickDps:    +body.ft || undefined,
+          gasDuration:    +body.gd || undefined,
+          blindDuration:  +body.bd || undefined,
+          stunDuration:   +body.sd || undefined,
+          triggerRadius:  +body.tr || undefined,
+          triggerConeDeg: +body.tc || undefined,
+          throwDirX: +body.dx || 0,
+          throwDirZ: +body.dz || 0,
+        };
+        projectiles.spawn(opts);
+        // Mirror to other joiners (server excludes the sender from
+        // the broadcast fanout, so the original thrower doesn't see
+        // a duplicate visual).
+        transport.send('fx-throwable', body);
+      } catch (e) { console.warn('[coop] rpc-throwable apply failed', e); }
       return;
     }
     if (kind === 'fx-throwable') {
@@ -3516,8 +3600,10 @@ function pickN(arr, n) {
   return out;
 }
 function makeGunsmithStock() {
-  // 4 weapons + 3 attachments base, weapons lean rare+. Upgrade level
-  // splits its bonus between weapons (rounded up) and attachments.
+  // 4 weapons + 3 attachments + 2 weapon repair kits base, weapons
+  // lean rare+. Upgrade level splits its bonus between weapons
+  // (rounded up) and attachments. Repair-kit count is fixed; players
+  // already get bonus drops from body loot and megabosses.
   const bonus = getMerchantStockBonus('gunsmith');
   const wBonus = Math.ceil(bonus / 2);
   const aBonus = bonus - wBonus;
@@ -3526,18 +3612,24 @@ function makeGunsmithStock() {
     4 + wBonus,
   );
   const atts = pickN(ALL_ATTACHMENTS.map(a => rollAttachmentRarity({ ...a, modifier: { ...a.modifier } })), 3 + aBonus);
-  return [...weapons, ...atts].map((it) => {
+  const kits = [];
+  for (let i = 0; i < 2; i++) kits.push(randomRepairKit('weapon'));
+  return [...weapons, ...atts, ...kits].map((it) => {
     it.priceMult = (it.priceMult || 1) * 1.15;  // premium shop
     return fluxify(it);
   });
 }
 function makeArmorerStock() {
+  // 4 armor + 3 gear + 2 armor repair kits. Same bonus / kit-count
+  // pattern as the gunsmith.
   const bonus = getMerchantStockBonus('armorer');
   const aBonus = Math.ceil(bonus / 2);
   const gBonus = bonus - aBonus;
   const armor = pickN(ALL_ARMOR.map(a => withAffixes(shopUpgradeRarity({ ...a, durability: { ...a.durability } }, { baseChance: 0.55, epicChance: 0.18 }))), 4 + aBonus);
   const gear  = pickN(ALL_GEAR.map(g => withAffixes(shopUpgradeRarity({ ...g, durability: { ...(g.durability || { current: 100, max: 100, repairability: 0.9 }) } }, { baseChance: 0.50, epicChance: 0.15 }))), 3 + gBonus);
-  return [...armor, ...gear].map((it) => {
+  const kits = [];
+  for (let i = 0; i < 2; i++) kits.push(randomRepairKit('armor'));
+  return [...armor, ...gear, ...kits].map((it) => {
     it.priceMult = (it.priceMult || 1) * 1.1;
     return fluxify(it);
   });
@@ -7145,7 +7237,7 @@ function spawnAiGrenade(g) {
   const apex = MIN_APEX + (MAX_APEX - MIN_APEX) * Math.min(1, throwDist / 16);
   const gravity = 18;
   const vel = ProjectileManager.ballisticVelocityApex(muzzle, aim, apex, gravity);
-  projectiles.spawn({
+  const aiOpts = {
     pos: muzzle,
     vel,
     type: 'grenade',
@@ -7161,7 +7253,13 @@ function spawnAiGrenade(g) {
     gravity,
     bounciness: 0.18,
     throwKind: 'frag',
-  });
+  };
+  projectiles.spawn(aiOpts);
+  // Coop: broadcast the visual so joiners see the AI grenade flying.
+  // Damage on the receiver-side mirror is zeroed; host's local
+  // explosion + the onProjectileExplode joiner-ghost scan handle
+  // auth damage to all peers.
+  _coopBroadcastThrowable(aiOpts);
   if (sfx?.aiFire) sfx.aiFire('lmg');
 }
 
@@ -10542,6 +10640,16 @@ function _alertThrowableBlast(pos, radius, owner) {
 function onProjectileExplode(pos, explosion, owner, p) {
   const radius = explosion.radius;
   const rSq = radius * radius;
+  // Coop: enemy-owned explosions (AI grenades, sniper shots, etc.)
+  // need to damage joiner ghosts in radius. Reuses the megaboss
+  // hazard helper which handles host-only gating + the
+  // rpc-player-damage send. Player-owned explosions are skipped —
+  // joiners' own throws are handled via rpc-throwable's auth path
+  // and host's throws don't damage the host's own teammates.
+  if (owner === 'enemy' && explosion && (explosion.damage | 0) > 0
+      && typeof _coopDamageRemotePlayersInRadius === 'function') {
+    _coopDamageRemotePlayersInRadius(pos.x, pos.z, radius, explosion.damage, 'megaboss');
+  }
   // Sniper bullet — direct hit, no AoE, no fireball. Cheap path:
   // single impact spark + one distance check on the player. Skips
   // spawnExplosionFx (which allocates 16+ meshes + a PointLight per
@@ -12689,7 +12797,7 @@ function throwItem(item) {
       throwKind: item.throwKind || 'elvenKnife',
       throwDirX: fdx, throwDirZ: fdz,
     };
-    projectiles.spawn(flatOpts);
+    projectiles.spawn(_coopNeuterThrowOpts(flatOpts));
     _coopBroadcastThrowable(flatOpts);
     sfx.uiAccept();
     return true;
@@ -12764,7 +12872,7 @@ function throwItem(item) {
     throwDirX: dx,
     throwDirZ: dz,
   };
-  projectiles.spawn(arcOpts);
+  projectiles.spawn(_coopNeuterThrowOpts(arcOpts));
   _coopBroadcastThrowable(arcOpts);
   sfx.uiAccept();
   return true;

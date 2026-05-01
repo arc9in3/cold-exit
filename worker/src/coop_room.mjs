@@ -60,6 +60,7 @@ const KIND_ALLOWED_FROM_JOINER = new Set([
   'rpc-revive-hold',  // joiner is holding interact on a downed peer
   'rpc-revive-item',  // joiner used a health item on a downed peer
   'rpc-self-down',    // joiner notifying host they entered downed state
+  'rpc-throwable',    // joiner threw a grenade — host applies auth damage
 ]);
 // Free-form kinds anyone may send (no server-side gameplay impact).
 const KIND_ALLOWED_FROM_ANY = new Set([
