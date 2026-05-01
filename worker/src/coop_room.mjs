@@ -46,12 +46,19 @@ const KIND_ALLOWED_FROM_HOST = new Set([
   'rpc-grant-item',   // pickup approval
   'rpc-grant-xp',
   'rpc-player-damage',
+  'fx-tracer',        // host's AI bullet trace; broadcast for visuals
+  'rpc-downed',       // peer entered downed state
+  'rpc-revived',      // peer left downed state (revived/full HP)
+  'rpc-revive-progress', // periodic broadcast of an active revive bar
 ]);
 const KIND_ALLOWED_FROM_JOINER = new Set([
   'rpc-shoot',
   'rpc-pickup',
   'rpc-drop',
   'rpc-body-take',
+  'rpc-revive-hold',  // joiner is holding interact on a downed peer
+  'rpc-revive-item',  // joiner used a health item on a downed peer
+  'rpc-self-down',    // joiner notifying host they entered downed state
 ]);
 // Free-form kinds anyone may send (no server-side gameplay impact).
 const KIND_ALLOWED_FROM_ANY = new Set([

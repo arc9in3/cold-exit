@@ -1,6 +1,28 @@
 // Central store of live-tunable values. Modules read from this object each
 // frame so the debug panel can mutate values without re-wiring anything.
 export const tunables = {
+  // Coop downed/revive system. Tuned for "stand-and-revive" tension —
+  // 60s of bleedout pressures the surviving team to rotate in, 20s of
+  // hold gives the reviver a real commitment window the squad has to
+  // protect them through.
+  coop: {
+    // Seconds a downed teammate can be left bleeding before the
+    // bleedout completes and they truly die.
+    reviveBleedoutSec: 60,
+    // Hold-interact seconds to fully revive (Phase 2 will let health
+    // items knock chunks off this).
+    reviveHoldSec: 20,
+    // Letting go of interact decays the progress bar. Decays back to
+    // zero over this many seconds (slower than the fill so the
+    // reviver can briefly let go to fight off a flanker without
+    // losing all their progress).
+    reviveDecaySec: 12,
+    // HP fraction the revivee respawns at (0.30 = 30% of maxHealth).
+    // Phase 2: certain items (defib) override to 1.0 (full HP).
+    reviveHpPct: 0.30,
+    // Range a reviver must be within to count as on-the-body.
+    reviveRange: 1.6,
+  },
   // Live lighting tunables — scene.js reads these when building the
   // scene, main.js's syncLighting() updates the live light refs each
   // frame so console edits take effect without a reload. Press F3

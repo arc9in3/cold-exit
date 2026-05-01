@@ -116,7 +116,7 @@ window.__resetHints = resetHints;
 // "I'm on build XYZ" without inspecting the bundle. Date stamps the
 // version so a quick glance tells you how stale the build is. Both
 // values render into the bottom-right #build-version label.
-const BUILD_VERSION = '4f7c9b9+death-polish-bodyloot-flicker';
+const BUILD_VERSION = '887f96e+coop-tracer-downed-revive';
 // Build date intentionally bumped each deploy so the corner label
 // reflects the current snapshot.
 const BUILD_DATE    = '2026-05-01';
@@ -1658,6 +1658,211 @@ let _coopLatestSeq = -1;
 // before receiving the host's seed. The level-seed listener clears it
 // and runs a real regen so the layout matches the host.
 let _coopRegenPending = false;
+// Per-frame budget for fx-tracer broadcasts. Bullet-hell archetypes
+// can fire 14 shots in a single frame; sending all of those over the
+// wire would saturate. Cap at 8 tracers/frame; the rest skip.
+// Recharged at the top of every host tick.
+let _coopAiTracerBudget = 8;
+
+// ─── Downed / revive state ────────────────────────────────────────
+// Phase 1 of the coop downed system. When a coop player would die,
+// they instead enter the downed state — locked in place, can't move
+// or fire, bleedout timer ticking. A teammate can hold interact on
+// the body to revive them (progress bar fills over reviveHoldSec;
+// decays when interact is released). Run only ends when ALL peers
+// are downed simultaneously and all bleedouts expire.
+//
+// Phase 2 (next session): hold-interact also surfaces a non-blocking
+// popup with reviver + downed inventories (health items only); using
+// items chunks time off the revive or pauses decay (tourniquet),
+// with defib granting an instant full-HP revive.
+//
+// Local-player downed state.
+let _localDowned = false;
+let _localBleedoutT = 0;
+let _localReviveT = 0;            // 0 .. tunables.coop.reviveHoldSec
+let _localReviveActive = false;   // true while a teammate is holding interact on us
+// Per-peer downed state (host AND joiner both track this — host is
+// authoritative, joiners receive via rpc-downed broadcast).
+const _coopPeerDowned = new Map();   // peerId → { bleedoutT, reviveT, reviverPeerId|null }
+// Reviver-side state.
+let _reviveTargetPeerId = null;   // who we're reviving (null = no-one)
+let _reviveHoldT = 0;             // local hold timer; mirrored to host via rpc-revive-hold
+let _reviveLastSendT = 0;
+
+function _coopHasLivingTeammate() {
+  const t = getCoopTransport();
+  if (!t.isOpen || !coopLobby) return false;
+  // For each peer in the room, count those NOT currently downed.
+  for (const peerId of t.peers.keys()) {
+    if (peerId === t.peerId) continue;     // skip self
+    if (!_coopPeerDowned.has(peerId)) return true;   // a peer is alive
+  }
+  return false;
+}
+function _enterDownedState() {
+  if (_localDowned) return;
+  _localDowned = true;
+  _localBleedoutT = tunables.coop?.reviveBleedoutSec ?? 60;
+  _localReviveT = 0;
+  _localReviveActive = false;
+  // Lock player input — set health to 1 (above zero) so the death
+  // detection elsewhere doesn't re-fire, but flag downed so movement
+  // / fire / interact code can early-out. The player's mesh stays
+  // at the ragdolled position locally; visuals via _renderDownedHud.
+  if (player && player.applyDownedState) player.applyDownedState(true);
+  // Broadcast to peers so they can render the downed state.
+  const t = getCoopTransport();
+  if (t.isOpen) {
+    if (t.isHost) {
+      t.send('rpc-downed', { p: t.peerId, b: _localBleedoutT });
+    } else {
+      // Joiner went down — tell host via the joiner-allowed kind.
+      // Host re-broadcasts as rpc-downed (host-only kind on the wire).
+      t.send('rpc-self-down', { b: _localBleedoutT });
+    }
+  }
+  // Surface a HUD message so the player understands.
+  try { transientHudMsg('DOWN — bleedout 60s — teammate must revive', 6.0); } catch (_) {}
+}
+function _leaveDownedState(restoreHpPct = 0.30) {
+  if (!_localDowned) return;
+  _localDowned = false;
+  _localBleedoutT = 0;
+  _localReviveT = 0;
+  _localReviveActive = false;
+  if (player && player.applyDownedState) player.applyDownedState(false);
+  if (player && player.restoreHealthPct) {
+    player.restoreHealthPct(Math.max(0.05, Math.min(1, restoreHpPct)));
+  }
+  try { transientHudMsg('REVIVED', 3.0); } catch (_) {}
+}
+// Reviver-side: detect downed teammate within range, accumulate
+// hold-progress while interact is held, send hold state to host (or
+// run auth locally if we are host). Phase 2 will surface a popup
+// with health-item grids the reviver can click to chunk time off.
+function _tickReviveInteract(dt) {
+  const t = getCoopTransport();
+  if (!t.isOpen) return;
+  if (_localDowned) return;
+  const px = player?.mesh?.position?.x ?? 0;
+  const pz = player?.mesh?.position?.z ?? 0;
+  const range = tunables.coop?.reviveRange ?? 1.6;
+  const r2 = range * range;
+  let target = null, bestD = r2;
+  for (const [peerId, st] of _coopPeerDowned) {
+    if (!st || st.bleedoutT <= 0) continue;
+    const ghost = coopLobby?.ghosts?.get(peerId);
+    if (!ghost) continue;
+    const dx = ghost.x - px, dz = ghost.z - pz;
+    const d2 = dx * dx + dz * dz;
+    if (d2 < bestD) { bestD = d2; target = peerId; }
+  }
+  const isHolding = !!(input && input._isHeld && input._isHeld(ACTIONS.INTERACT));
+  const totalHold = tunables.coop?.reviveHoldSec ?? 20;
+  const decaySec  = tunables.coop?.reviveDecaySec ?? 12;
+  if (target && isHolding) {
+    if (_reviveTargetPeerId !== target) {
+      _reviveTargetPeerId = target;
+      _reviveHoldT = 0;
+    }
+    _reviveHoldT = Math.min(totalHold, _reviveHoldT + dt);
+    _reviveLastSendT -= dt;
+    if (_reviveLastSendT <= 0) {
+      _reviveLastSendT = 0.2;
+      if (t.isHost) {
+        // Host is its own authority. Apply revive on completion.
+        if (_reviveHoldT >= totalHold) {
+          const hpPct = tunables.coop?.reviveHpPct ?? 0.30;
+          t.send('rpc-revived', { p: target, hp: hpPct });
+          _coopPeerDowned.delete(target);
+          _reviveTargetPeerId = null;
+          _reviveHoldT = 0;
+        } else {
+          // Broadcast progress so the revivee's HUD bar fills.
+          t.send('rpc-revive-progress', { p: target, t: _reviveHoldT, a: true });
+        }
+      } else {
+        // Joiner: notify host of the hold state. Host runs the auth
+        // timer + broadcasts completion.
+        t.send('rpc-revive-hold', { t: target, h: true });
+      }
+    }
+  } else {
+    if (_reviveTargetPeerId) {
+      if (!t.isHost) t.send('rpc-revive-hold', { t: _reviveTargetPeerId, h: false });
+      else {
+        // Host: also tell everyone we stopped progressing this
+        // target so the revivee's HUD bar starts decaying.
+        t.send('rpc-revive-progress', { p: _reviveTargetPeerId, t: _reviveHoldT, a: false });
+      }
+    }
+    // Decay slower than fill (decay over reviveDecaySec).
+    _reviveHoldT = Math.max(0, _reviveHoldT - dt * (totalHold / Math.max(0.1, decaySec)));
+    if (_reviveHoldT <= 0) _reviveTargetPeerId = null;
+  }
+}
+
+function _tickDowned(dt) {
+  // Local bleedout — applies whether host or joiner. While the
+  // reviveT > 0 (teammate is making progress), bleedout pauses; this
+  // matches the user's intent that holding interact stops the death
+  // clock.
+  if (_localDowned) {
+    if (!_localReviveActive) {
+      _localBleedoutT = Math.max(0, _localBleedoutT - dt);
+      if (_localBleedoutT <= 0) {
+        // Bleedout expired — true death now. Clear downed flag and
+        // pin health to 0 so the death-detection block fires on the
+        // next frame. _coopHasLivingTeammate() decides whether the
+        // run continues (other peers fight on) or ends (everyone
+        // down → playerDead = true via existing path).
+        _localDowned = false;
+        if (player && player.applyDownedState) player.applyDownedState(false);
+        if (player) {
+          // Force health to 0; the death-detection block will fire
+          // next tick. If a teammate is still up the gate routes
+          // back to _enterDownedState (but bleedoutT will be 0 so
+          // we'd loop) — clear that gate by using a hard hp=0 +
+          // playerDead flag set directly.
+          // Simpler: just set playerDead=true here for clean exit.
+          // The death overlay will surface via the standard flow.
+          playerDead = true;
+          try { sfx.death(); } catch (_) {}
+        }
+      }
+    }
+  }
+  // Tick remote downed peers. Host is authoritative; joiners just
+  // mirror what host broadcasts. We tick locally for visual countdown
+  // smoothness — host snapshots correct any drift.
+  const t = getCoopTransport();
+  const totalHold = tunables.coop?.reviveHoldSec ?? 20;
+  const decaySec  = tunables.coop?.reviveDecaySec ?? 12;
+  const hpPct     = tunables.coop?.reviveHpPct ?? 0.30;
+  for (const [peerId, st] of _coopPeerDowned) {
+    if (!st.reviverPeerId) {
+      st.bleedoutT = Math.max(0, (st.bleedoutT || 0) - dt);
+    }
+    // Host: drive the auth revive timer for joiner-initiated revives.
+    if (t.isHost && st.reviverPeerId) {
+      st.reviveT = Math.min(totalHold, (st.reviveT || 0) + dt);
+      // Throttle progress broadcast to 5Hz.
+      st._sendT = (st._sendT || 0) - dt;
+      if (st._sendT <= 0) {
+        st._sendT = 0.2;
+        t.send('rpc-revive-progress', { p: peerId, t: st.reviveT, a: true });
+      }
+      if (st.reviveT >= totalHold) {
+        t.send('rpc-revived', { p: peerId, hp: hpPct });
+        _coopPeerDowned.delete(peerId);
+      }
+    } else if (t.isHost && (st.reviveT || 0) > 0) {
+      // No active reviver — decay the bar.
+      st.reviveT = Math.max(0, st.reviveT - dt * (totalHold / Math.max(0.1, decaySec)));
+    }
+  }
+}
 // Coop-intent signal — `transport.roomCode` is set the MOMENT the
 // user clicks Host or Join in the lobby (inside transport.host() /
 // transport.join() before the WebSocket even opens). It's cleared
@@ -1801,6 +2006,101 @@ function _ensureCoopLobby() {
       } catch (err) {
         console.warn('[coop] rpc-player-damage apply failed', err);
       }
+      return;
+    }
+    if (kind === 'rpc-self-down') {
+      // Host-only — joiner reports they went down. Server already
+      // stamped `from` so we know which peer. Record state + re-
+      // broadcast as the host-only kind so every other peer sees it.
+      if (!transport.isHost || !body) return;
+      const bleedout = +body.b || (tunables.coop?.reviveBleedoutSec ?? 60);
+      _coopPeerDowned.set(from, {
+        bleedoutT: bleedout,
+        reviveT: 0,
+        reviverPeerId: null,
+      });
+      transport.send('rpc-downed', { p: from, b: bleedout });
+      return;
+    }
+    if (kind === 'rpc-downed') {
+      // Either side — host or joiner — receives this when a peer
+      // goes down. Track the peer's downed state locally so the
+      // reviver-detection + HUD render can use it.
+      if (!body || !body.p) return;
+      _coopPeerDowned.set(body.p, {
+        bleedoutT: body.b || 60,
+        reviveT: 0,
+        reviverPeerId: null,
+      });
+      // Visual: drop the ghost mesh into a "downed" pose. Phase 1
+      // just tints the ghost cyan→red so it reads as urgent.
+      const m = _coopGhostMeshes?.get(body.p);
+      if (m && m.group) {
+        m.group.traverse?.((o) => {
+          if (o?.material?.color) {
+            try { o.material.color.setHex(0xd24868); } catch (_) {}
+          }
+        });
+      }
+      return;
+    }
+    if (kind === 'rpc-revive-hold') {
+      // Host-only — joiner is holding interact on a downed peer.
+      // Body: { t: targetPeerId, h: bool }. Track per-target state.
+      if (!transport.isHost || !body) return;
+      const targetPid = body.t;
+      const st = _coopPeerDowned.get(targetPid);
+      if (!st) return;
+      if (body.h) {
+        st.reviverPeerId = from;
+      } else if (st.reviverPeerId === from) {
+        st.reviverPeerId = null;
+      }
+      return;
+    }
+    if (kind === 'rpc-revived') {
+      // Either side — peer was revived. Update local state.
+      if (!body || !body.p) return;
+      _coopPeerDowned.delete(body.p);
+      // If WE are the revived peer, clear local downed state.
+      if (transport.peerId === body.p) {
+        _leaveDownedState(body.hp || 0.30);
+      }
+      // Restore ghost tint.
+      const m = _coopGhostMeshes?.get(body.p);
+      if (m && m.group) {
+        m.group.traverse?.((o) => {
+          if (o?.material?.color) {
+            try { o.material.color.setHex(0x4080ff); } catch (_) {}
+          }
+        });
+      }
+      return;
+    }
+    if (kind === 'rpc-revive-progress') {
+      // Joiner — host is broadcasting revive progress for a peer
+      // (5Hz). If we're the revivee, our HUD bar should reflect it.
+      if (transport.isHost || !body || !body.p) return;
+      if (transport.peerId === body.p) {
+        _localReviveT = +body.t || 0;
+        _localReviveActive = !!body.a;
+      } else {
+        const st = _coopPeerDowned.get(body.p);
+        if (st) st.reviveT = +body.t || 0;
+      }
+      return;
+    }
+    if (kind === 'fx-tracer') {
+      // Joiner-only — host's enemy fired and broadcast a tracer.
+      // Reuse combat.spawnShot so visuals match the local muzzle
+      // flash + tracer pipeline. No-op on host (host already
+      // rendered the tracer via aiFire's local call).
+      if (transport.isHost || !body) return;
+      try {
+        const from = new THREE.Vector3(body.x1 || 0, body.y1 || 1, body.z1 || 0);
+        const to   = new THREE.Vector3(body.x2 || 0, body.y2 || 1, body.z2 || 0);
+        combat.spawnShot(from, to, body.c | 0, { light: false });
+      } catch (err) { /* defensive: never break a frame on a tracer */ }
       return;
     }
     if (kind === 'rpc-grant-xp') {
@@ -8547,6 +8847,95 @@ function _updatePeerEdgeArrow(peerId, name, dx, dz, dist) {
   el.style.display = 'block';
   void ang;
 }
+// Downed/revive HUD — non-blocking overlay. Shows the local
+// bleedout bar when WE'RE down, and a directional + bar prompt
+// when a teammate is down nearby (so the reviver can find them).
+let _coopDownedHudEl = null;
+function _renderDownedHud() {
+  if (!_coopDownedHudEl) {
+    const el = document.createElement('div');
+    el.id = 'coop-downed-hud';
+    Object.assign(el.style, {
+      position: 'fixed', left: '50%', bottom: '90px',
+      transform: 'translateX(-50%)', zIndex: '8',
+      pointerEvents: 'none', display: 'none',
+      font: '12px ui-monospace, Menlo, Consolas, monospace',
+      color: '#f0a0a0', textAlign: 'center',
+      letterSpacing: '1px', minWidth: '320px',
+      padding: '10px 16px',
+      background: 'rgba(20,8,10,0.85)',
+      border: '1px solid #a03038', borderRadius: '4px',
+      boxShadow: '0 0 28px rgba(208,72,104,0.45)',
+    });
+    document.body.appendChild(el);
+    _coopDownedHudEl = el;
+  }
+  const total = tunables.coop?.reviveBleedoutSec ?? 60;
+  const holdTotal = tunables.coop?.reviveHoldSec ?? 20;
+  if (_localDowned) {
+    const blPct = Math.max(0, Math.min(1, _localBleedoutT / total));
+    const rvPct = Math.max(0, Math.min(1, _localReviveT / holdTotal));
+    const rvActive = _localReviveActive ? 'TEAMMATE REVIVING' : 'TEAMMATE NEEDED';
+    _coopDownedHudEl.innerHTML = `
+      <div style="font-size:18px;color:#e04848;letter-spacing:4px;margin-bottom:4px">DOWN</div>
+      <div style="font-size:10px;color:#9b6a6a">${rvActive}</div>
+      <div style="margin-top:6px;background:#2a0e10;height:6px;border-radius:3px;overflow:hidden">
+        <div style="width:${(blPct * 100).toFixed(1)}%;height:100%;background:linear-gradient(90deg,#a03038,#e04848);transition:width 200ms linear"></div>
+      </div>
+      <div style="font-size:9px;color:#6a4040;margin-top:2px">bleedout ${_localBleedoutT.toFixed(1)}s</div>
+      ${rvPct > 0 ? `
+      <div style="margin-top:8px;background:#0e2a18;height:6px;border-radius:3px;overflow:hidden">
+        <div style="width:${(rvPct * 100).toFixed(1)}%;height:100%;background:linear-gradient(90deg,#3a7a48,#6abf78);transition:width 200ms linear"></div>
+      </div>
+      <div style="font-size:9px;color:#406040;margin-top:2px">revive ${(_reviveHoldT).toFixed(1)}s / ${holdTotal}s</div>
+      ` : ''}
+    `;
+    _coopDownedHudEl.style.display = 'block';
+    return;
+  }
+  // Reviver — actively progressing on a teammate.
+  if (_reviveTargetPeerId && _reviveHoldT > 0) {
+    const rvPct = Math.max(0, Math.min(1, _reviveHoldT / holdTotal));
+    const peerName = getCoopTransport().peers?.get(_reviveTargetPeerId)?.name || 'teammate';
+    _coopDownedHudEl.innerHTML = `
+      <div style="font-size:14px;color:#6abf78;letter-spacing:3px;margin-bottom:4px">REVIVING ${_escHtml(peerName)}</div>
+      <div style="font-size:9px;color:#406040">hold INTERACT — release to pause</div>
+      <div style="margin-top:6px;background:#0e2a18;height:8px;border-radius:3px;overflow:hidden">
+        <div style="width:${(rvPct * 100).toFixed(1)}%;height:100%;background:linear-gradient(90deg,#3a7a48,#6abf78);transition:width 100ms linear"></div>
+      </div>
+      <div style="font-size:9px;color:#406040;margin-top:2px">${_reviveHoldT.toFixed(1)}s / ${holdTotal}s</div>
+    `;
+    _coopDownedHudEl.style.display = 'block';
+    return;
+  }
+  // Down teammate prompt — when there's a downed peer in range.
+  let nearPeer = null;
+  let nearDist = Infinity;
+  if (_coopPeerDowned.size > 0 && player?.mesh?.position) {
+    const px = player.mesh.position.x, pz = player.mesh.position.z;
+    for (const [peerId, st] of _coopPeerDowned) {
+      const ghost = coopLobby?.ghosts?.get(peerId);
+      if (!ghost) continue;
+      const dx = ghost.x - px, dz = ghost.z - pz;
+      const d = Math.hypot(dx, dz);
+      if (d < nearDist) { nearDist = d; nearPeer = { peerId, ghost, st }; }
+    }
+  }
+  if (nearPeer) {
+    const peerName = getCoopTransport().peers?.get(nearPeer.peerId)?.name || 'teammate';
+    const range = tunables.coop?.reviveRange ?? 1.6;
+    const inRange = nearDist <= range;
+    _coopDownedHudEl.innerHTML = `
+      <div style="font-size:13px;color:${inRange ? '#f2c060' : '#9b8b6a'};letter-spacing:3px;margin-bottom:2px">
+        ${inRange ? 'HOLD E TO REVIVE' : `${_escHtml(peerName)} DOWN — ${nearDist.toFixed(1)}m`}
+      </div>
+      <div style="font-size:9px;color:#6a5a3a">bleedout ${nearPeer.st.bleedoutT.toFixed(1)}s</div>
+    `;
+    _coopDownedHudEl.style.display = 'block';
+    return;
+  }
+  _coopDownedHudEl.style.display = 'none';
+}
 function _arrowForAngle(rad) {
   // 8-way arrow glyph based on world-space heading from local player.
   const TAU = Math.PI * 2;
@@ -9695,6 +10084,28 @@ function aiFire(origin, dir, weapon, damageMult = 1, source = null) {
   // crushes fragment shading on low-spec GPUs. The additive flash
   // mesh + tracer still read clearly.
   combat.spawnShot(origin, endPoint, weapon.tracerColor, { light: false });
+  // Coop: broadcast the tracer to every joiner so they see host's
+  // enemy bullets in flight. Tiny payload (~24 bytes), fire-and-
+  // forget — tracers are 80ms visual events; mild jitter is fine.
+  // Skip during a single-frame burst to keep packets sane in a
+  // bullet-hell volley (host caps via _coopAiTracerBudget).
+  {
+    const _t = getCoopTransport();
+    if (_t.isOpen && _t.isHost && _t.peers && _t.peers.size > 0) {
+      _coopAiTracerBudget--;
+      if (_coopAiTracerBudget > 0) {
+        _t.send('fx-tracer', {
+          x1: +origin.x.toFixed(2),
+          y1: +origin.y.toFixed(2),
+          z1: +origin.z.toFixed(2),
+          x2: +endPoint.x.toFixed(2),
+          y2: +endPoint.y.toFixed(2),
+          z2: +endPoint.z.toFixed(2),
+          c: weapon.tracerColor | 0,
+        });
+      }
+    }
+  }
 
   if (!hitPlayer) {
     // Coop — host's enemies can also clip a joiner whose ghost is
@@ -10925,6 +11336,25 @@ function updateLootPrompt() {
 }
 
 function tryInteract({ nearItem, body, bodies, npc, container }) {
+  // Coop revive priority — if a downed teammate is in revive range,
+  // skip every other interact (body search, container open, etc).
+  // The hold-to-revive system in _tickReviveInteract takes over.
+  if (_coopPeerDowned && _coopPeerDowned.size > 0 && player?.mesh?.position) {
+    const px = player.mesh.position.x, pz = player.mesh.position.z;
+    const range = tunables.coop?.reviveRange ?? 1.6;
+    const r2 = range * range;
+    for (const [peerId, st] of _coopPeerDowned) {
+      if (!st || st.bleedoutT <= 0) continue;
+      const ghost = coopLobby?.ghosts?.get(peerId);
+      if (!ghost) continue;
+      const dx = ghost.x - px, dz = ghost.z - pz;
+      if (dx * dx + dz * dz < r2) {
+        // Standing on a downed teammate — defer to the hold-revive
+        // path. Don't interact with anything else.
+        return;
+      }
+    }
+  }
   // Loot pickup / body loot / encounter-spawned containers all beat
   // the encounter interact when the player is standing on / next to
   // them — encounter rewards (Shrine relic, Fountain signet chest,
@@ -13684,6 +14114,15 @@ function tick() {
   // looks like "we connected but I can't see them" — the actual
   // failure mode reported in playtest.
   _tickCoop(rawDt);
+  // Recharge AI-tracer broadcast budget once per host frame.
+  _coopAiTracerBudget = 8;
+  // Tick downed/revive state every frame regardless of pause UI.
+  // Bleedout MUST count down even if the player has the inventory
+  // open — otherwise downed players could just open inventory and
+  // wait out their teammate's revive cooldown.
+  _tickDowned(rawDt);
+  _tickReviveInteract(rawDt);
+  _renderDownedHud();
 
   if (paused || inventoryUI.visible || customizeUI.isOpen() || lootUI.isOpen() || shopUI.isOpen() || perkUI.isOpen() || gameMenuUI.isOpen() || playerDead) {
     // Modal pause — scene is frozen, so all the per-frame
@@ -14477,7 +14916,14 @@ function tick() {
     }
   }
 
-  if (!playerDead && playerInfo.health <= 0) {
+  // Coop downed-state — entered when health <= 0 and a teammate
+  // is still alive. Holds the death overlay off until the local
+  // bleedout expires (or a teammate revives). The else branch
+  // below is the normal solo death path.
+  const _shouldGoDown = !playerDead && !_localDowned
+    && playerInfo.health <= 0 && _coopHasLivingTeammate();
+  if (_shouldGoDown) _enterDownedState();
+  if (!playerDead && !_localDowned && playerInfo.health <= 0) {
     playerDead = true;
     sfx.death();
     // Seal the run's stats and submit to the local leaderboard. Tainted

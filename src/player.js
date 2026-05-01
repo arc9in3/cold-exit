@@ -833,6 +833,32 @@ export function createPlayer(scene) {
     return dealt;
   }
 
+  // Coop downed flag — read by movement / fire / consumeStamina paths
+  // to early-out so the player can't act while down. Visuals (rig
+  // collapse, opacity dim) hook off this in the HUD render layer.
+  function applyDownedState(on) {
+    state.downed = !!on;
+    if (on) {
+      // Pin health at a sliver above zero so death detection elsewhere
+      // doesn't re-fire each frame. Bleedout is tracked separately.
+      state.health = 1;
+      velocity.set(0, 0, 0);
+      state.airborne = false;
+      state.blocking = false;
+    }
+  }
+  // Revive helper — restore HP to a fraction of max (defib uses 1.0
+  // for a full-HP res). Clears the downed flag side effects.
+  function restoreHealthPct(pct = 0.30) {
+    state.health = Math.max(1, Math.round(state.maxHealth * Math.max(0.05, Math.min(1, pct))));
+    state.regenCap = Math.max(state.health, state.regenCap);
+    state.regenT = 0;
+    state.staminaRegenT = 0;
+    state.bleedT = 0;
+    state.brokenT = 0;
+    state.downed = false;
+  }
+
   function restoreFullHealth() {
     state.health = state.maxHealth;
     state.regenCap = state.maxHealth;
@@ -962,6 +988,11 @@ export function createPlayer(scene) {
     state.dashStartedEvent = false;
     state.rollStartedEvent = false;
     state.slideStartedEvent = false;
+    // Coop downed — player can't move, fire, dash, jump, etc. We
+    // still tick a few timers (iFrames, hitFlash) above so a revived
+    // player isn't stuck with stale flags. Just early-out before
+    // input dispatch.
+    if (state.downed) return;
     // Cooldowns and timers tick regardless of mode.
     state.dashCd = Math.max(0, state.dashCd - dt);
     state.rollCd = Math.max(0, state.rollCd - dt);
@@ -1932,6 +1963,7 @@ export function createPlayer(scene) {
     tryMeleeAttack, tryQuickMelee, cancelCombo,
     tryParry, isBlocking, isParryActive,
     consumeStamina, refundStamina, applyDerivedStats, restoreFullHealth,
+    applyDownedState, restoreHealthPct,
     kickRecoil, reactToHit, reactToDeath,
     swapHandedness,
     getHandedness: () => state.handedness,
