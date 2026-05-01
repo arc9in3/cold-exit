@@ -3,9 +3,49 @@ import { tunables } from './tunables.js';
 import { buildRig, initAnim, updateAnim, pokeHit, pokeDeath } from './actor_rig.js';
 import { spawnSpeechBubble } from './hud.js';
 
-// Melee rusher: idle → chase → windup → swing → recovery. Stockier than the
-// gunman so they read as distinct at a glance. No defensive system — they
-// commit to hitting the player with a telegraphed swing.
+// Melee rusher: idle → chase → windup → recovery. Stockier than the
+// gunman so they read as distinct at a glance. No defensive system —
+// they commit to hitting the player with a telegraphed swing.
+//
+// ============================================================
+// MeleeEnemy FSM — `e.state` (values from STATE constants below)
+// ============================================================
+//   IDLE     → CHASE    (canSee && state === IDLE — i.e. LoS + alerted,
+//                        or suspicion >= 1.0 with hidden detection)
+//            → CHASE    (cloaked assassin: player enters same room OR
+//                        canSee triggers; cloak drops on enter)
+//            → DEAD     (hp <= 0)
+//
+//   CHASE    → WINDUP   (dist <= swingRange && cooldownT <= 0 &&
+//                        dazzleT <= 0 && surpriseT <= 0; assassin
+//                        skips this branch while disengaging)
+//            → DEAD     (hp <= 0)
+//
+//   WINDUP   → RECOVERY (swingT <= 0 — strike lands, hit registers
+//                        via ctx.onPlayerHit, recoveryT + cooldownT
+//                        seeded from tunables.meleeEnemy)
+//            → DEAD     (hp <= 0)
+//
+//   RECOVERY → CHASE    (recoveryT <= 0 — once alerted they stay
+//                        committed and pursue even out of detection
+//                        radius, so this never falls back to IDLE)
+//            → DEAD     (hp <= 0)
+//
+//   DEAD     → (terminal; ragdoll-lite phase via deathPhys, then
+//              corpse_bake.js folds the rig into a static decal.
+//              `_respawn(e)` resets state = IDLE for dummies that
+//              support respawn — exit only, not part of the FSM)
+//
+// Forced overrides (any state → IDLE):
+//   - tunables.ai.active = false  (global pause)
+//   - e.deepSleepT > 0            (whisper-dart sleep)
+//   - e.forceSleep                (one-shot sleep flag, cleared next tick)
+//
+// `STATE.SWING` is enumerated for animation rendering parity (see
+// updateAnim's swingProgress branch) but is never actually written to
+// `e.state` — the FSM goes WINDUP → RECOVERY directly, with SWING
+// representing the in-between visual frame.
+// ============================================================
 const STATE = { IDLE: 'idle', CHASE: 'chase', WINDUP: 'windup', SWING: 'swing', RECOVERY: 'recovery', DEAD: 'dead' };
 
 // Reused scratch vector for blade-tip world-position lookups each

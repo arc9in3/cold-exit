@@ -133,6 +133,50 @@ const _HIT_GRACE_SEC = 0.55;
 const _PHASE_TRANSITION_DUR = 1.8;       // invuln window per phase change
 const _BARK_LIFE = 3.5;                  // seconds a bark stays on screen
 
+// ============================================================
+// MegaBoss action FSM — `this.state`
+// ============================================================
+//   spawn     → dormant         (constructor + spawn() — starts intro)
+//
+//   dormant   → idle            (intro timer expires; _activate() drops
+//                                invuln + restores chassis colors)
+//             → dead            (hp <= 0 — possible if some external
+//                                damage source bypasses invuln)
+//
+//   idle      → telegraph       (stateT >= stateUntil → _pickAttack
+//                                routes through one of _begin*Attack
+//                                helpers, which set state = 'telegraph')
+//             → phaseTransition (applyHit crosses phase2/phase3 HP
+//                                threshold — _enterPhaseTransition)
+//             → dead            (hp <= 0)
+//
+//   telegraph → attack          (stateT >= stateUntil → _beginAttackBody)
+//             → phaseTransition (HP threshold crossed mid-windup)
+//             → dead            (hp <= 0)
+//
+//   attack    → recover         (stateT >= stateUntil → _endAttack)
+//             → phaseTransition (HP threshold crossed mid-attack)
+//             → dead            (hp <= 0)
+//
+//   recover   → idle            (stateT >= stateUntil → reset to idle
+//                                with stateUntil = 0.25*freqScale+0.1)
+//             → phaseTransition (HP threshold crossed during recovery)
+//             → dead            (hp <= 0)
+//
+//   phaseTransition
+//             → recover         (phaseTransitionT >= phaseTransitionUntil
+//                                — invuln drops, state flips to recover)
+//             → dead            (hp <= 0 — should not happen since
+//                                invuln=true, but covered by _die)
+//
+//   dead      → (terminal — handled by _die; loot drops once)
+//
+// `phaseTransitioning` is a parallel boolean that gates the switch
+// statement above. While true, only the phase-transition timer ticks;
+// when it expires the state is forced to 'recover'. `invuln` blocks
+// applyHit during dormant + phaseTransition.
+// ============================================================
+
 export class MegaBoss {
   // ctx must expose:
   //   scene, camera, combat, loot, sfx, projectiles,
