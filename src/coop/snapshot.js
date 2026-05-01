@@ -387,15 +387,41 @@ export function applyInterpolated(gunmen, melees, lootMgr, spawnFn) {
   for (const m of a.melees || []) aMmap.set(m.n, m);
   for (const sb of b.gunmen || []) {
     liveG.add(sb.n);
-    const g = _findByNetId(gunmen.gunmen, sb.n);
-    if (!g) continue;
+    let g = _findByNetId(gunmen.gunmen, sb.n);
+    if (!g) {
+      // Late-arrival spawn — host added an enemy after our level-gen
+      // (necromant minion, encounter wave, megaboss summon). Mint a
+      // local mirror so the joiner can see + shoot it. netId is
+      // stamped from the snapshot so subsequent interp lands on the
+      // same entry. Generic pistol spawn — variant info isn't in
+      // the wire format yet, but position + HP keep up via interp.
+      try {
+        g = gunmen.spawn(sb.x, sb.z, null, { tier: 'normal', gearLevel: 0 });
+        if (g) {
+          g.netId = sb.n | 0;
+          g._coopRemote = true;
+          if (g.group?.position) g.group.position.set(sb.x, 0, sb.z);
+        }
+      } catch (e) { console.warn('[coop] late gunman spawn failed', e); }
+      if (!g) continue;
+    }
     const sa = aGmap.get(sb.n) || sb;
     _applyInterp(g, sa, sb, alpha);
   }
   for (const sb of b.melees || []) {
     liveM.add(sb.n);
-    const e = _findByNetId(melees.enemies, sb.n);
-    if (!e) continue;
+    let e = _findByNetId(melees.enemies, sb.n);
+    if (!e) {
+      try {
+        e = melees.spawn(sb.x, sb.z, { tier: 'normal', gearLevel: 0 });
+        if (e) {
+          e.netId = sb.n | 0;
+          e._coopRemote = true;
+          if (e.group?.position) e.group.position.set(sb.x, 0, sb.z);
+        }
+      } catch (err) { console.warn('[coop] late melee spawn failed', err); }
+      if (!e) continue;
+    }
     const sa = aMmap.get(sb.n) || sb;
     _applyInterp(e, sa, sb, alpha);
   }
