@@ -121,6 +121,11 @@ function _encodeLootForPeer(loot, forPeerId) {
       r: e.item.rarity || 'common',
       nm: String(e.item.name || 'item').slice(0, 32),
       ty: e.item.type || '',
+      // Claimed-for-recipient bit. Drives the owner-glow tint on
+      // the joiner side so they can tell their personal drops
+      // apart from shared loot at a glance. Omitted for shared
+      // entries (claimedBy === null).
+      ...(e.claimedBy != null ? { cb: 1 } : {}),
     });
   }
   return _scratch.loot.slice();
@@ -577,6 +582,21 @@ export function applyLootSnapshot(snap, lootMgr, spawnFn) {
     if (newEntry) {
       newEntry.netId = sl.n;
       newEntry._coopRemote = true;
+      // Owner-glow tint — recipient is either the claimer or the
+      // entry is shared (cb omitted). Bumping emissive intensity +
+      // adding an outline halo lets the joiner spot personal drops
+      // versus shared loot at iso distance.
+      if (sl.cb) {
+        newEntry.claimedForLocal = true;
+        if (newEntry.slot?.mat) {
+          newEntry.slot.mat.emissive.setHex(stubItem.tint || 0xaaaaaa)
+            .multiplyScalar(1.6);
+          newEntry.slot.mat.emissiveIntensity = 1.0;
+        }
+        if (newEntry.slot?.light) {
+          newEntry.slot.light.intensity = 1.6;
+        }
+      }
     }
   }
   // Despawn locals the host says are gone. Only despawn entries that
