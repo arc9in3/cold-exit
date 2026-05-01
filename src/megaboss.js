@@ -817,6 +817,13 @@ export class MegaBoss {
     this.scene.add(m);
     this._slamTelegraphMesh = m;
     this._bark('CRUSHING PROCEDURE INITIATED.');
+    // Coop: telegraph the slam zone so the joiner has the same
+    // window to dodge. Approximated as a circle bounding the 4×9m
+    // OBB (radius ~4.9m) — same shape as the damage check inside
+    // _tickSlam. Lifetime matches the attack stateUntil window.
+    const cx = this.boss.position.x + Math.sin(this.facing) * 5.5;
+    const cz = this.boss.position.z + Math.cos(this.facing) * 5.5;
+    this.ctx.coopBroadcastRing?.(cx, cz, 4.9, this.stateUntil || 1.2, 0xff4040);
   }
 
   _buildChargeTelegraph() {
@@ -845,6 +852,18 @@ export class MegaBoss {
     this.scene.add(m);
     this._chargeTelegraphMesh = m;
     this._bark('PURSUIT MODE ENGAGED.');
+    // Coop: charge corridor is a long thin rect, hard to render as
+    // a single ring. Broadcast two rings (start + end) so the joiner
+    // can read the line and dodge perpendicular. Telegraph lifetime
+    // is the stateUntil window; corridor stays visually accurate
+    // because the boss commits to ang at telegraph time.
+    const tl = this.stateUntil || 1.0;
+    this.ctx.coopBroadcastRing?.(this.boss.position.x, this.boss.position.z, 2.4, tl, 0xff4040);
+    this.ctx.coopBroadcastRing?.(
+      this.boss.position.x + Math.sin(ang) * dist,
+      this.boss.position.z + Math.cos(ang) * dist,
+      2.4, tl, 0xff4040,
+    );
   }
 
   _beginCoverPose() {

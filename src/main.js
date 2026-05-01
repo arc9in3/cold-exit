@@ -117,7 +117,7 @@ window.__resetHints = resetHints;
 // "I'm on build XYZ" without inspecting the bundle. Date stamps the
 // version so a quick glance tells you how stale the build is. Both
 // values render into the bottom-right #build-version label.
-const BUILD_VERSION = '093e7db+early-dmg-cushion';
+const BUILD_VERSION = '7c47507+revive-tourni-bandage+coop-polish';
 // Build date intentionally bumped each deploy so the corner label
 // reflects the current snapshot.
 const BUILD_DATE    = '2026-05-01';
@@ -1919,7 +1919,11 @@ function _tickReviveInteract(dt) {
   // press is consumed BEFORE tryUseMedkit so it doesn't double-fire.
   _refreshDefibHint(target);
   if (target && inputState && inputState.healPressed) {
-    const found = _findBestReviveItem();
+    // Try instant revive first; fall through to tourniquet (bleedout
+    // extender) if no revive item is carried but a tourniquet is.
+    const revive = _findBestReviveItem();
+    const tourni = revive ? null : _findTourniquet();
+    const found = revive || tourni;
     if (found) {
       inputState.healPressed = false;
       const stackCount = (found.entry.item.count | 0) || 1;
@@ -1930,15 +1934,32 @@ function _tickReviveInteract(dt) {
         inventory.takeFromBackpack(found.entry.idx);
       }
       inventoryUI.render();
-      transientHudMsg(`${found.label} — revive`, 2.5);
       try { sfx.uiAccept?.(); } catch (_) {}
-      if (t.isHost) {
-        t.send('rpc-revived', { p: target, hp: found.hpPct });
-        _coopPeerDowned.delete(target);
-        _reviveTargetPeerId = null;
-        _reviveHoldT = 0;
+      if (found.kind === 'tourniquet') {
+        // Bleedout extender — refresh the downed peer's timer to full.
+        // Does NOT take them out of downed state.
+        const fullBleedout = tunables.coop?.reviveBleedoutSec ?? 300;
+        transientHudMsg('TOURNIQUET — bleedout reset', 2.5);
+        if (t.isHost) {
+          // Host applies + rebroadcasts so the revivee's HUD updates.
+          const st = _coopPeerDowned.get(target);
+          if (st) st.bleedoutT = fullBleedout;
+          t.send('rpc-downed', { p: target, b: fullBleedout });
+          if (t.peerId === target) _localBleedoutT = fullBleedout;
+        } else {
+          t.send('rpc-revive-item', { t: target, k: 'tourniquet' });
+        }
       } else {
-        t.send('rpc-revive-item', { t: target, k: found.kind });
+        // Instant revive at the item's hpPct.
+        transientHudMsg(`${found.label} — revive`, 2.5);
+        if (t.isHost) {
+          t.send('rpc-revived', { p: target, hp: found.hpPct });
+          _coopPeerDowned.delete(target);
+          _reviveTargetPeerId = null;
+          _reviveHoldT = 0;
+        } else {
+          t.send('rpc-revive-item', { t: target, k: found.kind });
+        }
       }
       return;
     }
@@ -2239,13 +2260,21 @@ function _ensureCoopLobby() {
     }
     if (kind === 'rpc-revive-item') {
       // Host-only: a joiner used a health item on a downed peer.
-      // Kind maps to a revive HP fraction via _REVIVE_KIND_TO_HP.
-      // Unknown kinds fall back to the standard 30%.
+      // Kind maps to a revive HP fraction via _REVIVE_KIND_TO_HP,
+      // OR is the special 'tourniquet' kind which extends bleedout
+      // without reviving.
       if (!transport.isHost || !body || !body.t) return;
       const targetPeer = body.t;
       const itemKind = body.k || 'defib';
       const st = _coopPeerDowned.get(targetPeer);
       if (!st || st.bleedoutT <= 0) return;     // not downed / already gone
+      if (itemKind === 'tourniquet') {
+        const fullBleedout = tunables.coop?.reviveBleedoutSec ?? 300;
+        st.bleedoutT = fullBleedout;
+        transport.send('rpc-downed', { p: targetPeer, b: fullBleedout });
+        if (transport.peerId === targetPeer) _localBleedoutT = fullBleedout;
+        return;
+      }
       const hpPct = _REVIVE_KIND_TO_HP[itemKind] || (tunables.coop?.reviveHpPct ?? 0.30);
       transport.send('rpc-revived', { p: targetPeer, hp: hpPct });
       _coopPeerDowned.delete(targetPeer);
@@ -2272,19 +2301,27 @@ function _ensureCoopLobby() {
       return;
     }
     if (kind === 'rpc-peer-died') {
-      // A peer's player truly died (post-bleedout or solo). Clean up
-      // their downed state, hide their rig, and surface a toast.
-      // Local death sets _coopSelfDeathBroadcast so the echo back
-      // from the server doesn't loop.
+      // A peer's player truly died (post-bleedout or solo). Leave a
+      // static rig at their position as a corpse marker — frozen in
+      // the last pose, gun + reload dot hidden, slumped slightly.
+      // The per-frame ghost sync respects ghost.dead and skips anim
+      // ticks + position lerps so the corpse stays put.
       if (!body || !body.p) return;
       _coopPeerDowned.delete(body.p);
       _coopApplyDownedOverlay(body.p, false);
       const ghost = coopLobby?.ghosts?.get(body.p);
       if (ghost) ghost.dead = true;
-      // Hide the rig + gun mesh via the dedicated ghost-meshes map.
       const m = _coopGhostMeshes.get(body.p);
-      if (m?.group) m.group.visible = false;
-      if (m?.gunMesh) m.gunMesh.visible = false;
+      if (m) {
+        if (m.gunMesh) m.gunMesh.visible = false;
+        if (m.reloadDot) m.reloadDot.visible = false;
+        // Slump the body slightly so it reads as a corpse vs a
+        // standing teammate. Tilt forward + drop hips a touch.
+        if (m.group) {
+          m.group.rotation.x = -0.45;
+          m.group.position.y = -0.25;
+        }
+      }
       const name = ghost?.name || 'Player';
       try { transientHudMsg(`${name} has died`, 4.0); } catch (_) {}
       return;
@@ -9046,6 +9083,11 @@ function _tickCoop(dt) {
   const seen = new Set();
   for (const [peerId, ghost] of coopLobby.ghosts) {
     seen.add(peerId);
+    // Dead peers get frozen in place — skip the create + sync entirely
+    // so the corpse marker stays exactly where rpc-peer-died left it.
+    // Pruning still runs at the end (corpse persists until peer leaves
+    // the room).
+    if (ghost.dead) continue;
     let m = _coopGhostMeshes.get(peerId);
     if (!m) {
       // Real ally rig — same skeleton + animation as the gunmen so
@@ -9134,14 +9176,18 @@ function _tickCoop(dt) {
       const k = Math.min(1, dt / 0.18);
       m.gunMesh.scale.setScalar(cur + (target - cur) * k);
       // Swap-pop offset on the wrist-relative position. Linear up-
-      // and-down sine over the popT window.
+      // and-down sine over the popT window. Reload also drops the
+      // gun mesh slightly so a teammate with weapon down reads as
+      // "not ready" — pairs with the floating reload dot indicator.
+      const baseY = -(0.1 + 0.25) * (m.rig?.scale || 0.77);
+      const reloadDrop = ghost.reloading ? 0.06 : 0;
       if (m.swapPopT > 0) {
         m.swapPopT = Math.max(0, m.swapPopT - dt);
         const phase = 1 - (m.swapPopT / 0.35);  // 0..1
         const dip = Math.sin(phase * Math.PI) * 0.08;
-        m.gunMesh.position.y = -(0.1 + 0.25) * (m.rig?.scale || 0.77) - dip;
+        m.gunMesh.position.y = baseY - dip - reloadDrop;
       } else {
-        m.gunMesh.position.y = -(0.1 + 0.25) * (m.rig?.scale || 0.77);
+        m.gunMesh.position.y = baseY - reloadDrop;
       }
     }
     // Reload indicator — visible while ghost.reloading; pulses via
@@ -12149,13 +12195,17 @@ function _coopAllPeersReadyToExtract() {
 
 // Revive-item priority table. Higher hpPct = stronger revive. The
 // first carried item by this order wins when F is pressed while
-// reviving. Bandage is intentionally absent — using a bandage on a
-// downed teammate is the hold-based path's default (30%).
+// reviving. Bandage is the floor — explicitly carried bandages give
+// 40% revive vs the 30% hold-only default; the only reason for the
+// gap is opportunity cost (you spent the bandage instead of saving
+// it for self-heal). Tourniquet is NOT in this table — it's a
+// bleedout extender, not a revive (handled separately below).
 const _REVIVE_ITEMS = [
   { id: 'cons_defib',       kind: 'defib',       hpPct: 1.00, label: 'DEFIB' },
   { id: 'cons_trauma',      kind: 'trauma',      hpPct: 0.90, label: 'TRAUMA' },
   { id: 'cons_afak',        kind: 'ifak',        hpPct: 0.70, label: 'IFAK' },
   { id: 'cons_medkit',      kind: 'medkit',      hpPct: 0.60, label: 'MEDKIT' },
+  { id: 'cons_bandage',     kind: 'bandage',     hpPct: 0.40, label: 'BANDAGE' },
 ];
 const _REVIVE_KIND_TO_HP = Object.fromEntries(
   _REVIVE_ITEMS.map(r => [r.kind, r.hpPct]));
@@ -12166,6 +12216,16 @@ function _findBestReviveItem() {
     if (found) return { entry: found, ...r };
   }
   return null;
+}
+// Tourniquet — bleedout extender. Resets the downed peer's bleedout
+// timer to the full duration without bringing them up. Used as the
+// fallback when no instant-revive item is carried; lets the reviver
+// "buy time" if they need to clear a room before doing the full
+// hold-revive.
+function _findTourniquet() {
+  if (!inventory.findFirstConsumable) return null;
+  const found = inventory.findFirstConsumable(it => it.id === 'cons_tourniquet');
+  return found ? { entry: found, kind: 'tourniquet', label: 'TOURNIQUET' } : null;
 }
 
 // Sticky hint that surfaces while the local player is in revive range
@@ -12180,7 +12240,9 @@ function _refreshDefibHint(targetPeerId) {
     }
     return;
   }
-  const found = _findBestReviveItem();
+  const revive = _findBestReviveItem();
+  const tourni = revive ? null : _findTourniquet();
+  const found = revive || tourni;
   if (!found) {
     if (_defibHintEl && _defibHintEl._lastDisp !== 'none') {
       _defibHintEl.style.display = 'none';
@@ -12206,8 +12268,9 @@ function _refreshDefibHint(targetPeerId) {
     document.body.appendChild(el);
     _defibHintEl = el;
   }
-  const pct = Math.round(found.hpPct * 100);
-  const nextText = `[F] ${found.label} — REVIVE ${pct}%`;
+  const nextText = found.kind === 'tourniquet'
+    ? `[F] ${found.label} — RESET BLEEDOUT`
+    : `[F] ${found.label} — REVIVE ${Math.round(found.hpPct * 100)}%`;
   if (_defibHintEl._lastTxt !== nextText) {
     _defibHintEl.textContent = nextText;
     _defibHintEl._lastTxt = nextText;
