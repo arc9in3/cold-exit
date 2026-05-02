@@ -334,6 +334,14 @@ export const DEFAULT_DIMS_FEMALE = {
     collarBotR: 0.27,
     beltR: 0.16,         // tight waist belt
     beltH: 0.06,
+    // Per-segment depth ratios — torso isn't uniformly thick front-to-
+    // back. Ribcage at chest level has more depth (rounder ribs);
+    // waist is narrower in BOTH X and Z (wasp); pelvis returns to
+    // full depth (hip flare front-to-back). Without per-segment
+    // depth the front-back silhouette reads as a flat slab.
+    chestDepth:   0.78,   // ribcage front-back
+    stomachDepth: 0.55,   // waist pinch on Z too
+    pelvisDepth:  0.80,   // hip flare projects forward + back
     // Crotch wedge — sized to bridge the wide pelvis cylinder bottom
     // into the inward-attached legs. Without a properly-sized wedge
     // the bottom of the pelvis just ends in air and the inner edges
@@ -348,15 +356,17 @@ export const DEFAULT_DIMS_FEMALE = {
     // doesn't read as a flat-bottomed cylinder with cylinders dangling
     // out the corners.
     hipFront: { r: 0.12, y: -0.06, z: 0.10, scaleX: 1.6, scaleY: 0.7, scaleZ: 0.8 },
-    // Abdomen lobe — vertically elongated body-color mass running from
-    // sternum down through navel area. Pushed forward and made tall to
-    // sell the lean athletic torso line per refs. Eve has visible
-    // muscle definition; without surface detail we have to lean on
-    // SHAPE alone, which means a longer + more forward lobe.
-    abdomen: { r: 0.09, y: -0.04, z: 0.13, scaleY: 1.6, scaleZ: 0.55 },
-    // Pec lobe — moved forward and slightly higher so it merges into
-    // the bust spheres without a visible seam.
-    pec: { r: 0.10, y: 0.17, z: 0.18, scaleY: 0.50, scaleX: 1.40, scaleZ: 0.95 },
+    // Abdomen split into upper + lower lobes so the boundary between
+    // them reads as the implicit navel / abs definition line. Without
+    // shader tricks we can't draw a recessed line; stacking two lobes
+    // with a soft seam between them creates the visual cue.
+    upperAbdomen: { r: 0.085, y: 0.04, z: 0.12, scaleY: 1.0, scaleX: 1.0, scaleZ: 0.6 },
+    lowerAbdomen: { r: 0.080, y: -0.10, z: 0.11, scaleY: 0.9, scaleX: 1.0, scaleZ: 0.55 },
+    // Pec lobe — wider + slightly taller so it bridges UNDER the bust
+    // spheres like an underwire shelf. Bust will sit ON this lobe
+    // and merge at the bottom curve, reading as a continuous chest
+    // contour instead of two stuck-on lumps over a flat plate.
+    pec: { r: 0.11, y: 0.16, z: 0.19, scaleY: 0.65, scaleX: 1.50, scaleZ: 1.00 },
     // Trapezius — narrower wedge for female (smaller shoulder line).
     trapezius: { r: 0.15, y: 0.30, z: 0, scaleY: 0.40, scaleX: 1.30, scaleZ: 1.00 },
     // Lower-back / lumbar curve — soft body-color lobe at the back of
@@ -439,22 +449,19 @@ export const DEFAULT_DIMS_FEMALE = {
     // silhouette. scaleZ > 1 projects the bust further forward; scaleY
     // < 1 keeps the lobes from looking spherical (they should read
     // hemispherical against the chest plate).
-    bust: { r: 0.115, separationX: 0.08, y: 0.20, z: 0.23, scaleY: 0.90, scaleZ: 1.20 },
-    // Hair volume — bob cut. A flattened sphere wrapping the cranium,
-    // slightly oversized + stretched vertically so it extends from
-    // crown down past the ears to chin level. Pushed back in Z a hair
-    // so the FRONT of the sphere lands at the natural hairline,
-    // leaving the face exposed. Use this entry as the default; pass
-    // `style: 'long'` (bigger r/h, lower y, paired with ponytail) for
-    // the long-hair variant later.
-    hairVolume: {
-      r: 0.16, h: 0.36,
-      y: 0.05, z: -0.02,
-      scaleX: 1.10, scaleZ: 1.00,
+    bust: { r: 0.115, separationX: 0.085, y: 0.18, z: 0.21, scaleY: 0.85, scaleZ: 1.15 },
+    // Bob hair — built from 4 primitives instead of a single helmet
+    // sphere. Each piece reads as a directional flow of hair:
+    //   crown   — flattened dome covering the top of the cranium
+    //   back    — vertically stretched lobe falling from crown to nape
+    //   sideL/R — narrow slabs framing the cheeks (face-frame pieces)
+    // Together they read as a styled chin-length bob with visible
+    // structural pieces, not a uniform helmet of hair.
+    bob: {
+      crown:  { r: 0.16, scaleX: 1.05, scaleY: 0.65, scaleZ: 1.05, y: 0.16, z: -0.01 },
+      back:   { r: 0.14, scaleX: 0.95, scaleY: 1.50, scaleZ: 0.85, y: 0.04, z: -0.07 },
+      side:   { r: 0.10, scaleX: 0.55, scaleY: 1.50, scaleZ: 0.95, x: 0.13, y: 0.05, z: 0.02 },
     },
-    // Ponytail intentionally OMITTED for the bob variant. To go back
-    // to long hair, set head.ponytail back via DIM override or set
-    // opts.ponytail flag in the rig_tuner GUI.
   },
 };
 
@@ -742,7 +749,7 @@ export function buildRig(opts = {}) {
     legMat,
   );
   pelvis.position.set(0, T.pelvisY * scale, 0);
-  pelvis.scale.z = T.depthRatio;
+  pelvis.scale.z = T.pelvisDepth ?? T.depthRatio;
   pelvis.castShadow = true;
   pelvis.receiveShadow = true;
   pelvis.userData.zone = 'torso';
@@ -778,7 +785,7 @@ export function buildRig(opts = {}) {
       bodyMat,
     );
     mesh.position.y = stomachH / 2;
-    mesh.scale.z = T.depthRatio;
+    mesh.scale.z = T.stomachDepth ?? T.depthRatio;
     mesh.castShadow = true;
     mesh.receiveShadow = true;
     mesh.userData.zone = 'torso';
@@ -797,7 +804,7 @@ export function buildRig(opts = {}) {
       bodyMat,
     );
     mesh.position.y = chestH / 2;
-    mesh.scale.z = T.depthRatio;
+    mesh.scale.z = T.chestDepth ?? T.depthRatio;
     mesh.castShadow = true;
     mesh.receiveShadow = true;
     mesh.userData.zone = 'torso';
@@ -1102,6 +1109,10 @@ export function buildRig(opts = {}) {
   // INTO the ponytail tail. Read from dims.head.hairVolume so it scales
   // with the female DIM overlay. Body-color (same as the operator
   // palette ponytail).
+  // Hair: legacy single-sphere hairVolume (retained so non-bob actors
+  // that opt into long hair still have a hair-mass primitive feeding
+  // the ponytail) OR a multi-piece bob (4 primitives forming a styled
+  // chin-length cut with visible structural pieces).
   let hairVolume = null;
   if (H.hairVolume) {
     const HV = H.hairVolume;
@@ -1113,6 +1124,24 @@ export function buildRig(opts = {}) {
     hairVolume.castShadow = false;
     hairVolume.userData.zone = 'head';
     head.add(hairVolume);
+  }
+  if (H.bob) {
+    const B = H.bob;
+    const mkHairPiece = (cfg, x = 0) => {
+      const m = new THREE.Mesh(_sph(cfg.r * scale, 32, 24), hairMat);
+      m.scale.set(cfg.scaleX ?? 1.0, cfg.scaleY ?? 1.0, cfg.scaleZ ?? 1.0);
+      m.position.set(x * scale, (H.craniumY + cfg.y) * scale, cfg.z * scale);
+      m.castShadow = false;
+      m.userData.zone = 'head';
+      head.add(m);
+      return m;
+    };
+    if (B.crown) mkHairPiece(B.crown, 0);
+    if (B.back)  mkHairPiece(B.back, 0);
+    if (B.side) {
+      mkHairPiece(B.side, +B.side.x);   // right side
+      mkHairPiece(B.side, -B.side.x);   // left side (mirrored)
+    }
   }
 
   // --- ponytail (femme-fatale silhouette) ---------------------------
@@ -1267,20 +1296,23 @@ export function buildRig(opts = {}) {
     }
   }
 
-  // --- abdomen lobe (front belly curve) ----------------------------
-  // Soft forward bump on the stomach so the waist doesn't read as a
-  // uniform tapered cylinder. Subtle for female (tight abs); could be
-  // bumped up for male (slight beer belly) via DIM override later.
-  if (T.abdomen) {
-    const AB = T.abdomen;
-    const abR = AB.r * scale;
-    const lobe = new THREE.Mesh(_sph(abR, 24, 16), bodyMat);
-    lobe.scale.set(1.0, AB.scaleY ?? 1.0, AB.scaleZ ?? 1.0);
-    lobe.position.set(0, AB.y * scale, AB.z * scale);
+  // --- abdomen lobes (front torso curve + implicit abs definition) ---
+  // Single-lobe `abdomen` (legacy male path) OR split upper/lower
+  // lobes (female). The split creates an implicit horizontal seam at
+  // navel level — without surface shading it's how we get an abs
+  // definition cue from primitives alone.
+  const placeAbdomenLobe = (cfg) => {
+    if (!cfg) return;
+    const lobe = new THREE.Mesh(_sph(cfg.r * scale, 24, 16), bodyMat);
+    lobe.scale.set(cfg.scaleX ?? 1.0, cfg.scaleY ?? 1.0, cfg.scaleZ ?? 1.0);
+    lobe.position.set(0, cfg.y * scale, cfg.z * scale);
     lobe.castShadow = false;
     lobe.userData.zone = 'torso';
     stomach.pivot.add(lobe);
-  }
+  };
+  placeAbdomenLobe(T.abdomen);
+  placeAbdomenLobe(T.upperAbdomen);
+  placeAbdomenLobe(T.lowerAbdomen);
 
   // --- lumbar curve (back-of-torso S-curve) ------------------------
   // Female-coded. Soft body-color lobe at the back of the chest-
