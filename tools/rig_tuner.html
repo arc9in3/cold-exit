@@ -273,6 +273,10 @@ function rebuildRig() {
     handColor: state.colors.hand,
     gearColor: state.colors.gear,
     bootColor: state.colors.boot,
+    // Tuner shows the player rig — enable the asymmetric bandolier so
+    // signature props are part of the silhouette being tuned. Enemies
+    // omit this in spawn code.
+    signature: true,
   });
   initAnim(rig);
   scene.add(rig.group);

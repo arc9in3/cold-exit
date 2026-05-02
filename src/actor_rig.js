@@ -200,8 +200,13 @@ function jointSphere(radius, material, zone) {
 // anchor, wrist cuff, etc.) instead of requiring two coordinated edits.
 export const DEFAULT_DIMS = {
   hipY: 1.1,
+  // segs values are tuned for "intentionally low-poly, not amateur":
+  // each visible cylinder has just enough sides to read as a smooth
+  // curve without revealing tessellation at the silhouette. Torso 24 +
+  // limbs 16 + neck 16 hits that sweet spot. Bumping further has no
+  // visible payoff at game render scale.
   torso: {
-    segs: 16,
+    segs: 24,
     depthRatio: 0.72,
     // V-taper silhouette — wider top, narrower waist. Bumped chestTopR
     // and slimmed chestBotR so the cylinder reads with shoulders-out
@@ -553,7 +558,7 @@ export function buildRig(opts = {}) {
     const shoulder = taperedSegment({
       px: sign * A.shoulderInset * scale, py: A.shoulderYK * chestH, pz: 0,
       topR: A.upperArmTopR * scale, botR: A.upperArmBotR * scale, h: upperArmH,
-      segs: 10,
+      segs: 16,
       material: armMat, zone: 'arm',
     });
     // Shoulder joint sphere — smooths the shoulder-to-torso bulge.
@@ -588,13 +593,13 @@ export function buildRig(opts = {}) {
     const forearm = taperedSegment({
       px: 0, py: 0, pz: 0,
       topR: A.forearmTopR * scale, botR: A.forearmBotR * scale, h: forearmH,
-      segs: 10,
+      segs: 16,
       material: armMat, zone: 'arm',
     });
     elbow.add(forearm.pivot);
     // Wrist cuff — gear cylinder band just above the hand.
     const wristCuff = new THREE.Mesh(
-      _cyl(A.wristCuffR * scale, A.wristCuffR * scale, A.wristCuffH * scale, 12),
+      _cyl(A.wristCuffR * scale, A.wristCuffR * scale, A.wristCuffH * scale, 16),
       gearMat,
     );
     wristCuff.position.set(0, A.wristCuffYK * forearmH, 0);
@@ -606,15 +611,37 @@ export function buildRig(opts = {}) {
     const wrist = new THREE.Group();
     wrist.position.y = -forearmH;
     forearm.pivot.add(wrist);
-    // Hand — keep as a small rounded box; it reads as a fist with
-    // the grip curl applied.
+    // Hand — clenched fist read. The base mesh is a slightly squat box
+    // (subtle scale.x boost so the knuckle ridge reads wider than the
+    // wrist edge), with a knuckle dome on the forward face. Together
+    // they read as "closed hand" rather than the previous bare cube
+    // that looked like a brick at the end of the arm.
     const hand = segment({
       px: 0, py: 0, pz: 0,
       w: A.handW * scale, h: A.handH * scale, d: A.handD * scale,
       my: A.handY * scale,
       material: handMat, zone: 'arm',
     });
+    // Slight non-uniform scale: knuckle face wider than wrist face,
+    // softens the cube read into a fist read.
+    hand.mesh.scale.set(1.05, 1.0, 1.0);
     wrist.add(hand.pivot);
+    // Knuckle dome — small hemisphere on the FORWARD face of the hand
+    // (toward the gun grip / strike direction). Reads as the back of
+    // the fist when the hand rotates with the wrist.
+    const knuckleR = A.handW * 0.42 * scale;
+    const knuckleGeom = _stamp(new THREE.SphereGeometry(
+      knuckleR, 12, 6, 0, Math.PI * 2, 0, Math.PI / 2,
+    ));
+    const knuckle = new THREE.Mesh(knuckleGeom, handMat);
+    // Position at the front-top of the hand box: forward (-Z is the
+    // grip-side in this rig's local frame for the hand) and up by half
+    // the hand height. Rotate so the dome flat-side meets the box face.
+    knuckle.position.set(0, A.handY * scale, -A.handD * scale * 0.5);
+    knuckle.rotation.x = -Math.PI / 2;
+    knuckle.castShadow = false;
+    knuckle.userData.zone = 'arm';
+    hand.pivot.add(knuckle);
     return { shoulder, elbow, forearm, wrist, hand,
              shoulderPad, wristCuff, elbowBulge, shoulderBulge };
   };
@@ -646,7 +673,7 @@ export function buildRig(opts = {}) {
     const pivot = new THREE.Group();
     pivot.position.set(0, chestH, 0);
     const mesh = new THREE.Mesh(
-      _cyl(H.neckTopR * scale, H.neckBotR * scale, H.neckH * scale, 12),
+      _cyl(H.neckTopR * scale, H.neckBotR * scale, H.neckH * scale, 16),
       bodyMat,
     );
     mesh.position.y = H.neckMeshY * scale;
@@ -700,6 +727,28 @@ export function buildRig(opts = {}) {
   headHalo.castShadow = false;
   headHalo.userData.zone = 'head';
   head.add(headHalo);
+
+  // --- player signature: bandolier strap ---------------------------
+  // ONE asymmetric detail that distinguishes the protagonist from any
+  // bilateral enemy. Diagonal strap from left shoulder to right hip,
+  // realised as a thin tilted box parented to the chest so it follows
+  // torso pitch + twist naturally. Gated on opts.signature so spawn
+  // code can opt actors in/out (player ✓, enemies ✗).
+  let bandolier = null;
+  if (opts.signature) {
+    const stratW = 0.04 * scale;
+    const stratH = 0.55 * scale;
+    const stratD = 0.06 * scale;
+    bandolier = new THREE.Mesh(_box(stratW, stratH, stratD), gearMat);
+    // Place at chest center, then rotate ~30° around Z so it runs
+    // shoulder-to-opposite-hip diagonally. Z rotation in this rig's
+    // chest-local frame tilts the long axis toward the side.
+    bandolier.position.set(0, T.chestPlateYK * chestH * 0.4, T.chestPlateTopR * scale * 0.95);
+    bandolier.rotation.z = 0.55;   // ~32° tilt
+    bandolier.castShadow = false;
+    bandolier.userData.zone = 'torso';
+    chest.pivot.add(bandolier);
+  }
 
   // Expose every pivot + mesh by name so callers can grab what they
   // need. `torso` is an alias of the chest group (most callers care
@@ -1499,8 +1548,22 @@ export function updateAnim(rig, state, dt) {
   // arm itself so the weapon stays level.
   const crouchBias = 0;
   const tuckBias   = 0;
-  const chestShoulderPitch = -0.60 - aimPitchV * 0.55 + crouchBias;
-  const chestElbow         = -0.97 - tuckBias;
+  // No-weapon idle: arms hang at the sides instead of holding an
+  // invisible rifle at chest level. Triggers when the actor isn't in
+  // a weapon stance (rifleHold / meleeStance / akimbo / blockPose) and
+  // isn't actively swinging or aiming. Default chest-hold pose stays
+  // for any actor carrying a weapon — they always set rifleHold or
+  // meleeStance, so this only flips for unarmed idles (player without
+  // an equip, NPCs in dialogue, etc.).
+  const noWeaponPose = !state.rifleHold && !state.meleeStance
+                     && !state.akimbo && !state.attacking
+                     && !state.blockPose && !state.aiming;
+  const chestShoulderPitch = noWeaponPose
+    ? -0.08 - aimPitchV * 0.10
+    : (-0.60 - aimPitchV * 0.55 + crouchBias);
+  const chestElbow = noWeaponPose
+    ? -0.18
+    : (-0.97 - tuckBias);
   const headShoulderPitch  = -1.75 - aimPitchV * 0.80 + crouchBias * 0.40;
   const headElbow          =  0.18 - tuckBias * 0.40;
   // Chest-lean compensation — when the chest tilts forward for a run

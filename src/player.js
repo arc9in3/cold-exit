@@ -83,6 +83,10 @@ export function createPlayer(scene) {
     handColor: 0x0d0e10,     // black gloves
     gearColor: 0x2a2c30,     // subtle dark-grey plate/strap contrast
     bootColor: 0x0a0b0c,     // black boots
+    // Asymmetric bandolier strap — the protagonist's signature prop.
+    // Only the player gets this; enemies stay bilateral so the player
+    // reads as THE character on screen.
+    signature: true,
   });
   initAnim(rig);
   const group = rig.group;
