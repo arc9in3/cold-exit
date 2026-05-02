@@ -38,7 +38,7 @@ function _encodeMegaBoss(megaBoss) {
   // back to either so all three rotate cleanly into the snapshot.
   const root = megaBoss.boss || megaBoss.group;
   if (!root || !root.position) return null;
-  return {
+  const out = {
     x: +(root.position.x.toFixed(3)),
     z: +(root.position.z.toFixed(3)),
     y: +((megaBoss.facing ?? root.rotation?.y ?? 0).toFixed(3)),
@@ -47,6 +47,14 @@ function _encodeMegaBoss(megaBoss) {
     p: (megaBoss.phase | 0) || 1,
     s: megaBoss.state || 'idle',
   };
+  // Echo-specific: ghost minions live on echoBoss.ghosts[] outside
+  // any standard snapshot list. Encode their stable gids + positions
+  // so the joiner can spawn local mirror rigs.
+  if (typeof megaBoss._coopEncodeGhosts === 'function') {
+    const ghosts = megaBoss._coopEncodeGhosts();
+    if (ghosts && ghosts.length) out.eg = ghosts;
+  }
+  return out;
 }
 
 // Drone snapshot — same shape as gunmen/melees minus the state
@@ -548,6 +556,13 @@ export function applyMegaBossSnapshot(snap, megaBoss) {
   if (b.m) megaBoss.maxHp = b.m;
   if (typeof b.p === 'number') megaBoss.phase = b.p;
   if (b.s) megaBoss.state = b.s;
+  // Echo ghost mirrors — encoded in `b.eg` when the host's boss is
+  // an Echo with live ghosts. Joiner's _coopApplyGhostMirrors
+  // reconciles spawn / position-update / despawn against the
+  // local rig pool. No-op on Arboter / General (no method).
+  if (typeof megaBoss._coopApplyGhostMirrors === 'function') {
+    megaBoss._coopApplyGhostMirrors(b.eg || []);
+  }
 }
 
 // Drone apply for the interpolation path. droneMgr is the joiner's

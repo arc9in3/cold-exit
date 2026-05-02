@@ -329,7 +329,9 @@ export class MegaBossEcho {
     const rig = this._buildGhostRig();
     rig.group.position.set(start.x, 0, start.z);
     this.scene.add(rig.group);
+    this._ghostIdCounter = (this._ghostIdCounter | 0) + 1;
     this.ghosts.push({
+      gid: this._ghostIdCounter,         // stable id for coop snapshot matching
       rig,
       pathIdx: 0,                        // float — fractional sample index
       pathSpeed: T.recordHz,             // samples per second (replays in real time)
@@ -338,6 +340,64 @@ export class MegaBossEcho {
       lastX: start.x,
       lastZ: start.z,
     });
+  }
+  // Coop: encode the live ghost list as a compact [{gid, x, z}, ...]
+  // array. Joiner's snapshot apply (in coop/snapshot.js) reads this
+  // off the megaboss snapshot's `extras.echoGhosts` field and
+  // reconciles local mirror rigs so the joiner can SEE the ghosts.
+  _coopEncodeGhosts() {
+    if (!this.ghosts.length) return null;
+    const out = [];
+    for (const g of this.ghosts) {
+      if (!g?.rig?.group) continue;
+      out.push({
+        n: g.gid | 0,
+        x: +g.rig.group.position.x.toFixed(2),
+        z: +g.rig.group.position.z.toFixed(2),
+      });
+    }
+    return out;
+  }
+  // Joiner-side: reconcile local mirror ghosts against an array
+  // received from the host's snapshot. Spawns rigs for new gids,
+  // updates positions for known ones, despawns ones the host has
+  // dropped. This is visual-only — no recording / ghost AI runs on
+  // the joiner; damage still routes through the host's auth path.
+  _coopApplyGhostMirrors(snapList) {
+    const list = Array.isArray(snapList) ? snapList : [];
+    const live = new Set();
+    for (const sg of list) {
+      live.add(sg.n | 0);
+      let local = null;
+      for (const g of this.ghosts) {
+        if ((g.gid | 0) === (sg.n | 0)) { local = g; break; }
+      }
+      if (!local) {
+        // Late-arrival mirror — joiner's recording buffer is empty
+        // so we can't reuse _spawnGhost (which reads from it).
+        // Build the rig directly + park at the snapshot position.
+        const rig = this._buildGhostRig();
+        rig.group.position.set(+sg.x || 0, 0, +sg.z || 0);
+        this.scene.add(rig.group);
+        this.ghosts.push({
+          gid: sg.n | 0, rig,
+          pathIdx: 0, pathSpeed: 0, fireT: 1e9, bornT: 0,
+          lastX: +sg.x || 0, lastZ: +sg.z || 0,
+          _coopRemote: true,
+        });
+        continue;
+      }
+      // Position update.
+      local.rig.group.position.set(+sg.x || 0, 0, +sg.z || 0);
+    }
+    // Despawn locals the host says are gone.
+    for (let i = this.ghosts.length - 1; i >= 0; i--) {
+      const g = this.ghosts[i];
+      if (!live.has(g.gid | 0)) {
+        try { this._destroyGhost(g); } catch (_) {}
+        this.ghosts.splice(i, 1);
+      }
+    }
   }
 
   _buildGhostRig() {
