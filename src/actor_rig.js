@@ -315,9 +315,13 @@ export const DEFAULT_DIMS = {
 export const DEFAULT_DIMS_FEMALE = {
   hipY: 1.24,   // taller stance to match longer legs (thigh+calf+foot)
   torso: {
-    pelvisH: 0.16,
-    pelvisTopR: 0.21,    // hip flare upper bound
-    pelvisBotR: 0.28,    // hips DRAMATICALLY wider than shoulders
+    pelvisH: 0.20,       // taller pelvis cylinder so the hip ITSELF is
+                         // the primary shape (not the iliac shelves +
+                         // glute spheres reading as two bumps)
+    pelvisTopR: 0.20,    // hip flare upper bound
+    pelvisBotR: 0.27,    // hips wider than shoulders, slightly pulled
+                         // back from 0.28 so it pairs with smaller
+                         // glutes without exaggerating
     stomachH: 0.26,      // longer waist for hourglass elongation
     stomachTopR: 0.18,
     stomachBotR: 0.11,   // wasp waist — narrowest point
@@ -330,6 +334,20 @@ export const DEFAULT_DIMS_FEMALE = {
     collarBotR: 0.27,
     beltR: 0.16,         // tight waist belt
     beltH: 0.06,
+    // Crotch wedge — sized to bridge the wide pelvis cylinder bottom
+    // into the inward-attached legs. Without a properly-sized wedge
+    // the bottom of the pelvis just ends in air and the inner edges
+    // of the legs read as separate cylinders. Female crotch needs to
+    // be much bigger than the male default since female pelvis is
+    // dramatically wider.
+    crotchTopR: 0.20, crotchBotR: 0.11, crotchH: 0.08,
+    crotchY: 0.005, crotchZ: 0,
+    // Hip-front lobe — soft body-color sphere on the FRONT-bottom of
+    // the pelvis cylinder. Smooths the visible "scoop" between the
+    // wider iliac flare and where the legs descend, so the pelvis
+    // doesn't read as a flat-bottomed cylinder with cylinders dangling
+    // out the corners.
+    hipFront: { r: 0.12, y: -0.06, z: 0.10, scaleX: 1.6, scaleY: 0.7, scaleZ: 0.8 },
     // Abdomen lobe — vertically elongated body-color mass running from
     // sternum down through navel area. Pushed forward and made tall to
     // sell the lean athletic torso line per refs. Eve has visible
@@ -365,13 +383,17 @@ export const DEFAULT_DIMS_FEMALE = {
     hipBulgeR: 0.20,     // big iliac-to-thigh bridge sphere
     kneeBulgeR: 0.08,
     kneePadW: 0.15, kneePadH: 0.08, kneePadD: 0.08,
-    // Glute volume — bumped wider + larger + pushed back for the eve
-    // pronounced-glute silhouette. Each lobe sits directly above its
-    // matching leg attach so the back-curve flows continuous.
-    glute: { r: 0.20, separationX: 0.13, y: -0.04, z: -0.14, scaleY: 1.00, scaleZ: 1.20 },
-    // Iliac shelf — bigger and pushed slightly forward so it merges
-    // the wider hip flare into the inward-attached thigh top.
-    iliacShelf: { r: 0.14, x: 0.14, y: -0.04, z: 0.03, scaleX: 1.5, scaleY: 0.8, scaleZ: 1.1 },
+    // Glute volume — pulled back from the previous over-amplified
+    // values. Glutes are now SUBTLE additions to the pelvis cylinder
+    // shape, not standalone "two spheres" reads. The pelvis cylinder
+    // does the primary hip-volume work (taller + wider); glutes only
+    // add the soft back-projection a cylinder alone can't give.
+    glute: { r: 0.13, separationX: 0.12, y: -0.06, z: -0.10, scaleY: 0.85, scaleZ: 0.95 },
+    // Iliac shelf — much smaller now. Just enough to soften the
+    // pelvis-to-thigh transition; not large enough to read as a
+    // distinct sphere. The taller pelvis cylinder + bigger crotch
+    // wedge are doing most of the bridging work.
+    iliacShelf: { r: 0.09, x: 0.13, y: -0.04, z: 0.02, scaleX: 1.2, scaleY: 0.7, scaleZ: 1.0 },
     // Glute-thigh bridge — fills the deeper curve between the
     // pronounced glute and the longer thigh.
     gluteThighBlend: { r: 0.14, yK: 0.06, z: -0.09, scaleZ: 0.85, scaleY: 0.78 },
@@ -1207,6 +1229,22 @@ export function buildRig(opts = {}) {
       lobe.userData.zone = 'leg';
       hips.add(lobe);
     }
+  }
+
+  // --- hip-front lobe (smooth pelvis-front curve) ------------------
+  // Female-coded. Fills the visible scoop between the wider iliac
+  // flare and where the legs descend, so the front of the pelvis
+  // reads as one continuous curve instead of a flat cylinder bottom
+  // with two leg cylinders sticking out the corners. Parented to the
+  // pelvis mesh's parent (hips) so it follows hip motion.
+  if (T.hipFront) {
+    const HF = T.hipFront;
+    const hipFrontMesh = new THREE.Mesh(_sph(HF.r * scale, 24, 16), bodyMat);
+    hipFrontMesh.scale.set(HF.scaleX ?? 1.0, HF.scaleY ?? 1.0, HF.scaleZ ?? 1.0);
+    hipFrontMesh.position.set(0, HF.y * scale, HF.z * scale);
+    hipFrontMesh.castShadow = false;
+    hipFrontMesh.userData.zone = 'torso';
+    hips.add(hipFrontMesh);
   }
 
   // --- iliac shelf (hip-to-thigh connective shape) -----------------
