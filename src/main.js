@@ -121,7 +121,7 @@ window.__resetHints = resetHints;
 // "I'm on build XYZ" without inspecting the bundle. Date stamps the
 // version so a quick glance tells you how stale the build is. Both
 // values render into the bottom-right #build-version label.
-const BUILD_VERSION = '5a38c75+flamer-nerf';
+const BUILD_VERSION = '79db9df+coop-perf-bug-pass';
 // Build date intentionally bumped each deploy so the corner label
 // reflects the current snapshot.
 const BUILD_DATE    = '2026-05-01';
@@ -2650,6 +2650,25 @@ function _ensureCoopLobby() {
   // Clear interp buffer on disconnect so a stale snapshot can't
   // briefly drive the apply path when the next session opens.
   transport.addEventListener('close', () => clearSnapshotBuffer());
+  // Peer-out cleanup — strip the disconnected peer's downed entry +
+  // overlay so the reviver-detection loop doesn't keep finding a
+  // ghost teammate after they've disconnected. Ghost mesh is pruned
+  // via the per-frame sweep that compares against coopLobby.ghosts.
+  transport.addEventListener('peer-out', (e) => {
+    const pid = e?.detail?.peer?.id;
+    if (!pid) return;
+    if (_coopPeerDowned.has(pid)) {
+      _coopPeerDowned.delete(pid);
+      try { _coopApplyDownedOverlay(pid, false); } catch (_) {}
+    }
+    if (_reviveTargetPeerId === pid) {
+      _reviveTargetPeerId = null;
+      _reviveHoldT = 0;
+    }
+    if (_medicalMenuOpen && _medicalMenuTarget === pid) {
+      try { _closeMedicalMenu(); } catch (_) {}
+    }
+  });
   transport.addEventListener('host-lost', () => clearSnapshotBuffer());
   // Host re-broadcasts the current seed whenever a peer joins. Without
   // this the joiner has to wait for the host's NEXT regenerateLevel

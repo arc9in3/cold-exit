@@ -162,6 +162,12 @@ export function encodeEnemySnapshot(gunmen, melees, seq, t, loot = null, droneMg
       h: Math.round(g.hp),
       m: Math.round(g.maxHp),
       s: g.state || 'idle',
+      // Tier + variant so the joiner's late-arrival spawn fallback
+      // can mint a mirror that matches host's archetype (tank /
+      // dasher / shieldBearer / sniper / boss). Omitted when the
+      // entry is normal/no-variant to keep the typical packet small.
+      ...(g.tier && g.tier !== 'normal' ? { t: g.tier } : {}),
+      ...(g.variant ? { v: g.variant } : {}),
       // Burn DoT visual — sent only when active (>0) so the typical
       // snapshot stays small. Joiner reads this in _applyInterp to
       // pose flame particles on the right enemy.
@@ -178,6 +184,8 @@ export function encodeEnemySnapshot(gunmen, melees, seq, t, loot = null, droneMg
       h: Math.round(e.hp),
       m: Math.round(e.maxHp),
       s: e.state || 'idle',
+      ...(e.tier && e.tier !== 'normal' ? { t: e.tier } : {}),
+      ...(e.variant ? { v: e.variant } : {}),
       ...(e.burnT > 0 ? { bt: +e.burnT.toFixed(2), bs: e.burnStacks | 0 } : {}),
     });
   }
@@ -391,12 +399,13 @@ export function applyInterpolated(gunmen, melees, lootMgr, spawnFn) {
     if (!g) {
       // Late-arrival spawn — host added an enemy after our level-gen
       // (necromant minion, encounter wave, megaboss summon). Mint a
-      // local mirror so the joiner can see + shoot it. netId is
-      // stamped from the snapshot so subsequent interp lands on the
-      // same entry. Generic pistol spawn — variant info isn't in
-      // the wire format yet, but position + HP keep up via interp.
+      // local mirror so the joiner can see + shoot it. tier/variant
+      // pulled from the snapshot so a tank reads as a tank, sniper
+      // as a sniper, etc. Position + HP keep up via subsequent interp.
       try {
-        g = gunmen.spawn(sb.x, sb.z, null, { tier: 'normal', gearLevel: 0 });
+        const opts = { tier: sb.t || 'normal', gearLevel: 0 };
+        if (sb.v) opts.variant = sb.v;
+        g = gunmen.spawn(sb.x, sb.z, null, opts);
         if (g) {
           g.netId = sb.n | 0;
           g._coopRemote = true;
@@ -413,7 +422,9 @@ export function applyInterpolated(gunmen, melees, lootMgr, spawnFn) {
     let e = _findByNetId(melees.enemies, sb.n);
     if (!e) {
       try {
-        e = melees.spawn(sb.x, sb.z, { tier: 'normal', gearLevel: 0 });
+        const opts = { tier: sb.t || 'normal', gearLevel: 0 };
+        if (sb.v) opts.variant = sb.v;
+        e = melees.spawn(sb.x, sb.z, opts);
         if (e) {
           e.netId = sb.n | 0;
           e._coopRemote = true;
@@ -585,11 +596,22 @@ function _applyInterp(entity, a, b, alpha) {
   entity.burnStacks = b.bs | 0;
 }
 
+// Per-list netId → entity cache. Rebuilt when the list length
+// changes (entries added or removed). Avoids the O(N²) scan
+// pattern of calling _findByNetId once per snapshot entry against
+// a list of similar size — gunmen / melees lists routinely have
+// 20-40 entries, so a snapshot tick was 400-1600 ops without this.
 function _findByNetId(list, netId) {
-  for (let i = 0; i < list.length; i++) {
-    if (list[i].netId === netId) return list[i];
+  if (!list._coopNetIdMap || list._coopNetIdLen !== list.length) {
+    const map = new Map();
+    for (let i = 0; i < list.length; i++) {
+      const e = list[i];
+      if (e?.netId != null) map.set(e.netId, e);
+    }
+    list._coopNetIdMap = map;
+    list._coopNetIdLen = list.length;
   }
-  return null;
+  return list._coopNetIdMap.get(netId) || null;
 }
 
 // Apply the loot section of a snapshot to the joiner's local loot
