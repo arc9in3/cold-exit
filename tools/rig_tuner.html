@@ -152,6 +152,16 @@ const state = {
     hand: 0xcba07a,   // skin (gloves override per-actor)
     gear: 0x1d2024,   // darker than body — pads/cuffs/plate ride as accents
     boot: 0x1a1510,   // dark leather
+    accent: 0xf2c060, // visor / glow strip — project's accent-gold
+  },
+  // Signature-prop toggles. Default ON so the tuner shows the full
+  // protagonist silhouette out of the box.
+  sig: {
+    signature: true, // bandolier across chest
+    visor:     true, // Raiden eye-line
+    ponytail:  false,// Eve sweep — flip to compare ninja vs Eve
+    neckCable: true, // mechanical neck
+    sheath:    true, // back blade
   },
   pose: {
     preset: 'idle',
@@ -273,10 +283,21 @@ function rebuildRig() {
     handColor: state.colors.hand,
     gearColor: state.colors.gear,
     bootColor: state.colors.boot,
-    // Tuner shows the player rig — enable the asymmetric bandolier so
-    // signature props are part of the silhouette being tuned. Enemies
-    // omit this in spawn code.
-    signature: true,
+    // Tuner shows the player rig — enable the asymmetric bandolier +
+    // the iconic head/neck/back signature props so silhouette tuning
+    // sees the actual in-game character. Enemy actors omit these in
+    // spawn code. Each flag gates one of the design-reference
+    // silhouette elements:
+    //   visor      — Raiden eye-line accent bar
+    //   ponytail   — Eve back-of-head sweep
+    //   neckCable  — segmented mechanical neck (Raiden)
+    //   sheath     — permanent blade silhouette across back
+    signature: state.sig.signature,
+    visor: state.sig.visor,
+    ponytail: state.sig.ponytail,
+    neckCable: state.sig.neckCable,
+    sheath: state.sig.sheath,
+    accentColor: state.colors.accent,
   });
   initAnim(rig);
   scene.add(rig.group);
@@ -637,6 +658,45 @@ gui.domElement.addEventListener('focusout', () => { _kbField = null; }, true);
   addColor('hand', 'hands');
   addColor('gear', 'gear');
   addColor('boot', 'boots');
+  addColor('accent', 'accent (visor)');
+}
+
+// --- signature primitives folder ---------------------------------
+// Toggle the iconic protagonist silhouette elements live so we can
+// compare ninja vs Eve in the same session. Each toggle rebuilds
+// the rig, which is fine for a dev tool.
+{
+  const f = gui.addFolder('signature props');
+  const t = (key, label) => f.add(state.sig, key).name(label).onChange(() => rebuildRig());
+  t('signature', 'bandolier strap');
+  t('visor',     'visor (Raiden)');
+  t('ponytail',  'ponytail (Eve)');
+  t('neckCable', 'neck cable (cyborg)');
+  t('sheath',    'back sheath');
+  // One-click "load Raiden look" / "load Eve look" presets for fast
+  // comparison.
+  const presets = {
+    raiden() {
+      state.sig.signature = true;
+      state.sig.visor = true;
+      state.sig.ponytail = false;
+      state.sig.neckCable = true;
+      state.sig.sheath = true;
+      for (const c of f.controllers) c.updateDisplay();
+      rebuildRig();
+    },
+    eve() {
+      state.sig.signature = true;
+      state.sig.visor = false;
+      state.sig.ponytail = true;
+      state.sig.neckCable = false;
+      state.sig.sheath = true;
+      for (const c of f.controllers) c.updateDisplay();
+      rebuildRig();
+    },
+  };
+  f.add(presets, 'raiden').name('preset → Raiden');
+  f.add(presets, 'eve').name('preset → Eve');
 }
 
 // --- dims ---

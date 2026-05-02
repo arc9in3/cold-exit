@@ -310,7 +310,18 @@ export function buildRig(opts = {}) {
   // the caller doesn't set it explicitly.
   const gearColor = opts.gearColor ?? _darken(bodyColor, 0.55);
   const bootColor = opts.bootColor ?? 0x1a1510;
+  // Accent — used by signature primitives (visor, eye-line, glow strip).
+  // Defaults to the project's accent-gold so any caller that opts into a
+  // visor without specifying a colour still gets a coherent look.
+  const accentColor = opts.accentColor ?? 0xf2c060;
 
+  const accentMat = (() => {
+    // Accent uses unlit-ish basic so glow elements (visor, strip) read
+    // emissive without needing post-processing. Toon fallback when unlit
+    // doesn't fit a project — for now, basic.
+    const m = new THREE.MeshBasicMaterial({ color: accentColor });
+    return m;
+  })();
   const bodyMat = makeMat(bodyColor, toon);
   const headMat = makeMat(headColor, toon);
   const legMat  = makeMat(legColor,  toon);
@@ -672,6 +683,39 @@ export function buildRig(opts = {}) {
   const neck = (() => {
     const pivot = new THREE.Group();
     pivot.position.set(0, chestH, 0);
+    if (opts.neckCable) {
+      // Cyborg articulated neck — 3 stacked gear-color rings instead of
+      // a smooth body-color cylinder. Reads as segmented mechanical
+      // articulation (Raiden / cyborg ninja silhouette element). The
+      // top + bottom rings are slightly larger to form a barrel shape;
+      // the middle ring is the narrowest visible joint.
+      const cableGroup = new THREE.Group();
+      cableGroup.position.y = H.neckMeshY * scale;
+      const segH = (H.neckH * scale) / 3.2;
+      const segR = H.neckBotR * scale * 0.95;
+      const segR2 = H.neckTopR * scale * 0.85;
+      const ringDefs = [
+        { y: -segH * 1.05, r: segR, h: segH * 0.82 },
+        { y:  0,           r: segR2, h: segH * 0.65 },
+        { y:  segH * 1.05, r: segR, h: segH * 0.82 },
+      ];
+      for (const r of ringDefs) {
+        const ring = new THREE.Mesh(
+          _cyl(r.r, r.r, r.h, 16),
+          gearMat,
+        );
+        ring.position.y = r.y;
+        ring.castShadow = false;
+        ring.userData.zone = 'torso';
+        cableGroup.add(ring);
+      }
+      pivot.add(cableGroup);
+      // Return the group as the "mesh" reference so external systems
+      // (hit-flash lerp etc.) can still target it; the toon hit-flash
+      // walks meshes via the rig.meshes flat list which we'll patch
+      // below to include the cable rings.
+      return { pivot, mesh: cableGroup, cableRings: cableGroup.children.slice() };
+    }
     const mesh = new THREE.Mesh(
       _cyl(H.neckTopR * scale, H.neckBotR * scale, H.neckH * scale, 16),
       bodyMat,
@@ -708,6 +752,56 @@ export function buildRig(opts = {}) {
   jawMesh.castShadow = false;
   jawMesh.userData.zone = 'head';
   head.add(jawMesh);
+
+  // --- visor (cyborg ninja eye-line) -------------------------------
+  // Single horizontal accent-color bar wrapping the front of the
+  // cranium where a face would be. Strongest single-element silhouette
+  // change for the Raiden-coded male player. Gated on opts.visor so
+  // unhelmeted civilian / female / boss rigs can opt out.
+  let visorMesh = null;
+  if (opts.visor) {
+    const cR = H.craniumR * scale;
+    // Curved arc cylinder (open-ended) wrapping the front 180° of the
+    // head, very thin vertically. Slightly larger radius than the
+    // cranium so the band stands proud of the head surface.
+    const visorGeom = _cyl(
+      cR * 1.02, cR * 1.02, cR * 0.32, 24, true,
+      -Math.PI * 0.5, Math.PI,
+    );
+    visorMesh = new THREE.Mesh(visorGeom, accentMat);
+    visorMesh.position.y = (H.craniumY + H.craniumR * 0.05) * scale;
+    visorMesh.castShadow = false;
+    visorMesh.userData.zone = 'head';
+    head.add(visorMesh);
+  }
+
+  // --- ponytail (femme-fatale silhouette) ---------------------------
+  // Sweep box hanging from the back of the cranium. Adds a strong
+  // vertical silhouette element behind the head — the single biggest
+  // read change for an Eve-coded female player. Body-color so it
+  // matches the operator palette; the visor's accent does the
+  // signature-color work. Gated on opts.ponytail.
+  let ponytail = null;
+  if (opts.ponytail) {
+    const ptW = H.craniumR * scale * 0.55;
+    const ptH = H.craniumR * scale * 4.0;
+    const ptD = H.craniumR * scale * 0.55;
+    ponytail = new THREE.Mesh(_box(ptW, ptH, ptD), bodyMat);
+    // Anchor at back-top of cranium, hanging down. The mesh's local
+    // origin is the box centre, so position the centre half its height
+    // below the anchor + push back along +Z (this rig's cranium-back
+    // direction is +Z given the chest-front is +Z'd... double-check
+    // by viewing — visor uses thetaStart -π/2 to face +Z, and the
+    // jaw projects forward via jawY=+0.06 +Z. So back-of-head is -Z).
+    ponytail.position.set(
+      0,
+      (H.craniumY + H.craniumR * 0.6) * scale - ptH * 0.5,
+      -H.craniumR * scale * 0.85,
+    );
+    ponytail.castShadow = false;
+    ponytail.userData.zone = 'head';
+    head.add(ponytail);
+  }
 
   // Head-zone halo — invisible cap sitting just above the cranium so
   // shots that clip slightly over the top still register as head
@@ -748,6 +842,26 @@ export function buildRig(opts = {}) {
     bandolier.castShadow = false;
     bandolier.userData.zone = 'torso';
     chest.pivot.add(bandolier);
+  }
+
+  // --- back sheath (permanent blade silhouette) --------------------
+  // Thin gear-color box mounted across the back, slightly diagonal so
+  // it reads as a sheathed sword strap. Always present when opted in,
+  // independent of equipped weapon — gives the protagonist a permanent
+  // "carries a blade" silhouette element. Gated on opts.sheath.
+  let sheath = null;
+  if (opts.sheath) {
+    const shW = 0.05 * scale;
+    const shH = 0.85 * scale;
+    const shD = 0.05 * scale;
+    sheath = new THREE.Mesh(_box(shW, shH, shD), gearMat);
+    // Mount at chest back, slightly above center, tilted across the
+    // back. -Z is back of body in this rig's chest-local frame.
+    sheath.position.set(0, T.chestPlateYK * chestH * 0.3, -T.chestPlateTopR * scale * 0.95);
+    sheath.rotation.z = -0.45;   // tilt left-down to right-up across back
+    sheath.castShadow = false;
+    sheath.userData.zone = 'torso';
+    chest.pivot.add(sheath);
   }
 
   // Expose every pivot + mesh by name so callers can grab what they

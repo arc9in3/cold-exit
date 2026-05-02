@@ -87,6 +87,15 @@ export function createPlayer(scene) {
     // Only the player gets this; enemies stay bilateral so the player
     // reads as THE character on screen.
     signature: true,
+    // Cyborg-ninja silhouette signatures: yellow visor across the
+    // face, segmented neck cable in place of the smooth neck, gear-
+    // color sheath box mounted across the back. Together these read
+    // the player as the Raiden-coded protagonist; enemies skip these
+    // flags and stay generic-operator.
+    visor: true,
+    neckCable: true,
+    sheath: true,
+    accentColor: 0xf2c060,   // visor glow — project's accent-gold
   });
   initAnim(rig);
   const group = rig.group;
