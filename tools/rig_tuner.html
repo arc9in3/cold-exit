@@ -324,6 +324,15 @@ function rebuildRig() {
   }
   selectedJoint = null;
   refreshEditorUI();
+  // Debug exposure — let external scripts (Playwright, devtools) reach
+  // the live rig + scene + state for one-off captures (e.g. T-pose
+  // screenshot for art reference).
+  window.__rig = rig;
+  window.__state = state;
+  window.__scene = scene;
+  window.__camera = camera;
+  window.__controls = controls;
+  window.__renderer = renderer;
 }
 rebuildRig();
 

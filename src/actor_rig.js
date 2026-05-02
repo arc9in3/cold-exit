@@ -316,31 +316,34 @@ export const DEFAULT_DIMS_FEMALE = {
   hipY: 1.24,   // taller stance to match longer legs (thigh+calf+foot)
   torso: {
     pelvisH: 0.22,
-    // Pelvis taper FLIPPED to match anatomy refs: wider at the TOP
-    // (iliac crest, where the pelvis meets the waist) and narrower at
-    // the BOTTOM (pubic bone, where the legs descend). Previous values
-    // had this inverted, which made the hips read wrong.
     pelvisTopR: 0.30,    // wide iliac crest
     pelvisBotR: 0.18,    // narrow pubic bone
-    stomachH: 0.26,      // longer waist for hourglass elongation
-    stomachTopR: 0.18,
-    stomachBotR: 0.11,   // wasp waist — narrowest point
+    // Chest + stomach seam matched — chestBotR = stomachTopR = 0.13,
+    // and chestDepth = stomachDepth (set below) so the two cylinders
+    // read as ONE continuous torso taper from shoulder to wasp-waist.
+    // Without matching the seam radii / depths, there's a visible
+    // primitive boundary at the chest-stomach junction.
+    stomachH: 0.26,
+    stomachTopR: 0.13,
+    stomachBotR: 0.11,   // wasp waist
     chestH: 0.34,
-    chestTopR: 0.27,     // narrower shoulder line than male
-    chestBotR: 0.15,     // sharp taper into the waist pinch
+    chestTopR: 0.27,
+    chestBotR: 0.13,
     chestPlateTopR: 0.29,
     chestPlateBotR: 0.20,
-    collarTopR: 0.09,
-    collarBotR: 0.27,
-    beltR: 0.16,         // tight waist belt
-    beltH: 0.06,
+    // Collar + belt SKIPPED on female: the bodyshapes ref shows a
+    // clean torso with no visible accent bands. Build code guards on
+    // collarH > 0 / beltH > 0 — setting these to 0 hides the meshes.
+    collarH: 0,
+    beltH: 0,
     // Per-segment depth ratios — torso isn't uniformly thick front-to-
     // back. Ribcage at chest level has flatter front (eve refs show
     // chest plane is relatively flat, the bust does the forward
     // projection). Waist pinches on Z too. Pelvis projects forward
     // and back per the wedge shape refs show.
-    chestDepth:   0.70,   // flatter chest plane — bust does the forward work
-    stomachDepth: 0.55,
+    // Matched depths so chest + stomach read as one continuous torso.
+    chestDepth:   0.70,
+    stomachDepth: 0.70,
     pelvisDepth:  0.82,
     // Crotch wedge — bridges the pelvis bottom to the inward-attached
     // legs. Sized for the wider female pelvis.
@@ -369,8 +372,9 @@ export const DEFAULT_DIMS_FEMALE = {
     upperAbdomen: null,
     lowerAbdomen: null,
     trapezius: null,
-    // Single subtle abdomen lobe for the front-of-stomach curve.
-    abdomen: { r: 0.08, y: 0, z: 0.10, scaleY: 1.4, scaleZ: 0.55 },
+    // Abdomen lobe stripped — chest + stomach cylinder taper does the
+    // torso curve work; the small front lobe was just adding a seam.
+    abdomen: null,
     // Abdomen split into upper + lower lobes so the boundary between
     // them reads as the implicit navel / abs definition line. Without
     // shader tricks we can't draw a recessed line; stacking two lobes
@@ -848,21 +852,22 @@ export function buildRig(opts = {}) {
   })();
   stomach.pivot.add(chest.pivot);
 
-  // Collar / shoulder yoke — flattened truncated cone that caps the
-  // chest top, leaving only a neck-sized hole. Without this, the
-  // chest's flat top disc catches direct warm key light and reads as
-  // a bright tan ring around the neck.
-  const collar = new THREE.Mesh(
-    _cyl(T.collarTopR * scale, T.collarBotR * scale, T.collarH * scale, T.segs),
-    bodyMat,
-  );
-  collar.position.set(0, chestH + T.collarDY * scale, 0);
-  collar.scale.z = T.depthRatio;
-  // Accessory — silhouette inside the chest+head shadow.
-  collar.castShadow = false;
-  collar.receiveShadow = true;
-  collar.userData.zone = 'torso';
-  chest.pivot.add(collar);
+  // Collar / shoulder yoke — caps the chest top so it doesn't read as
+  // a flat-top cylinder. Skipped when collarH is 0 (female default
+  // strips this for the clean bodyshapes-style silhouette).
+  let collar = null;
+  if ((T.collarH || 0) > 0.0001) {
+    collar = new THREE.Mesh(
+      _cyl(T.collarTopR * scale, T.collarBotR * scale, T.collarH * scale, T.segs),
+      bodyMat,
+    );
+    collar.position.set(0, chestH + T.collarDY * scale, 0);
+    collar.scale.z = T.depthRatio;
+    collar.castShadow = false;
+    collar.receiveShadow = true;
+    collar.userData.zone = 'torso';
+    chest.pivot.add(collar);
+  }
 
   // Chest plate — curved front panel. Open-ended cylindrical arc
   // wrapping the front + sides of the ribcage, radius a hair larger
@@ -893,18 +898,20 @@ export function buildRig(opts = {}) {
     chest.pivot.add(chestPlate);
   }
 
-  // Belt — full cylinder ring at the stomach/chest seam, slightly
-  // oversized relative to the waist so it reads as worn over.
-  const belt = new THREE.Mesh(
-    _cyl(T.beltR * scale, T.beltR * scale, T.beltH * scale, T.segs),
-    gearMat,
-  );
-  belt.position.set(0, T.beltY * scale, 0);
-  belt.scale.z = T.depthRatio;
-  // Accessory — same vertical band as the stomach, no silhouette gain.
-  belt.castShadow = false;
-  belt.userData.zone = 'torso';
-  chest.pivot.add(belt);
+  // Belt — gear ring at the waist seam. Skipped when beltH is 0
+  // (female default — clean silhouette has no belt accent).
+  let belt = null;
+  if ((T.beltH || 0) > 0.0001) {
+    belt = new THREE.Mesh(
+      _cyl(T.beltR * scale, T.beltR * scale, T.beltH * scale, T.segs),
+      gearMat,
+    );
+    belt.position.set(0, T.beltY * scale, 0);
+    belt.scale.z = T.depthRatio;
+    belt.castShadow = false;
+    belt.userData.zone = 'torso';
+    chest.pivot.add(belt);
+  }
 
   // --- arms ---
   const A = dims.arms;
@@ -1506,19 +1513,34 @@ export function buildRig(opts = {}) {
     // Flat mesh list (useful for hit-flash color lerp across every part).
     // Includes gear accents so they flash with the body on hit.
     meshes: [
-      ...(pelvis ? [pelvis] : []), stomach.mesh, chest.mesh, ...(chestPlate ? [chestPlate] : []), belt, collar,
+      ...(pelvis ? [pelvis] : []), stomach.mesh, chest.mesh,
+      ...(chestPlate ? [chestPlate] : []),
+      ...(belt ? [belt] : []),
+      ...(collar ? [collar] : []),
       neck.mesh, headMesh, jawMesh, headHalo,
-      leftLeg.thigh.mesh, leftLeg.hipBulge, leftLeg.thighRig,
-      leftLeg.kneeBulge, leftLeg.kneePad,
-      leftLeg.calf.mesh, leftLeg.bootTop, leftLeg.foot.mesh,
-      rightLeg.thigh.mesh, rightLeg.hipBulge, rightLeg.thighRig,
-      rightLeg.kneeBulge, rightLeg.kneePad,
-      rightLeg.calf.mesh, rightLeg.bootTop, rightLeg.foot.mesh,
-      leftArm.shoulder.mesh, leftArm.shoulderBulge, leftArm.shoulderPad,
-      leftArm.forearm.mesh, leftArm.elbowBulge, leftArm.wristCuff,
+      leftLeg.thigh.mesh, leftLeg.hipBulge,
+      ...(leftLeg.thighRig ? [leftLeg.thighRig] : []),
+      leftLeg.kneeBulge,
+      ...(leftLeg.kneePad ? [leftLeg.kneePad] : []),
+      leftLeg.calf.mesh,
+      ...(leftLeg.bootTop ? [leftLeg.bootTop] : []),
+      leftLeg.foot.mesh,
+      rightLeg.thigh.mesh, rightLeg.hipBulge,
+      ...(rightLeg.thighRig ? [rightLeg.thighRig] : []),
+      rightLeg.kneeBulge,
+      ...(rightLeg.kneePad ? [rightLeg.kneePad] : []),
+      rightLeg.calf.mesh,
+      ...(rightLeg.bootTop ? [rightLeg.bootTop] : []),
+      rightLeg.foot.mesh,
+      leftArm.shoulder.mesh, leftArm.shoulderBulge,
+      ...(leftArm.shoulderPad ? [leftArm.shoulderPad] : []),
+      leftArm.forearm.mesh, leftArm.elbowBulge,
+      ...(leftArm.wristCuff ? [leftArm.wristCuff] : []),
       leftArm.hand.mesh,
-      rightArm.shoulder.mesh, rightArm.shoulderBulge, rightArm.shoulderPad,
-      rightArm.forearm.mesh, rightArm.elbowBulge, rightArm.wristCuff,
+      rightArm.shoulder.mesh, rightArm.shoulderBulge,
+      ...(rightArm.shoulderPad ? [rightArm.shoulderPad] : []),
+      rightArm.forearm.mesh, rightArm.elbowBulge,
+      ...(rightArm.wristCuff ? [rightArm.wristCuff] : []),
       rightArm.hand.mesh,
     ],
     // Subset of `meshes` that lives in the right-arm subtree. The
