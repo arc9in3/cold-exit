@@ -121,7 +121,7 @@ window.__resetHints = resetHints;
 // "I'm on build XYZ" without inspecting the bundle. Date stamps the
 // version so a quick glance tells you how stale the build is. Both
 // values render into the bottom-right #build-version label.
-const BUILD_VERSION = 'f758dcf+headhunter-trace';
+const BUILD_VERSION = 'b1c4a00+headhunter-trace-removed';
 // Build date intentionally bumped each deploy so the corner label
 // reflects the current snapshot.
 const BUILD_DATE    = '2026-05-01';
@@ -8661,17 +8661,6 @@ function fireOneShot(playerInfo, weapon, aimPoint, isADS, aimOwner, aimZone) {
           weapon.reloadingT = 0;
           weapon.reloadEndsAt = 0;
         }
-        if (window.__debug?.traceHeadhunter) {
-          console.log('[headhunter] refunded, wasEmpty=', wasEmpty,
-            'ammo->', weapon.ammo, 'reloadingT->', weapon.reloadingT);
-        }
-      } else if (window.__debug?.traceHeadhunter) {
-        // Loud diagnostic — log every bullet hit while traceHeadhunter
-        // is on so the player can see why the perk didn't fire.
-        console.log('[headhunter] no refund — zone=', hit.zone,
-          'hasPerk=', weaponHasPerk(weapon, 'headhunter'),
-          'ammo=', weapon.ammo, 'magSize=', eff.magSize,
-          'perks=', (weapon.perks || []).map(p => p?.id));
       }
       // Scavenged Rounds — chance-based ammo refund on any body hit.
       // Cancel the auto-reload-on-empty if this refund puts a round
