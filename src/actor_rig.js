@@ -352,10 +352,17 @@ export const DEFAULT_DIMS_FEMALE = {
     crotchY: 0.005, crotchZ: 0,
     // Hip-front lobe — soft body-color sphere on the FRONT-bottom of
     // the pelvis cylinder. Smooths the visible "scoop" between the
-    // wider iliac flare and where the legs descend, so the pelvis
-    // doesn't read as a flat-bottomed cylinder with cylinders dangling
-    // out the corners.
+    // wider iliac flare and where the legs descend.
     hipFront: { r: 0.12, y: -0.06, z: 0.10, scaleX: 1.6, scaleY: 0.7, scaleZ: 0.8 },
+    // Hip bowl — large body-color ellipsoid that ENVELOPS the pelvis
+    // cylinder area and forms the primary hip read. Scaled wide in X
+    // (hip flare), full pelvisH in Y, full depth in Z. Sits centered
+    // on the pelvis. Without this the cylinder + iliacShelves + glutes
+    // read as four separate primitives clipping each other; with it
+    // the entire hip area reads as ONE continuous curved volume.
+    // Anatomically the hip / pelvis area is more spheroid than
+    // cylindrical — this primitive matches that.
+    hipBowl: { r: 0.30, y: -0.04, z: 0, scaleX: 1.00, scaleY: 0.62, scaleZ: 0.92 },
     // Abdomen split into upper + lower lobes so the boundary between
     // them reads as the implicit navel / abs definition line. Without
     // shader tricks we can't draw a recessed line; stacking two lobes
@@ -393,17 +400,13 @@ export const DEFAULT_DIMS_FEMALE = {
     hipBulgeR: 0.20,     // big iliac-to-thigh bridge sphere
     kneeBulgeR: 0.08,
     kneePadW: 0.15, kneePadH: 0.08, kneePadD: 0.08,
-    // Glute volume — pulled back from the previous over-amplified
-    // values. Glutes are now SUBTLE additions to the pelvis cylinder
-    // shape, not standalone "two spheres" reads. The pelvis cylinder
-    // does the primary hip-volume work (taller + wider); glutes only
-    // add the soft back-projection a cylinder alone can't give.
-    glute: { r: 0.13, separationX: 0.12, y: -0.06, z: -0.10, scaleY: 0.85, scaleZ: 0.95 },
-    // Iliac shelf — much smaller now. Just enough to soften the
-    // pelvis-to-thigh transition; not large enough to read as a
-    // distinct sphere. The taller pelvis cylinder + bigger crotch
-    // wedge are doing most of the bridging work.
-    iliacShelf: { r: 0.09, x: 0.13, y: -0.04, z: 0.02, scaleX: 1.2, scaleY: 0.7, scaleZ: 1.0 },
+    // Glute volume — small soft additions to the hipBowl back curve,
+    // not standalone shapes. The hipBowl is now doing the primary hip
+    // volume work; glutes just add a subtle outward-back projection.
+    glute: { r: 0.10, separationX: 0.13, y: -0.06, z: -0.13, scaleY: 0.85, scaleZ: 0.85 },
+    // Iliac shelf disabled (set null) — hipBowl envelops this region
+    // smoothly, the shelf was just adding visible primitive seams.
+    iliacShelf: null,
     // Glute-thigh bridge — fills the deeper curve between the
     // pronounced glute and the longer thigh.
     gluteThighBlend: { r: 0.14, yK: 0.06, z: -0.09, scaleZ: 0.85, scaleY: 0.78 },
@@ -450,17 +453,22 @@ export const DEFAULT_DIMS_FEMALE = {
     // < 1 keeps the lobes from looking spherical (they should read
     // hemispherical against the chest plate).
     bust: { r: 0.115, separationX: 0.085, y: 0.18, z: 0.21, scaleY: 0.85, scaleZ: 1.15 },
-    // Bob hair — built from 4 primitives instead of a single helmet
-    // sphere. Each piece reads as a directional flow of hair:
-    //   crown   — flattened dome covering the top of the cranium
-    //   back    — vertically stretched lobe falling from crown to nape
-    //   sideL/R — narrow slabs framing the cheeks (face-frame pieces)
-    // Together they read as a styled chin-length bob with visible
-    // structural pieces, not a uniform helmet of hair.
+    // Bob hair — 5-primitive structured cut. Spheres for the rounded
+    // top, cylinders for the flat-bottomed body so the chin-length
+    // cut reads as a clean horizontal line (not a tapered curve).
+    // Plus a fringe slab across the brow.
+    //   crown    — sphere top-half only (dome) on cranium top
+    //   back     — vertical cylinder behind head, flat top + bottom
+    //   sideL/R  — vertical cylinders flanking face, flat bottoms
+    //              along the chin/jaw line (the "cut edge")
+    //   fringe   — thin horizontal slab across the brow for bangs
+    // Cylinders are open-ended at the top so the crown dome blends in
+    // without revealing a hard ring at the crown seam.
     bob: {
-      crown:  { r: 0.16, scaleX: 1.05, scaleY: 0.65, scaleZ: 1.05, y: 0.16, z: -0.01 },
-      back:   { r: 0.14, scaleX: 0.95, scaleY: 1.50, scaleZ: 0.85, y: 0.04, z: -0.07 },
-      side:   { r: 0.10, scaleX: 0.55, scaleY: 1.50, scaleZ: 0.95, x: 0.13, y: 0.05, z: 0.02 },
+      crown:  { r: 0.17, scaleX: 1.05, scaleY: 0.55, scaleZ: 1.05, y: 0.18, z: -0.01 },
+      back:   { topR: 0.135, botR: 0.155, h: 0.30, y: 0.03, z: -0.07 },
+      side:   { topR: 0.06, botR: 0.075, h: 0.30, x: 0.135, y: 0.03, z: 0.02 },
+      fringe: { w: 0.27, h: 0.06, d: 0.06, y: 0.18, z: 0.13 },
     },
   },
 };
@@ -1127,20 +1135,67 @@ export function buildRig(opts = {}) {
   }
   if (H.bob) {
     const B = H.bob;
-    const mkHairPiece = (cfg, x = 0) => {
-      const m = new THREE.Mesh(_sph(cfg.r * scale, 32, 24), hairMat);
-      m.scale.set(cfg.scaleX ?? 1.0, cfg.scaleY ?? 1.0, cfg.scaleZ ?? 1.0);
-      m.position.set(x * scale, (H.craniumY + cfg.y) * scale, cfg.z * scale);
-      m.castShadow = false;
-      m.userData.zone = 'head';
-      head.add(m);
-      return m;
-    };
-    if (B.crown) mkHairPiece(B.crown, 0);
-    if (B.back)  mkHairPiece(B.back, 0);
+    // Crown — sphere top-half only (dome). Phi-clipped so only the
+    // upper hemisphere renders, matching the rounded top of a styled
+    // bob without a visible bottom seam.
+    if (B.crown) {
+      const c = B.crown;
+      const crownGeom = _stamp(new THREE.SphereGeometry(
+        c.r * scale, 32, 16, 0, Math.PI * 2, 0, Math.PI / 2,
+      ));
+      const crown = new THREE.Mesh(crownGeom, hairMat);
+      crown.scale.set(c.scaleX ?? 1.0, c.scaleY ?? 1.0, c.scaleZ ?? 1.0);
+      crown.position.set(0, (H.craniumY + c.y) * scale, c.z * scale);
+      crown.castShadow = false;
+      crown.userData.zone = 'head';
+      head.add(crown);
+    }
+    // Back panel — vertical cylinder behind head with FLAT top edge
+    // (open-ended cylinder caps off so the crown dome hides the top
+    // seam) and FLAT bottom edge so the chin-length cut reads as a
+    // straight horizontal line instead of tapering to a point.
+    if (B.back) {
+      const b = B.back;
+      const backMesh = new THREE.Mesh(
+        _cyl(b.topR * scale, b.botR * scale, b.h * scale, 24),
+        hairMat,
+      );
+      backMesh.position.set(0, (H.craniumY + b.y) * scale, b.z * scale);
+      backMesh.castShadow = false;
+      backMesh.userData.zone = 'head';
+      head.add(backMesh);
+    }
+    // Side panels — vertical cylinders flanking face. Flat bottoms
+    // form the horizontal cut edge along the jaw line. Slight outward
+    // taper (botR > topR) gives the bob its characteristic flare at
+    // the chin.
     if (B.side) {
-      mkHairPiece(B.side, +B.side.x);   // right side
-      mkHairPiece(B.side, -B.side.x);   // left side (mirrored)
+      const s = B.side;
+      for (const sign of [-1, +1]) {
+        const sideMesh = new THREE.Mesh(
+          _cyl(s.topR * scale, s.botR * scale, s.h * scale, 16),
+          hairMat,
+        );
+        sideMesh.position.set(sign * s.x * scale, (H.craniumY + s.y) * scale, s.z * scale);
+        sideMesh.castShadow = false;
+        sideMesh.userData.zone = 'head';
+        head.add(sideMesh);
+      }
+    }
+    // Fringe / bangs — horizontal slab across the brow line, flat
+    // bottom so it reads as a clean cut at brow level. Sits forward
+    // of the cranium so it covers the forehead without clipping
+    // through the face.
+    if (B.fringe) {
+      const f = B.fringe;
+      const fringeMesh = new THREE.Mesh(
+        _box(f.w * scale, f.h * scale, f.d * scale),
+        hairMat,
+      );
+      fringeMesh.position.set(0, (H.craniumY + f.y) * scale, f.z * scale);
+      fringeMesh.castShadow = false;
+      fringeMesh.userData.zone = 'head';
+      head.add(fringeMesh);
     }
   }
 
@@ -1258,6 +1313,22 @@ export function buildRig(opts = {}) {
       lobe.userData.zone = 'leg';
       hips.add(lobe);
     }
+  }
+
+  // --- hip bowl (primary hip volume) -------------------------------
+  // Female-coded. Large body-color ellipsoid enveloping the pelvis
+  // cylinder area. Forms the primary hip silhouette so the cylinder
+  // + iliacShelves + glutes don't read as separate primitives. Sized
+  // to extend slightly past the cylinder in every direction so the
+  // cylinder edges hide under the bowl's curve. Parented to hips.
+  if (T.hipBowl) {
+    const HB = T.hipBowl;
+    const bowlMesh = new THREE.Mesh(_sph(HB.r * scale, 32, 24), bodyMat);
+    bowlMesh.scale.set(HB.scaleX ?? 1.0, HB.scaleY ?? 1.0, HB.scaleZ ?? 1.0);
+    bowlMesh.position.set(0, HB.y * scale, HB.z * scale);
+    bowlMesh.castShadow = false;
+    bowlMesh.userData.zone = 'torso';
+    hips.add(bowlMesh);
   }
 
   // --- hip-front lobe (smooth pelvis-front curve) ------------------
