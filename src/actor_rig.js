@@ -313,67 +313,83 @@ export const DEFAULT_DIMS = {
 // bust / glute / hair-volume blocks the build pipeline keys off when
 // they exist. Apply with mergeDims(DEFAULT_DIMS, DEFAULT_DIMS_FEMALE).
 export const DEFAULT_DIMS_FEMALE = {
-  hipY: 1.20,   // taller stance — leg-length total ~1.22 (thigh+calf+foot)
+  hipY: 1.24,   // taller stance to match longer legs (thigh+calf+foot)
   torso: {
     pelvisH: 0.16,
-    pelvisTopR: 0.20,    // hip flare begins
-    pelvisBotR: 0.24,    // hips wider than shoulders (eve-coded)
-    stomachH: 0.24,
-    stomachTopR: 0.20,
-    stomachBotR: 0.14,   // narrowest point — waist pinch
+    pelvisTopR: 0.21,    // hip flare upper bound
+    pelvisBotR: 0.28,    // hips DRAMATICALLY wider than shoulders
+    stomachH: 0.26,      // longer waist for hourglass elongation
+    stomachTopR: 0.18,
+    stomachBotR: 0.11,   // wasp waist — narrowest point
     chestH: 0.34,
-    chestTopR: 0.28,     // narrower shoulder line than male
-    chestBotR: 0.18,     // tapers into the waist
-    chestPlateTopR: 0.30,
-    chestPlateBotR: 0.24,
-    collarTopR: 0.10,
-    collarBotR: 0.28,
-    beltR: 0.20,
-    // Abdomen lobe — soft forward bump on the stomach front so the
-    // waist doesn't read as a uniform tapered cylinder. Subtle for
-    // female (tight abs).
-    abdomen: { r: 0.10, y: -0.04, z: 0.10, scaleY: 1.2, scaleZ: 0.6 },
-    // Pec lobe — soft body-color mass between the bust spheres bridging
-    // them into the chest cylinder centerline. Without this the bust
-    // reads as two stuck-on lumps; with it the entire chest reads as
-    // one continuous curve. Female-specific; not present on male.
-    pec: { r: 0.10, y: 0.16, z: 0.16, scaleY: 0.55, scaleX: 1.40, scaleZ: 0.90 },
+    chestTopR: 0.27,     // narrower shoulder line than male
+    chestBotR: 0.15,     // sharp taper into the waist pinch
+    chestPlateTopR: 0.29,
+    chestPlateBotR: 0.20,
+    collarTopR: 0.09,
+    collarBotR: 0.27,
+    beltR: 0.16,         // tight waist belt
+    beltH: 0.06,
+    // Abdomen lobe — vertically elongated body-color mass running from
+    // sternum down through navel area. Pushed forward and made tall to
+    // sell the lean athletic torso line per refs. Eve has visible
+    // muscle definition; without surface detail we have to lean on
+    // SHAPE alone, which means a longer + more forward lobe.
+    abdomen: { r: 0.09, y: -0.04, z: 0.13, scaleY: 1.6, scaleZ: 0.55 },
+    // Pec lobe — moved forward and slightly higher so it merges into
+    // the bust spheres without a visible seam.
+    pec: { r: 0.10, y: 0.17, z: 0.18, scaleY: 0.50, scaleX: 1.40, scaleZ: 0.95 },
     // Trapezius — narrower wedge for female (smaller shoulder line).
-    trapezius: { r: 0.16, y: 0.30, z: 0, scaleY: 0.40, scaleX: 1.40, scaleZ: 1.00 },
+    trapezius: { r: 0.15, y: 0.30, z: 0, scaleY: 0.40, scaleX: 1.30, scaleZ: 1.00 },
+    // Lower-back / lumbar curve — soft body-color lobe at the back of
+    // the chest-bottom that arcs INTO the glute curves below. Without
+    // this the spine area reads as a vertical line; with it the back
+    // has an S-curve from shoulder blades down through lumbar to glutes.
+    lumbar: { r: 0.10, y: -0.16, z: -0.12, scaleY: 0.7, scaleX: 1.4, scaleZ: 0.7 },
   },
   legs: {
-    // Legs pulled inward (was 0.20) so they descend from directly
-    // under the glute mass instead of attaching at the wider iliac
-    // crest. Anatomically the femur head is inside the hip bone, and
-    // the eve refs show the femur shaft angling inward — pulling
-    // hipX in matches both. The thigh-top sphere (hipBulge) is bumped
-    // up to bridge the gap between the wide pelvis and the narrower
-    // leg attach.
+    // Legs pulled inward so they descend from directly under the glute
+    // mass instead of attaching at the wider iliac crest. Anatomically
+    // the femur head is inside the hip bone.
     hipX: 0.13,
-    thighH: 0.50,        // long legs (was 0.42)
-    thighTopR: 0.13,
-    thighBotR: 0.085,
-    calfH: 0.66,         // long legs (was 0.59)
-    calfTopR: 0.085,
-    calfBotR: 0.055,
-    footH: 0.06,         // smaller heeled foot
-    footW: 0.13,
-    footD: 0.26,
-    hipBulgeR: 0.18,     // bigger so it bridges hip flare → thigh
-    kneeBulgeR: 0.085,
-    kneePadW: 0.16, kneePadH: 0.09, kneePadD: 0.09,
-    // Glute volume — two flattened spheres on the back of the pelvis,
-    // bumped wider + larger so they read as full glute curves and sit
-    // directly above where each leg now attaches.
-    glute: { r: 0.16, separationX: 0.13, y: -0.02, z: -0.10, scaleY: 0.90, scaleZ: 1.05 },
-    // Iliac shelf — connective sphere on each side that bridges the
-    // hip flare into the thigh top so the seam between pelvis cylinder
-    // and thigh cylinder reads as a single curve instead of a hard
-    // polygon ring. Per-side X mirrored at build time.
-    iliacShelf: { r: 0.13, x: 0.13, y: -0.05, z: 0.02, scaleX: 1.4, scaleY: 0.8, scaleZ: 1.1 },
-    // Bigger glute-thigh blend for female — fills the deeper curve
-    // between the more-pronounced glute and the longer thigh.
-    gluteThighBlend: { r: 0.13, yK: 0.06, z: -0.08, scaleZ: 0.85, scaleY: 0.75 },
+    thighH: 0.54,        // longer legs (push for the eve-ratio look)
+    thighTopR: 0.13,     // top retains volume so iliac shelf seamless
+    thighBotR: 0.075,    // tapers tighter at the knee
+    calfH: 0.70,         // longer + tapered
+    calfTopR: 0.082,
+    calfBotR: 0.045,     // very narrow at ankle (athletic calf taper)
+    footH: 0.05,         // smaller heeled foot
+    footW: 0.11,
+    footD: 0.24,
+    footZ: 0.07,         // toe pushed forward (heeled stance)
+    hipBulgeR: 0.20,     // big iliac-to-thigh bridge sphere
+    kneeBulgeR: 0.08,
+    kneePadW: 0.15, kneePadH: 0.08, kneePadD: 0.08,
+    // Glute volume — bumped wider + larger + pushed back for the eve
+    // pronounced-glute silhouette. Each lobe sits directly above its
+    // matching leg attach so the back-curve flows continuous.
+    glute: { r: 0.20, separationX: 0.13, y: -0.04, z: -0.14, scaleY: 1.00, scaleZ: 1.20 },
+    // Iliac shelf — bigger and pushed slightly forward so it merges
+    // the wider hip flare into the inward-attached thigh top.
+    iliacShelf: { r: 0.14, x: 0.14, y: -0.04, z: 0.03, scaleX: 1.5, scaleY: 0.8, scaleZ: 1.1 },
+    // Glute-thigh bridge — fills the deeper curve between the
+    // pronounced glute and the longer thigh.
+    gluteThighBlend: { r: 0.14, yK: 0.06, z: -0.09, scaleZ: 0.85, scaleY: 0.78 },
+    // Knee bridge — body-color sphere at the knee joint that bridges
+    // the thigh-bottom narrowing into the calf-top widening. Without
+    // it the seam is visible from the side at every knee bend; with
+    // it the leg reads as one continuous curve through the joint.
+    kneeBridge: { r: 0.08, scaleY: 0.7, scaleZ: 1.0 },
+    // Calf flex lobe — soft body-color sphere on the back of the calf
+    // mid-segment, parented to the calf so it follows leg motion.
+    // Sells the natural calf bulge that a uniform tapered cylinder
+    // can't.
+    calfFlex: { r: 0.08, yK: 0.45, z: -0.04, scaleY: 1.4, scaleZ: 0.9 },
+    // Heel block — small body-color box at the back of the boot that
+    // raises the heel to read as a heeled boot rather than a flat
+    // tactical boot. Parented to the foot pivot so it stays glued to
+    // the boot in motion.
+    heel: { w: 0.06, h: 0.06, d: 0.05, y: -0.03, z: -0.08 },
   },
   arms: {
     shoulderInset: 0.28,    // narrower shoulders
@@ -396,9 +412,12 @@ export const DEFAULT_DIMS_FEMALE = {
     craniumR: 0.13,         // smaller head — anime proportions
     craniumStretchY: 1.10,
     jawW: 0.06, jawH: 0.08, jawD: 0.18,
-    // Bust geometry — two flattened spheres on the chest plate. Build
-    // pipeline reads dims.head.bust and adds the meshes.
-    bust: { r: 0.085, separationX: 0.07, y: 0.16, z: 0.18, scaleY: 0.95, scaleZ: 1.05 },
+    // Bust geometry — two flattened spheres on the chest plate. Pushed
+    // up + forward and given more volume to match the prominent eve
+    // silhouette. scaleZ > 1 projects the bust further forward; scaleY
+    // < 1 keeps the lobes from looking spherical (they should read
+    // hemispherical against the chest plate).
+    bust: { r: 0.115, separationX: 0.08, y: 0.20, z: 0.23, scaleY: 0.90, scaleZ: 1.20 },
     // Hair volume — bob cut. A flattened sphere wrapping the cranium,
     // slightly oversized + stretched vertically so it extends from
     // crown down past the ears to chin level. Pushed back in Z a hair
@@ -556,6 +575,19 @@ export function buildRig(opts = {}) {
     // Knee sphere — smooth bend between thigh and calf.
     const kneeBulge = jointSphere(L.kneeBulgeR * scale, legMat, 'leg');
     knee.add(kneeBulge);
+
+    // Knee bridge — body-color sphere at the knee joint that bridges
+    // the thigh-bottom narrowing into the calf-top widening. Without
+    // it the seam reads as a hard polygon ring at every knee bend.
+    if (L.kneeBridge) {
+      const KB = L.kneeBridge;
+      const bridgeMesh = new THREE.Mesh(_sph(KB.r * scale, 24, 16), legMat);
+      bridgeMesh.scale.set(KB.scaleX ?? 1.0, KB.scaleY ?? 1.0, KB.scaleZ ?? 1.0);
+      bridgeMesh.position.set(0, 0, 0);
+      bridgeMesh.castShadow = false;
+      bridgeMesh.userData.zone = 'leg';
+      knee.add(bridgeMesh);
+    }
     // Knee pad — round dome over the front of the joint. Sphere
     // geometry scaled into a flat oval cap reads softer than the
     // previous boxy plate; the cel-shading band wraps around the
@@ -575,6 +607,20 @@ export function buildRig(opts = {}) {
       material: legMat, zone: 'leg',
     });
     knee.add(calf.pivot);
+
+    // Calf flex lobe — soft body-color sphere on the back of the calf
+    // mid-segment, parented to the calf so it follows leg motion.
+    // Sells the natural calf bulge that a uniform tapered cylinder
+    // can't.
+    if (L.calfFlex) {
+      const CF = L.calfFlex;
+      const flexMesh = new THREE.Mesh(_sph(CF.r * scale, 24, 16), legMat);
+      flexMesh.scale.set(CF.scaleX ?? 1.0, CF.scaleY ?? 1.0, CF.scaleZ ?? 1.0);
+      flexMesh.position.set(0, -CF.yK * calfH, CF.z * scale);
+      flexMesh.castShadow = false;
+      flexMesh.userData.zone = 'leg';
+      calf.pivot.add(flexMesh);
+    }
 
     const ankle = new THREE.Group();
     ankle.position.y = -calfH;
@@ -618,6 +664,20 @@ export function buildRig(opts = {}) {
       toe.castShadow = false;
       toe.userData.zone = 'leg';
       pivot.add(toe);
+      // Heel block — small body-color box at the back of the boot
+      // that raises the heel to read as a heeled boot rather than a
+      // flat tactical boot. Female-only via dim entry.
+      if (L.heel) {
+        const HE = L.heel;
+        const heelMesh = new THREE.Mesh(
+          _box(HE.w * scale, HE.h * scale, HE.d * scale),
+          bootMat,
+        );
+        heelMesh.position.set(0, HE.y * scale, HE.z * scale);
+        heelMesh.castShadow = false;
+        heelMesh.userData.zone = 'leg';
+        pivot.add(heelMesh);
+      }
       // Mesh alias for the .meshes flat list — point at the sole so
       // hit-flash etc. still has a single mesh handle per foot.
       return { pivot, mesh: sole };
@@ -746,7 +806,14 @@ export function buildRig(opts = {}) {
   // (character front); Three.js's CylinderGeometry places theta=0 at
   // +Z then sweeps through +X, so the arc spans -75°..+75° around
   // the front axis.
-  const chestPlate = new THREE.Mesh(
+  // Chest plate is the "tactical chest rig" gear element — reads
+  // wrong on the eve / female silhouette where the body should be
+  // smooth bodysuit. Skip it when the rig has bust geometry (i.e.,
+  // the female overlay) so the chest reads as continuous skin/cloth
+  // rather than armor plate over breasts. Male path retains the
+  // plate as before. NB: H = dims.head is declared further down with
+  // the head-block; reference dims.head directly here.
+  const chestPlate = dims.head.bust ? null : new THREE.Mesh(
     _cyl(
       T.chestPlateTopR * scale, T.chestPlateBotR * scale,
       T.chestPlateH * scale, 48, true,
@@ -754,12 +821,13 @@ export function buildRig(opts = {}) {
     ),
     gearMat,
   );
-  chestPlate.position.set(0, T.chestPlateYK * chestH, 0);
-  chestPlate.scale.z = T.depthRatio;
-  // Accessory — sits inside the chest cylinder shadow.
-  chestPlate.castShadow = false;
-  chestPlate.userData.zone = 'torso';
-  chest.pivot.add(chestPlate);
+  if (chestPlate) {
+    chestPlate.position.set(0, T.chestPlateYK * chestH, 0);
+    chestPlate.scale.z = T.depthRatio;
+    chestPlate.castShadow = false;
+    chestPlate.userData.zone = 'torso';
+    chest.pivot.add(chestPlate);
+  }
 
   // Belt — full cylinder ring at the stomach/chest seam, slightly
   // oversized relative to the waist so it reads as worn over.
@@ -1176,6 +1244,21 @@ export function buildRig(opts = {}) {
     stomach.pivot.add(lobe);
   }
 
+  // --- lumbar curve (back-of-torso S-curve) ------------------------
+  // Female-coded. Soft body-color lobe at the back of the chest-
+  // bottom that arcs INTO the glute curves below. Without this the
+  // spine area reads as a vertical line; with it the back has an
+  // S-curve from shoulder blades through lumbar to glutes.
+  if (T.lumbar) {
+    const LB = T.lumbar;
+    const lumbarMesh = new THREE.Mesh(_sph(LB.r * scale, 24, 16), bodyMat);
+    lumbarMesh.scale.set(LB.scaleX ?? 1.0, LB.scaleY ?? 1.0, LB.scaleZ ?? 1.0);
+    lumbarMesh.position.set(0, LB.y * scale, LB.z * scale);
+    lumbarMesh.castShadow = false;
+    lumbarMesh.userData.zone = 'torso';
+    chest.pivot.add(lumbarMesh);
+  }
+
   let bandolier = null;
   if (opts.signature) {
     const stratW = 0.04 * scale;
@@ -1233,7 +1316,7 @@ export function buildRig(opts = {}) {
     // Flat mesh list (useful for hit-flash color lerp across every part).
     // Includes gear accents so they flash with the body on hit.
     meshes: [
-      pelvis, stomach.mesh, chest.mesh, chestPlate, belt, collar,
+      pelvis, stomach.mesh, chest.mesh, ...(chestPlate ? [chestPlate] : []), belt, collar,
       neck.mesh, headMesh, jawMesh, headHalo,
       leftLeg.thigh.mesh, leftLeg.hipBulge, leftLeg.thighRig,
       leftLeg.kneeBulge, leftLeg.kneePad,
