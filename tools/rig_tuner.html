@@ -167,9 +167,9 @@ const state = {
     sheath:    true, // back blade
   },
   // Sex / archetype variant — drives DIM overlay (hourglass, bust,
-  // glutes, hair volume, longer legs, smaller head). Sex selector in
-  // the GUI flips this and rebuilds.
-  archetype: { sex: 'male' },
+  // glutes, hair volume, longer legs, smaller head). Default female
+  // since that's what we're actively iterating on.
+  archetype: { sex: 'female' },
   // Per-actor scale multipliers for tunable feature sizes. Lets the
   // rig_tuner sweep different bust / glute sizes without touching
   // DIMS — character creator will use the same opts.
@@ -806,6 +806,14 @@ function addDimsFolder(gui, obj, path) {
 
 let dimsFolder = gui.addFolder('dimensions');
 addDimsFolder(dimsFolder, state.dims, []);
+
+// Apply female baseline at boot since we default-archetype to female.
+// Rebuilds dimsFolder + state.dims so the sliders reflect the female
+// rig values, not the male defaults.
+if (state.archetype.sex === 'female') {
+  applyArchetypeBaseline('female');
+  rebuildRig();
+}
 
 // --- procedural pose constants (live-tunable) ---
 // These read from POSE_TUNABLES which actor_rig.js's updateAnim() also

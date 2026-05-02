@@ -424,6 +424,14 @@ export const DEFAULT_DIMS_FEMALE = {
     kneeBridge: null,
     calfFlex: null,
     ankleBlend: null,
+    // Gear overlays stripped from the female default — bodyshapes ref
+    // shows clean wedge segments + circle joints, no armor accents.
+    // Setting these to 0 makes the build skip the meshes (build code
+    // guards on > 0 thresholds). Gear can be re-added per-actor via
+    // opts.dims overrides if a particular female actor wears armor.
+    kneePadW: 0, kneePadH: 0, kneePadD: 0,
+    thighRigW: 0, thighRigH: 0, thighRigD: 0,
+    bootTopR: 0, bootTopH: 0,
     // Glute-thigh bridge — fills the deeper curve between the
     // pronounced glute and the longer thigh.
     gluteThighBlend: { r: 0.14, yK: 0.06, z: -0.09, scaleZ: 0.85, scaleY: 0.78 },
@@ -457,6 +465,9 @@ export const DEFAULT_DIMS_FEMALE = {
     // Bicep pruned for female — slim arms read clean as tapered
     // cylinders + visible elbow joint, no extra muscle lobe needed.
     bicep: null,
+    // Gear overlays stripped from female default per bodyshapes ref.
+    shoulderPadR: 0,
+    wristCuffR: 0, wristCuffH: 0,
   },
   head: {
     neckH: 0.26,            // longer neck
@@ -623,12 +634,17 @@ export function buildRig(opts = {}) {
     // Thigh rig — small gear-coloured pouch on the outer thigh.
     // Rounded silhouette reads softer than the previous flat box;
     // sphere scaled to a wedge sits flush against the thigh cylinder.
-    const thighRig = new THREE.Mesh(_sph(0.5, 24, 16), gearMat);
-    thighRig.scale.set(L.thighRigW * scale * 1.2, L.thighRigH * scale, L.thighRigD * scale);
-    thighRig.position.set(sign * L.thighRigX * scale, L.thighRigYK * thighH, 0);
-    thighRig.castShadow = false;
-    thighRig.userData.zone = 'leg';
-    thigh.pivot.add(thighRig);
+    // Gear overlay — skipped when dim is zero (female bodyshapes-style
+    // clean default). Re-enabled for actors wearing leg gear.
+    let thighRig = null;
+    if (L.thighRigW > 0 && L.thighRigH > 0) {
+      thighRig = new THREE.Mesh(_sph(0.5, 24, 16), gearMat);
+      thighRig.scale.set(L.thighRigW * scale * 1.2, L.thighRigH * scale, L.thighRigD * scale);
+      thighRig.position.set(sign * L.thighRigX * scale, L.thighRigYK * thighH, 0);
+      thighRig.castShadow = false;
+      thighRig.userData.zone = 'leg';
+      thigh.pivot.add(thighRig);
+    }
 
     const knee = new THREE.Group();
     knee.position.y = -thighH;
@@ -653,12 +669,15 @@ export function buildRig(opts = {}) {
     // geometry scaled into a flat oval cap reads softer than the
     // previous boxy plate; the cel-shading band wraps around the
     // curve instead of breaking on a hard edge.
-    const kneePad = new THREE.Mesh(_sph(0.5, 24, 16), gearMat);
-    kneePad.scale.set(L.kneePadW * scale, L.kneePadH * scale, L.kneePadD * scale * 1.5);
-    kneePad.position.set(0, 0, L.kneePadZ * scale);
-    kneePad.castShadow = false;
-    kneePad.userData.zone = 'leg';
-    knee.add(kneePad);
+    let kneePad = null;
+    if (L.kneePadW > 0 && L.kneePadH > 0) {
+      kneePad = new THREE.Mesh(_sph(0.5, 24, 16), gearMat);
+      kneePad.scale.set(L.kneePadW * scale, L.kneePadH * scale, L.kneePadD * scale * 1.5);
+      kneePad.position.set(0, 0, L.kneePadZ * scale);
+      kneePad.castShadow = false;
+      kneePad.userData.zone = 'leg';
+      knee.add(kneePad);
+    }
 
     // Calf — tapered cylinder, narrower at ankle.
     const calf = taperedSegment({
@@ -687,73 +706,50 @@ export function buildRig(opts = {}) {
     ankle.position.y = -calfH;
     calf.pivot.add(ankle);
 
-    // Ankle blend — small body-color sphere bridging the calf bottom
-    // into the boot top. Parented to ankle so it moves with the foot
-    // during walks. Fills the visible seam left by the calf cylinder
-    // narrowing into the boot sole.
-    if (L.ankleBlend) {
-      const AB = L.ankleBlend;
-      const ankleMesh = new THREE.Mesh(_sph(AB.r * scale, 24, 16), bodyMat);
-      ankleMesh.scale.set(AB.scaleX ?? 1.0, AB.scaleY ?? 1.0, AB.scaleZ ?? 1.0);
-      ankleMesh.position.set(0, 0, 0);
-      ankleMesh.castShadow = false;
-      ankleMesh.userData.zone = 'leg';
-      ankle.add(ankleMesh);
-    }
-    // Boot — rounded boot read instead of bare box. Built from a base
-    // tapered "shoe" (slim toe, wider at the heel) plus a dome on the
-    // toe so the front rounds off. The pivot stays at the ankle so
-    // existing IK / foot-plant code is unaffected.
+    // Ankle joint — visible body-color sphere bridging calf into foot,
+    // sized off the calf's distal radius. Reads as a circle joint per
+    // the bodyshapes ref. Replaces the previous invisible Group +
+    // small body-color blend.
+    const ankleJoint = new THREE.Mesh(_sph(L.calfBotR * scale * 1.10, 16, 12), legMat);
+    ankleJoint.castShadow = false;
+    ankleJoint.userData.zone = 'leg';
+    ankle.add(ankleJoint);
+    // Boot — single horizontal wedge per bodyshapes ref: a tapered
+    // cylinder running heel→toe, wider at the heel and narrowing at
+    // the toe. Rotated 90° around X so the cylinder lies flat on the
+    // ground.
     const foot = (() => {
       const pivot = new THREE.Group();
       pivot.position.set(0, 0, L.footZ * scale);
-      // Sole: shallow flattened oval — sphere scaled to a slipper
-      // shape. Sits with its centre at footH * 0.5 above the ground.
-      const sole = new THREE.Mesh(_sph(0.5, 24, 16), bootMat);
-      sole.scale.set(L.footW * scale * 0.55, footH * 0.7, L.footD * scale * 0.55);
-      sole.position.set(0, -footH * 0.35, 0);
-      sole.castShadow = true;
-      sole.userData.zone = 'leg';
-      pivot.add(sole);
-      // Toe dome — a small hemisphere capping the front of the boot.
-      // Reads as the rounded toe of a tactical boot.
-      const toeR = L.footW * scale * 0.45;
-      const toeGeom = _stamp(new THREE.SphereGeometry(toeR, 24, 12, 0, Math.PI * 2, 0, Math.PI / 2));
-      const toe = new THREE.Mesh(toeGeom, bootMat);
-      toe.position.set(0, -footH * 0.05, L.footD * scale * 0.45);
-      toe.rotation.x = -Math.PI / 2;
-      toe.castShadow = false;
-      toe.userData.zone = 'leg';
-      pivot.add(toe);
-      // Heel block — small body-color box at the back of the boot
-      // that raises the heel to read as a heeled boot rather than a
-      // flat tactical boot. Female-only via dim entry.
-      if (L.heel) {
-        const HE = L.heel;
-        const heelMesh = new THREE.Mesh(
-          _box(HE.w * scale, HE.h * scale, HE.d * scale),
-          bootMat,
-        );
-        heelMesh.position.set(0, HE.y * scale, HE.z * scale);
-        heelMesh.castShadow = false;
-        heelMesh.userData.zone = 'leg';
-        pivot.add(heelMesh);
-      }
-      // Mesh alias for the .meshes flat list — point at the sole so
-      // hit-flash etc. still has a single mesh handle per foot.
-      return { pivot, mesh: sole };
+      const heelR = L.footW * scale * 0.45;     // wider at heel
+      const toeR  = L.footW * scale * 0.30;     // narrower at toe
+      const len   = L.footD * scale;            // length from heel to toe
+      const wedge = new THREE.Mesh(_cyl(heelR, toeR, len, 16), bootMat);
+      // Cylinder native axis is Y — rotate so it lies along Z (horizontal,
+      // pointing forward). After rotation +Y becomes -Z (toe direction).
+      wedge.rotation.x = Math.PI / 2;
+      wedge.position.set(0, -footH * 0.5, len * 0.5);
+      // Slight Z-axis flatten so the wedge reads as a sole (flatter
+      // than tall) rather than a column.
+      wedge.scale.set(1.0, 1.0, footH / heelR * 1.4);
+      wedge.castShadow = true;
+      wedge.userData.zone = 'leg';
+      pivot.add(wedge);
+      return { pivot, mesh: wedge };
     })();
     ankle.add(foot.pivot);
     // Boot top — gear-coloured cuff above the foot, on the calf.
-    const bootTop = new THREE.Mesh(
-      _cyl(L.bootTopR * scale, L.bootTopR * scale, L.bootTopH * scale, 24),
-      bootMat,
-    );
-    bootTop.position.set(0, L.bootTopYK * calfH, 0);
-    // Accessory — covered by the calf+boot shadow at the same height.
-    bootTop.castShadow = false;
-    bootTop.userData.zone = 'leg';
-    calf.pivot.add(bootTop);
+    let bootTop = null;
+    if (L.bootTopR > 0 && L.bootTopH > 0) {
+      bootTop = new THREE.Mesh(
+        _cyl(L.bootTopR * scale, L.bootTopR * scale, L.bootTopH * scale, 24),
+        bootMat,
+      );
+      bootTop.position.set(0, L.bootTopYK * calfH, 0);
+      bootTop.castShadow = false;
+      bootTop.userData.zone = 'leg';
+      calf.pivot.add(bootTop);
+    }
 
     return { thigh, knee, calf, ankle, foot,
              thighRig, kneePad, bootTop, kneeBulge, hipBulge };
@@ -938,12 +934,14 @@ export function buildRig(opts = {}) {
       ));
       _geomCache.set(shoulderPadKey, shoulderPadGeom);
     }
-    const shoulderPad = new THREE.Mesh(shoulderPadGeom, gearMat);
-    shoulderPad.position.set(0, 0, 0);
-    // Accessory — pauldron sits over the shoulder cylinder shadow.
-    shoulderPad.castShadow = false;
-    shoulderPad.userData.zone = 'arm';
-    shoulder.pivot.add(shoulderPad);
+    let shoulderPad = null;
+    if (A.shoulderPadR > 0) {
+      shoulderPad = new THREE.Mesh(shoulderPadGeom, gearMat);
+      shoulderPad.position.set(0, 0, 0);
+      shoulderPad.castShadow = false;
+      shoulderPad.userData.zone = 'arm';
+      shoulder.pivot.add(shoulderPad);
+    }
 
     // Bicep bulge — flattened sphere mid-upper-arm. Parented to
     // shoulder.pivot so it follows the arm. Sells "this arm has
@@ -974,51 +972,56 @@ export function buildRig(opts = {}) {
       material: armMat, zone: 'arm',
     });
     elbow.add(forearm.pivot);
-    // Wrist cuff — gear cylinder band just above the hand.
-    const wristCuff = new THREE.Mesh(
-      _cyl(A.wristCuffR * scale, A.wristCuffR * scale, A.wristCuffH * scale, 24),
-      gearMat,
-    );
-    wristCuff.position.set(0, A.wristCuffYK * forearmH, 0);
-    // Accessory — same band as the wrist of the forearm cylinder.
-    wristCuff.castShadow = false;
-    wristCuff.userData.zone = 'arm';
-    forearm.pivot.add(wristCuff);
+    let wristCuff = null;
+    if (A.wristCuffR > 0 && A.wristCuffH > 0) {
+      wristCuff = new THREE.Mesh(
+        _cyl(A.wristCuffR * scale, A.wristCuffR * scale, A.wristCuffH * scale, 24),
+        gearMat,
+      );
+      wristCuff.position.set(0, A.wristCuffYK * forearmH, 0);
+      wristCuff.castShadow = false;
+      wristCuff.userData.zone = 'arm';
+      forearm.pivot.add(wristCuff);
+    }
 
     const wrist = new THREE.Group();
     wrist.position.y = -forearmH;
     forearm.pivot.add(wrist);
-    // Hand — clenched fist read. The base mesh is a slightly squat box
-    // (subtle scale.x boost so the knuckle ridge reads wider than the
-    // wrist edge), with a knuckle dome on the forward face. Together
-    // they read as "closed hand" rather than the previous bare cube
-    // that looked like a brick at the end of the arm.
-    const hand = segment({
-      px: 0, py: 0, pz: 0,
-      w: A.handW * scale, h: A.handH * scale, d: A.handD * scale,
-      my: A.handY * scale,
-      material: handMat, zone: 'arm',
-    });
-    // Slight non-uniform scale: knuckle face wider than wrist face,
-    // softens the cube read into a fist read.
-    hand.mesh.scale.set(1.05, 1.0, 1.0);
+    // Wrist joint — visible body-color sphere bridging the forearm
+    // taper into the hand. Sized off the forearm's distal radius so
+    // it scales with the limb and reads as a circle joint per the
+    // bodyshapes ref.
+    const wristJoint = new THREE.Mesh(_sph(A.forearmBotR * scale * 1.05, 16, 12), armMat);
+    wristJoint.castShadow = false;
+    wristJoint.userData.zone = 'arm';
+    wrist.add(wristJoint);
+    // Hand — tapered cylinder wedge (per bodyshapes ref) instead of
+    // a box. Wider at the wrist (palm), narrower toward the
+    // fingertips. Oriented along Y like the forearm so the cylinder
+    // axis runs from wrist out to fingers.
+    const hand = (() => {
+      const pivot = new THREE.Group();
+      pivot.position.set(0, A.handY * scale, 0);
+      const wedgeMesh = new THREE.Mesh(
+        _cyl(
+          (A.handW * 0.55) * scale,    // wider at palm
+          (A.handW * 0.40) * scale,    // narrower at fingertips
+          A.handH * 1.4 * scale,        // length from wrist to fingertips
+          16,
+        ),
+        handMat,
+      );
+      // Cylinder is Y-centered; offset so the TOP sits at wrist (y=0).
+      wedgeMesh.position.y = -A.handH * 0.7 * scale;
+      // Slight non-uniform scale to flatten the hand front-to-back so
+      // it reads as a flattened palm/fist rather than a true cylinder.
+      wedgeMesh.scale.set(1.0, 1.0, 0.65);
+      wedgeMesh.castShadow = true;
+      wedgeMesh.userData.zone = 'arm';
+      pivot.add(wedgeMesh);
+      return { pivot, mesh: wedgeMesh };
+    })();
     wrist.add(hand.pivot);
-    // Knuckle dome — small hemisphere on the FORWARD face of the hand
-    // (toward the gun grip / strike direction). Reads as the back of
-    // the fist when the hand rotates with the wrist.
-    const knuckleR = A.handW * 0.42 * scale;
-    const knuckleGeom = _stamp(new THREE.SphereGeometry(
-      knuckleR, 12, 6, 0, Math.PI * 2, 0, Math.PI / 2,
-    ));
-    const knuckle = new THREE.Mesh(knuckleGeom, handMat);
-    // Position at the front-top of the hand box: forward (-Z is the
-    // grip-side in this rig's local frame for the hand) and up by half
-    // the hand height. Rotate so the dome flat-side meets the box face.
-    knuckle.position.set(0, A.handY * scale, -A.handD * scale * 0.5);
-    knuckle.rotation.x = -Math.PI / 2;
-    knuckle.castShadow = false;
-    knuckle.userData.zone = 'arm';
-    hand.pivot.add(knuckle);
     return { shoulder, elbow, forearm, wrist, hand,
              shoulderPad, wristCuff, elbowBulge, shoulderBulge };
   };
