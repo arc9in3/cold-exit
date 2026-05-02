@@ -174,6 +174,16 @@ const state = {
   // rig_tuner sweep different bust / glute sizes without touching
   // DIMS — character creator will use the same opts.
   shape: { bustScale: 1.0, gluteScale: 1.0 },
+  // Part scaler — pick a body part, drag X/Y/Z sliders, sliders write
+  // multipliers into state.dims and rebuild. Each slider tick
+  // computes a delta vs the last value so re-selecting a part resets
+  // the slider to 1.0 representing "current state as the new
+  // baseline" — sequential scales compound naturally.
+  parter: {
+    selected: 'chest',
+    scaleX: 1.0, scaleY: 1.0, scaleZ: 1.0,
+    lastX: 1.0,  lastY: 1.0,  lastZ: 1.0,
+  },
   pose: {
     preset: 'idle',
     freeze: false,
@@ -726,6 +736,143 @@ function applyArchetypeBaseline(sex) {
   f.add(state.shape, 'bustScale', 0.5, 1.6, 0.05).name('bust scale').onChange(() => rebuildRig());
   f.add(state.shape, 'gluteScale', 0.5, 1.6, 0.05).name('glute scale').onChange(() => rebuildRig());
 }
+
+// --- part scaler ---------------------------------------------------
+// Pick a body part, drag X/Y/Z sliders, the rig updates live. This is
+// the in-tuner character-creator surface: clicking a different part
+// resets the sliders to 1.0 representing "current dim values as the
+// new baseline", so successive scales compound.
+//
+// Each entry maps "axis" → list of dot-path dim keys to multiply.
+// Width/depth dims that should both grow together (e.g. chestTopR +
+// chestBotR for chest width) are listed together so a single slider
+// move scales the entire feature uniformly.
+const PART_AXIS_MAP = {
+  head: {
+    x: ['head.craniumR'],
+    y: ['head.craniumStretchY'],
+    z: ['head.craniumStretchZ'],
+  },
+  neck: {
+    x: ['head.neckTopR', 'head.neckBotR'],
+    y: ['head.neckH'],
+    z: ['head.neckTopR', 'head.neckBotR'],
+  },
+  chest: {
+    x: ['torso.chestTopR', 'torso.chestBotR'],
+    y: ['torso.chestH'],
+    z: ['torso.chestDepth'],
+  },
+  stomach: {
+    x: ['torso.stomachTopR', 'torso.stomachBotR'],
+    y: ['torso.stomachH'],
+    z: ['torso.stomachDepth'],
+  },
+  hips: {
+    x: ['torso.pelvisTopR', 'torso.pelvisBotR', 'torso.hipBowl.r'],
+    y: ['torso.pelvisH', 'torso.hipBowl.scaleY'],
+    z: ['torso.pelvisDepth', 'torso.hipBowl.scaleZ'],
+  },
+  bust: {
+    x: ['head.bust.r', 'head.bust.separationX'],
+    y: ['head.bust.scaleY'],
+    z: ['head.bust.scaleZ'],
+  },
+  glutes: {
+    x: ['legs.glute.r', 'legs.glute.separationX'],
+    y: ['legs.glute.scaleY'],
+    z: ['legs.glute.scaleZ'],
+  },
+  thighs: {
+    x: ['legs.thighTopR', 'legs.thighBotR'],
+    y: ['legs.thighH'],
+    z: ['legs.thighTopR', 'legs.thighBotR'],
+  },
+  calves: {
+    x: ['legs.calfTopR', 'legs.calfBotR'],
+    y: ['legs.calfH'],
+    z: ['legs.calfTopR', 'legs.calfBotR'],
+  },
+  feet: {
+    x: ['legs.footW'],
+    y: ['legs.footH'],
+    z: ['legs.footD'],
+  },
+  upperArms: {
+    x: ['arms.upperArmTopR', 'arms.upperArmBotR'],
+    y: ['arms.upperArmH'],
+    z: ['arms.upperArmTopR', 'arms.upperArmBotR'],
+  },
+  forearms: {
+    x: ['arms.forearmTopR', 'arms.forearmBotR'],
+    y: ['arms.forearmH'],
+    z: ['arms.forearmTopR', 'arms.forearmBotR'],
+  },
+  hands: {
+    x: ['arms.handW'],
+    y: ['arms.handH'],
+    z: ['arms.handD'],
+  },
+  shoulderWidth: {
+    x: ['arms.shoulderInset'],
+    y: ['arms.shoulderInset'],
+    z: ['arms.shoulderInset'],
+  },
+};
+
+// Dot-path read/write so e.g. "torso.hipBowl.r" walks dims.torso.hipBowl.r
+function getDimByPath(obj, path) {
+  return path.split('.').reduce((o, k) => (o ? o[k] : undefined), obj);
+}
+function setDimByPath(obj, path, value) {
+  const keys = path.split('.');
+  let node = obj;
+  for (let i = 0; i < keys.length - 1; i++) {
+    if (node[keys[i]] == null) return false;
+    node = node[keys[i]];
+  }
+  if (typeof node[keys.at(-1)] !== 'number') return false;
+  node[keys.at(-1)] = value;
+  return true;
+}
+
+function applyPartAxis(part, axis, newValue) {
+  const map = PART_AXIS_MAP[part];
+  if (!map) return;
+  const last = state.parter['last' + axis.toUpperCase()];
+  if (last === 0) return;
+  const delta = newValue / last;
+  for (const path of map[axis]) {
+    const cur = getDimByPath(state.dims, path);
+    if (typeof cur === 'number') {
+      setDimByPath(state.dims, path, cur * delta);
+    }
+  }
+  state.parter['last' + axis.toUpperCase()] = newValue;
+}
+
+let parterFolder = null;
+function rebuildParterFolder() {
+  if (parterFolder) parterFolder.destroy();
+  parterFolder = gui.addFolder('part scaler');
+  parterFolder.add(state.parter, 'selected', Object.keys(PART_AXIS_MAP))
+    .name('selected part')
+    .onChange(() => {
+      // Reset sliders + last-trackers to 1.0 — the current dims
+      // become the new baseline for this part's next scaling pass.
+      state.parter.scaleX = state.parter.lastX = 1.0;
+      state.parter.scaleY = state.parter.lastY = 1.0;
+      state.parter.scaleZ = state.parter.lastZ = 1.0;
+      for (const c of parterFolder.controllers) c.updateDisplay();
+    });
+  parterFolder.add(state.parter, 'scaleX', 0.30, 2.0, 0.02).name('scale X (width)')
+    .onChange((v) => { applyPartAxis(state.parter.selected, 'x', v); rebuildRig(); });
+  parterFolder.add(state.parter, 'scaleY', 0.30, 2.0, 0.02).name('scale Y (height)')
+    .onChange((v) => { applyPartAxis(state.parter.selected, 'y', v); rebuildRig(); });
+  parterFolder.add(state.parter, 'scaleZ', 0.30, 2.0, 0.02).name('scale Z (depth)')
+    .onChange((v) => { applyPartAxis(state.parter.selected, 'z', v); rebuildRig(); });
+}
+rebuildParterFolder();
 
 // --- signature primitives folder ---------------------------------
 // Toggle the iconic protagonist silhouette elements live so we can
