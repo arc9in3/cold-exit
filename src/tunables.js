@@ -459,16 +459,18 @@ export const tunables = {
       // used to hold (which was a single-shot rocket — magSize: 1 → 2);
       // for flame the comment's "5s of held fire" intent at tickRate 20
       // requires a 100-tick mag.
-      magSize: 100,
       // 2026-05-01 nerf — flamer was over-performing in playtest.
-      // Reload bumped 4.0 → 6.0s (longer commit window between
-      // tank-swaps). flameTickRate 20 → 23 t/s drains the 100-tick
-      // mag in ~4.35s instead of 5s, +15% ammo cost per second of
-      // held fire. Per-tick damage unchanged so DPS still feels
-      // good, just costs more to sustain.
+      // User feedback: feel is good, just sustains too long.
+      //   magSize 100 → 87 (87/20 = 4.35s held fire vs 5s, +15%
+      //                     ammo cost per second of fire).
+      //   reloadTime 4.0 → 6.0s — longer commit window between
+      //                          tank-swaps.
+      // tickRate (and thus DPS) unchanged on purpose; the moment-
+      // to-moment feel they liked stays intact.
+      magSize: 87,
       reloadTime: 6.0,
       flameAngleDeg: 36,
-      flameTickRate: 23,
+      flameTickRate: 20,
       // Loudness — `alertEnemiesFromShot` reads `weapon.noiseRange` when
       // present. A roaring flame jet is plainly louder than a pistol;
       // wakes the whole next room.
