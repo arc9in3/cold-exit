@@ -342,36 +342,35 @@ export const DEFAULT_DIMS_FEMALE = {
     chestDepth:   0.70,   // flatter chest plane — bust does the forward work
     stomachDepth: 0.55,
     pelvisDepth:  0.82,
-    // Crotch wedge — sized to bridge the wide pelvis cylinder bottom
-    // into the inward-attached legs. Without a properly-sized wedge
-    // the bottom of the pelvis just ends in air and the inner edges
-    // of the legs read as separate cylinders. Female crotch needs to
-    // be much bigger than the male default since female pelvis is
-    // dramatically wider.
+    // Crotch wedge — bridges the pelvis bottom to the inward-attached
+    // legs. Sized for the wider female pelvis.
     crotchTopR: 0.20, crotchBotR: 0.11, crotchH: 0.08,
     crotchY: 0.005, crotchZ: 0,
-    // Hip-front lobe — soft body-color sphere on the FRONT-bottom of
-    // the pelvis cylinder. Smooths the visible "scoop" between the
-    // wider iliac flare and where the legs descend.
-    hipFront: { r: 0.12, y: -0.06, z: 0.10, scaleX: 1.6, scaleY: 0.7, scaleZ: 0.8 },
-    // Hip bowl — body-color volume that ENVELOPS the pelvis cylinder
-    // and reads as the wedge shape from the anatomy refs. Pitched
-    // forward 6° so the back (sacrum) sits higher than the front
-    // (pubis) — matches the anatomy refs' visible pelvic tilt.
-    // Wider at the top (iliac flare) and narrower at the bottom
-    // (where legs descend), achieved via the wedge config below.
-    // Tuned so it reads as part of the pelvis silhouette, not a
-    // separate ellipsoid.
+    // Hip bowl — primary pelvis volume per anatomy refs. Wedge shape:
+    // wider at iliac (top), narrower at pubic (bottom), 6° forward
+    // pitch (sacrum higher than pubis). This single primitive replaces
+    // the messy stack of pelvis cylinder + iliac shelves + hipFront +
+    // small glute spheres that the prior iteration was using.
     hipBowl: {
       r: 0.30, y: -0.05, z: 0,
       scaleX: 1.00, scaleY: 0.58, scaleZ: 0.90,
-      pitchX: 0.10,        // ~6° forward tilt
-      // Wedge mode: when set, the build pipeline replaces the simple
-      // sphere with a stretched-and-tapered shape. wedgeTopFactor
-      // controls upper width vs scaleX; wedgeBotFactor lower width.
-      wedgeTopFactor: 1.00,   // full iliac width at top
-      wedgeBotFactor: 0.62,   // narrower pubic bone at bottom
+      pitchX: 0.10,
+      wedgeTopFactor: 1.00,
+      wedgeBotFactor: 0.62,
     },
+    // PRUNED for the simplification pass: hipFront, pec, lumbar,
+    // upperAbdomen, lowerAbdomen, trapezius. The hipBowl + bust +
+    // chest cylinder + bob now do the silhouette work these were
+    // patching. Each was a small subtle primitive that wasn't
+    // reading clearly and was adding visual noise / clipping.
+    hipFront: null,
+    pec: null,
+    lumbar: null,
+    upperAbdomen: null,
+    lowerAbdomen: null,
+    trapezius: null,
+    // Single subtle abdomen lobe for the front-of-stomach curve.
+    abdomen: { r: 0.08, y: 0, z: 0.10, scaleY: 1.4, scaleZ: 0.55 },
     // Abdomen split into upper + lower lobes so the boundary between
     // them reads as the implicit navel / abs definition line. Without
     // shader tricks we can't draw a recessed line; stacking two lobes
@@ -416,9 +415,15 @@ export const DEFAULT_DIMS_FEMALE = {
     // curve projects out where the wedge bottom would otherwise just
     // taper to nothing.
     glute: { r: 0.13, separationX: 0.11, y: -0.04, z: -0.14, scaleY: 0.80, scaleZ: 1.00 },
-    // Iliac shelf disabled (set null) — hipBowl envelops this region
-    // smoothly, the shelf was just adding visible primitive seams.
+    // PRUNED for the simplification pass — the hipBowl wedge handles
+    // the hip-to-thigh transition without needing these tiny bridge
+    // spheres, which weren't reading at viewing scale and were just
+    // adding clipping noise.
     iliacShelf: null,
+    gluteThighBlend: null,
+    kneeBridge: null,
+    calfFlex: null,
+    ankleBlend: null,
     // Glute-thigh bridge — fills the deeper curve between the
     // pronounced glute and the longer thigh.
     gluteThighBlend: { r: 0.14, yK: 0.06, z: -0.09, scaleZ: 0.85, scaleY: 0.78 },
@@ -449,8 +454,9 @@ export const DEFAULT_DIMS_FEMALE = {
     elbowBulgeR: 0.06,
     wristCuffR: 0.055, wristCuffH: 0.06,
     handW: 0.09, handH: 0.10, handD: 0.13,
-    // Smaller bicep — slim feminine arms.
-    bicep: { r: 0.075, yK: 0.45, z: 0.03, scaleY: 0.85, scaleX: 1.00, scaleZ: 1.10 },
+    // Bicep pruned for female — slim arms read clean as tapered
+    // cylinders + visible elbow joint, no extra muscle lobe needed.
+    bicep: null,
   },
   head: {
     neckH: 0.26,            // longer neck
@@ -770,16 +776,23 @@ export function buildRig(opts = {}) {
 
   // Pelvis — fills the gap between thigh pivots and stomach bottom.
   // Uses legMat so it reads as pants/hip region, not extra torso.
-  const pelvis = new THREE.Mesh(
-    _cyl(T.pelvisTopR * scale, T.pelvisBotR * scale, T.pelvisH * scale, T.segs),
-    legMat,
-  );
-  pelvis.position.set(0, T.pelvisY * scale, 0);
-  pelvis.scale.z = T.pelvisDepth ?? T.depthRatio;
-  pelvis.castShadow = true;
-  pelvis.receiveShadow = true;
-  pelvis.userData.zone = 'torso';
-  hips.add(pelvis);
+  // SKIPPED when a hipBowl is present: the bowl envelops this region
+  // already, and rendering both produces visible primitive seams +
+  // wasted draw calls. The bowl's wedge taper does what the cylinder
+  // was trying to do, only better.
+  let pelvis = null;
+  if (!T.hipBowl) {
+    pelvis = new THREE.Mesh(
+      _cyl(T.pelvisTopR * scale, T.pelvisBotR * scale, T.pelvisH * scale, T.segs),
+      legMat,
+    );
+    pelvis.position.set(0, T.pelvisY * scale, 0);
+    pelvis.scale.z = T.pelvisDepth ?? T.depthRatio;
+    pelvis.castShadow = true;
+    pelvis.receiveShadow = true;
+    pelvis.userData.zone = 'torso';
+    hips.add(pelvis);
+  }
 
   // Crotch wedge — closes the inverted-V gap below the pelvis between
   // the two inner-thigh surfaces. Top meets pelvis bottom, tapers
@@ -1490,7 +1503,7 @@ export function buildRig(opts = {}) {
     // Flat mesh list (useful for hit-flash color lerp across every part).
     // Includes gear accents so they flash with the body on hit.
     meshes: [
-      pelvis, stomach.mesh, chest.mesh, ...(chestPlate ? [chestPlate] : []), belt, collar,
+      ...(pelvis ? [pelvis] : []), stomach.mesh, chest.mesh, ...(chestPlate ? [chestPlate] : []), belt, collar,
       neck.mesh, headMesh, jawMesh, headHalo,
       leftLeg.thigh.mesh, leftLeg.hipBulge, leftLeg.thighRig,
       leftLeg.kneeBulge, leftLeg.kneePad,
