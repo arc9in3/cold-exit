@@ -298,6 +298,7 @@ export const ARTIFACT_DEFS = {
     short: 'All stamina costs halved',
     tint: 0x60c070,
     price: 104000,
+    encounterOnly: true,    // Loose Duck encounter only — no shop pool
     apply(s) { s.staminaCostMult = (s.staminaCostMult || 1) * 0.5; },
   },
   // -------------------------------------------------------------
