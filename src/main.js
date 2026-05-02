@@ -121,7 +121,7 @@ window.__resetHints = resetHints;
 // "I'm on build XYZ" without inspecting the bundle. Date stamps the
 // version so a quick glance tells you how stale the build is. Both
 // values render into the bottom-right #build-version label.
-const BUILD_VERSION = '79db9df+coop-perf-bug-pass';
+const BUILD_VERSION = 'a6dca5f+megaboss-coop-pass';
 // Build date intentionally bumped each deploy so the corner label
 // reflects the current snapshot.
 const BUILD_DATE    = '2026-05-01';
@@ -3211,6 +3211,21 @@ function _ensureCoopLobby() {
       // joiner. Skip silently if we're not host or the entity is gone
       // (already dead, or netId doesn't resolve).
       if (!transport.isHost || !body) return;
+      // Megaboss hit — joiner sets `mb:1` because megabosses aren't
+      // tracked by netId. Apply directly to host's megaBoss instance
+      // so HP comes down on the auth side; snapshot reflects.
+      if (body.mb) {
+        if (megaBoss && megaBoss.alive && typeof megaBoss.applyHit === 'function') {
+          const dmg = Math.max(0, body.d | 0);
+          const wasAlive = megaBoss.alive;
+          try { megaBoss.applyHit(dmg); } catch (e) { console.warn('[coop] megaboss applyHit failed', e); }
+          if (wasAlive && !megaBoss.alive) {
+            // Megaboss death triggers via its own _die path on host;
+            // joiner sees it via subsequent snapshot returning null.
+          }
+        }
+        return;
+      }
       const netId = body.n | 0;
       let target = null;
       if (gunmen?.gunmen) {
@@ -8452,8 +8467,18 @@ function fireOneShot(playerInfo, weapon, aimPoint, isADS, aimOwner, aimZone) {
           : (1 - 0.35 * _ratio);
         dmg *= _falloff;
       }
+      // Coop: joiner's hit needs to reach the host's authoritative
+      // megaboss instance — joiner's local applyHit only mutates
+      // the snapshot mirror and gets overwritten next tick. Send
+      // rpc-shoot with mb:1 so host applies on their side; local
+      // applyHit still runs for snappy visual feedback.
+      const _coopT_mb = getCoopTransport();
+      if (_coopT_mb.isOpen && !_coopT_mb.isHost) {
+        _coopT_mb.send('rpc-shoot', { mb: 1, d: Math.round(dmg), z: hit.zone || 'torso' });
+      }
       hit.owner.applyHit(dmg);
       runStats.addDamage(dmg);
+      runStats.noteShotHit();
       spawnDamageNumber(hit.point, camera, dmg, hit.zone);
       // Visual hit feedback piggybacks the existing impact pool.
       combat.spawnImpact(hit.point);

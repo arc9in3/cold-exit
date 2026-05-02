@@ -32,14 +32,19 @@ const _scratch = { gunmen: [], melees: [], drones: [], loot: [], corpses: [] };
 // (fires, bullets, gas) are NOT synced — that needs hazard-list
 // snapshotting which we'll layer on next pass.
 function _encodeMegaBoss(megaBoss) {
-  if (!megaBoss || !megaBoss.alive || !megaBoss.boss) return null;
+  if (!megaBoss || !megaBoss.alive) return null;
+  // The three megaboss classes store their root mesh inconsistently
+  // — Arboter uses `.boss` while Echo + General use `.group`. Fall
+  // back to either so all three rotate cleanly into the snapshot.
+  const root = megaBoss.boss || megaBoss.group;
+  if (!root || !root.position) return null;
   return {
-    x: +(megaBoss.boss.position.x.toFixed(3)),
-    z: +(megaBoss.boss.position.z.toFixed(3)),
-    y: +(megaBoss.facing?.toFixed?.(3) ?? 0),
-    h: Math.round(megaBoss.hp),
-    m: Math.round(megaBoss.maxHp),
-    p: megaBoss.phase | 0,
+    x: +(root.position.x.toFixed(3)),
+    z: +(root.position.z.toFixed(3)),
+    y: +((megaBoss.facing ?? root.rotation?.y ?? 0).toFixed(3)),
+    h: Math.round(megaBoss.hp || 0),
+    m: Math.round(megaBoss.maxHp || 0),
+    p: (megaBoss.phase | 0) || 1,
     s: megaBoss.state || 'idle',
   };
 }
@@ -517,14 +522,15 @@ export function applyMegaBossSnapshot(snap, megaBoss) {
     return;
   }
   const b = snap.boss;
-  if (megaBoss.boss?.position) {
-    megaBoss.boss.position.x = b.x;
-    megaBoss.boss.position.z = b.z;
+  // Mirror the root mesh from whichever field this megaboss class
+  // uses. Arboter `.boss`, Echo + General `.group`.
+  const root = megaBoss.boss || megaBoss.group;
+  if (root?.position) {
+    root.position.x = b.x;
+    root.position.z = b.z;
   }
-  if (typeof megaBoss.facing === 'number') {
-    megaBoss.facing = b.y;
-    if (megaBoss.boss) megaBoss.boss.rotation.y = b.y;
-  }
+  if (typeof megaBoss.facing === 'number') megaBoss.facing = b.y;
+  if (root?.rotation) root.rotation.y = b.y;
   megaBoss.hp = b.h;
   if (b.m) megaBoss.maxHp = b.m;
   if (typeof b.p === 'number') megaBoss.phase = b.p;
