@@ -518,7 +518,20 @@ function _applyCorpseSection(snap, gunmen, melees) {
 export function applyMegaBossSnapshot(snap, megaBoss) {
   if (!snap || !megaBoss) return;
   if (!snap.boss) {
-    // No boss info — host says boss is gone or not spawned.
+    // Host says boss is gone (just died, or never spawned). If our
+    // local mirror is still alive, kill the visual + flip alive=false
+    // so the joiner doesn't keep seeing a corpse-looking-alive boss
+    // standing in the arena while the run continues without it.
+    // Don't trigger _die() — that fires loot-drop / onMegaBossDead
+    // side effects which are host-auth and would double-fire here.
+    if (megaBoss.alive) {
+      megaBoss.alive = false;
+      megaBoss.hp = 0;
+      const root = megaBoss.boss || megaBoss.group;
+      if (root) root.visible = false;
+      // Hide the floating HP bar element if the boss exposes it.
+      if (megaBoss._barEl) megaBoss._barEl.style.display = 'none';
+    }
     return;
   }
   const b = snap.boss;
