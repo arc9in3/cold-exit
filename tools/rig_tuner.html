@@ -155,6 +155,7 @@ const state = {
     gear: 0x1d2024,   // darker than body — pads/cuffs/plate ride as accents
     boot: 0x1a1510,   // dark leather
     accent: 0xf2c060, // visor / glow strip — project's accent-gold
+    hair: 0x0a0a0a,   // black — bob cut for the female default
   },
   // Signature-prop toggles. Default ON so the tuner shows the full
   // protagonist silhouette out of the box.
@@ -304,6 +305,7 @@ function rebuildRig() {
     neckCable: state.sig.neckCable,
     sheath: state.sig.sheath,
     accentColor: state.colors.accent,
+    hairColor:   state.colors.hair,
     sex: state.archetype.sex,
   });
   initAnim(rig);
@@ -666,6 +668,7 @@ gui.domElement.addEventListener('focusout', () => { _kbField = null; }, true);
   addColor('gear', 'gear');
   addColor('boot', 'boots');
   addColor('accent', 'accent (visor)');
+  addColor('hair', 'hair');
 }
 
 // --- archetype / sex selector ------------------------------------
@@ -739,9 +742,10 @@ function applyArchetypeBaseline(sex) {
       applyArchetypeBaseline('female');
       state.sig.signature = false;   // bandolier off — body is the read
       state.sig.visor = false;
-      state.sig.ponytail = true;
+      state.sig.ponytail = false;    // bob cut, no ponytail
       state.sig.neckCable = false;
       state.sig.sheath = false;
+      state.colors.hair = 0x0a0a0a;  // black bob
       for (const c of f.controllers) c.updateDisplay();
       gui.controllersRecursive().forEach(c => c.updateDisplay());
       rebuildRig();

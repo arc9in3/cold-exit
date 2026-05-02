@@ -305,9 +305,20 @@ export const DEFAULT_DIMS_FEMALE = {
     collarTopR: 0.10,
     collarBotR: 0.28,
     beltR: 0.20,
+    // Abdomen lobe — soft forward bump on the stomach front so the
+    // waist doesn't read as a uniform tapered cylinder. Subtle for
+    // female (tight abs).
+    abdomen: { r: 0.10, y: -0.04, z: 0.10, scaleY: 1.2, scaleZ: 0.6 },
   },
   legs: {
-    hipX: 0.20,
+    // Legs pulled inward (was 0.20) so they descend from directly
+    // under the glute mass instead of attaching at the wider iliac
+    // crest. Anatomically the femur head is inside the hip bone, and
+    // the eve refs show the femur shaft angling inward — pulling
+    // hipX in matches both. The thigh-top sphere (hipBulge) is bumped
+    // up to bridge the gap between the wide pelvis and the narrower
+    // leg attach.
+    hipX: 0.13,
     thighH: 0.50,        // long legs (was 0.42)
     thighTopR: 0.13,
     thighBotR: 0.085,
@@ -317,12 +328,18 @@ export const DEFAULT_DIMS_FEMALE = {
     footH: 0.06,         // smaller heeled foot
     footW: 0.13,
     footD: 0.26,
-    hipBulgeR: 0.15,
+    hipBulgeR: 0.18,     // bigger so it bridges hip flare → thigh
     kneeBulgeR: 0.085,
     kneePadW: 0.16, kneePadH: 0.09, kneePadD: 0.09,
-    // Glute volume — two flattened spheres on the back of the pelvis.
-    // Build pipeline reads dims.legs.glute and adds the meshes.
-    glute: { r: 0.13, separationX: 0.09, y: 0, z: -0.10, scaleY: 0.85 },
+    // Glute volume — two flattened spheres on the back of the pelvis,
+    // bumped wider + larger so they read as full glute curves and sit
+    // directly above where each leg now attaches.
+    glute: { r: 0.16, separationX: 0.13, y: -0.02, z: -0.10, scaleY: 0.90, scaleZ: 1.05 },
+    // Iliac shelf — connective sphere on each side that bridges the
+    // hip flare into the thigh top so the seam between pelvis cylinder
+    // and thigh cylinder reads as a single curve instead of a hard
+    // polygon ring. Per-side X mirrored at build time.
+    iliacShelf: { r: 0.13, x: 0.13, y: -0.05, z: 0.02, scaleX: 1.4, scaleY: 0.8, scaleZ: 1.1 },
   },
   arms: {
     shoulderInset: 0.28,    // narrower shoulders
@@ -346,11 +363,21 @@ export const DEFAULT_DIMS_FEMALE = {
     // Bust geometry — two flattened spheres on the chest plate. Build
     // pipeline reads dims.head.bust and adds the meshes.
     bust: { r: 0.085, separationX: 0.07, y: 0.16, z: 0.18, scaleY: 0.95, scaleZ: 1.05 },
-    // Hair volume — domed cap on the upper-back of the cranium feeding
-    // into the ponytail tail. Build pipeline reads dims.head.hairVolume.
-    hairVolume: { r: 0.16, h: 0.22, y: 0.10, z: -0.06 },
-    // Long ponytail — extends to lower-back / butt level per refs.
-    ponytail: { w: 0.07, h: 0.95, d: 0.10, y: 0.16, z: -0.13 },
+    // Hair volume — bob cut. A flattened sphere wrapping the cranium,
+    // slightly oversized + stretched vertically so it extends from
+    // crown down past the ears to chin level. Pushed back in Z a hair
+    // so the FRONT of the sphere lands at the natural hairline,
+    // leaving the face exposed. Use this entry as the default; pass
+    // `style: 'long'` (bigger r/h, lower y, paired with ponytail) for
+    // the long-hair variant later.
+    hairVolume: {
+      r: 0.16, h: 0.36,
+      y: 0.05, z: -0.02,
+      scaleX: 1.10, scaleZ: 1.00,
+    },
+    // Ponytail intentionally OMITTED for the bob variant. To go back
+    // to long hair, set head.ponytail back via DIM override or set
+    // opts.ponytail flag in the rig_tuner GUI.
   },
 };
 
@@ -409,6 +436,11 @@ export function buildRig(opts = {}) {
   // Defaults to the project's accent-gold so any caller that opts into a
   // visor without specifying a colour still gets a coherent look.
   const accentColor = opts.accentColor ?? 0xf2c060;
+  // Hair gets its own colour so a female-with-bob can have black hair
+  // riding on a dark-grey body without the bob disappearing into the
+  // body silhouette. Defaults to bodyColor so existing rigs that don't
+  // set a hairColor continue to render the same.
+  const hairColor = opts.hairColor ?? bodyColor;
 
   const accentMat = (() => {
     // Accent uses unlit-ish basic so glow elements (visor, strip) read
@@ -417,6 +449,7 @@ export function buildRig(opts = {}) {
     const m = new THREE.MeshBasicMaterial({ color: accentColor });
     return m;
   })();
+  const hairMat = makeMat(hairColor, toon);
   const bodyMat = makeMat(bodyColor, toon);
   const headMat = makeMat(headColor, toon);
   const legMat  = makeMat(legColor,  toon);
@@ -906,8 +939,8 @@ export function buildRig(opts = {}) {
     const HV = H.hairVolume;
     const hairR = HV.r * scale;
     const hairH = HV.h * scale;
-    hairVolume = new THREE.Mesh(_sph(hairR, 24, 16), bodyMat);
-    hairVolume.scale.set(1.0, hairH / hairR, 1.05);
+    hairVolume = new THREE.Mesh(_sph(hairR, 32, 24), hairMat);
+    hairVolume.scale.set(HV.scaleX ?? 1.0, hairH / hairR, HV.scaleZ ?? 1.05);
     hairVolume.position.set(0, (H.craniumY + HV.y) * scale, HV.z * scale);
     hairVolume.castShadow = false;
     hairVolume.userData.zone = 'head';
@@ -930,7 +963,7 @@ export function buildRig(opts = {}) {
     const ptD = PT ? PT.d * scale : H.craniumR * scale * 0.55;
     const ptY = PT ? PT.y * scale : (H.craniumY + H.craniumR * 0.6) * scale;
     const ptZ = PT ? PT.z * scale : -H.craniumR * scale * 0.85;
-    ponytail = new THREE.Mesh(_box(ptW, ptH, ptD), bodyMat);
+    ponytail = new THREE.Mesh(_box(ptW, ptH, ptD), hairMat);
     // Pivot at the tie-point on top-back of the cranium. The mesh's
     // origin is the box centre, so push it down by half-height. Back-
     // of-head is -Z (visor uses theta -π/2 / +π wrapping the front;
@@ -991,12 +1024,47 @@ export function buildRig(opts = {}) {
     const gR = G.r * scale;
     for (const sign of [-1, +1]) {
       const lobe = new THREE.Mesh(_sph(gR, 24, 16), legMat);
-      lobe.scale.set(1.0, G.scaleY ?? 1.0, 1.0);
+      lobe.scale.set(1.0, G.scaleY ?? 1.0, G.scaleZ ?? 1.0);
       lobe.position.set(sign * G.separationX * scale, G.y * scale, G.z * scale);
       lobe.castShadow = false;
       lobe.userData.zone = 'leg';
       hips.add(lobe);
     }
+  }
+
+  // --- iliac shelf (hip-to-thigh connective shape) -----------------
+  // Flattened spheres on each side of the hips that bridge the seam
+  // between the pelvis cylinder (wide) and the thigh top (narrow).
+  // Without this, the leg looks like it stabs straight up into a
+  // wider hip ring; with it the silhouette flows from waist → hip
+  // flare → thigh as a continuous curve. Body-color so it reads as
+  // skin/cloth, not gear.
+  if (dims.legs.iliacShelf) {
+    const IS = dims.legs.iliacShelf;
+    const isR = IS.r * scale;
+    for (const sign of [-1, +1]) {
+      const shelf = new THREE.Mesh(_sph(isR, 24, 16), bodyMat);
+      shelf.scale.set(IS.scaleX ?? 1.0, IS.scaleY ?? 1.0, IS.scaleZ ?? 1.0);
+      shelf.position.set(sign * IS.x * scale, IS.y * scale, IS.z * scale);
+      shelf.castShadow = false;
+      shelf.userData.zone = 'leg';
+      hips.add(shelf);
+    }
+  }
+
+  // --- abdomen lobe (front belly curve) ----------------------------
+  // Soft forward bump on the stomach so the waist doesn't read as a
+  // uniform tapered cylinder. Subtle for female (tight abs); could be
+  // bumped up for male (slight beer belly) via DIM override later.
+  if (T.abdomen) {
+    const AB = T.abdomen;
+    const abR = AB.r * scale;
+    const lobe = new THREE.Mesh(_sph(abR, 24, 16), bodyMat);
+    lobe.scale.set(1.0, AB.scaleY ?? 1.0, AB.scaleZ ?? 1.0);
+    lobe.position.set(0, AB.y * scale, AB.z * scale);
+    lobe.castShadow = false;
+    lobe.userData.zone = 'torso';
+    stomach.pivot.add(lobe);
   }
 
   let bandolier = null;
