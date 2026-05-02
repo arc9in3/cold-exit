@@ -283,6 +283,86 @@ export const DEFAULT_DIMS = {
   },
 };
 
+// Female (Eve-coded) overrides — anime-stylized hourglass: dramatic
+// waist pinch, hips wider than shoulders, longer legs proportionally,
+// slimmer arms + smaller hands + smaller head, longer neck, plus new
+// bust / glute / hair-volume blocks the build pipeline keys off when
+// they exist. Apply with mergeDims(DEFAULT_DIMS, DEFAULT_DIMS_FEMALE).
+export const DEFAULT_DIMS_FEMALE = {
+  hipY: 1.20,   // taller stance — leg-length total ~1.22 (thigh+calf+foot)
+  torso: {
+    pelvisH: 0.16,
+    pelvisTopR: 0.20,    // hip flare begins
+    pelvisBotR: 0.24,    // hips wider than shoulders (eve-coded)
+    stomachH: 0.24,
+    stomachTopR: 0.20,
+    stomachBotR: 0.14,   // narrowest point — waist pinch
+    chestH: 0.34,
+    chestTopR: 0.28,     // narrower shoulder line than male
+    chestBotR: 0.18,     // tapers into the waist
+    chestPlateTopR: 0.30,
+    chestPlateBotR: 0.24,
+    collarTopR: 0.10,
+    collarBotR: 0.28,
+    beltR: 0.20,
+  },
+  legs: {
+    hipX: 0.20,
+    thighH: 0.50,        // long legs (was 0.42)
+    thighTopR: 0.13,
+    thighBotR: 0.085,
+    calfH: 0.66,         // long legs (was 0.59)
+    calfTopR: 0.085,
+    calfBotR: 0.055,
+    footH: 0.06,         // smaller heeled foot
+    footW: 0.13,
+    footD: 0.26,
+    hipBulgeR: 0.15,
+    kneeBulgeR: 0.085,
+    kneePadW: 0.16, kneePadH: 0.09, kneePadD: 0.09,
+    // Glute volume — two flattened spheres on the back of the pelvis.
+    // Build pipeline reads dims.legs.glute and adds the meshes.
+    glute: { r: 0.13, separationX: 0.09, y: 0, z: -0.10, scaleY: 0.85 },
+  },
+  arms: {
+    shoulderInset: 0.28,    // narrower shoulders
+    upperArmTopR: 0.085,
+    upperArmBotR: 0.065,
+    forearmTopR: 0.07,
+    forearmBotR: 0.05,
+    shoulderBulgeR: 0.10,
+    shoulderPadR: 0.085,
+    elbowBulgeR: 0.06,
+    wristCuffR: 0.055, wristCuffH: 0.06,
+    handW: 0.09, handH: 0.10, handD: 0.13,
+  },
+  head: {
+    neckH: 0.26,            // longer neck
+    neckTopR: 0.06,
+    neckBotR: 0.07,
+    craniumR: 0.13,         // smaller head — anime proportions
+    craniumStretchY: 1.10,
+    jawW: 0.06, jawH: 0.08, jawD: 0.18,
+    // Bust geometry — two flattened spheres on the chest plate. Build
+    // pipeline reads dims.head.bust and adds the meshes.
+    bust: { r: 0.085, separationX: 0.07, y: 0.16, z: 0.18, scaleY: 0.95, scaleZ: 1.05 },
+    // Hair volume — domed cap on the upper-back of the cranium feeding
+    // into the ponytail tail. Build pipeline reads dims.head.hairVolume.
+    hairVolume: { r: 0.16, h: 0.22, y: 0.10, z: -0.06 },
+    // Long ponytail — extends to lower-back / butt level per refs.
+    ponytail: { w: 0.07, h: 0.95, d: 0.10, y: 0.16, z: -0.13 },
+  },
+};
+
+// Male (operator-coded) — currently a no-op overlay; the default DIMS
+// already encode male proportions. Kept as an explicit slot so callers
+// can pass `archetype: 'male'` symmetrically with `'female'` and so
+// future tuning has a clean home (operator bicep / pec adjustments).
+export const DEFAULT_DIMS_MALE = {
+  // intentionally minimal — defaults already represent the male/operator
+  // grounded build per the maleref design.
+};
+
 // Deep-merge `override` into `base`. Objects recurse; scalars and
 // arrays are replaced wholesale.
 function mergeDims(base, override) {
@@ -304,7 +384,14 @@ function mergeDims(base, override) {
 export function buildRig(opts = {}) {
   const scale = opts.scale ?? 1.0;
   const toon = opts.toon !== false;
-  const dims = mergeDims(DEFAULT_DIMS, opts.dims);
+  // Sex / archetype variant — picks a DIM overlay before opts.dims is
+  // applied. opts.sex='female' merges DEFAULT_DIMS_FEMALE first, opts.sex
+  // === 'male' is a no-op overlay (defaults already represent the male
+  // build). Caller's opts.dims still wins on top so per-actor tuning is
+  // unaffected. Default sex === 'male'.
+  const sex = opts.sex === 'female' ? 'female' : 'male';
+  const archetypeDims = sex === 'female' ? DEFAULT_DIMS_FEMALE : DEFAULT_DIMS_MALE;
+  const dims = mergeDims(mergeDims(DEFAULT_DIMS, archetypeDims), opts.dims);
 
   const bodyColor = opts.bodyColor ?? 0x3a4048;
   const headColor = opts.headColor ?? 0xc39066;
@@ -807,29 +894,48 @@ export function buildRig(opts = {}) {
     head.add(visorMesh);
   }
 
+  // --- hair volume (femme silhouette mass on the cranium) -----------
+  // Domed cap on the upper-back of the cranium feeding into the
+  // ponytail. Without this, the ponytail looks like a baton glued to
+  // a bald head — refs show real hair-mass volume on the head feeding
+  // INTO the ponytail tail. Read from dims.head.hairVolume so it scales
+  // with the female DIM overlay. Body-color (same as the operator
+  // palette ponytail).
+  let hairVolume = null;
+  if (H.hairVolume) {
+    const HV = H.hairVolume;
+    const hairR = HV.r * scale;
+    const hairH = HV.h * scale;
+    hairVolume = new THREE.Mesh(_sph(hairR, 24, 16), bodyMat);
+    hairVolume.scale.set(1.0, hairH / hairR, 1.05);
+    hairVolume.position.set(0, (H.craniumY + HV.y) * scale, HV.z * scale);
+    hairVolume.castShadow = false;
+    hairVolume.userData.zone = 'head';
+    head.add(hairVolume);
+  }
+
   // --- ponytail (femme-fatale silhouette) ---------------------------
-  // Sweep box hanging from the back of the cranium. Adds a strong
-  // vertical silhouette element behind the head — the single biggest
-  // read change for an Eve-coded female player. Body-color so it
-  // matches the operator palette; the visor's accent does the
-  // signature-color work. Gated on opts.ponytail.
+  // Sweep box hanging from the back of the cranium. Per refs, extends
+  // to lower back / butt level — much longer than the previous
+  // craniumR * 4 default. When dims.head.ponytail is provided (female
+  // DIMS overlay does this), use those values; otherwise fall back to
+  // the legacy craniumR-relative defaults so existing male presets
+  // that opt into ponytail still work. Body-color so it matches the
+  // operator palette.
   let ponytail = null;
   if (opts.ponytail) {
-    const ptW = H.craniumR * scale * 0.55;
-    const ptH = H.craniumR * scale * 4.0;
-    const ptD = H.craniumR * scale * 0.55;
+    const PT = H.ponytail;
+    const ptW = PT ? PT.w * scale : H.craniumR * scale * 0.55;
+    const ptH = PT ? PT.h * scale : H.craniumR * scale * 4.0;
+    const ptD = PT ? PT.d * scale : H.craniumR * scale * 0.55;
+    const ptY = PT ? PT.y * scale : (H.craniumY + H.craniumR * 0.6) * scale;
+    const ptZ = PT ? PT.z * scale : -H.craniumR * scale * 0.85;
     ponytail = new THREE.Mesh(_box(ptW, ptH, ptD), bodyMat);
-    // Anchor at back-top of cranium, hanging down. The mesh's local
-    // origin is the box centre, so position the centre half its height
-    // below the anchor + push back along +Z (this rig's cranium-back
-    // direction is +Z given the chest-front is +Z'd... double-check
-    // by viewing — visor uses thetaStart -π/2 to face +Z, and the
-    // jaw projects forward via jawY=+0.06 +Z. So back-of-head is -Z).
-    ponytail.position.set(
-      0,
-      (H.craniumY + H.craniumR * 0.6) * scale - ptH * 0.5,
-      -H.craniumR * scale * 0.85,
-    );
+    // Pivot at the tie-point on top-back of the cranium. The mesh's
+    // origin is the box centre, so push it down by half-height. Back-
+    // of-head is -Z (visor uses theta -π/2 / +π wrapping the front;
+    // jaw extends +Z).
+    ponytail.position.set(0, ptY - ptH * 0.5, ptZ);
     ponytail.castShadow = false;
     ponytail.userData.zone = 'head';
     head.add(ponytail);
@@ -860,6 +966,39 @@ export function buildRig(opts = {}) {
   // realised as a thin tilted box parented to the chest so it follows
   // torso pitch + twist naturally. Gated on opts.signature so spawn
   // code can opt actors in/out (player ✓, enemies ✗).
+  // --- bust (femme silhouette) -------------------------------------
+  // Two flattened spheres positioned on the chest plate. Read from
+  // dims.head.bust so the female DIM overlay drives placement. Body-
+  // color so it sits inside the bodysuit silhouette.
+  if (H.bust) {
+    const B = H.bust;
+    const bR = B.r * scale;
+    for (const sign of [-1, +1]) {
+      const lobe = new THREE.Mesh(_sph(bR, 24, 16), bodyMat);
+      lobe.scale.set(1.0, B.scaleY ?? 1.0, B.scaleZ ?? 1.0);
+      lobe.position.set(sign * B.separationX * scale, B.y * scale, B.z * scale);
+      lobe.castShadow = false;
+      lobe.userData.zone = 'torso';
+      chest.pivot.add(lobe);
+    }
+  }
+
+  // --- glute (femme silhouette) ------------------------------------
+  // Two flattened spheres on the back of the pelvis. Read from
+  // dims.legs.glute. Leg-color so it matches the trousers / bodysuit.
+  if (dims.legs.glute) {
+    const G = dims.legs.glute;
+    const gR = G.r * scale;
+    for (const sign of [-1, +1]) {
+      const lobe = new THREE.Mesh(_sph(gR, 24, 16), legMat);
+      lobe.scale.set(1.0, G.scaleY ?? 1.0, 1.0);
+      lobe.position.set(sign * G.separationX * scale, G.y * scale, G.z * scale);
+      lobe.castShadow = false;
+      lobe.userData.zone = 'leg';
+      hips.add(lobe);
+    }
+  }
+
   let bandolier = null;
   if (opts.signature) {
     const stratW = 0.04 * scale;

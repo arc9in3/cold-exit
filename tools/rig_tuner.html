@@ -62,7 +62,9 @@ import { OrbitControls } from 'three/addons/controls/OrbitControls.js';
 import { TransformControls } from 'three/addons/controls/TransformControls.js';
 import GUI from 'lil-gui';
 import {
-  buildRig, initAnim, updateAnim, DEFAULT_DIMS, POSE_TUNABLES,
+  buildRig, initAnim, updateAnim, DEFAULT_DIMS,
+  DEFAULT_DIMS_MALE, DEFAULT_DIMS_FEMALE,
+  POSE_TUNABLES,
 } from '../src/actor_rig.js';
 
 // ---------- scene ----------
@@ -163,6 +165,10 @@ const state = {
     neckCable: true, // mechanical neck
     sheath:    true, // back blade
   },
+  // Sex / archetype variant — drives DIM overlay (hourglass, bust,
+  // glutes, hair volume, longer legs, smaller head). Sex selector in
+  // the GUI flips this and rebuilds.
+  archetype: { sex: 'male' },
   pose: {
     preset: 'idle',
     freeze: false,
@@ -298,6 +304,7 @@ function rebuildRig() {
     neckCable: state.sig.neckCable,
     sheath: state.sig.sheath,
     accentColor: state.colors.accent,
+    sex: state.archetype.sex,
   });
   initAnim(rig);
   scene.add(rig.group);
@@ -661,6 +668,45 @@ gui.domElement.addEventListener('focusout', () => { _kbField = null; }, true);
   addColor('accent', 'accent (visor)');
 }
 
+// --- archetype / sex selector ------------------------------------
+// Pick male or female DIM overlay. Female applies hourglass + bust +
+// glutes + hair volume + longer legs + smaller head. Switching sex
+// re-clones state.dims from the appropriate archetype baseline so the
+// dim sliders reflect the new values; otherwise per-slider overrides
+// would mask the female silhouette behind male defaults.
+function applyArchetypeBaseline(sex) {
+  const overlay = sex === 'female' ? DEFAULT_DIMS_FEMALE : DEFAULT_DIMS_MALE;
+  // Walk the merged tree manually since structuredClone would lose the
+  // explicit "this dim doesn't exist on the male side" structure.
+  const merged = JSON.parse(JSON.stringify(DEFAULT_DIMS));
+  const apply = (target, source) => {
+    for (const k of Object.keys(source)) {
+      const v = source[k];
+      if (v && typeof v === 'object' && !Array.isArray(v)) {
+        target[k] = target[k] && typeof target[k] === 'object' ? target[k] : {};
+        apply(target[k], v);
+      } else {
+        target[k] = v;
+      }
+    }
+  };
+  apply(merged, overlay);
+  state.dims = merged;
+  // Rebuild the dim folder so sliders show new baselines.
+  if (typeof dimsFolder !== 'undefined' && dimsFolder) {
+    dimsFolder.destroy();
+    dimsFolder = gui.addFolder('dimensions');
+    addDimsFolder(dimsFolder, state.dims, []);
+  }
+}
+{
+  const f = gui.addFolder('archetype');
+  f.add(state.archetype, 'sex', ['male', 'female']).name('sex').onChange((sex) => {
+    applyArchetypeBaseline(sex);
+    rebuildRig();
+  });
+}
+
 // --- signature primitives folder ---------------------------------
 // Toggle the iconic protagonist silhouette elements live so we can
 // compare ninja vs Eve in the same session. Each toggle rebuilds
@@ -676,27 +722,33 @@ gui.domElement.addEventListener('focusout', () => { _kbField = null; }, true);
   // One-click "load Raiden look" / "load Eve look" presets for fast
   // comparison.
   const presets = {
-    raiden() {
+    male() {
+      state.archetype.sex = 'male';
+      applyArchetypeBaseline('male');
       state.sig.signature = true;
       state.sig.visor = true;
       state.sig.ponytail = false;
       state.sig.neckCable = true;
       state.sig.sheath = true;
       for (const c of f.controllers) c.updateDisplay();
+      gui.controllersRecursive().forEach(c => c.updateDisplay());
       rebuildRig();
     },
-    eve() {
-      state.sig.signature = true;
+    female() {
+      state.archetype.sex = 'female';
+      applyArchetypeBaseline('female');
+      state.sig.signature = false;   // bandolier off — body is the read
       state.sig.visor = false;
       state.sig.ponytail = true;
       state.sig.neckCable = false;
-      state.sig.sheath = true;
+      state.sig.sheath = false;
       for (const c of f.controllers) c.updateDisplay();
+      gui.controllersRecursive().forEach(c => c.updateDisplay());
       rebuildRig();
     },
   };
-  f.add(presets, 'raiden').name('preset → Raiden');
-  f.add(presets, 'eve').name('preset → Eve');
+  f.add(presets, 'male').name('preset → male / operator');
+  f.add(presets, 'female').name('preset → female / Eve');
 }
 
 // --- dims ---
