@@ -240,6 +240,12 @@ export const DEFAULT_DIMS = {
     chestPlateTopR: 0.34, chestPlateBotR: 0.28,
     chestPlateH: 0.34, chestPlateYK: 0.55, // * chestH
     beltR: 0.24, beltH: 0.09, beltY: 0.015,
+    // Trapezius wedge — flattened sphere mounted at the top of the
+    // chest cylinder, parented to chest.pivot so it follows torso
+    // pitch/twist. Bridges the visual gap between the shoulder line
+    // and the neck base; without it the shoulders look like two
+    // pegged-on spheres at the corners of a flat chest top.
+    trapezius: { r: 0.20, y: 0.34, z: 0, scaleY: 0.40, scaleX: 1.50, scaleZ: 1.00 },
   },
   legs: {
     hipX: 0.18, hipJointY: 0.002,
@@ -252,6 +258,18 @@ export const DEFAULT_DIMS = {
     thighRigW: 0.06, thighRigH: 0.18, thighRigD: 0.22,
     thighRigX: 0.11, thighRigYK: 0, // * thighH
     bootTopR: 0.10, bootTopH: 0.08, bootTopYK: -0.9, // * calfH
+    // Ankle blend — small sphere at the ankle pivot bridging the calf
+    // bottom into the boot top. Parented to the ankle Group so it
+    // moves with the foot during walks. Fills the visible gap that
+    // showed up after the foot box → rounded boot swap.
+    ankleBlend: { r: 0.08, scaleY: 0.7 },
+    // Glute-thigh bridge — small body-color sphere on the upper-back
+    // of the thigh top, parented to thigh.pivot so it tracks leg
+    // motion. Visible when the leg is planted (fills the seam between
+    // glute and thigh) and naturally swings out of view when the leg
+    // lifts. Important for keeping the back-of-rig coherent during
+    // walk + dash.
+    gluteThighBlend: { r: 0.10, yK: 0.05, z: -0.06, scaleZ: 0.85, scaleY: 0.70 },
   },
   arms: {
     // Shoulders pushed outboard for the V-silhouette. Bigger
@@ -267,6 +285,12 @@ export const DEFAULT_DIMS = {
     shoulderPadR: 0.11,
     wristCuffR: 0.075, wristCuffH: 0.07, wristCuffYK: -0.9, // * forearmH
     handW: 0.12, handH: 0.12, handD: 0.16, handY: -0.06,
+    // Bicep bulge — flattened sphere mid-upper-arm, parented to
+    // shoulder.pivot so it follows the arm. Subtle by default;
+    // archetype overrides push it bigger for male / smaller for
+    // female. Sells "this arm has muscle" instead of reading as
+    // a tube of pixels.
+    bicep: { r: 0.10, yK: 0.45, z: 0.04, scaleY: 0.85, scaleX: 1.05, scaleZ: 1.10 },
   },
   rifleAnchor: {
     x: 0.23, yK: 0.82, z: 0.04, // yK * chestH
@@ -309,6 +333,13 @@ export const DEFAULT_DIMS_FEMALE = {
     // waist doesn't read as a uniform tapered cylinder. Subtle for
     // female (tight abs).
     abdomen: { r: 0.10, y: -0.04, z: 0.10, scaleY: 1.2, scaleZ: 0.6 },
+    // Pec lobe — soft body-color mass between the bust spheres bridging
+    // them into the chest cylinder centerline. Without this the bust
+    // reads as two stuck-on lumps; with it the entire chest reads as
+    // one continuous curve. Female-specific; not present on male.
+    pec: { r: 0.10, y: 0.16, z: 0.16, scaleY: 0.55, scaleX: 1.40, scaleZ: 0.90 },
+    // Trapezius — narrower wedge for female (smaller shoulder line).
+    trapezius: { r: 0.16, y: 0.30, z: 0, scaleY: 0.40, scaleX: 1.40, scaleZ: 1.00 },
   },
   legs: {
     // Legs pulled inward (was 0.20) so they descend from directly
@@ -340,6 +371,9 @@ export const DEFAULT_DIMS_FEMALE = {
     // and thigh cylinder reads as a single curve instead of a hard
     // polygon ring. Per-side X mirrored at build time.
     iliacShelf: { r: 0.13, x: 0.13, y: -0.05, z: 0.02, scaleX: 1.4, scaleY: 0.8, scaleZ: 1.1 },
+    // Bigger glute-thigh blend for female — fills the deeper curve
+    // between the more-pronounced glute and the longer thigh.
+    gluteThighBlend: { r: 0.13, yK: 0.06, z: -0.08, scaleZ: 0.85, scaleY: 0.75 },
   },
   arms: {
     shoulderInset: 0.28,    // narrower shoulders
@@ -352,6 +386,8 @@ export const DEFAULT_DIMS_FEMALE = {
     elbowBulgeR: 0.06,
     wristCuffR: 0.055, wristCuffH: 0.06,
     handW: 0.09, handH: 0.10, handD: 0.13,
+    // Smaller bicep — slim feminine arms.
+    bicep: { r: 0.075, yK: 0.45, z: 0.03, scaleY: 0.85, scaleX: 1.00, scaleZ: 1.10 },
   },
   head: {
     neckH: 0.26,            // longer neck
@@ -490,6 +526,20 @@ export function buildRig(opts = {}) {
     // the torso.
     const hipBulge = jointSphere(L.hipBulgeR * scale, legMat, 'leg');
     thigh.pivot.add(hipBulge);
+
+    // Glute-thigh blend — body-color sphere on the upper-back of the
+    // thigh. Parented to thigh.pivot so it tracks leg motion: visible
+    // when the leg is planted (fills the seam between glute and
+    // thigh) and naturally swings out of view when the leg lifts.
+    if (L.gluteThighBlend) {
+      const GTB = L.gluteThighBlend;
+      const blendMesh = new THREE.Mesh(_sph(GTB.r * scale, 24, 16), bodyMat);
+      blendMesh.scale.set(GTB.scaleX ?? 1.0, GTB.scaleY ?? 1.0, GTB.scaleZ ?? 1.0);
+      blendMesh.position.set(0, -GTB.yK * thighH, GTB.z * scale);
+      blendMesh.castShadow = false;
+      blendMesh.userData.zone = 'leg';
+      thigh.pivot.add(blendMesh);
+    }
     // Thigh rig — small gear-coloured pouch on the outer thigh.
     // Rounded silhouette reads softer than the previous flat box;
     // sphere scaled to a wedge sits flush against the thigh cylinder.
@@ -529,6 +579,20 @@ export function buildRig(opts = {}) {
     const ankle = new THREE.Group();
     ankle.position.y = -calfH;
     calf.pivot.add(ankle);
+
+    // Ankle blend — small body-color sphere bridging the calf bottom
+    // into the boot top. Parented to ankle so it moves with the foot
+    // during walks. Fills the visible seam left by the calf cylinder
+    // narrowing into the boot sole.
+    if (L.ankleBlend) {
+      const AB = L.ankleBlend;
+      const ankleMesh = new THREE.Mesh(_sph(AB.r * scale, 24, 16), bodyMat);
+      ankleMesh.scale.set(AB.scaleX ?? 1.0, AB.scaleY ?? 1.0, AB.scaleZ ?? 1.0);
+      ankleMesh.position.set(0, 0, 0);
+      ankleMesh.castShadow = false;
+      ankleMesh.userData.zone = 'leg';
+      ankle.add(ankleMesh);
+    }
     // Boot — rounded boot read instead of bare box. Built from a base
     // tapered "shoe" (slim toe, wider at the heel) plus a dome on the
     // toe so the front rounds off. The pivot stays at the ankle so
@@ -744,6 +808,20 @@ export function buildRig(opts = {}) {
     shoulderPad.castShadow = false;
     shoulderPad.userData.zone = 'arm';
     shoulder.pivot.add(shoulderPad);
+
+    // Bicep bulge — flattened sphere mid-upper-arm. Parented to
+    // shoulder.pivot so it follows the arm. Sells "this arm has
+    // muscle" instead of reading as a tube. Female overlay slims it;
+    // male keeps the default mid-bulk read.
+    if (A.bicep) {
+      const BI = A.bicep;
+      const bicepMesh = new THREE.Mesh(_sph(BI.r * scale, 24, 16), armMat);
+      bicepMesh.scale.set(BI.scaleX ?? 1.0, BI.scaleY ?? 1.0, BI.scaleZ ?? 1.0);
+      bicepMesh.position.set(0, -BI.yK * upperArmH, BI.z * scale);
+      bicepMesh.castShadow = false;
+      bicepMesh.userData.zone = 'arm';
+      shoulder.pivot.add(bicepMesh);
+    }
 
     const elbow = new THREE.Group();
     elbow.position.y = -upperArmH;
@@ -999,6 +1077,37 @@ export function buildRig(opts = {}) {
   // realised as a thin tilted box parented to the chest so it follows
   // torso pitch + twist naturally. Gated on opts.signature so spawn
   // code can opt actors in/out (player ✓, enemies ✗).
+  // --- trapezius wedge (neck-shoulder blend) -----------------------
+  // Flattened sphere on top of the chest cylinder, parented to
+  // chest.pivot so it follows torso pitch + twist + aim yaw. Bridges
+  // the gap between the shoulder line and the neck base. Without it
+  // the shoulders look like two pegged-on spheres at the corners of
+  // a flat chest top.
+  if (T.trapezius) {
+    const TR = T.trapezius;
+    const trapMesh = new THREE.Mesh(_sph(TR.r * scale, 24, 16), bodyMat);
+    trapMesh.scale.set(TR.scaleX ?? 1.0, TR.scaleY ?? 1.0, TR.scaleZ ?? 1.0);
+    trapMesh.position.set(0, TR.y * scale, TR.z * scale);
+    trapMesh.castShadow = false;
+    trapMesh.userData.zone = 'torso';
+    chest.pivot.add(trapMesh);
+  }
+
+  // --- pec lobe (bust-to-chest bridge) -----------------------------
+  // Female-specific. Soft body-color mass between the bust spheres
+  // and the chest centerline, parented to chest.pivot. Without it
+  // the bust reads as two stuck-on lumps; with it the upper chest
+  // reads as one continuous curve.
+  if (T.pec) {
+    const PC = T.pec;
+    const pecMesh = new THREE.Mesh(_sph(PC.r * scale, 24, 16), bodyMat);
+    pecMesh.scale.set(PC.scaleX ?? 1.0, PC.scaleY ?? 1.0, PC.scaleZ ?? 1.0);
+    pecMesh.position.set(0, PC.y * scale, PC.z * scale);
+    pecMesh.castShadow = false;
+    pecMesh.userData.zone = 'torso';
+    chest.pivot.add(pecMesh);
+  }
+
   // --- bust (femme silhouette) -------------------------------------
   // Two flattened spheres positioned on the chest plate. Read from
   // dims.head.bust so the female DIM overlay drives placement. Body-
