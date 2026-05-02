@@ -170,6 +170,10 @@ const state = {
   // glutes, hair volume, longer legs, smaller head). Sex selector in
   // the GUI flips this and rebuilds.
   archetype: { sex: 'male' },
+  // Per-actor scale multipliers for tunable feature sizes. Lets the
+  // rig_tuner sweep different bust / glute sizes without touching
+  // DIMS — character creator will use the same opts.
+  shape: { bustScale: 1.0, gluteScale: 1.0 },
   pose: {
     preset: 'idle',
     freeze: false,
@@ -307,6 +311,8 @@ function rebuildRig() {
     accentColor: state.colors.accent,
     hairColor:   state.colors.hair,
     sex: state.archetype.sex,
+    bustScale: state.shape.bustScale,
+    gluteScale: state.shape.gluteScale,
   });
   initAnim(rig);
   scene.add(rig.group);
@@ -708,6 +714,8 @@ function applyArchetypeBaseline(sex) {
     applyArchetypeBaseline(sex);
     rebuildRig();
   });
+  f.add(state.shape, 'bustScale', 0.5, 1.6, 0.05).name('bust scale').onChange(() => rebuildRig());
+  f.add(state.shape, 'gluteScale', 0.5, 1.6, 0.05).name('glute scale').onChange(() => rebuildRig());
 }
 
 // --- signature primitives folder ---------------------------------

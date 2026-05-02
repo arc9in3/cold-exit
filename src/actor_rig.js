@@ -315,13 +315,13 @@ export const DEFAULT_DIMS = {
 export const DEFAULT_DIMS_FEMALE = {
   hipY: 1.24,   // taller stance to match longer legs (thigh+calf+foot)
   torso: {
-    pelvisH: 0.20,       // taller pelvis cylinder so the hip ITSELF is
-                         // the primary shape (not the iliac shelves +
-                         // glute spheres reading as two bumps)
-    pelvisTopR: 0.20,    // hip flare upper bound
-    pelvisBotR: 0.27,    // hips wider than shoulders, slightly pulled
-                         // back from 0.28 so it pairs with smaller
-                         // glutes without exaggerating
+    pelvisH: 0.22,
+    // Pelvis taper FLIPPED to match anatomy refs: wider at the TOP
+    // (iliac crest, where the pelvis meets the waist) and narrower at
+    // the BOTTOM (pubic bone, where the legs descend). Previous values
+    // had this inverted, which made the hips read wrong.
+    pelvisTopR: 0.30,    // wide iliac crest
+    pelvisBotR: 0.18,    // narrow pubic bone
     stomachH: 0.26,      // longer waist for hourglass elongation
     stomachTopR: 0.18,
     stomachBotR: 0.11,   // wasp waist — narrowest point
@@ -335,13 +335,13 @@ export const DEFAULT_DIMS_FEMALE = {
     beltR: 0.16,         // tight waist belt
     beltH: 0.06,
     // Per-segment depth ratios — torso isn't uniformly thick front-to-
-    // back. Ribcage at chest level has more depth (rounder ribs);
-    // waist is narrower in BOTH X and Z (wasp); pelvis returns to
-    // full depth (hip flare front-to-back). Without per-segment
-    // depth the front-back silhouette reads as a flat slab.
-    chestDepth:   0.78,   // ribcage front-back
-    stomachDepth: 0.55,   // waist pinch on Z too
-    pelvisDepth:  0.80,   // hip flare projects forward + back
+    // back. Ribcage at chest level has flatter front (eve refs show
+    // chest plane is relatively flat, the bust does the forward
+    // projection). Waist pinches on Z too. Pelvis projects forward
+    // and back per the wedge shape refs show.
+    chestDepth:   0.70,   // flatter chest plane — bust does the forward work
+    stomachDepth: 0.55,
+    pelvisDepth:  0.82,
     // Crotch wedge — sized to bridge the wide pelvis cylinder bottom
     // into the inward-attached legs. Without a properly-sized wedge
     // the bottom of the pelvis just ends in air and the inner edges
@@ -354,15 +354,24 @@ export const DEFAULT_DIMS_FEMALE = {
     // the pelvis cylinder. Smooths the visible "scoop" between the
     // wider iliac flare and where the legs descend.
     hipFront: { r: 0.12, y: -0.06, z: 0.10, scaleX: 1.6, scaleY: 0.7, scaleZ: 0.8 },
-    // Hip bowl — large body-color ellipsoid that ENVELOPS the pelvis
-    // cylinder area and forms the primary hip read. Scaled wide in X
-    // (hip flare), full pelvisH in Y, full depth in Z. Sits centered
-    // on the pelvis. Without this the cylinder + iliacShelves + glutes
-    // read as four separate primitives clipping each other; with it
-    // the entire hip area reads as ONE continuous curved volume.
-    // Anatomically the hip / pelvis area is more spheroid than
-    // cylindrical — this primitive matches that.
-    hipBowl: { r: 0.30, y: -0.04, z: 0, scaleX: 1.00, scaleY: 0.62, scaleZ: 0.92 },
+    // Hip bowl — body-color volume that ENVELOPS the pelvis cylinder
+    // and reads as the wedge shape from the anatomy refs. Pitched
+    // forward 6° so the back (sacrum) sits higher than the front
+    // (pubis) — matches the anatomy refs' visible pelvic tilt.
+    // Wider at the top (iliac flare) and narrower at the bottom
+    // (where legs descend), achieved via the wedge config below.
+    // Tuned so it reads as part of the pelvis silhouette, not a
+    // separate ellipsoid.
+    hipBowl: {
+      r: 0.30, y: -0.05, z: 0,
+      scaleX: 1.00, scaleY: 0.58, scaleZ: 0.90,
+      pitchX: 0.10,        // ~6° forward tilt
+      // Wedge mode: when set, the build pipeline replaces the simple
+      // sphere with a stretched-and-tapered shape. wedgeTopFactor
+      // controls upper width vs scaleX; wedgeBotFactor lower width.
+      wedgeTopFactor: 1.00,   // full iliac width at top
+      wedgeBotFactor: 0.62,   // narrower pubic bone at bottom
+    },
     // Abdomen split into upper + lower lobes so the boundary between
     // them reads as the implicit navel / abs definition line. Without
     // shader tricks we can't draw a recessed line; stacking two lobes
@@ -400,10 +409,13 @@ export const DEFAULT_DIMS_FEMALE = {
     hipBulgeR: 0.20,     // big iliac-to-thigh bridge sphere
     kneeBulgeR: 0.08,
     kneePadW: 0.15, kneePadH: 0.08, kneePadD: 0.08,
-    // Glute volume — small soft additions to the hipBowl back curve,
-    // not standalone shapes. The hipBowl is now doing the primary hip
-    // volume work; glutes just add a subtle outward-back projection.
-    glute: { r: 0.10, separationX: 0.13, y: -0.06, z: -0.13, scaleY: 0.85, scaleZ: 0.85 },
+    // Glute volume — repositioned as the BACK PROJECTION of the
+    // pelvis wedge (per anatomy refs which show glutes as part of the
+    // pelvis silhouette, not separate spheres). Higher Y so they
+    // attach to the upper-back of the wedge; bigger Z so the back
+    // curve projects out where the wedge bottom would otherwise just
+    // taper to nothing.
+    glute: { r: 0.13, separationX: 0.11, y: -0.04, z: -0.14, scaleY: 0.80, scaleZ: 1.00 },
     // Iliac shelf disabled (set null) — hipBowl envelops this region
     // smoothly, the shelf was just adding visible primitive seams.
     iliacShelf: null,
@@ -533,6 +545,12 @@ export function buildRig(opts = {}) {
   // body silhouette. Defaults to bodyColor so existing rigs that don't
   // set a hairColor continue to render the same.
   const hairColor = opts.hairColor ?? bodyColor;
+  // Per-actor bust + glute scaling so the rig_tuner / character
+  // creator can sweep size variants without touching DIMS. 1.0 leaves
+  // the dim-driven defaults; 0.6 → smaller; 1.4 → fuller. Applied
+  // multiplicatively to the radius and projection scales.
+  const bustScale = opts.bustScale ?? 1.0;
+  const gluteScale = opts.gluteScale ?? 1.0;
 
   const accentMat = (() => {
     // Accent uses unlit-ish basic so glow elements (visor, strip) read
@@ -1288,10 +1306,10 @@ export function buildRig(opts = {}) {
   // color so it sits inside the bodysuit silhouette.
   if (H.bust) {
     const B = H.bust;
-    const bR = B.r * scale;
+    const bR = B.r * scale * bustScale;
     for (const sign of [-1, +1]) {
       const lobe = new THREE.Mesh(_sph(bR, 24, 16), bodyMat);
-      lobe.scale.set(1.0, B.scaleY ?? 1.0, B.scaleZ ?? 1.0);
+      lobe.scale.set(1.0, B.scaleY ?? 1.0, (B.scaleZ ?? 1.0) * bustScale);
       lobe.position.set(sign * B.separationX * scale, B.y * scale, B.z * scale);
       lobe.castShadow = false;
       lobe.userData.zone = 'torso';
@@ -1304,10 +1322,10 @@ export function buildRig(opts = {}) {
   // dims.legs.glute. Leg-color so it matches the trousers / bodysuit.
   if (dims.legs.glute) {
     const G = dims.legs.glute;
-    const gR = G.r * scale;
+    const gR = G.r * scale * gluteScale;
     for (const sign of [-1, +1]) {
       const lobe = new THREE.Mesh(_sph(gR, 24, 16), legMat);
-      lobe.scale.set(1.0, G.scaleY ?? 1.0, G.scaleZ ?? 1.0);
+      lobe.scale.set(1.0, G.scaleY ?? 1.0, (G.scaleZ ?? 1.0) * gluteScale);
       lobe.position.set(sign * G.separationX * scale, G.y * scale, G.z * scale);
       lobe.castShadow = false;
       lobe.userData.zone = 'leg';
@@ -1315,17 +1333,32 @@ export function buildRig(opts = {}) {
     }
   }
 
-  // --- hip bowl (primary hip volume) -------------------------------
-  // Female-coded. Large body-color ellipsoid enveloping the pelvis
-  // cylinder area. Forms the primary hip silhouette so the cylinder
-  // + iliacShelves + glutes don't read as separate primitives. Sized
-  // to extend slightly past the cylinder in every direction so the
-  // cylinder edges hide under the bowl's curve. Parented to hips.
+  // --- hip bowl (primary hip volume, wedge-shaped) ------------------
+  // Female-coded. Reads as the pelvis WEDGE per anatomy refs: wider
+  // at the iliac crest (top), narrower at the pubic bone (bottom),
+  // with a slight forward pitch (sacrum higher than pubis). Built
+  // from a tapered cylinder with high segs (smooth surface, planar
+  // structure visible only conceptually) when wedgeTopFactor /
+  // wedgeBotFactor are set; falls back to a simple scaled sphere
+  // otherwise.
   if (T.hipBowl) {
     const HB = T.hipBowl;
-    const bowlMesh = new THREE.Mesh(_sph(HB.r * scale, 32, 24), bodyMat);
-    bowlMesh.scale.set(HB.scaleX ?? 1.0, HB.scaleY ?? 1.0, HB.scaleZ ?? 1.0);
+    let bowlMesh;
+    if (HB.wedgeTopFactor != null && HB.wedgeBotFactor != null) {
+      // Wedge: tapered cylinder. Top radius wider (iliac), bottom
+      // narrower (pubic). High segs so the surface reads smooth even
+      // though the underlying primitive language is "tapered cyl".
+      const topR = HB.r * HB.wedgeTopFactor * scale;
+      const botR = HB.r * HB.wedgeBotFactor * scale;
+      const h = HB.r * 2 * (HB.scaleY ?? 0.6) * scale;
+      bowlMesh = new THREE.Mesh(_cyl(topR, botR, h, 32), bodyMat);
+      bowlMesh.scale.set(HB.scaleX ?? 1.0, 1.0, HB.scaleZ ?? 1.0);
+    } else {
+      bowlMesh = new THREE.Mesh(_sph(HB.r * scale, 32, 24), bodyMat);
+      bowlMesh.scale.set(HB.scaleX ?? 1.0, HB.scaleY ?? 1.0, HB.scaleZ ?? 1.0);
+    }
     bowlMesh.position.set(0, HB.y * scale, HB.z * scale);
+    if (HB.pitchX) bowlMesh.rotation.x = HB.pitchX;
     bowlMesh.castShadow = false;
     bowlMesh.userData.zone = 'torso';
     hips.add(bowlMesh);
