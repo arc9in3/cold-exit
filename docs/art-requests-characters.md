@@ -142,7 +142,14 @@ Standing rules baked into every prompt below:
 
 ## How to use
 
-For each character above, post **two** Discord messages in `#art-requests-2d`:
+All Cold Exit art requests go to the project-specific channels:
+**`#cold-exit-art-2d`** for portraits + backgrounds and
+**`#cold-exit-art-3d`** for any model work. Don't post Cold Exit
+requests to the generic `#art-requests-2d` / `#art-requests-3d`
+channels — Artie routes the result back to wherever the request
+came from, so project channel keeps the assets organized.
+
+For each character above, post **two** Discord messages in `#cold-exit-art-2d`:
 1. The **portrait prompt** under a heading like `## 3. THE GUNSMITH — portrait`
 2. The **room prompt** under `## 3. THE GUNSMITH — room`
 
