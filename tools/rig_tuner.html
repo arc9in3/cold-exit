@@ -137,14 +137,21 @@ scene.add(new THREE.GridHelper(40, 40, 0x1a1c24, 0x0e1014));
 // Deep clone so GUI edits are local — DEFAULT_DIMS stays pristine.
 const state = {
   dims: structuredClone(DEFAULT_DIMS),
+  // Tuner defaults mirror buildRig()'s in-game defaults so the rig you
+  // see here matches the actor as spawned by the game (sans gear-color
+  // overrides from equipped armor). Previous values were uniformly dark
+  // with gear lighter than body — the inverse of the in-game contrast,
+  // so pads dominated the silhouette and the body submerged into the
+  // ground. With these defaults the body reads brightest, gear sits
+  // darker as accents on top.
   colors: {
-    body: 0x1c1e22,
-    head: 0x141518,
-    leg:  0x121317,
-    arm:  0x1a1c20,
-    hand: 0x0d0e10,
-    gear: 0x2a2c30,
-    boot: 0x0a0b0c,
+    body: 0x3a4048,   // mid-steel — readable mid-tone
+    head: 0xc39066,   // skin
+    leg:  0x1f2328,   // dark trousers
+    arm:  0x3a4048,   // matches body
+    hand: 0xcba07a,   // skin (gloves override per-actor)
+    gear: 0x1d2024,   // darker than body — pads/cuffs/plate ride as accents
+    boot: 0x1a1510,   // dark leather
   },
   pose: {
     preset: 'idle',

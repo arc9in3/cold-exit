@@ -219,7 +219,12 @@ export const DEFAULT_DIMS = {
     stomachH: 0.235, stomachTopR: 0.24, stomachBotR: 0.18, stomachY: 0.22,
     chestH: 0.345, chestTopR: 0.32, chestBotR: 0.22,
     collarH: 0.055, collarTopR: 0.11, collarBotR: 0.32, collarDY: 0.057,
-    chestPlateTopR: 0.34, chestPlateBotR: 0.22,
+    // Bottom radius lifted from 0.22 → 0.28 so the cone tapers less
+    // aggressively — the previous value created a visible polygon ring
+    // at the bottom edge that read as a row of triangle teeth at iso
+    // angles. With less taper + more segments (see chestPlate build)
+    // the rim reads as a smooth curve.
+    chestPlateTopR: 0.34, chestPlateBotR: 0.28,
     chestPlateH: 0.34, chestPlateYK: 0.55, // * chestH
     beltR: 0.24, beltH: 0.09, beltY: 0.015,
   },
@@ -243,7 +248,10 @@ export const DEFAULT_DIMS = {
     forearmH: 0.30, forearmTopR: 0.09, forearmBotR: 0.065,
     shoulderBulgeR: 0.15,
     elbowBulgeR: 0.08,
-    shoulderPadR: 0.18,
+    // Pauldron — sized to sit *on* the deltoid, not swallow it. Was 0.18
+    // (read bigger than the head from front-3/4); 0.11 keeps the
+    // armoured-shoulder read without the visor-helmet-pauldron silhouette.
+    shoulderPadR: 0.11,
     wristCuffR: 0.075, wristCuffH: 0.07, wristCuffYK: -0.9, // * forearmH
     handW: 0.12, handH: 0.12, handD: 0.16, handY: -0.06,
   },
@@ -251,8 +259,12 @@ export const DEFAULT_DIMS = {
     x: 0.23, yK: 0.82, z: 0.04, // yK * chestH
   },
   head: {
-    neckTopR: 0.08, neckBotR: 0.09, neckH: 0.185, neckMeshY: 0.09,
-    headY: 0.125,
+    // Neck lengthened (0.185 → 0.22) + head raised (0.125 → 0.14) so
+    // there's a visible neck segment between the chest cap and the
+    // cranium. Previously the head sat directly on the chest plate /
+    // collar and read Lego-figure-ish.
+    neckTopR: 0.08, neckBotR: 0.09, neckH: 0.22, neckMeshY: 0.09,
+    headY: 0.14,
     craniumR: 0.15, craniumStretchY: 1.15, craniumStretchZ: 1.05, craniumY: 0.18,
     jawW: 0.075, jawH: 0.10, jawD: 0.22, jawY: 0.06,
   },
@@ -505,7 +517,7 @@ export function buildRig(opts = {}) {
   const chestPlate = new THREE.Mesh(
     _cyl(
       T.chestPlateTopR * scale, T.chestPlateBotR * scale,
-      T.chestPlateH * scale, 14, true,
+      T.chestPlateH * scale, 32, true,
       -Math.PI / 2.4, Math.PI / 1.2,
     ),
     gearMat,
@@ -923,8 +935,19 @@ export const POSE_TUNABLES = {
     runBobMult: 1.4,              // run-vs-walk multiplier on the bob
     plantDipAmplitude: 0.015,     // heel-strike hip dip (m, scaled by rs)
     hipRollAmplitude: 0.035,      // gait-driven hip roll (rad)
+    // Spinal counter-rotation: hips yaw +sin(cycle), chest counter-yaws
+    // -sin(cycle) (in world space), so the upper and lower body twist
+    // against each other across the stride. Aim direction is preserved
+    // via a 2x subtract on chest.rotation.y. Damped while aiming so ADS
+    // doesn't make the hips wiggle under a locked-on shoulder.
+    gaitYawAmplitude: 0.08,       // peak hip-yaw amplitude during gait (rad)
+    // Forward lean during run was 0.16 (~9°). Bumped to 0.22 (~12.6°)
+    // for a more aggressive run silhouette. The arm-lean compensation
+    // (`armLeanComp` in updateAnim) subtracts this from shoulder pitch
+    // so the gun stays level — verified the chain references runLean
+    // directly, not a stale hardcoded constant.
     runLeanWalk: 0.04,            // forward lean per blendWalk
-    runLeanRun: 0.16,             // forward lean per blendRun
+    runLeanRun: 0.22,             // forward lean per blendRun
   },
   // Kneel pose — fires when state.crouched && speed < kneel.threshold.
   // At full blend, overrides the crouch-pose leg rotations (one knee
@@ -1369,7 +1392,18 @@ export function updateAnim(rig, state, dt) {
   const rawRunLean = (a.blendWalk * Tg.runLeanWalk + a.blendRun * Tg.runLeanRun) * (1 - crouch * 0.85);
   const runLean = meleeActive ? rawRunLean * 0.5 : rawRunLean;
   const meleeWaistBend = meleeActive ? 0.08 : 0;
-  rig.chest.rotation.y = chestAimYaw;
+  // Spinal counter-rotation during gait — hips swing one way, chest
+  // counter-swings the other so the torso twists across the stride.
+  // Subtracting 2x the gait yaw from chest.rotation.y means the chest's
+  // WORLD yaw equals chestAimYaw - gaitHipYaw (chest's local + parent's
+  // yaw): aim stays correct, but the hips rotate UNDER a stable chest.
+  // Damped during aim so ADS doesn't spin the hips. Suppressed while
+  // crouching since the crouch pose already locks the hips. Disabled
+  // entirely during melee (hips zeroed by the swing block at line ~1873).
+  const gaitYawAmp = Tg.gaitYawAmplitude * gaitT * (1 - a.aimBlend * 0.6) * (1 - crouch * 0.7);
+  const gaitHipYaw = s * gaitYawAmp;
+  rig.hips.rotation.y = gaitHipYaw;
+  rig.chest.rotation.y = chestAimYaw - 2 * gaitHipYaw;
   rig.chest.rotation.x = chestFlinch - recK * 0.06 + crouchLean + dashLean + runLean + breathPitch + meleeWaistBend;
   // Hip pitch matches the chest hunch so the spine doesn't break — a
   // deeper crouch chest fold without matching hip pitch reads as a
@@ -1695,12 +1729,17 @@ export function updateAnim(rig, state, dt) {
     // (like a fighter's guard). Off-arm mirrors with a lighter bend
     // so the character reads as coiled and ready to react, not
     // strolling with arms hanging.
-    const idleShoulder        = -0.35;   // weapon arm forward at ~20°
+    // Tightened guard: weapon shoulder pulled further forward and
+    // elbow folded harder so the blade rides at chest/shoulder height
+    // instead of dangling at the hip. Off-arm mirrors with a slightly
+    // softer fold so the silhouette reads as a coiled fighter's stance,
+    // not "arms hanging at the sides."
+    const idleShoulder        = -0.55;   // weapon arm forward at ~31°
     const idleShoulderYaw     =  0.20 * supportYawSign;  // elbow tucked slightly inward
-    const idleElbow           = -1.15;   // tight bend — weapon tip up near chest
-    const idleSupportShoulder = -0.30;
+    const idleElbow           = -1.55;   // ~89° fold — weapon tip up near chin
+    const idleSupportShoulder = -0.45;
     const idleSupportYaw      = -0.25 * supportYawSign;  // off-hand up in guard
-    const idleSupportElbow    = -0.90;
+    const idleSupportElbow    = -1.20;
     // Swing-time lift — during an active strike the weapon arm
     // rises to ~shoulder height for the strike. Gated on the
     // `attacking` flag from player.js so the one-frame `swingP=0`
