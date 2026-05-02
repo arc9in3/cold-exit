@@ -121,7 +121,7 @@ window.__resetHints = resetHints;
 // "I'm on build XYZ" without inspecting the bundle. Date stamps the
 // version so a quick glance tells you how stale the build is. Both
 // values render into the bottom-right #build-version label.
-const BUILD_VERSION = '4502671+megaboss-death-sync';
+const BUILD_VERSION = '0cabc75+megaboss-tick-visuals';
 // Build date intentionally bumped each deploy so the corner label
 // reflects the current snapshot.
 const BUILD_DATE    = '2026-05-01';
@@ -16994,6 +16994,10 @@ function tick() {
     if (_coopJoiner) {
       const pair = pickInterpSnapshots();
       if (pair) applyMegaBossSnapshot(pair.b, megaBoss);
+      // Visual-only tick — animates the boss mesh (eye spin, fire
+      // patches, gesturing arm) without running the AI / attack /
+      // hazard FSM. Each megaboss class exposes its own tickVisuals.
+      try { megaBoss.tickVisuals?.(dt); } catch (_) {}
     } else {
       megaBoss.update(dt, player.mesh.position);
       _coopTickMegabossHazards();

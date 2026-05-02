@@ -636,6 +636,17 @@ export class MegaBoss {
   }
 
   // ----- Per-frame --------------------------------------------------
+  // Visual-only tick — drives phase 2 smoke + phase 3 fire-patch +
+  // ember pool animations on the joiner side without running the AI
+  // FSM, attack timers, or hazard damage. Joiner's _coopJoiner branch
+  // calls this after applyMegaBossSnapshot so the boss isn't a frozen
+  // mesh teleporting between snapshot ticks.
+  tickVisuals(dt) {
+    if (!this.alive) return;
+    this._t = (this._t || 0) + dt;
+    this._tickPhaseEffects(dt);
+  }
+
   update(dt, playerPos) {
     if (!this.alive && this.state !== 'dead') return;
     this._t += dt;

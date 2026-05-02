@@ -224,6 +224,27 @@ export class MegaBossEcho {
     this._updateBossBar();
   }
 
+  // ---------- Visual-only tick ----------
+  // Drives eye + ring spin, color pulse, and phase-3 beam reveal.
+  // Called by both the host's update() (below) and by the joiner's
+  // post-snapshot path so the mirror doesn't freeze when its local
+  // update() is gated off. Reads megaBoss.phase from the snapshot
+  // rather than recomputing it from hpRatio so joiner stays aligned
+  // with host's authoritative phase.
+  tickVisuals(dt) {
+    if (!this.alive) return;
+    this._t = (this._t || 0) + dt;
+    if (this.eyeMesh) this.eyeMesh.rotation.y += dt * 1.2;
+    if (this.ringMesh) {
+      this.ringMesh.rotation.z += dt * 0.6;
+      this.ringMesh.rotation.x = Math.PI / 2 + Math.sin(this._t * 0.8) * 0.18;
+    }
+    const hpRatio = this.maxHp ? this.hp / this.maxHp : 1;
+    const targetHex = hpRatio > 0.75 ? 0xb892f0 : hpRatio > 0.35 ? 0xff70d0 : 0xff5070;
+    if (this.eyeMat) this.eyeMat.color.setHex(targetHex);
+    if (this.beamMat) this.beamMat.opacity = this.phase === 3 ? 0.65 : 0;
+  }
+
   // ---------- Per-tick ----------
   update(dt) {
     if (!this.alive) return;
