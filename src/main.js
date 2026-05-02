@@ -121,7 +121,7 @@ window.__resetHints = resetHints;
 // "I'm on build XYZ" without inspecting the bundle. Date stamps the
 // version so a quick glance tells you how stale the build is. Both
 // values render into the bottom-right #build-version label.
-const BUILD_VERSION = 'e98cbe4+headhunter-singlebullet-fix';
+const BUILD_VERSION = 'c1bfed7+headhunter-cancel-on-empty';
 // Build date intentionally bumped each deploy so the corner label
 // reflects the current snapshot.
 const BUILD_DATE    = '2026-05-01';
@@ -8645,26 +8645,32 @@ function fireOneShot(playerInfo, weapon, aimPoint, isADS, aimOwner, aimZone) {
           spawnKillBlast(hit.owner.group.position, derivedStats.explodeOnKillRadius, derivedStats.explodeOnKillDmg);
         }
       }
-      // Headhunter: refund one round per headshot if the weapon has the perk.
-      // For single-bullet weapons (magSize === 1) the auto-reload that
-      // kicks off the moment ammo hit 0 has already started — we need
-      // to cancel it once the refund tops the mag back up, or the
-      // visible effect is "reload anyway" and the perk reads as broken.
+      // Headhunter: refund one round per headshot if the weapon has
+      // the perk. If this shot emptied the mag (ammo was 0 going
+      // into the refund), the auto-reload-on-empty branch above
+      // already kicked off a reload — cancel it the moment the
+      // refund puts a round back, or the gun visibly reloads anyway
+      // and the perk reads as broken. Applies whether magSize is 1
+      // (sniper) or 5+ (the player just had 1 bullet left in a
+      // bigger mag).
       if (hit.zone === 'head' && weaponHasPerk(weapon, 'headhunter')
         && typeof weapon.ammo === 'number' && weapon.ammo < eff.magSize) {
+        const wasEmpty = weapon.ammo <= 0;
         weapon.ammo = Math.min(eff.magSize, weapon.ammo + 1);
-        if (weapon.ammo >= eff.magSize && weapon.reloadingT > 0) {
+        if (wasEmpty && weapon.reloadingT > 0) {
           weapon.reloadingT = 0;
           weapon.reloadEndsAt = 0;
         }
       }
       // Scavenged Rounds — chance-based ammo refund on any body hit.
-      // Cancel any in-flight auto-reload if the refund tops the mag.
+      // Cancel the auto-reload-on-empty if this refund puts a round
+      // back into a mag we just emptied this shot.
       if ((derivedStats.ammoOnHitChance || 0) > 0
           && typeof weapon.ammo === 'number' && weapon.ammo < eff.magSize
           && Math.random() < derivedStats.ammoOnHitChance) {
+        const wasEmpty = weapon.ammo <= 0;
         weapon.ammo = Math.min(eff.magSize, weapon.ammo + 1);
-        if (weapon.ammo >= eff.magSize && weapon.reloadingT > 0) {
+        if (wasEmpty && weapon.reloadingT > 0) {
           weapon.reloadingT = 0;
           weapon.reloadEndsAt = 0;
         }
