@@ -180,7 +180,11 @@ function taperedSegment(opts) {
 // limb connects smoothly to the torso / next segment instead of
 // showing a hard cylinder step.
 function jointSphere(radius, material, zone) {
-  const mesh = new THREE.Mesh(_sph(radius, 10, 8), material);
+  // Sphere segs bumped for the anatomical-curves pass — joint bulges
+  // are visible at the limb-torso transition and the previous 10×8
+  // tessellation read as faceted at iso. 24×16 reads as a smooth
+  // organic blend.
+  const mesh = new THREE.Mesh(_sph(radius, 24, 16), material);
   // Joint bulges are always tiny accessory blobs that fill the gap
   // between two limb segments — disable shadow casting since they
   // don't change the silhouette and Three.js's shadow pass renders
@@ -206,7 +210,11 @@ export const DEFAULT_DIMS = {
   // limbs 16 + neck 16 hits that sweet spot. Bumping further has no
   // visible payoff at game render scale.
   torso: {
-    segs: 24,
+    // Pushed up so the silhouette polygon edges disappear at iso /
+    // mid-distance render scales. 48 is essentially free perf-wise on
+    // a single torso cylinder per actor; bumping further has no
+    // visible payoff. Joint spheres + limbs follow suit elsewhere.
+    segs: 48,
     depthRatio: 0.72,
     // V-taper silhouette — wider top, narrower waist. Bumped chestTopR
     // and slimmed chestBotR so the cylinder reads with shoulders-out
@@ -355,6 +363,7 @@ export function buildRig(opts = {}) {
     const thigh = taperedSegment({
       px: sign * L.hipX * scale, py: L.hipJointY * scale, pz: 0,
       topR: L.thighTopR * scale, botR: L.thighBotR * scale, h: thighH,
+      segs: 24,
       material: legMat, zone: 'leg',
     });
     // Hip-joint sphere caps the tapered cylinder cleanly against
@@ -364,7 +373,7 @@ export function buildRig(opts = {}) {
     // Thigh rig — small gear-coloured pouch on the outer thigh.
     // Rounded silhouette reads softer than the previous flat box;
     // sphere scaled to a wedge sits flush against the thigh cylinder.
-    const thighRig = new THREE.Mesh(_sph(0.5, 10, 6), gearMat);
+    const thighRig = new THREE.Mesh(_sph(0.5, 24, 16), gearMat);
     thighRig.scale.set(L.thighRigW * scale * 1.2, L.thighRigH * scale, L.thighRigD * scale);
     thighRig.position.set(sign * L.thighRigX * scale, L.thighRigYK * thighH, 0);
     thighRig.castShadow = false;
@@ -381,7 +390,7 @@ export function buildRig(opts = {}) {
     // geometry scaled into a flat oval cap reads softer than the
     // previous boxy plate; the cel-shading band wraps around the
     // curve instead of breaking on a hard edge.
-    const kneePad = new THREE.Mesh(_sph(0.5, 12, 8), gearMat);
+    const kneePad = new THREE.Mesh(_sph(0.5, 24, 16), gearMat);
     kneePad.scale.set(L.kneePadW * scale, L.kneePadH * scale, L.kneePadD * scale * 1.5);
     kneePad.position.set(0, 0, L.kneePadZ * scale);
     kneePad.castShadow = false;
@@ -392,6 +401,7 @@ export function buildRig(opts = {}) {
     const calf = taperedSegment({
       px: 0, py: 0, pz: 0,
       topR: L.calfTopR * scale, botR: L.calfBotR * scale, h: calfH,
+      segs: 24,
       material: legMat, zone: 'leg',
     });
     knee.add(calf.pivot);
@@ -399,17 +409,39 @@ export function buildRig(opts = {}) {
     const ankle = new THREE.Group();
     ankle.position.y = -calfH;
     calf.pivot.add(ankle);
-    // Boot — keep a box for the foot since boots actually read boxy.
-    const foot = segment({
-      px: 0, py: 0, pz: L.footZ * scale,
-      w: L.footW * scale, h: footH, d: L.footD * scale,
-      my: -footH / 2,
-      material: bootMat, zone: 'leg',
-    });
+    // Boot — rounded boot read instead of bare box. Built from a base
+    // tapered "shoe" (slim toe, wider at the heel) plus a dome on the
+    // toe so the front rounds off. The pivot stays at the ankle so
+    // existing IK / foot-plant code is unaffected.
+    const foot = (() => {
+      const pivot = new THREE.Group();
+      pivot.position.set(0, 0, L.footZ * scale);
+      // Sole: shallow flattened oval — sphere scaled to a slipper
+      // shape. Sits with its centre at footH * 0.5 above the ground.
+      const sole = new THREE.Mesh(_sph(0.5, 24, 16), bootMat);
+      sole.scale.set(L.footW * scale * 0.55, footH * 0.7, L.footD * scale * 0.55);
+      sole.position.set(0, -footH * 0.35, 0);
+      sole.castShadow = true;
+      sole.userData.zone = 'leg';
+      pivot.add(sole);
+      // Toe dome — a small hemisphere capping the front of the boot.
+      // Reads as the rounded toe of a tactical boot.
+      const toeR = L.footW * scale * 0.45;
+      const toeGeom = _stamp(new THREE.SphereGeometry(toeR, 24, 12, 0, Math.PI * 2, 0, Math.PI / 2));
+      const toe = new THREE.Mesh(toeGeom, bootMat);
+      toe.position.set(0, -footH * 0.05, L.footD * scale * 0.45);
+      toe.rotation.x = -Math.PI / 2;
+      toe.castShadow = false;
+      toe.userData.zone = 'leg';
+      pivot.add(toe);
+      // Mesh alias for the .meshes flat list — point at the sole so
+      // hit-flash etc. still has a single mesh handle per foot.
+      return { pivot, mesh: sole };
+    })();
     ankle.add(foot.pivot);
     // Boot top — gear-coloured cuff above the foot, on the calf.
     const bootTop = new THREE.Mesh(
-      _cyl(L.bootTopR * scale, L.bootTopR * scale, L.bootTopH * scale, 12),
+      _cyl(L.bootTopR * scale, L.bootTopR * scale, L.bootTopH * scale, 24),
       bootMat,
     );
     bootTop.position.set(0, L.bootTopYK * calfH, 0);
@@ -533,7 +565,7 @@ export function buildRig(opts = {}) {
   const chestPlate = new THREE.Mesh(
     _cyl(
       T.chestPlateTopR * scale, T.chestPlateBotR * scale,
-      T.chestPlateH * scale, 32, true,
+      T.chestPlateH * scale, 48, true,
       -Math.PI / 2.4, Math.PI / 1.2,
     ),
     gearMat,
@@ -569,7 +601,7 @@ export function buildRig(opts = {}) {
     const shoulder = taperedSegment({
       px: sign * A.shoulderInset * scale, py: A.shoulderYK * chestH, pz: 0,
       topR: A.upperArmTopR * scale, botR: A.upperArmBotR * scale, h: upperArmH,
-      segs: 16,
+      segs: 24,
       material: armMat, zone: 'arm',
     });
     // Shoulder joint sphere — smooths the shoulder-to-torso bulge.
@@ -604,13 +636,13 @@ export function buildRig(opts = {}) {
     const forearm = taperedSegment({
       px: 0, py: 0, pz: 0,
       topR: A.forearmTopR * scale, botR: A.forearmBotR * scale, h: forearmH,
-      segs: 16,
+      segs: 24,
       material: armMat, zone: 'arm',
     });
     elbow.add(forearm.pivot);
     // Wrist cuff — gear cylinder band just above the hand.
     const wristCuff = new THREE.Mesh(
-      _cyl(A.wristCuffR * scale, A.wristCuffR * scale, A.wristCuffH * scale, 16),
+      _cyl(A.wristCuffR * scale, A.wristCuffR * scale, A.wristCuffH * scale, 24),
       gearMat,
     );
     wristCuff.position.set(0, A.wristCuffYK * forearmH, 0);
@@ -701,7 +733,7 @@ export function buildRig(opts = {}) {
       ];
       for (const r of ringDefs) {
         const ring = new THREE.Mesh(
-          _cyl(r.r, r.r, r.h, 16),
+          _cyl(r.r, r.r, r.h, 24),
           gearMat,
         );
         ring.position.y = r.y;
@@ -717,7 +749,7 @@ export function buildRig(opts = {}) {
       return { pivot, mesh: cableGroup, cableRings: cableGroup.children.slice() };
     }
     const mesh = new THREE.Mesh(
-      _cyl(H.neckTopR * scale, H.neckBotR * scale, H.neckH * scale, 16),
+      _cyl(H.neckTopR * scale, H.neckBotR * scale, H.neckH * scale, 24),
       bodyMat,
     );
     mesh.position.y = H.neckMeshY * scale;
@@ -734,7 +766,7 @@ export function buildRig(opts = {}) {
   head.position.y = H.headY * scale;
   neck.pivot.add(head);
   // Cranium — faceted low-poly sphere with vertical stretch.
-  const headMesh = new THREE.Mesh(_sph(H.craniumR * scale, 14, 10), headMat);
+  const headMesh = new THREE.Mesh(_sph(H.craniumR * scale, 32, 24), headMat);
   headMesh.scale.set(1.0, H.craniumStretchY, H.craniumStretchZ);
   headMesh.position.y = H.craniumY * scale;
   headMesh.castShadow = true;
