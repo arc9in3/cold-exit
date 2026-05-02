@@ -3458,10 +3458,9 @@ export class HideoutUI {
         position: absolute; top: 16px; left: 16px; right: 16px;
         display: flex; align-items: center; gap: 16px;
         padding: 10px 18px;
-        background: linear-gradient(180deg, rgba(14,16,24,0.85) 0%, rgba(14,16,24,0.65) 100%);
-        border: 1px solid rgba(90,138,207,0.4); border-radius: 6px;
+        background: rgba(14,16,24,0.85);
+        border: 1px solid rgba(42,47,58,0.9); border-radius: 2px;
         backdrop-filter: blur(4px);
-        box-shadow: 0 4px 18px rgba(0,0,0,0.6);
         color: #e8dfc8;
       }
 
@@ -3481,11 +3480,10 @@ export class HideoutUI {
         position: absolute; top: 78px; left: 16px; right: 16px;
         z-index: 50;
         display: flex; flex-direction: row; gap: 2px;
-        background: linear-gradient(180deg, rgba(14,16,24,0.85) 0%, rgba(14,16,24,0.65) 100%);
-        border: 1px solid rgba(90,138,207,0.4); border-radius: 6px;
-        padding: 6px 8px;
+        background: rgba(14,16,24,0.85);
+        border: 1px solid rgba(42,47,58,0.9); border-radius: 2px;
+        padding: 8px 8px;
         backdrop-filter: blur(4px);
-        box-shadow: 0 4px 18px rgba(0,0,0,0.6);
         overflow-x: auto;
       }
       #hideout-tabs .hideout-tab {
@@ -3500,17 +3498,17 @@ export class HideoutUI {
       #hideout-panel {
         position: absolute; top: 132px; left: 16px; right: 16px; bottom: 16px;
         width: auto; max-width: none;
-        background: linear-gradient(180deg, rgba(14,16,24,0.92) 0%, rgba(14,16,24,0.95) 100%);
-        border: 1px solid rgba(90,138,207,0.4); border-radius: 6px;
-        padding: 14px 18px;
+        background: rgba(14,16,24,0.93);
+        border: 1px solid rgba(42,47,58,0.9); border-radius: 2px;
+        padding: 16px 16px;
         overflow-y: auto;
         color: #e8dfc8;
-        box-shadow: 0 8px 28px rgba(0,0,0,0.75);
+        box-shadow: 0 12px 32px rgba(0,0,0,0.6);
         backdrop-filter: blur(3px);
       }
       #hideout-panel::-webkit-scrollbar { width: 8px; }
       #hideout-panel::-webkit-scrollbar-track { background: transparent; }
-      #hideout-panel::-webkit-scrollbar-thumb { background: #2a2f3a; border-radius: 4px; }
+      #hideout-panel::-webkit-scrollbar-thumb { background: #2a2f3a; border-radius: 2px; }
       #hideout-panel::-webkit-scrollbar-thumb:hover { background: #3a3f4a; }
 
       /* Stash twocol — natural twocol layout from .hideout-stash-twocol
@@ -3536,13 +3534,13 @@ export class HideoutUI {
         position: absolute; top: 14px; left: 14px; bottom: 14px;
         width: 200px;
         background: rgba(10,12,18,0.6);
-        border: 1px solid rgba(90,138,207,0.25); border-radius: 4px;
-        padding: 10px 12px; overflow-y: auto;
+        border: 1px solid rgba(42,47,58,0.9); border-radius: 2px;
+        padding: 12px 12px; overflow-y: auto;
       }
       .contractor-feed .feed-head {
         font-size: 10px; letter-spacing: 1.6px; color: #5a8acf;
-        margin-bottom: 8px; padding-bottom: 6px;
-        border-bottom: 1px solid rgba(90,138,207,0.2);
+        margin-bottom: 8px; padding-bottom: 8px;
+        border-bottom: 1px solid rgba(42,47,58,0.9);
       }
       .feed-row {
         display: grid; grid-template-columns: 1fr auto;
@@ -3562,13 +3560,13 @@ export class HideoutUI {
         position: absolute; top: 14px; right: 14px;
         width: 220px;
         background: rgba(10,12,18,0.6);
-        border: 1px solid rgba(90,138,207,0.25); border-radius: 4px;
-        padding: 10px 12px;
+        border: 1px solid rgba(42,47,58,0.9); border-radius: 2px;
+        padding: 12px 12px;
       }
       .contractor-board .board-head {
         font-size: 10px; letter-spacing: 1.6px; color: #5a8acf;
-        margin-bottom: 8px; padding-bottom: 6px;
-        border-bottom: 1px solid rgba(90,138,207,0.2);
+        margin-bottom: 8px; padding-bottom: 8px;
+        border-bottom: 1px solid rgba(42,47,58,0.9);
       }
       .board-row {
         display: flex; justify-content: space-between;
@@ -3586,18 +3584,17 @@ export class HideoutUI {
       .host-portrait {
         width: 240px; height: 240px;
         background: radial-gradient(circle at 50% 35%, #2a1a2a 0%, #0a0a14 90%);
-        border: 2px solid rgba(178,112,224,0.4); border-radius: 8px;
+        border: 1px solid rgba(178,112,224,0.4); border-radius: 2px;
         display: flex; align-items: center; justify-content: center;
-        box-shadow: 0 8px 32px rgba(0,0,0,0.7), inset 0 0 30px rgba(178,112,224,0.15);
+        box-shadow: inset 0 0 30px rgba(178,112,224,0.15);
       }
       .host-glyph {
         font-size: 90px; color: #b870e0; opacity: 0.6;
-        text-shadow: 0 0 24px rgba(178,112,224,0.6);
       }
       .host-bubble {
         background: rgba(20,16,28,0.92);
         border: 1px solid rgba(178,112,224,0.4);
-        border-radius: 6px; padding: 10px 16px;
+        border-radius: 2px; padding: 12px 16px;
         max-width: 460px;
       }
       .host-quote {
@@ -3607,22 +3604,22 @@ export class HideoutUI {
 
       /* Big golden CTA — bottom-center per spec */
       #contractor-cta {
-        position: absolute; left: 50%; bottom: 60px;
+        position: absolute; left: 50%; bottom: 48px;
         transform: translateX(-50%);
-        background: linear-gradient(180deg, #f2c060 0%, #c98a3a 100%);
-        border: 2px solid #f2c060;
-        color: #1a1408; font-weight: 900;
+        background: #f2c060;
+        border: 1px solid #f2c060;
+        color: #0c0e14; font-weight: 700;
         font-size: 22px; letter-spacing: 4px;
-        padding: 16px 64px; border-radius: 4px;
+        padding: 16px 48px; border-radius: 2px;
         cursor: pointer;
-        box-shadow: 0 0 40px rgba(242,192,96,0.5), 0 8px 24px rgba(0,0,0,0.6);
-        font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+        box-shadow: 0 0 40px rgba(242,192,96,0.5);
+        font-family: 'Inter', system-ui, -apple-system, sans-serif;
         text-transform: uppercase;
-        transition: transform 0.18s, box-shadow 0.18s;
+        transition: background-color 120ms ease-out, box-shadow 120ms ease-out, color 120ms ease-out;
       }
       #contractor-cta:hover {
-        transform: translateX(-50%) scale(1.04);
-        box-shadow: 0 0 60px rgba(242,192,96,0.7), 0 12px 28px rgba(0,0,0,0.7);
+        background: #ffd070;
+        box-shadow: 0 0 60px rgba(242,192,96,0.7);
       }
       .contractor-cta-sub {
         position: absolute; left: 50%; bottom: 30px;
@@ -3642,7 +3639,7 @@ export class HideoutUI {
         border: 1px solid rgba(155,139,106,0.4);
         color: #c9a87a; font: inherit; font-size: 11px;
         letter-spacing: 1.4px; padding: 8px 16px;
-        border-radius: 4px; cursor: pointer;
+        border-radius: 2px; cursor: pointer;
         transition: background 0.15s, color 0.15s;
         z-index: 5;
       }
