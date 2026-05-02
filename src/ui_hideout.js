@@ -2524,11 +2524,10 @@ export class HideoutUI {
 
     const cols = document.createElement('div');
     cols.className = 'lb-full-cols';
-    for (const c of cats) {
-      const col = document.createElement('div');
-      col.className = 'lb-full-col';
-      const entries = lb?.top ? (lb.top(c.key, 10) || []) : [];
-      const rowsHTML = [];
+    // Render rows for one category. Reused for the initial local
+    // pass + the remote-result swap.
+    const renderRows = (col, c, entries) => {
+      const rowsHTML = [`<div class="lb-col-head">${c.label}</div>`];
       for (let i = 0; i < 10; i++) {
         const e = entries[i];
         if (e) {
@@ -2538,11 +2537,23 @@ export class HideoutUI {
           rowsHTML.push(`<div class="lb-full-row empty"><span class="lb-rank">${i + 1}.</span><span class="lb-name">—</span><span class="lb-val"></span></div>`);
         }
       }
-      col.innerHTML = `
-        <div class="lb-col-head">${c.label}</div>
-        ${rowsHTML.join('')}
-      `;
+      col.innerHTML = rowsHTML.join('');
+    };
+    for (const c of cats) {
+      const col = document.createElement('div');
+      col.className = 'lb-full-col';
+      // Initial paint from the local list so something shows
+      // instantly. Remote fetch fires in the background and swaps
+      // the rows in when it lands — same pattern as the main-menu
+      // leaderboard.
+      const local = lb?.top ? (lb.top(c.key, 10) || []) : [];
+      renderRows(col, c, local);
       cols.appendChild(col);
+      if (lb?.remoteTop) {
+        Promise.resolve(lb.remoteTop(c.key, 10)).then((res) => {
+          if (res && Array.isArray(res.entries)) renderRows(col, c, res.entries);
+        }).catch(() => { /* offline / CORS — local stays */ });
+      }
     }
     wrap.appendChild(cols);
 
@@ -2989,10 +3000,13 @@ export class HideoutUI {
     const owned = getRecruiterUnlocks();
 
     const head = document.createElement('div');
-    head.className = 'hideout-section-head';
+    head.className = 'hideout-section-head trainer-head-with-portrait';
     head.innerHTML = `
-      <div class="hideout-section-title">TRAINER</div>
-      <div class="hideout-section-sub">Spend marks earned by dying. Each track levels up in place — buy a tier, the notch lights, the next tier becomes available. <b>${marks}</b> marks on file.</div>
+      <img class="trainer-portrait" src="Assets/generated/art-recruiter-portrait-v3-via-qwen-image.png" alt="" aria-hidden="true" decoding="async">
+      <div class="trainer-head-text">
+        <div class="hideout-section-title">TRAINER</div>
+        <div class="hideout-section-sub">Spend marks earned by dying. Each track levels up in place — buy a tier, the notch lights, the next tier becomes available. <b>${marks}</b> marks on file.</div>
+      </div>
     `;
     wrap.appendChild(head);
 
@@ -3002,6 +3016,20 @@ export class HideoutUI {
       const style = document.createElement('style');
       style.id = 'trainer-notch-style';
       style.textContent = `
+        /* Recruiter portrait on the section head — small head-and-shoulders
+           painting of the trainer NPC sits left of the title block so the
+           tab has a face attached to the marks-spend pitch. */
+        .trainer-head-with-portrait {
+          display: flex; align-items: center; gap: 14px;
+        }
+        .trainer-head-with-portrait .trainer-head-text { flex: 1; min-width: 0; }
+        .trainer-portrait {
+          width: 96px; height: 96px; flex: 0 0 auto;
+          object-fit: cover; object-position: center 18%;
+          border: 1px solid rgba(155,139,106,0.4); border-radius: 4px;
+          background: radial-gradient(circle at 50% 35%, #2a2018 0%, #0a0a14 90%);
+          box-shadow: 0 4px 16px rgba(0,0,0,0.6);
+        }
         /* Trainer track row — notches and per-tier text live on their
            own lines below the title row so nothing overlaps the cost
            pill on the right or the action button column. */
