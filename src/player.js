@@ -43,13 +43,22 @@ const _aimIkPole = new THREE.Vector3();
 // on the shoulder bind-pose composition that produced visible arm-
 // orbit-in-circles motion. Plain chest+head additive aim looks
 // correct for the GASP locomotion set.
-function _runUpperBodyIK(rig, state, aimPoint, aimPitch) {
+function _runUpperBodyIK(rig, state, aimPoint, aimPitch, dt = 1/60) {
   if (!rig || !rig._fbx) return;
   const fbx = rig._fbx;
   const aimYaw = state.chestTwist || 0;
   // Add the GASP pitch-up baseline (negative aimPitch tilts upper
   // body forward; we want backward when below ADS so arms rise).
   aimPitch += (state._gaspPitchOffset || 0);
+  // Recoil pulse — kickRecoil() set fbx._recoilT and _recoilAmt;
+  // decay over time and add a backward pitch contribution. ~180ms
+  // total, peak at trigger, smooth ease-out.
+  if (fbx._recoilT > 0) {
+    fbx._recoilT = Math.max(0, fbx._recoilT - dt);
+    const phase = fbx._recoilT / 0.18;            // 1.0 → 0.0
+    const k = phase * phase;                       // ease-out quadratic
+    aimPitch += -fbx._recoilAmt * k;               // negative = pitch UP (gun rises)
+  }
 
   // Resolve spine chain + neck + head + clavicles on first call.
   if (!fbx._spineChain) {
@@ -2057,7 +2066,25 @@ export function createPlayer(scene) {
           let gunYaw = cursorYaw - rig.group.rotation.y;
           while (gunYaw >  Math.PI) gunYaw -= 2 * Math.PI;
           while (gunYaw < -Math.PI) gunYaw += 2 * Math.PI;
-          rig._gunAnchor.rotation.set(0, gunYaw, 0);
+          // Pitch the gun anchor toward target Y when the cursor is
+          // significantly above or below chest height — head shots,
+          // dropped enemies, low-cover targets all need the muzzle
+          // angled rather than parallel-to-ground.
+          let gunPitch = 0;
+          if (aimPoint) {
+            const chestWorldY = rig.group.position.y + 1.30;
+            const dy = aimPoint.y - chestWorldY;
+            const dxz = Math.hypot(aimPoint.x - rig.group.position.x,
+                                   aimPoint.z - rig.group.position.z);
+            if (dxz > 0.1) {
+              // Apply only past a deadband so flat aim stays flat.
+              const rawPitch = Math.atan2(dy, dxz);
+              if      (rawPitch >  0.10) gunPitch = -(rawPitch - 0.10);
+              else if (rawPitch < -0.10) gunPitch = -(rawPitch + 0.10);
+              gunPitch = Math.max(-0.6, Math.min(0.6, gunPitch));
+            }
+          }
+          rig._gunAnchor.rotation.set(gunPitch, gunYaw, 0);
         }
         // Hipfire pitch-up baseline — the GASP _Pistol clips
         // author the arms in low-ready (downward) pose. We add a
@@ -2134,7 +2161,7 @@ export function createPlayer(scene) {
           // clip with arms forward); IK overwrites the arm bones to
           // make them track the cursor. Chest + head get yaw/pitch
           // additive deltas via the existing world-space IK math.
-          _runUpperBodyIK(rig, state, aimPoint, aimPitch);
+          _runUpperBodyIK(rig, state, aimPoint, aimPitch, dt);
           // Done with anim for this frame.
           // Skip the remainder of the FBX clip-selection block via
           // a continue-like construct: structured as a labeled
@@ -2498,7 +2525,19 @@ export function createPlayer(scene) {
 
   // Expose rig + poke helpers so main.js can drive shot recoil / hit
   // flinches without knowing the internal rig structure.
-  function kickRecoil() { pokeRecoil(rig); }
+  function kickRecoil() {
+    // Procgen path: existing pokeRecoil writes per-frame chest/arm
+    // offsets. GASP/FBX path: trigger a short additive pulse stored
+    // on rig._fbx that decays over ~180ms — chest pitches back, gun
+    // muzzle rises, lerps back to neutral. Read by _runUpperBodyIK
+    // and the gun anchor each frame.
+    if (rig._fbx) {
+      rig._fbx._recoilT = 0.18;     // seconds remaining
+      rig._fbx._recoilAmt = 0.10;   // peak rad on chest pitch
+    } else {
+      pokeRecoil(rig);
+    }
+  }
   function reactToHit(dirX, dirZ, mag) { pokeHit(rig, dirX, dirZ, mag); }
   function reactToDeath(dirX, dirZ, mag) { pokeDeath(rig, dirX, dirZ, mag); }
 
