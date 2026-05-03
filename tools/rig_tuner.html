@@ -962,13 +962,24 @@ function applyPartTaper(part, which, axis, newValue) {
   const last = state.parter[lastKey];
   if (last === 0) return;
   // Seed missing depth dims with the part's uniform depth so the
-  // first taper move has a real baseline rather than NaN. Looks up
-  // 'torso.chestDepth' for chest, etc., from map.z[0].
+  // first taper move has a real baseline rather than NaN. CRITICAL:
+  // also seed the OTHER end's depth (zBot when moving zTop, vice
+  // versa) so the per-end values can DIFFER. Without this, only the
+  // moved end gets dim'd while the other stays null, and the
+  // applyPerEndDepthIfDifferent helper falls back to uniform mode —
+  // which scales the WHOLE part's Z, not just the targeted end. That
+  // looked like the part stretching way past the slider value.
   if (axis === 'Z') {
-    for (const path of map[key]) {
-      if (getDimByPath(state.dims, path) == null && map.z && map.z[0]) {
-        const seed = getDimByPath(state.dims, map.z[0]) ?? 1.0;
-        setDimByPath_force(state.dims, path, seed);
+    const seedBoth = ['zTop', 'zBot'];
+    const baseDepth = map.z && map.z[0]
+      ? (getDimByPath(state.dims, map.z[0]) ?? 1.0)
+      : 1.0;
+    for (const sk of seedBoth) {
+      if (!map[sk]) continue;
+      for (const path of map[sk]) {
+        if (getDimByPath(state.dims, path) == null) {
+          setDimByPath_force(state.dims, path, baseDepth);
+        }
       }
     }
   }
