@@ -26,14 +26,13 @@ await page.evaluate(() => {
   const zero = (g) => { if (g) g.rotation.set(0, 0, 0); };
   zero(r.hips); zero(r.stomach); zero(r.chest); zero(r.neck); zero(r.head);
 
-  // LEFT arm (code name) — flat T-pose, arm out to side
+  // Both arms in flat T-pose — straightforward chain inspection.
   if (r.leftArm) {
     r.leftArm.shoulder.pivot.rotation.set(0, 0, +Math.PI / 2);
     zero(r.leftArm.elbow); zero(r.leftArm.forearm.pivot); zero(r.leftArm.wrist);
   }
-  // RIGHT arm (code name) — raised straight up, so chain is along Y axis
   if (r.rightArm) {
-    r.rightArm.shoulder.pivot.rotation.set(0, 0, Math.PI);
+    r.rightArm.shoulder.pivot.rotation.set(0, 0, -Math.PI / 2);
     zero(r.rightArm.elbow); zero(r.rightArm.forearm.pivot); zero(r.rightArm.wrist);
   }
 
@@ -63,7 +62,8 @@ await page.evaluate(() => {
     const foreHex  = label.startsWith('LEFT')  ? 0xdd6677 : 0x6677dd; // light red / light blue
     if (arm.shoulder?.mesh) recolor(arm.shoulder.mesh, upperHex);
     if (arm.forearm?.mesh)  recolor(arm.forearm.mesh,  foreHex);
-    if (arm.elbowBulge)     recolor(arm.elbowBulge,    0x33dd55); // GREEN — elbow ball
+    if (arm.shoulderBulge) recolor(arm.shoulderBulge, 0xff2244); // RED — shoulder ball
+    if (arm.elbowBulge)    recolor(arm.elbowBulge,    0x33dd55); // GREEN — elbow ball
     if (arm.wrist?.children) {
       for (const c of arm.wrist.children) {
         if (c.isMesh && c.geometry?.type === 'SphereGeometry') {
@@ -74,9 +74,9 @@ await page.evaluate(() => {
     if (arm.hand?.mesh) recolor(arm.hand.mesh, 0xffcc22); // YELLOW — hand
   }
 
-  // Bright camera framing on the upper torso so both arms are visible.
-  cam.position.set(0, 1.5, 3.0);
-  ctrl.target.set(0, 1.6, 0);
+  // Wide front view to see both arms fully extended.
+  cam.position.set(0, 1.4, 4.5);
+  ctrl.target.set(0, 1.4, 0);
   ctrl.update();
 
   // Boost ambient lighting for the debug shot.

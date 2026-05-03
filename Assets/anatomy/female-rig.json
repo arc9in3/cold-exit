@@ -73,7 +73,7 @@
     "scale": { "x": 0.89, "y": 1, "z": 1 },
     "color": "#2a2f3a",
     "opacity": 1,
-    "shape": { "r": 0.075, "segsW": 16, "segsH": 12 },
+    "shape": { "r": 0.045, "segsW": 16, "segsH": 12 },
     "scaleChildren": true
   },
   {
@@ -146,7 +146,7 @@
     "scale": { "x": 0.89, "y": 1, "z": 1 },
     "color": "#2a2f3a",
     "opacity": 1,
-    "shape": { "r": 0.075, "segsW": 16, "segsH": 12 },
+    "shape": { "r": 0.045, "segsW": 16, "segsH": 12 },
     "scaleChildren": true
   },
   {
