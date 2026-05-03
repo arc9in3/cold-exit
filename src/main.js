@@ -946,6 +946,7 @@ window.__useGaspMannequin = async () => {
   // Curated subset of clips — the locomotion state machine references
   // these by name. Order matters only for cosmetic console output.
   const CLIPS = [
+    // Hipfire / low-ready (Pistol pose)
     'M_Neutral_Stand_Idle_Loop_Pistol',
     'M_Neutral_Crouch_Idle_Loop_Pistol',
     'M_Neutral_Walk_Loop_F_Pistol',  'M_Neutral_Walk_Loop_B_Pistol',
@@ -958,6 +959,17 @@ window.__useGaspMannequin = async () => {
     'M_Neutral_Crouch_Loop_F_Pistol',  'M_Neutral_Crouch_Loop_B_Pistol',
     'M_Neutral_Crouch_Loop_FL_Pistol', 'M_Neutral_Crouch_Loop_FR_Pistol',
     'M_Neutral_Crouch_Loop_BL_Pistol', 'M_Neutral_Crouch_Loop_BR_Pistol',
+    // ADS / shouldered (Rifle pose). selectGaspLocomotion swaps to
+    // these when state.adsAmount > 0.5.
+    'M_Neutral_Stand_Idle_Loop_Rifle',
+    'M_Neutral_Crouch_Idle_Loop_Rifle',
+    'M_Neutral_Walk_Loop_F_Rifle',  'M_Neutral_Walk_Loop_B_Rifle',
+    'M_Neutral_Walk_Loop_FL_Rifle', 'M_Neutral_Walk_Loop_FR_Rifle',
+    'M_Neutral_Walk_Loop_BL_Rifle', 'M_Neutral_Walk_Loop_BR_Rifle',
+    'M_Neutral_Run_Loop_F_Rifle',
+    'M_Neutral_Run_Loop_FL_Rifle',  'M_Neutral_Run_Loop_FR_Rifle',
+    'M_Neutral_Crouch_Loop_F_Rifle',
+    'M_Neutral_Crouch_Loop_FL_Rifle', 'M_Neutral_Crouch_Loop_FR_Rifle',
   ];
   for (const n of CLIPS) {
     try {

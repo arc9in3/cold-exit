@@ -1815,13 +1815,17 @@ export function createPlayer(scene) {
         }
         rig.group.position.y = 0;
       }
-      // Crouch sink — the GASP crouch clips drop the hip bone in
-      // bone-local space but the procgen-driven group.position.y
-      // doesn't reflect crouching. To make the character visually
-      // drop into a crouch silhouette (matches gameplay collider /
-      // sight-line), pull the FBX rig group down ~0.3m when crouched.
-      // Eased so transitions read smooth, not snapped.
-      const wantSink = state.crouched ? -0.30 : 0;
+      // Crouch sink — the GASP crouch clips fold the legs (knees
+      // bent, feet still extended outward) but I stripped pelvis
+      // position tracks at conversion time, so the pelvis Y stays
+      // at standing height and the legs visually fold UP toward the
+      // pelvis. Compensate by lowering the whole rig group: the
+      // amount needs to roughly match how much the legs fold so
+      // the feet wind up on the ground at crouched height.
+      // 0.55m gets us there empirically (1.15× scaled rig with
+      // ~1.0m crouched leg compression). Eased lerp for smooth
+      // transitions in/out of crouch.
+      const wantSink = state.crouched ? -0.55 : 0;
       rig._fbx._crouchSinkY = (rig._fbx._crouchSinkY ?? 0)
         + (wantSink - (rig._fbx._crouchSinkY ?? 0)) * (1 - Math.exp(-10 * dt));
       rig.group.position.y += rig._fbx._crouchSinkY;
@@ -1847,14 +1851,27 @@ export function createPlayer(scene) {
       // owned by the IK solve below.
       if (rig._fbx.useGaspLocomotion) {
         _ensureGaspSmLoaded();
-        // Body yaw is the FIRST thing to fix on the GASP path — the
-        // procgen group's rotation may lag or be wrong; force the
-        // FBX rig group to face the cursor directly so bullet origin
-        // (= body forward) and gun-anchor (= chest+forward) line up.
-        const targetYaw = aimPoint
+        // Body yaw EASES toward cursor instead of snapping. Within
+        // the chest-twist deadzone (≤45°) the chest does the work;
+        // beyond, the whole body catches up. Net feel: cursor
+        // tracks responsively but the body has weight.
+        const cursorYaw = aimPoint
           ? Math.atan2(aimPoint.x - rig.group.position.x, aimPoint.z - rig.group.position.z)
           : (state.bodyYaw || 0);
-        rig.group.rotation.y = targetYaw;
+        let dyaw = cursorYaw - rig.group.rotation.y;
+        while (dyaw >  Math.PI) dyaw -= 2 * Math.PI;
+        while (dyaw < -Math.PI) dyaw += 2 * Math.PI;
+        const TWIST_LIMIT = Math.PI / 4;          // 45° deadzone
+        const BODY_CATCH_RATE = 6.0;              // 1/s — body lerp toward cursor when outside deadzone
+        const overshoot = Math.max(0, Math.abs(dyaw) - TWIST_LIMIT) * Math.sign(dyaw);
+        rig.group.rotation.y += overshoot * (1 - Math.exp(-BODY_CATCH_RATE * dt));
+        // Chest twist = remaining cursor delta after body catch-up.
+        // Recompute after body update.
+        let chestTwist = cursorYaw - rig.group.rotation.y;
+        while (chestTwist >  Math.PI) chestTwist -= 2 * Math.PI;
+        while (chestTwist < -Math.PI) chestTwist += 2 * Math.PI;
+        chestTwist = Math.max(-TWIST_LIMIT, Math.min(TWIST_LIMIT, chestTwist));
+        state.chestTwist = chestTwist;  // consumed by _runUpperBodyIK below
         // Gun-anchor lerps between hipfire (chest height ≈ 1.30m
         // after the 1.15× rig scale → ~1.50 visible) and ADS
         // (eye-line ≈ 1.55m → ~1.78 visible). Forward distance

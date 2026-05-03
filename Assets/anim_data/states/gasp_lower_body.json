@@ -12,30 +12,32 @@
     "crouched":   "from playerState"
   },
 
+  "_adsNote": "Each locomotion state has BOTH a hipfire clip (low-ready Pistol pose) and an ADS clip (shouldered Rifle pose). selectGaspLocomotion picks adsClip when playerState.adsAmount > 0.5. ADS sprint/back/diagonal coverage is partial — sectors without an ADS variant fall back to the hipfire clip via existing fallback logic.",
+
   "states": {
-    "stand_idle":    { "clip": "M_Neutral_Stand_Idle_Loop_Pistol",   "loop": true },
-    "crouch_idle":   { "clip": "M_Neutral_Crouch_Idle_Loop_Pistol",  "loop": true },
+    "stand_idle":    { "clip": "M_Neutral_Stand_Idle_Loop_Pistol",   "adsClip": "M_Neutral_Stand_Idle_Loop_Rifle",   "loop": true },
+    "crouch_idle":   { "clip": "M_Neutral_Crouch_Idle_Loop_Pistol",  "adsClip": "M_Neutral_Crouch_Idle_Loop_Rifle",  "loop": true },
 
-    "walk_F":  { "clip": "M_Neutral_Walk_Loop_F_Pistol",  "loop": true, "speedRef": 1.6 },
-    "walk_B":  { "clip": "M_Neutral_Walk_Loop_B_Pistol",  "loop": true, "speedRef": 1.6 },
-    "walk_FL": { "clip": "M_Neutral_Walk_Loop_FL_Pistol", "loop": true, "speedRef": 1.6 },
-    "walk_FR": { "clip": "M_Neutral_Walk_Loop_FR_Pistol", "loop": true, "speedRef": 1.6 },
-    "walk_BL": { "clip": "M_Neutral_Walk_Loop_BL_Pistol", "loop": true, "speedRef": 1.6 },
-    "walk_BR": { "clip": "M_Neutral_Walk_Loop_BR_Pistol", "loop": true, "speedRef": 1.6 },
+    "walk_F":  { "clip": "M_Neutral_Walk_Loop_F_Pistol",  "adsClip": "M_Neutral_Walk_Loop_F_Rifle",  "loop": true, "speedRef": 1.6 },
+    "walk_B":  { "clip": "M_Neutral_Walk_Loop_B_Pistol",  "adsClip": "M_Neutral_Walk_Loop_B_Rifle",  "loop": true, "speedRef": 1.6 },
+    "walk_FL": { "clip": "M_Neutral_Walk_Loop_FL_Pistol", "adsClip": "M_Neutral_Walk_Loop_FL_Rifle", "loop": true, "speedRef": 1.6 },
+    "walk_FR": { "clip": "M_Neutral_Walk_Loop_FR_Pistol", "adsClip": "M_Neutral_Walk_Loop_FR_Rifle", "loop": true, "speedRef": 1.6 },
+    "walk_BL": { "clip": "M_Neutral_Walk_Loop_BL_Pistol", "adsClip": "M_Neutral_Walk_Loop_BL_Rifle", "loop": true, "speedRef": 1.6 },
+    "walk_BR": { "clip": "M_Neutral_Walk_Loop_BR_Pistol", "adsClip": "M_Neutral_Walk_Loop_BR_Rifle", "loop": true, "speedRef": 1.6 },
 
-    "run_F":   { "clip": "M_Neutral_Run_Loop_F_Pistol",   "loop": true, "speedRef": 3.5 },
-    "run_B":   { "clip": "M_Neutral_Run_Loop_B_Pistol",   "loop": true, "speedRef": 3.5 },
-    "run_FL":  { "clip": "M_Neutral_Run_Loop_FL_Pistol",  "loop": true, "speedRef": 3.5 },
-    "run_FR":  { "clip": "M_Neutral_Run_Loop_FR_Pistol",  "loop": true, "speedRef": 3.5 },
-    "run_BL":  { "clip": "M_Neutral_Run_Loop_BL_Pistol",  "loop": true, "speedRef": 3.5 },
-    "run_BR":  { "clip": "M_Neutral_Run_Loop_BR_Pistol",  "loop": true, "speedRef": 3.5 },
+    "run_F":   { "clip": "M_Neutral_Run_Loop_F_Pistol",   "adsClip": "M_Neutral_Run_Loop_F_Rifle",  "loop": true, "speedRef": 3.5 },
+    "run_B":   { "clip": "M_Neutral_Run_Loop_B_Pistol",   "adsClip": "M_Neutral_Run_Loop_B_Rifle",  "loop": true, "speedRef": 3.5 },
+    "run_FL":  { "clip": "M_Neutral_Run_Loop_FL_Pistol",  "adsClip": "M_Neutral_Run_Loop_FL_Rifle", "loop": true, "speedRef": 3.5 },
+    "run_FR":  { "clip": "M_Neutral_Run_Loop_FR_Pistol",  "adsClip": "M_Neutral_Run_Loop_FR_Rifle", "loop": true, "speedRef": 3.5 },
+    "run_BL":  { "clip": "M_Neutral_Run_Loop_BL_Pistol",  "adsClip": "M_Neutral_Run_Loop_BL_Rifle", "loop": true, "speedRef": 3.5 },
+    "run_BR":  { "clip": "M_Neutral_Run_Loop_BR_Pistol",  "adsClip": "M_Neutral_Run_Loop_BR_Rifle", "loop": true, "speedRef": 3.5 },
 
     "sprint_F":{ "clip": "M_Neutral_Sprint_Loop_F_Pistol", "loop": true, "speedRef": 6.0 },
 
-    "crouch_F":  { "clip": "M_Neutral_Crouch_Loop_F_Pistol",  "loop": true, "speedRef": 1.0 },
+    "crouch_F":  { "clip": "M_Neutral_Crouch_Loop_F_Pistol",  "adsClip": "M_Neutral_Crouch_Loop_F_Rifle",  "loop": true, "speedRef": 1.0 },
     "crouch_B":  { "clip": "M_Neutral_Crouch_Loop_B_Pistol",  "loop": true, "speedRef": 1.0 },
-    "crouch_FL": { "clip": "M_Neutral_Crouch_Loop_FL_Pistol", "loop": true, "speedRef": 1.0 },
-    "crouch_FR": { "clip": "M_Neutral_Crouch_Loop_FR_Pistol", "loop": true, "speedRef": 1.0 },
+    "crouch_FL": { "clip": "M_Neutral_Crouch_Loop_FL_Pistol", "adsClip": "M_Neutral_Crouch_Loop_FL_Rifle", "loop": true, "speedRef": 1.0 },
+    "crouch_FR": { "clip": "M_Neutral_Crouch_Loop_FR_Pistol", "adsClip": "M_Neutral_Crouch_Loop_FR_Rifle", "loop": true, "speedRef": 1.0 },
     "crouch_BL": { "clip": "M_Neutral_Crouch_Loop_BL_Pistol", "loop": true, "speedRef": 1.0 },
     "crouch_BR": { "clip": "M_Neutral_Crouch_Loop_BR_Pistol", "loop": true, "speedRef": 1.0 }
   },

@@ -112,12 +112,21 @@ export function selectGaspLocomotion(smCfg, playerState, planarSpeed, velocity, 
     s = smCfg.states[`walk_${sector}`] || smCfg.states[`run_${sector}`] || smCfg.states[`${prefix}_F`] || smCfg.states['stand_idle'];
   }
   if (!s) return null;
+
+  // ADS swap — when state.adsAmount > 0.5, prefer the rifle (ADS /
+  // shouldered) variant of the picked clip if one exists. The clip
+  // metadata maps a base clip name to its ADS sibling via the
+  // 'adsClip' field; absent → no swap.
+  const ads = (playerState?.adsAmount || 0) > 0.5;
+  const clipName = (ads && s.adsClip) ? s.adsClip : s.clip;
+
   return {
     stateId: id,
-    clip: s.clip,
+    clip: clipName,
     loop: s.loop !== false,
     speedRef: s.speedRef ?? null,
     sector,
     bucket: prefix,
+    ads,
   };
 }
