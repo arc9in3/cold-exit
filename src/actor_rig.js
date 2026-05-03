@@ -2104,17 +2104,18 @@ export function updateAnim(rig, state, dt) {
   let rightThighRot = rightThighGait + rightCrouchThigh;
   let leftKneeRot   = leftKneeGait   + crouchKnee;
   let rightKneeRot  = rightKneeGait  + rightCrouchKnee;
-  // Ankle: partial compensation for knee bend + heel-toe roll +
-  // crouch offset. Heel-toe roll is amplified during a crouch-walk
-  // so sneaking reads as deliberate toe-down/heel-up footing instead
-  // of flat slabs of foot.
+  // Ankle: heel-toe roll during gait + crouch offset. The previous
+  // `-leftKneeGait * 0.35` knee-bend compensation was tuned for the
+  // procgen rig's vertical-cylinder foot — on the new JSON rig
+  // (horizontal foot, pre-rotated π/2) it instead pitched the toes
+  // UP every time the knee bent forward, so the character looked
+  // like he was walking on his heels with toes curled up. Dropped.
+  // Foot now inherits the calf's bent orientation naturally + adds
+  // only the explicit heel-toe roll for stride variation.
   const sneakRollBoost = 1 + crouch * 0.6 * gaitT;
   const rightCrouchAnkle = -(rightCrouchThigh + rightCrouchKnee);
-  // ankleAdjust is added to both ankles on top of the auto-flat
-  // compensation. Scaled by `crouch` so the offset only applies
-  // while crouched (standing pose isn't dragged off-axis).
-  let leftAnkleRot  = -leftKneeGait  * 0.35 + leftFootRoll  * sneakRollBoost + crouchAnkle  + crouch * Tc.ankleAdjust;
-  let rightAnkleRot = -rightKneeGait * 0.35 + rightFootRoll * sneakRollBoost + rightCrouchAnkle + crouch * Tc.ankleAdjust;
+  let leftAnkleRot  = leftFootRoll  * sneakRollBoost + crouchAnkle  + crouch * Tc.ankleAdjust;
+  let rightAnkleRot = rightFootRoll * sneakRollBoost + rightCrouchAnkle + crouch * Tc.ankleAdjust;
 
   if (kneel > 0.01) {
     // Kneel pose targets — calibrated for the current leg proportions
@@ -2581,7 +2582,7 @@ export function updateAnim(rig, state, dt) {
   const supportShoulderYaw = state.akimbo
     ? 0                          // parallel forward — track cursor
     : noWeaponPose
-      ? 0.35 * supportYawSign    // ready pose — moderate inward so hands converge near centerline
+      ? 0.55 * supportYawSign    // ready pose — same as two-hand grip so hands meet at centerline
       : 0.55 * supportYawSign;   // inward — two-hand-grip default
   // Pitch — match the weapon arm so both hands rise together. Same
   // formula in both modes; akimbo only differs in yaw + elbow bend.
@@ -2594,10 +2595,9 @@ export function updateAnim(rig, state, dt) {
   supportArm.elbow.rotation.x = state.akimbo
     ? rightElbow + idleWeaponDrift * 0.4
     : noWeaponPose
-      // Ready pose — small extra tuck so the off hand cups near where
-      // a weapon foregrip would be. Less than the full -0.18 two-hand-
-      // grip so it doesn't cross the body.
-      ? rightElbow - 0.10 + idleWeaponDrift * 0.4
+      // Ready pose — full inward tuck so off hand meets the main hand
+      // at centerline (where a gun grip would be). Same as armed grip.
+      ? rightElbow - 0.18 + idleWeaponDrift * 0.4
       : rightElbow - 0.18 - supportElbowPump + idleWeaponDrift * 0.4;
 
   // Grip curl — rotate each hand pivot forward so the hand reads as
