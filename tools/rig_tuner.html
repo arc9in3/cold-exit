@@ -958,13 +958,16 @@ function rebuildParterFolder() {
       state.parter.offZ = saved.offZ || 0;
       for (const c of parterFolder.controllers) c.updateDisplay();
     });
-  // Plain number inputs — no min/max clamps. Typing any value sets
-  // the scale exactly.
-  parterFolder.add(state.parter, 'scaleX').name('scale X (width)')
+  // Wide min/max so typed values "override" without practical clamping
+  // (anything from 0.01 → 100 is acceptable). Without min/max,
+  // lil-gui's text-input variant only fires onChange on blur/enter
+  // and ignores live keystrokes — the slider+input variant responds
+  // continuously.
+  parterFolder.add(state.parter, 'scaleX', 0.01, 100, 0.01).name('scale X (width)')
     .onChange((v) => { applyPartAxis(state.parter.selected, 'x', v); rebuildRig(); });
-  parterFolder.add(state.parter, 'scaleY').name('scale Y (height)')
+  parterFolder.add(state.parter, 'scaleY', 0.01, 100, 0.01).name('scale Y (height)')
     .onChange((v) => { applyPartAxis(state.parter.selected, 'y', v); rebuildRig(); });
-  parterFolder.add(state.parter, 'scaleZ').name('scale Z (depth)')
+  parterFolder.add(state.parter, 'scaleZ', 0.01, 100, 0.01).name('scale Z (depth)')
     .onChange((v) => { applyPartAxis(state.parter.selected, 'z', v); rebuildRig(); });
 
   // Per-part mirror + offset. Edited values are saved into
@@ -981,11 +984,14 @@ function rebuildParterFolder() {
   };
   parterFolder.add(state.parter, 'mirror', ['none', 'x', 'y', 'z']).name('mirror axis')
     .onChange(saveTransform);
-  parterFolder.add(state.parter, 'offX').name('offset X (left/right)')
+  // Wide min/max for the same reason as the scale sliders — without
+  // it lil-gui's text input only fires on commit (blur/enter), which
+  // looks broken when the user is dragging or typing live.
+  parterFolder.add(state.parter, 'offX', -10, 10, 0.005).name('offset X (left/right)')
     .onChange(saveTransform);
-  parterFolder.add(state.parter, 'offY').name('offset Y (up/down)')
+  parterFolder.add(state.parter, 'offY', -10, 10, 0.005).name('offset Y (up/down)')
     .onChange(saveTransform);
-  parterFolder.add(state.parter, 'offZ').name('offset Z (front/back)')
+  parterFolder.add(state.parter, 'offZ', -10, 10, 0.005).name('offset Z (front/back)')
     .onChange(saveTransform);
   parterFolder.add({
     reset: () => {
