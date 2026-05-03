@@ -9,8 +9,8 @@
   "boneMap": {
     "Hips":          "hips",
     "Spine":         "stomach",
-    "Spine1":        "chest",
     "Spine2":        "chest",
+    "Spine1":        "chest",
     "Neck":          "neck",
     "Head":          "head",
     "LeftShoulder":  "rightArm.shoulder.pivot",

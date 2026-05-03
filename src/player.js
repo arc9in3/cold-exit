@@ -37,6 +37,12 @@ const RIGHT = new THREE.Vector3(1, 0, -1).normalize();
 // function so reuse is safe across frames.
 const _aimChestScratch = new THREE.Vector3();
 const _muzzleTipScratch = new THREE.Vector3();
+// Scratches for the FBX aim-IK quaternion path. The IK applies a
+// delta quaternion to the bone's mixer-driven base each frame; using
+// quat-multiply instead of `rotation += ...` avoids accumulation when
+// the bone isn't animated by the active clip.
+const _aimDeltaQ = new THREE.Quaternion();
+const _aimDeltaE = new THREE.Euler(0, 0, 0, 'YXZ');
 
 // Movement modes. Only one is active at a time.
 const MODE = {
@@ -1849,23 +1855,24 @@ export function createPlayer(scene) {
         // Layered path — graph.step() ticks the shared mixer.
         rig._fbx.graph.step(dt);
       }
-      // Aim IK — additive on top of the clip pose. The mixer just set
-      // every bone to its keyframed rotation; we layer chest yaw/pitch
-      // and head yaw/pitch to point the character at the cursor.
-      // 60/40 chest/head split for yaw, 70/30 for pitch — feels natural
-      // and the arms (children of chest) inherit chest yaw so the gun
-      // tracks the cursor for free without arm IK.
+      // Aim IK — additive on top of the clip pose. We multiply a
+      // delta quaternion onto the mixer-driven base instead of using
+      // `rotation += ...` so the IK can't accumulate over frames if
+      // the active clip happens to NOT animate the bone (which would
+      // leave bone.rotation unchanged each tick and turn += into a
+      // continuous spin — the bug that produced "rotates like a clock").
+      // 60/40 chest/head split for yaw, ~55/45 for pitch.
       const aimYaw = state.chestTwist || 0;
       // aimPitch was computed earlier in this same function (line ~1611).
-      // Chest is mapped to either 'chest' (Spine1) or 'stomach'
-      // (Spine). Spine1 is what we want — sits between shoulders.
-      if (rig.chest && rig.chest.rotation) {
-        rig.chest.rotation.y += aimYaw * 0.60;
-        rig.chest.rotation.x += aimPitch * 0.55;
+      if (rig.chest && rig.chest.quaternion) {
+        _aimDeltaE.set(aimPitch * 0.55, aimYaw * 0.60, 0, 'YXZ');
+        _aimDeltaQ.setFromEuler(_aimDeltaE);
+        rig.chest.quaternion.multiply(_aimDeltaQ);
       }
-      if (rig.head && rig.head.rotation) {
-        rig.head.rotation.y += aimYaw * 0.40;
-        rig.head.rotation.x += aimPitch * 0.45;
+      if (rig.head && rig.head.quaternion) {
+        _aimDeltaE.set(aimPitch * 0.45, aimYaw * 0.40, 0, 'YXZ');
+        _aimDeltaQ.setFromEuler(_aimDeltaE);
+        rig.head.quaternion.multiply(_aimDeltaQ);
       }
     } else {
     updateAnim(rig, {
