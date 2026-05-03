@@ -263,12 +263,12 @@ export const DEFAULT_DIMS = {
     crotchTopR: 0.13, crotchBotR: 0.07, crotchH: 0.06,
     crotchX: 0, crotchY: 0.005, crotchZ: 0,
     stomachH: 0.235, stomachTopR: 0.24, stomachBotR: 0.18, stomachY: 0.22,
-    // Torso split into ribs (lower chest) + chest (upper chest). Both
-    // use the same tapered-cylinder primitive language. Seam-matched
-    // radii: ribsBotR = stomachTopR, ribsTopR = chestBotR. Together
-    // they replace what used to be a single chestH cylinder.
-    ribsH: 0.16, ribsTopR: 0.27, ribsBotR: 0.24,
-    chestH: 0.18, chestTopR: 0.32, chestBotR: 0.27,
+    // Single chest cylinder. The ribs split was an experiment that
+    // added complexity without payoff — torso reads as one taper
+    // anyway and the seam was just one more thing to align. Reverted
+    // to the original chestH so this DIM block matches all the legacy
+    // call sites.
+    chestH: 0.345, chestTopR: 0.32, chestBotR: 0.22,
     collarH: 0.055, collarTopR: 0.11, collarBotR: 0.32, collarDY: 0.057,
     // Bottom radius lifted from 0.22 → 0.28 so the cone tapers less
     // aggressively — the previous value created a visible polygon ring
@@ -356,24 +356,15 @@ export const DEFAULT_DIMS_FEMALE = {
     pelvisH: 0.22,
     pelvisTopR: 0.30,    // wide iliac crest
     pelvisBotR: 0.18,    // narrow pubic bone
-    // Torso split into ribs + chest with seam-matched radii so the
-    // upper torso reads as ONE continuous taper from shoulder to
-    // waist via three stacked tapered cylinders (chest → ribs →
-    // stomach). All three share the same chestDepth/stomachDepth
-    // depth ratio so the silhouette flows unbroken.
-    //   shoulder (chestTopR 0.27) → mid-rib (chestBotR = ribsTopR 0.20)
-    //   → lower-rib (ribsBotR = stomachTopR 0.13) → waist (stomachBotR 0.11)
-    // Combined ribsH + chestH = 0.34 — preserves the legacy single-
-    // chestH torso height so the rig doesn't shrink with the split.
+    // Single tapered chest cylinder. Seam-matched at the bottom to
+    // stomachTopR so chest + stomach read as one continuous taper
+    // from shoulder to waist.
     stomachH: 0.26,
-    stomachTopR: 0.13,
+    stomachTopR: 0.18,
     stomachBotR: 0.11,   // wasp waist
-    ribsH: 0.17,
-    ribsTopR: 0.20,
-    ribsBotR: 0.13,
-    chestH: 0.17,
+    chestH: 0.34,
     chestTopR: 0.27,
-    chestBotR: 0.20,
+    chestBotR: 0.18,
     chestPlateTopR: 0.29,
     chestPlateBotR: 0.20,
     // Collar + belt SKIPPED on female: the bodyshapes ref shows a
@@ -890,51 +881,25 @@ export function buildRig(opts = {}) {
   })();
   hips.add(stomach.pivot);
 
-  // Ribs — tapered cylinder between stomach and chest. Lower chest
-  // section. Same primitive language as chest + stomach (tapered
-  // body-color cylinder), seam-matched radii so the torso reads as
-  // one continuous taper. Bust attaches above this on the chest
-  // pivot.
-  const ribsH = T.ribsH * scale;
-  const ribs = (() => {
-    const pivot = new THREE.Group();
-    pivot.rotation.order = 'YXZ';
-    pivot.position.set(0, stomachH, 0);
-    const mesh = new THREE.Mesh(
-      _cyl(T.ribsTopR * scale, T.ribsBotR * scale, ribsH, T.segs),
-      bodyMat,
-    );
-    mesh.position.y = ribsH / 2;
-    mesh.scale.z = T.ribsDepth ?? T.chestDepth ?? T.depthRatio;
-    applyPerEndDepthIfDifferent(mesh, T.ribsTopDepth, T.ribsBotDepth, ribsH);
-    mesh.castShadow = true;
-    mesh.receiveShadow = true;
-    mesh.userData.zone = 'torso';
-    pivot.add(mesh);
-    return { pivot, mesh };
-  })();
-  stomach.pivot.add(ribs.pivot);
-
-  // Chest — tapered cylinder flaring up from the ribs to the shoulder
-  // line. Upper chest section. Bust attaches here.
+  // Chest — single tapered cylinder flaring from waist to shoulder
+  // line. Bust attaches here.
   const chest = (() => {
     const pivot = new THREE.Group();
     pivot.rotation.order = 'YXZ';
-    pivot.position.set(0, ribsH, 0);
+    pivot.position.set(0, stomachH, 0);
     const mesh = new THREE.Mesh(
       _cyl(T.chestTopR * scale, T.chestBotR * scale, chestH, T.segs),
       bodyMat,
     );
     mesh.position.y = chestH / 2;
     mesh.scale.z = T.chestDepth ?? T.depthRatio;
-    applyPerEndDepthIfDifferent(mesh, T.chestTopDepth, T.chestBotDepth, chestH);
     mesh.castShadow = true;
     mesh.receiveShadow = true;
     mesh.userData.zone = 'torso';
     pivot.add(mesh);
     return { pivot, mesh };
   })();
-  ribs.pivot.add(chest.pivot);
+  stomach.pivot.add(chest.pivot);
 
   // Collar / shoulder yoke — caps the chest top so it doesn't read as
   // a flat-top cylinder. Skipped when collarH is 0 (female default
@@ -1585,7 +1550,6 @@ export function buildRig(opts = {}) {
     hips,
     pelvis,
     stomach: stomach.pivot, stomachMesh: stomach.mesh,
-    ribs:    ribs.pivot,    ribsMesh:    ribs.mesh,
     chest: chest.pivot,     chestMesh: chest.mesh,
     torso: chest.pivot,           // alias used by existing callers
     torsoMesh: chest.mesh,        // alias for hit-flash lerp
@@ -1600,7 +1564,7 @@ export function buildRig(opts = {}) {
     // Flat mesh list (useful for hit-flash color lerp across every part).
     // Includes gear accents so they flash with the body on hit.
     meshes: [
-      ...(pelvis ? [pelvis] : []), stomach.mesh, ribs.mesh, chest.mesh,
+      ...(pelvis ? [pelvis] : []), stomach.mesh, chest.mesh,
       ...(chestPlate ? [chestPlate] : []),
       ...(belt ? [belt] : []),
       ...(collar ? [collar] : []),

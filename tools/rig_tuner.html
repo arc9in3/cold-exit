@@ -1038,15 +1038,6 @@ const PART_AXIS_MAP = {
     zTop: ['torso.chestTopDepth'],
     zBot: ['torso.chestBotDepth'],
   },
-  ribs: {
-    x: ['torso.ribsTopR', 'torso.ribsBotR'],
-    y: ['torso.ribsH'],
-    z: ['torso.ribsDepth'],
-    xTop: ['torso.ribsTopR'],
-    xBot: ['torso.ribsBotR'],
-    zTop: ['torso.ribsTopDepth'],
-    zBot: ['torso.ribsBotDepth'],
-  },
   stomach: {
     x: ['torso.stomachTopR', 'torso.stomachBotR'],
     y: ['torso.stomachH'],
@@ -1242,7 +1233,6 @@ function getPartTransformTargets(partName) {
     case 'head':       return [{ mesh: rig.headMesh,  sign: 1 }];
     case 'neck':       return [{ mesh: rig.neckMesh,  sign: 1 }];
     case 'chest':      return [{ mesh: rig.chestMesh, sign: 1 }];
-    case 'ribs':       return [{ mesh: rig.ribsMesh, sign: 1 }];
     case 'stomach':    return [{ mesh: rig.stomachMesh, sign: 1 }];
     case 'hips': {
       // Female has rig.pelvis = null (skipped, hipBowl envelops it).

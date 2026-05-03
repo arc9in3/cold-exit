@@ -10,13 +10,8 @@ page.on('console', m => { if (m.type() === 'error') errs.push('[console] ' + m.t
 await page.goto('http://localhost:8080/tools/rig_tuner.html', { waitUntil: 'networkidle' });
 await page.waitForTimeout(2500);
 
-// Click the "load female" primitive rig button
-await page.evaluate(() => {
-  const ctrl = Array.from(document.querySelectorAll('.lil-gui .controller'))
-    .find(c => c.textContent.includes('load female'));
-  ctrl?.querySelector('button')?.click();
-});
-await page.waitForTimeout(1500);
+// USE the default-loaded actor_rig female (not the primitive rig).
+// Tuner boots in archetype.sex='female' so this is what we want.
 
 // Make sure idle preset is active
 await page.evaluate(() => {
@@ -34,8 +29,9 @@ await page.evaluate(() => {
   const root = document.querySelector('.lil-gui.root');
   if (root) root.style.display = 'none';
   if (window.__camera) {
-    window.__camera.position.set(2.4, 1.6, 4.5);
-    window.__controls.target.set(0, 1.40, 0);
+    // Front-3/4 view, head + feet both in frame.
+    window.__camera.position.set(2.0, 1.4, 3.8);
+    window.__controls.target.set(0, 1.10, 0);
     window.__controls.update();
   }
 });
