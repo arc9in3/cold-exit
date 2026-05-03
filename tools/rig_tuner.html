@@ -371,6 +371,12 @@ function rebuildRig() {
   if (typeof applyPartTransformsToRig === 'function') applyPartTransformsToRig();
 }
 rebuildRig();
+// Switch immediately to the primitive rig authored in rig_builder
+// (Assets/anatomy/female-rig.json) — that's the canonical "new rig"
+// going forward. The procedural rebuildRig() above runs first to
+// initialize state.dims + GUI state, then loadPrimitiveRig swaps the
+// live scene rig over to the JSON-authored one.
+loadPrimitiveRig('../Assets/anatomy/female-rig.json');
 
 // ============================================================
 // PRIMITIVE-RIG LOADER
