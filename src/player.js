@@ -99,6 +99,8 @@ const RIGHT = new THREE.Vector3(1, 0, -1).normalize();
 // function so reuse is safe across frames.
 const _aimChestScratch = new THREE.Vector3();
 const _muzzleTipScratch = new THREE.Vector3();
+// Scratch vector for hand-bone tracking on the GASP gun anchor.
+const _handTrackV = new THREE.Vector3();
 // Scratches for the FBX aim-IK quaternion path. The IK applies a
 // delta quaternion to the bone's mixer-driven base each frame in
 // WORLD space (not bone-local) — bone local axes vary by export
@@ -1833,10 +1835,14 @@ export function createPlayer(scene) {
       // crouch-walk doesn't flicker, gentle enough that the
       // standing-up rise isn't a snap. Final position clamped to
       // >=0 so even mid-transition we never go subterranean.
+      // No clamp on the resulting Y — the sink is INTENTIONAL (rig
+      // origin moves below world 0 by 0.35m, mesh feet visually land
+      // at ground). The previous Math.max(0) clamp wiped out the
+      // sink entirely so the player floated mid-air during crouch.
       const wantSink = state.crouched ? -0.35 : 0;
       const cur = rig._fbx._crouchSinkY ?? 0;
       rig._fbx._crouchSinkY = cur + (wantSink - cur) * (1 - Math.exp(-18 * dt));
-      rig.group.position.y = Math.max(0, rig.group.position.y + rig._fbx._crouchSinkY);
+      rig.group.position.y += rig._fbx._crouchSinkY;
       // The SkinnedMesh inside the rig may have its OWN position
       // mutated by the loaded clip (some packs author the mesh's
       // root translation rather than a hip-bone position track).
@@ -1894,13 +1900,54 @@ export function createPlayer(scene) {
         // while the body lags within the chest-twist deadzone.
         if (rig._gunAnchor) {
           const ads = state.adsAmount || 0;
-          const hipY = 1.30, adsY = 1.55;
-          rig._gunAnchor.position.y = hipY + (adsY - hipY) * ads;
-          rig._gunAnchor.position.z = 0.45;
+          // Track the dominant hand-bone's WORLD position so the
+          // gun visually pins to the hand. Damped lerp so the
+          // anchor doesn't shake with locomotion-clip arm-swing
+          // (~0.05 lerp factor per frame, snappy enough to
+          // visually follow but smoothed against stride).
+          const handBone = state.handedness === 'right'
+            ? rig.rightArm?.wrist
+            : rig.leftArm?.wrist;
+          if (handBone) {
+            handBone.getWorldPosition(_handTrackV);
+            // Convert world hand position to rig.group local.
+            rig.group.worldToLocal(_handTrackV);
+            // Hipfire keeps gun lower (chest height); ADS raises
+            // toward eye-line. Blend the hand-tracked Y with the
+            // target height.
+            const hipY = 1.30, adsY = 1.55;
+            const wantY = hipY + (adsY - hipY) * ads;
+            rig._gunAnchor.position.x += (_handTrackV.x - rig._gunAnchor.position.x) * 0.18;
+            rig._gunAnchor.position.y += (Math.max(_handTrackV.y, wantY * 0.9) - rig._gunAnchor.position.y) * 0.18;
+            rig._gunAnchor.position.z += (Math.max(_handTrackV.z, 0.30) - rig._gunAnchor.position.z) * 0.18;
+          } else {
+            const hipY = 1.30, adsY = 1.55;
+            rig._gunAnchor.position.set(0, hipY + (adsY - hipY) * ads, 0.45);
+          }
           let gunYaw = cursorYaw - rig.group.rotation.y;
           while (gunYaw >  Math.PI) gunYaw -= 2 * Math.PI;
           while (gunYaw < -Math.PI) gunYaw += 2 * Math.PI;
           rig._gunAnchor.rotation.set(0, gunYaw, 0);
+        }
+        // Chest pitch-up compensation when NOT ADS — the GASP
+        // _Pistol locomotion clips author the arms in low-ready
+        // (downward) pose. Pitching the chest up ~12° brings the
+        // arms (chest's children) level so the gun reads held at
+        // chest height. Disabled during ADS since the _Rifle clips
+        // already hold the arms shouldered at eye level.
+        if (rig.chest && rig.chest.quaternion && rig.chest.parent) {
+          if (!rig._fbx._chestPitchBase) rig._fbx._chestPitchBase = rig.chest.quaternion.clone();
+          rig.chest.quaternion.copy(rig._fbx._chestPitchBase);
+          const ads = state.adsAmount || 0;
+          const pitchUp = (1 - ads) * 0.21;  // ~12° at hipfire, 0 at ADS
+          if (pitchUp > 0.001) {
+            _aimDeltaE.set(-pitchUp, 0, 0, 'YXZ');
+            _aimDeltaQ.setFromEuler(_aimDeltaE);
+            rig.chest.parent.getWorldQuaternion(_aimParentWorldQ);
+            _aimComposeQ.copy(_aimParentWorldQ).multiply(rig._fbx._chestPitchBase);
+            const localDelta = _aimComposeQ.clone().invert().multiply(_aimDeltaQ).multiply(_aimComposeQ);
+            rig.chest.quaternion.multiply(localDelta);
+          }
         }
         // Arm-shoulder twist for extended aim range — when the
         // cursor is FAR off-axis (residual past the chest's 45°
