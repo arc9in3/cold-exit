@@ -498,26 +498,17 @@ export const DEFAULT_DIMS_FEMALE = {
   },
   arms: {
     shoulderInset: 0.36,
-    // Equal upper / forearm — elbow at exact mid-arm. The Y-position
-    // ping-pong (50%, 46%, 61%, 50%, 37%, 26%) wasn't converging
-    // because the shoulder bulge sphere was being read as "the elbow
-    // ball near the shoulder" — it's the most visible sphere on the
-    // arm. Removing it (shoulderBulgeR: 0) leaves the elbow as the
-    // ONLY ball, planted clearly at mid-arm.
+    // Equal upper / forearm length — elbow ball lands at exact mid-arm.
     upperArmH: 0.62,
     forearmH: 0.62,
-    // Cylinder taper at the elbow seam: upperArmBotR > forearmTopR
-    // so the cylinders form a clear step. Combined with the
-    // larger-than-both elbow ball, the joint pops as a circle.
-    // Slimmed upperArmTopR so there's no "shoulder thickness" look.
+    // Cylinder taper at the elbow seam: upperArmBotR > forearmTopR so
+    // the cylinders form a step the elbow ball pops through.
     upperArmTopR: 0.070,
     upperArmBotR: 0.060,
     forearmTopR: 0.048,
     forearmBotR: 0.038,
-    // No shoulder ball — was being mistaken for the elbow.
-    shoulderBulgeR: 0,
-    // Elbow ball — the ONLY ball on the arm. Sits at mid-arm.
-    elbowBulgeR: 0.11,
+    shoulderBulgeR: 0,    // omitted — was reading as "elbow at shoulder"
+    elbowBulgeR: 0.11,    // only joint sphere on the arm, at mid-arm
     handW: 0.09, handH: 0.10, handD: 0.13,
     bicep: null,
     shoulderPadR: 0,
