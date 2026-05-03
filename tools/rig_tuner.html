@@ -1832,18 +1832,37 @@ function applyIK() {
 }
 
 // IK GUI
+//
+// IMPORTANT — naming: code uses `leftArm` / `rightArm` / `leftHand` etc.
+// from the rig's *world coordinate* perspective, but a character facing
+// the camera (+Z) has their physical right side at world -X (right-hand
+// rule). So code's `leftArm` is actually the character's RIGHT (main)
+// hand, and `rightArm` is the LEFT (off) hand. The dropdown labels here
+// use the PHYSICAL side to avoid confusion in the editor; the option
+// values keep the code names so the underlying handlers don't need to
+// change.
 {
   const f = gui.addFolder('IK targets');
   f.close();
-  f.add({
-    selected: 'leftHand',
-  }, 'selected', ['leftHand', 'rightHand', 'head', 'leftFoot', 'rightFoot'])
+  const ikLabels = {
+    'main hand (R)':  'leftHand',
+    'off hand (L)':   'rightHand',
+    'head':           'head',
+    'right foot':     'leftFoot',
+    'left foot':      'rightFoot',
+  };
+  f.add({ selected: 'leftHand' }, 'selected', ikLabels)
     .name('selected target')
     .onChange((n) => selectIkTarget(n));
+  const ikLabelOf = {
+    leftHand: 'main hand (R)', rightHand: 'off hand (L)',
+    head: 'head',
+    leftFoot: 'right foot',    rightFoot: 'left foot',
+  };
   for (const name of ['leftHand', 'rightHand', 'head', 'leftFoot', 'rightFoot']) {
     f.add({
       [name]: false,
-    }, name).name(`enable ${name}`).onChange((on) => setIkEnabled(name, on));
+    }, name).name(`enable ${ikLabelOf[name]}`).onChange((on) => setIkEnabled(name, on));
   }
   f.add({
     seedAll: () => {
