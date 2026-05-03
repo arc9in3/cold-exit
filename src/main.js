@@ -926,6 +926,22 @@ window.__useGaspMannequin = async () => {
   // weapon scales tuned around the procgen rig.
   if (player.rig?.group) player.rig.group.scale.setScalar(1.15);
 
+  // GUN ANCHOR — stable Object3D parented under rig.group (NOT a
+  // bone) so it inherits body yaw but NOT clip-driven chest twist
+  // or arm bone movement. Gun + muzzle attach here for hipfire +
+  // ADS poses. Position lerps between chest height (hipfire) and
+  // eye height (ADS) based on state.adsAmount; rotation stays
+  // identity so the gun is always parallel to the ground and
+  // pointing body-forward (which equals cursor direction since
+  // body yaw is locked to aim).
+  if (player.rig && player.rig.group) {
+    const anchor = new (await import('three')).Object3D();
+    anchor.name = '_gunAnchor';
+    anchor.position.set(0, 1.30, 0.45);  // hipfire default
+    player.rig.group.add(anchor);
+    player.rig._gunAnchor = anchor;
+  }
+
   const charMod = await import('./character_fbx.js');
   // Curated subset of clips — the locomotion state machine references
   // these by name. Order matters only for cosmetic console output.

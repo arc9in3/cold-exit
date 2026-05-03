@@ -443,11 +443,17 @@ export function createPlayer(scene) {
   // for shouldered long guns; hand anchor = grip mount for pistols,
   // SMGs, melee blades.
   function _handAnchor() {
-    return state.handedness === 'right'
-      ? rig.rightArm.wrist
-      : rig.leftArm.wrist;
+    // GASP / FBX rigs declare a stable _gunAnchor under rig.group.
+    // Always prefer it over a wrist bone so the gun doesn't follow
+    // locomotion-clip arm-swing motion.
+    if (rig._gunAnchor) return rig._gunAnchor;
+    // Procgen path — wrist bone with handedness flip.
+    const armRight = rig.rightArm?.wrist;
+    const armLeft  = rig.leftArm?.wrist;
+    return (state.handedness === 'right' ? armRight : armLeft) || armRight || armLeft || rig.group;
   }
   function _shoulderAnchor() {
+    if (rig._gunAnchor) return rig._gunAnchor;
     return state.handedness === 'right'
       ? rig.rightShoulderAnchor
       : rig.leftShoulderAnchor;
@@ -1841,6 +1847,25 @@ export function createPlayer(scene) {
       // owned by the IK solve below.
       if (rig._fbx.useGaspLocomotion) {
         _ensureGaspSmLoaded();
+        // Body yaw is the FIRST thing to fix on the GASP path — the
+        // procgen group's rotation may lag or be wrong; force the
+        // FBX rig group to face the cursor directly so bullet origin
+        // (= body forward) and gun-anchor (= chest+forward) line up.
+        const targetYaw = aimPoint
+          ? Math.atan2(aimPoint.x - rig.group.position.x, aimPoint.z - rig.group.position.z)
+          : (state.bodyYaw || 0);
+        rig.group.rotation.y = targetYaw;
+        // Gun-anchor lerps between hipfire (chest height ≈ 1.30m
+        // after the 1.15× rig scale → ~1.50 visible) and ADS
+        // (eye-line ≈ 1.55m → ~1.78 visible). Forward distance
+        // stays steady (gun extends past hands at all times).
+        if (rig._gunAnchor) {
+          const ads = state.adsAmount || 0;
+          const hipY = 1.30, adsY = 1.55;
+          rig._gunAnchor.position.y = hipY + (adsY - hipY) * ads;
+          rig._gunAnchor.position.z = 0.45;  // forward distance
+          rig._gunAnchor.rotation.set(0, 0, 0);  // always parallel to ground
+        }
         if (_gaspSmCfg) {
           const pick = selectGaspLocomotion(_gaspSmCfg, state, planarSpeed, velocity, rig.group.rotation.y);
           if (pick && rig._fbx.currentClipName !== pick.clip) {
