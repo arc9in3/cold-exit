@@ -1738,6 +1738,24 @@ export function createPlayer(scene) {
         rig._fbx.currentAction.timeScale = 1.0;
       }
       rig.update(dt);
+      // Aim IK — additive on top of the clip pose. The mixer just set
+      // every bone to its keyframed rotation; we layer chest yaw/pitch
+      // and head yaw/pitch to point the character at the cursor.
+      // 60/40 chest/head split for yaw, 70/30 for pitch — feels natural
+      // and the arms (children of chest) inherit chest yaw so the gun
+      // tracks the cursor for free without arm IK.
+      const aimYaw = state.chestTwist || 0;
+      // aimPitch was computed earlier in this same function (line ~1611).
+      // Chest is mapped to either 'chest' (Spine1) or 'stomach'
+      // (Spine). Spine1 is what we want — sits between shoulders.
+      if (rig.chest && rig.chest.rotation) {
+        rig.chest.rotation.y += aimYaw * 0.60;
+        rig.chest.rotation.x += aimPitch * 0.55;
+      }
+      if (rig.head && rig.head.rotation) {
+        rig.head.rotation.y += aimYaw * 0.40;
+        rig.head.rotation.x += aimPitch * 0.45;
+      }
     } else {
     updateAnim(rig, {
       speed: planarSpeed,
