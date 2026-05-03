@@ -1035,9 +1035,11 @@ gui.domElement.addEventListener('focusout', () => { _kbField = null; }, true);
     if (!poseName) return null;
     // Bright high-contrast colors so the weapon clearly reads against
     // the dark rig — these are debug/preview values, not in-game art.
-    if (poseName.startsWith('rifle')) return { length: 0.85, thickness: 0.07, color: 0xffaa44 };
-    if (poseName.startsWith('smg'))   return { length: 0.50, thickness: 0.06, color: 0xff6644 };
-    if (poseName === 'melee')         return { length: 0.30, thickness: 0.03, color: 0xddffff };
+    // hands: 'two' = spans both hand IK targets (rifle/smg)
+    //        'main' = anchored at main hand only (melee/pistol)
+    if (poseName.startsWith('rifle')) return { length: 0.85, thickness: 0.07, color: 0xffaa44, hands: 'two' };
+    if (poseName.startsWith('smg'))   return { length: 0.50, thickness: 0.06, color: 0xff6644, hands: 'two' };
+    if (poseName === 'melee')         return { length: 0.28, thickness: 0.025, color: 0xddffff, hands: 'main' };
     return null;
   };
   const updateWeaponStub = (poseName, ikData) => {
@@ -1045,26 +1047,44 @@ gui.domElement.addEventListener('focusout', () => { _kbField = null; }, true);
     const w = ensureWeaponStub();
     const left = ikData?.leftHand;
     const right = ikData?.rightHand;
-    if (!spec || !left || !right || !left.enabled || !right.enabled) {
-      w.visible = false;
-      return;
+    if (!spec) { w.visible = false; return; }
+    if (spec.hands === 'two') {
+      if (!left || !right || !left.enabled || !right.enabled) { w.visible = false; return; }
+      // Axis from main hand (leftHand in code) to off hand (rightHand).
+      const a = new THREE.Vector3(left.x, left.y, left.z);
+      const b = new THREE.Vector3(right.x, right.y, right.z);
+      const mid = a.clone().add(b).multiplyScalar(0.5);
+      const axis = b.clone().sub(a);
+      const handSpan = axis.length();
+      const dir = axis.clone().normalize();
+      const q = new THREE.Quaternion().setFromUnitVectors(new THREE.Vector3(1, 0, 0), dir);
+      w.position.copy(mid);
+      w.quaternion.copy(q);
+      // Length = max(handSpan + 0.15, spec.length) so the muzzle pokes
+      // a bit past the off hand.
+      const len = Math.max(handSpan + 0.15, spec.length);
+      w.scale.set(len, spec.thickness, spec.thickness);
+    } else if (spec.hands === 'main') {
+      if (!left || !left.enabled) { w.visible = false; return; }
+      // Anchored at main hand. Knife points in CHEST-LOCAL +Z (i.e.,
+      // the direction the character is facing, accounting for body
+      // twist). Without this the knife sticks straight along world Z
+      // even when the body is bladed.
+      const a = new THREE.Vector3(left.x, left.y, left.z);
+      const dir = new THREE.Vector3(0, 0, 1);
+      if (rig?.chest) {
+        const chestQuat = new THREE.Quaternion();
+        rig.chest.getWorldQuaternion(chestQuat);
+        dir.applyQuaternion(chestQuat).normalize();
+      }
+      const q = new THREE.Quaternion().setFromUnitVectors(new THREE.Vector3(1, 0, 0), dir);
+      // Center the box such that the GRIP end is at the main hand and
+      // the BLADE extends forward.
+      const mid = a.clone().addScaledVector(dir, spec.length * 0.5);
+      w.position.copy(mid);
+      w.quaternion.copy(q);
+      w.scale.set(spec.length, spec.thickness, spec.thickness);
     }
-    // Axis from main hand (leftHand in code) to off hand (rightHand).
-    // Place the weapon center at the midpoint, oriented along that axis.
-    const a = new THREE.Vector3(left.x, left.y, left.z);
-    const b = new THREE.Vector3(right.x, right.y, right.z);
-    const mid = a.clone().add(b).multiplyScalar(0.5);
-    const axis = b.clone().sub(a);
-    const handSpan = axis.length();
-    const dir = axis.clone().normalize();
-    // Default box X-axis aligns to the hand-to-hand axis.
-    const q = new THREE.Quaternion().setFromUnitVectors(new THREE.Vector3(1, 0, 0), dir);
-    w.position.copy(mid);
-    w.quaternion.copy(q);
-    // Length = max(handSpan + 0.15, spec.length) so weapon extends a
-    // bit past whichever hand is gripping closer to the muzzle.
-    const len = Math.max(handSpan + 0.15, spec.length);
-    w.scale.set(len, spec.thickness, spec.thickness);
     w.material.color.setHex(spec.color);
     w.visible = true;
   };
