@@ -1710,7 +1710,14 @@ export function createPlayer(scene) {
         target = aim ? 'W1_Stand_Aim_Idle_IPC' : 'W1_Stand_Relaxed_Idle_IPC';
       }
       if (rig._fbx.currentClipName !== target) {
-        rig.play(target, { fadeMs: 180, loop: !swinging });
+        const action = rig.play(target, { fadeMs: 180, loop: !swinging });
+        // Diagnostic — log every clip switch with bind count so we can
+        // see WHY a clip isn't visibly playing (action returned null,
+        // tracks didn't bind, etc.). Throttled to ONE log per switch
+        // (currentClipName comparison gates).
+        const bindings = action?._propertyBindings || [];
+        const bound = bindings.filter(b => b && b.binding && b.binding.node).length;
+        console.log(`[fbx] clip → ${target} (action=${!!action}, tracks=${action?.getClip().tracks.length}, bound=${bound}, speed=${planarSpeed.toFixed(2)})`);
         rig._fbx.currentClipName = target;
       }
       rig.update(dt);

@@ -175,6 +175,30 @@ function buildRigAdapter(group, mixer) {
   rig.dims.legs.thighH    = segLen(rig.leftLeg.thigh.pivot,     rig.leftLeg.knee);
   rig.dims.legs.calfH     = segLen(rig.leftLeg.knee,            rig.leftLeg.ankle);
 
+  // Diagnostic — dump every action's bind state, weight, time so we
+  // can tell if a clip is actually animating bones or silently failing
+  // to bind. Run from console: window.__player.rig.diag()
+  rig.diag = () => {
+    const out = { clipCount: rig._fbx.actions.size, clips: [], boneCount: bonesByName.size };
+    for (const [name, action] of rig._fbx.actions) {
+      const clip = action.getClip();
+      // PropertyBindings are internal; peek to see how many tracks
+      // actually resolved to bones in the mixer's root.
+      const bindings = action._propertyBindings || [];
+      const bound = bindings.filter(b => b && b.binding && b.binding.node).length;
+      out.clips.push({
+        name,
+        duration: +clip.duration.toFixed(2),
+        running: action.isRunning(),
+        weight: +action.getEffectiveWeight().toFixed(2),
+        time: +action.time.toFixed(2),
+        trackCount: clip.tracks.length,
+        boundTracks: bound,
+      });
+    }
+    return out;
+  };
+
   // Animation playback API.
   rig.play = (clipNameOrIndex, opts = {}) => {
     const { fadeMs = 200, loop = true, timeScale = 1.0 } = opts;
