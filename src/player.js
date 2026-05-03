@@ -50,64 +50,82 @@ function _runUpperBodyIK(rig, state, aimPoint, aimPitch) {
   // Add the GASP pitch-up baseline (negative aimPitch tilts upper
   // body forward; we want backward when below ADS so arms rise).
   aimPitch += (state._gaspPitchOffset || 0);
-  // Resolve the spine chain on first call. UEFN: spine_01 (base) →
-  // spine_02 → spine_03 → spine_04 → spine_05 (top, under neck).
-  // Distribute the yaw + pitch across them with a gradient: lower
-  // bones get less, upper bones get more. Per spec §3 ("rotation
-  // distributed across multiple bones, not applied to a single
-  // joint", "head and neck receive the highest influence").
+
+  // Resolve spine chain + neck + head on first call.
   if (!fbx._spineChain) {
     const bones = fbx.bonesByName;
     const candidates = ['spine_01', 'spine_02', 'spine_03', 'spine_04', 'spine_05'];
     fbx._spineChain = candidates.map(n => bones?.get(n) || null).filter(Boolean);
-    fbx._spineBaseQs = fbx._spineChain.map(b => b.quaternion.clone());
+    fbx._neckBone = bones?.get('neck_01') || null;
   }
-  // Yaw weights — bottom-light, top-heavy. Reduced from earlier
-  // (0.06..0.32 → 0.03..0.20) so the upper body doesn't bob with
-  // every chest-twist micro-update from the cursor; combined
-  // weight ≈ 0.65 (rest goes to neck + head).
-  const YAW_WEIGHTS   = [0.03, 0.07, 0.13, 0.18, 0.20];
-  const PITCH_WEIGHTS = [0.03, 0.06, 0.12, 0.18, 0.22];
-  for (let i = 0; i < fbx._spineChain.length; i++) {
-    const bone = fbx._spineChain[i];
-    if (!bone || !bone.quaternion || !bone.parent) continue;
-    const baseQ = fbx._spineBaseQs[i];
-    bone.quaternion.copy(baseQ);
-    const yawAmt   = aimYaw   * (YAW_WEIGHTS[i]   ?? 0);
-    const pitchAmt = aimPitch * (PITCH_WEIGHTS[i] ?? 0);
-    if (Math.abs(yawAmt) < 0.001 && Math.abs(pitchAmt) < 0.001) continue;
+
+  // CRITICAL: stabilize the upper body against locomotion-clip hip
+  // sway. The clip rotates the pelvis with stride; via the bone
+  // chain that propagates up and the WHOLE upper body bobs. We
+  // override each upper-body bone's WORLD orientation to a stable
+  // body-frame target (rig.group's world quaternion + the bone's
+  // bind-relative-to-group rotation), then add the aim deltas on
+  // top. Net result: upper body holds steady relative to the rig's
+  // root yaw, regardless of what the locomotion clip does to the
+  // hip.
+  //
+  // bind_relative_to_group is captured ONCE at first frame, when
+  // the rig is in its bind pose. group.world.invert() * bone.world
+  // gives the bone's orientation in the GROUP's frame.
+  if (!fbx._upperBodyBindRel) {
+    fbx._upperBodyBindRel = new Map();
+    rig.group.updateMatrixWorld(true);
+    rig.group.getWorldQuaternion(_aimParentWorldQ);
+    const groupInvW = _aimParentWorldQ.clone().invert();
+    for (const bone of fbx._spineChain) {
+      bone.updateMatrixWorld(true);
+      const w = new THREE.Quaternion();
+      bone.getWorldQuaternion(w);
+      fbx._upperBodyBindRel.set(bone, groupInvW.clone().multiply(w));
+    }
+    if (fbx._neckBone) {
+      const w = new THREE.Quaternion();
+      fbx._neckBone.getWorldQuaternion(w);
+      fbx._upperBodyBindRel.set(fbx._neckBone, groupInvW.clone().multiply(w));
+    }
+    if (rig.head) {
+      const w = new THREE.Quaternion();
+      rig.head.getWorldQuaternion(w);
+      fbx._upperBodyBindRel.set(rig.head, groupInvW.clone().multiply(w));
+    }
+  }
+
+  // Helper: set bone.local so its world quaternion equals
+  // (group.world × bind_relative_to_group × aim_delta).
+  rig.group.updateMatrixWorld(true);
+  rig.group.getWorldQuaternion(_aimParentWorldQ);  // group's world Q
+  const setBoneAimed = (bone, yawAmt, pitchAmt) => {
+    if (!bone || !bone.parent) return;
+    const bindRel = fbx._upperBodyBindRel.get(bone);
+    if (!bindRel) return;
+    // desired world Q = group_world × bindRel × aim_delta
     _aimDeltaE.set(pitchAmt, yawAmt, 0, 'YXZ');
     _aimDeltaQ.setFromEuler(_aimDeltaE);
-    bone.parent.getWorldQuaternion(_aimParentWorldQ);
-    _aimComposeQ.copy(_aimParentWorldQ).multiply(baseQ);
-    const localDelta = _aimComposeQ.clone().invert().multiply(_aimDeltaQ).multiply(_aimComposeQ);
-    bone.quaternion.multiply(localDelta);
+    _aimComposeQ.copy(_aimParentWorldQ).multiply(bindRel).multiply(_aimDeltaQ);
+    // bone.local = parent.world.invert() × desired_world
+    const parentW = new THREE.Quaternion();
+    bone.parent.getWorldQuaternion(parentW);
+    bone.quaternion.copy(parentW.invert()).multiply(_aimComposeQ);
+    bone.updateMatrixWorld(true);
+  };
+
+  // Distribute aim across spine + neck + head. Bottom-light,
+  // top-heavy gradient (per spec §3).
+  const YAW_WEIGHTS   = [0.04, 0.08, 0.14, 0.18, 0.20];
+  const PITCH_WEIGHTS = [0.04, 0.07, 0.12, 0.16, 0.18];
+  let cumYaw = 0, cumPitch = 0;
+  for (let i = 0; i < fbx._spineChain.length; i++) {
+    cumYaw   += YAW_WEIGHTS[i]   ?? 0;
+    cumPitch += PITCH_WEIGHTS[i] ?? 0;
+    setBoneAimed(fbx._spineChain[i], aimYaw * (YAW_WEIGHTS[i] ?? 0), aimPitch * (PITCH_WEIGHTS[i] ?? 0));
   }
-  // Head + neck — neck splits weight with head; head gets the most.
-  if (!fbx._neckBase && rig._fbx.bonesByName?.get('neck_01')) {
-    fbx._neckBone = rig._fbx.bonesByName.get('neck_01');
-    fbx._neckBase = fbx._neckBone.quaternion.clone();
-  }
-  if (fbx._neckBone) {
-    const bone = fbx._neckBone;
-    bone.quaternion.copy(fbx._neckBase);
-    _aimDeltaE.set(aimPitch * 0.18, aimYaw * 0.10, 0, 'YXZ');
-    _aimDeltaQ.setFromEuler(_aimDeltaE);
-    bone.parent.getWorldQuaternion(_aimParentWorldQ);
-    _aimComposeQ.copy(_aimParentWorldQ).multiply(fbx._neckBase);
-    const localDelta = _aimComposeQ.clone().invert().multiply(_aimDeltaQ).multiply(_aimComposeQ);
-    bone.quaternion.multiply(localDelta);
-  }
-  if (rig.head && rig.head.quaternion && rig.head.parent) {
-    if (!fbx._aimHeadBase) fbx._aimHeadBase = rig.head.quaternion.clone();
-    rig.head.quaternion.copy(fbx._aimHeadBase);
-    _aimDeltaE.set(aimPitch * 0.45, aimYaw * 0.30, 0, 'YXZ');
-    _aimDeltaQ.setFromEuler(_aimDeltaE);
-    rig.head.parent.getWorldQuaternion(_aimParentWorldQ);
-    _aimComposeQ.copy(_aimParentWorldQ).multiply(fbx._aimHeadBase);
-    const localDelta = _aimComposeQ.clone().invert().multiply(_aimDeltaQ).multiply(_aimComposeQ);
-    rig.head.quaternion.multiply(localDelta);
-  }
+  if (fbx._neckBone) setBoneAimed(fbx._neckBone, aimYaw * 0.10, aimPitch * 0.18);
+  if (rig.head)     setBoneAimed(rig.head,        aimYaw * 0.20, aimPitch * 0.30);
 }
 
 // Lazy-load the player FBX clip-selection state machine. Until the
@@ -1955,16 +1973,13 @@ export function createPlayer(scene) {
         let lerpRate;
         if (ads) {
           targetYaw = cursorYaw;
-          // Was 30/s — snapped jarringly when entering ADS while
-          // moving sideways. 10/s gives a perceptible-but-smooth
-          // body re-orientation as aim takes over.
-          lerpRate = 10;
+          lerpRate = 20;       // tight tracking under ADS
         } else if (moving) {
           targetYaw = movementYaw;
           lerpRate = 14;       // body briskly tracks movement
         } else {
           targetYaw = cursorYaw;
-          lerpRate = 3.5;      // idle slow rotation toward aim (natural)
+          lerpRate = 5;        // idle rotation toward aim
         }
         // Twist-compensation clamp — when |aim-target| > limit, the
         // root absorbs the excess so chest stays within twist range.
@@ -1994,13 +2009,10 @@ export function createPlayer(scene) {
         while (chestTwist >  Math.PI) chestTwist -= 2 * Math.PI;
         while (chestTwist < -Math.PI) chestTwist += 2 * Math.PI;
         chestTwist = Math.max(-TWIST_LIMIT - 0.1, Math.min(TWIST_LIMIT + 0.1, chestTwist));
-        // Smooth the chest twist so cursor-jitter and per-frame
-        // numerical noise don't propagate as visible bone
-        // oscillation. 22/s lerp = ~140ms convergence; fast enough
-        // to track real cursor motion, slow enough to filter jitter.
-        const prevTwist = rig._fbx._smoothTwist ?? chestTwist;
-        rig._fbx._smoothTwist = prevTwist + (chestTwist - prevTwist) * (1 - Math.exp(-22 * dt));
-        state.chestTwist = rig._fbx._smoothTwist;
+        // Pass-through — earlier 22/s smoother was filtering too
+        // aggressively and reading as cursor-tracking lag. Cursor
+        // is already smoothed upstream; chestTwist follows directly.
+        state.chestTwist = chestTwist;
         // Gun-anchor lerps between hipfire (chest height ≈ 1.30m
         // after the 1.15× rig scale → ~1.50 visible) and ADS
         // (eye-line ≈ 1.55m → ~1.78 visible). Forward distance
