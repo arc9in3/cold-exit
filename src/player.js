@@ -127,12 +127,13 @@ function _runUpperBodyIK(rig, state, aimPoint, aimPitch, dt = 1/60) {
     }
   }
 
-  // Step 2: each spine bone above spine_01 + neck + head gets a
-  // LOCAL aim delta. Through the parent chain, deltas compound,
-  // so the arms (children of spine_05's clavicle) inherit the full
-  // chest twist.
-  const YAW_WEIGHTS   = [0,    0.10, 0.16, 0.20, 0.24];
-  const PITCH_WEIGHTS = [0,    0.10, 0.14, 0.18, 0.20];
+  // Step 2: spine yaw distribution is ZEROED per user feedback —
+  // any spine yaw read as side-lean due to UEFN bone-axis
+  // convention. Yaw is now applied to clavicle bones directly
+  // (world-frame, see step 3). Spine pitch stays as a tiny
+  // capped contribution for life signal only.
+  const YAW_WEIGHTS   = [0, 0, 0, 0, 0];
+  const PITCH_WEIGHTS = [0, 0.04, 0.08, 0.10, 0.12];
   const applyChain = (bone, yawAmt, pitchAmt) => {
     if (!bone || !bone.parent) return;
     const bindLocal = fbx._upperBodyBindLocal.get(bone);
@@ -147,6 +148,43 @@ function _runUpperBodyIK(rig, state, aimPoint, aimPitch, dt = 1/60) {
   };
   for (let i = 1; i < fbx._spineChain.length; i++) {
     applyChain(fbx._spineChain[i], aimYaw * YAW_WEIGHTS[i], aimPitch * PITCH_WEIGHTS[i]);
+  }
+  // Clavicles — apply the FULL chestTwist yaw in WORLD frame so the
+  // arms rotate toward cursor without leaning the spine. World-yaw
+  // is converted into the clavicle's parent (spine_05) frame:
+  //   delta_local = parent.world.invert() * worldYawQ * parent.world
+  // Then bone.local = delta_local * bind_local (left-multiply, so
+  // the rotation is applied around the parent's frame). Result is
+  // a clean horizontal arm sweep regardless of bone-axis convention.
+  if (Math.abs(aimYaw) > 0.001 && (fbx._clavicleL || fbx._clavicleR)) {
+    const _clavWorldYaw = new THREE.Quaternion().setFromAxisAngle(
+      new THREE.Vector3(0, 1, 0), aimYaw);
+    const _clavParentW = new THREE.Quaternion();
+    const _clavLocal = new THREE.Quaternion();
+    if (!fbx._clavLBindLocal && fbx._clavicleL) {
+      fbx._clavLBindLocal = fbx._clavicleL.quaternion.clone();
+    }
+    if (!fbx._clavRBindLocal && fbx._clavicleR) {
+      fbx._clavRBindLocal = fbx._clavicleR.quaternion.clone();
+    }
+    for (const [bone, bind] of [
+      [fbx._clavicleL, fbx._clavLBindLocal],
+      [fbx._clavicleR, fbx._clavRBindLocal],
+    ]) {
+      if (!bone || !bind || !bone.parent) continue;
+      bone.parent.getWorldQuaternion(_clavParentW);
+      _clavLocal.copy(_clavParentW).invert()
+        .multiply(_clavWorldYaw).multiply(_clavParentW);
+      bone.quaternion.copy(_clavLocal).multiply(bind);
+      bone.updateMatrixWorld(true);
+    }
+  } else if (fbx._clavicleL && fbx._clavLBindLocal) {
+    // Chest twist is zero — restore both clavicles to bind so they
+    // don't accumulate stale rotation from a previous frame.
+    fbx._clavicleL.quaternion.copy(fbx._clavLBindLocal);
+    if (fbx._clavicleR && fbx._clavRBindLocal) {
+      fbx._clavicleR.quaternion.copy(fbx._clavRBindLocal);
+    }
   }
   // Neck + head: NO direct write. Earlier attempts applied a yaw
   // delta in bone-LOCAL frame, but UEFN bone-local axes don't
