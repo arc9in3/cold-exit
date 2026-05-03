@@ -733,20 +733,20 @@ export function createPlayer(scene) {
     const ws = WEAPON_SCALE;
     const usingGunAnchor = !!(rig._gunAnchor && anchor === rig._gunAnchor);
     if (usingGunAnchor) {
-      // GASP path — anchor is a plain Object3D under rig.group,
-      // tracking the dominant hand bone position. Gun barrel extends
-      // along anchor's +Z. Most of the gun's length sits FORWARD
-      // of the anchor; a small portion sits behind so the grip
-      // overlaps the hand instead of floating at the front.
-      // Was len/2 forward (grip at anchor, full gun forward) —
-      // for long rifles like the AK that put the muzzle ~1.4m in
-      // front of the body. New offset = len * 0.2 means box center
-      // is at 20% of length forward, so back of gun sits ~30cm
-      // behind anchor (at the wrist / inner hand) and muzzle is
-      // ~70% of length forward of anchor.
+      // GASP path — anchor under rig.group, tracking the dominant
+      // hand bone. Gun barrel extends along anchor's +Z.
+      //
+      // Forward-offset formula is class-dependent: pistols use the
+      // original (len/2) so grip sits at the anchor and the full
+      // gun extends forward (this was perfect for the 1911 at
+      // commit 13a43e1). Long rifles use (len*0.2) so the back of
+      // the gun overlaps the wrist instead of the muzzle floating
+      // ~1.4m in front of the body (the AK fix from 8e5b22e).
       gunMesh.rotation.set(0, 0, 0);
       inHandModel.rotation.set(0, 0, 0);
-      const fwd = len * 0.2;
+      const isLong = cls === 'rifle' || cls === 'shotgun'
+        || cls === 'sniper' || cls === 'lmg';
+      const fwd = isLong ? (len * 0.2) : (len / 2);
       gunMesh.position.set(0, 0, fwd * ws);
       muzzle.position.set(0, 0, (fwd + len / 2) * ws);
       inHandModel.position.copy(gunMesh.position);
