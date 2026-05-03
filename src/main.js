@@ -938,6 +938,12 @@ window.__useGaspMannequin = async () => {
     const anchor = new (await import('three')).Object3D();
     anchor.name = '_gunAnchor';
     anchor.position.set(0, 1.30, 0.45);  // hipfire default
+    // Counter-scale so weapons render at their AUTHORED metre size
+    // regardless of the rig.group's outer scale. Without this, the
+    // 1.15× rig scale bump above multiplies into gun mesh world
+    // size, making every weapon ~15% larger than the procgen path.
+    const groupScale = player.rig.group.scale.x || 1.0;
+    anchor.scale.setScalar(1.0 / groupScale);
     player.rig.group.add(anchor);
     player.rig._gunAnchor = anchor;
   }
