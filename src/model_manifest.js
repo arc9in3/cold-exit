@@ -1,5 +1,5 @@
-// 3D model manifest — maps items to .fbx files extracted from the animpic
-// POLY packs via tools/unity_to_gltf.py. Three.js loads .fbx natively via
+// 3D model manifest — maps items to .glb files extracted from the animpic
+// POLY packs via tools/unity_to_gltf.py. Three.js loads .glb natively via
 // FBXLoader (wired in src/gltf_cache.js).
 //
 // Resolution order mirrors iconForItem in inventory.js:
@@ -7,7 +7,7 @@
 // Falling through returns null, which tells loot.js to keep the primitive
 // box placeholder.
 //
-// To add a new model: drop the .fbx under Assets/models/<category>/,
+// To add a new model: drop the .glb under Assets/models/<category>/,
 // then add one line to the appropriate table. No other code changes.
 
 const MODEL_BASE = 'Assets/models/';
@@ -18,103 +18,103 @@ const MODEL_BASE = 'Assets/models/';
 // session — see Assets/Weapons/weapon_assignments.json for the audit.
 export const MODEL_BY_WEAPON_NAME = {
   // Pistols
-  'Makarov':            'weapons/SM_Civilian_Pistol.fbx',
-  'Glock 17':           'weapons/SM_Army_Pistol.fbx',
-  'M1911':              'weapons/SM_Police_Gun.fbx',
-  'Desert Eagle .50':   'weapons/SM_Hunting_Pistol.fbx',
-  'Colt Anaconda .44':  'lowpolyguns/Revolver_5.fbx',           // user: colt six shooter (.44 visual)
-  'Colt Python':        'lowpolyguns/Revolver_3.fbx',
-  'Colt 357':           'lowpolyguns/Revolver_1.fbx',
-  '.38 Special':        'lowpolyguns/Revolver_4.fbx',
-  'Colt Six Shooter':   'lowpolyguns/Revolver_5.fbx',
+  'Makarov':            'weapons/SM_Civilian_Pistol.glb',
+  'Glock 17':           'weapons/SM_Army_Pistol.glb',
+  'M1911':              'weapons/SM_Police_Gun.glb',
+  'Desert Eagle .50':   'weapons/SM_Hunting_Pistol.glb',
+  'Colt Anaconda .44':  'lowpolyguns/Revolver_5.glb',           // user: colt six shooter (.44 visual)
+  'Colt Python':        'lowpolyguns/Revolver_3.glb',
+  'Colt 357':           'lowpolyguns/Revolver_1.glb',
+  '.38 Special':        'lowpolyguns/Revolver_4.glb',
+  'Colt Six Shooter':   'lowpolyguns/Revolver_5.glb',
 
   // SMGs
-  'PDW':                'weapons/SM_Civilian_Submachine_Gun.fbx',
-  'P90':                'weapons/SM_Police_Submachine_Gun.fbx',
-  'UMP45':              'weapons/SM_Army_Submachine_Gun.fbx',
-  'Spectre':            'lowpolyguns/SubmachineGun_2.fbx',
-  'Spectre CQB':        'lowpolyguns/SubmachineGun_1.fbx',
-  'SPC9':               'lowpolyguns/SubmachineGun_3.fbx',
-  'SPCA3':              'lowpolyguns/SubmachineGun_4.fbx',          // SIG SPC AR-style 9mm
-  'SPC223':             'lowpolyguns/SubmachineGun_5.fbx',          // SIG SPC .223 carbine
+  'PDW':                'weapons/SM_Civilian_Submachine_Gun.glb',
+  'P90':                'weapons/SM_Police_Submachine_Gun.glb',
+  'UMP45':              'weapons/SM_Army_Submachine_Gun.glb',
+  'Spectre':            'lowpolyguns/SubmachineGun_2.glb',
+  'Spectre CQB':        'lowpolyguns/SubmachineGun_1.glb',
+  'SPC9':               'lowpolyguns/SubmachineGun_3.glb',
+  'SPCA3':              'lowpolyguns/SubmachineGun_4.glb',          // SIG SPC AR-style 9mm
+  'SPC223':             'lowpolyguns/SubmachineGun_5.glb',          // SIG SPC .223 carbine
 
   // Rifles
-  'AK47':               'lowpolyguns/AssaultRifle_2.fbx',
-  'AKS-47':             'lowpolyguns/AssaultRifle_3.fbx',         // folding-stock AK47 sibling
-  'AKS-74':             'lowpolyguns/AssaultRifle_4.fbx',
-  'AK104':              'lowpolyguns/AssaultRifle_5.fbx',
-  'Draco NAK9':         'lowpolyguns/AssaultRifle_1.fbx',         // 9mm AK-pattern compact
-  'AS VAL':             'weapons/SM_Assault_Rifle_9x39.fbx',
-  'VSS':                'weapons/SM_Police_Sniper_Rifle.fbx',     // user-tagged FBX = "VSS vintorez"
-  'M16':                'weapons/Assault_Rifle_5_56_Prototype.fbx',
-  'M4':                 'lowpolyguns/AssaultRifle2_2.fbx',         // Apr-26: re-introduced with proper FBX
-  'AR-15 SBR':          'lowpolyguns/AssaultRifle2_4.fbx',         // short-barrel AR-15
-  'AR-15 Pistol':       'lowpolyguns/AssaultRifle2_3.fbx',         // AR pistol — pistol class for size
-  'AUG A3-CQC':         'weapons/SM_Bulpam_Assault_Rifle.fbx',
-  'CAR-15':             'lowpolyguns/AssaultRifle2_1.fbx',
-  'JARD J67':           'lowpolyguns/Bullpup_2.fbx',
-  'JARD J68':           'lowpolyguns/Bullpup_1.fbx',
-  'JARD J56':           'lowpolyguns/Bullpup_3.fbx',
+  'AK47':               'lowpolyguns/AssaultRifle_2.glb',
+  'AKS-47':             'lowpolyguns/AssaultRifle_3.glb',         // folding-stock AK47 sibling
+  'AKS-74':             'lowpolyguns/AssaultRifle_4.glb',
+  'AK104':              'lowpolyguns/AssaultRifle_5.glb',
+  'Draco NAK9':         'lowpolyguns/AssaultRifle_1.glb',         // 9mm AK-pattern compact
+  'AS VAL':             'weapons/SM_Assault_Rifle_9x39.glb',
+  'VSS':                'weapons/SM_Police_Sniper_Rifle.glb',     // user-tagged FBX = "VSS vintorez"
+  'M16':                'weapons/Assault_Rifle_5_56_Prototype.glb',
+  'M4':                 'lowpolyguns/AssaultRifle2_2.glb',         // Apr-26: re-introduced with proper FBX
+  'AR-15 SBR':          'lowpolyguns/AssaultRifle2_4.glb',         // short-barrel AR-15
+  'AR-15 Pistol':       'lowpolyguns/AssaultRifle2_3.glb',         // AR pistol — pistol class for size
+  'AUG A3-CQC':         'weapons/SM_Bulpam_Assault_Rifle.glb',
+  'CAR-15':             'lowpolyguns/AssaultRifle2_1.glb',
+  'JARD J67':           'lowpolyguns/Bullpup_2.glb',
+  'JARD J68':           'lowpolyguns/Bullpup_1.glb',
+  'JARD J56':           'lowpolyguns/Bullpup_3.glb',
 
   // LMGs
-  'Type 80 LMG':        'weapons/SM_Heavy_Machine_Gun.fbx',
-  'M249':               'weapons/SM_Light_Machine_Gun.fbx',
+  'Type 80 LMG':        'weapons/SM_Heavy_Machine_Gun.glb',
+  'M249':               'weapons/SM_Light_Machine_Gun.glb',
 
   // Snipers
   // Apr-26: Remington 700's art swapped to the user-tagged
   // SniperRifle_1 FBX. Tactical chassis variant added as a sibling.
-  'Remington 700':      'lowpolyguns/SniperRifle_1.fbx',
-  'Remington 700 Tactical': 'lowpolyguns/SniperRifle_2.fbx',
-  'SVD Dragunov':       'weapons/SM_Army_Sniper_Rifle.fbx',
-  'Cheytac Intervention':'weapons/SM_High_Precision_Sniper_Rifle.fbx',
-  'AWP':                'lowpolyguns/SniperRifle_3.fbx',
-  '.338 Lapua':         'lowpolyguns/SniperRifle_5.fbx',
-  'Hunting Rifle':      'lowpolyguns/SniperRifle_6.fbx',
+  'Remington 700':      'lowpolyguns/SniperRifle_1.glb',
+  'Remington 700 Tactical': 'lowpolyguns/SniperRifle_2.glb',
+  'SVD Dragunov':       'weapons/SM_Army_Sniper_Rifle.glb',
+  'Cheytac Intervention':'weapons/SM_High_Precision_Sniper_Rifle.glb',
+  'AWP':                'lowpolyguns/SniperRifle_3.glb',
+  '.338 Lapua':         'lowpolyguns/SniperRifle_5.glb',
+  'Hunting Rifle':      'lowpolyguns/SniperRifle_6.glb',
 
   // Shotguns
-  'AA-12':              'weapons/SM_Assault_Shotgun.fbx',
-  'Benelli M4':         'weapons/SM_Army_Shotgun.fbx',
-  'Mossberg 500':       'lowpolyguns/Shotgun_1.fbx',
-  'Remington 870':      'lowpolyguns/Shotgun_3.fbx',
-  'Sawed-Off Shotgun':  'lowpolyguns/Shotgun_SawedOff.fbx',
-  'KSG-12':             'weapons/Modern_Pump_Action_Shotgun.fbx',
+  'AA-12':              'weapons/SM_Assault_Shotgun.glb',
+  'Benelli M4':         'weapons/SM_Army_Shotgun.glb',
+  'Mossberg 500':       'lowpolyguns/Shotgun_1.glb',
+  'Remington 870':      'lowpolyguns/Shotgun_3.glb',
+  'Sawed-Off Shotgun':  'lowpolyguns/Shotgun_SawedOff.glb',
+  'KSG-12':             'weapons/Modern_Pump_Action_Shotgun.glb',
   // Henry single-shot 12-gauge slug rifle. Class: shotgun (slug).
-  'Henry Slug Rifle':   'lowpolyguns/Shotgun_4.fbx',
+  'Henry Slug Rifle':   'lowpolyguns/Shotgun_4.glb',
 
   // Exotic
-  'Widowmaker Rocket Launcher': 'weapons/SM_Rocket_Launchers_01.fbx',
+  'Widowmaker Rocket Launcher': 'weapons/SM_Rocket_Launchers_01.glb',
   // Flamethrower — placeholder uses the heavy MG mesh (long tube +
   // top-mounted feed reads as a fuel-tank shape from the iso angle).
   // Replace when a real flamethrower FBX is sourced.
-  'Flamethrower':       'weapons/SM_Heavy_Machine_Gun.fbx',
+  'Flamethrower':       'weapons/SM_Heavy_Machine_Gun.glb',
 
   // Legendary artifact pistol.
-  "Jessica's Rage":     'weapons/SM_Hunting_Pistol.fbx',
+  "Jessica's Rage":     'weapons/SM_Hunting_Pistol.glb',
 
   // SMGs (cont.)
-  'Kriss Vector':       'weapons/SM_Tactical_Submachine_Gun.fbx',
+  'Kriss Vector':       'weapons/SM_Tactical_Submachine_Gun.glb',
 
   // Melee.
   // Combat Knife: per the Apr-26 dupe rule, the Bayonet_2 FBX tagged
   // "combat knife" supersedes the older SM_Combat_Knife model.
-  'Combat Knife':       'lowpolyguns_accessories/Bayonet_2.fbx',
-  'Survival Knife':     'lowpolyguns_accessories/Bayonet.fbx',
-  'Pocket Knife':       'weapons/SM_Flick_Knife.fbx',
-  'Hammer':             'melee/SM_Hammer.fbx',
-  'Baseball Bat':       'melee/SM_Baseball_bat_Nails_reinforced_.fbx',
-  'katana':             'melee/SM_Katana.fbx',
-  'Brass Knuckles':     'melee/SM_Brass_Knuckles_02.fbx',
-  'Crowbar':            'melee/SM_Tire_iron.fbx',
-  'Kukri':              'weapons/SM_Kukri.fbx',
-  'Tomahawk':           'weapons/SM_Combat_Axe.fbx',
-  'Fire Axe':           'melee/SM_Fire_Axe.fbx',
-  'Sledgehammer':       'tools/SM_Sledgehammer.fbx',
-  'Chainsaw':           'tools/SM_Chainsaw.fbx',
-  'Scimitar':           'melee/SM_Handcrafted_Curved_Sword.fbx',
+  'Combat Knife':       'lowpolyguns_accessories/Bayonet_2.glb',
+  'Survival Knife':     'lowpolyguns_accessories/Bayonet.glb',
+  'Pocket Knife':       'weapons/SM_Flick_Knife.glb',
+  'Hammer':             'melee/SM_Hammer.glb',
+  'Baseball Bat':       'melee/SM_Baseball_bat_Nails_reinforced_.glb',
+  'katana':             'melee/SM_Katana.glb',
+  'Brass Knuckles':     'melee/SM_Brass_Knuckles_02.glb',
+  'Crowbar':            'melee/SM_Tire_iron.glb',
+  'Kukri':              'weapons/SM_Kukri.glb',
+  'Tomahawk':           'weapons/SM_Combat_Axe.glb',
+  'Fire Axe':           'melee/SM_Fire_Axe.glb',
+  'Sledgehammer':       'tools/SM_Sledgehammer.glb',
+  'Chainsaw':           'tools/SM_Chainsaw.glb',
+  'Scimitar':           'melee/SM_Handcrafted_Curved_Sword.glb',
 
   // Mythic kept around (Dragonbreath has no in-class shotgun model
   // distinct from the others; reuse Benelli silhouette).
-  'Dragonbreath':       'weapons/SM_Army_Shotgun.fbx',
+  'Dragonbreath':       'weapons/SM_Army_Shotgun.glb',
 };
 
 // Per-item-id override — consumables, armor pieces, junk — anything with a
@@ -122,120 +122,120 @@ export const MODEL_BY_WEAPON_NAME = {
 // JUNK_DEFS in inventory.js.
 export const MODEL_BY_ITEM_ID = {
   // Consumables — medical pack coverage.
-  cons_bandage:      'medical/SM_Bandage.fbx',
-  cons_pain:         'medical/SM_Bottle_Of_Pills_Painkiller.fbx',
-  cons_splint:       'medical/SM_Bandage.fbx',
-  cons_medkit:       'medical/SM_Car_First_Aid_Kit.fbx',
-  cons_trauma:       'medical/SM_Blood_Bag.fbx',
-  cons_adrenaline:   'medical/SM_Ampoule_With_Solution_01.fbx',
-  cons_combat_stim:  'medical/SM_Ampoule_With_Solution_02.fbx',
-  cons_energy:       'medical/SM_Bottle_Of_Pills_Syrup.fbx',
-  cons_tourniquet:   'medical/SM_Tourniquet.fbx',
-  cons_afak:         'medical/SM_INDIVIDUAL_TACTICAL_AID_KIT.fbx',
-  cons_defib:        'medical/SM_Defibrillator.fbx',
-  cons_morphine:     'medical/SM_Injector_With_Morphine.fbx',
-  cons_regen:        'medical/SM_Injector_With_Regeneration.fbx',
-  junk_carbatt:      'tools/SM_Car_Battery.fbx',
-  junk_scrap:        'tools/SM_Scrap_Metal_02.fbx',
+  cons_bandage:      'medical/SM_Bandage.glb',
+  cons_pain:         'medical/SM_Bottle_Of_Pills_Painkiller.glb',
+  cons_splint:       'medical/SM_Bandage.glb',
+  cons_medkit:       'medical/SM_Car_First_Aid_Kit.glb',
+  cons_trauma:       'medical/SM_Blood_Bag.glb',
+  cons_adrenaline:   'medical/SM_Ampoule_With_Solution_01.glb',
+  cons_combat_stim:  'medical/SM_Ampoule_With_Solution_02.glb',
+  cons_energy:       'medical/SM_Bottle_Of_Pills_Syrup.glb',
+  cons_tourniquet:   'medical/SM_Tourniquet.glb',
+  cons_afak:         'medical/SM_INDIVIDUAL_TACTICAL_AID_KIT.glb',
+  cons_defib:        'medical/SM_Defibrillator.glb',
+  cons_morphine:     'medical/SM_Injector_With_Morphine.glb',
+  cons_regen:        'medical/SM_Injector_With_Regeneration.glb',
+  junk_carbatt:      'tools/SM_Car_Battery.glb',
+  junk_scrap:        'tools/SM_Scrap_Metal_02.glb',
   // Throwables — user-tagged per the Apr 2026 weapon-assigner pass.
-  thr_frag:          'weapons/SM_Frag_Grenade.fbx',
-  thr_flash:         'weapons/SM_Stun_Grenade.fbx',     // user-tagged "flashbang"
-  thr_stun:          'weapons/SM_Stun_Grenade.fbx',
-  thr_molotov:       'weapons/SM_Molotov_02.fbx',
-  thr_maotai:        'weapons/SM_Molotov_01.fbx',     // Maotai-bottle variant
-  thr_claymore:      'weapons/SM_Infantry_Mine.fbx',
-  thr_elven_knife:   'weapons/SM_Throwing_Knife.fbx',
+  thr_frag:          'weapons/SM_Frag_Grenade.glb',
+  thr_flash:         'weapons/SM_Stun_Grenade.glb',     // user-tagged "flashbang"
+  thr_stun:          'weapons/SM_Stun_Grenade.glb',
+  thr_molotov:       'weapons/SM_Molotov_02.glb',
+  thr_maotai:        'weapons/SM_Molotov_01.glb',     // Maotai-bottle variant
+  thr_claymore:      'weapons/SM_Infantry_Mine.glb',
+  thr_elven_knife:   'weapons/SM_Throwing_Knife.glb',
 
   // Attachments — user-tagged FBXes from the Apr 2026 pass. Mapping
   // reads attachment.id to FBX path; the inventory grid + customize
   // screen render the same model.
   // -- Muzzle: comps / brakes / flash hiders
-  att_compensator:        'weapons/SM_Compensator_For_Large_Caliber_Sniper_Rifle.fbx',
-  att_brake_a2:           'weapons/SM_Muzzle_Brake_Compensator_01.fbx',
-  att_brake_ak:           'weapons/SM_Muzzle_Brake_Compensator_03.fbx',
-  att_brake_sniper:       'weapons/SM_Muzzle_Brake_Compensator_02.fbx',
-  att_comp_linear:        'weapons/SM_Muzzle_Brake_Compensator_05.fbx',
-  att_flash_hider:        'weapons/SM_Muzzle_Brake_Compensator_06.fbx',
-  att_flash_hider_long:   'weapons/SM_Muzzle_Brake_Compensator_07.fbx',
+  att_compensator:        'weapons/SM_Compensator_For_Large_Caliber_Sniper_Rifle.glb',
+  att_brake_a2:           'weapons/SM_Muzzle_Brake_Compensator_01.glb',
+  att_brake_ak:           'weapons/SM_Muzzle_Brake_Compensator_03.glb',
+  att_brake_sniper:       'weapons/SM_Muzzle_Brake_Compensator_02.glb',
+  att_comp_linear:        'weapons/SM_Muzzle_Brake_Compensator_05.glb',
+  att_flash_hider:        'weapons/SM_Muzzle_Brake_Compensator_06.glb',
+  att_flash_hider_long:   'weapons/SM_Muzzle_Brake_Compensator_07.glb',
   // -- Muzzle: suppressors (lowpoly + animpic)
-  att_suppressor:         'lowpolyguns_accessories/Silencer_1.fbx',
-  att_suppressor_short:   'lowpolyguns_accessories/Silencer_Short.fbx',
-  att_suppressor_long:    'lowpolyguns_accessories/Silencer_long.fbx',
-  att_suppressor_qd:      'lowpolyguns_accessories/Silencer_2.fbx',
-  att_suppressor_fluted:  'lowpolyguns_accessories/Silencer_3.fbx',
-  att_suppressor_osprey:  'weapons/SM_Muffler_04.fbx',
-  att_suppressor_tactical:'weapons/SM_Muffler_05.fbx',
+  att_suppressor:         'lowpolyguns_accessories/Silencer_1.glb',
+  att_suppressor_short:   'lowpolyguns_accessories/Silencer_Short.glb',
+  att_suppressor_long:    'lowpolyguns_accessories/Silencer_long.glb',
+  att_suppressor_qd:      'lowpolyguns_accessories/Silencer_2.glb',
+  att_suppressor_fluted:  'lowpolyguns_accessories/Silencer_3.glb',
+  att_suppressor_osprey:  'weapons/SM_Muffler_04.glb',
+  att_suppressor_tactical:'weapons/SM_Muffler_05.glb',
   // Apr-26 second-pass — extra muzzle/suppressor variants from
   // weapon_assignments.json (chinese / russian / KA QD cans, plus
   // a precision sniper brake and an alternate AK slant brake).
-  att_brake_precision:    'weapons/SM_Compensator_For_High_Precision_Sniper_Rifle.fbx',
-  att_brake_ak2:          'weapons/SM_Muzzle_Brake_Compensator_04.fbx',
-  att_suppressor_chinese: 'weapons/SM_Muffler_01.fbx',
-  att_suppressor_russian: 'weapons/SM_Muffler_02.fbx',
-  att_suppressor_ka_qd:   'weapons/SM_Muffler_03.fbx',
+  att_brake_precision:    'weapons/SM_Compensator_For_High_Precision_Sniper_Rifle.glb',
+  att_brake_ak2:          'weapons/SM_Muzzle_Brake_Compensator_04.glb',
+  att_suppressor_chinese: 'weapons/SM_Muffler_01.glb',
+  att_suppressor_russian: 'weapons/SM_Muffler_02.glb',
+  att_suppressor_ka_qd:   'weapons/SM_Muffler_03.glb',
   // -- Side rail
-  att_laser:              'weapons/SM_Tactical_Laser_Designator.fbx',
-  att_laser_red:          'weapons/SM_Tactical_Laser_Designator.fbx',
-  att_laser_green:        'weapons/SM_Tactical_Laser_Designator.fbx',
-  att_laser_blue:         'weapons/SM_Tactical_Laser_Designator.fbx',
-  att_laser_pistol:       'weapons/SM_Tactical_Laser_Designator.fbx',
-  att_flashlight:         'weapons/SM_Tactical_Flashlight_01.fbx',
-  att_tac_light:          'weapons/SM_Tactical_Flashlight_03.fbx',
-  att_strobe:             'weapons/SM_Tactical_Flashlight_02.fbx',
-  att_flashlight_olight:  'lowpolyguns_accessories/Flashlight.fbx',
+  att_laser:              'weapons/SM_Tactical_Laser_Designator.glb',
+  att_laser_red:          'weapons/SM_Tactical_Laser_Designator.glb',
+  att_laser_green:        'weapons/SM_Tactical_Laser_Designator.glb',
+  att_laser_blue:         'weapons/SM_Tactical_Laser_Designator.glb',
+  att_laser_pistol:       'weapons/SM_Tactical_Laser_Designator.glb',
+  att_flashlight:         'weapons/SM_Tactical_Flashlight_01.glb',
+  att_tac_light:          'weapons/SM_Tactical_Flashlight_03.glb',
+  att_strobe:             'weapons/SM_Tactical_Flashlight_02.glb',
+  att_flashlight_olight:  'lowpolyguns_accessories/Flashlight.glb',
   // -- Under rail (foregrips / bipod)
-  att_foregrip:           'weapons/SM_Vertical_Handle_01.fbx',
-  att_foregrip_angled:    'weapons/SM_Horizontal_Handle_01.fbx',
-  att_foregrip_stubby:    'lowpolyguns_accessories/Grip.fbx',
-  att_grip_canted:        'weapons/SM_Side_Handle.fbx',
-  att_bipod:              'weapons/SM_Bipod__ForHigh_Precision_Sniper_Rifle.fbx',
+  att_foregrip:           'weapons/SM_Vertical_Handle_01.glb',
+  att_foregrip_angled:    'weapons/SM_Horizontal_Handle_01.glb',
+  att_foregrip_stubby:    'lowpolyguns_accessories/Grip.glb',
+  att_grip_canted:        'weapons/SM_Side_Handle.glb',
+  att_bipod:              'weapons/SM_Bipod__ForHigh_Precision_Sniper_Rifle.glb',
   // Apr-26 second-pass foregrip variants (tan colorways + a folding
   // grip + a short vertical alternative).
-  att_foregrip_tan:           'weapons/SM_Vertical_Handle_02.fbx',
-  att_foregrip_angled_tan:    'weapons/SM_Horizontal_Handle_02.fbx',
-  att_foregrip_vert_alt:      'weapons/SM_Horizontal_Handle_03.fbx',
-  att_foregrip_folding:       'weapons/SM_Horizontal_Handle_04.fbx',
+  att_foregrip_tan:           'weapons/SM_Vertical_Handle_02.glb',
+  att_foregrip_angled_tan:    'weapons/SM_Horizontal_Handle_02.glb',
+  att_foregrip_vert_alt:      'weapons/SM_Horizontal_Handle_03.glb',
+  att_foregrip_folding:       'weapons/SM_Horizontal_Handle_04.glb',
   // -- Top rail (sights)
-  att_reddot:             'weapons/SM_Cylindrical_Collimator_Sight.fbx',
-  att_reflex:             'weapons/SM_Square_Dot_Sight.fbx',
-  att_holo:               'weapons/SM_Optical_Sight_01.fbx',
-  att_scope:              'lowpolyguns_accessories/Scope_2.fbx',
-  att_long_scope:         'lowpolyguns_accessories/Scope_3.fbx',
+  att_reddot:             'weapons/SM_Cylindrical_Collimator_Sight.glb',
+  att_reflex:             'weapons/SM_Square_Dot_Sight.glb',
+  att_holo:               'weapons/SM_Optical_Sight_01.glb',
+  att_scope:              'lowpolyguns_accessories/Scope_2.glb',
+  att_long_scope:         'lowpolyguns_accessories/Scope_3.glb',
   // Apr-26 EOD batch — extra sight + side-rail variants. Names
   // distinguish 'Amazon Special' (cheap), 'Prism' (etched-glass),
   // 'UH-1' (premium holo), 'PSO' (Soviet 4×).
-  att_reddot_amazon:      'weapons/SM_Cylindrical_Collimator_Sight.fbx',
-  att_prism:              'weapons/SM_Optical_Sight_01.fbx',
-  att_holo_uh1:           'weapons/SM_Square_Dot_Sight.fbx',
-  att_scope_pso:          'weapons/SM_Scope_For_Police_Sniper_Rifle.fbx',
-  att_peq15:              'weapons/SM_Tactical_Block.fbx',
+  att_reddot_amazon:      'weapons/SM_Cylindrical_Collimator_Sight.glb',
+  att_prism:              'weapons/SM_Optical_Sight_01.glb',
+  att_holo_uh1:           'weapons/SM_Square_Dot_Sight.glb',
+  att_scope_pso:          'weapons/SM_Scope_For_Police_Sniper_Rifle.glb',
+  att_peq15:              'weapons/SM_Tactical_Block.glb',
   // Apr-26 second-pass top-rail variants (6× lowpoly scope, bullpup
   // tube scope, and an alt long-range scope from animpic).
-  att_scope_6x:           'lowpolyguns_accessories/Scope_1.fbx',
-  att_scope_tube:         'weapons/SM_SM_Sight_Bulpam_Assault_Rifle.fbx',
-  att_scope_sniper:       'weapons/SM_Sniper_Scope.fbx',
+  att_scope_6x:           'lowpolyguns_accessories/Scope_1.glb',
+  att_scope_tube:         'weapons/SM_SM_Sight_Bulpam_Assault_Rifle.glb',
+  att_scope_sniper:       'weapons/SM_Sniper_Scope.glb',
   // -- Barrel: handguard rail kits (Apr-26 second pass)
-  att_rails_quad:         'weapons/SM_Forend_With_Picatinny_Rails_01.fbx',
-  att_rails_mlok:         'weapons/SM_Forend_With_Picatinny_Rails_02.fbx',
-  att_rails_ak:           'weapons/SM_Forend_With_Picatinny_Rails_5_45.fbx',
+  att_rails_quad:         'weapons/SM_Forend_With_Picatinny_Rails_01.glb',
+  att_rails_mlok:         'weapons/SM_Forend_With_Picatinny_Rails_02.glb',
+  att_rails_ak:           'weapons/SM_Forend_With_Picatinny_Rails_5_45.glb',
   // -- Stock
-  att_stock_heavy:        'weapons/SM_Wooden_Butt_01.fbx',
-  att_stock_skeleton:     'lowpolyguns_accessories/Stock.fbx',
-  att_stock_cqb:          'weapons/SM_Butt_Of_The_Rifle_For_Special_Submachine_Gun_Clean.fbx',
-  att_stock_folding:      'weapons/SM_Telescopic_Stock.fbx',
-  att_stock_crane:        'weapons/SM_Telescopic_Universal_Butt_01.fbx',
+  att_stock_heavy:        'weapons/SM_Wooden_Butt_01.glb',
+  att_stock_skeleton:     'lowpolyguns_accessories/Stock.glb',
+  att_stock_cqb:          'weapons/SM_Butt_Of_The_Rifle_For_Special_Submachine_Gun_Clean.glb',
+  att_stock_folding:      'weapons/SM_Telescopic_Stock.glb',
+  att_stock_crane:        'weapons/SM_Telescopic_Universal_Butt_01.glb',
   // -- Grip (pistol grip)
-  att_grip_match:         'weapons/SM_Pistol_Grip_Prototype.fbx',
-  att_grip_stippled:      'weapons/SM_Pistol_Grip_01_5_45.fbx',
-  att_grip_skeleton:      'weapons/SM_Polymer_Handle.fbx',
-  att_grip_rubberized:    'weapons/SM_Pistol_Grip_01_5_56.fbx',
+  att_grip_match:         'weapons/SM_Pistol_Grip_Prototype.glb',
+  att_grip_stippled:      'weapons/SM_Pistol_Grip_01_5_45.glb',
+  att_grip_skeleton:      'weapons/SM_Polymer_Handle.glb',
+  att_grip_rubberized:    'weapons/SM_Pistol_Grip_01_5_56.glb',
   // -- Magazine
-  att_mag_extended:       'weapons/SM_Larfe_For_Assault_Rifle_5_56.fbx',
-  att_mag_drum:           'weapons/SM_Large_Magazine_For_Assault_Rifle_5_45.fbx',
-  att_mag_banana:         'weapons/SM_Paired_For_Assault_Rifle_5_45.fbx',
-  att_mag_fast:           'weapons/SM_Magazine__For_Bulpam_Assault_Rifle.fbx',
-  att_mag_lmg_box:        'weapons/SM_Cartridge_Box_For_Light_Machine_Gun.fbx',
-  att_mag_hmg_box:        'weapons/SM_Cartridge_Box_For_Heavy_Machine_Gun.fbx',
+  att_mag_extended:       'weapons/SM_Larfe_For_Assault_Rifle_5_56.glb',
+  att_mag_drum:           'weapons/SM_Large_Magazine_For_Assault_Rifle_5_45.glb',
+  att_mag_banana:         'weapons/SM_Paired_For_Assault_Rifle_5_45.glb',
+  att_mag_fast:           'weapons/SM_Magazine__For_Bulpam_Assault_Rifle.glb',
+  att_mag_lmg_box:        'weapons/SM_Cartridge_Box_For_Light_Machine_Gun.glb',
+  att_mag_hmg_box:        'weapons/SM_Cartridge_Box_For_Heavy_Machine_Gun.glb',
 };
 
 // Per-type fallback — coarse category model when no name/id override
@@ -275,36 +275,36 @@ export const MODEL_GRIP_OFFSET = {
   // the shooter" on the MP7. Earlier negative values (−0.14 to
   // −0.20) weren't aggressive enough — bumping to around −0.32
   // to clearly seat the grip.
-  'weapons/SM_Civilian_Submachine_Gun.fbx': { x: 0, y: 0, z: -0.32 },   // PDW / generic SMG (shared w/ MP7)
-  'weapons/SM_Army_Submachine_Gun.fbx':     { x: 0, y: 0, z: -0.30 },   // AKS-74U
-  'weapons/SM_Police_Submachine_Gun.fbx':   { x: 0, y: 0, z: -0.38 },   // P90 (bullpup — need deeper push)
-  'weapons/SM_Special_Submachine_Gun.fbx':       { x: 0, y: 0, z: -0.28 },   // MP7 fallback
-  'weapons/SM_Special_Submachine_Gun_Clean.fbx': { x: 0, y: 0, z: -0.28 },   // MP7 active mesh
-  'weapons/SM_Tactical_Submachine_Gun.fbx': { x: 0, y: 0, z: -0.30 },   // Vector
+  'weapons/SM_Civilian_Submachine_Gun.glb': { x: 0, y: 0, z: -0.32 },   // PDW / generic SMG (shared w/ MP7)
+  'weapons/SM_Army_Submachine_Gun.glb':     { x: 0, y: 0, z: -0.30 },   // AKS-74U
+  'weapons/SM_Police_Submachine_Gun.glb':   { x: 0, y: 0, z: -0.38 },   // P90 (bullpup — need deeper push)
+  'weapons/SM_Special_Submachine_Gun.glb':       { x: 0, y: 0, z: -0.28 },   // MP7 fallback
+  'weapons/SM_Special_Submachine_Gun_Clean.glb': { x: 0, y: 0, z: -0.28 },   // MP7 active mesh
+  'weapons/SM_Tactical_Submachine_Gun.glb': { x: 0, y: 0, z: -0.30 },   // Vector
   // Lowpolyguns SMG variants — same negative-Z convention to pull
   // the grip into the hand (otherwise held by the stock end).
-  'lowpolyguns/SubmachineGun_1.fbx':         { x: 0, y: 0, z: -0.30 },  // Spectre CQB
-  'lowpolyguns/SubmachineGun_2.fbx':         { x: 0, y: 0, z: -0.30 },  // Spectre
-  'lowpolyguns/SubmachineGun_3.fbx':         { x: 0, y: 0, z: -0.30 },  // SPC9
-  'lowpolyguns/SubmachineGun_4.fbx':         { x: 0, y: 0, z: -0.30 },  // SPCA3
-  'lowpolyguns/SubmachineGun_5.fbx':         { x: 0, y: 0, z: -0.30 },  // SPC223
+  'lowpolyguns/SubmachineGun_1.glb':         { x: 0, y: 0, z: -0.30 },  // Spectre CQB
+  'lowpolyguns/SubmachineGun_2.glb':         { x: 0, y: 0, z: -0.30 },  // Spectre
+  'lowpolyguns/SubmachineGun_3.glb':         { x: 0, y: 0, z: -0.30 },  // SPC9
+  'lowpolyguns/SubmachineGun_4.glb':         { x: 0, y: 0, z: -0.30 },  // SPCA3
+  'lowpolyguns/SubmachineGun_5.glb':         { x: 0, y: 0, z: -0.30 },  // SPC223
   // PISTOLS — fitToRadius centers the bbox at the hand. For pistols
   // the bbox center sits roughly between the grip and the muzzle, so
   // the grip ends up about half the gun-length BEHIND the hand.
   // Negative Z pulls the model forward so the grip lands at the palm.
-  'weapons/SM_Police_Gun.fbx':               { x: 0, y: 0, z: -0.10 },  // 1911
-  'weapons/SM_Civilian_Pistol.fbx':          { x: 0, y: 0, z: -0.08 },  // Makarov
-  'weapons/SM_Special_Pistol.fbx':           { x: 0, y: 0, z: -0.10 },  // .357 Magnum / Desert Eagle
+  'weapons/SM_Police_Gun.glb':               { x: 0, y: 0, z: -0.10 },  // 1911
+  'weapons/SM_Civilian_Pistol.glb':          { x: 0, y: 0, z: -0.08 },  // Makarov
+  'weapons/SM_Special_Pistol.glb':           { x: 0, y: 0, z: -0.10 },  // .357 Magnum / Desert Eagle
   // Melee — handle is at one end of the mesh, but fitToRadius
   // centres the bbox at the hand, so the handle ends up ~half the
   // mesh length away. Negative Z shifts the model back so the grip
   // lands on the hand. Use `__debug.tuneWeapon(...)` live to refine.
-  'melee/SM_Tire_iron.fbx':                    { x: 0, y: 0, z: -0.28 },  // crowbar
-  'melee/SM_Baseball_bat_Nails_reinforced_.fbx': { x: 0, y: 0, z: -0.32 },
-  'melee/SM_Katana.fbx':                       { x: 0, y: 0, z: -0.30 },
-  'melee/SM_Fire_Axe.fbx':                     { x: 0, y: 0, z: -0.26 },
-  'melee/SM_Hammer.fbx':                       { x: 0, y: 0, z: -0.20 },  // club
-  'melee/SM_Combat_Knife.fbx':                 { x: 0, y: 0, z: -0.10 },
+  'melee/SM_Tire_iron.glb':                    { x: 0, y: 0, z: -0.28 },  // crowbar
+  'melee/SM_Baseball_bat_Nails_reinforced_.glb': { x: 0, y: 0, z: -0.32 },
+  'melee/SM_Katana.glb':                       { x: 0, y: 0, z: -0.30 },
+  'melee/SM_Fire_Axe.glb':                     { x: 0, y: 0, z: -0.26 },
+  'melee/SM_Hammer.glb':                       { x: 0, y: 0, z: -0.20 },  // club
+  'melee/SM_Combat_Knife.glb':                 { x: 0, y: 0, z: -0.10 },
 };
 
 export const MODEL_ROTATION_OVERRIDE = {
@@ -363,8 +363,8 @@ const PACK_SCALE_DEFAULTS = {
 };
 export const MODEL_SCALE_OVERRIDE = {
   // Outliers within a pack — these win over PACK_SCALE_DEFAULTS.
-  'weapons/SM_Civilian_Pistol.fbx':         0.55,  // Makarov — was way too big
-  'weapons/SM_Police_Submachine_Gun.fbx':   1.10,  // P90 — was a tad small
+  'weapons/SM_Civilian_Pistol.glb':         0.55,  // Makarov — was way too big
+  'weapons/SM_Police_Submachine_Gun.glb':   1.10,  // P90 — was a tad small
 };
 export function scaleForModelPath(fullPath) {
   if (!fullPath) return 1.0;
