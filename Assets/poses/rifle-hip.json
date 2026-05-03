@@ -1,12 +1,12 @@
 {
-  "_comment": "Rifle held at hip, ready stance. Main hand on grip (code 'leftHand' = char's right per the rig naming-swap), off hand on forepart. IK targets pin the hands; IK solver computes elbow + shoulder rotations so the pose stays correct across rig proportion changes.",
+  "_comment": "Rifle held at hip, ready stance. PLACEHOLDER VALUES — needs in-editor authoring with the user driving gizmos. Loads + applies cleanly via the new pipeline; rotations need creative tuning.",
   "rotations": {
     "chest": { "x": 0, "y": 0.18, "z": 0 },
     "head":  { "x": 0.05, "y": -0.10, "z": 0 }
   },
   "ikTargets": {
-    "leftHand":  { "enabled": true, "x": -0.18, "y": 1.10, "z": 0.28 },
-    "rightHand": { "enabled": true, "x":  0.06, "y": 1.18, "z": 0.55 },
+    "leftHand":  { "enabled": false, "x": -0.18, "y": 1.10, "z": 0.28 },
+    "rightHand": { "enabled": false, "x":  0.06, "y": 1.18, "z": 0.55 },
     "head":      { "enabled": false, "x": 0, "y": 1.7, "z": 1 },
     "leftFoot":  { "enabled": false, "x": -0.13, "y": 0, "z": 0 },
     "rightFoot": { "enabled": false, "x":  0.13, "y": 0, "z": 0 }

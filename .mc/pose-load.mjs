@@ -40,6 +40,31 @@ await page.evaluate(async () => {
 // Give IK solver a frame to settle.
 await page.waitForTimeout(500);
 
+// Diagnostic: dump where the hands ACTUALLY landed vs where the
+// IK targets are. If they match, IK reached the target. If they
+// don't, the pole hint or bone length computation is off.
+const diagnostics = await page.evaluate(() => {
+  const r = window.__rig;
+  const v = new (r.hips.position.constructor)();
+  const dump = (m, label) => {
+    if (!m) return null;
+    m.getWorldPosition(v);
+    return { label, x: +v.x.toFixed(3), y: +v.y.toFixed(3), z: +v.z.toFixed(3) };
+  };
+  return {
+    bones: [
+      dump(r.leftArm?.hand?.mesh,  'leftHand actual'),
+      dump(r.rightArm?.hand?.mesh, 'rightHand actual'),
+      dump(r.leftArm?.elbow,       'leftElbow actual'),
+      dump(r.rightArm?.elbow,      'rightElbow actual'),
+    ].filter(Boolean),
+    dimsArms: r.dims?.arms,
+  };
+});
+console.log('--- pose diagnostics ---');
+for (const b of diagnostics.bones) console.log(`  ${b.label.padEnd(20)} (${b.x}, ${b.y}, ${b.z})`);
+console.log('  dims.arms:', JSON.stringify(diagnostics.dimsArms));
+
 // Hide GUI for clean capture + 3/4 framing.
 await page.evaluate(() => {
   document.querySelector('.lil-gui.root').style.display = 'none';
