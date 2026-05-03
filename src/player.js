@@ -1879,8 +1879,16 @@ export function createPlayer(scene) {
         // the body needs to catch up. GASP clips hold the upper
         // body forward in their authored pose so the silhouette
         // reads correctly through this range.
-        const TWIST_LIMIT = Math.PI / 2;          // 90° deadzone
-        const BODY_CATCH_RATE = 6.0;              // 1/s — body lerp toward cursor when outside deadzone
+        // ADS override: body snaps to cursor (no deadzone lag) so
+        // the directional locomotion sector is computed against
+        // the cursor direction. Without this, ADS + moving-back
+        // produces a body yaw between cursor and velocity, which
+        // selects a side-stride clip instead of the backpedal
+        // the user expects.
+        const adsAmt = state.adsAmount || 0;
+        const ads = adsAmt > 0.5;
+        const TWIST_LIMIT = ads ? 0 : (Math.PI / 2);
+        const BODY_CATCH_RATE = ads ? 30 : 6.0;
         const overshoot = Math.max(0, Math.abs(dyaw) - TWIST_LIMIT) * Math.sign(dyaw);
         rig.group.rotation.y += overshoot * (1 - Math.exp(-BODY_CATCH_RATE * dt));
         // Chest twist = remaining cursor delta after body catch-up.
