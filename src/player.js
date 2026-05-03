@@ -237,15 +237,55 @@ const QUICK_MELEE_BY_CLASS = {
 // at the FBX adapter so weapon attach (rig.rightArm.hand.pivot etc.)
 // keeps working through the rest of the codebase. updateAnim
 // auto-detects rig._fbx and routes to the AnimationMixer instead.
+// Dispose an FBX/GLB rig — removes the group from its scene parent
+// and disposes geometry / materials / mixer. Called before a new
+// FBX swap (to prevent scene-stacking) and during revert-to-procgen.
+function _disposeFbxRig(rig) {
+  if (!rig || !rig._fbx) return;
+  if (rig._fbx.mixer) {
+    try { rig._fbx.mixer.stopAllAction(); } catch (_) {}
+    try { rig._fbx.mixer.uncacheRoot(rig.group); } catch (_) {}
+  }
+  if (rig.group) {
+    if (rig.group.parent) rig.group.parent.remove(rig.group);
+    rig.group.traverse(o => {
+      if (o.geometry) o.geometry.dispose?.();
+      if (o.material) {
+        if (Array.isArray(o.material)) o.material.forEach(m => m?.dispose?.());
+        else o.material.dispose?.();
+      }
+    });
+  }
+}
+
+// Public revert helper — drops the current FBX rig and shows the
+// procgen rig. Used by __useFbx(null) so the FBX assets get freed
+// instead of accumulating in scene.
+export function revertPlayerToProcgen(player) {
+  if (!player._procgenRig) return false;
+  player._procgenRig.group.visible = true;
+  if (player.rig && player.rig !== player._procgenRig && player.rig._fbx) {
+    _disposeFbxRig(player.rig);
+  }
+  player.rig = player._procgenRig;
+  if (typeof player._setRig === 'function') player._setRig(player._procgenRig);
+  return true;
+}
+
 export async function swapPlayerToFbxRig(player, scene, url, opts = {}) {
   const { loadCharacterFBX } = await import('./character_fbx.js');
-  const fbxRig = await loadCharacterFBX(scene, url, opts);
-  // Hide the procgen rig — keep it in scene for fast revert. Save
-  // the procgen rig once on first swap; subsequent swaps go FBX→FBX
-  // and we don't want to overwrite our procgen reference.
+  // Save the procgen rig once on first swap; subsequent swaps go
+  // FBX→FBX and we don't want to overwrite our procgen reference.
   if (player.rig && player.rig.group && !player._procgenRig) {
     player._procgenRig = player.rig;
   }
+  // If we were on a previous FBX rig (FBX→FBX swap), dispose it
+  // before loading the new one so the scene doesn't accumulate
+  // hidden meshes + leaked GPU buffers.
+  if (player.rig && player.rig._fbx && player.rig !== player._procgenRig) {
+    _disposeFbxRig(player.rig);
+  }
+  const fbxRig = await loadCharacterFBX(scene, url, opts);
   if (player._procgenRig?.group) player._procgenRig.group.visible = false;
   player.rig = fbxRig;
   // Critical: flip the closure binding inside player.update so the

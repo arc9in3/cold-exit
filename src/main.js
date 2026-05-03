@@ -662,18 +662,11 @@ window.__scene = scene;
 window.__useFbx = async (url) => {
   const mod = await import('./player.js');
   if (!url) {
-    // Revert — show procgen rig, hide FBX, flip closure binding back.
-    if (player._procgenRig) {
-      player._procgenRig.group.visible = true;
-      // Hide whatever the current FBX rig is (its group stays in scene
-      // until manually unloaded — fast re-swap path).
-      if (player.rig && player.rig !== player._procgenRig && player.rig.group) {
-        player.rig.group.visible = false;
-      }
-      player.rig = player._procgenRig;
-      if (typeof player._setRig === 'function') player._setRig(player._procgenRig);
-    }
-    return 'reverted to procgen';
+    // Revert — disposes current FBX rig (geometry / materials / mixer)
+    // and shows the procgen rig. Doesn't keep the prior FBX in scene
+    // (the previous behavior leaked GPU buffers across swaps).
+    if (mod.revertPlayerToProcgen(player)) return 'reverted to procgen';
+    return 'no procgen rig to revert to';
   }
   await mod.swapPlayerToFbxRig(player, scene, url);
   return `loaded ${url}, clips: ${player.rig.clipNames?.().join(', ')}`;
