@@ -1,178 +1,75 @@
-<!DOCTYPE html>
+<!doctype html>
 <html lang="en">
 <head>
-<meta charset="UTF-8">
-<title>tacticalrogue — pose editor</title>
+<meta charset="utf-8">
+<title>cold exit · pose editor (GASP)</title>
 <style>
-  html, body { margin: 0; padding: 0; background: #16181c; color: #ddd;
-               font: 12px/1.4 ui-monospace, Menlo, Consolas, monospace;
-               overflow: hidden; }
+  :root { color-scheme: dark; }
+  html, body { margin: 0; padding: 0; width: 100%; height: 100%;
+    background: #0c0c10; color: #cbd2dc;
+    font-family: ui-monospace, Menlo, Consolas, monospace;
+    font-size: 12px; overflow: hidden; }
   #root { display: flex; width: 100vw; height: 100vh; }
-  #stage { flex: 1 1 auto; position: relative; min-width: 0;
-    overflow: hidden; background:
-    linear-gradient(45deg, #0c0d10 25%, transparent 25%) -10px 0 / 20px 20px,
-    linear-gradient(-45deg, #0c0d10 25%, transparent 25%) -10px 0 / 20px 20px,
-    linear-gradient(45deg, transparent 75%, #0c0d10 75%) -10px 0 / 20px 20px,
-    linear-gradient(-45deg, transparent 75%, #0c0d10 75%) -10px 0 / 20px 20px,
-    #16181c; }
-  /* Force the renderer canvas to fill its parent — Three.js's
-     setSize(w,h,false) leaves CSS at default 300x150 which would
-     otherwise push the side panel off-screen on mobile / narrow
-     viewports. */
+  #stage { flex: 1 1 auto; position: relative; min-width: 0; overflow: hidden;
+    background:
+      linear-gradient(45deg, #0a0c0f 25%, transparent 25%) -10px 0 / 20px 20px,
+      linear-gradient(-45deg, #0a0c0f 25%, transparent 25%) -10px 0 / 20px 20px,
+      linear-gradient(45deg, transparent 75%, #0a0c0f 75%) -10px 0 / 20px 20px,
+      linear-gradient(-45deg, transparent 75%, #0a0c0f 75%) -10px 0 / 20px 20px,
+      #14161a; }
   #stage canvas { display: block; position: absolute; inset: 0;
-                  width: 100% !important; height: 100% !important; }
+    width: 100% !important; height: 100% !important; }
+  #panel { flex: 0 0 460px; background: #14171c; border-left: 1px solid #2a2d34;
+    padding: 12px; overflow-y: auto; box-sizing: border-box; }
   #boot-error { position: fixed; top: 8px; left: 8px;
-                background: #4a2a2a; color: #ffcaca; padding: 8px 12px;
-                border-radius: 4px; font-size: 11px; max-width: 60vw;
-                display: none; z-index: 1000; }
-  #panel {
-    flex: 0 0 420px; background: #1b1d22; border-left: 1px solid #2a2d34;
-    padding: 12px; overflow-y: auto; box-sizing: border-box;
-  }
+    background: #4a2a2a; color: #ffcaca; padding: 8px 12px;
+    border-radius: 4px; font-size: 11px; max-width: 60vw;
+    display: none; z-index: 1000; white-space: pre-wrap; }
   h1 { margin: 0 0 12px 0; color: #c9a87a; font-size: 14px; font-weight: 600; }
   h2 { margin: 14px 0 6px 0; color: #c9a87a; font-size: 12px;
-       border-bottom: 1px solid #2a2d34; padding-bottom: 4px; font-weight: 500; }
-  h3 { margin: 10px 0 4px 0; color: #b0c0d0; font-size: 11px;
-       text-transform: uppercase; letter-spacing: 0.04em; font-weight: 500; }
+    border-bottom: 1px solid #2a2d34; padding-bottom: 4px; font-weight: 500; }
   label { display: block; margin: 4px 0 1px; color: #9aa; font-size: 10px; }
-  select, input[type=range] {
+  select, input[type=text], input[type=range], textarea {
     width: 100%; box-sizing: border-box;
     background: #0f1014; color: #ddd; border: 1px solid #2a2d34;
-    padding: 4px 8px; border-radius: 3px; font: inherit;
-  }
+    padding: 4px 8px; border-radius: 3px; font: inherit; }
   input[type=range] { padding: 0; }
-  .slider-row { display: grid; grid-template-columns: 16px 1fr 42px;
-                gap: 4px; align-items: center; margin: 1px 0; }
-  .slider-row .axis { color: #c9a87a; font-size: 10px; text-align: center; }
-  .slider-row .val  { color: #f1d9a8; font-size: 10px; text-align: right;
-                      font-variant-numeric: tabular-nums; }
-  .joint-block { margin-bottom: 8px; padding: 6px; background: #15171b;
-                 border: 1px solid #20232a; border-radius: 3px;
-                 transition: border-color 0.15s, background 0.15s; }
-  .joint-block.selected { border-color: #c9a87a; background: #1f1d18;
-                          box-shadow: 0 0 0 1px #c9a87a55; }
-  .joint-block .title { display: flex; justify-content: space-between;
-                        align-items: baseline; margin-bottom: 4px; }
-  .joint-block .title .name { color: #b0c0d0; font-size: 11px; font-weight: 500; }
-  .joint-block .title .reset { color: #6a7a8a; font-size: 10px;
-                               cursor: pointer; user-select: none;
-                               text-decoration: underline; }
-  .joint-block .title .reset:hover { color: #b0c0d0; }
-  .six-grid { display: grid; grid-template-columns: 1fr 1fr;
-              gap: 2px 8px; }
-  .six-grid .col-title { color: #6a7a8a; font-size: 9px;
-                         text-transform: uppercase; text-align: center;
-                         border-bottom: 1px solid #20232a;
-                         padding-bottom: 1px; margin-bottom: 2px; }
-  .mode-toggle { display: flex; gap: 4px; margin: 8px 0; }
-  .mode-toggle button { flex: 1; margin: 0; }
-  .mode-toggle button.active { background: #4a6a3a; border-color: #5a8a4a;
-                               color: #fff; }
+  textarea { font-size: 10px; min-height: 100px; }
+  .row { display: grid; grid-template-columns: 16px 1fr 50px;
+    gap: 4px; align-items: center; margin: 1px 0; }
+  .row .axis { color: #c9a87a; text-align: center; }
+  .row .val  { color: #f1d9a8; text-align: right; font-variant-numeric: tabular-nums; }
+  .bone-block { margin-bottom: 6px; padding: 6px;
+    background: #15171b; border: 1px solid #20232a; border-radius: 3px;
+    transition: border-color 0.15s, background 0.15s; }
+  .bone-block.selected { border-color: #c9a87a; background: #1f1d18;
+    box-shadow: 0 0 0 1px #c9a87a55; }
+  .bone-block .title { display: flex; justify-content: space-between;
+    align-items: baseline; margin-bottom: 4px; cursor: pointer; }
+  .bone-block .title .name { color: #b0c0d0; font-weight: 500; }
+  .bone-block .title .reset { color: #6a7a8a; font-size: 10px;
+    cursor: pointer; user-select: none; text-decoration: underline; }
+  .bone-block .title .reset:hover { color: #b0c0d0; }
   button { background: #2a2d34; color: #ddd; border: 1px solid #3a3d44;
-           padding: 6px 12px; border-radius: 3px; font: inherit;
-           cursor: pointer; margin-top: 8px; width: 100%; }
+    padding: 5px 10px; border-radius: 3px; font: inherit; cursor: pointer;
+    margin-top: 4px; }
   button:hover { background: #3a3d44; }
-  button.primary { background: #4a6a3a; border-color: #5a8a4a; color: #fff; }
+  button.primary { background: #4a6a3a; border-color: #5a8a4a; color: #fff; width: 100%; }
   button.primary:hover { background: #5a8a4a; }
-  pre { background: #0c0d10; border: 1px solid #2a2d34; padding: 8px;
-        font-size: 10px; white-space: pre-wrap; word-break: break-all;
-        max-height: 200px; overflow-y: auto; color: #9aa; }
-  .legend { background: #0f1014; padding: 6px 8px; margin: 8px 0;
-            border: 1px solid #2a2d34; border-radius: 3px; font-size: 11px;
-            color: #9aa; line-height: 1.6; }
+  button.full { width: 100%; }
+  .row-buttons { display: flex; gap: 4px; }
+  .row-buttons button { flex: 1; }
+  .row-buttons button.active { background: #4a6a3a; border-color: #5a8a4a; color: #fff; }
+  .legend { background: #0f1014; padding: 6px 8px; margin: 6px 0;
+    border: 1px solid #2a2d34; border-radius: 3px; font-size: 10px;
+    color: #9aa; line-height: 1.5; }
+  .legend strong { color: #c9a87a; }
   .legend .swatch { display: inline-block; width: 10px; height: 10px;
-                    margin-right: 4px; vertical-align: middle; }
+    margin-right: 4px; vertical-align: middle; }
+  .pill { display: inline-block; padding: 1px 6px; margin: 1px;
+    border-radius: 8px; background: #1a1d24; font-size: 10px; color: #8a93a3; }
+  #bones { max-height: 500px; overflow-y: auto; }
 </style>
-</head>
-<body>
-<div id="boot-error"></div>
-<div id="root">
-  <div id="stage"></div>
-  <div id="panel">
-    <h1>Pose Editor</h1>
-
-    <label>Weapon class preset</label>
-    <select id="preset">
-      <option value="pistol">Pistol</option>
-      <option value="smg">SMG</option>
-      <option value="rifle" selected>Rifle</option>
-      <option value="shotgun">Shotgun</option>
-      <option value="sniper">Sniper</option>
-      <option value="lmg">LMG</option>
-      <option value="melee">Melee</option>
-    </select>
-    <button id="reset-class">Reset to current preset defaults</button>
-    <button id="undo">Undo (Ctrl+Z)</button>
-    <button id="flip-view">Flip camera (front ↔ back)</button>
-    <button id="swap-handed">Swap handedness — current: <span id="handed-label">RIGHT</span></button>
-    <div class="mode-toggle">
-      <button id="gizmo-translate">Translate (T)</button>
-      <button id="gizmo-rotate" class="active">Rotate (R)</button>
-    </div>
-    <div class="legend" style="font-size:10px">
-      Click a joint sphere or limb in the 3D view → gizmo attaches.
-      Drag the gizmo to rotate/translate that joint directly. Sliders
-      mirror the gizmo. Press <strong>R</strong> for rotate,
-      <strong>T</strong> for translate, <strong>Esc</strong> to deselect.
-    </div>
-
-    <div class="mode-toggle">
-      <button id="mode-hip" class="active">HIP (idle)</button>
-      <button id="mode-aim">AIM (ADS)</button>
-    </div>
-
-    <label style="margin-top:10px">Optional: load a real weapon FBX</label>
-    <select id="weapon-pick">
-      <option value="">— none —</option>
-    </select>
-    <div class="legend" style="font-size:10px">
-      Loads the chosen weapon's FBX with the SAME transforms it gets
-      in-game (per-class scale, pack-scale, mirror, rotation override,
-      grip offset). Weapon sliders below offset the FBX from that
-      baseline.
-    </div>
-
-    <div class="legend">
-      <div><span class="swatch" style="background:#50c8ff"></span><strong>BULLET ORIGIN</strong> — chest center; bullets fly FROM here in the game (player.js: <code>playerInfo.fireOrigin</code>)</div>
-      <div><span class="swatch" style="background:#ffa040"></span><strong>MUZZLE</strong> — where flash + tracer FX spawn; only the visible effect, not the bullet path</div>
-      <div><span class="swatch" style="background:#ff5050"></span><strong>BULLET TRAJECTORY</strong> — chest → cursor target. This is the actual hitscan path; the gun's geometric facing is irrelevant.</div>
-      <div><span class="swatch" style="background:#ffd040"></span><strong>CURSOR TARGET</strong> — virtual aim point 3m out, driven by aim yaw/pitch sliders</div>
-      <div>Drag canvas to orbit. Scroll to zoom.</div>
-    </div>
-
-    <h2>Aim direction (preview)</h2>
-    <div class="slider-row">
-      <span class="axis">Y</span>
-      <input type="range" id="aim-yaw" min="-1.57" max="1.57" step="0.01" value="0">
-      <span class="val" id="aim-yaw-v">0.00</span>
-    </div>
-    <div class="slider-row">
-      <span class="axis">X</span>
-      <input type="range" id="aim-pitch" min="-0.6" max="0.6" step="0.01" value="0">
-      <span class="val" id="aim-pitch-v">0.00</span>
-    </div>
-
-    <h2 id="joints-heading">Joints — HIP</h2>
-    <div id="joints"></div>
-
-    <h2 id="weapon-heading">Weapon offset — HIP</h2>
-    <div id="weapon-block"></div>
-
-    <h2>Save</h2>
-    <button id="save" class="primary">Download pose JSON</button>
-    <button id="copy">Copy pose JSON to clipboard</button>
-    <div class="legend">
-      <strong>Workflow:</strong> click Download → file lands in your
-      Downloads folder named <code>pose_&lt;class&gt;.json</code>.
-      Drop it into <code>Assets/poses/</code> in the repo and commit
-      &amp; push. Tell me you're done — I'll pull the file(s) from
-      <code>Assets/poses/</code> and update <code>actor_rig.js</code>
-      with the new defaults.
-    </div>
-    <pre id="output">// Click Download or Copy to dump current values.</pre>
-  </div>
-</div>
-
 <script type="importmap">
 {
   "imports": {
@@ -181,1036 +78,811 @@
   }
 }
 </script>
+</head>
+<body>
+<div id="boot-error"></div>
+<div id="root">
+  <div id="stage"></div>
+  <div id="panel">
+    <h1>Pose Editor — GASP</h1>
+
+    <h2>Weapon class</h2>
+    <select id="cls">
+      <option value="rifle" selected>Rifle (M_..._Rifle)</option>
+      <option value="shotgun">Shotgun (rifle stance)</option>
+      <option value="sniper">Sniper (rifle stance)</option>
+      <option value="lmg">LMG (rifle stance)</option>
+      <option value="pistol">Pistol (M_..._OneHand_Pistol)</option>
+      <option value="revolver">Revolver (M_..._OneHand_Pistol)</option>
+      <option value="smg">SMG (M_..._Pistol low-ready)</option>
+      <option value="flame">Flame (M_..._Pistol low-ready)</option>
+      <option value="melee">Melee (M_..._Pistol low-ready)</option>
+    </select>
+
+    <label>Specific weapon (loads with in-game scale + grip offset)</label>
+    <select id="weapon"></select>
+
+    <label>Pose / clip</label>
+    <select id="clip">
+      <option value="M_Neutral_Stand_Idle_Loop" selected>Stand idle</option>
+      <option value="M_Neutral_Crouch_Idle_Loop">Crouch idle</option>
+      <option value="M_Neutral_Walk_Loop_F">Walk forward</option>
+      <option value="M_Neutral_Walk_Loop_FL">Walk FL</option>
+      <option value="M_Neutral_Walk_Loop_FR">Walk FR</option>
+      <option value="M_Neutral_Walk_Loop_BL">Walk BL</option>
+      <option value="M_Neutral_Walk_Loop_BR">Walk BR</option>
+      <option value="M_Neutral_Walk_Loop_B">Walk back</option>
+      <option value="M_Neutral_Run_Loop_F">Run forward</option>
+      <option value="M_Neutral_Run_Loop_FL">Run FL</option>
+      <option value="M_Neutral_Run_Loop_FR">Run FR</option>
+      <option value="M_Neutral_Sprint_Loop_F">Sprint forward</option>
+    </select>
+
+    <div class="row-buttons">
+      <button id="play-pause">⏸ Paused at frame 0</button>
+      <button id="frame-back">‹ -1f</button>
+      <button id="frame-fwd">+1f ›</button>
+    </div>
+    <div class="row">
+      <span class="axis">t</span>
+      <input type="range" id="scrub" min="0" max="1000" value="0">
+      <span class="val" id="scrub-v">0.00</span>
+    </div>
+
+    <h2>Aim direction (preview)</h2>
+    <div class="row">
+      <span class="axis">Y</span>
+      <input type="range" id="aim-yaw" min="-1.57" max="1.57" step="0.01" value="0">
+      <span class="val" id="aim-yaw-v">0.00</span>
+    </div>
+    <div class="row">
+      <span class="axis">X</span>
+      <input type="range" id="aim-pitch" min="-0.6" max="0.6" step="0.01" value="0">
+      <span class="val" id="aim-pitch-v">0.00</span>
+    </div>
+
+    <div class="row-buttons">
+      <button id="apply-stance" class="active">Apply rifle stance preview</button>
+      <button id="flip-cam">Flip camera</button>
+    </div>
+    <div class="legend">
+      <span class="swatch" style="background:#50c8ff"></span><strong>BULLET ORIGIN</strong> — chest, where fireOrigin is computed in-game.<br>
+      <span class="swatch" style="background:#ffa040"></span><strong>MUZZLE</strong> — flash + tracer FX spawn point.<br>
+      <span class="swatch" style="background:#ff5050"></span><strong>BULLET TRAJECTORY</strong> — chest → cursor (the actual hitscan path).<br>
+      <span class="swatch" style="background:#ffd040"></span><strong>CURSOR TARGET</strong> — virtual aim 3m forward of the body.<br>
+      Drag to orbit · scroll to zoom · click a bone sphere to select.
+    </div>
+
+    <h2>Edit frame</h2>
+    <div class="row-buttons">
+      <button id="frame-world" class="active">WORLD frame</button>
+      <button id="frame-local">LOCAL frame</button>
+    </div>
+    <div class="row-buttons">
+      <button id="mode-rotate" class="active">Rotate (R)</button>
+      <button id="mode-translate">Translate (T)</button>
+    </div>
+
+    <h2>Bones — <span id="selected-bone-label">none</span></h2>
+    <div id="bones"></div>
+
+    <h2>Output (paste back to me)</h2>
+    <div class="row-buttons">
+      <button id="copy">Copy JSON</button>
+      <button id="reset-all">Reset all</button>
+    </div>
+    <textarea id="output" readonly>// adjust a bone to populate</textarea>
+  </div>
+</div>
 
 <script type="module">
 window.addEventListener('error', (e) => {
   const el = document.getElementById('boot-error');
-  if (el) {
-    el.style.display = 'block';
-    el.textContent = `JS error: ${e.message} (${e.filename}:${e.lineno})`;
-  }
+  el.style.display = 'block';
+  el.textContent = `JS error: ${e.message}\n${e.filename}:${e.lineno}\n${e.error?.stack || ''}`;
 });
 window.addEventListener('unhandledrejection', (e) => {
   const el = document.getElementById('boot-error');
-  if (el) {
-    el.style.display = 'block';
-    el.textContent = `Promise rejection: ${e.reason?.message || e.reason}`;
-  }
+  el.style.display = 'block';
+  el.textContent = `Promise rejection: ${e.reason?.message || e.reason}\n${e.reason?.stack || ''}`;
 });
 
 import * as THREE from 'three';
 import { OrbitControls } from 'three/addons/controls/OrbitControls.js';
 import { TransformControls } from 'three/addons/controls/TransformControls.js';
-import { FBXLoader } from 'three/addons/loaders/FBXLoader.js';
-import { buildRig } from '../src/actor_rig.js';
-import { MODEL_BY_WEAPON_NAME, MODEL_BY_ITEM_ID, gripOffsetForModelPath,
+import { GLTFLoader } from 'three/addons/loaders/GLTFLoader.js';
+import { MODEL_BY_WEAPON_NAME, gripOffsetForModelPath,
          rotationOverrideForModelPath, scaleForModelPath,
          shouldMirrorInHand } from '../src/model_manifest.js';
 import { tunables } from '../src/tunables.js';
 
+const PACK     = '../Assets/models/animations/gasp_glb/';
+const MESH_URL = `${PACK}SKM_UEFN_Mannequin.glb`;
+const MODELS_BASE = '../Assets/models/';
+const RIG_GROUP_SCALE = 1.15;
+
 // ---------- scene + renderer ---------------------------------------
 const stage = document.getElementById('stage');
 const renderer = new THREE.WebGLRenderer({ antialias: true });
-renderer.setPixelRatio(window.devicePixelRatio);
+renderer.setPixelRatio(devicePixelRatio);
+renderer.outputColorSpace = THREE.SRGBColorSpace;
+stage.appendChild(renderer.domElement);
+
+const scene = new THREE.Scene();
+scene.background = new THREE.Color(0x14161a);
+const camera = new THREE.PerspectiveCamera(45, 1, 0.05, 50);
+let camFront = false;     // false = behind (game default), true = in front (mirror view)
+camera.position.set(0, 1.6, -3.5);
+
 const resize = () => {
   const w = Math.max(1, stage.clientWidth);
   const h = Math.max(1, stage.clientHeight);
   renderer.setSize(w, h, false);
-  if (camera) {
-    camera.aspect = w / h;
-    camera.updateProjectionMatrix();
-  }
+  camera.aspect = w / h;
+  camera.updateProjectionMatrix();
 };
-stage.appendChild(renderer.domElement);
-new ResizeObserver(() => resize()).observe(stage);
-
-const scene = new THREE.Scene();
-scene.background = new THREE.Color(0x16181c);
-const camera = new THREE.PerspectiveCamera(40, 1, 0.05, 50);
-// Rig forward = +Z (gun extends from rightShoulderAnchor toward +Z;
-// muzzle Object3D placed at +Z offset). So actor faces +Z. Camera at
-// -Z puts us BEHIND the actor: screen-right then matches actor's
-// anatomical right (rig.rightArm at world +X). +Z camera would be a
-// front mirror view where Dom appears on screen-left.
-camera.position.set(0, 1.6, -3.5);
+new ResizeObserver(resize).observe(stage);
+resize();
 
 const controls = new OrbitControls(camera, renderer.domElement);
 controls.target.set(0, 1.0, 0);
 controls.update();
 
-// Direct-manipulation gizmo. Attached to the currently selected
-// joint's pivot (or the weapon in-hand group). Dragging it writes
-// pivot.rotation / pivot.position; we mirror those values back to
-// the slider deltas so the panel stays in sync. OrbitControls is
-// disabled while dragging the gizmo to avoid camera fighting.
 const tcontrols = new TransformControls(camera, renderer.domElement);
 tcontrols.size = 0.7;
 scene.add(tcontrols);
 tcontrols.addEventListener('dragging-changed', (e) => {
   controls.enabled = !e.value;
-  if (!e.value) _pushUndo();   // snapshot on drag release
+  if (!e.value) {
+    syncSlidersFromBone();
+    rebuildOutput();
+  }
 });
 
 scene.add(new THREE.AmbientLight(0xffffff, 0.55));
 const key = new THREE.DirectionalLight(0xffffff, 1.1); key.position.set(3, 5, 2); scene.add(key);
 const fill = new THREE.DirectionalLight(0x8fbaff, 0.35); fill.position.set(-3, 2, -1); scene.add(fill);
 
-const grid = new THREE.GridHelper(6, 12, 0x2a2d34, 0x222428);
-scene.add(grid);
-const axes = new THREE.AxesHelper(0.5);
-scene.add(axes);
+scene.add(new THREE.GridHelper(6, 12, 0x2a2d34, 0x222428));
 
-// ---------- rig ---------------------------------------------------
-const rig = buildRig({ toon: false });
-scene.add(rig.group);
-rig.group.position.y = 0;
+// ---------- mannequin ---------------------------------------------
+const loader = new GLTFLoader();
+const rigGroup = new THREE.Group();
+rigGroup.scale.setScalar(RIG_GROUP_SCALE);
+scene.add(rigGroup);
 
-// === Combat viz =====================================================
-// All overlay markers render with depthTest=false + renderOrder=999
-// so they're never hidden by the rig/gun mesh.
-const _overlayMat = (color) => new THREE.MeshBasicMaterial({
-  color, depthTest: false, depthWrite: false,
+let mannequin = null;
+let mixer = null;
+let currentAction = null;
+let skinnedMesh = null;
+let boneByName = new Map();      // 'spine_03' → THREE.Bone
+let boneRestLocal = new Map();   // 'spine_03' → original local Quaternion at clip frame 0
+
+const gunAnchor = new THREE.Object3D();
+gunAnchor.name = '_gunAnchor';
+gunAnchor.position.set(0, 1.30, 0.45);
+gunAnchor.scale.setScalar(1.0 / RIG_GROUP_SCALE);
+rigGroup.add(gunAnchor);
+
+let weaponMesh = null;     // visible GLB clone
+let weaponBox = null;      // collision box (shows raw len × girth)
+let muzzle = new THREE.Object3D();
+gunAnchor.add(muzzle);
+
+(async function loadMannequin() {
+  const gltf = await loader.loadAsync(MESH_URL);
+  mannequin = gltf.scene;
+  rigGroup.add(mannequin);
+  mannequin.traverse(o => {
+    if (o.isSkinnedMesh && !skinnedMesh) skinnedMesh = o;
+    if (o.isBone) boneByName.set(o.name, o);
+  });
+  mixer = new THREE.AnimationMixer(skinnedMesh || mannequin);
+  buildBoneUI();
+  await loadClip();
+})();
+
+// ---------- clip loading + scrubbing ------------------------------
+const clipCache = new Map();   // url → clipArray
+const clsSel  = document.getElementById('cls');
+const clipSel = document.getElementById('clip');
+const scrub   = document.getElementById('scrub');
+const scrubV  = document.getElementById('scrub-v');
+const playPause = document.getElementById('play-pause');
+const frameBack = document.getElementById('frame-back');
+const frameFwd  = document.getElementById('frame-fwd');
+let isPlaying = false;
+
+function suffixForClass(c) {
+  if (c === 'rifle' || c === 'shotgun' || c === 'sniper' || c === 'lmg') return 'Rifle';
+  if (c === 'pistol' || c === 'revolver') return 'OneHand_Pistol';
+  return 'Pistol';
+}
+function classIsRifleStance(c) {
+  return c === 'rifle' || c === 'shotgun' || c === 'sniper' || c === 'lmg';
+}
+
+async function loadClip() {
+  if (!mixer) return;
+  const cls    = clsSel.value;
+  const suffix = suffixForClass(cls);
+  const base   = clipSel.value;
+  const url    = `${PACK}${base}_${suffix}.glb`;
+  let clips = clipCache.get(url);
+  if (!clips) {
+    try {
+      const gltf = await loader.loadAsync(url);
+      clips = gltf.animations || [];
+      clipCache.set(url, clips);
+    } catch (err) {
+      console.warn('clip load failed', url, err);
+      return;
+    }
+  }
+  if (!clips.length) return;
+  const clip = clips[0].clone();
+  // strip 'root.*' tracks (FBX import-scale + axis bake on the
+  // top-level node) so the mannequin doesn't get shrunk/rotated.
+  clip.tracks = clip.tracks.filter(t => !/^root\./.test(t.name));
+  if (currentAction) currentAction.stop();
+  currentAction = mixer.clipAction(clip);
+  currentAction.setLoop(THREE.LoopRepeat, Infinity);
+  currentAction.play();
+  currentAction.paused = !isPlaying;
+  currentAction.time = 0;
+  scrub.max = Math.round(clip.duration * 1000);
+  scrub.value = 0;
+  scrubV.textContent = '0.00';
+  // tick mixer once so we can capture the rest pose at frame 0
+  mixer.update(0);
+  captureRest();
+  await loadWeaponForClass();
+}
+clsSel.addEventListener('change', () => {
+  rebuildWeaponPicker();
+  loadClip();
 });
-const _overlayLineMat = (color, dashed = false) => {
-  const opts = { color, depthTest: false, depthWrite: false };
-  return dashed ? new THREE.LineDashedMaterial({ ...opts, dashSize: 0.08, gapSize: 0.06 })
-                : new THREE.LineBasicMaterial(opts);
-};
+clipSel.addEventListener('change', loadClip);
+playPause.addEventListener('click', () => {
+  isPlaying = !isPlaying;
+  if (currentAction) currentAction.paused = !isPlaying;
+  playPause.textContent = isPlaying ? '▶ Playing' : '⏸ Paused';
+});
+scrub.addEventListener('input', () => {
+  if (!currentAction) return;
+  currentAction.time = scrub.value / 1000;
+  scrubV.textContent = (scrub.value / 1000).toFixed(2);
+  // step mixer so the new time renders even when paused
+  if (mixer) mixer.update(0);
+});
+frameBack.addEventListener('click', () => stepFrame(-1/60));
+frameFwd.addEventListener('click',  () => stepFrame( 1/60));
+function stepFrame(dt) {
+  if (!currentAction) return;
+  const t = (currentAction.time + dt + currentAction.getClip().duration)
+            % currentAction.getClip().duration;
+  currentAction.time = t;
+  scrub.value = Math.round(t * 1000);
+  scrubV.textContent = t.toFixed(2);
+  if (mixer) mixer.update(0);
+}
 
-// (1) BULLET ORIGIN — chest center. Game: rig.chestMesh.getWorldPosition()
-//     identical to player.js fireOrigin/playerInfo.fireOrigin.
+function captureRest() {
+  // Snapshot every editable bone's CURRENT post-mixer local quaternion
+  // so our deltas compose cleanly on top.
+  for (const name of EDITABLE_BONES) {
+    const b = boneByName.get(name);
+    if (b) boneRestLocal.set(name, b.quaternion.clone());
+  }
+}
+
+// ---------- weapon picker (in-game transforms) ---------------------
+const weaponSel = document.getElementById('weapon');
+const PICKS_BY_CLASS = {
+  rifle:    ['AK47','M16','M4','AS VAL','AKS-74','AR-15 SBR','CAR-15'],
+  shotgun:  ['Mossberg 500','Benelli M4','AA-12','Sawed-Off Shotgun'],
+  sniper:   ['Remington 700','SVD Dragunov','AWP','Cheytac Intervention'],
+  lmg:      ['M249','Type 80 LMG'],
+  pistol:   ['M1911','Glock 17','Desert Eagle .50','Makarov'],
+  revolver: ['Colt Python','.38 Special','Colt Six Shooter'],
+  smg:      ['UMP45','P90','Kriss Vector','PDW'],
+  flame:    ['Flamethrower'],
+  melee:    ['Combat Knife','Hammer','katana','Crowbar'],
+};
+function rebuildWeaponPicker() {
+  const cls = clsSel.value;
+  const list = PICKS_BY_CLASS[cls] || [];
+  weaponSel.innerHTML = '';
+  for (const name of list) {
+    const opt = document.createElement('option');
+    opt.value = name; opt.textContent = name;
+    weaponSel.appendChild(opt);
+  }
+  // sensible defaults: M1911 for pistol, AK47 for rifle
+  if (cls === 'pistol') weaponSel.value = 'M1911';
+  if (cls === 'rifle')  weaponSel.value = 'AK47';
+}
+rebuildWeaponPicker();
+weaponSel.addEventListener('change', loadWeaponForClass);
+
+async function loadWeaponForClass() {
+  const cls  = clsSel.value;
+  const name = weaponSel.value;
+  const path = MODEL_BY_WEAPON_NAME[name];
+  if (!path) { clearWeapon(); return; }
+  // Find the matching tunables entry (for muzzleLength/Girth → fitToRadius scale).
+  const w = (tunables.weapons || []).find(x => x.name === name) ||
+            { muzzleLength: 0.55, muzzleGirth: 0.13 };
+  const len  = w.muzzleLength || 0.55;
+  const girth = w.muzzleGirth || 0.12;
+  const cs = (cls === 'rifle' || cls === 'shotgun' || cls === 'sniper' || cls === 'lmg') ? 0.36 : 0.22;
+  const ws = scaleForModelPath(path) || 1.0;
+  // Mirror the in-game GASP setWeapon path:
+  //   fwd = (rifle-class) ? len*0.2 : len/2
+  //   gunMesh.position.z = fwd * ws
+  //   muzzle.position.z  = (fwd + len/2) * ws
+  const isLong = cls === 'rifle' || cls === 'shotgun' || cls === 'sniper' || cls === 'lmg';
+  const fwd = isLong ? (len * 0.2) : (len / 2);
+
+  clearWeapon();
+  const gltf = await loader.loadAsync(`${MODELS_BASE}${path}`);
+  const clone = gltf.scene.clone(true);
+  // Fit-to-radius: scale clone so longest dim ≈ len * cs * ws.
+  const targetLong = len * cs * ws * 2.0;   // matches actor_rig's fitToRadius behavior
+  const bbox = new THREE.Box3().setFromObject(clone);
+  const size = new THREE.Vector3(); bbox.getSize(size);
+  const longest = Math.max(size.x, size.y, size.z) || 1;
+  const fit = targetLong / longest;
+  clone.scale.setScalar(fit);
+  // Recentre.
+  bbox.setFromObject(clone);
+  const ctr = new THREE.Vector3(); bbox.getCenter(ctr);
+  clone.position.sub(ctr);
+
+  // Apply manifest grip offset + rotation override.
+  const grip = gripOffsetForModelPath(path) || { x: 0, y: 0, z: 0 };
+  const rot  = rotationOverrideForModelPath(path);
+  const mirror = shouldMirrorInHand(path);
+  const wrap = new THREE.Group();
+  wrap.add(clone);
+  if (mirror) clone.scale.x *= -1;
+  if (rot) wrap.rotation.set(rot.x || 0, rot.y || 0, rot.z || 0);
+  wrap.position.set((grip.x || 0) * ws, (grip.y || 0) * ws, (grip.z || 0) * ws + fwd * ws);
+  weaponMesh = wrap;
+  gunAnchor.add(weaponMesh);
+
+  // Move muzzle to (fwd + len/2) * ws.
+  muzzle.position.set(0, 0, (fwd + len / 2) * ws);
+}
+function clearWeapon() {
+  if (weaponMesh) {
+    gunAnchor.remove(weaponMesh);
+    weaponMesh.traverse(o => {
+      if (o.geometry) o.geometry.dispose();
+      if (o.material) {
+        const ms = Array.isArray(o.material) ? o.material : [o.material];
+        ms.forEach(m => m?.dispose());
+      }
+    });
+    weaponMesh = null;
+  }
+}
+
+// ---------- aim viz (chest origin → cursor) -----------------------
 const fireOriginMarker = new THREE.Mesh(
-  new THREE.SphereGeometry(0.06, 16, 10), _overlayMat(0x50c8ff),
+  new THREE.SphereGeometry(0.04, 16, 10),
+  new THREE.MeshBasicMaterial({ color: 0x50c8ff, depthTest: false }),
 );
 fireOriginMarker.renderOrder = 999;
 scene.add(fireOriginMarker);
 
-// (2) MUZZLE — where flash + tracer FX spawn. Game: muzzle Object3D
-//     parented to rightShoulderAnchor (shouldered) or hand (hand-held)
-//     at (0,0,(0.1+len)*ws) or (0,-(0.1+len)*ws,0). Created once;
-//     re-parented + repositioned by the weapon loader.
 const muzzleMarker = new THREE.Mesh(
-  new THREE.SphereGeometry(0.045, 14, 10), _overlayMat(0xffa040),
+  new THREE.SphereGeometry(0.035, 14, 10),
+  new THREE.MeshBasicMaterial({ color: 0xffa040, depthTest: false }),
 );
 muzzleMarker.renderOrder = 999;
-muzzleMarker.visible = false;   // shown only when a weapon is loaded
 scene.add(muzzleMarker);
 
-// (3) BULLET TRAJECTORY — solid red line from chest to virtual cursor.
-//     Three points (start, end) updated each apply. BufferGeometry +
-//     LineSegments so we can mutate positions cheaply.
-const bulletLineGeom = new THREE.BufferGeometry();
-bulletLineGeom.setAttribute('position', new THREE.BufferAttribute(new Float32Array(6), 3));
-const bulletLine = new THREE.Line(bulletLineGeom, _overlayLineMat(0xff5050));
+const cursorMarker = new THREE.Mesh(
+  new THREE.RingGeometry(0.08, 0.10, 24),
+  new THREE.MeshBasicMaterial({ color: 0xffd040, depthTest: false, side: THREE.DoubleSide }),
+);
+cursorMarker.renderOrder = 999;
+scene.add(cursorMarker);
+
+const bulletGeom = new THREE.BufferGeometry();
+bulletGeom.setAttribute('position', new THREE.BufferAttribute(new Float32Array(6), 3));
+const bulletLine = new THREE.Line(bulletGeom,
+  new THREE.LineBasicMaterial({ color: 0xff5050, depthTest: false }));
 bulletLine.renderOrder = 999;
 scene.add(bulletLine);
 
-// (3b) TRACER — dashed orange line from muzzle to cursor target. Same
-//      direction as the bullet trajectory (game uses bullet vector for
-//      tracer too); just a different start point. Helps visualize
-//      muzzle/trajectory mismatch — if your gun isn't aligned with the
-//      cursor direction, the tracer crosses the bullet line.
-const tracerLineGeom = new THREE.BufferGeometry();
-tracerLineGeom.setAttribute('position', new THREE.BufferAttribute(new Float32Array(6), 3));
-const tracerLine = new THREE.Line(tracerLineGeom, _overlayLineMat(0xffa040, true));
+const tracerGeom = new THREE.BufferGeometry();
+tracerGeom.setAttribute('position', new THREE.BufferAttribute(new Float32Array(6), 3));
+const tracerLine = new THREE.Line(tracerGeom,
+  new THREE.LineDashedMaterial({ color: 0xffa040, depthTest: false,
+                                  dashSize: 0.08, gapSize: 0.06 }));
 tracerLine.renderOrder = 998;
 scene.add(tracerLine);
 
-// (4) CURSOR TARGET — yellow ring at the end of the bullet trajectory,
-//     3m out along the aim direction. Represents where the cursor would
-//     be in 3D space.
-const cursorRingGeom = new THREE.RingGeometry(0.10, 0.13, 24);
-cursorRingGeom.rotateX(-Math.PI / 2);
-const cursorRing = new THREE.Mesh(cursorRingGeom, _overlayMat(0xffd040));
-cursorRing.material.side = THREE.DoubleSide;
-cursorRing.renderOrder = 999;
-scene.add(cursorRing);
+const aimYaw = document.getElementById('aim-yaw');
+const aimPitch = document.getElementById('aim-pitch');
+const aimYawV = document.getElementById('aim-yaw-v');
+const aimPitchV = document.getElementById('aim-pitch-v');
+aimYaw.addEventListener('input',   () => { aimYawV.textContent   = (+aimYaw.value).toFixed(2); });
+aimPitch.addEventListener('input', () => { aimPitchV.textContent = (+aimPitch.value).toFixed(2); });
 
-const AIM_DISTANCE = 3.0;   // virtual cursor distance, meters
-
-rig.group.traverse(o => {
-  if (o.isMesh && o.material) {
-    o.material.flatShading = false;
-    o.material.needsUpdate = true;
-  }
-});
-
-// ---------- handedness --------------------------------------------
-// `mirror` is the unified sign applied to all Y rotations, Z rotations,
-// and X positions on apply / readback. Right-handed = +1 (no flip);
-// left-handed = -1 mirrors the pose across the YZ plane. Saved JSON
-// is therefore handedness-agnostic — reload the same file on either
-// side and it'll look symmetric.
-let handed = 'right';
-let weaponArm, supportArm, mirror;
-function _applyHandedness() {
-  weaponArm  = handed === 'right' ? rig.rightArm : rig.leftArm;
-  supportArm = handed === 'right' ? rig.leftArm  : rig.rightArm;
-  mirror     = handed === 'right' ? 1 : -1;
-}
-_applyHandedness();
-
-// ---------- joints ------------------------------------------------
-// Every controllable joint. Targets are accessor functions so they
-// re-resolve to the correct arm after a handedness swap.
-const JOINTS = [
-  { key: 'hips',        label: 'Hips (whole-body lean)',         target: () => rig.hips     },
-  { key: 'stomach',     label: 'Stomach (torso sway)',           target: () => rig.stomach  },
-  { key: 'chest',       label: 'Chest (upper spine)',            target: () => rig.chest    },
-  { key: 'neck',        label: 'Neck',                           target: () => rig.neck     },
-  { key: 'head',        label: 'Head',                           target: () => rig.head     },
-  { key: 'domShoulder', label: 'Dom shoulder (trigger)',         target: () => weaponArm.shoulder.pivot  },
-  { key: 'domElbow',    label: 'Dom elbow',                      target: () => weaponArm.elbow           },
-  { key: 'domWrist',    label: 'Dom wrist',                      target: () => weaponArm.wrist           },
-  { key: 'supShoulder', label: 'Sup shoulder (foregrip)',        target: () => supportArm.shoulder.pivot },
-  { key: 'supElbow',    label: 'Sup elbow',                      target: () => supportArm.elbow          },
-  { key: 'supWrist',    label: 'Sup wrist',                      target: () => supportArm.wrist          },
+// ---------- bone deltas (the actual editing) ----------------------
+//
+// Game model: clip drives bones, then post-mixer code applies world-frame
+// rotations on top. Editor mirrors that by storing per-bone (frame, x, y, z)
+// deltas; after mixer.update() each frame we walk the deltas and compose
+// them onto bones.
+//
+// frame = 'world' → Euler-YXZ delta interpreted in WORLD space:
+//   new_local = (parent_world^-1 * worldDeltaQ * parent_world) * old_local
+// frame = 'local' → Euler-YXZ delta in LOCAL bone space (right-multiply):
+//   new_local = old_local * localDeltaQ
+const EDITABLE_BONES = [
+  'pelvis',
+  'spine_01', 'spine_02', 'spine_03', 'spine_04', 'spine_05',
+  'neck_01', 'head',
+  'clavicle_l', 'upperarm_l', 'lowerarm_l', 'hand_l',
+  'clavicle_r', 'upperarm_r', 'lowerarm_r', 'hand_r',
 ];
+let editFrame = 'world';     // 'world' | 'local'
+let editMode  = 'rotate';    // 'rotate' | 'translate'
+const deltas = new Map();    // boneName → { frame, x, y, z }
+let selectedBone = null;
 
-// Cache rest position by Object3D identity so swap-handedness still
-// resolves to the correct base for whichever side is now active.
-// Captured BEFORE any pose runs (rig is at rest immediately after
-// buildRig).
-const _baseObjPos = new WeakMap();
-const _captureBase = (obj) => { if (obj) _baseObjPos.set(obj, obj.position.clone()); };
-for (const arm of [rig.leftArm, rig.rightArm]) {
-  _captureBase(arm.shoulder.pivot);
-  _captureBase(arm.elbow);
-  _captureBase(arm.wrist);
-}
-_captureBase(rig.hips);
-_captureBase(rig.stomach);
-_captureBase(rig.chest);
-_captureBase(rig.neck);
-_captureBase(rig.head);
-
-const _getBase = (t) => _baseObjPos.get(t)
-  || { x: t.position.x, y: t.position.y, z: t.position.z };
-
-// Slider field shape — six axes per joint, raw user-facing values.
-const FIELDS = ['rx', 'ry', 'rz', 'px', 'py', 'pz'];
-const FIELD_LABELS = { rx: 'rot X', ry: 'rot Y', rz: 'rot Z',
-                       px: 'pos X', py: 'pos Y', pz: 'pos Z' };
-const FIELD_MIN = { rx: -3.14, ry: -3.14, rz: -3.14,
-                    px: -0.5, py: -0.5, pz: -0.5 };
-const FIELD_MAX = { rx:  3.14, ry:  3.14, rz:  3.14,
-                    px:  0.5, py:  0.5, pz:  0.5 };
-
-const ZERO_JOINT = () => ({ rx: 0, ry: 0, rz: 0, px: 0, py: 0, pz: 0 });
-
-// ---------- presets -----------------------------------------------
-// Class-default poses pulled from actor_rig.js's rifleHold block. Aim
-// variant seeds same-as-hip; user tunes the difference.
-function _zeroFullPose() {
-  const j = {};
-  for (const J of JOINTS) j[J.key] = ZERO_JOINT();
-  return { joints: j, weapon: ZERO_JOINT() };
-}
-function _seed(cls, hipOverrides) {
-  const hip = _zeroFullPose();
-  Object.assign(hip.joints, hipOverrides);
-  // Aim defaults match hip — the user authors the difference in the
-  // editor and saves both modes at once.
-  const aim = JSON.parse(JSON.stringify(hip));
-  return { hip, aim };
+function ensureDelta(name) {
+  let d = deltas.get(name);
+  if (!d) { d = { frame: editFrame, x: 0, y: 0, z: 0 };
+            deltas.set(name, d); }
+  return d;
 }
 
-const PRESETS = {
-  pistol: _seed('pistol', {
-    domShoulder: { rx: -1.20, ry: 0, rz: -0.10, px: 0, py: 0, pz: 0 },
-    domElbow:    { rx: -1.20, ry: 0, rz:  0,    px: 0, py: 0, pz: 0 },
-    supShoulder: { rx: -1.20, ry: 0, rz:  0.40, px: 0, py: 0, pz: 0 },
-    supElbow:    { rx: -1.20, ry: 0, rz:  0,    px: 0, py: 0, pz: 0 },
-    chest:       { rx:  0,    ry: -0.20, rz: 0, px: 0, py: 0, pz: 0 },
-  }),
-  smg: _seed('smg', {
-    domShoulder: { rx: -1.05, ry: 0, rz: -0.12, px: 0, py: 0, pz: 0 },
-    domElbow:    { rx: -1.70, ry: 0, rz:  0,    px: 0, py: 0, pz: 0 },
-    supShoulder: { rx: -1.45, ry: 0, rz:  0.18, px: 0, py: 0, pz: 0 },
-    supElbow:    { rx: -0.85, ry: 0, rz:  0,    px: 0, py: 0, pz: 0 },
-    chest:       { rx:  0,    ry: -0.30, rz: 0, px: 0, py: 0, pz: 0 },
-  }),
-  rifle: _seed('rifle', {
-    domShoulder: { rx: -1.05, ry: 0, rz: -0.12, px: 0, py: 0, pz: 0 },
-    domElbow:    { rx: -1.70, ry: 0, rz:  0,    px: 0, py: 0, pz: 0 },
-    supShoulder: { rx: -1.55, ry: 0, rz:  0.55, px: 0, py: 0, pz: 0 },
-    supElbow:    { rx: -0.20, ry: 0, rz:  0,    px: 0, py: 0, pz: 0 },
-    chest:       { rx:  0,    ry: -0.30, rz: 0, px: 0, py: 0, pz: 0 },
-  }),
-  shotgun: _seed('shotgun', {
-    domShoulder: { rx: -1.05, ry: 0, rz: -0.12, px: 0, py: 0, pz: 0 },
-    domElbow:    { rx: -1.70, ry: 0, rz:  0,    px: 0, py: 0, pz: 0 },
-    supShoulder: { rx: -1.45, ry: 0, rz:  0.18, px: 0, py: 0, pz: 0 },
-    supElbow:    { rx: -0.85, ry: 0, rz:  0,    px: 0, py: 0, pz: 0 },
-    chest:       { rx:  0,    ry: -0.30, rz: 0, px: 0, py: 0, pz: 0 },
-  }),
-  sniper: _seed('sniper', {
-    domShoulder: { rx: -1.05, ry: 0, rz: -0.12, px: 0, py: 0, pz: 0 },
-    domElbow:    { rx: -1.70, ry: 0, rz:  0,    px: 0, py: 0, pz: 0 },
-    supShoulder: { rx: -1.45, ry: 0, rz:  0.18, px: 0, py: 0, pz: 0 },
-    supElbow:    { rx: -0.85, ry: 0, rz:  0,    px: 0, py: 0, pz: 0 },
-    chest:       { rx:  0,    ry: -0.30, rz: 0, px: 0, py: 0, pz: 0 },
-  }),
-  lmg: _seed('lmg', {
-    domShoulder: { rx: -1.05, ry: 0, rz: -0.12, px: 0, py: 0, pz: 0 },
-    domElbow:    { rx: -1.70, ry: 0, rz:  0,    px: 0, py: 0, pz: 0 },
-    supShoulder: { rx: -1.45, ry: 0, rz:  0.18, px: 0, py: 0, pz: 0 },
-    supElbow:    { rx: -0.85, ry: 0, rz:  0,    px: 0, py: 0, pz: 0 },
-    chest:       { rx:  0,    ry: -0.30, rz: 0, px: 0, py: 0, pz: 0 },
-  }),
-  melee: _seed('melee', {
-    domShoulder: { rx: -1.40, ry: 0, rz:  0.15, px: 0, py: 0, pz: 0 },
-    domElbow:    { rx: -1.10, ry: 0, rz:  0,    px: 0, py: 0, pz: 0 },
-    supShoulder: { rx: -0.40, ry: 0, rz: -0.10, px: 0, py: 0, pz: 0 },
-    supElbow:    { rx: -0.40, ry: 0, rz:  0,    px: 0, py: 0, pz: 0 },
-    chest:       { rx:  0.05, ry: -0.10, rz: 0, px: 0, py: 0, pz: 0 },
-  }),
-};
+const _scratchQ = new THREE.Quaternion();
+const _scratchE = new THREE.Euler(0, 0, 0, 'YXZ');
+const _parentWQ = new THREE.Quaternion();
+const _parentWQinv = new THREE.Quaternion();
+const _worldDQ = new THREE.Quaternion();
+const _localDQ = new THREE.Quaternion();
 
-// Live edit buffer — what the UI reflects and what gets saved.
-let pose = JSON.parse(JSON.stringify(PRESETS.rifle));
-let mode = 'hip';   // 'hip' | 'aim'
-
-// ---------- panel build -------------------------------------------
-// Build per-joint slider blocks programmatically so adding a new
-// joint = adding one line to JOINTS, no HTML edits.
-const jointsWrap = document.getElementById('joints');
-const weaponWrap = document.getElementById('weapon-block');
-
-function _buildSliderRow(id, field) {
-  const row = document.createElement('div');
-  row.className = 'slider-row';
-  row.innerHTML = `
-    <span class="axis">${field[1].toUpperCase()}</span>
-    <input type="range" id="${id}-${field}"
-           min="${FIELD_MIN[field]}" max="${FIELD_MAX[field]}"
-           step="0.01" value="0">
-    <span class="val" id="${id}-${field}-v">0.00</span>
-  `;
-  return row;
-}
-
-function _buildJointBlock(id, label) {
-  const block = document.createElement('div');
-  block.className = 'joint-block';
-  const title = document.createElement('div');
-  title.className = 'title';
-  title.innerHTML = `<span class="name">${label}</span>
-                     <span class="reset" data-reset="${id}">reset</span>`;
-  block.appendChild(title);
-  const grid = document.createElement('div');
-  grid.className = 'six-grid';
-  // Two columns: rotation (rx/ry/rz), position (px/py/pz).
-  const rotCol = document.createElement('div');
-  const posCol = document.createElement('div');
-  const rotHead = document.createElement('div');
-  rotHead.className = 'col-title'; rotHead.textContent = 'rotation';
-  const posHead = document.createElement('div');
-  posHead.className = 'col-title'; posHead.textContent = 'position';
-  rotCol.appendChild(rotHead);
-  posCol.appendChild(posHead);
-  for (const f of ['rx', 'ry', 'rz']) rotCol.appendChild(_buildSliderRow(id, f));
-  for (const f of ['px', 'py', 'pz']) posCol.appendChild(_buildSliderRow(id, f));
-  grid.appendChild(rotCol);
-  grid.appendChild(posCol);
-  block.appendChild(grid);
-  return block;
-}
-
-for (const j of JOINTS) jointsWrap.appendChild(_buildJointBlock(j.key, j.label));
-weaponWrap.appendChild(_buildJointBlock('weapon', 'Weapon (FBX in-hand offset)'));
-
-// ---------- click-to-select --------------------------------------
-// Tag every descendant mesh of a joint pivot with that joint's key.
-// On canvas click, raycast → hit object → walk up parents until we
-// find a tagged ancestor → highlight + scroll its slider block.
-// Forward-declared so _tagDescendants can prune the gun subtree
-// during the initial _retagJoints() call (which runs before the
-// weapon loader code further down assigns these). Reassigned by
-// _makeInHandGroup / weapon-pick handler when a real weapon loads.
-var _inHandGroup = null;
-var _muzzleObj = null;
-var _weaponMesh = null;
-var _loadedWeapon = null;
-
-function _tagDescendants(root, key) {
-  // Manual recursion (instead of traverse) so we can prune subtrees:
-  // the gun + muzzle live under the rig (parented to a shoulder
-  // anchor) and would otherwise get tagged as the spine joint that
-  // owns the anchor. That broke click-to-select on the gun after
-  // the swap-handedness retag.
-  if (!root) return;
-  const _walk = (o) => {
-    if (o === _inHandGroup || o === _muzzleObj) return;
-    // Don't overwrite a deeper-joint tag set by a child mkArm call
-    // (shoulder pivot owns the elbow, but elbow owns its own child
-    // meshes — those should resolve to elbow, not shoulder).
-    if (o.userData && o.userData.jointKey === undefined) {
-      o.userData.jointKey = key;
-    }
-    for (const c of o.children) _walk(c);
-  };
-  _walk(root);
-}
-// Tag in reverse order — distal joints first so proximal pivots don't
-// claim their descendants. Wrist owns hand meshes; elbow owns
-// forearm + wristCuff up to (not including) wrist; shoulder owns
-// upper arm + shoulderBulge up to (not including) elbow.
-function _tagArm(arm, shoulderKey, elbowKey, wristKey) {
-  _tagDescendants(arm.hand?.pivot, wristKey);
-  _tagDescendants(arm.wrist, wristKey);
-  _tagDescendants(arm.forearm?.pivot, elbowKey);
-  _tagDescendants(arm.elbow, elbowKey);
-  _tagDescendants(arm.shoulder?.pivot, shoulderKey);
-}
-function _retagJoints() {
-  // Clear any stale tags (left over from a prior handedness).
-  rig.group.traverse(o => {
-    if (o.userData && 'jointKey' in o.userData) delete o.userData.jointKey;
-  });
-  _tagArm(weaponArm,  'domShoulder', 'domElbow', 'domWrist');
-  _tagArm(supportArm, 'supShoulder', 'supElbow', 'supWrist');
-  // Spine — tag innermost first so chest descendants resolve to chest,
-  // stomach descendants resolve to stomach, etc.
-  _tagDescendants(rig.head,    'head');
-  _tagDescendants(rig.neck,    'neck');
-  _tagDescendants(rig.chest,   'chest');
-  _tagDescendants(rig.stomach, 'stomach');
-  _tagDescendants(rig.hips,    'hips');
-}
-_retagJoints();
-
-let _selectedKey = null;
-let _selectedJoint = null;   // entry from JOINTS, or null for 'weapon'
-function _targetForKey(key) {
-  if (key === 'weapon') return _inHandGroup;
-  const j = JOINTS.find(j => j.key === key);
-  return j ? j.target() : null;
-}
-function selectJoint(key) {
-  // Don't bail when key matches — re-attach in case the target was
-  // recreated (e.g. weapon swap rebuilt _inHandGroup).
-  _selectedKey = key;
-  for (const el of document.querySelectorAll('.joint-block.selected')) {
-    el.classList.remove('selected');
-  }
-  _selectedJoint = key && key !== 'weapon'
-    ? JOINTS.find(j => j.key === key) || null : null;
-  const t = _targetForKey(key);
-  if (t) tcontrols.attach(t);
-  else tcontrols.detach();
-  if (!key) return;
-  const reset = document.querySelector(`[data-reset="${key}"]`);
-  const block = reset?.closest('.joint-block');
-  if (block) {
-    block.classList.add('selected');
-    block.scrollIntoView({ behavior: 'smooth', block: 'center' });
-  }
-}
-
-// Gizmo drag → mirror the live pivot/group transform back into the
-// slider buffer for the active mode, so the slider values stay
-// truthful and Save captures what the user dragged. We do NOT call
-// applyPose here — the gizmo already mutated the target directly,
-// and applyPose would clobber the in-progress drag with the
-// previous slider values.
-tcontrols.addEventListener('objectChange', () => {
-  if (!_selectedKey) return;
-  const t = _targetForKey(_selectedKey);
-  if (!t) return;
-  const v = _selectedKey === 'weapon'
-    ? pose[mode].weapon
-    : (pose[mode].joints[_selectedKey] = pose[mode].joints[_selectedKey] || ZERO_JOINT());
-  // Sliders store the canonical right-handed value. On left-handed
-  // we divide back through the mirror so the slider/save state stays
-  // handedness-agnostic.
-  if (_selectedKey === 'weapon') {
-    v.px = (t.position.x - _baseWeaponPos.x) / mirror;
-    v.py =  t.position.y - _baseWeaponPos.y;
-    v.pz =  t.position.z - _baseWeaponPos.z;
-    v.rx =  t.rotation.x - _baseWeaponRot.x;
-    v.ry = (t.rotation.y - _baseWeaponRot.y) / mirror;
-    v.rz = (t.rotation.z - _baseWeaponRot.z) / mirror;
-  } else {
-    const bp = _getBase(t);
-    v.px = (t.position.x - bp.x) / mirror;
-    v.py =  t.position.y - bp.y;
-    v.pz =  t.position.z - bp.z;
-    v.rx =  t.rotation.x;
-    v.ry =  t.rotation.y / mirror;
-    v.rz =  t.rotation.z / mirror;
-  }
-  // Push slider element values + visible labels in sync.
-  const prefix = _selectedKey;
-  for (const f of FIELDS) {
-    const el = document.getElementById(`${prefix}-${f}`);
-    if (el) el.value = v[f];
-  }
-  _updateValueLabels();
-});
-
-// Keyboard mode shortcuts — match Blender / Three.js editor convention.
-window.addEventListener('keydown', (e) => {
-  if ((e.ctrlKey || e.metaKey) || e.altKey) return;
-  const tag = (e.target?.tagName || '').toLowerCase();
-  if (tag === 'input' && e.target.type !== 'range') return;
-  if (e.key === 'g' || e.key === 't') tcontrols.setMode('translate');
-  else if (e.key === 'r') tcontrols.setMode('rotate');
-  else if (e.key === 'Escape') selectJoint(null);
-});
-
-const _raycaster = new THREE.Raycaster();
-const _mouse = new THREE.Vector2();
-let _dragMoved = false;
-let _downX = 0, _downY = 0;
-renderer.domElement.addEventListener('pointerdown', (e) => {
-  _dragMoved = false;
-  _downX = e.clientX; _downY = e.clientY;
-});
-renderer.domElement.addEventListener('pointermove', (e) => {
-  if (!e.buttons) return;
-  const dx = e.clientX - _downX, dy = e.clientY - _downY;
-  if (dx * dx + dy * dy > 25) _dragMoved = true;   // 5px threshold
-});
-renderer.domElement.addEventListener('click', (e) => {
-  // Suppress click after an orbit-drag — OrbitControls already
-  // consumed the gesture; we don't want a stray click selecting.
-  if (_dragMoved) return;
-  const rect = renderer.domElement.getBoundingClientRect();
-  _mouse.x =  ((e.clientX - rect.left) / rect.width)  * 2 - 1;
-  _mouse.y = -((e.clientY - rect.top)  / rect.height) * 2 + 1;
-  _raycaster.setFromCamera(_mouse, camera);
-  // Test rig + weapon mesh (if loaded). Use rig.group so all rig
-  // meshes are in scope; the weapon FBX lives inside rig.group too
-  // via _inHandGroup, so a single root covers everything.
-  const hits = _raycaster.intersectObject(rig.group, true);
-  if (!hits.length) { selectJoint(null); return; }
-  // Walk up the parent chain on the first hit until we find a tag.
-  // Weapon FBX meshes are untagged → they resolve to no key → fall
-  // through to selecting "weapon" since they live under _inHandGroup.
-  let o = hits[0].object;
-  let key = null;
-  while (o) {
-    if (o.userData?.jointKey) { key = o.userData.jointKey; break; }
-    if (o === _inHandGroup) { key = 'weapon'; break; }
-    o = o.parent;
-  }
-  selectJoint(key);
-});
-
-// ---------- pose <-> UI sync --------------------------------------
-function writePoseToUI() {
-  const p = pose[mode];
-  for (const j of JOINTS) {
-    const v = p.joints[j.key] || ZERO_JOINT();
-    for (const f of FIELDS) {
-      const el = document.getElementById(`${j.key}-${f}`);
-      if (el) el.value = v[f] ?? 0;
+function applyDeltas() {
+  for (const name of EDITABLE_BONES) {
+    const bone = boneByName.get(name);
+    if (!bone) continue;
+    const d = deltas.get(name);
+    if (!d) continue;
+    if (Math.abs(d.x) < 1e-4 && Math.abs(d.y) < 1e-4 && Math.abs(d.z) < 1e-4) continue;
+    if (d.frame === 'world') {
+      // need parent world quaternion
+      if (!bone.parent) continue;
+      bone.parent.updateWorldMatrix(true, false);
+      bone.parent.getWorldQuaternion(_parentWQ);
+      _parentWQinv.copy(_parentWQ).invert();
+      _scratchE.set(d.x, d.y, d.z, 'YXZ');
+      _worldDQ.setFromEuler(_scratchE);
+      // localDelta = parent_inv * worldDelta * parent
+      _localDQ.copy(_parentWQinv).multiply(_worldDQ).multiply(_parentWQ);
+      bone.quaternion.premultiply(_localDQ);
+    } else {
+      _scratchE.set(d.x, d.y, d.z, 'YXZ');
+      _localDQ.setFromEuler(_scratchE);
+      bone.quaternion.multiply(_localDQ);
     }
   }
-  for (const f of FIELDS) {
-    const el = document.getElementById(`weapon-${f}`);
-    if (el) el.value = p.weapon[f] ?? 0;
-  }
-  _updateValueLabels();
 }
 
-function readPoseFromUI() {
-  const p = pose[mode];
-  for (const j of JOINTS) {
-    if (!p.joints[j.key]) p.joints[j.key] = ZERO_JOINT();
-    const v = p.joints[j.key];
-    for (const f of FIELDS) {
-      v[f] = parseFloat(document.getElementById(`${j.key}-${f}`).value);
-    }
+// Optional rifle-stance preview matching player.js (so the user
+// edits ON TOP of the in-game stance, or can disable to start clean).
+let stancePreview = true;
+const STANCE_WEIGHTS = [0, 0.05, 0.18, 0.35, 0.42];
+const STANCE_BONES = ['spine_01','spine_02','spine_03','spine_04','spine_05'];
+const STANCE_YAW = 0.26;
+function applyStancePreview() {
+  if (!stancePreview) return;
+  if (!classIsRifleStance(clsSel.value)) return;
+  for (let i = 0; i < STANCE_BONES.length; i++) {
+    if (STANCE_WEIGHTS[i] === 0) continue;
+    const bone = boneByName.get(STANCE_BONES[i]);
+    if (!bone || !bone.parent) continue;
+    bone.parent.updateWorldMatrix(true, false);
+    bone.parent.getWorldQuaternion(_parentWQ);
+    _parentWQinv.copy(_parentWQ).invert();
+    _scratchE.set(0, STANCE_YAW * STANCE_WEIGHTS[i], 0, 'YXZ');
+    _worldDQ.setFromEuler(_scratchE);
+    _localDQ.copy(_parentWQinv).multiply(_worldDQ).multiply(_parentWQ);
+    bone.quaternion.premultiply(_localDQ);
   }
-  for (const f of FIELDS) {
-    p.weapon[f] = parseFloat(document.getElementById(`weapon-${f}`).value);
-  }
-}
-
-function _updateValueLabels() {
-  const ids = [];
-  for (const j of JOINTS) for (const f of FIELDS) ids.push(`${j.key}-${f}`);
-  for (const f of FIELDS) ids.push(`weapon-${f}`);
-  ids.push('aim-yaw', 'aim-pitch');
-  for (const id of ids) {
-    const el = document.getElementById(id);
-    const lbl = document.getElementById(id + '-v');
-    if (el && lbl) lbl.textContent = parseFloat(el.value).toFixed(2);
-  }
-}
-
-// ---------- pose application --------------------------------------
-let _baseWeaponPos = { x: 0, y: 0, z: 0 };
-let _baseWeaponRot = { x: 0, y: 0, z: 0 };
-
-function applyPose() {
-  const p = pose[mode];
-  for (const j of JOINTS) {
-    const t = j.target();
-    if (!t) continue;
-    const v = p.joints[j.key] || ZERO_JOINT();
-    // Y rot, Z rot, and X pos mirror across YZ plane on left-handed.
-    t.rotation.set(v.rx, v.ry * mirror, v.rz * mirror);
-    const bp = _getBase(t);
-    t.position.set(bp.x + v.px * mirror, bp.y + v.py, bp.z + v.pz);
-  }
-  // Weapon FBX offset — same mirror rules so a swap puts the gun on
-  // the opposite side at the symmetric position/rotation.
-  if (_inHandGroup) {
-    const v = p.weapon;
-    _inHandGroup.position.set(_baseWeaponPos.x + v.px * mirror,
-                              _baseWeaponPos.y + v.py,
-                              _baseWeaponPos.z + v.pz);
-    _inHandGroup.rotation.set(_baseWeaponRot.x + v.rx,
-                              _baseWeaponRot.y + v.ry * mirror,
-                              _baseWeaponRot.z + v.rz * mirror);
-  }
-
-  // === Combat viz update ============================================
-  // Game's bullet pipeline: fireOrigin = chest, dir = (cursor - chest).
-  // We synthesize a virtual cursor 3m along the aim slider direction
-  // so the trajectory line is meaningful even without a real cursor.
-  const chestWorld = new THREE.Vector3();
-  (rig.chestMesh || rig.chest).getWorldPosition(chestWorld);
-  fireOriginMarker.position.copy(chestWorld);
-
-  // Aim direction. Actor faces +Z in this rig — the shoulder-anchor
-  // forward offset (0, 0, +len) places the gun barrel toward +Z, and
-  // the in-game muzzle Object3D sits at the same +Z offset. So
-  // yaw=0/pitch=0 must produce world (0, 0, +1). Positive yaw
-  // rotates toward actor's right (+X); positive pitch tilts up.
-  const yaw   = parseFloat(document.getElementById('aim-yaw').value);
-  const pitch = parseFloat(document.getElementById('aim-pitch').value);
-  const aimDir = new THREE.Vector3(
-    Math.sin(yaw)  * Math.cos(pitch),
-    Math.sin(pitch),
-    Math.cos(yaw)  * Math.cos(pitch),
-  );
-  const cursorWorld = chestWorld.clone().addScaledVector(aimDir, AIM_DISTANCE);
-
-  // Bullet line: chest → cursor (the actual bullet path in-game).
-  const bp = bulletLine.geometry.attributes.position.array;
-  bp[0] = chestWorld.x; bp[1] = chestWorld.y; bp[2] = chestWorld.z;
-  bp[3] = cursorWorld.x; bp[4] = cursorWorld.y; bp[5] = cursorWorld.z;
-  bulletLine.geometry.attributes.position.needsUpdate = true;
-
-  // Cursor target ring at the far end of the bullet line.
-  cursorRing.position.copy(cursorWorld);
-  cursorRing.lookAt(chestWorld);   // ring faces back along trajectory
-
-  // Muzzle marker — only when a weapon is loaded; player.js parents
-  // the muzzle Object3D to the same anchor as the gun and offsets it
-  // by the weapon's length. We mirror that exactly via _muzzleObj.
-  if (_muzzleObj && _inHandGroup) {
-    _muzzleObj.updateMatrixWorld(true);
-    const muzzleWorld = new THREE.Vector3();
-    _muzzleObj.getWorldPosition(muzzleWorld);
-    muzzleMarker.position.copy(muzzleWorld);
-    muzzleMarker.visible = true;
-    // Tracer = muzzle → cursor (parallel to bullet line in spirit).
-    const tp = tracerLine.geometry.attributes.position.array;
-    tp[0] = muzzleWorld.x; tp[1] = muzzleWorld.y; tp[2] = muzzleWorld.z;
-    tp[3] = cursorWorld.x; tp[4] = cursorWorld.y; tp[5] = cursorWorld.z;
-    tracerLine.geometry.attributes.position.needsUpdate = true;
-    tracerLine.computeLineDistances();   // required for dashed material
-    tracerLine.visible = true;
-  } else {
-    muzzleMarker.visible = false;
-    tracerLine.visible  = false;
+  // Clavicle counter-yaw on dominant (right by default).
+  const clav = boneByName.get('clavicle_r');
+  if (clav && clav.parent) {
+    clav.parent.updateWorldMatrix(true, false);
+    clav.parent.getWorldQuaternion(_parentWQ);
+    _parentWQinv.copy(_parentWQ).invert();
+    _scratchE.set(0, -STANCE_YAW, 0, 'YXZ');
+    _worldDQ.setFromEuler(_scratchE);
+    _localDQ.copy(_parentWQinv).multiply(_worldDQ).multiply(_parentWQ);
+    clav.quaternion.premultiply(_localDQ);
   }
 }
 
-function applyFromUI() {
-  readPoseFromUI();
-  applyPose();
-  _updateValueLabels();
-}
-
-// ---------- undo stack -------------------------------------------
-// Snapshot the full pose buffer (both modes) on slider release and
-// other discrete state changes. Ctrl+Z pops one snapshot, restores
-// it, re-syncs the UI. Stack capped at 50 to bound memory.
-const _undoStack = [];
-const UNDO_MAX = 50;
-
-function _snapshot() {
-  return JSON.stringify({ pose, mode });
-}
-function _pushUndo() {
-  const snap = _snapshot();
-  if (_undoStack[_undoStack.length - 1] === snap) return; // no-op edits
-  _undoStack.push(snap);
-  if (_undoStack.length > UNDO_MAX) _undoStack.shift();
-}
-function _undo() {
-  if (_undoStack.length === 0) return;
-  // Top of stack = state BEFORE the most recent edit, so a single pop
-  // restores it. The current state isn't on the stack itself.
-  const snap = _undoStack.pop();
-  const restored = JSON.parse(snap);
-  pose = restored.pose;
-  if (restored.mode !== mode) {
-    mode = restored.mode;
-    btnHip.classList.toggle('active', mode === 'hip');
-    btnAim.classList.toggle('active', mode === 'aim');
-    document.getElementById('joints-heading').textContent = `Joints — ${mode.toUpperCase()}`;
-    document.getElementById('weapon-heading').textContent = `Weapon offset — ${mode.toUpperCase()}`;
-  }
-  writePoseToUI();
-  applyPose();
-}
-// Seed the stack with the boot state so the very first edit is undoable.
-_pushUndo();
-
-window.addEventListener('keydown', (e) => {
-  // Ctrl+Z (or Cmd+Z on macOS). Ignore if focus is in a text input
-  // so future text fields don't get hijacked.
-  const isUndo = (e.ctrlKey || e.metaKey) && !e.shiftKey && e.key.toLowerCase() === 'z';
-  if (!isUndo) return;
-  const tag = (e.target?.tagName || '').toLowerCase();
-  if (tag === 'input' && e.target.type !== 'range') return;
-  e.preventDefault();
-  _undo();
+document.getElementById('apply-stance').addEventListener('click', (e) => {
+  stancePreview = !stancePreview;
+  e.currentTarget.classList.toggle('active', stancePreview);
+  e.currentTarget.textContent = stancePreview
+    ? 'Apply rifle stance preview' : 'Stance preview OFF';
 });
-
-// Wire input events for every slider. `input` fires per-pixel (live
-// preview), `change` fires on release (one undo entry per drag).
-function _wireAllSliders() {
-  const ids = [];
-  for (const j of JOINTS) for (const f of FIELDS) ids.push(`${j.key}-${f}`);
-  for (const f of FIELDS) ids.push(`weapon-${f}`);
-  for (const id of ids) {
-    const el = document.getElementById(id);
-    el.addEventListener('input', applyFromUI);
-    el.addEventListener('change', _pushUndo);
-  }
-  for (const id of ['aim-yaw', 'aim-pitch']) {
-    const el = document.getElementById(id);
-    el.addEventListener('input', applyFromUI);
-    el.addEventListener('change', _pushUndo);
-  }
-}
-_wireAllSliders();
-
-// Per-joint reset buttons — zero only that block in the current mode.
-document.addEventListener('click', (e) => {
-  const id = e.target?.dataset?.reset;
-  if (!id) return;
-  if (id === 'weapon') {
-    pose[mode].weapon = ZERO_JOINT();
-  } else if (pose[mode].joints[id]) {
-    pose[mode].joints[id] = ZERO_JOINT();
-  }
-  writePoseToUI();
-  applyPose();
-  _pushUndo();
-});
-
-// ---------- preset + mode wiring ----------------------------------
-function loadPreset(name) {
-  const src = PRESETS[name];
-  if (!src) return;
-  pose = JSON.parse(JSON.stringify(src));
-  writePoseToUI();
-  applyPose();
-  _pushUndo();
-}
-document.getElementById('preset').addEventListener('change',
-  (e) => loadPreset(e.target.value));
-document.getElementById('reset-class').addEventListener('click',
-  () => loadPreset(document.getElementById('preset').value));
-document.getElementById('undo').addEventListener('click', _undo);
-
-const btnTranslate = document.getElementById('gizmo-translate');
-const btnRotate    = document.getElementById('gizmo-rotate');
-function _setGizmoMode(m) {
-  tcontrols.setMode(m);
-  btnTranslate.classList.toggle('active', m === 'translate');
-  btnRotate.classList.toggle('active',    m === 'rotate');
-}
-btnTranslate.addEventListener('click', () => _setGizmoMode('translate'));
-btnRotate.addEventListener('click',    () => _setGizmoMode('rotate'));
-_setGizmoMode('rotate');
-
-document.getElementById('flip-view').addEventListener('click', () => {
-  // Mirror the camera through the actor across both X and Z so the
-  // orbit pivot stays put and the user just sees the opposite side.
-  camera.position.set(-camera.position.x, camera.position.y, -camera.position.z);
+document.getElementById('flip-cam').addEventListener('click', () => {
+  camFront = !camFront;
+  camera.position.set(0, 1.6, camFront ? 3.5 : -3.5);
+  controls.target.set(0, 1.0, 0);
   controls.update();
 });
 
-// Handedness swap. Lifts the gun + muzzle to the opposite anchor,
-// re-tags joint meshes, and re-applies the current pose. The pose
-// buffer values themselves are unchanged — `mirror` flips Y rot,
-// Z rot, and X position at apply time so the result is symmetric.
-function swapHanded() {
-  // Reset the about-to-be-abandoned arm to its rest pose so it
-  // doesn't stay frozen mid-twist after the swap.
-  for (const j of JOINTS) {
-    const t = j.target();
-    if (!t) continue;
-    t.rotation.set(0, 0, 0);
-    const bp = _getBase(t);
-    t.position.set(bp.x, bp.y, bp.z);
+document.getElementById('frame-world').addEventListener('click', (e) => setEditFrame('world', e));
+document.getElementById('frame-local').addEventListener('click', (e) => setEditFrame('local', e));
+function setEditFrame(f, evt) {
+  editFrame = f;
+  document.getElementById('frame-world').classList.toggle('active', f === 'world');
+  document.getElementById('frame-local').classList.toggle('active', f === 'local');
+  // re-tag any currently zero deltas; existing non-zero deltas keep their frame.
+  for (const [name, d] of deltas) {
+    if (d.x === 0 && d.y === 0 && d.z === 0) d.frame = f;
   }
-  handed = handed === 'right' ? 'left' : 'right';
-  _applyHandedness();
-  _retagJoints();
-  // Re-parent the gun + muzzle to the new side. Easiest: rebuild
-  // the inHandGroup via _makeInHandGroup so all the offset math
-  // mirrors the loader's path exactly.
-  if (_inHandGroup && _loadedWeapon) {
-    const fbx = _weaponMesh;
-    if (fbx?.parent) fbx.parent.remove(fbx);
-    _inHandGroup.parent?.remove(_inHandGroup);
-    _inHandGroup = _makeInHandGroup(_loadedWeapon.cls, _loadedWeapon.len);
-    if (fbx) _inHandGroup.add(fbx);
-  }
-  // Re-attach gizmo to the now-correct target.
-  const t = _selectedKey ? _targetForKey(_selectedKey) : null;
-  if (t) tcontrols.attach(t); else tcontrols.detach();
-  document.getElementById('handed-label').textContent = handed.toUpperCase();
-  applyPose();
-  _pushUndo();
+  syncSlidersFromBone();
 }
-document.getElementById('swap-handed').addEventListener('click', swapHanded);
-
-const btnHip = document.getElementById('mode-hip');
-const btnAim = document.getElementById('mode-aim');
-function setMode(m) {
-  // Save the values currently in the UI back to the previous mode
-  // before swapping — otherwise tweaks made under "hip" get lost
-  // when the user clicks "aim".
-  readPoseFromUI();
-  mode = m;
-  btnHip.classList.toggle('active', mode === 'hip');
-  btnAim.classList.toggle('active', mode === 'aim');
-  document.getElementById('joints-heading').textContent =
-    `Joints — ${mode.toUpperCase()}`;
-  document.getElementById('weapon-heading').textContent =
-    `Weapon offset — ${mode.toUpperCase()}`;
-  writePoseToUI();
-  applyPose();
-  _pushUndo();
-}
-btnHip.addEventListener('click', () => setMode('hip'));
-btnAim.addEventListener('click', () => setMode('aim'));
-
-// ---------- save --------------------------------------------------
-function _buildPoseJson() {
-  // Always read current UI into the buffer first so save captures the
-  // active mode's latest tweaks.
-  readPoseFromUI();
-  const cls = document.getElementById('preset').value;
-  return {
-    weapon_class: cls,
-    handedness: handed,
-    modes: {
-      hip: pose.hip,
-      aim: pose.aim,
-    },
-    note: 'Canonical right-handed pose. At apply time multiply joints[*].ry, joints[*].rz, joints[*].px AND weapon.{ry,rz,px} by `mirror` (-1 for left-handed actors, +1 otherwise) to get the symmetric mirrored stance. weapon.{px,py,pz,rx,ry,rz} are deltas on top of the in-hand intermediate group transform.',
-    saved_at: new Date().toISOString(),
-  };
+document.getElementById('mode-rotate').addEventListener('click', () => setEditMode('rotate'));
+document.getElementById('mode-translate').addEventListener('click', () => setEditMode('translate'));
+function setEditMode(m) {
+  editMode = m;
+  document.getElementById('mode-rotate').classList.toggle('active', m === 'rotate');
+  document.getElementById('mode-translate').classList.toggle('active', m === 'translate');
+  if (selectedBone && tcontrols.object) tcontrols.setMode(m);
 }
 
-document.getElementById('save').addEventListener('click', () => {
-  const out = _buildPoseJson();
-  const text = JSON.stringify(out, null, 2);
-  document.getElementById('output').textContent =
-    `// Saved pose_${out.weapon_class}.json — commit it under Assets/poses/\n` + text;
-  const blob = new Blob([text], { type: 'application/json' });
-  const a = document.createElement('a');
-  a.href = URL.createObjectURL(blob);
-  a.download = `pose_${out.weapon_class}.json`;
-  document.body.appendChild(a);
-  a.click();
-  a.remove();
-});
-
-document.getElementById('copy').addEventListener('click', async () => {
-  const out = _buildPoseJson();
-  const text = JSON.stringify(out, null, 2);
-  document.getElementById('output').textContent = text;
-  try {
-    await navigator.clipboard.writeText(text);
-    document.getElementById('output').textContent = '// Copied to clipboard.\n' + text;
-  } catch (_) { /* fallback: just show in pre */ }
-});
-
-// ---------- weapon FBX loader ------------------------------------
-const MODEL_BASE = '../Assets/models/';
-const fbxLoader = new FBXLoader();
-// _weaponMesh and _inHandGroup are hoisted near _tagDescendants.
-
-const CLASS_FIT_RADIUS = {
-  pistol: 0.45, smg: 0.65, rifle: 0.75, shotgun: 0.75,
-  lmg: 0.75, sniper: 0.75, flame: 0.7, melee: 0.7,
-};
-
-function _fitToRadius(obj, target) {
-  obj.updateMatrixWorld(true);
-  const box = new THREE.Box3().setFromObject(obj);
-  if (box.isEmpty()) return;
-  const size = new THREE.Vector3(); box.getSize(size);
-  const center = new THREE.Vector3(); box.getCenter(center);
-  const maxDim = Math.max(size.x, size.y, size.z) || 1;
-  const scale = (2 * target) / maxDim;
-  const localCenter = obj.worldToLocal(center.clone());
-  for (const child of obj.children) child.position.sub(localCenter);
-  obj.scale.multiplyScalar(scale);
-}
-
-// _muzzleObj — bare Object3D matching player.js's `muzzle`,
-// re-parented + repositioned per weapon swap so its world position
-// gives us the spot where the game spawns muzzle flash + tracer FX.
-// Hoisted near _tagDescendants for TDZ safety.
-
-// _loadedWeapon — { cls, len }, hoisted near _tagDescendants. Used by
-// swap-handedness to re-parent + reload state.
-
-function _makeInHandGroup(cls, len) {
-  const ws = 1.0;
-  const isShouldered = ['rifle', 'shotgun', 'lmg', 'sniper'].includes(cls);
-  const g = new THREE.Group();
-  if (_muzzleObj?.parent) _muzzleObj.parent.remove(_muzzleObj);
-  if (!_muzzleObj) _muzzleObj = new THREE.Object3D();
-
-  // Side-aware anchor selection. swapHanded re-runs the loader so a
-  // swap with a gun in hand puts it on the new side.
-  const shoulderAnchor = handed === 'right' ? rig.rightShoulderAnchor : rig.leftShoulderAnchor;
-  const wristNode      = (handed === 'right' ? rig.rightArm : rig.leftArm).wrist;
-
-  if (isShouldered) {
-    g.rotation.set(0, 0, 0);
-    g.position.set(0, 0, (0.1 + len / 2) * ws);
-    shoulderAnchor.add(g);
-    shoulderAnchor.add(_muzzleObj);
-    _muzzleObj.position.set(0, 0, (0.1 + len) * ws);
-  } else {
-    g.rotation.set(Math.PI / 2, 0, 0);
-    g.position.set(0, -(0.1 + len / 2) * ws, 0);
-    wristNode.add(g);
-    wristNode.add(_muzzleObj);
-    _muzzleObj.position.set(0, -(0.1 + len) * ws, 0);
-  }
-  _baseWeaponPos = { x: g.position.x, y: g.position.y, z: g.position.z };
-  _baseWeaponRot = { x: g.rotation.x, y: g.rotation.y, z: g.rotation.z };
-  _loadedWeapon = { cls, len };
-  return g;
-}
-
-function _populateWeaponPicker() {
-  const sel = document.getElementById('weapon-pick');
-  // Combined catalog: weapons keyed by name + item-id assets
-  // (attachments, throwables, tools, consumables) keyed by id. Both
-  // get exposed so the editor can preview anything the inventory
-  // could render. The picker `value` is the lookup key — name for
-  // weapons, id for item-id entries — and the loader resolves it.
-  const groups = {};
-  for (const [name, path] of Object.entries(MODEL_BY_WEAPON_NAME)) {
-    const folder = path.split('/')[0];
-    (groups[folder] = groups[folder] || []).push({ key: name, label: name, path });
-  }
-  for (const [id, path] of Object.entries(MODEL_BY_ITEM_ID || {})) {
-    const folder = path.split('/')[0];
-    (groups[folder] = groups[folder] || []).push({ key: id, label: id, path });
-  }
-  for (const folder of Object.keys(groups).sort()) {
-    const grp = document.createElement('optgroup');
-    grp.label = folder;
-    for (const { key, label } of groups[folder].sort((a, b) => a.label.localeCompare(b.label))) {
-      const opt = document.createElement('option');
-      opt.value = key;
-      opt.textContent = label;
-      grp.appendChild(opt);
-    }
-    sel.appendChild(grp);
-  }
-}
-_populateWeaponPicker();
-
-function _findTunable(name) {
-  return tunables.weapons.find(w => w.name === name) || null;
-}
-
-document.getElementById('weapon-pick').addEventListener('change', (e) => {
-  const name = e.target.value;
-  if (_weaponMesh) {
-    _weaponMesh.parent?.remove(_weaponMesh);
-    _weaponMesh.traverse?.(o => {
-      if (o.geometry) o.geometry.dispose();
-      if (o.material) {
-        if (Array.isArray(o.material)) o.material.forEach(m => m.dispose?.());
-        else o.material.dispose?.();
+// ---------- bone UI -----------------------------------------------
+const bonesUI = document.getElementById('bones');
+const sliderRefs = new Map();    // name → { x, y, z, xv, yv, zv, root }
+function buildBoneUI() {
+  bonesUI.innerHTML = '';
+  sliderRefs.clear();
+  for (const name of EDITABLE_BONES) {
+    const block = document.createElement('div');
+    block.className = 'bone-block';
+    block.dataset.bone = name;
+    block.innerHTML = `
+      <div class="title">
+        <span class="name">${name}</span>
+        <span class="reset" data-action="reset">reset</span>
+      </div>
+      <div class="row">
+        <span class="axis">Y</span>
+        <input type="range" data-axis="y" min="-1.57" max="1.57" step="0.005" value="0">
+        <span class="val" data-axis="y-v">0.00</span>
+      </div>
+      <div class="row">
+        <span class="axis">X</span>
+        <input type="range" data-axis="x" min="-1.57" max="1.57" step="0.005" value="0">
+        <span class="val" data-axis="x-v">0.00</span>
+      </div>
+      <div class="row">
+        <span class="axis">Z</span>
+        <input type="range" data-axis="z" min="-1.57" max="1.57" step="0.005" value="0">
+        <span class="val" data-axis="z-v">0.00</span>
+      </div>
+    `;
+    block.addEventListener('click', (e) => {
+      if (e.target.dataset.action === 'reset') {
+        deltas.delete(name);
+        const refs = sliderRefs.get(name);
+        ['x','y','z'].forEach(a => { refs[a].value = 0; refs[a + 'v'].textContent = '0.00'; });
+        rebuildOutput();
+        return;
       }
+      selectBone(name);
     });
-    _weaponMesh = null;
+    block.querySelectorAll('input[type=range]').forEach(input => {
+      input.addEventListener('input', () => {
+        const d = ensureDelta(name);
+        d.frame = editFrame;
+        d[input.dataset.axis] = +input.value;
+        const valEl = block.querySelector(`[data-axis="${input.dataset.axis}-v"]`);
+        valEl.textContent = (+input.value).toFixed(2);
+        rebuildOutput();
+      });
+    });
+    bonesUI.appendChild(block);
+    const refs = {
+      x:  block.querySelector('[data-axis=x]'),
+      y:  block.querySelector('[data-axis=y]'),
+      z:  block.querySelector('[data-axis=z]'),
+      xv: block.querySelector('[data-axis=x-v]'),
+      yv: block.querySelector('[data-axis=y-v]'),
+      zv: block.querySelector('[data-axis=z-v]'),
+      root: block,
+    };
+    sliderRefs.set(name, refs);
   }
-  if (_inHandGroup) {
-    if (_selectedKey === 'weapon') tcontrols.detach();
-    _inHandGroup.parent?.remove(_inHandGroup);
-    _inHandGroup = null;
-    _baseWeaponPos = { x: 0, y: 0, z: 0 };
-    _baseWeaponRot = { x: 0, y: 0, z: 0 };
-    if (_muzzleObj?.parent) _muzzleObj.parent.remove(_muzzleObj);
+}
+function selectBone(name) {
+  selectedBone = name;
+  document.getElementById('selected-bone-label').textContent = name;
+  for (const [n, refs] of sliderRefs) {
+    refs.root.classList.toggle('selected', n === name);
   }
-  if (!name) { applyPose(); return; }
-  // Lookup precedence: weapon-name first (so 'Benelli M4' resolves
-  // to the shotgun before any item-id collision), then item-id
-  // (att_*, thr_*, cons_*, junk_*).
-  const path = MODEL_BY_WEAPON_NAME[name] || (MODEL_BY_ITEM_ID && MODEL_BY_ITEM_ID[name]);
-  if (!path) return;
-  const url = MODEL_BASE + path;
-  // Tunable lookup only meaningful for weapon names. Item-id assets
-  // (attachments / throwables / tools) fall back to a small pistol-
-  // sized hand-held default — they're not posed against weapon stats.
-  const w = _findTunable(name) || { class: 'pistol', muzzleLength: 0.5 };
-  const cls = w.class || 'pistol';
-  const len = w.muzzleLength ?? 0.5;
-  document.getElementById('output').textContent = `loading ${name}…`;
-  fbxLoader.load(url, (obj) => {
-    const cs = CLASS_FIT_RADIUS[cls] ?? 0.9;
-    _fitToRadius(obj, len * cs * scaleForModelPath(url));
-    const rotOverride = rotationOverrideForModelPath(url);
-    if (rotOverride) {
-      obj.rotation.set(rotOverride.x || 0, rotOverride.y || 0, rotOverride.z || 0);
-    } else if (w.modelRotation) {
-      obj.rotation.set(w.modelRotation.x || 0, w.modelRotation.y || 0, w.modelRotation.z || 0);
-    } else {
-      obj.rotation.set(0, Math.PI / 2, 0);
+  const bone = boneByName.get(name);
+  if (bone) {
+    tcontrols.attach(bone);
+    tcontrols.setMode(editMode);
+  }
+  syncSlidersFromBone();
+}
+function syncSlidersFromBone() {
+  if (!selectedBone) return;
+  const d = deltas.get(selectedBone);
+  const refs = sliderRefs.get(selectedBone);
+  if (!refs) return;
+  // If user dragged the gizmo, read bone.quaternion delta from rest as
+  // an Euler-YXZ approximation and write into the LOCAL frame deltas.
+  // (Gizmo writes directly to bone.quaternion which composes on top
+  // of the clip; we treat that as a local-frame delta for the JSON.)
+  const bone = boneByName.get(selectedBone);
+  const rest = boneRestLocal.get(selectedBone);
+  if (bone && rest && tcontrols.dragging === false && (d?.frame !== 'world')) {
+    // local delta = rest^-1 * current
+    const localDelta = rest.clone().invert().multiply(bone.quaternion);
+    const e = new THREE.Euler().setFromQuaternion(localDelta, 'YXZ');
+    if (Math.abs(e.x) > 1e-4 || Math.abs(e.y) > 1e-4 || Math.abs(e.z) > 1e-4) {
+      const dd = ensureDelta(selectedBone);
+      dd.frame = 'local'; dd.x = e.x; dd.y = e.y; dd.z = e.z;
     }
-    if (shouldMirrorInHand({ baseName: name })) obj.scale.x *= -1;
-    const grip = gripOffsetForModelPath(url);
-    if (grip) obj.position.set(grip.x || 0, grip.y || 0, grip.z || 0);
-    _inHandGroup = _makeInHandGroup(cls, len);
-    _inHandGroup.add(obj);
-    _weaponMesh = obj;
-    const anchorName = _inHandGroup.parent === rig.rightShoulderAnchor
-      ? 'rightShoulderAnchor' : 'rightArm.wrist';
-    document.getElementById('output').textContent =
-      `loaded ${name} → ${path}\n  cls=${cls}, anchor=${anchorName}\n  fitR=${(len*cs*scaleForModelPath(url)).toFixed(3)}, mirror=${shouldMirrorInHand({baseName:name})}\n  grip=${grip ? `(${grip.x},${grip.y},${grip.z})` : 'none'}`;
-    applyPose();
-    if (_selectedKey === 'weapon') tcontrols.attach(_inHandGroup);
-  }, undefined, (err) => {
-    document.getElementById('output').textContent =
-      `failed to load ${path}: ${err?.message || err}`;
-  });
+  }
+  const cur = deltas.get(selectedBone) || { x:0, y:0, z:0 };
+  refs.x.value = cur.x; refs.xv.textContent = cur.x.toFixed(2);
+  refs.y.value = cur.y; refs.yv.textContent = cur.y.toFixed(2);
+  refs.z.value = cur.z; refs.zv.textContent = cur.z.toFixed(2);
+  rebuildOutput();
+}
+
+// ---------- click-pick bones from canvas --------------------------
+const raycaster = new THREE.Raycaster();
+const mouseNDC = new THREE.Vector2();
+renderer.domElement.addEventListener('pointerdown', (e) => {
+  if (tcontrols.dragging) return;
+  const rect = renderer.domElement.getBoundingClientRect();
+  mouseNDC.x = ((e.clientX - rect.left) / rect.width) * 2 - 1;
+  mouseNDC.y = -((e.clientY - rect.top) / rect.height) * 2 + 1;
+  raycaster.setFromCamera(mouseNDC, camera);
+  // Intersect against bone proxies (small spheres rendered alongside bones).
+  const hits = raycaster.intersectObjects(boneProxies, false);
+  if (hits.length) {
+    const name = hits[0].object.userData.boneName;
+    if (name) selectBone(name);
+  }
 });
 
-// ---------- boot --------------------------------------------------
-loadPreset('rifle');
-window.addEventListener('resize', resize);
-resize();
+// ---------- bone proxies (small spheres at each editable bone) ----
+const boneProxies = [];
+const proxyMat = new THREE.MeshBasicMaterial({ color: 0xc9a87a, transparent: true,
+                                                opacity: 0.85, depthTest: false });
+function createBoneProxies() {
+  for (const name of EDITABLE_BONES) {
+    const bone = boneByName.get(name);
+    if (!bone) continue;
+    const sph = new THREE.Mesh(new THREE.SphereGeometry(0.02, 10, 8), proxyMat);
+    sph.userData.boneName = name;
+    sph.renderOrder = 998;
+    bone.add(sph);
+    boneProxies.push(sph);
+  }
+}
 
-function tick() {
+// ---------- output JSON -------------------------------------------
+function rebuildOutput() {
+  const out = {
+    rig: 'gasp_uefn',
+    weaponClass: clsSel.value,
+    weapon: weaponSel.value,
+    weaponPath: MODEL_BY_WEAPON_NAME[weaponSel.value] || null,
+    clip: `${clipSel.value}_${suffixForClass(clsSel.value)}`,
+    clipTime: currentAction ? +currentAction.time.toFixed(3) : 0,
+    aim: { yaw: +aimYaw.value, pitch: +aimPitch.value },
+    stancePreview,
+    deltas: {},
+  };
+  for (const [name, d] of deltas) {
+    if (Math.abs(d.x) < 1e-4 && Math.abs(d.y) < 1e-4 && Math.abs(d.z) < 1e-4) continue;
+    out.deltas[name] = {
+      frame: d.frame,
+      yaw:   +d.y.toFixed(4),
+      pitch: +d.x.toFixed(4),
+      roll:  +d.z.toFixed(4),
+    };
+  }
+  document.getElementById('output').value = JSON.stringify(out, null, 2);
+}
+document.getElementById('copy').addEventListener('click', () => {
+  rebuildOutput();
+  const t = document.getElementById('output');
+  t.select();
+  navigator.clipboard.writeText(t.value).catch(() => document.execCommand('copy'));
+});
+document.getElementById('reset-all').addEventListener('click', () => {
+  deltas.clear();
+  for (const [, refs] of sliderRefs) {
+    ['x','y','z'].forEach(a => { refs[a].value = 0; refs[a + 'v'].textContent = '0.00'; });
+  }
+  rebuildOutput();
+});
+
+// keyboard shortcuts
+addEventListener('keydown', (e) => {
+  if (e.target.tagName === 'INPUT' || e.target.tagName === 'TEXTAREA') return;
+  if (e.key === 'r' || e.key === 'R') setEditMode('rotate');
+  if (e.key === 't' || e.key === 'T') setEditMode('translate');
+  if (e.key === 'Escape') {
+    selectedBone = null;
+    tcontrols.detach();
+    document.getElementById('selected-bone-label').textContent = 'none';
+    for (const [, refs] of sliderRefs) refs.root.classList.remove('selected');
+  }
+});
+
+// ---------- per-frame ---------------------------------------------
+const clock = new THREE.Clock();
+let proxiesBuilt = false;
+(function tick() {
+  requestAnimationFrame(tick);
+  const dt = clock.getDelta();
+  if (mixer && currentAction) {
+    if (isPlaying) mixer.update(dt);
+    else mixer.update(0);   // ensure pose holds at scrub.time
+  }
+  if (boneByName.size && !proxiesBuilt) {
+    createBoneProxies();
+    proxiesBuilt = true;
+  }
+  // Body yaw from aim slider (matches game's rigid cursor track).
+  rigGroup.rotation.y = +aimYaw.value;
+
+  // Apply stance preview (matches game) THEN user deltas.
+  applyStancePreview();
+  applyDeltas();
+
+  // Update viz markers.
+  // Bullet origin = chest world position (approximate via spine_03 head).
+  const chestBone = boneByName.get('spine_03') || boneByName.get('spine_04');
+  if (chestBone) {
+    chestBone.getWorldPosition(fireOriginMarker.position);
+  }
+  // Cursor target: 3m forward of body in aim direction + pitch.
+  const yaw = +aimYaw.value, pitch = +aimPitch.value;
+  cursorMarker.position.set(
+    Math.sin(yaw) * 3,
+    1.4 + Math.sin(pitch) * 3,
+    Math.cos(yaw) * 3,
+  );
+  cursorMarker.lookAt(fireOriginMarker.position);
+  // Bullet line.
+  const bp = bulletGeom.attributes.position.array;
+  bp[0] = fireOriginMarker.position.x; bp[1] = fireOriginMarker.position.y; bp[2] = fireOriginMarker.position.z;
+  bp[3] = cursorMarker.position.x;     bp[4] = cursorMarker.position.y;     bp[5] = cursorMarker.position.z;
+  bulletGeom.attributes.position.needsUpdate = true;
+  // Muzzle position from gunAnchor + muzzle local.
+  muzzle.getWorldPosition(muzzleMarker.position);
+  // Tracer.
+  const tp = tracerGeom.attributes.position.array;
+  tp[0] = muzzleMarker.position.x; tp[1] = muzzleMarker.position.y; tp[2] = muzzleMarker.position.z;
+  tp[3] = cursorMarker.position.x; tp[4] = cursorMarker.position.y; tp[5] = cursorMarker.position.z;
+  tracerGeom.attributes.position.needsUpdate = true;
+  tracerLine.computeLineDistances();
+
   controls.update();
   renderer.render(scene, camera);
-  requestAnimationFrame(tick);
-}
-tick();
+})();
 </script>
 </body>
 </html>
