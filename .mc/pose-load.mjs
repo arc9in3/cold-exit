@@ -72,7 +72,7 @@ console.log('  dims.arms:', JSON.stringify(diagnostics.dimsArms));
 await page.evaluate(() => {
   document.querySelector('.lil-gui.root').style.display = 'none';
   if (window.__camera) {
-    window.__camera.position.set(0.5, 1.4, 4.5);
+    window.__camera.position.set(2.6, 1.5, 3.4);
     window.__controls.target.set(0, 1.20, 0);
     window.__controls.update();
   }

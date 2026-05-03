@@ -20,7 +20,8 @@ await page.waitForTimeout(1500);
 await page.evaluate(() => {
   document.querySelector('.lil-gui.root').style.display = 'none';
   if (window.__camera) {
-    window.__camera.position.set(2.0, 1.4, 3.8);
+    // Wider 3/4 framing — fits whole rig in shot now that arms reach further.
+    window.__camera.position.set(2.5, 1.5, 5.0);
     window.__controls.target.set(0, 1.10, 0);
     window.__controls.update();
   }

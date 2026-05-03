@@ -1,0 +1,54 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <title>Recruiter Preview</title>
+  <style>
+    body { background: #0c0a08; color: #d8d4cc; font-family: system-ui; padding: 24px; }
+    button { background: #2a2620; color: #d8d4cc; border: 1px solid #3a3530; padding: 8px 14px; cursor: pointer; }
+    button:hover { background: #3a3530; }
+    pre { background: #181612; padding: 12px; border-radius: 4px; }
+  </style>
+</head>
+<body>
+  <h1>Recruiter Preview</h1>
+  <p>Standalone test page for the recruiter modal. Click "Open Recruiter" to see the daily roster card UI.</p>
+  <button id="open">Open Recruiter</button>
+  <button id="open-special">Open with forced special merc</button>
+  <pre id="log">Result will appear here.</pre>
+
+  <script type="module">
+    import { RecruiterUI } from '../src/ui_recruiter.js';
+    import { rollRoster } from '../src/recruiter.js';
+
+    const log = document.getElementById('log');
+    let credits = 8000;
+    const updateLog = (msg) => { log.textContent = `${msg}\nCredits: ${credits}c`; };
+    updateLog('Standing by.');
+
+    const opts = {
+      getCredits: () => credits,
+      spendCredits: (n) => { if (credits < n) return false; credits -= n; return true; },
+      addAgentToRoster: (a) => updateLog(`Hired: ${a.codename} (${a.kind === 'special' ? 'special — ' + a.weapon.label : a.tier})`),
+      unlockedSpecials: new Set(),
+      mercProgress: {},
+      onClose: () => {},
+    };
+
+    const ui = new RecruiterUI(opts);
+    document.getElementById('open').addEventListener('click', async () => {
+      const result = await ui.show();
+      if (!result) updateLog('Walked away.');
+    });
+    // Force a special merc on open by stubbing rollRoster.
+    document.getElementById('open-special').addEventListener('click', async () => {
+      const orig = ui.show.bind(ui);
+      ui.roster = rollRoster(new Set(), { forceSpecial: 'pyre' });
+      ui._render();
+      ui.root.classList.add('show');
+      const result = await new Promise((resolve) => { ui._resolve = resolve; });
+      if (!result) updateLog('Walked away.');
+    });
+  </script>
+</body>
+</html>
