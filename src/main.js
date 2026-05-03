@@ -5593,13 +5593,19 @@ function nearestInteractableEncounter() {
   if (!room || !room._encounter) return null;
   const ent = room._encounter;
   if (!ent.def.interact) return null;
+  // REGRESSION: bug-15 — completed encounters (Sus paid, Fountain
+  // accepted offering, etc.) should not surface the interact prompt.
+  // The encounter's interact() handlers do `if (s.complete) return;`
+  // already, but the prompt was still drawing because this gate only
+  // checked def.interact existence, not state.complete.
+  const s = ent.state;
+  if (s && s.complete) return null;
   // Distance gate — the player must be standing near the encounter
   // anchor (disc / altar / NPC), not just anywhere in the room.
   // Without this gate, walking up to a keycard door at the far end
   // of an encounter room (Shrine, Fountain, etc.) re-opened the
   // encounter prompt instead of unlocking the door. The disc center
   // is stamped on every encounter spawn via _spawnFloorDisc.
-  const s = ent.state;
   const anchor = s?.disc;
   if (anchor && typeof anchor.cx === 'number') {
     const dx = anchor.cx - player.mesh.position.x;
