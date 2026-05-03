@@ -292,7 +292,7 @@ export const MODEL_GRIP_OFFSET = {
   // the bbox center sits roughly between the grip and the muzzle, so
   // the grip ends up about half the gun-length BEHIND the hand.
   // Negative Z pulls the model forward so the grip lands at the palm.
-  'weapons/SM_Police_Gun.glb':               { x: 0, y: 0, z: -0.04 },  // 1911 — was -0.10, pulled forward slightly per user feedback
+  'weapons/SM_Police_Gun.glb':               { x: 0, y: 0.04, z: 0.02 },  // 1911 — up + forward iteration
   'weapons/SM_Civilian_Pistol.glb':          { x: 0, y: 0, z: -0.08 },  // Makarov
   'weapons/SM_Special_Pistol.glb':           { x: 0, y: 0, z: -0.10 },  // .357 Magnum / Desert Eagle
   // Melee — handle is at one end of the mesh, but fitToRadius
