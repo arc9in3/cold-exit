@@ -2175,9 +2175,15 @@ export function updateAnim(rig, state, dt) {
   // weightShift cycles -1..+1 over ~4.5s. Bumped hip roll ~50% so
   // standing characters visibly settle their weight back and forth
   // rather than reading as a mannequin.
-  const idleHeadYaw = Math.sin(a.breathT * 0.35 + 1.2) * 0.22 * idleStandStrength;
-  const idleHipRoll = weightShift * 0.085 * idleStandStrength;
-  const idleShoulderDrop = -weightShift * 0.08 * idleStandStrength;
+  // Idle motion amplitudes — tuned DOWN from the previous values
+  // (head 0.22 → 0.09, hip roll 0.085 → 0.040, shoulder drop 0.08 →
+  // 0.045). Three oscillators on different periods stack, and at the
+  // old amplitudes the resulting motion read as "about to fall over"
+  // rather than "alive but still." Subtle is the goal — a stationary
+  // character should breathe and shift weight, not perform.
+  const idleHeadYaw = Math.sin(a.breathT * 0.35 + 1.2) * 0.09 * idleStandStrength;
+  const idleHipRoll = weightShift * 0.040 * idleStandStrength;
+  const idleShoulderDrop = -weightShift * 0.045 * idleStandStrength;
   // Idle weapon micro-drift — a tiny breath-driven offset on the
   // weapon-side shoulder so a stationary aiming pose has the gun
   // gently rising / falling with the actor's chest. Real shooters
@@ -2327,11 +2333,12 @@ export function updateAnim(rig, state, dt) {
     // raises the LEFT side of the hips, so the apparent stance is
     // weight-on-right. Hips.z gets a hard absolute write at line ~2305
     // (idleHipRoll + gaitHipRoll), so this += stacks cleanly.
-    rig.hips.rotation.z += cf * 0.07;
-    // Chest counter-tilt: shoulders compensate the hip cock.
-    rig.chest.rotation.z = -cf * 0.04;
-    // Head tilt: a touch in the same direction as the chest.
-    rig.head.rotation.z = cf * 0.05;
+    // Amplitudes tuned DOWN from 0.07/0.04/0.05 → 0.035/0.020/0.025
+    // so the contrapposto + idle hip roll don't compound into a big
+    // side-to-side sway.
+    rig.hips.rotation.z += cf * 0.035;
+    rig.chest.rotation.z = -cf * 0.020;
+    rig.head.rotation.z = cf * 0.025;
   }
 
   // --- pose: arms -----------------------------------------------------
