@@ -71,12 +71,26 @@ def wipe_scene():
 
 
 def import_fbx(path, scale, no_leaf_bones):
-    """Import an FBX and return refs to (armature, meshes, actions)."""
+    """Import an FBX and return refs to (armature, meshes, actions).
+
+    Scale handling — Blender's `global_scale` param produces a scaled
+    OBJECT but leaves the bone head/tail values + mesh verts at the
+    source magnitude (so a 1.8m Mixamo character imports as a 180-unit
+    skeleton with object.scale=0.01). On GLB export, the exporter
+    bakes whatever-it-can-bake but the result is still a 0.01-scaled
+    armature → 1cm character in Three.js.
+
+    To avoid that, we use FBX_SCALE_ALL so the importer applies the
+    scale globally INSIDE the operator — vertex positions, bone
+    head/tail, animation curves all multiplied uniformly. The
+    resulting Blender data is in scene units (meters) and exports
+    cleanly to GLB at proper character size.
+    """
+    # Step 1: import at native FBX scale (no global_scale).
     bpy.ops.import_scene.fbx(
         filepath=path,
         use_anim=True,
         ignore_leaf_bones=no_leaf_bones,
-        global_scale=scale,
         # automatic_bone_orientation=False keeps the source pack's
         # local axes — important so existing rigCfg's logicalGroups
         # apply to the exported skeleton without re-mapping.
@@ -85,6 +99,30 @@ def import_fbx(path, scale, no_leaf_bones):
     armature = next((o for o in bpy.context.scene.objects if o.type == 'ARMATURE'), None)
     meshes   = [o for o in bpy.context.scene.objects if o.type == 'MESH']
     actions  = list(bpy.data.actions)
+    if not armature:
+        return armature, meshes, actions
+
+    # Step 2: if the user requested a non-1.0 scale (e.g. 0.01 for
+    # cm→m), apply it to the armature object then bake the transform.
+    # transform_apply with the armature as active scales bone
+    # head/tail values (armature data) AND propagates to child mesh
+    # vertex positions. This is the reliable way to convert cm to m
+    # in Blender 5.1 (global_scale at import keeps the data in cm
+    # and only scales the object transform).
+    if scale != 1.0:
+        bpy.context.view_layer.objects.active = armature
+        bpy.ops.object.select_all(action='DESELECT')
+        armature.select_set(True)
+        for m in meshes:
+            m.select_set(True)
+        armature.scale = (scale, scale, scale)
+        for m in meshes:
+            m.scale = (scale, scale, scale)
+        try:
+            bpy.ops.object.transform_apply(location=False, rotation=False, scale=True)
+        except RuntimeError as e:
+            print(f"[blender] transform_apply warning: {e}", file=sys.stderr)
+
     return armature, meshes, actions
 
 
@@ -240,6 +278,22 @@ def main():
     if args.strip_root_motion:
         n = strip_root_motion(actions, armature)
         print(f"[blender] stripped {n} root-motion fcurves")
+
+    # Diagnostic — print a representative bone's world Y so we can
+    # confirm scale baking worked. A 1.8m character should have its
+    # head bone at world Y ≈ 1.6.
+    if armature:
+        try:
+            import mathutils
+            for bone_name in ['Head', 'mixamorig:Head', 'Bip001-Head', 'head']:
+                pb = armature.pose.bones.get(bone_name) or next(
+                    (b for b in armature.pose.bones if bone_name in b.name), None)
+                if pb:
+                    head_world = armature.matrix_world @ pb.head
+                    print(f"[blender] {pb.name} world Y = {head_world.y:.3f}")
+                    break
+        except Exception as e:
+            print(f"[blender] bone-Y print skipped: {e}")
 
     export_glb(out_glb)
     print(f"[blender] WROTE {out_glb}")

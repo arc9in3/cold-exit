@@ -47,6 +47,14 @@ tmp/
 Assets/*.zip
 Assets/*.unitypackage
 
+# Animation source archives + extracted dirs. Cold Exit ships GLBs
+# converted via tools/blender-fbx-to-glb.py; the source FBX/zip can
+# be re-acquired from upstream packs and don't need version control.
+Assets/models/animations/*.zip
+Assets/models/animations/gaspfix_extracted/
+Assets/models/animations/FBX_Pistol_Starter_27A/
+Assets/models/animations/Universal Animation Library*/
+
 # Chrome DevTools performance traces — accumulating reference snapshots
 # in the repo bloats clones. Keep one canonical trace if needed; toss
 # the rest.
