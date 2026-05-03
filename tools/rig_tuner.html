@@ -819,6 +819,11 @@ const PART_AXIS_MAP = {
     z: ['head.craniumStretchZ'],
     // No taper — head is one sphere radius.
   },
+  jaw: {
+    x: ['head.jawW'],
+    y: ['head.jawH'],
+    z: ['head.jawD'],
+  },
   neck: {
     x: ['head.neckTopR', 'head.neckBotR'],
     y: ['head.neckH'],
@@ -914,6 +919,26 @@ const PART_AXIS_MAP = {
     x: ['arms.shoulderInset'],
     y: ['arms.shoulderInset'],
     z: ['arms.shoulderInset'],
+  },
+  hipJoints: {
+    x: ['legs.hipBulgeR'],
+    y: ['legs.hipBulgeR'],
+    z: ['legs.hipBulgeR'],
+  },
+  kneeJoints: {
+    x: ['legs.kneeBulgeR'],
+    y: ['legs.kneeBulgeR'],
+    z: ['legs.kneeBulgeR'],
+  },
+  shoulderJoints: {
+    x: ['arms.shoulderBulgeR'],
+    y: ['arms.shoulderBulgeR'],
+    z: ['arms.shoulderBulgeR'],
+  },
+  elbowJoints: {
+    x: ['arms.elbowBulgeR'],
+    y: ['arms.elbowBulgeR'],
+    z: ['arms.elbowBulgeR'],
   },
 };
 

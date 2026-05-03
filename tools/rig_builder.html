@@ -1,0 +1,606 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<title>cold-exit · rig builder</title>
+<style>
+  :root { color-scheme: dark; }
+  html, body { margin: 0; padding: 0; width: 100%; height: 100%;
+    background: #0c0c10; color: #cbd2dc;
+    font-family: system-ui, -apple-system, Segoe UI, sans-serif;
+    overflow: hidden; }
+  #stage { position: absolute; inset: 0; }
+  #crumb {
+    position: absolute; top: 10px; left: 14px;
+    font-size: 12px; color: #60697a;
+    background: rgba(14,16,22,0.7);
+    padding: 6px 10px; border-radius: 4px;
+    pointer-events: none; user-select: none;
+  }
+  #crumb b { color: #c9a87a; }
+  #toast {
+    position: absolute; bottom: 20px; left: 50%; transform: translateX(-50%);
+    background: #1f2a18; border: 1px solid #3e5a2e;
+    color: #a8d68a; padding: 8px 14px;
+    border-radius: 4px; font-size: 12px;
+    opacity: 0; transition: opacity 0.3s;
+    pointer-events: none;
+  }
+  #toast.show { opacity: 1; }
+</style>
+<script type="importmap">
+{
+  "imports": {
+    "three": "https://unpkg.com/three@0.161.0/build/three.module.js",
+    "three/addons/": "https://unpkg.com/three@0.161.0/examples/jsm/",
+    "lil-gui": "https://unpkg.com/lil-gui@0.19.2/dist/lil-gui.esm.min.js"
+  }
+}
+</script>
+</head>
+<body>
+<div id="stage"></div>
+<div id="crumb">
+  <b>rig builder</b> · drag to orbit · wheel to zoom ·
+  <span style="color:#a8d68a">add primitives, parent them, position + scale them</span>
+</div>
+<div id="toast"></div>
+<script type="module">
+import * as THREE from 'three';
+import { OrbitControls } from 'three/addons/controls/OrbitControls.js';
+import GUI from 'lil-gui';
+
+// ============================================================
+// SCENE
+// ============================================================
+const stage = document.getElementById('stage');
+const renderer = new THREE.WebGLRenderer({ antialias: true });
+renderer.setPixelRatio(Math.min(2, window.devicePixelRatio || 1));
+renderer.setSize(window.innerWidth, window.innerHeight);
+renderer.shadowMap.enabled = true;
+renderer.shadowMap.type = THREE.PCFSoftShadowMap;
+stage.appendChild(renderer.domElement);
+
+const scene = new THREE.Scene();
+scene.background = new THREE.Color(0x0c0c10);
+
+const aspect = window.innerWidth / window.innerHeight;
+const camera = new THREE.PerspectiveCamera(35, aspect, 0.1, 100);
+camera.position.set(2.6, 2.0, 3.4);
+
+const controls = new OrbitControls(camera, renderer.domElement);
+controls.target.set(0, 1.0, 0);
+controls.enableDamping = true;
+controls.dampingFactor = 0.1;
+controls.update();
+
+// Lighting — same as rig_tuner so what you see here matches in-game.
+scene.add(new THREE.HemisphereLight(0x3a4258, 0x06070a, 0.30));
+const key = new THREE.DirectionalLight(0xffcf96, 1.10);
+key.position.set(3.0, 4.0, 2.0);
+key.castShadow = true;
+key.shadow.mapSize.set(1024, 1024);
+const s = 4;
+key.shadow.camera.left = -s; key.shadow.camera.right = s;
+key.shadow.camera.top = s;   key.shadow.camera.bottom = -s;
+key.shadow.bias = -0.0005;
+scene.add(key);
+scene.add(new THREE.DirectionalLight(0x2a3c5e, 0.40));
+
+const ground = new THREE.Mesh(
+  new THREE.PlaneGeometry(40, 40),
+  new THREE.MeshStandardMaterial({ color: 0x12141a, roughness: 0.95 }),
+);
+ground.rotation.x = -Math.PI / 2;
+ground.receiveShadow = true;
+scene.add(ground);
+scene.add(new THREE.GridHelper(40, 40, 0x1a1c24, 0x0e1014));
+
+// 1m reference pillar (cream-capped) so authoring scale stays anchored.
+(() => {
+  const pillar = new THREE.Mesh(
+    new THREE.CylinderGeometry(0.02, 0.02, 1.85, 8),
+    new THREE.MeshStandardMaterial({ color: 0x3a4050, roughness: 0.85 }),
+  );
+  pillar.position.set(1.4, 1.85 / 2, 0);
+  scene.add(pillar);
+  const cap = new THREE.Mesh(
+    new THREE.CylinderGeometry(0.06, 0.06, 0.005, 16),
+    new THREE.MeshStandardMaterial({ color: 0xc9a87a }),
+  );
+  cap.position.set(1.4, 1.85, 0);
+  scene.add(cap);
+})();
+
+// ============================================================
+// DATA MODEL
+// ============================================================
+//
+// A rig is a flat array of primitives. Each primitive has:
+//   id        — unique string
+//   name      — user-editable label
+//   type      — 'cylinder' | 'sphere' | 'box' | 'cone'
+//   parentId  — null (root, parented to scene) or another primitive's id
+//   pos.{x,y,z}   — local position relative to parent
+//   rot.{x,y,z}   — local euler rotation (radians)
+//   scale.{x,y,z} — local scale
+//   color     — hex string '#rrggbb'
+//   shape     — type-specific dim block:
+//     cylinder: { topR, botR, h, segs }
+//     sphere:   { r, segsW, segsH }
+//     box:      { w, h, d }
+//     cone:     { r, h, segs }
+//
+// The full rig is just an array — no DEFAULT_DIMS, no archetypes, no
+// taper machinery. Save / load via JSON.
+// ============================================================
+
+const STORAGE_KEY = 'cold-exit-rig-builder-v1';
+
+let primitives = [];
+let primIndex = new Map();   // id → primitive
+let meshIndex = new Map();   // id → THREE.Mesh
+let groupIndex = new Map();  // id → THREE.Group (parent target for children)
+let selectedId = null;
+let nextId = 1;
+
+const rootGroup = new THREE.Group();
+scene.add(rootGroup);
+
+function newId(stem = 'part') {
+  return `${stem}_${(nextId++).toString(36)}`;
+}
+
+function defaultPrim(type) {
+  const id = newId(type);
+  const base = {
+    id,
+    name: id,
+    type,
+    parentId: null,
+    pos: { x: 0, y: 1.0, z: 0 },
+    rot: { x: 0, y: 0, z: 0 },
+    scale: { x: 1, y: 1, z: 1 },
+    color: '#3a4048',
+  };
+  if (type === 'cylinder') base.shape = { topR: 0.10, botR: 0.10, h: 0.30, segs: 24 };
+  if (type === 'sphere')   base.shape = { r: 0.12, segsW: 24, segsH: 16 };
+  if (type === 'box')      base.shape = { w: 0.20, h: 0.20, d: 0.20 };
+  if (type === 'cone')     base.shape = { r: 0.12, h: 0.20, segs: 24 };
+  return base;
+}
+
+function buildMeshFor(prim) {
+  let geo;
+  if (prim.type === 'cylinder') {
+    geo = new THREE.CylinderGeometry(prim.shape.topR, prim.shape.botR, prim.shape.h, prim.shape.segs);
+  } else if (prim.type === 'sphere') {
+    geo = new THREE.SphereGeometry(prim.shape.r, prim.shape.segsW, prim.shape.segsH);
+  } else if (prim.type === 'box') {
+    geo = new THREE.BoxGeometry(prim.shape.w, prim.shape.h, prim.shape.d);
+  } else if (prim.type === 'cone') {
+    geo = new THREE.ConeGeometry(prim.shape.r, prim.shape.h, prim.shape.segs);
+  } else {
+    throw new Error('unknown primitive type: ' + prim.type);
+  }
+  const mat = new THREE.MeshStandardMaterial({
+    color: new THREE.Color(prim.color),
+    roughness: 0.85,
+    metalness: 0.05,
+  });
+  const mesh = new THREE.Mesh(geo, mat);
+  mesh.castShadow = true;
+  mesh.receiveShadow = true;
+  return mesh;
+}
+
+// Rebuild the entire scene tree from the primitives array. Called
+// after any data mutation. Cheap because we're talking dozens of
+// primitives, not thousands.
+function rebuild() {
+  // Clear previous
+  for (const m of meshIndex.values()) {
+    m.geometry?.dispose?.();
+    m.material?.dispose?.();
+    m.parent?.remove(m);
+  }
+  for (const g of groupIndex.values()) g.parent?.remove(g);
+  meshIndex = new Map();
+  groupIndex = new Map();
+  primIndex = new Map();
+  for (const p of primitives) primIndex.set(p.id, p);
+
+  // Build groups (parent containers) for every primitive — each
+  // primitive's children attach to its group, not its mesh.
+  for (const p of primitives) {
+    const g = new THREE.Group();
+    g.name = p.name;
+    groupIndex.set(p.id, g);
+  }
+
+  // Parent groups according to parentId
+  for (const p of primitives) {
+    const g = groupIndex.get(p.id);
+    const parent = p.parentId ? groupIndex.get(p.parentId) : rootGroup;
+    parent.add(g);
+    // Local transform on the group
+    g.position.set(p.pos.x, p.pos.y, p.pos.z);
+    g.rotation.set(p.rot.x, p.rot.y, p.rot.z);
+    g.scale.set(p.scale.x, p.scale.y, p.scale.z);
+  }
+
+  // Build mesh inside each group
+  for (const p of primitives) {
+    const g = groupIndex.get(p.id);
+    const m = buildMeshFor(p);
+    g.add(m);
+    meshIndex.set(p.id, m);
+  }
+
+  // Selection ring
+  refreshSelectionVisual();
+}
+
+let selRing = null;
+function refreshSelectionVisual() {
+  if (selRing) { selRing.parent?.remove(selRing); selRing.geometry.dispose(); selRing = null; }
+  if (!selectedId) return;
+  const m = meshIndex.get(selectedId);
+  if (!m) return;
+  // Wire-frame box of the mesh's bounding box
+  m.geometry.computeBoundingBox();
+  const b = m.geometry.boundingBox;
+  const w = b.max.x - b.min.x;
+  const h = b.max.y - b.min.y;
+  const d = b.max.z - b.min.z;
+  const ringGeo = new THREE.BoxGeometry(w * 1.04, h * 1.04, d * 1.04);
+  const edges = new THREE.EdgesGeometry(ringGeo);
+  selRing = new THREE.LineSegments(edges, new THREE.LineBasicMaterial({ color: 0xf2c060 }));
+  selRing.position.set((b.max.x + b.min.x) / 2, (b.max.y + b.min.y) / 2, (b.max.z + b.min.z) / 2);
+  m.add(selRing);
+  ringGeo.dispose();   // edges already extracted
+}
+
+// ============================================================
+// GUI
+// ============================================================
+const gui = new GUI({ title: 'rig builder', width: 360 });
+
+const addFolder = gui.addFolder('add primitive');
+const addOps = {
+  cylinder: () => addPrim('cylinder'),
+  sphere:   () => addPrim('sphere'),
+  box:      () => addPrim('box'),
+  cone:     () => addPrim('cone'),
+};
+addFolder.add(addOps, 'cylinder').name('+ cylinder');
+addFolder.add(addOps, 'sphere').name('+ sphere');
+addFolder.add(addOps, 'box').name('+ box');
+addFolder.add(addOps, 'cone').name('+ cone');
+
+const partsFolder = gui.addFolder('parts');
+let partsList = null;
+
+function rebuildPartsFolder() {
+  if (partsList) partsList.destroy();
+  partsList = partsFolder.addFolder('list');
+  partsList.open();
+  for (const p of primitives) {
+    const labelObj = {
+      select: () => selectPrim(p.id),
+    };
+    partsList.add(labelObj, 'select').name(`${p.name} (${p.type})`);
+  }
+}
+rebuildPartsFolder();
+
+const editorFolder = gui.addFolder('selected');
+let editorControls = [];
+
+function clearEditor() {
+  for (const c of editorControls) c.destroy?.();
+  editorControls = [];
+}
+
+function rebuildEditor() {
+  clearEditor();
+  if (!selectedId) {
+    const noneCtrl = editorFolder.add({ none: '(none — pick a part)' }, 'none').disable();
+    editorControls.push(noneCtrl);
+    return;
+  }
+  const p = primIndex.get(selectedId);
+  if (!p) return;
+
+  // Name + parent
+  editorControls.push(editorFolder.add(p, 'name').onChange(() => {
+    rebuildPartsFolder();
+    rebuild();
+  }));
+
+  const parentChoices = ['(root)', ...primitives
+    .filter(o => o.id !== p.id && !isAncestor(p.id, o.id))
+    .map(o => o.id)];
+  const parentProxy = { parent: p.parentId || '(root)' };
+  editorControls.push(editorFolder.add(parentProxy, 'parent', parentChoices).onChange((v) => {
+    p.parentId = v === '(root)' ? null : v;
+    rebuild();
+  }));
+
+  // Position
+  for (const axis of ['x', 'y', 'z']) {
+    editorControls.push(editorFolder
+      .add(p.pos, axis, -3, 3, 0.005)
+      .name('pos ' + axis)
+      .onChange(rebuild));
+  }
+  // Rotation
+  for (const axis of ['x', 'y', 'z']) {
+    editorControls.push(editorFolder
+      .add(p.rot, axis, -Math.PI, Math.PI, 0.01)
+      .name('rot ' + axis)
+      .onChange(rebuild));
+  }
+  // Scale
+  for (const axis of ['x', 'y', 'z']) {
+    editorControls.push(editorFolder
+      .add(p.scale, axis, 0.05, 5, 0.01)
+      .name('scale ' + axis)
+      .onChange(rebuild));
+  }
+  // Color
+  editorControls.push(editorFolder
+    .addColor(p, 'color')
+    .name('color')
+    .onChange(rebuild));
+
+  // Shape-specific dims
+  if (p.type === 'cylinder') {
+    editorControls.push(editorFolder.add(p.shape, 'topR', 0.001, 1, 0.005).name('top radius').onChange(rebuild));
+    editorControls.push(editorFolder.add(p.shape, 'botR', 0.001, 1, 0.005).name('bot radius').onChange(rebuild));
+    editorControls.push(editorFolder.add(p.shape, 'h',    0.005, 2, 0.005).name('height').onChange(rebuild));
+    editorControls.push(editorFolder.add(p.shape, 'segs', 4, 64, 1).name('segments').onChange(rebuild));
+  } else if (p.type === 'sphere') {
+    editorControls.push(editorFolder.add(p.shape, 'r', 0.005, 1, 0.005).name('radius').onChange(rebuild));
+    editorControls.push(editorFolder.add(p.shape, 'segsW', 4, 64, 1).name('segments W').onChange(rebuild));
+    editorControls.push(editorFolder.add(p.shape, 'segsH', 4, 64, 1).name('segments H').onChange(rebuild));
+  } else if (p.type === 'box') {
+    editorControls.push(editorFolder.add(p.shape, 'w', 0.005, 2, 0.005).name('width').onChange(rebuild));
+    editorControls.push(editorFolder.add(p.shape, 'h', 0.005, 2, 0.005).name('height').onChange(rebuild));
+    editorControls.push(editorFolder.add(p.shape, 'd', 0.005, 2, 0.005).name('depth').onChange(rebuild));
+  } else if (p.type === 'cone') {
+    editorControls.push(editorFolder.add(p.shape, 'r', 0.005, 1, 0.005).name('radius').onChange(rebuild));
+    editorControls.push(editorFolder.add(p.shape, 'h', 0.005, 2, 0.005).name('height').onChange(rebuild));
+    editorControls.push(editorFolder.add(p.shape, 'segs', 4, 64, 1).name('segments').onChange(rebuild));
+  }
+
+  // Mirror this primitive: clones it with X-flipped position. Useful
+  // for symmetric pairs (left/right limb).
+  editorControls.push(editorFolder.add({
+    mirror: () => mirrorPrim(p.id),
+  }, 'mirror').name('mirror across X (clone with -X)'));
+
+  // Delete
+  editorControls.push(editorFolder.add({
+    del: () => deletePrim(p.id),
+  }, 'del').name('delete'));
+}
+
+function isAncestor(maybeAncestorId, descendantId) {
+  // Returns true if maybeAncestorId is an ancestor of descendantId.
+  // Used to prevent setting a primitive's parent to its own descendant.
+  let cur = primIndex.get(descendantId);
+  while (cur) {
+    if (cur.parentId === maybeAncestorId) return true;
+    cur = cur.parentId ? primIndex.get(cur.parentId) : null;
+  }
+  return false;
+}
+
+function addPrim(type) {
+  const p = defaultPrim(type);
+  primitives.push(p);
+  rebuild();
+  rebuildPartsFolder();
+  selectPrim(p.id);
+}
+
+function selectPrim(id) {
+  selectedId = id;
+  refreshSelectionVisual();
+  rebuildEditor();
+}
+
+function deletePrim(id) {
+  // Reparent any children to the deleted primitive's parent.
+  const target = primIndex.get(id);
+  if (!target) return;
+  for (const p of primitives) {
+    if (p.parentId === id) p.parentId = target.parentId;
+  }
+  primitives = primitives.filter(p => p.id !== id);
+  if (selectedId === id) selectedId = null;
+  rebuild();
+  rebuildPartsFolder();
+  rebuildEditor();
+}
+
+function mirrorPrim(id) {
+  const orig = primIndex.get(id);
+  if (!orig) return;
+  const copy = JSON.parse(JSON.stringify(orig));
+  copy.id = newId(orig.type);
+  copy.name = orig.name + '_mirror';
+  copy.pos.x = -orig.pos.x;
+  copy.scale.x = -orig.scale.x;
+  primitives.push(copy);
+  rebuild();
+  rebuildPartsFolder();
+  selectPrim(copy.id);
+}
+
+// ============================================================
+// SAVE / LOAD
+// ============================================================
+const ioFolder = gui.addFolder('save / load');
+ioFolder.add({
+  save: () => {
+    localStorage.setItem(STORAGE_KEY, JSON.stringify(primitives));
+    showToast('Saved to localStorage.');
+  },
+}, 'save').name('save (localStorage)');
+ioFolder.add({
+  load: () => {
+    const raw = localStorage.getItem(STORAGE_KEY);
+    if (!raw) { showToast('No saved rig found.'); return; }
+    try {
+      primitives = JSON.parse(raw);
+      // Re-seed nextId so new prims get unique ids
+      let maxN = 0;
+      for (const p of primitives) {
+        const m = (p.id || '').match(/_(\w+)$/);
+        if (m) {
+          const n = parseInt(m[1], 36);
+          if (!isNaN(n) && n > maxN) maxN = n;
+        }
+      }
+      nextId = maxN + 1;
+      selectedId = null;
+      rebuild();
+      rebuildPartsFolder();
+      rebuildEditor();
+      showToast('Loaded from localStorage.');
+    } catch (e) {
+      showToast('Load failed: ' + e.message);
+    }
+  },
+}, 'load').name('load (localStorage)');
+ioFolder.add({
+  exportJson: () => {
+    const json = JSON.stringify(primitives, null, 2);
+    navigator.clipboard.writeText(json).then(
+      () => showToast('Copied JSON to clipboard.'),
+      () => showToast('Clipboard write failed; see console.'),
+    );
+    console.log('[rig builder] exported JSON:\n', json);
+  },
+}, 'exportJson').name('export → clipboard');
+ioFolder.add({
+  importJson: () => {
+    const txt = window.prompt('Paste rig JSON:');
+    if (!txt) return;
+    try {
+      primitives = JSON.parse(txt);
+      let maxN = 0;
+      for (const p of primitives) {
+        const m = (p.id || '').match(/_(\w+)$/);
+        if (m) {
+          const n = parseInt(m[1], 36);
+          if (!isNaN(n) && n > maxN) maxN = n;
+        }
+      }
+      nextId = maxN + 1;
+      selectedId = null;
+      rebuild();
+      rebuildPartsFolder();
+      rebuildEditor();
+      showToast('Imported.');
+    } catch (e) {
+      showToast('Parse failed: ' + e.message);
+    }
+  },
+}, 'importJson').name('import from prompt');
+ioFolder.add({
+  clear: () => {
+    if (!confirm('Clear all primitives?')) return;
+    primitives = [];
+    selectedId = null;
+    nextId = 1;
+    rebuild();
+    rebuildPartsFolder();
+    rebuildEditor();
+    showToast('Cleared.');
+  },
+}, 'clear').name('clear all');
+
+// ============================================================
+// CLICK-TO-SELECT
+// ============================================================
+const raycaster = new THREE.Raycaster();
+const pointer = new THREE.Vector2();
+renderer.domElement.addEventListener('pointerdown', (e) => {
+  if (e.button !== 0) return;
+  if (controls.enabled === false) return;
+  const rect = renderer.domElement.getBoundingClientRect();
+  pointer.x = ((e.clientX - rect.left) / rect.width) * 2 - 1;
+  pointer.y = -((e.clientY - rect.top) / rect.height) * 2 + 1;
+  raycaster.setFromCamera(pointer, camera);
+  const meshes = Array.from(meshIndex.values());
+  const hits = raycaster.intersectObjects(meshes, false);
+  if (hits.length > 0) {
+    // Reverse-lookup id from mesh
+    const mesh = hits[0].object;
+    for (const [id, m] of meshIndex) {
+      if (m === mesh) { selectPrim(id); break; }
+    }
+  }
+});
+
+// ============================================================
+// TOAST + RENDER LOOP
+// ============================================================
+const toastEl = document.getElementById('toast');
+function showToast(msg) {
+  toastEl.textContent = msg;
+  toastEl.classList.add('show');
+  clearTimeout(showToast._t);
+  showToast._t = setTimeout(() => toastEl.classList.remove('show'), 1800);
+}
+
+window.addEventListener('resize', () => {
+  camera.aspect = window.innerWidth / window.innerHeight;
+  camera.updateProjectionMatrix();
+  renderer.setSize(window.innerWidth, window.innerHeight);
+});
+
+function tick() {
+  controls.update();
+  renderer.render(scene, camera);
+  requestAnimationFrame(tick);
+}
+tick();
+
+// ============================================================
+// SEED — start with a couple of primitives so the scene isn't empty
+// ============================================================
+{
+  const torso = defaultPrim('cylinder');
+  torso.name = 'torso';
+  torso.pos = { x: 0, y: 1.20, z: 0 };
+  torso.shape = { topR: 0.20, botR: 0.18, h: 0.40, segs: 24 };
+  torso.color = '#3a4048';
+  primitives.push(torso);
+
+  const head = defaultPrim('sphere');
+  head.name = 'head';
+  head.parentId = torso.id;
+  head.pos = { x: 0, y: 0.30, z: 0 };
+  head.shape = { r: 0.13, segsW: 24, segsH: 16 };
+  head.color = '#c39066';
+  primitives.push(head);
+}
+rebuild();
+rebuildPartsFolder();
+rebuildEditor();
+
+// ============================================================
+// Debug exposure
+// ============================================================
+window.__rb = {
+  primitives, primIndex, meshIndex, groupIndex,
+  rebuild, addPrim, selectPrim, deletePrim, mirrorPrim,
+};
+
+</script>
+</body>
+</html>
