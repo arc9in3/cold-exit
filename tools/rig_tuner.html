@@ -460,6 +460,34 @@ function buildRigFromPrimitives(primitives) {
   const pelvisPrim = primitives.find(p => p.id === 'pelvis');
   const hipY = pelvisPrim ? pelvisPrim.pos.y : 1.1;
 
+  // Force-update the world transforms once so getWorldPosition / scale
+  // calls below see the assembled hierarchy (groups were just parented
+  // a few lines up — Three.js lazy-evaluates matrixWorld until render).
+  rootGroup.updateWorldMatrix(true, true);
+  // Compute bone lengths in the chest-local frame so the IK solver
+  // (solveTwoBoneIK) can resolve hand targets correctly. The IK code
+  // converts targets to rootPivot.parent.local — the parent is the chest
+  // for arm chains and the hips for leg chains. Bone lengths must be in
+  // the same frame. We get there by measuring world distances and
+  // dividing by the parent's world scale.
+  const _v1 = new THREE.Vector3(), _v2 = new THREE.Vector3();
+  const _scratchScale = new THREE.Vector3();
+  const boneLen = (rootPivot, midPivot) => {
+    if (!rootPivot || !midPivot || !rootPivot.parent) return 0;
+    rootPivot.getWorldPosition(_v1);
+    midPivot.getWorldPosition(_v2);
+    const worldDist = _v1.distanceTo(_v2);
+    rootPivot.parent.getWorldScale(_scratchScale);
+    // Average scale — non-uniform parent scales aren't perfectly handled
+    // by IK anyway; the average is the right approximation.
+    const avg = (_scratchScale.x + _scratchScale.y + _scratchScale.z) / 3;
+    return avg > 1e-6 ? worldDist / avg : worldDist;
+  };
+  const upperArmLen = boneLen(get('lshoulder'), get('lelbow'));
+  const forearmLen  = boneLen(get('lelbow'),    get('lwrist'));
+  const thighLen    = boneLen(get('lhip'),      get('lknee'));
+  const calfLen     = boneLen(get('lknee'),     get('lankle'));
+
   return {
     group: rootGroup,
     hips: get('pelvis'),
@@ -520,8 +548,12 @@ function buildRigFromPrimitives(primitives) {
         && primitives.find(p => p.id === 'pelvis' && (p.scale?.x ?? 1) > 1.4)
         ? { bust: { r: 0.1 } }
         : {},
-      legs: {},
-      arms: {},
+      // Bone lengths in chest-local / hips-local frame, used by the
+      // IK solver (solveTwoBoneIK). Computed empirically above from
+      // the assembled hierarchy so they're correct regardless of
+      // which JSON variant is loaded.
+      legs: { thighH: thighLen, calfH: calfLen },
+      arms: { upperArmH: upperArmLen, forearmH: forearmLen },
     },
     meshes: Array.from(meshes.values()),
     torso: get('chest'), torsoMesh: getMesh('chest'),
@@ -971,8 +1003,13 @@ gui.domElement.addEventListener('focusout', () => { _kbField = null; }, true);
   }, 'savePose').name('save pose to Assets/poses/');
   // Load pose JSON and apply: set joint rotations, IK target positions,
   // hips Y. Missing rotations stay at 0; missing IK targets get disabled.
+  // Side effect: freezes procedural anim — otherwise updateAnim() would
+  // overwrite the pose on the very next frame. The IK solver still
+  // runs on top of the frozen pose so IK-pinned chains (hands on
+  // weapon) keep working.
   const applyPose = (data) => {
     pushUndo();
+    state.pose.freeze = true;
     // Zero everything first so a partial pose doesn't mix with current.
     for (const pivot of jointNames.keys()) pivot.rotation.set(0, 0, 0);
     if (data.rotations) {
@@ -987,10 +1024,15 @@ gui.domElement.addEventListener('focusout', () => { _kbField = null; }, true);
       for (const [name, t] of Object.entries(data.ikTargets)) {
         const m = ikTargetMeshes?.[name];
         if (m) m.position.set(t.x ?? 0, t.y ?? 0, t.z ?? 0);
-        if (ikState?.[name]) ikState[name].enabled = !!t.enabled;
+        if (ikState?.[name]) {
+          ikState[name].enabled = !!t.enabled;
+          if (m) m.visible = !!t.enabled;
+        }
       }
     }
     if (data.hips && typeof data.hips.y === 'number') rig.hips.position.y = data.hips.y;
+    // Sync the freeze checkbox UI so the user sees the state change.
+    gui.controllersRecursive().forEach(c => c.updateDisplay());
     refreshEditorUI();
   };
   const loadProxy = { name: 'rifle-hip' };
