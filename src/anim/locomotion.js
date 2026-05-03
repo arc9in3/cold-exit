@@ -95,8 +95,16 @@ export function selectGaspLocomotion(smCfg, playerState, planarSpeed, velocity, 
   if (!moving) {
     const id = crouched ? 'crouch_idle' : 'stand_idle';
     const s  = smCfg.states[id];
-    return s ? { stateId: id, clip: s.clip, loop: s.loop !== false, speedRef: null,
-                 sector: 'F', bucket: 'idle' } : null;
+    if (!s) return null;
+    // Apply weapon-class swap to idle just like the moving path —
+    // rifle-class weapons should idle in shouldered Rifle pose,
+    // not low-ready Pistol pose.
+    const weaponClass = playerState?.equipped?.class;
+    const wantSuffix = _clipSuffixForWeapon(weaponClass);
+    let clipName = s.clip;
+    if (wantSuffix === 'Rifle' && s.adsClip) clipName = s.adsClip;
+    return { stateId: id, clip: clipName, loop: s.loop !== false, speedRef: null,
+             sector: 'F', bucket: 'idle', weaponClass };
   }
 
   // Speed bucket.
