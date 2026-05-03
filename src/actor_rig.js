@@ -498,27 +498,29 @@ export const DEFAULT_DIMS_FEMALE = {
   },
   arms: {
     shoulderInset: 0.36,    // wider shoulder line
-    // Arms pushed further per follow-up feedback ("looks better but
-    // arms are kinda short"). Comic-style proportions: armspan
-    // significantly past height for visual readability. We can dial
-    // these two values to taste — they're the only thing controlling
-    // arm length.
-    upperArmH: 0.62,
-    forearmH: 0.62,           // matches upperArm so the forearm reads as a clear segment
+    // Arm proportions — heroic / anatomical read. Forearm slightly
+    // longer than upper arm pushes the elbow above midpoint so the
+    // joint reads as the cleavage between two distinct lobes (per
+    // bodyshapes ref) instead of "ball stuck mid-cylinder".
+    //   upperArmH 0.55  — shoulder → elbow
+    //   forearmH  0.65  — elbow → wrist (extends past mid for reach)
+    upperArmH: 0.55,
+    forearmH: 0.65,
+    // Cylinder taper at the elbow seam: upperArmBotR > forearmTopR
+    // by ~25% so the cylinders form a clear inverted step. Combined
+    // with the larger-than-both elbow ball, the joint reads as a
+    // circle popping between two lobes.
     upperArmTopR: 0.085,
-    upperArmBotR: 0.065,
-    // Forearm slimmer than upperArm at the seam so the elbow joint
-    // step reads cleanly (was 0.07 / 0.05, almost matching upperArm
-    // botR 0.065 — looked like one cylinder).
-    forearmTopR: 0.058,
-    forearmBotR: 0.040,
-    shoulderBulgeR: 0.10,
-    shoulderPadR: 0.085,
-    // Bigger elbow joint sphere — the previous 0.06 was smaller than
-    // both adjoining radii and the joint disappeared. 0.095 gives the
-    // 'circle joint' read from the bodyshapes ref.
-    elbowBulgeR: 0.095,
-    wristCuffR: 0.055, wristCuffH: 0.06,
+    upperArmBotR: 0.060,
+    forearmTopR: 0.048,
+    forearmBotR: 0.038,
+    // Shoulder bulge slimmed — was 0.10, dominated the silhouette.
+    // 0.07 reads as a smooth bridge from chest to deltoid, not a
+    // stacked beach ball.
+    shoulderBulgeR: 0.07,
+    // Elbow ball substantially bigger than both adjoining cylinder
+    // radii (0.060 / 0.048) so it clearly pops as a joint sphere.
+    elbowBulgeR: 0.11,
     handW: 0.09, handH: 0.10, handD: 0.13,
     // Bicep pruned for female — slim arms read clean as tapered
     // cylinders + visible elbow joint, no extra muscle lobe needed.
