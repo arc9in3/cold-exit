@@ -1681,7 +1681,7 @@ export function createPlayer(scene) {
     // overwrite whatever color applyCharacterStyle set — that
     // overwrite is what made the body read tan even after the rig
     // was configured all-dark.
-    if (state.hitFlashT > 0) {
+    if (state.hitFlashT > 0 && rig.materials?.bodyMat?.color) {
       const k = state.hitFlashT / Math.max(0.0001, tunables.player.hitFlashTime);
       rig.materials.bodyMat.color.copy(baseBodyColor).lerp(hurtColor, k);
     }
