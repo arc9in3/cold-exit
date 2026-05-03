@@ -32,46 +32,44 @@ function _ensureGaspSmLoaded() {
 const _aimIkTarget = new THREE.Vector3();
 const _aimIkPole = new THREE.Vector3();
 
-// Upper-body IK pass for the GASP rig — runs AFTER the locomotion
-// clip's mixer.update so we OVERWRITE the arm bones with cursor-
-// aimed IK. The chest + head still get yaw/pitch additive deltas
-// via the existing world-space delta math.
+// Upper-body aim for the GASP rig — the locomotion clips already
+// pose the arms holding the gun forward (they're authored as
+// "_Pistol" gun-aim cycles), so we DON'T run a 2-bone IK on the
+// arms. The arms naturally track the cursor via chest yaw, since
+// the upperarm bones are children of the spine chain.
+//
+// The 2-bone IK code (src/anim/ik_two_bone.js) is kept for future
+// non-aim-pose clips but not invoked here — it has math instability
+// on the shoulder bind-pose composition that produced visible arm-
+// orbit-in-circles motion. Plain chest+head additive aim looks
+// correct for the GASP locomotion set.
 function _runUpperBodyIK(rig, state, aimPoint, aimPitch) {
   if (!rig || !rig._fbx) return;
   const fbx = rig._fbx;
-  fbx.armIkCache = fbx.armIkCache || { left: {}, right: {} };
-  // Aim target — where the wrists should converge. For now point
-  // both wrists at the cursor-projected world position. If aimPoint
-  // is null (no cursor target), reach forward in the body's facing.
-  if (aimPoint) {
-    _aimIkTarget.copy(aimPoint);
-  } else {
-    _aimIkTarget.set(0, 1.4, 0).applyMatrix4(rig.group.matrixWorld);
-    _aimIkTarget.z += 2.0;
+  // Apply chest + head world-space additive aim — same snapshot-
+  // restore-multiply pattern as the non-GASP FBX path, but using
+  // the GASP rig's bone references.
+  const aimYaw = state.chestTwist || 0;
+  if (rig.chest && rig.chest.quaternion && rig.chest.parent) {
+    if (!fbx._aimChestBase) fbx._aimChestBase = rig.chest.quaternion.clone();
+    rig.chest.quaternion.copy(fbx._aimChestBase);
+    _aimDeltaE.set(aimPitch * 0.55, aimYaw * 0.60, 0, 'YXZ');
+    _aimDeltaQ.setFromEuler(_aimDeltaE);
+    rig.chest.parent.getWorldQuaternion(_aimParentWorldQ);
+    _aimComposeQ.copy(_aimParentWorldQ).multiply(fbx._aimChestBase);
+    const localDelta = _aimComposeQ.clone().invert().multiply(_aimDeltaQ).multiply(_aimComposeQ);
+    rig.chest.quaternion.multiply(localDelta);
   }
-  // Pole hint — elbow-out direction. World +Y bias keeps the elbow
-  // raised (gun grip pose) instead of letting it drop sideways.
-  _aimIkPole.set(0, 1, 0);
-
-  // Right arm (= code's leftArm — handedness flip).
-  if (rig.leftArm?.shoulder?.pivot && rig.leftArm.elbow && rig.leftArm.wrist) {
-    solveTwoBoneIK(
-      rig.leftArm.shoulder.pivot, rig.leftArm.elbow, rig.leftArm.wrist,
-      _aimIkTarget, _aimIkPole, fbx.armIkCache.left);
+  if (rig.head && rig.head.quaternion && rig.head.parent) {
+    if (!fbx._aimHeadBase) fbx._aimHeadBase = rig.head.quaternion.clone();
+    rig.head.quaternion.copy(fbx._aimHeadBase);
+    _aimDeltaE.set(aimPitch * 0.45, aimYaw * 0.40, 0, 'YXZ');
+    _aimDeltaQ.setFromEuler(_aimDeltaE);
+    rig.head.parent.getWorldQuaternion(_aimParentWorldQ);
+    _aimComposeQ.copy(_aimParentWorldQ).multiply(fbx._aimHeadBase);
+    const localDelta = _aimComposeQ.clone().invert().multiply(_aimDeltaQ).multiply(_aimComposeQ);
+    rig.head.quaternion.multiply(localDelta);
   }
-  // Left arm (= code's rightArm) — only if dual-wielding / akimbo.
-  // Otherwise leave it tucked at the body via the locomotion clip.
-  if (state.offhandEquipped && rig.rightArm?.shoulder?.pivot
-      && rig.rightArm.elbow && rig.rightArm.wrist) {
-    solveTwoBoneIK(
-      rig.rightArm.shoulder.pivot, rig.rightArm.elbow, rig.rightArm.wrist,
-      _aimIkTarget, _aimIkPole, fbx.armIkCache.right);
-  }
-  // Chest + head additive aim — same path the existing FBX block
-  // uses (snapshot-restore-multiply) but kept here for the GASP rig
-  // so locomotion clips don't rotate the chest the wrong way.
-  // Compute a delta from the existing aimYaw / aimPitch sources.
-  // (player.update closes over state.chestTwist + aimPitch above.)
 }
 
 // Lazy-load the player FBX clip-selection state machine. Until the
@@ -1811,6 +1809,16 @@ export function createPlayer(scene) {
         }
         rig.group.position.y = 0;
       }
+      // Crouch sink — the GASP crouch clips drop the hip bone in
+      // bone-local space but the procgen-driven group.position.y
+      // doesn't reflect crouching. To make the character visually
+      // drop into a crouch silhouette (matches gameplay collider /
+      // sight-line), pull the FBX rig group down ~0.3m when crouched.
+      // Eased so transitions read smooth, not snapped.
+      const wantSink = state.crouched ? -0.30 : 0;
+      rig._fbx._crouchSinkY = (rig._fbx._crouchSinkY ?? 0)
+        + (wantSink - (rig._fbx._crouchSinkY ?? 0)) * (1 - Math.exp(-10 * dt));
+      rig.group.position.y += rig._fbx._crouchSinkY;
       // The SkinnedMesh inside the rig may have its OWN position
       // mutated by the loaded clip (some packs author the mesh's
       // root translation rather than a hip-bone position track).

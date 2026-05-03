@@ -208,6 +208,20 @@ function buildRigAdapter(group, mixer, rigCfg = null) {
     const bare = bareBoneCfg(o.name, rigCfg);
     if (bare !== o.name && !bonesByName.has(bare)) bonesByName.set(bare, o);
   });
+  // GLTF/GLB convention: skinned bones often live ONLY inside
+  // SkinnedMesh.skeleton.bones[] — they may not appear as scene-
+  // graph Bone objects with .isBone=true. The traverse above misses
+  // them. This second pass registers anything in skeleton.bones[]
+  // that wasn't already added.
+  group.traverse((o) => {
+    if (!o.isSkinnedMesh || !o.skeleton || !o.skeleton.bones) return;
+    for (const b of o.skeleton.bones) {
+      if (!b || !b.name) continue;
+      if (!bonesByName.has(b.name)) bonesByName.set(b.name, b);
+      const bare = bareBoneCfg(b.name, rigCfg);
+      if (bare !== b.name && !bonesByName.has(bare)) bonesByName.set(bare, b);
+    }
+  });
 
   // Build an empty rig skeleton. Each "joint" is `{ pivot: bone }`
   // for arms/legs (matching the existing rig shape), or a direct

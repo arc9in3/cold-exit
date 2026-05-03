@@ -920,6 +920,11 @@ window.__useGaspMannequin = async () => {
   const playerMod = await import('./player.js');
   await playerMod.swapPlayerToFbxRig(player, scene, `${PACK}/SKM_UEFN_Mannequin.glb`,
                                      { rigId: 'gasp_uefn' });
+  // Bump the rig group scale a touch so the UEFN mannequin matches
+  // the procgen rig's visual size — the bare GLB lands at ~1.8m
+  // which reads slightly small against Cold Exit's existing prop +
+  // weapon scales tuned around the procgen rig.
+  if (player.rig?.group) player.rig.group.scale.setScalar(1.15);
 
   const charMod = await import('./character_fbx.js');
   // Curated subset of clips — the locomotion state machine references
