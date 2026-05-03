@@ -901,6 +901,32 @@ window.__usePistolPack = async () => {
 
   return `pistol pack loaded — ${player.rig.clipNames?.().length} clips: ${player.rig.clipNames?.().join(', ')}`;
 };
+
+// AUTO-LOAD on game start — the Motus pistol pack becomes the default
+// player rig instead of the procgen rig. Procgen stays in scene as a
+// hidden fallback (so __useFbx(null) can flip back).
+//
+// Disable per-session by setting localStorage.coldExitDefaultRig =
+// 'procgen' before reload, or by calling __useFbx(null) once the
+// game's running.
+//
+// Fire-and-forget — if the load fails (missing files), procgen stays
+// visible and the warning lands in console. Wrapped in setTimeout so
+// the rest of main.js boot finishes before the first await yields.
+const _wantFbxDefault = (() => {
+  try { return (localStorage.getItem('coldExitDefaultRig') || 'fbx') !== 'procgen'; }
+  catch (_) { return true; }
+})();
+if (_wantFbxDefault) {
+  setTimeout(async () => {
+    try {
+      const result = await window.__usePistolPack();
+      console.log('[anim] default rig swapped to FBX pistol pack:', result);
+    } catch (err) {
+      console.warn('[anim] FBX auto-load failed; staying on procgen:', err.message);
+    }
+  }, 0);
+}
 const input = new Input(renderer.domElement, camera, groundPlane);
 const combat = new Combat(scene);
 const dummies = new DummyManager(scene);
