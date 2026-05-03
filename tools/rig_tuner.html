@@ -503,7 +503,20 @@ function buildRigFromPrimitives(primitives) {
     leftShoulderAnchor: new THREE.Group(),
     rightShoulderAnchor: new THREE.Group(),
     scale: 1.0,
-    dims: { hipY, torso: { depthRatio: 0.85 }, head: {}, legs: {}, arms: {} },
+    // dims.head.bust presence is the femme-detection marker
+    // updateAnim uses to fire contrapposto idle. We set it whenever
+    // the primitive rig has a 'bandolier' or wide-pelvis-scale signal,
+    // so a feminine builder rig animates with the femme idle pose.
+    dims: {
+      hipY,
+      torso: { depthRatio: 0.85 },
+      head: primitives.find(p => p.id === 'bandolier' || p.id === 'lhip')
+        && primitives.find(p => p.id === 'pelvis' && (p.scale?.x ?? 1) > 1.4)
+        ? { bust: { r: 0.1 } }
+        : {},
+      legs: {},
+      arms: {},
+    },
     meshes: Array.from(meshes.values()),
     torso: get('chest'), torsoMesh: getMesh('chest'),
   };

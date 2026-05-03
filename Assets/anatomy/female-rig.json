@@ -368,5 +368,18 @@
     "color": "#3a4048",
     "opacity": 1,
     "shape": { "topR": 0.075, "botR": 0.1, "h": 0.3, "segs": 24, "topDepth": 1, "botDepth": 1 }
+  },
+  {
+    "id": "bandolier",
+    "name": "bandolier",
+    "type": "box",
+    "parentId": "chest",
+    "pos": { "x": 0, "y": 0.02, "z": 0.13 },
+    "rot": { "x": 0, "y": 0, "z": 0.7 },
+    "scale": { "x": 1, "y": 1, "z": 1 },
+    "scaleChildren": true,
+    "color": "#d24868",
+    "opacity": 1,
+    "shape": { "w": 0.025, "h": 0.30, "d": 0.025 }
   }
 ]
