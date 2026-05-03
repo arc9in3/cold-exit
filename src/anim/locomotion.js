@@ -126,10 +126,12 @@ export function selectGaspLocomotion(smCfg, playerState, planarSpeed, velocity, 
   if (crouched) prefix = 'crouch';
   else if (bucket === 'sprint' && sector !== 'F') prefix = 'run';
 
-  // L/R-only sectors aren't authored in our subset (only FL/FR/BL/BR).
-  // Fold them into the closer half-sector: L→FL or BL based on sign.
-  if (sector === 'L') sector = ang > 0 ? 'BL' : 'FL';
-  if (sector === 'R') sector = ang > 0 ? 'BR' : 'FR';
+  // L/R-only sectors aren't authored in our subset (GASP ships only
+  // F/B + 4 diagonals). Collapse to forward-diagonal by default
+  // (pure side strafe = no back component); fold to back-diagonal
+  // only when ang clearly indicates back-of-side.
+  if (sector === 'L') sector = ang >  Math.PI * 3 / 4 ? 'BL' : 'FL';
+  if (sector === 'R') sector = ang < -Math.PI * 3 / 4 ? 'BR' : 'FR';
 
   const id = `${prefix}_${sector}`;
   let s = smCfg.states[id];
