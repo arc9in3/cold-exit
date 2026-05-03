@@ -104,45 +104,44 @@ function _runUpperBodyIK(rig, state, aimPoint, aimPitch) {
   }
 
   // Step 2: each spine bone above spine_01 + neck + head gets a
-  // LOCAL aim delta. Through the parent chain, deltas compound,
-  // so the arms (children of spine_05's clavicle) inherit the full
-  // chest twist + pitch. Distribution shapes the spine curve.
+  // WORLD-frame aim delta converted to its parent's frame.
+  // Bone-local Euler interpretation depends on axis convention
+  // (UEFN bones have local X along the bone, so a "yaw" around
+  // local Y reads as a lean). Building the delta around world Y
+  // and rotating it into the parent's frame produces correct
+  // pitch + yaw regardless of bone export axes.
   const YAW_WEIGHTS   = [0,    0.10, 0.16, 0.20, 0.24];  // spine_01 is stabilized, skip
   const PITCH_WEIGHTS = [0,    0.10, 0.14, 0.18, 0.20];
-  for (let i = 1; i < fbx._spineChain.length; i++) {
-    const bone = fbx._spineChain[i];
-    if (!bone) continue;
+  const _parentInvW = new THREE.Quaternion();
+  const _parentW    = new THREE.Quaternion();
+  const _deltaWorld = new THREE.Quaternion();
+  const _deltaPar   = new THREE.Quaternion();
+  const applyChain = (bone, yawAmt, pitchAmt) => {
+    if (!bone || !bone.parent) return;
     const bindLocal = fbx._upperBodyBindLocal.get(bone);
-    if (!bindLocal) continue;
+    if (!bindLocal) return;
     bone.quaternion.copy(bindLocal);
-    const yawAmt   = aimYaw   * YAW_WEIGHTS[i];
-    const pitchAmt = aimPitch * PITCH_WEIGHTS[i];
-    if (Math.abs(yawAmt) > 0.001 || Math.abs(pitchAmt) > 0.001) {
-      _aimDeltaE.set(pitchAmt, yawAmt, 0, 'YXZ');
-      _aimDeltaQ.setFromEuler(_aimDeltaE);
-      bone.quaternion.multiply(_aimDeltaQ);
+    if (Math.abs(yawAmt) < 0.001 && Math.abs(pitchAmt) < 0.001) {
+      bone.updateMatrixWorld(true);
+      return;
     }
+    // World-frame delta: yaw around world Y, pitch around world X.
+    _aimDeltaE.set(pitchAmt, yawAmt, 0, 'YXZ');
+    _deltaWorld.setFromEuler(_aimDeltaE);
+    // Convert to parent's local frame: deltaPar = parentW⁻¹ × deltaWorld × parentW
+    bone.parent.getWorldQuaternion(_parentW);
+    _parentInvW.copy(_parentW).invert();
+    _deltaPar.copy(_parentInvW).multiply(_deltaWorld).multiply(_parentW);
+    // bone.local = deltaPar × bindLocal (left-multiply so the rotation
+    // happens in parent's frame around world axes).
+    bone.quaternion.copy(_deltaPar).multiply(bindLocal);
     bone.updateMatrixWorld(true);
+  };
+  for (let i = 1; i < fbx._spineChain.length; i++) {
+    applyChain(fbx._spineChain[i], aimYaw * YAW_WEIGHTS[i], aimPitch * PITCH_WEIGHTS[i]);
   }
-  // Neck + head — same pattern.
-  if (fbx._neckBone) {
-    const b = fbx._neckBone;
-    const bindLocal = fbx._upperBodyBindLocal.get(b);
-    b.quaternion.copy(bindLocal);
-    _aimDeltaE.set(aimPitch * 0.16, aimYaw * 0.10, 0, 'YXZ');
-    _aimDeltaQ.setFromEuler(_aimDeltaE);
-    b.quaternion.multiply(_aimDeltaQ);
-    b.updateMatrixWorld(true);
-  }
-  if (rig.head) {
-    const b = rig.head;
-    const bindLocal = fbx._upperBodyBindLocal.get(b);
-    b.quaternion.copy(bindLocal);
-    _aimDeltaE.set(aimPitch * 0.30, aimYaw * 0.20, 0, 'YXZ');
-    _aimDeltaQ.setFromEuler(_aimDeltaE);
-    b.quaternion.multiply(_aimDeltaQ);
-    b.updateMatrixWorld(true);
-  }
+  applyChain(fbx._neckBone, aimYaw * 0.10, aimPitch * 0.16);
+  applyChain(rig.head,      aimYaw * 0.20, aimPitch * 0.30);
 }
 
 // Lazy-load the player FBX clip-selection state machine. Until the
