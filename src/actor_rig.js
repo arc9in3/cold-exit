@@ -1776,7 +1776,11 @@ export const POSE_TUNABLES = {
     chestLean: 0.26,
     chestMoveLean: 0.0,
     hipPitch: 0.45,
-    headCounterPitch: 0.22,
+    // headCounterPitch ZEROED — the `-chestPitch * 0.6` compensation
+    // in updateAnim already keeps the head ~level as the chest leans
+    // forward. Adding crouch * 0.22 ON TOP over-corrected and tilted
+    // the head BACK during crouch run (face pointed at sky).
+    headCounterPitch: 0.0,
     // gait
     hipRoll: -0.70,
     bobReduction: 1.0,
