@@ -48,6 +48,7 @@
 <script type="module">
 import * as THREE from 'three';
 import { OrbitControls } from 'three/addons/controls/OrbitControls.js';
+import { TransformControls } from 'three/addons/controls/TransformControls.js';
 import GUI from 'lil-gui';
 
 // ============================================================
@@ -152,6 +153,11 @@ let nextId = 1;
 const display = {
   showBones: false,
   boneSize: 0.08,
+  // Gizmo mode for the TransformControls handle on the selected
+  // primitive. 'off' detaches; 'translate' / 'scale' attach the
+  // appropriate handle. (Rotate left out for now — pos + scale are
+  // the primary authoring moves; rotation rarely needs gizmo work.)
+  gizmoMode: 'translate',
 };
 
 const rootGroup = new THREE.Group();
@@ -160,6 +166,49 @@ scene.add(rootGroup);
 function newId(stem = 'part') {
   return `${stem}_${(nextId++).toString(36)}`;
 }
+
+// ============================================================
+// UNDO STACK
+// ============================================================
+// Snapshot the entire primitives array on every mutation that the
+// user can reasonably want to revert. Ctrl+Z pops the most recent
+// snapshot and restores. Cap the stack at 50 entries so an
+// indefinite editing session doesn't accumulate forever.
+const undoStack = [];
+const UNDO_MAX = 50;
+
+function pushUndo() {
+  undoStack.push(JSON.stringify(primitives));
+  if (undoStack.length > UNDO_MAX) undoStack.shift();
+}
+
+function undo() {
+  if (undoStack.length === 0) {
+    showToast('Nothing to undo.');
+    return;
+  }
+  const snap = undoStack.pop();
+  primitives = JSON.parse(snap);
+  // Rebuild the selection if the previously-selected primitive
+  // still exists; otherwise clear selection.
+  if (selectedId && !primitives.find(p => p.id === selectedId)) {
+    selectedId = null;
+  }
+  rebuild();
+  rebuildPartsFolder();
+  rebuildEditor();
+  showToast(`Undo (${undoStack.length} left).`);
+}
+
+window.addEventListener('keydown', (e) => {
+  if ((e.ctrlKey || e.metaKey) && e.key.toLowerCase() === 'z' && !e.shiftKey) {
+    // Skip when typing in a text input (lil-gui slider field, prompt).
+    const tag = document.activeElement?.tagName?.toLowerCase();
+    if (tag === 'input' || tag === 'textarea') return;
+    e.preventDefault();
+    undo();
+  }
+});
 
 function defaultPrim(type) {
   const id = newId(type);
@@ -301,8 +350,51 @@ function rebuild() {
     }
   }
 
-  // Selection ring
+  // Selection ring + gizmo
   refreshSelectionVisual();
+  attachGizmoToSelected();
+}
+
+// ============================================================
+// TRANSFORM GIZMO
+// ============================================================
+// One TransformControls instance, switchable between translate /
+// scale modes. Attached to the selected primitive's group on
+// selection change. Disables orbit controls during drag so the
+// camera doesn't fight the gizmo.
+const tControls = new TransformControls(camera, renderer.domElement);
+tControls.setMode(display.gizmoMode === 'off' ? 'translate' : display.gizmoMode);
+tControls.setSize(0.7);
+tControls.addEventListener('dragging-changed', (e) => {
+  controls.enabled = !e.value;
+  // Drag started — push undo snapshot before any value change.
+  if (e.value) pushUndo();
+  // Drag ended — flush the group's live transform back into the
+  // primitive data so save/export captures the move.
+  if (!e.value && selectedId) {
+    const p = primIndex.get(selectedId);
+    const g = groupIndex.get(selectedId);
+    if (p && g) {
+      p.pos.x = g.position.x;
+      p.pos.y = g.position.y;
+      p.pos.z = g.position.z;
+      p.scale.x = g.scale.x;
+      p.scale.y = g.scale.y;
+      p.scale.z = g.scale.z;
+      rebuildEditor();
+    }
+  }
+});
+scene.add(tControls);
+
+function attachGizmoToSelected() {
+  if (display.gizmoMode === 'off' || !selectedId) {
+    tControls.detach();
+    return;
+  }
+  const g = groupIndex.get(selectedId);
+  if (g) tControls.attach(g);
+  else tControls.detach();
 }
 
 let selRing = null;
@@ -333,6 +425,12 @@ const gui = new GUI({ title: 'rig builder', width: 360 });
 const displayFolder = gui.addFolder('display');
 displayFolder.add(display, 'showBones').name('show bones (axes)').onChange(rebuild);
 displayFolder.add(display, 'boneSize', 0.01, 0.5, 0.01).name('bone size').onChange(rebuild);
+displayFolder.add(display, 'gizmoMode', ['translate', 'scale', 'off']).name('gizmo mode')
+  .onChange((m) => {
+    if (m !== 'off') tControls.setMode(m);
+    attachGizmoToSelected();
+  });
+displayFolder.add({ undo: () => undo() }, 'undo').name('undo (Ctrl+Z)');
 displayFolder.add({
   allTransparent: () => {
     for (const p of primitives) p.opacity = 0.35;
@@ -497,6 +595,7 @@ function isAncestor(maybeAncestorId, descendantId) {
 }
 
 function addPrim(type) {
+  pushUndo();
   const p = defaultPrim(type);
   primitives.push(p);
   rebuild();
@@ -507,10 +606,12 @@ function addPrim(type) {
 function selectPrim(id) {
   selectedId = id;
   refreshSelectionVisual();
+  attachGizmoToSelected();
   rebuildEditor();
 }
 
 function deletePrim(id) {
+  pushUndo();
   // Reparent any children to the deleted primitive's parent.
   const target = primIndex.get(id);
   if (!target) return;
@@ -525,6 +626,7 @@ function deletePrim(id) {
 }
 
 function mirrorPrim(id) {
+  pushUndo();
   const orig = primIndex.get(id);
   if (!orig) return;
   const copy = JSON.parse(JSON.stringify(orig));
