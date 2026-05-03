@@ -497,23 +497,27 @@ export const DEFAULT_DIMS_FEMALE = {
     heel: { w: 0.06, h: 0.06, d: 0.05, y: -0.03, z: -0.08 },
   },
   arms: {
-    shoulderInset: 0.32,    // shoulder width pulled outboard a notch
-    // Arms substantially longer per user feedback ("arms collapsed
-    // onto shoulders, not arms spread out"). Female arms inherit
-    // male-default 0.35/0.30 length unless overridden, and the
-    // narrower female frame made them read truncated. Pushing well
-    // past anatomical for visual readability — armspan now ~30%
-    // greater than height which is comic-style but reads correctly
-    // at game scale.
-    upperArmH: 0.52,
-    forearmH: 0.45,
+    shoulderInset: 0.36,    // wider shoulder line
+    // Arms pushed further per follow-up feedback ("looks better but
+    // arms are kinda short"). Comic-style proportions: armspan
+    // significantly past height for visual readability. We can dial
+    // these two values to taste — they're the only thing controlling
+    // arm length.
+    upperArmH: 0.62,
+    forearmH: 0.62,           // matches upperArm so the forearm reads as a clear segment
     upperArmTopR: 0.085,
     upperArmBotR: 0.065,
-    forearmTopR: 0.07,
-    forearmBotR: 0.05,
+    // Forearm slimmer than upperArm at the seam so the elbow joint
+    // step reads cleanly (was 0.07 / 0.05, almost matching upperArm
+    // botR 0.065 — looked like one cylinder).
+    forearmTopR: 0.058,
+    forearmBotR: 0.040,
     shoulderBulgeR: 0.10,
     shoulderPadR: 0.085,
-    elbowBulgeR: 0.06,
+    // Bigger elbow joint sphere — the previous 0.06 was smaller than
+    // both adjoining radii and the joint disappeared. 0.095 gives the
+    // 'circle joint' read from the bodyshapes ref.
+    elbowBulgeR: 0.095,
     wristCuffR: 0.055, wristCuffH: 0.06,
     handW: 0.09, handH: 0.10, handD: 0.13,
     // Bicep pruned for female — slim arms read clean as tapered
