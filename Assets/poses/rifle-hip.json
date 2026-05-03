@@ -1,12 +1,12 @@
 {
-  "_comment": "Rifle held at hip. IK-driven hand placement: main hand (code 'leftHand' = char's right) on grip near right hip, off hand (code 'rightHand' = char's left) on forepart further forward. Light chest twist + head turn. IK solver computes shoulder + elbow rotations.",
+  "_comment": "Rifle held at hip, ready stance. IK-driven hand placement: main hand (code 'leftHand' = char's right per the rig naming-swap) on grip near right hip, off hand (code 'rightHand' = char's left) on forepart well forward — gun length ~0.6m so off hand 0.6m forward of main hand. Light chest twist + head turn toward target.",
   "rotations": {
-    "chest": { "x": 0, "y": 0.18, "z": 0 },
-    "head":  { "x": 0.05, "y": -0.10, "z": 0 }
+    "chest": { "x": 0.05, "y": 0.20, "z": 0 },
+    "head":  { "x": 0.08, "y": -0.18, "z": 0 }
   },
   "ikTargets": {
-    "leftHand":  { "enabled": true, "x": -0.18, "y": 1.10, "z": 0.28 },
-    "rightHand": { "enabled": true, "x":  0.06, "y": 1.18, "z": 0.55 },
+    "leftHand":  { "enabled": true, "x": -0.20, "y": 1.05, "z": 0.20 },
+    "rightHand": { "enabled": true, "x":  0.10, "y": 1.10, "z": 0.78 },
     "head":      { "enabled": false, "x": 0, "y": 1.7, "z": 1 },
     "leftFoot":  { "enabled": false, "x": -0.13, "y": 0, "z": 0 },
     "rightFoot": { "enabled": false, "x":  0.13, "y": 0, "z": 0 }

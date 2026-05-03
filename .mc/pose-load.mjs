@@ -17,17 +17,20 @@ page.on('console', m => { if (m.type() === 'error' || m.type() === 'warning') co
 await page.goto('http://localhost:8080/tools/rig_tuner.html', { waitUntil: 'networkidle' });
 await page.waitForTimeout(2500);
 
+// POSE_NAME env var picks which pose to load; defaults to rifle-hip.
+const POSE_NAME = process.env.POSE_NAME || 'rifle-hip';
+
 // Drive the lil-gui controls: find the 'load name' input + click the
 // 'load pose from Assets/poses/' button.
-await page.evaluate(async () => {
-  // Find the load-name input + set value to 'rifle-hip'
+await page.evaluate(async (poseName) => {
+  // Find the load-name input + set value
   const inputs = Array.from(document.querySelectorAll('.lil-gui input[type="text"]'));
   const loadNameInput = inputs.find(i => {
     const ctrl = i.closest('.controller');
     return ctrl && ctrl.querySelector('.name')?.textContent.trim() === 'load name';
   });
   if (loadNameInput) {
-    loadNameInput.value = 'rifle-hip';
+    loadNameInput.value = poseName;
     loadNameInput.dispatchEvent(new Event('input', { bubbles: true }));
     loadNameInput.dispatchEvent(new Event('change', { bubbles: true }));
   }
@@ -35,7 +38,7 @@ await page.evaluate(async () => {
   const buttons = Array.from(document.querySelectorAll('.lil-gui button'));
   const loadBtn = buttons.find(b => b.textContent.trim() === 'load pose from Assets/poses/');
   if (loadBtn) loadBtn.click();
-});
+}, POSE_NAME);
 
 // Give IK solver a frame to settle.
 await page.waitForTimeout(500);
@@ -65,17 +68,18 @@ console.log('--- pose diagnostics ---');
 for (const b of diagnostics.bones) console.log(`  ${b.label.padEnd(20)} (${b.x}, ${b.y}, ${b.z})`);
 console.log('  dims.arms:', JSON.stringify(diagnostics.dimsArms));
 
-// Hide GUI for clean capture + 3/4 framing.
+// Hide GUI for clean capture + front 3/4 framing showing both arms.
 await page.evaluate(() => {
   document.querySelector('.lil-gui.root').style.display = 'none';
   if (window.__camera) {
-    window.__camera.position.set(2.2, 1.4, 4.0);
-    window.__controls.target.set(0, 1.10, 0);
+    window.__camera.position.set(0.5, 1.4, 4.5);
+    window.__controls.target.set(0, 1.20, 0);
     window.__controls.update();
   }
 });
 await page.waitForTimeout(200);
 
-await page.screenshot({ path: `${OUT}/_pose-rifle-hip.png` });
+const outPath = `${OUT}/_pose-${POSE_NAME}.png`;
+await page.screenshot({ path: outPath });
 await browser.close();
-console.log('saved:', `${OUT}/_pose-rifle-hip.png`);
+console.log('saved:', outPath);

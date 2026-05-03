@@ -1,0 +1,15 @@
+{
+  "_comment": "Rifle aimed (looking down sights). Both hands raised to chest+ height, gun level with eyeline. Main hand on grip near right shoulder, off hand on forepart well forward. Body squared toward target, head straight forward.",
+  "rotations": {
+    "chest": { "x": -0.10, "y": 0.05, "z": 0 },
+    "head":  { "x": 0, "y": 0, "z": 0 }
+  },
+  "ikTargets": {
+    "leftHand":  { "enabled": true, "x": -0.10, "y": 1.42, "z": 0.30 },
+    "rightHand": { "enabled": true, "x":  0.05, "y": 1.45, "z": 0.85 },
+    "head":      { "enabled": false, "x": 0, "y": 1.7, "z": 1 },
+    "leftFoot":  { "enabled": false, "x": -0.13, "y": 0, "z": 0 },
+    "rightFoot": { "enabled": false, "x":  0.13, "y": 0, "z": 0 }
+  },
+  "hips": { "y": 1.205 }
+}
