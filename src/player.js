@@ -1871,13 +1871,31 @@ export function createPlayer(scene) {
       // crouch-walk doesn't flicker, gentle enough that the
       // standing-up rise isn't a snap. Final position clamped to
       // >=0 so even mid-transition we never go subterranean.
-      // No clamp on the resulting Y — the sink is INTENTIONAL (rig
-      // origin moves below world 0 by 0.35m, mesh feet visually land
-      // at ground). The previous Math.max(0) clamp wiped out the
-      // sink entirely so the player floated mid-air during crouch.
-      const wantSink = state.crouched ? -0.35 : 0;
+      // Foot ground-clamp — replaces the static crouch sink. Reads
+      // the lowest foot bone's world Y AFTER mixer.update applies
+      // the locomotion/crouch clip pose, then sinks the rig group
+      // by exactly that amount so the lowest foot lands at world
+      // Y=0 (ground). Works for any clip — standing, walking,
+      // crouching, idle — without per-clip sink tuning.
+      // Resolved on first call.
+      if (!rig._fbx._footBones) {
+        const bones = rig._fbx.bonesByName;
+        rig._fbx._footBones = ['foot_l', 'foot_r']
+          .map(n => bones?.get(n) || null)
+          .filter(Boolean);
+      }
+      let lowestFootY = Infinity;
+      for (const fb of rig._fbx._footBones) {
+        fb.getWorldPosition(_handTrackV);
+        if (_handTrackV.y < lowestFootY) lowestFootY = _handTrackV.y;
+      }
+      if (lowestFootY === Infinity) lowestFootY = 0;
+      const wantSink = -lowestFootY;
       const cur = rig._fbx._crouchSinkY ?? 0;
-      rig._fbx._crouchSinkY = cur + (wantSink - cur) * (1 - Math.exp(-18 * dt));
+      // Faster lerp during crouch transition (15/s) so feet don't
+      // visibly hover; slower otherwise (8/s) for smooth normal play.
+      const rate = (Math.abs(wantSink - cur) > 0.05) ? 15 : 8;
+      rig._fbx._crouchSinkY = cur + (wantSink - cur) * (1 - Math.exp(-rate * dt));
       rig.group.position.y += rig._fbx._crouchSinkY;
       // The SkinnedMesh inside the rig may have its OWN position
       // mutated by the loaded clip (some packs author the mesh's
