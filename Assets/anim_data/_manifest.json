@@ -1,0 +1,10 @@
+{
+  "_note": "Auto-discovery manifest. Add an entry here when authoring a new rig_compose / rig_parts / scenes / overrides JSON. Keeps the engine + tools from needing to hardcode KNOWN lists. Registry.create loads this; __listComposed / __listRigParts / tools/rig_compose.html read from it.",
+
+  "rigs":         ["mixamo", "motus", "biped", "procgen"],
+  "rigParts":     ["assassin_top", "eve_bottom"],
+  "rigCompose":   ["eve_alt"],
+  "stateMachines":["cold_exit_player"],
+  "overrides":    ["eve"],
+  "scenes":       ["intro_lab"]
+}

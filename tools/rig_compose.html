@@ -136,17 +136,23 @@ const status = (msg, ok = true) => {
   el.style.color = ok ? '#6a8a4a' : '#d68a8a';
 };
 
-// Populate rig-part dropdowns by reading the manifest directory.
-// Static list for now — update when new rig_parts are authored.
-const KNOWN_PARTS = ['assassin_top', 'eve_bottom'];
+// Populate rig-part dropdowns from Assets/anim_data/_manifest.json
+// (the registry loads it at create()). Falls back to a hard-coded
+// list if the manifest is missing.
 const topSel = document.getElementById('cmp-top');
 const botSel = document.getElementById('cmp-bottom');
-for (const id of KNOWN_PARTS) {
-  topSel.add(new Option(id, id));
-  botSel.add(new Option(id, id));
+async function populatePartDropdowns() {
+  const reg = await Registry.create('Assets/anim_data/');
+  const ids = reg.list('rigParts');
+  const list = ids.length ? ids : ['assassin_top', 'eve_bottom'];
+  for (const id of list) {
+    topSel.add(new Option(id, id));
+    botSel.add(new Option(id, id));
+  }
+  topSel.value = list.find(id => id.endsWith('_top')) || list[0];
+  botSel.value = list.find(id => id.endsWith('_bottom')) || list[list.length - 1];
 }
-topSel.value = 'assassin_top';
-botSel.value = 'eve_bottom';
+await populatePartDropdowns();
 
 function buildCmpJson() {
   const id = document.getElementById('cmp-id').value || 'untitled';

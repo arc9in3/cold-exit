@@ -21,9 +21,10 @@
 const SCHEMA_COMPATIBLE_DEFAULT = [1];
 
 export class Registry {
-  constructor(basePath, version) {
+  constructor(basePath, version, manifest = null) {
     this.basePath = basePath.endsWith('/') ? basePath : basePath + '/';
     this.version = version;
+    this.manifest = manifest;         // _manifest.json (or null if missing)
     this._rigs = new Map();           // id → parsed rig config
     this._stateMachines = new Map();  // id → parsed SM config
     this._overrides = new Map();      // id → parsed override config
@@ -31,6 +32,13 @@ export class Registry {
     this._composes = new Map();       // id → parsed compose config
     this._scenes = new Map();         // id → parsed scene config
     this._clipMeta = new Map();       // (rigId, clipName) → metadata
+  }
+
+  // List known ids by kind, from the manifest. Returns [] if no
+  // manifest is present (callers fall back to their own enumeration).
+  list(kind) {
+    if (!this.manifest) return [];
+    return this.manifest[kind] || [];
   }
 
   // Async factory. Loads schema version + all rig configs (small set,
@@ -44,10 +52,18 @@ export class Registry {
     if (!compatible.includes(ver.schemaVersion)) {
       throw new Error(`[anim/registry] schema version ${ver.schemaVersion} not in compatible set ${compatible}`);
     }
-    const reg = new Registry(basePath, ver);
+    // Optional discovery manifest at _manifest.json. Lists all
+    // available rig_compose / rig_parts / scenes / overrides ids so
+    // the engine + tools don't hardcode KNOWN lists. Missing manifest
+    // is non-fatal — list() returns [] and callers fall back.
+    const manifest = await fetchJson(`${basePath}_manifest.json`).catch(() => null);
+    const reg = new Registry(basePath, ver, manifest);
     // Eager-load rig configs — there are only a handful and consumers
-    // expect synchronous lookup via reg.rig(id).
-    for (const id of ['mixamo', 'motus', 'biped', 'procgen']) {
+    // expect synchronous lookup via reg.rig(id). The manifest's
+    // `rigs` list controls which ids get loaded; falls back to a
+    // hard-coded set when no manifest exists.
+    const rigIds = (manifest && manifest.rigs) || ['mixamo', 'motus', 'biped', 'procgen'];
+    for (const id of rigIds) {
       try {
         const cfg = await fetchJson(`${reg.basePath}rigs/${id}.json`);
         reg._rigs.set(id, cfg);

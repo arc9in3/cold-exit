@@ -757,22 +757,24 @@ window.__animDebug = window.__animDebug || false;
 //   these probe a hard-coded set of known ids. Keep in sync with the
 //   files actually in Assets/anim_data/{rig_compose,rig_parts}/.
 window.__listComposed = async () => {
-  const KNOWN = ['eve_alt'];
   const reg = window.__animRegistry;
   if (!reg) return 'registry not warmed';
+  const ids = reg.list('rigCompose');
+  if (!ids.length) return 'no rigCompose entries in _manifest.json';
   const out = {};
-  for (const id of KNOWN) {
+  for (const id of ids) {
     out[id] = await reg.compose(id).catch(e => `error: ${e.message}`);
   }
   console.table(out);
   return out;
 };
 window.__listRigParts = async () => {
-  const KNOWN = ['assassin_top', 'eve_bottom'];
   const reg = window.__animRegistry;
   if (!reg) return 'registry not warmed';
+  const ids = reg.list('rigParts');
+  if (!ids.length) return 'no rigParts entries in _manifest.json';
   const out = {};
-  for (const id of KNOWN) {
+  for (const id of ids) {
     out[id] = await reg.rigPart(id).catch(e => `error: ${e.message}`);
   }
   console.table(out);
