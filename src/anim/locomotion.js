@@ -64,15 +64,17 @@ export function bodyLocalAngle(velocity, bodyYaw) {
   return Math.atan2(-localX, localZ);
 }
 
-// Map a weapon.class to a GASP clip-set suffix. Pistol-style grips
-// (one-handed low-ready) get the _Pistol clips; rifle-style grips
-// (two-handed shouldered) get the _Rifle clips. Melee falls back to
-// _Pistol since GASP doesn't ship melee-stance clips.
+// Map a weapon.class to a GASP clip-set suffix.
+//   Rifle           → two-handed shouldered (rifle/shotgun/sniper/lmg)
+//   OneHand_Pistol  → one-handed pistol grip (pistol/revolver)
+//   Pistol          → two-handed low-ready (smg/flame/melee/default)
 function _clipSuffixForWeapon(weaponClass) {
   switch (weaponClass) {
     case 'rifle': case 'shotgun': case 'sniper': case 'lmg':
       return 'Rifle';
-    case 'pistol': case 'smg': case 'revolver': case 'flame':
+    case 'pistol': case 'revolver':
+      return 'OneHand_Pistol';
+    case 'smg': case 'flame':
     case 'melee': case undefined: case null:
     default:
       return 'Pistol';
@@ -141,20 +143,22 @@ export function selectGaspLocomotion(smCfg, playerState, planarSpeed, velocity, 
   }
   if (!s) return null;
 
-  // Weapon-class swap — pistols/SMGs/revolvers stay on _Pistol clips
-  // (one-handed low-ready); rifles/shotguns/snipers/LMGs swap to
-  // _Rifle clips (two-handed shouldered). The state-machine entry
-  // is keyed off the BASE clip; we substitute the suffix at the
-  // last segment of the clip name.
+  // Weapon-class swap — substitute the suffix on the base clip
+  // name based on weapon class. The state-machine entry is keyed
+  // off the BASE _Pistol clip; we swap to _Rifle (rifle stance)
+  // or _OneHand_Pistol (pistol-only stance) when appropriate.
   const weaponClass = playerState?.equipped?.class;
   const wantSuffix = _clipSuffixForWeapon(weaponClass);
   let clipName = s.clip;
   if (wantSuffix === 'Rifle' && clipName.endsWith('_Pistol')) {
     const candidate = clipName.slice(0, -'_Pistol'.length) + '_Rifle';
-    // Only swap if we actually have the _Rifle variant authored;
-    // otherwise stay on _Pistol so the state still resolves.
     if (s.adsClip || (smCfg._availableClips && smCfg._availableClips.has(candidate))) {
       clipName = s.adsClip || candidate;
+    }
+  } else if (wantSuffix === 'OneHand_Pistol' && clipName.endsWith('_Pistol')) {
+    const candidate = clipName.slice(0, -'_Pistol'.length) + '_OneHand_Pistol';
+    if (s.oneHandClip || (smCfg._availableClips && smCfg._availableClips.has(candidate))) {
+      clipName = s.oneHandClip || candidate;
     }
   }
 

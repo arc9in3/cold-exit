@@ -973,6 +973,21 @@ window.__useGaspMannequin = async () => {
     'M_Neutral_Crouch_Loop_F_Rifle',  'M_Neutral_Crouch_Loop_B_Rifle',
     'M_Neutral_Crouch_Loop_FL_Rifle', 'M_Neutral_Crouch_Loop_FR_Rifle',
     'M_Neutral_Crouch_Loop_BL_Rifle', 'M_Neutral_Crouch_Loop_BR_Rifle',
+    // One-handed pistol stance — selectGaspLocomotion swaps to these
+    // for pistol/revolver weapon class. Off-hand swings naturally
+    // at the side (procedural pose via tools/blender-onehand-pistol.py).
+    'M_Neutral_Stand_Idle_Loop_OneHand_Pistol',
+    'M_Neutral_Crouch_Idle_Loop_OneHand_Pistol',
+    'M_Neutral_Walk_Loop_F_OneHand_Pistol',  'M_Neutral_Walk_Loop_B_OneHand_Pistol',
+    'M_Neutral_Walk_Loop_FL_OneHand_Pistol', 'M_Neutral_Walk_Loop_FR_OneHand_Pistol',
+    'M_Neutral_Walk_Loop_BL_OneHand_Pistol', 'M_Neutral_Walk_Loop_BR_OneHand_Pistol',
+    'M_Neutral_Run_Loop_F_OneHand_Pistol',   'M_Neutral_Run_Loop_B_OneHand_Pistol',
+    'M_Neutral_Run_Loop_FL_OneHand_Pistol',  'M_Neutral_Run_Loop_FR_OneHand_Pistol',
+    'M_Neutral_Run_Loop_BL_OneHand_Pistol',  'M_Neutral_Run_Loop_BR_OneHand_Pistol',
+    'M_Neutral_Sprint_Loop_F_OneHand_Pistol',
+    'M_Neutral_Crouch_Loop_F_OneHand_Pistol',  'M_Neutral_Crouch_Loop_B_OneHand_Pistol',
+    'M_Neutral_Crouch_Loop_FL_OneHand_Pistol', 'M_Neutral_Crouch_Loop_FR_OneHand_Pistol',
+    'M_Neutral_Crouch_Loop_BL_OneHand_Pistol', 'M_Neutral_Crouch_Loop_BR_OneHand_Pistol',
   ];
   for (const n of CLIPS) {
     try {
