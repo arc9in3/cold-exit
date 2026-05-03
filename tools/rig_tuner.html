@@ -183,6 +183,13 @@ const state = {
     selected: 'chest',
     scaleX: 1.0, scaleY: 1.0, scaleZ: 1.0,
     lastX: 1.0,  lastY: 1.0,  lastZ: 1.0,
+    // Taper sliders — scale ONLY the top or bottom radius of a
+    // tapered-cylinder part, so a chest can be made shoulder-heavy
+    // (taperTop > 1) or hip-heavy (taperBot > 1) independent of
+    // overall width. Sphere parts (head) ignore these — they have
+    // only one radius and PART_AXIS_MAP omits xTop/xBot.
+    taperTop: 1.0, taperBot: 1.0,
+    lastTaperTop: 1.0, lastTaperBot: 1.0,
     // Per-part mirror + offset, keyed by part name. Mirror flips the
     // mesh scale on the chosen axis (negative scale). Offsets shift
     // the mesh.position. Both apply ONLY to the targeted part — they
@@ -606,6 +613,47 @@ gui.domElement.addEventListener('focusout', () => { _kbField = null; }, true);
 {
   const f = gui.addFolder('pose');
   f.add(state.pose, 'preset', Object.keys(POSE_PRESETS)).name('preset').onChange(applyPreset);
+  // T-pose action — freezes the procedural anim and writes the
+  // canonical reference pose to the rig: arms straight out at ±π/2,
+  // every other joint zeroed. Useful for art capture and to verify
+  // dim changes without anim noise. Press again or pick a different
+  // preset to leave T-pose (anim resumes when freeze is unticked).
+  f.add({
+    tpose: () => {
+      if (!rig) return;
+      state.pose.freeze = true;
+      const zero = (g) => { if (g) g.rotation.set(0, 0, 0); };
+      zero(rig.hips);
+      zero(rig.stomach);
+      zero(rig.chest);
+      zero(rig.neck);
+      zero(rig.head);
+      if (rig.leftArm) {
+        rig.leftArm.shoulder.pivot.rotation.set(0, 0, +Math.PI / 2);
+        zero(rig.leftArm.elbow);
+        zero(rig.leftArm.forearm.pivot);
+        zero(rig.leftArm.wrist);
+        if (rig.leftArm.hand?.pivot) zero(rig.leftArm.hand.pivot);
+      }
+      if (rig.rightArm) {
+        rig.rightArm.shoulder.pivot.rotation.set(0, 0, -Math.PI / 2);
+        zero(rig.rightArm.elbow);
+        zero(rig.rightArm.forearm.pivot);
+        zero(rig.rightArm.wrist);
+        if (rig.rightArm.hand?.pivot) zero(rig.rightArm.hand.pivot);
+      }
+      for (const leg of [rig.leftLeg, rig.rightLeg]) {
+        if (!leg) continue;
+        zero(leg.thigh.pivot);
+        zero(leg.knee);
+        zero(leg.calf.pivot);
+        zero(leg.ankle);
+        if (leg.foot?.pivot) zero(leg.foot.pivot);
+      }
+      // Refresh the freeze checkbox display so it reflects the new state.
+      gui.controllersRecursive().forEach(c => c.updateDisplay?.());
+    },
+  }, 'tpose').name('T-pose');
   poseControls.push(f.add(state.pose, 'freeze').name('freeze (pause anim)'));
   poseControls.push(f.add(state.pose, 'speed', 0, 6, 0.05).name('speed (walk/run)').onChange(() => refreshGaitGate()));
   poseControls.push(f.add(state.pose, 'aimYaw',  -1.5, 1.5, 0.01).name('aim yaw'));
@@ -766,26 +814,35 @@ const PART_AXIS_MAP = {
     x: ['head.craniumR'],
     y: ['head.craniumStretchY'],
     z: ['head.craniumStretchZ'],
+    // No taper — head is one sphere radius.
   },
   neck: {
     x: ['head.neckTopR', 'head.neckBotR'],
     y: ['head.neckH'],
     z: ['head.neckTopR', 'head.neckBotR'],
+    xTop: ['head.neckTopR'],
+    xBot: ['head.neckBotR'],
   },
   chest: {
     x: ['torso.chestTopR', 'torso.chestBotR'],
     y: ['torso.chestH'],
     z: ['torso.chestDepth'],
+    xTop: ['torso.chestTopR'],
+    xBot: ['torso.chestBotR'],
   },
   stomach: {
     x: ['torso.stomachTopR', 'torso.stomachBotR'],
     y: ['torso.stomachH'],
     z: ['torso.stomachDepth'],
+    xTop: ['torso.stomachTopR'],
+    xBot: ['torso.stomachBotR'],
   },
   hips: {
     x: ['torso.pelvisTopR', 'torso.pelvisBotR', 'torso.hipBowl.r'],
     y: ['torso.pelvisH', 'torso.hipBowl.scaleY'],
     z: ['torso.pelvisDepth', 'torso.hipBowl.scaleZ'],
+    xTop: ['torso.pelvisTopR'],   // iliac crest width
+    xBot: ['torso.pelvisBotR'],   // pubic bone width
   },
   bust: {
     x: ['head.bust.r', 'head.bust.separationX'],
@@ -801,11 +858,15 @@ const PART_AXIS_MAP = {
     x: ['legs.thighTopR', 'legs.thighBotR'],
     y: ['legs.thighH'],
     z: ['legs.thighTopR', 'legs.thighBotR'],
+    xTop: ['legs.thighTopR'],
+    xBot: ['legs.thighBotR'],
   },
   calves: {
     x: ['legs.calfTopR', 'legs.calfBotR'],
     y: ['legs.calfH'],
     z: ['legs.calfTopR', 'legs.calfBotR'],
+    xTop: ['legs.calfTopR'],
+    xBot: ['legs.calfBotR'],
   },
   feet: {
     x: ['legs.footW'],
@@ -816,11 +877,15 @@ const PART_AXIS_MAP = {
     x: ['arms.upperArmTopR', 'arms.upperArmBotR'],
     y: ['arms.upperArmH'],
     z: ['arms.upperArmTopR', 'arms.upperArmBotR'],
+    xTop: ['arms.upperArmTopR'],
+    xBot: ['arms.upperArmBotR'],
   },
   forearms: {
     x: ['arms.forearmTopR', 'arms.forearmBotR'],
     y: ['arms.forearmH'],
     z: ['arms.forearmTopR', 'arms.forearmBotR'],
+    xTop: ['arms.forearmTopR'],
+    xBot: ['arms.forearmBotR'],
   },
   hands: {
     x: ['arms.handW'],
@@ -863,6 +928,28 @@ function applyPartAxis(part, axis, newValue) {
     }
   }
   state.parter['last' + axis.toUpperCase()] = newValue;
+}
+
+// Taper: scale only the top OR bottom radius of a tapered-cylinder
+// part. Lets users dial a "shoulder-heavy chest" (taperTop > 1) or
+// "hip-heavy thigh" (taperBot > 1) without affecting the other end.
+// Sphere parts that don't define xTop/xBot in PART_AXIS_MAP no-op
+// silently — taper sliders for them have no effect.
+function applyPartTaper(part, which, newValue) {
+  const map = PART_AXIS_MAP[part];
+  const key = 'x' + which;        // 'xTop' or 'xBot'
+  if (!map || !map[key]) return;
+  const lastKey = 'lastTaper' + which;
+  const last = state.parter[lastKey];
+  if (last === 0) return;
+  const delta = newValue / last;
+  for (const path of map[key]) {
+    const cur = getDimByPath(state.dims, path);
+    if (typeof cur === 'number') {
+      setDimByPath(state.dims, path, cur * delta);
+    }
+  }
+  state.parter[lastKey] = newValue;
 }
 
 // Part name → list of mesh refs to transform (mirror / offset).
@@ -944,10 +1031,12 @@ function rebuildParterFolder() {
   parterFolder.add(state.parter, 'selected', Object.keys(PART_AXIS_MAP))
     .name('selected part')
     .onChange(() => {
-      // Reset scale sliders to 1.0 (current dims = new baseline).
+      // Reset scale + taper sliders to 1.0 (current dims = new baseline).
       state.parter.scaleX = state.parter.lastX = 1.0;
       state.parter.scaleY = state.parter.lastY = 1.0;
       state.parter.scaleZ = state.parter.lastZ = 1.0;
+      state.parter.taperTop = state.parter.lastTaperTop = 1.0;
+      state.parter.taperBot = state.parter.lastTaperBot = 1.0;
       // Load the saved mirror+offset for this part into the editor
       // controls (or zeros if this is the first time it's been
       // selected). Persisted in state.parter.transforms keyed by name.
@@ -958,17 +1047,20 @@ function rebuildParterFolder() {
       state.parter.offZ = saved.offZ || 0;
       for (const c of parterFolder.controllers) c.updateDisplay();
     });
-  // Wide min/max so typed values "override" without practical clamping
-  // (anything from 0.01 → 100 is acceptable). Without min/max,
-  // lil-gui's text-input variant only fires onChange on blur/enter
-  // and ignores live keystrokes — the slider+input variant responds
-  // continuously.
-  parterFolder.add(state.parter, 'scaleX', 0.01, 100, 0.01).name('scale X (width)')
+  // Clamps 0.01 → 3 per user spec — covers any reasonable body-shape
+  // tuning while preventing accidental wild values that hide the rig.
+  parterFolder.add(state.parter, 'scaleX', 0.01, 3, 0.01).name('scale X (width)')
     .onChange((v) => { applyPartAxis(state.parter.selected, 'x', v); rebuildRig(); });
-  parterFolder.add(state.parter, 'scaleY', 0.01, 100, 0.01).name('scale Y (height)')
+  parterFolder.add(state.parter, 'scaleY', 0.01, 3, 0.01).name('scale Y (height)')
     .onChange((v) => { applyPartAxis(state.parter.selected, 'y', v); rebuildRig(); });
-  parterFolder.add(state.parter, 'scaleZ', 0.01, 100, 0.01).name('scale Z (depth)')
+  parterFolder.add(state.parter, 'scaleZ', 0.01, 3, 0.01).name('scale Z (depth)')
     .onChange((v) => { applyPartAxis(state.parter.selected, 'z', v); rebuildRig(); });
+  // Taper top + bottom — only apply to parts that define xTop / xBot
+  // in PART_AXIS_MAP (tapered cylinders). Sphere/box parts no-op.
+  parterFolder.add(state.parter, 'taperTop', 0.01, 3, 0.01).name('taper top')
+    .onChange((v) => { applyPartTaper(state.parter.selected, 'Top', v); rebuildRig(); });
+  parterFolder.add(state.parter, 'taperBot', 0.01, 3, 0.01).name('taper bottom')
+    .onChange((v) => { applyPartTaper(state.parter.selected, 'Bot', v); rebuildRig(); });
 
   // Per-part mirror + offset. Edited values are saved into
   // state.parter.transforms[selected] on change so they persist
