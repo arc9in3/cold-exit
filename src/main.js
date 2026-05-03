@@ -669,6 +669,23 @@ window.__useFbx = async (url) => {
   return `loaded ${url}, clips: ${player.rig.clipNames?.().join(', ')}`;
 };
 
+// Console: __useEve()           — load Assets/models/characters/eve.glb
+//          __useEveDetailed()   — load eve1.glb (24MB, more polys/textures)
+//          __useEveWithUAL()    — eve.glb + Universal Animation Library
+window.__useEve = async () => {
+  return await window.__useFbx('Assets/models/characters/eve.glb');
+};
+window.__useEveDetailed = async () => {
+  return await window.__useFbx('Assets/models/characters/eve1.glb');
+};
+window.__useEveWithUAL = async () => {
+  await window.__useFbx('Assets/models/characters/eve.glb');
+  const charMod = await import('./character_fbx.js');
+  await charMod.loadAnimationFBX(player.rig,
+    'Assets/models/animations/Universal%20Animation%20Library%5BStandard%5D/Unreal-Godot/UAL1_Standard.glb');
+  return `eve.glb + UAL clips: ${player.rig.clipNames?.().length} total`;
+};
+
 // Load the Motus Digital pistol pack — base mesh + skeleton + 16
 // movement / aim / fire / jump animations all merged into one mixer.
 // player.update's clip-name mapping already knows the W1_* names so

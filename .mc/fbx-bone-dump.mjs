@@ -35,11 +35,16 @@ await page.goto('http://localhost:8080/tools/rig_tuner.html', { waitUntil: 'netw
 await page.waitForTimeout(1500);
 
 const out = await page.evaluate(async (url) => {
-  const FBXLoader = (await import('https://unpkg.com/three@0.161.0/examples/jsm/loaders/FBXLoader.js')).FBXLoader;
+  const isGLB = /\.(glb|gltf)$/i.test(url);
+  const Loader = isGLB
+    ? (await import('https://unpkg.com/three@0.161.0/examples/jsm/loaders/GLTFLoader.js')).GLTFLoader
+    : (await import('https://unpkg.com/three@0.161.0/examples/jsm/loaders/FBXLoader.js')).FBXLoader;
   const THREE = await import('https://unpkg.com/three@0.161.0/build/three.module.js');
-  const loader = new FBXLoader();
+  const loader = new Loader();
   return new Promise((resolve, reject) => {
-    loader.load(url, (group) => {
+    loader.load(url, (loaded) => {
+      const group = loaded.scene || loaded;
+      const animations = loaded.animations || group.animations || [];
       const bones = [];
       const meshes = [];
       group.traverse(o => {
@@ -50,9 +55,11 @@ const out = await page.evaluate(async (url) => {
       resolve({
         url,
         boneCount: bones.length,
-        bones,
+        bones: bones.slice(0, 60),  // truncate for readability
+        boneTotal: bones.length,
         meshes,
-        clipNames: (group.animations || []).map(c => `${c.name} (${c.duration.toFixed(2)}s)`),
+        clipNames: animations.map(c => `${c.name} (${c.duration.toFixed(2)}s)`),
+        clipCount: animations.length,
       });
     }, undefined, e => resolve({ url, error: String(e?.message || e) }));
   });

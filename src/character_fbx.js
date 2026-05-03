@@ -50,6 +50,7 @@
 
 import * as THREE from 'three';
 import { FBXLoader } from 'three/addons/loaders/FBXLoader.js';
+import { GLTFLoader } from 'three/addons/loaders/GLTFLoader.js';
 
 // Bare bone names (without the optional 'mixamorig:' prefix).
 // Both Mixamo (mixamorig:Hips) and Motus Digital (Hips) export packs
@@ -85,12 +86,41 @@ const BONE_TO_CODE = {
   'RightUpLeg':   { path: 'leftLeg.thigh.pivot' },
   'RightLeg':     { path: 'leftLeg.knee' },
   'RightFoot':    { path: 'leftLeg.ankle' },
+
+  // 3ds Max Biped naming (Bip001-* prefix). eve.glb uses this scheme,
+  // and bones often have a numeric suffix (Bip001-Pelvis_349) that
+  // bareBone() handles via partial match further down.
+  'Bip001-Pelvis':       { path: 'hips' },
+  'Bip001-Spine':        { path: 'stomach' },
+  'Bip001-Spine1':       { path: 'chest' },
+  'Bip001-Neck':         { path: 'neck' },
+  'Bip001-Head':         { path: 'head' },
+  // Biped's L/R follows the same handedness flip — char's Left = code rightArm.
+  'Bip001-L-Clavicle':   { path: 'rightArm.shoulder.pivot' },
+  'Bip001-L-UpperArm':   { path: 'rightArm.shoulder.pivot' },
+  'Bip001-L-Forearm':    { path: 'rightArm.elbow' },
+  'Bip001-L-Hand':       { path: 'rightArm.wrist' },
+  'Bip001-R-Clavicle':   { path: 'leftArm.shoulder.pivot' },
+  'Bip001-R-UpperArm':   { path: 'leftArm.shoulder.pivot' },
+  'Bip001-R-Forearm':    { path: 'leftArm.elbow' },
+  'Bip001-R-Hand':       { path: 'leftArm.wrist' },
+  'Bip001-L-Thigh':      { path: 'rightLeg.thigh.pivot' },
+  'Bip001-L-Calf':       { path: 'rightLeg.knee' },
+  'Bip001-L-Foot':       { path: 'rightLeg.ankle' },
+  'Bip001-R-Thigh':      { path: 'leftLeg.thigh.pivot' },
+  'Bip001-R-Calf':       { path: 'leftLeg.knee' },
+  'Bip001-R-Foot':       { path: 'leftLeg.ankle' },
 };
 
-// Lookup helper — strips 'mixamorig:' prefix if present.
+// Lookup helper — strips 'mixamorig:' prefix and trailing numeric
+// suffix ('_349' style used by 3ds Max Biped exports / eve.glb).
 function bareBone(name) {
   if (!name) return name;
-  return name.startsWith('mixamorig:') ? name.slice('mixamorig:'.length) : name;
+  let n = name;
+  if (n.startsWith('mixamorig:')) n = n.slice('mixamorig:'.length);
+  // Strip trailing _N suffix (Biped numeric tags).
+  n = n.replace(/_\d+$/, '');
+  return n;
 }
 
 // Walk the loaded FBX scene graph, find every bone matching the
@@ -237,65 +267,98 @@ function buildRigAdapter(group, mixer) {
   return rig;
 }
 
-// Load an FBX from a URL and return the rig adapter. opts.scale
-// defaults to 0.01 since Mixamo exports in centimetres.
+// Auto-detect FBX vs GLB by extension. GLB / glTF files load via
+// GLTFLoader and are typically already in metres (no cm scale needed).
+function loaderForUrl(url) {
+  return /\.(glb|gltf)$/i.test(url) ? new GLTFLoader() : new FBXLoader();
+}
+function defaultScaleForUrl(url) {
+  return /\.(glb|gltf)$/i.test(url) ? 1.0 : 0.01;
+}
+
+// Load a character FBX or GLB from a URL and return the rig adapter.
+// opts.scale defaults to 0.01 for FBX (Mixamo cm) or 1.0 for GLB.
 export async function loadCharacterFBX(scene, url, opts = {}) {
-  const { scale = 0.01 } = opts;
-  const loader = new FBXLoader();
+  const isGLB = /\.(glb|gltf)$/i.test(url);
+  const { scale = defaultScaleForUrl(url) } = opts;
+  const loader = loaderForUrl(url);
   return new Promise((resolve, reject) => {
-    loader.load(url, (group) => {
-      group.scale.setScalar(scale);
-      let skinnedMesh = null;
-      group.traverse((o) => {
-        if (o.isMesh) {
-          o.castShadow = true;
-          o.receiveShadow = true;
-        }
-        if (o.isSkinnedMesh && !skinnedMesh) skinnedMesh = o;
-      });
-      // Anchor the mixer to the SkinnedMesh, NOT the loaded group.
-      // Mixamo/MotusMan FBX files contain a duplicate bone hierarchy
-      // (a deformer copy + the rig skeleton); binding clip tracks by
-      // name from the group root resolves to the wrong copy and the
-      // mesh stays in bind pose even though tracks report bound=N.
-      // Rooting the mixer at the SkinnedMesh constrains track lookup
-      // to its skeleton.bones, which is the set the mesh actually
-      // skins against.
-      const mixerRoot = skinnedMesh || group;
-      const mixer = new THREE.AnimationMixer(mixerRoot);
-      // Pre-build one Action per clip so play(name) can fade in fast.
-      // Skip empty clips (Mixamo always exports a 'Take 001' placeholder).
-      const actions = new Map();
-      for (const clip of (group.animations || [])) {
-        if (clip.duration < 0.01) continue;
-        actions.set(clip.name, mixer.clipAction(clip));
+    loader.load(url, (loaded) => {
+      // GLTFLoader returns { scene, animations, ... }; FBXLoader returns
+      // a Group directly. Unify by extracting `group` + `animations`.
+      const group = isGLB ? loaded.scene : loaded;
+      if (isGLB && loaded.animations && !group.animations) {
+        group.animations = loaded.animations;
       }
-      const rig = buildRigAdapter(group, mixer);
-      rig._fbx.actions = actions;
-      scene.add(group);
-      // Auto-play the first clip if any, so the rig isn't a T-pose
-      // statue on load. Caller can override via rig.play(...).
-      const firstClipName = actions.keys().next().value;
-      if (firstClipName) rig.play(firstClipName);
-      resolve(rig);
+      // Re-enter the FBX path with the unified group below.
+      _onLoadGroup(scene, group, scale, resolve);
     }, undefined, reject);
   });
 }
 
-// Merge animation clips from another FBX onto an already-loaded rig.
-// Mixamo exports each animation as a separate FBX file; this lets you
-// load the base rig once (e.g. Idle.fbx) and add Walk.fbx / Run.fbx /
-// etc. on top so they all share the same skeleton + mixer.
+// Shared post-load step (used by both FBX and GLB paths).
+function _onLoadGroup(scene, group, scale, resolve) {
+  group.scale.setScalar(scale);
+  let skinnedMesh = null;
+  group.traverse((o) => {
+    if (o.isMesh) {
+      o.castShadow = true;
+      o.receiveShadow = true;
+    }
+    if (o.isSkinnedMesh && !skinnedMesh) skinnedMesh = o;
+  });
+  // Anchor the mixer to the SkinnedMesh, NOT the loaded group.
+  // Mixamo/MotusMan FBX files contain a duplicate bone hierarchy
+  // (a deformer copy + the rig skeleton); binding clip tracks by
+  // name from the group root resolves to the wrong copy and the
+  // mesh stays in bind pose even though tracks report bound=N.
+  // Rooting the mixer at the SkinnedMesh constrains track lookup
+  // to its skeleton.bones, which is the set the mesh actually
+  // skins against.
+  const mixerRoot = skinnedMesh || group;
+  const mixer = new THREE.AnimationMixer(mixerRoot);
+  // Pre-build one Action per clip so play(name) can fade in fast.
+  // Skip empty clips (Mixamo always exports a 'Take 001' placeholder).
+  const actions = new Map();
+  for (const clip of (group.animations || [])) {
+    if (clip.duration < 0.01) continue;
+    actions.set(clip.name, mixer.clipAction(clip));
+  }
+  const rig = buildRigAdapter(group, mixer);
+  rig._fbx.actions = actions;
+  scene.add(group);
+  // Auto-play the first clip if any.
+  const firstClipName = actions.keys().next().value;
+  if (firstClipName) rig.play(firstClipName);
+  resolve(rig);
+}
+
+// Merge animation clips from another FBX or GLB onto an already-loaded
+// rig. Mixamo exports each animation as a separate FBX file; the
+// Universal Animation Library (Quaternius) ships as one big GLB with
+// all clips in it. Both go through the same path here.
+//
+// For multi-clip files (UAL): clipName is OPTIONAL. Each clip from the
+// loaded asset is registered under its own name (clip.name).
 export async function loadAnimationFBX(rig, url, clipName = null) {
-  const loader = new FBXLoader();
+  const isGLB = /\.(glb|gltf)$/i.test(url);
+  const loader = loaderForUrl(url);
   return new Promise((resolve, reject) => {
-    loader.load(url, (group) => {
-      for (const clip of (group.animations || [])) {
+    loader.load(url, (loaded) => {
+      const animations = isGLB ? loaded.animations : (loaded.animations || []);
+      let added = 0;
+      for (const clip of animations) {
         if (clip.duration < 0.01) continue;
-        const name = clipName || clip.name || url.split('/').pop().replace(/\.fbx$/i, '');
+        // Single-clip merge: use provided clipName. Multi-clip merge
+        // (UAL): use each clip's own name.
+        const name = (animations.length === 1 && clipName)
+          ? clipName
+          : (clip.name || `${url.split('/').pop().replace(/\.(fbx|glb|gltf)$/i, '')}_${added}`);
         const action = rig._fbx.mixer.clipAction(clip);
         rig._fbx.actions.set(name, action);
+        added++;
       }
+      console.log(`[fbx] merged ${added} clip(s) from ${url}`);
       resolve(rig);
     }, undefined, reject);
   });
