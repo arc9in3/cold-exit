@@ -245,13 +245,24 @@ export async function loadCharacterFBX(scene, url, opts = {}) {
   return new Promise((resolve, reject) => {
     loader.load(url, (group) => {
       group.scale.setScalar(scale);
+      let skinnedMesh = null;
       group.traverse((o) => {
         if (o.isMesh) {
           o.castShadow = true;
           o.receiveShadow = true;
         }
+        if (o.isSkinnedMesh && !skinnedMesh) skinnedMesh = o;
       });
-      const mixer = new THREE.AnimationMixer(group);
+      // Anchor the mixer to the SkinnedMesh, NOT the loaded group.
+      // Mixamo/MotusMan FBX files contain a duplicate bone hierarchy
+      // (a deformer copy + the rig skeleton); binding clip tracks by
+      // name from the group root resolves to the wrong copy and the
+      // mesh stays in bind pose even though tracks report bound=N.
+      // Rooting the mixer at the SkinnedMesh constrains track lookup
+      // to its skeleton.bones, which is the set the mesh actually
+      // skins against.
+      const mixerRoot = skinnedMesh || group;
+      const mixer = new THREE.AnimationMixer(mixerRoot);
       // Pre-build one Action per clip so play(name) can fade in fast.
       // Skip empty clips (Mixamo always exports a 'Take 001' placeholder).
       const actions = new Map();
