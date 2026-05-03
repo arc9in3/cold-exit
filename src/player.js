@@ -1894,18 +1894,20 @@ export function createPlayer(scene) {
       if (lowestFootY === Infinity) lowestFootY = 0;
       const wantSink = -lowestFootY;
       const cur = rig._fbx._crouchSinkY ?? 0;
-      // Asymmetric lerp — running has an AIRBORNE phase where both
-      // feet briefly leave ground; lowestFootY jumps UP and a
-      // symmetric lerp would chase it, bobbing the whole rig.
-      //   sinking deeper (foot fell, want more negative): snap fast
-      //   rising (foot lifted, want less negative):       lerp slow
-      // Net: rig anchors at the lowest planted foot height; brief
-      // airborne moments don't lift the rig.
-      const goingDown = wantSink < cur;
+      // Asymmetric lerp inverted from the previous attempt:
+      //   wantSink > cur (lowestFoot is BELOW ground, rig should
+      //                  RISE to un-clip): fast (25/s)
+      //   wantSink < cur (lowestFoot is ABOVE ground, rig wants
+      //                  to SINK to chase a lifted foot): slow
+      //                  (2/s) — running airborne phase looks
+      //                  natural when feet briefly fly above
+      //                  ground; chasing them down bobs the rig.
+      // Big transitions like crouch toggle: symmetric 12/s.
+      const goingUp = wantSink > cur;
       const bigTransition = Math.abs(wantSink - cur) > 0.10;
       const rate = bigTransition
         ? 12
-        : (goingDown ? 25 : 2);
+        : (goingUp ? 25 : 2);
       rig._fbx._crouchSinkY = cur + (wantSink - cur) * (1 - Math.exp(-rate * dt));
       rig.group.position.y += rig._fbx._crouchSinkY;
       // The SkinnedMesh inside the rig may have its OWN position
