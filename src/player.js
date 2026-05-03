@@ -46,24 +46,60 @@ const _aimIkPole = new THREE.Vector3();
 function _runUpperBodyIK(rig, state, aimPoint, aimPitch) {
   if (!rig || !rig._fbx) return;
   const fbx = rig._fbx;
-  // Apply chest + head world-space additive aim — same snapshot-
-  // restore-multiply pattern as the non-GASP FBX path, but using
-  // the GASP rig's bone references.
   const aimYaw = state.chestTwist || 0;
-  if (rig.chest && rig.chest.quaternion && rig.chest.parent) {
-    if (!fbx._aimChestBase) fbx._aimChestBase = rig.chest.quaternion.clone();
-    rig.chest.quaternion.copy(fbx._aimChestBase);
-    _aimDeltaE.set(aimPitch * 0.55, aimYaw * 0.60, 0, 'YXZ');
+  // Add the GASP pitch-up baseline (negative aimPitch tilts upper
+  // body forward; we want backward when below ADS so arms rise).
+  aimPitch += (state._gaspPitchOffset || 0);
+  // Resolve the spine chain on first call. UEFN: spine_01 (base) →
+  // spine_02 → spine_03 → spine_04 → spine_05 (top, under neck).
+  // Distribute the yaw + pitch across them with a gradient: lower
+  // bones get less, upper bones get more. Per spec §3 ("rotation
+  // distributed across multiple bones, not applied to a single
+  // joint", "head and neck receive the highest influence").
+  if (!fbx._spineChain) {
+    const bones = fbx.bonesByName;
+    const candidates = ['spine_01', 'spine_02', 'spine_03', 'spine_04', 'spine_05'];
+    fbx._spineChain = candidates.map(n => bones?.get(n) || null).filter(Boolean);
+    fbx._spineBaseQs = fbx._spineChain.map(b => b.quaternion.clone());
+  }
+  // Yaw weights — sum to 1.0. Bottom-light, top-heavy. Pitch
+  // weights similarly.
+  const YAW_WEIGHTS   = [0.06, 0.12, 0.22, 0.28, 0.32];
+  const PITCH_WEIGHTS = [0.05, 0.10, 0.20, 0.30, 0.35];
+  for (let i = 0; i < fbx._spineChain.length; i++) {
+    const bone = fbx._spineChain[i];
+    if (!bone || !bone.quaternion || !bone.parent) continue;
+    const baseQ = fbx._spineBaseQs[i];
+    bone.quaternion.copy(baseQ);
+    const yawAmt   = aimYaw   * (YAW_WEIGHTS[i]   ?? 0);
+    const pitchAmt = aimPitch * (PITCH_WEIGHTS[i] ?? 0);
+    if (Math.abs(yawAmt) < 0.001 && Math.abs(pitchAmt) < 0.001) continue;
+    _aimDeltaE.set(pitchAmt, yawAmt, 0, 'YXZ');
     _aimDeltaQ.setFromEuler(_aimDeltaE);
-    rig.chest.parent.getWorldQuaternion(_aimParentWorldQ);
-    _aimComposeQ.copy(_aimParentWorldQ).multiply(fbx._aimChestBase);
+    bone.parent.getWorldQuaternion(_aimParentWorldQ);
+    _aimComposeQ.copy(_aimParentWorldQ).multiply(baseQ);
     const localDelta = _aimComposeQ.clone().invert().multiply(_aimDeltaQ).multiply(_aimComposeQ);
-    rig.chest.quaternion.multiply(localDelta);
+    bone.quaternion.multiply(localDelta);
+  }
+  // Head + neck — neck splits weight with head; head gets the most.
+  if (!fbx._neckBase && rig._fbx.bonesByName?.get('neck_01')) {
+    fbx._neckBone = rig._fbx.bonesByName.get('neck_01');
+    fbx._neckBase = fbx._neckBone.quaternion.clone();
+  }
+  if (fbx._neckBone) {
+    const bone = fbx._neckBone;
+    bone.quaternion.copy(fbx._neckBase);
+    _aimDeltaE.set(aimPitch * 0.18, aimYaw * 0.10, 0, 'YXZ');
+    _aimDeltaQ.setFromEuler(_aimDeltaE);
+    bone.parent.getWorldQuaternion(_aimParentWorldQ);
+    _aimComposeQ.copy(_aimParentWorldQ).multiply(fbx._neckBase);
+    const localDelta = _aimComposeQ.clone().invert().multiply(_aimDeltaQ).multiply(_aimComposeQ);
+    bone.quaternion.multiply(localDelta);
   }
   if (rig.head && rig.head.quaternion && rig.head.parent) {
     if (!fbx._aimHeadBase) fbx._aimHeadBase = rig.head.quaternion.clone();
     rig.head.quaternion.copy(fbx._aimHeadBase);
-    _aimDeltaE.set(aimPitch * 0.45, aimYaw * 0.40, 0, 'YXZ');
+    _aimDeltaE.set(aimPitch * 0.45, aimYaw * 0.30, 0, 'YXZ');
     _aimDeltaQ.setFromEuler(_aimDeltaE);
     rig.head.parent.getWorldQuaternion(_aimParentWorldQ);
     _aimComposeQ.copy(_aimParentWorldQ).multiply(fbx._aimHeadBase);
@@ -1865,39 +1901,58 @@ export function createPlayer(scene) {
       // owned by the IK solve below.
       if (rig._fbx.useGaspLocomotion) {
         _ensureGaspSmLoaded();
-        // Body yaw EASES toward cursor instead of snapping. Within
-        // the chest-twist deadzone (≤45°) the chest does the work;
-        // beyond, the whole body catches up. Net feel: cursor
-        // tracks responsively but the body has weight.
+        // ============================================================
+        // ROOT ORIENTATION — per design spec §7:
+        //   Root follows MOVEMENT direction (hipfire), with
+        //   compensation: if movement-vs-aim exceeds twist limit,
+        //   root catches up toward aim so chest doesn't over-twist.
+        //   ADS overrides: root snaps to aim (cleaner aim, lets
+        //   directional locomotion clips read correctly).
+        //   Idle: root slowly rotates toward aim direction.
+        // ============================================================
         const cursorYaw = aimPoint
           ? Math.atan2(aimPoint.x - rig.group.position.x, aimPoint.z - rig.group.position.z)
           : (state.bodyYaw || 0);
-        let dyaw = cursorYaw - rig.group.rotation.y;
-        while (dyaw >  Math.PI) dyaw -= 2 * Math.PI;
-        while (dyaw < -Math.PI) dyaw += 2 * Math.PI;
-        // 90° deadzone — chest can twist a full quarter-turn before
-        // the body needs to catch up. GASP clips hold the upper
-        // body forward in their authored pose so the silhouette
-        // reads correctly through this range.
-        // ADS override: body snaps to cursor (no deadzone lag) so
-        // the directional locomotion sector is computed against
-        // the cursor direction. Without this, ADS + moving-back
-        // produces a body yaw between cursor and velocity, which
-        // selects a side-stride clip instead of the backpedal
-        // the user expects.
         const adsAmt = state.adsAmount || 0;
         const ads = adsAmt > 0.5;
-        const TWIST_LIMIT = ads ? 0 : (Math.PI / 2);
-        const BODY_CATCH_RATE = ads ? 30 : 6.0;
-        const overshoot = Math.max(0, Math.abs(dyaw) - TWIST_LIMIT) * Math.sign(dyaw);
-        rig.group.rotation.y += overshoot * (1 - Math.exp(-BODY_CATCH_RATE * dt));
-        // Chest twist = remaining cursor delta after body catch-up.
-        // Recompute after body update.
+        const moving = planarSpeed > 0.1;
+        const movementYaw = moving
+          ? Math.atan2(velocity.x, velocity.z)
+          : cursorYaw;
+        // Pick a target body yaw based on mode.
+        let targetYaw;
+        let lerpRate;
+        if (ads) {
+          targetYaw = cursorYaw;
+          lerpRate = 30;       // snap fast for clean aim
+        } else if (moving) {
+          targetYaw = movementYaw;
+          lerpRate = 14;       // body briskly tracks movement
+        } else {
+          targetYaw = cursorYaw;
+          lerpRate = 3.5;      // idle slow rotation toward aim (natural)
+        }
+        // Twist-compensation clamp — when |aim-target| > limit, the
+        // root absorbs the excess so chest stays within twist range.
+        const TWIST_LIMIT = ads ? 0 : (Math.PI / 2);  // 0 in ADS (body=aim), 90° hipfire
+        let aimVsTarget = cursorYaw - targetYaw;
+        while (aimVsTarget >  Math.PI) aimVsTarget -= 2 * Math.PI;
+        while (aimVsTarget < -Math.PI) aimVsTarget += 2 * Math.PI;
+        if (Math.abs(aimVsTarget) > TWIST_LIMIT) {
+          const excess = (Math.abs(aimVsTarget) - TWIST_LIMIT) * Math.sign(aimVsTarget);
+          targetYaw += excess;  // pull target toward aim
+        }
+        // Lerp current body yaw toward target.
+        let dyaw = targetYaw - rig.group.rotation.y;
+        while (dyaw >  Math.PI) dyaw -= 2 * Math.PI;
+        while (dyaw < -Math.PI) dyaw += 2 * Math.PI;
+        rig.group.rotation.y += dyaw * (1 - Math.exp(-lerpRate * dt));
+        // Chest twist = aim minus current body yaw (post-lerp).
         let chestTwist = cursorYaw - rig.group.rotation.y;
         while (chestTwist >  Math.PI) chestTwist -= 2 * Math.PI;
         while (chestTwist < -Math.PI) chestTwist += 2 * Math.PI;
-        chestTwist = Math.max(-TWIST_LIMIT, Math.min(TWIST_LIMIT, chestTwist));
-        state.chestTwist = chestTwist;  // consumed by _runUpperBodyIK below
+        chestTwist = Math.max(-TWIST_LIMIT - 0.1, Math.min(TWIST_LIMIT + 0.1, chestTwist));
+        state.chestTwist = chestTwist;
         // Gun-anchor lerps between hipfire (chest height ≈ 1.30m
         // after the 1.15× rig scale → ~1.50 visible) and ADS
         // (eye-line ≈ 1.55m → ~1.78 visible). Forward distance
@@ -1937,26 +1992,14 @@ export function createPlayer(scene) {
           while (gunYaw < -Math.PI) gunYaw += 2 * Math.PI;
           rig._gunAnchor.rotation.set(0, gunYaw, 0);
         }
-        // Chest pitch-up compensation when NOT ADS — the GASP
-        // _Pistol locomotion clips author the arms in low-ready
-        // (downward) pose. Pitching the chest up ~12° brings the
-        // arms (chest's children) level so the gun reads held at
-        // chest height. Disabled during ADS since the _Rifle clips
-        // already hold the arms shouldered at eye level.
-        if (rig.chest && rig.chest.quaternion && rig.chest.parent) {
-          if (!rig._fbx._chestPitchBase) rig._fbx._chestPitchBase = rig.chest.quaternion.clone();
-          rig.chest.quaternion.copy(rig._fbx._chestPitchBase);
-          const ads = state.adsAmount || 0;
-          const pitchUp = (1 - ads) * 0.21;  // ~12° at hipfire, 0 at ADS
-          if (pitchUp > 0.001) {
-            _aimDeltaE.set(-pitchUp, 0, 0, 'YXZ');
-            _aimDeltaQ.setFromEuler(_aimDeltaE);
-            rig.chest.parent.getWorldQuaternion(_aimParentWorldQ);
-            _aimComposeQ.copy(_aimParentWorldQ).multiply(rig._fbx._chestPitchBase);
-            const localDelta = _aimComposeQ.clone().invert().multiply(_aimDeltaQ).multiply(_aimComposeQ);
-            rig.chest.quaternion.multiply(localDelta);
-          }
-        }
+        // Hipfire pitch-up baseline — the GASP _Pistol clips
+        // author the arms in low-ready (downward) pose. We add a
+        // negative-pitch offset to aimPitch when NOT ADS so the
+        // spine distribution naturally tilts the upper body
+        // upward, lifting the arms (and gun) to chest height.
+        // 0 at full ADS (rifle clips already hold arms level),
+        // -0.18 rad (~10°) at full hipfire.
+        state._gaspPitchOffset = (1 - adsAmt) * -0.18;
         // Arm-shoulder twist for extended aim range — when the
         // cursor is FAR off-axis (residual past the chest's 45°
         // limit), rotate the dominant clavicle / upperarm to point
