@@ -502,14 +502,12 @@ export const DEFAULT_DIMS_FEMALE = {
     // longer than upper arm pushes the elbow above midpoint so the
     // joint reads as the cleavage between two distinct lobes (per
     // bodyshapes ref) instead of "ball stuck mid-cylinder".
-    //   upperArmH 0.62  — shoulder → elbow
-    //   forearmH  0.62  — elbow → wrist (matched length, joint at
-    //                     visual mid-arm. Was 0.78 / 0.50 — that read
-    //                     "elbow in the bicep". Was 0.55 / 0.65 — that
-    //                     read "elbow by the shoulder". Equal length
-    //                     puts the joint where the eye expects it.)
-    upperArmH: 0.62,
-    forearmH: 0.62,
+    //   upperArmH 0.32  — shoulder → elbow (short)
+    //   forearmH  0.92  — elbow → wrist (long terminal sweep)
+    //   Elbow sits at ~26% along the arm — close to the shoulder
+    //   with most of the visible reach being a long tapered forearm.
+    upperArmH: 0.32,
+    forearmH: 0.92,
     // Cylinder taper at the elbow seam: upperArmBotR > forearmTopR
     // by ~25% so the cylinders form a clear inverted step. Combined
     // with the larger-than-both elbow ball, the joint reads as a

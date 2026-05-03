@@ -176,8 +176,8 @@ export const DEFAULT_DIMS_FEMALE = {
     // than upper arm pushes the elbow above midpoint so the joint
     // reads as the cleavage between two distinct lobes (per
     // bodyshapes ref) instead of "ball stuck mid-cylinder".
-    upperArmH: 0.62,
-    forearmH: 0.62,
+    upperArmH: 0.32,
+    forearmH: 0.92,
     // Cylinder taper at the elbow seam: upperArmBotR > forearmTopR
     // by ~25% so the cylinders form a clear step. Combined with the
     // larger-than-both elbow ball, the joint pops as a circle.
