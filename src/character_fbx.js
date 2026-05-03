@@ -396,34 +396,28 @@ export async function loadCharacterFBX(scene, url, opts = {}) {
   });
 }
 
-// Strip position tracks for the root / hip bone so the character
-// doesn't bounce up-and-down during locomotion-cycle clips. Mixamo
-// and Motus packs author a small hip-Y oscillation (stride bounce)
-// that intermittently sinks the feet below ground when the rig's
-// group.position.y is exactly 0. Idle/aim clips carry the same
-// authoring artifact in subtle form.
+// Strip ALL position + scale tracks from every clip. Mixamo / Motus
+// / Biped packs author root motion as well as subtle stride bounce,
+// idle weight-shift, and breathing dips on various bones — including
+// nodes ABOVE the rig's hip (export armature roots, "Take 001"
+// containers) that my earlier name-based filter missed. Symptom of
+// the missed cases: whole body sinking through the ground at a
+// regular cadence even when standing still (idle clip's vertical bob
+// driving a top-level translation).
 //
-// We blanket-strip ANY position track whose target bone bareName
-// is in the root-set below. Rotation tracks pass through, so the
-// hips still rotate / yaw normally for the locomotion pose.
-const _ROOT_BONE_BARE = new Set([
-  'Hips', 'Bip001-Pelvis', 'Pelvis', 'Bip001', 'Root',
-  'mixamorig:Hips',
-]);
+// In Cold Exit the player's world position is driven by gameplay
+// physics on the rig.group; clip-level translations can ONLY ever
+// fight that. So we keep quaternion (rotation) tracks across the
+// board and drop position + scale entirely. If a future setup
+// requires root-motion-driven movement, gate this strip behind a
+// per-pack flag.
 function _stripRootMotion(clip) {
   if (!clip || !clip.tracks) return;
   clip.tracks = clip.tracks.filter(track => {
-    // Track names look like 'BoneName.position' / 'BoneName.quaternion'.
-    // Extract the bone name + property and decide.
-    const match = track.name.match(/^(.+)\.(position|quaternion|scale)(\[.+\])?$/);
+    const match = track.name.match(/\.(position|quaternion|scale)(\[.+\])?$/);
     if (!match) return true;
-    const [, boneName, prop] = match;
-    if (prop !== 'position') return true;
-    // Bare-name match (strip 'mixamorig:' prefix + trailing _\d+ if present).
-    let bare = boneName;
-    if (bare.startsWith('mixamorig:')) bare = bare.slice('mixamorig:'.length);
-    bare = bare.replace(/_\d+$/, '');
-    return !_ROOT_BONE_BARE.has(bare);
+    const prop = match[1];
+    return prop === 'quaternion';
   });
 }
 
