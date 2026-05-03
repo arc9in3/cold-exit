@@ -183,13 +183,16 @@ const state = {
     selected: 'chest',
     scaleX: 1.0, scaleY: 1.0, scaleZ: 1.0,
     lastX: 1.0,  lastY: 1.0,  lastZ: 1.0,
-    // Taper sliders — scale ONLY the top or bottom radius of a
-    // tapered-cylinder part, so a chest can be made shoulder-heavy
-    // (taperTop > 1) or hip-heavy (taperBot > 1) independent of
-    // overall width. Sphere parts (head) ignore these — they have
-    // only one radius and PART_AXIS_MAP omits xTop/xBot.
-    taperTop: 1.0, taperBot: 1.0,
-    lastTaperTop: 1.0, lastTaperBot: 1.0,
+    // Per-end, per-axis taper. Scale only the top OR bottom of a
+    // tapered-cylinder part, separately in X (radius / width) and Z
+    // (depth front-to-back). Lets you author shoulder-heavy chests,
+    // hip-heavy thighs, ribcage that's wider than deep at the top
+    // and narrower than deep at the bottom — full taper control.
+    // Sphere parts (head) ignore these.
+    taperTopX: 1.0, taperBotX: 1.0,
+    taperTopZ: 1.0, taperBotZ: 1.0,
+    lastTaperTopX: 1.0, lastTaperBotX: 1.0,
+    lastTaperTopZ: 1.0, lastTaperBotZ: 1.0,
     // Per-part mirror + offset, keyed by part name. Mirror flips the
     // mesh scale on the chosen axis (negative scale). Offsets shift
     // the mesh.position. Both apply ONLY to the targeted part — they
@@ -829,6 +832,17 @@ const PART_AXIS_MAP = {
     z: ['torso.chestDepth'],
     xTop: ['torso.chestTopR'],
     xBot: ['torso.chestBotR'],
+    zTop: ['torso.chestTopDepth'],
+    zBot: ['torso.chestBotDepth'],
+  },
+  ribs: {
+    x: ['torso.ribsTopR', 'torso.ribsBotR'],
+    y: ['torso.ribsH'],
+    z: ['torso.ribsDepth'],
+    xTop: ['torso.ribsTopR'],
+    xBot: ['torso.ribsBotR'],
+    zTop: ['torso.ribsTopDepth'],
+    zBot: ['torso.ribsBotDepth'],
   },
   stomach: {
     x: ['torso.stomachTopR', 'torso.stomachBotR'],
@@ -836,13 +850,17 @@ const PART_AXIS_MAP = {
     z: ['torso.stomachDepth'],
     xTop: ['torso.stomachTopR'],
     xBot: ['torso.stomachBotR'],
+    zTop: ['torso.stomachTopDepth'],
+    zBot: ['torso.stomachBotDepth'],
   },
   hips: {
     x: ['torso.pelvisTopR', 'torso.pelvisBotR', 'torso.hipBowl.r'],
     y: ['torso.pelvisH', 'torso.hipBowl.scaleY'],
     z: ['torso.pelvisDepth', 'torso.hipBowl.scaleZ'],
-    xTop: ['torso.pelvisTopR'],   // iliac crest width
-    xBot: ['torso.pelvisBotR'],   // pubic bone width
+    // Tapers also drive the hipBowl wedge factors so a female rig
+    // (which uses hipBowl, not the pelvis cylinder) responds.
+    xTop: ['torso.pelvisTopR', 'torso.hipBowl.wedgeTopFactor'],
+    xBot: ['torso.pelvisBotR', 'torso.hipBowl.wedgeBotFactor'],
   },
   bust: {
     x: ['head.bust.r', 'head.bust.separationX'],
@@ -930,18 +948,30 @@ function applyPartAxis(part, axis, newValue) {
   state.parter['last' + axis.toUpperCase()] = newValue;
 }
 
-// Taper: scale only the top OR bottom radius of a tapered-cylinder
-// part. Lets users dial a "shoulder-heavy chest" (taperTop > 1) or
-// "hip-heavy thigh" (taperBot > 1) without affecting the other end.
-// Sphere parts that don't define xTop/xBot in PART_AXIS_MAP no-op
-// silently — taper sliders for them have no effect.
-function applyPartTaper(part, which, newValue) {
+// Per-end, per-axis taper. axis is 'X' (radius) or 'Z' (depth);
+// which is 'Top' or 'Bot'. Looks up the path list in PART_AXIS_MAP
+// (xTop / xBot / zTop / zBot) and multiplies each numeric dim by
+// the slider delta. For Z paths that don't yet exist in dims (e.g.
+// chestTopDepth not authored), seed them with the current uniform
+// depth value so the first taper move from 1.0 has a sensible base.
+function applyPartTaper(part, which, axis, newValue) {
   const map = PART_AXIS_MAP[part];
-  const key = 'x' + which;        // 'xTop' or 'xBot'
+  const key = axis.toLowerCase() + which;   // 'xTop' / 'xBot' / 'zTop' / 'zBot'
   if (!map || !map[key]) return;
-  const lastKey = 'lastTaper' + which;
+  const lastKey = 'lastTaper' + which + axis;
   const last = state.parter[lastKey];
   if (last === 0) return;
+  // Seed missing depth dims with the part's uniform depth so the
+  // first taper move has a real baseline rather than NaN. Looks up
+  // 'torso.chestDepth' for chest, etc., from map.z[0].
+  if (axis === 'Z') {
+    for (const path of map[key]) {
+      if (getDimByPath(state.dims, path) == null && map.z && map.z[0]) {
+        const seed = getDimByPath(state.dims, map.z[0]) ?? 1.0;
+        setDimByPath_force(state.dims, path, seed);
+      }
+    }
+  }
   const delta = newValue / last;
   for (const path of map[key]) {
     const cur = getDimByPath(state.dims, path);
@@ -950,6 +980,21 @@ function applyPartTaper(part, which, newValue) {
     }
   }
   state.parter[lastKey] = newValue;
+}
+
+// setDimByPath only writes if the leaf is already a number. To seed
+// new dim entries (e.g. chestTopDepth that wasn't in DEFAULT_DIMS),
+// we need a force-write that creates the leaf if missing.
+function setDimByPath_force(obj, path, value) {
+  const keys = path.split('.');
+  let node = obj;
+  for (let i = 0; i < keys.length - 1; i++) {
+    if (node[keys[i]] == null || typeof node[keys[i]] !== 'object') {
+      node[keys[i]] = {};
+    }
+    node = node[keys[i]];
+  }
+  node[keys.at(-1)] = value;
 }
 
 // Part name → list of mesh refs to transform (mirror / offset).
@@ -963,8 +1008,17 @@ function getPartTransformTargets(partName) {
     case 'head':       return [{ mesh: rig.headMesh,  sign: 1 }];
     case 'neck':       return [{ mesh: rig.neckMesh,  sign: 1 }];
     case 'chest':      return [{ mesh: rig.chestMesh, sign: 1 }];
+    case 'ribs':       return [{ mesh: rig.ribsMesh, sign: 1 }];
     case 'stomach':    return [{ mesh: rig.stomachMesh, sign: 1 }];
-    case 'hips':       return rig.pelvis ? [{ mesh: rig.pelvis, sign: 1 }] : [];
+    case 'hips': {
+      // Female has rig.pelvis = null (skipped, hipBowl envelops it).
+      // Target whichever mesh exists so offsets / mirrors apply to
+      // the actual visible pelvis volume.
+      const targets = [];
+      if (rig.pelvis)  targets.push({ mesh: rig.pelvis,  sign: 1 });
+      if (rig.hipBowl) targets.push({ mesh: rig.hipBowl, sign: 1 });
+      return targets;
+    }
     case 'thighs':     return [
       { mesh: rig.leftLeg.thigh.mesh,  sign: -1 },
       { mesh: rig.rightLeg.thigh.mesh, sign: +1 },
@@ -1035,8 +1089,10 @@ function rebuildParterFolder() {
       state.parter.scaleX = state.parter.lastX = 1.0;
       state.parter.scaleY = state.parter.lastY = 1.0;
       state.parter.scaleZ = state.parter.lastZ = 1.0;
-      state.parter.taperTop = state.parter.lastTaperTop = 1.0;
-      state.parter.taperBot = state.parter.lastTaperBot = 1.0;
+      state.parter.taperTopX = state.parter.lastTaperTopX = 1.0;
+      state.parter.taperBotX = state.parter.lastTaperBotX = 1.0;
+      state.parter.taperTopZ = state.parter.lastTaperTopZ = 1.0;
+      state.parter.taperBotZ = state.parter.lastTaperBotZ = 1.0;
       // Load the saved mirror+offset for this part into the editor
       // controls (or zeros if this is the first time it's been
       // selected). Persisted in state.parter.transforms keyed by name.
@@ -1055,12 +1111,18 @@ function rebuildParterFolder() {
     .onChange((v) => { applyPartAxis(state.parter.selected, 'y', v); rebuildRig(); });
   parterFolder.add(state.parter, 'scaleZ', 0.01, 3, 0.01).name('scale Z (depth)')
     .onChange((v) => { applyPartAxis(state.parter.selected, 'z', v); rebuildRig(); });
-  // Taper top + bottom — only apply to parts that define xTop / xBot
-  // in PART_AXIS_MAP (tapered cylinders). Sphere/box parts no-op.
-  parterFolder.add(state.parter, 'taperTop', 0.01, 3, 0.01).name('taper top')
-    .onChange((v) => { applyPartTaper(state.parter.selected, 'Top', v); rebuildRig(); });
-  parterFolder.add(state.parter, 'taperBot', 0.01, 3, 0.01).name('taper bottom')
-    .onChange((v) => { applyPartTaper(state.parter.selected, 'Bot', v); rebuildRig(); });
+  // Per-end, per-axis taper. Four sliders give full taper control
+  // over a tapered-cylinder part — top X (radius), top Z (depth),
+  // bot X, bot Z. Sphere/box parts no-op for end values they don't
+  // map (e.g. head has no xTop/xBot/zTop/zBot in PART_AXIS_MAP).
+  parterFolder.add(state.parter, 'taperTopX', 0.01, 3, 0.01).name('taper top X (width)')
+    .onChange((v) => { applyPartTaper(state.parter.selected, 'Top', 'X', v); rebuildRig(); });
+  parterFolder.add(state.parter, 'taperTopZ', 0.01, 3, 0.01).name('taper top Z (depth)')
+    .onChange((v) => { applyPartTaper(state.parter.selected, 'Top', 'Z', v); rebuildRig(); });
+  parterFolder.add(state.parter, 'taperBotX', 0.01, 3, 0.01).name('taper bot X (width)')
+    .onChange((v) => { applyPartTaper(state.parter.selected, 'Bot', 'X', v); rebuildRig(); });
+  parterFolder.add(state.parter, 'taperBotZ', 0.01, 3, 0.01).name('taper bot Z (depth)')
+    .onChange((v) => { applyPartTaper(state.parter.selected, 'Bot', 'Z', v); rebuildRig(); });
 
   // Per-part mirror + offset. Edited values are saved into
   // state.parter.transforms[selected] on change so they persist

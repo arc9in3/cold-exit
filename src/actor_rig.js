@@ -140,6 +140,39 @@ function _darken(hex, k) {
 // Build a single body-part "segment": a pivot group plus an offset
 // child mesh. The pivot sits at the joint (shoulder/hip/knee), the
 // mesh extends outward so rotating the pivot swings the segment.
+// Per-end Z taper helper — when topDepth and botDepth differ from
+// the cylinder's uniform mesh.scale.z, deform the geometry so each
+// vertex's Z gets a per-Y depth multiplier. Top and bottom of the
+// cylinder end up at different oval depths. Skipped (no-op) when
+// topDepth and botDepth are both undefined or equal to each other,
+// since uniform mesh.scale.z handles that case cheaply.
+//
+// IMPORTANT: this mutates the mesh's geometry, so the geometry must
+// be a fresh instance (not a shared cached _cyl call). _cyl passes
+// through to THREE.CylinderGeometry which is allocated per-call, so
+// this is safe in practice.
+function applyPerEndDepthIfDifferent(mesh, topDepth, botDepth, h) {
+  if (topDepth == null && botDepth == null) return;
+  if (topDepth == null) topDepth = botDepth;
+  if (botDepth == null) botDepth = topDepth;
+  if (Math.abs(topDepth - botDepth) < 1e-4) {
+    // Equal — uniform; let mesh.scale.z handle it instead.
+    mesh.scale.z = topDepth;
+    return;
+  }
+  const geo = mesh.geometry;
+  const pos = geo.attributes.position;
+  for (let i = 0; i < pos.count; i++) {
+    const y = pos.getY(i);
+    const t = Math.max(0, Math.min(1, (y + h / 2) / h));   // 0 at bot, 1 at top
+    const d = botDepth + (topDepth - botDepth) * t;
+    pos.setZ(i, pos.getZ(i) * d);
+  }
+  pos.needsUpdate = true;
+  geo.computeVertexNormals();
+  mesh.scale.z = 1.0;
+}
+
 function segment(opts) {
   const pivot = new THREE.Group();
   pivot.position.set(opts.px || 0, opts.py || 0, opts.pz || 0);
@@ -230,7 +263,12 @@ export const DEFAULT_DIMS = {
     crotchTopR: 0.13, crotchBotR: 0.07, crotchH: 0.06,
     crotchX: 0, crotchY: 0.005, crotchZ: 0,
     stomachH: 0.235, stomachTopR: 0.24, stomachBotR: 0.18, stomachY: 0.22,
-    chestH: 0.345, chestTopR: 0.32, chestBotR: 0.22,
+    // Torso split into ribs (lower chest) + chest (upper chest). Both
+    // use the same tapered-cylinder primitive language. Seam-matched
+    // radii: ribsBotR = stomachTopR, ribsTopR = chestBotR. Together
+    // they replace what used to be a single chestH cylinder.
+    ribsH: 0.16, ribsTopR: 0.27, ribsBotR: 0.24,
+    chestH: 0.18, chestTopR: 0.32, chestBotR: 0.27,
     collarH: 0.055, collarTopR: 0.11, collarBotR: 0.32, collarDY: 0.057,
     // Bottom radius lifted from 0.22 → 0.28 so the cone tapers less
     // aggressively — the previous value created a visible polygon ring
@@ -318,17 +356,24 @@ export const DEFAULT_DIMS_FEMALE = {
     pelvisH: 0.22,
     pelvisTopR: 0.30,    // wide iliac crest
     pelvisBotR: 0.18,    // narrow pubic bone
-    // Chest + stomach seam matched — chestBotR = stomachTopR = 0.13,
-    // and chestDepth = stomachDepth (set below) so the two cylinders
-    // read as ONE continuous torso taper from shoulder to wasp-waist.
-    // Without matching the seam radii / depths, there's a visible
-    // primitive boundary at the chest-stomach junction.
+    // Torso split into ribs + chest with seam-matched radii so the
+    // upper torso reads as ONE continuous taper from shoulder to
+    // waist via three stacked tapered cylinders (chest → ribs →
+    // stomach). All three share the same chestDepth/stomachDepth
+    // depth ratio so the silhouette flows unbroken.
+    //   shoulder (chestTopR 0.27) → mid-rib (chestBotR = ribsTopR 0.20)
+    //   → lower-rib (ribsBotR = stomachTopR 0.13) → waist (stomachBotR 0.11)
+    // Combined ribsH + chestH = 0.34 — preserves the legacy single-
+    // chestH torso height so the rig doesn't shrink with the split.
     stomachH: 0.26,
     stomachTopR: 0.13,
     stomachBotR: 0.11,   // wasp waist
-    chestH: 0.34,
+    ribsH: 0.17,
+    ribsTopR: 0.20,
+    ribsBotR: 0.13,
+    chestH: 0.17,
     chestTopR: 0.27,
-    chestBotR: 0.13,
+    chestBotR: 0.20,
     chestPlateTopR: 0.29,
     chestPlateBotR: 0.20,
     // Collar + belt SKIPPED on female: the bodyshapes ref shows a
@@ -830,6 +875,7 @@ export function buildRig(opts = {}) {
     );
     mesh.position.y = stomachH / 2;
     mesh.scale.z = T.stomachDepth ?? T.depthRatio;
+    applyPerEndDepthIfDifferent(mesh, T.stomachTopDepth, T.stomachBotDepth, stomachH);
     mesh.castShadow = true;
     mesh.receiveShadow = true;
     mesh.userData.zone = 'torso';
@@ -838,24 +884,51 @@ export function buildRig(opts = {}) {
   })();
   hips.add(stomach.pivot);
 
-  // Chest — tapered cylinder flaring up to the ribcage / shoulder line.
-  const chest = (() => {
+  // Ribs — tapered cylinder between stomach and chest. Lower chest
+  // section. Same primitive language as chest + stomach (tapered
+  // body-color cylinder), seam-matched radii so the torso reads as
+  // one continuous taper. Bust attaches above this on the chest
+  // pivot.
+  const ribsH = T.ribsH * scale;
+  const ribs = (() => {
     const pivot = new THREE.Group();
     pivot.rotation.order = 'YXZ';
     pivot.position.set(0, stomachH, 0);
     const mesh = new THREE.Mesh(
-      _cyl(T.chestTopR * scale, T.chestBotR * scale, chestH, T.segs),
+      _cyl(T.ribsTopR * scale, T.ribsBotR * scale, ribsH, T.segs),
       bodyMat,
     );
-    mesh.position.y = chestH / 2;
-    mesh.scale.z = T.chestDepth ?? T.depthRatio;
+    mesh.position.y = ribsH / 2;
+    mesh.scale.z = T.ribsDepth ?? T.chestDepth ?? T.depthRatio;
+    applyPerEndDepthIfDifferent(mesh, T.ribsTopDepth, T.ribsBotDepth, ribsH);
     mesh.castShadow = true;
     mesh.receiveShadow = true;
     mesh.userData.zone = 'torso';
     pivot.add(mesh);
     return { pivot, mesh };
   })();
-  stomach.pivot.add(chest.pivot);
+  stomach.pivot.add(ribs.pivot);
+
+  // Chest — tapered cylinder flaring up from the ribs to the shoulder
+  // line. Upper chest section. Bust attaches here.
+  const chest = (() => {
+    const pivot = new THREE.Group();
+    pivot.rotation.order = 'YXZ';
+    pivot.position.set(0, ribsH, 0);
+    const mesh = new THREE.Mesh(
+      _cyl(T.chestTopR * scale, T.chestBotR * scale, chestH, T.segs),
+      bodyMat,
+    );
+    mesh.position.y = chestH / 2;
+    mesh.scale.z = T.chestDepth ?? T.depthRatio;
+    applyPerEndDepthIfDifferent(mesh, T.chestTopDepth, T.chestBotDepth, chestH);
+    mesh.castShadow = true;
+    mesh.receiveShadow = true;
+    mesh.userData.zone = 'torso';
+    pivot.add(mesh);
+    return { pivot, mesh };
+  })();
+  ribs.pivot.add(chest.pivot);
 
   // Collar / shoulder yoke — caps the chest top so it doesn't read as
   // a flat-top cylinder. Skipped when collarH is 0 (female default
@@ -1362,6 +1435,10 @@ export function buildRig(opts = {}) {
     }
   }
 
+  // hipBowl mesh handle exposed on the rig return below so external
+  // tools (rig_tuner part scaler) can mirror / offset it. Declared
+  // here so the build block + return both reach it.
+  let hipBowlMesh = null;
   // --- hip bowl (primary hip volume, wedge-shaped) ------------------
   // Female-coded. Reads as the pelvis WEDGE per anatomy refs: wider
   // at the iliac crest (top), narrower at the pubic bone (bottom),
@@ -1372,25 +1449,21 @@ export function buildRig(opts = {}) {
   // otherwise.
   if (T.hipBowl) {
     const HB = T.hipBowl;
-    let bowlMesh;
     if (HB.wedgeTopFactor != null && HB.wedgeBotFactor != null) {
-      // Wedge: tapered cylinder. Top radius wider (iliac), bottom
-      // narrower (pubic). High segs so the surface reads smooth even
-      // though the underlying primitive language is "tapered cyl".
       const topR = HB.r * HB.wedgeTopFactor * scale;
       const botR = HB.r * HB.wedgeBotFactor * scale;
       const h = HB.r * 2 * (HB.scaleY ?? 0.6) * scale;
-      bowlMesh = new THREE.Mesh(_cyl(topR, botR, h, 32), bodyMat);
-      bowlMesh.scale.set(HB.scaleX ?? 1.0, 1.0, HB.scaleZ ?? 1.0);
+      hipBowlMesh = new THREE.Mesh(_cyl(topR, botR, h, 32), bodyMat);
+      hipBowlMesh.scale.set(HB.scaleX ?? 1.0, 1.0, HB.scaleZ ?? 1.0);
     } else {
-      bowlMesh = new THREE.Mesh(_sph(HB.r * scale, 32, 24), bodyMat);
-      bowlMesh.scale.set(HB.scaleX ?? 1.0, HB.scaleY ?? 1.0, HB.scaleZ ?? 1.0);
+      hipBowlMesh = new THREE.Mesh(_sph(HB.r * scale, 32, 24), bodyMat);
+      hipBowlMesh.scale.set(HB.scaleX ?? 1.0, HB.scaleY ?? 1.0, HB.scaleZ ?? 1.0);
     }
-    bowlMesh.position.set(0, HB.y * scale, HB.z * scale);
-    if (HB.pitchX) bowlMesh.rotation.x = HB.pitchX;
-    bowlMesh.castShadow = false;
-    bowlMesh.userData.zone = 'torso';
-    hips.add(bowlMesh);
+    hipBowlMesh.position.set(0, HB.y * scale, HB.z * scale);
+    if (HB.pitchX) hipBowlMesh.rotation.x = HB.pitchX;
+    hipBowlMesh.castShadow = false;
+    hipBowlMesh.userData.zone = 'torso';
+    hips.add(hipBowlMesh);
   }
 
   // --- hip-front lobe (smooth pelvis-front curve) ------------------
@@ -1506,6 +1579,7 @@ export function buildRig(opts = {}) {
     hips,
     pelvis,
     stomach: stomach.pivot, stomachMesh: stomach.mesh,
+    ribs:    ribs.pivot,    ribsMesh:    ribs.mesh,
     chest: chest.pivot,     chestMesh: chest.mesh,
     torso: chest.pivot,           // alias used by existing callers
     torsoMesh: chest.mesh,        // alias for hit-flash lerp
@@ -1513,13 +1587,14 @@ export function buildRig(opts = {}) {
     head,                   headMesh,
     jawMesh,
     chestPlate, belt, collar,
+    hipBowl: hipBowlMesh,
     leftLeg, rightLeg,
     leftArm, rightArm,
     leftShoulderAnchor, rightShoulderAnchor,
     // Flat mesh list (useful for hit-flash color lerp across every part).
     // Includes gear accents so they flash with the body on hit.
     meshes: [
-      ...(pelvis ? [pelvis] : []), stomach.mesh, chest.mesh,
+      ...(pelvis ? [pelvis] : []), stomach.mesh, ribs.mesh, chest.mesh,
       ...(chestPlate ? [chestPlate] : []),
       ...(belt ? [belt] : []),
       ...(collar ? [collar] : []),
