@@ -1,0 +1,37 @@
+{
+  "id": "mixamo",
+  "label": "Mixamo (mixamorig:* prefix)",
+  "scaleHint": 0.01,
+  "handedness": "char_left_is_world_plus_x",
+  "_handednessNote": "Mixamo's 'Left' bones are on the character's physical LEFT (= world +X when facing +Z). Code's leftArm is on world -X = char's physical right. So mixamo Left maps to code rightArm.",
+  "bonePrefixStrip": ["mixamorig:"],
+  "boneSuffixStripRegex": "_\\d+$",
+  "boneMap": {
+    "Hips":          "hips",
+    "Spine":         "stomach",
+    "Spine1":        "chest",
+    "Spine2":        "chest",
+    "Neck":          "neck",
+    "Head":          "head",
+    "LeftShoulder":  "rightArm.shoulder.pivot",
+    "LeftArm":       "rightArm.shoulder.pivot",
+    "LeftForeArm":   "rightArm.elbow",
+    "LeftHand":      "rightArm.wrist",
+    "RightShoulder": "leftArm.shoulder.pivot",
+    "RightArm":      "leftArm.shoulder.pivot",
+    "RightForeArm":  "leftArm.elbow",
+    "RightHand":     "leftArm.wrist",
+    "LeftUpLeg":     "rightLeg.thigh.pivot",
+    "LeftLeg":       "rightLeg.knee",
+    "LeftFoot":      "rightLeg.ankle",
+    "RightUpLeg":    "leftLeg.thigh.pivot",
+    "RightLeg":      "leftLeg.knee",
+    "RightFoot":     "leftLeg.ankle"
+  },
+  "logicalGroups": {
+    "lower":  ["hips", "stomach", "leftLeg.*", "rightLeg.*"],
+    "upper":  ["chest", "neck", "head", "leftArm.*", "rightArm.*"],
+    "top":    ["chest", "neck", "head", "leftArm.*", "rightArm.*"],
+    "bottom": ["hips", "stomach", "leftLeg.*", "rightLeg.*"]
+  }
+}

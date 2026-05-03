@@ -1,0 +1,37 @@
+{
+  "id": "motus",
+  "label": "Motus Digital MotusMan (no prefix)",
+  "scaleHint": 0.01,
+  "handedness": "char_left_is_world_plus_x",
+  "_handednessNote": "Same as Mixamo — char's Left bones map to code rightArm. The Motus pack just doesn't prefix bone names, so the same name table works after prefix-strip handles 'mixamorig:'.",
+  "bonePrefixStrip": [],
+  "boneSuffixStripRegex": null,
+  "boneMap": {
+    "Hips":          "hips",
+    "Spine":         "stomach",
+    "Spine1":        "chest",
+    "Spine2":        "chest",
+    "Neck":          "neck",
+    "Head":          "head",
+    "LeftShoulder":  "rightArm.shoulder.pivot",
+    "LeftArm":       "rightArm.shoulder.pivot",
+    "LeftForeArm":   "rightArm.elbow",
+    "LeftHand":      "rightArm.wrist",
+    "RightShoulder": "leftArm.shoulder.pivot",
+    "RightArm":      "leftArm.shoulder.pivot",
+    "RightForeArm":  "leftArm.elbow",
+    "RightHand":     "leftArm.wrist",
+    "LeftUpLeg":     "rightLeg.thigh.pivot",
+    "LeftLeg":       "rightLeg.knee",
+    "LeftFoot":      "rightLeg.ankle",
+    "RightUpLeg":    "leftLeg.thigh.pivot",
+    "RightLeg":      "leftLeg.knee",
+    "RightFoot":     "leftLeg.ankle"
+  },
+  "logicalGroups": {
+    "lower":  ["hips", "stomach", "leftLeg.*", "rightLeg.*"],
+    "upper":  ["chest", "neck", "head", "leftArm.*", "rightArm.*"],
+    "top":    ["chest", "neck", "head", "leftArm.*", "rightArm.*"],
+    "bottom": ["hips", "stomach", "leftLeg.*", "rightLeg.*"]
+  }
+}

@@ -1,0 +1,17 @@
+{
+  "id": "procgen",
+  "label": "Cold Exit procedural rig (actor_rig.js / Assets/anatomy/*.json)",
+  "scaleHint": 1.0,
+  "handedness": "code_native",
+  "_handednessNote": "The procedural rig is authored directly in code's coordinate system. leftArm/rightArm here ARE code's leftArm/rightArm — no flip applied at the loader level (the procedural rig builds with leftArm at world -X already).",
+  "bonePrefixStrip": [],
+  "boneSuffixStripRegex": null,
+  "_note": "Procedural rig bones are accessed via the rig structure directly (rig.leftArm.shoulder.pivot, etc.) — there is no string-keyed bone lookup. This file documents the logical-group definitions for consistency with FBX/GLB rigs.",
+  "boneMap": {},
+  "logicalGroups": {
+    "lower":  ["hips", "stomach", "leftLeg.*", "rightLeg.*"],
+    "upper":  ["chest", "neck", "head", "leftArm.*", "rightArm.*"],
+    "top":    ["chest", "neck", "head", "leftArm.*", "rightArm.*"],
+    "bottom": ["hips", "stomach", "leftLeg.*", "rightLeg.*"]
+  }
+}

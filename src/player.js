@@ -7,6 +7,24 @@ import { buildRig, initAnim, updateAnim, pokeHit, pokeRecoil, pokeDeath,
          RIFLE_WEAPON_HIP, RIFLE_WEAPON_AIM,
          SMG_WEAPON_HIP,   SMG_WEAPON_AIM } from './actor_rig.js';
 import { buildMeleePrimitive } from './melee_primitives.js';
+import { loadStateMachine, selectFromPlayerState } from './anim/state_machine.js';
+
+// Lazy-load the player FBX clip-selection state machine. Until the
+// JSON is fetched, the legacy if/else cascade below runs as a
+// fallback so behaviour matches the previous version exactly. Once
+// the JSON resolves, it becomes the source of truth.
+let _playerSmCfg = null;
+let _playerSmFetched = false;
+function _ensurePlayerSmLoaded() {
+  if (_playerSmFetched) return;
+  _playerSmFetched = true;
+  loadStateMachine('cold_exit_player').then(cfg => {
+    _playerSmCfg = cfg;
+    if (cfg) console.log('[player] state machine loaded: cold_exit_player');
+  }).catch(err => {
+    console.warn('[player] state machine load failed; falling back to legacy clip selection:', err.message);
+  });
+}
 
 // Isometric camera is rotated 45° around Y. Map input directions so W goes
 // "up the screen" in the iso view rather than along world +Z.
@@ -1702,33 +1720,58 @@ export function createPlayer(scene) {
         rig.group.position.copy(procgenGroup.position);
         rig.group.rotation.copy(procgenGroup.rotation);
       }
-      // Clip selection — maps player state to a Motus / Mixamo clip
-      // name. Pack-specific names (W1_Stand_Aim_Idle_IPC etc.) take
-      // priority, then bare names (idle / walk / run / aim) for
-      // Mixamo single-anim packs. Falls back to whatever's playing
-      // if the requested clip isn't loaded (rig.play does a loose
-      // first-non-empty-clip match).
-      let target = 'idle';
-      const aim = (state.adsAmount || 0) > 0.4;
-      const swinging = state.attack && state.attack.phase !== 'idle';
-      const moving = planarSpeed > 0.05;
-      const running = planarSpeed > 3.5;
-      const crouched = !!state.crouched;
-      if (swinging) {
-        target = crouched ? 'W1_Crouch_Fire_Single' : 'W1_Stand_Fire_Single';
-      } else if (crouched && moving) {
-        target = 'W1_CrouchWalk_Aim_F_Loop_IPC';
-      } else if (crouched) {
-        target = aim ? 'W1_Crouch_Aim_Idle_IPC' : 'W1_Crouch_Idle_IPC';
-      } else if (running) {
-        target = 'W1_Jog_Aim_F_Loop_IPC';
-      } else if (moving) {
-        target = 'W1_Walk_Aim_F_Loop_IPC';
-      } else {
-        target = aim ? 'W1_Stand_Aim_Idle_IPC' : 'W1_Stand_Relaxed_Idle_IPC';
+      // Clip selection — sourced from
+      // Assets/anim_data/states/cold_exit_player.json via the JSON
+      // state machine (src/anim/state_machine.js). The JSON encodes
+      // the same priority cascade that lived inline here previously;
+      // the fallback path below mirrors it for the brief window
+      // before the SM JSON finishes loading on first run.
+      _ensurePlayerSmLoaded();
+      let target, loop, speedRef, fadeMs, tsClamp;
+      if (_playerSmCfg) {
+        const pick = selectFromPlayerState(_playerSmCfg, state, planarSpeed);
+        if (pick) {
+          target = pick.clip;
+          loop = pick.loop;
+          speedRef = pick.speedRef;
+          fadeMs = pick.playback?.fadeMs ?? 180;
+          tsClamp = pick.playback?.timeScaleClamp ?? [0.5, 1.5];
+        }
+      }
+      if (!target) {
+        // Legacy fallback (matches the JSON exactly). Used only until
+        // the SM JSON resolves on first run.
+        const aim = (state.adsAmount || 0) > 0.4;
+        const swinging = state.attack && state.attack.phase !== 'idle';
+        const moving = planarSpeed > 0.05;
+        const running = planarSpeed > 3.5;
+        const crouched = !!state.crouched;
+        const SPEED_REF = {
+          W1_Walk_Aim_F_Loop_IPC: 1.6,
+          W1_Jog_Aim_F_Loop_IPC: 3.5,
+          W1_CrouchWalk_Aim_F_Loop_IPC: 1.0,
+        };
+        if (swinging) {
+          target = crouched ? 'W1_Crouch_Fire_Single' : 'W1_Stand_Fire_Single';
+          loop = false;
+        } else if (crouched && moving) {
+          target = 'W1_CrouchWalk_Aim_F_Loop_IPC'; loop = true;
+        } else if (crouched) {
+          target = aim ? 'W1_Crouch_Aim_Idle_IPC' : 'W1_Crouch_Idle_IPC'; loop = true;
+        } else if (running) {
+          target = 'W1_Jog_Aim_F_Loop_IPC'; loop = true;
+        } else if (moving) {
+          target = 'W1_Walk_Aim_F_Loop_IPC'; loop = true;
+        } else {
+          target = aim ? 'W1_Stand_Aim_Idle_IPC' : 'W1_Stand_Relaxed_Idle_IPC';
+          loop = true;
+        }
+        speedRef = SPEED_REF[target] ?? null;
+        fadeMs = 180;
+        tsClamp = [0.5, 1.5];
       }
       if (rig._fbx.currentClipName !== target) {
-        const action = rig.play(target, { fadeMs: 180, loop: !swinging });
+        const action = rig.play(target, { fadeMs, loop });
         const bindings = action?._propertyBindings || [];
         const bound = bindings.filter(b => b && b.binding && b.binding.node).length;
         console.log(`[fbx] clip → ${target} (action=${!!action}, tracks=${action?.getClip().tracks.length}, bound=${bound}, speed=${planarSpeed.toFixed(2)})`);
@@ -1736,21 +1779,11 @@ export function createPlayer(scene) {
         rig._fbx.currentAction = action; // remember for live timeScale tweaks below
       }
       // Match the playing clip's timeScale to actual ground speed so
-      // feet don't skate. Reference speeds are ballpark for the Motus
-      // pack — Walk authored for ~1.6 m/s, Jog ~3.5 m/s, CrouchWalk
-      // ~1.0 m/s. Outside locomotion clips (idle / aim_idle / fire),
-      // timeScale stays 1.0.
-      const SPEED_REF = {
-        W1_Walk_Aim_F_Loop_IPC: 1.6,
-        W1_Jog_Aim_F_Loop_IPC: 3.5,
-        W1_CrouchWalk_Aim_F_Loop_IPC: 1.0,
-      };
-      const ref = SPEED_REF[target];
-      if (ref && rig._fbx.currentAction) {
-        // Clamp so we don't get freakishly fast or frozen anims when
-        // the player tap-walks or hits speed peaks. 0.5..1.5 keeps
-        // the visible motion within natural cadence.
-        const ts = Math.max(0.5, Math.min(1.5, planarSpeed / ref));
+      // feet don't skate. Reference speeds come from the SM state's
+      // speedRef (was the inline SPEED_REF table previously). Outside
+      // locomotion clips, timeScale stays 1.0.
+      if (speedRef && rig._fbx.currentAction) {
+        const ts = Math.max(tsClamp[0], Math.min(tsClamp[1], planarSpeed / speedRef));
         rig._fbx.currentAction.timeScale = ts;
       } else if (rig._fbx.currentAction) {
         rig._fbx.currentAction.timeScale = 1.0;

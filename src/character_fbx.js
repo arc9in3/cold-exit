@@ -51,11 +51,45 @@
 import * as THREE from 'three';
 import { FBXLoader } from 'three/addons/loaders/FBXLoader.js';
 import { GLTFLoader } from 'three/addons/loaders/GLTFLoader.js';
+import { Registry } from './anim/registry.js';
+import { adapt as adaptRig } from './anim/rig_adapter.js';
 
-// Bare bone names (without the optional 'mixamorig:' prefix).
-// Both Mixamo (mixamorig:Hips) and Motus Digital (Hips) export packs
-// use the same naming scheme; the lookup in buildRigAdapter strips
-// the prefix before checking this table.
+// Lazy registry singleton — loaded on first FBX/GLB load so the JSON
+// configs at Assets/anim_data/rigs/* drive bone mapping. If the load
+// fails (missing JSON, schema mismatch), we fall back to the legacy
+// hardcoded BONE_TO_CODE table and the loader keeps working.
+let _registry = null;
+let _registryPromise = null;
+async function getRegistry() {
+  if (_registry) return _registry;
+  if (!_registryPromise) {
+    _registryPromise = Registry.create('Assets/anim_data/').catch(err => {
+      console.warn('[character_fbx] Registry.create failed; using legacy bone map:', err.message);
+      return null;
+    });
+  }
+  _registry = await _registryPromise;
+  return _registry;
+}
+
+// ============================================================
+// PHASE 1 NOTE — bone-map source-of-truth migration
+// ============================================================
+// The hardcoded BONE_TO_CODE table below is being migrated to JSON
+// config files at Assets/anim_data/rigs/{mixamo,motus,biped}.json,
+// loaded by src/anim/registry.js.
+//
+// During migration, BOTH paths exist:
+// - If buildRigAdapter is called with a rigCfg parameter, the JSON
+//   table is used (per-rig, with prefix-strip + suffix-regex from
+//   the rigCfg).
+// - If no rigCfg is passed, the hardcoded BONE_TO_CODE union table
+//   is used. This is the legacy code path that EXISTING callers
+//   (loadCharacterFBX without options) hit.
+//
+// Once all callers pass rigCfg + the registry is in main.js boot,
+// the hardcoded table can be deleted.
+// ============================================================
 const BONE_TO_CODE = {
   // torso chain
   'Hips':         { path: 'hips' },
@@ -123,22 +157,55 @@ function bareBone(name) {
   return n;
 }
 
+// Per-rig bareBone — uses prefix-strip + suffix-regex from a rig JSON
+// config (when provided), else falls back to the hardcoded behavior.
+function bareBoneCfg(name, rigCfg) {
+  if (!name) return name;
+  let n = name;
+  if (rigCfg) {
+    for (const p of (rigCfg.bonePrefixStrip || [])) {
+      if (n.startsWith(p)) { n = n.slice(p.length); break; }
+    }
+    if (rigCfg.boneSuffixStripRegex) {
+      n = n.replace(new RegExp(rigCfg.boneSuffixStripRegex), '');
+    }
+    return n;
+  }
+  // Legacy fallback: strip mixamorig: + trailing _N
+  if (n.startsWith('mixamorig:')) n = n.slice('mixamorig:'.length);
+  n = n.replace(/_\d+$/, '');
+  return n;
+}
+
 // Walk the loaded FBX scene graph, find every bone matching the
-// mixamorig:* names, and stamp them onto the rig adapter. Returns
-// the rig structure that the rest of the game expects.
-function buildRigAdapter(group, mixer) {
+// mixamorig:* names (or the rigCfg-driven names if rigCfg is passed),
+// and stamp them onto the rig adapter. Returns the rig structure
+// that the rest of the game expects.
+//
+// Optional rigCfg parameter: a parsed JSON config from
+// Assets/anim_data/rigs/<id>.json. When provided, the cfg's boneMap
+// + prefix-strip + suffix-regex drive bone lookup. When omitted,
+// the legacy hardcoded BONE_TO_CODE union table is used (Phase 1
+// migration: existing callers don't break).
+function buildRigAdapter(group, mixer, rigCfg = null) {
+  const boneMap = rigCfg && rigCfg.boneMap ? rigCfg.boneMap : null;
   // Find each bone by name. Mixamo FBX has a single SkinnedMesh whose
   // skeleton.bones array contains all bones; we can also walk the
   // group tree and look for Bone objects.
   const bonesByName = new Map();
   group.traverse((o) => {
-    if (!o.isBone && !(o.name && (o.name.startsWith('mixamorig:') || BONE_TO_CODE[bareBone(o.name)]))) return;
+    const isMatchedName = o.name && (
+      o.name.startsWith('mixamorig:')
+      || (boneMap && boneMap[bareBoneCfg(o.name, rigCfg)])
+      || (!boneMap && BONE_TO_CODE[bareBoneCfg(o.name, null)])
+    );
+    if (!o.isBone && !isMatchedName) return;
     // Register under exact name AND bare name so callers can look up
     // either 'mixamorig:Hips' or just 'Hips' interchangeably. Many
     // packs also duplicate bones (deformer + skeleton copies); the
     // first registration wins which is the visible animation root.
     if (!bonesByName.has(o.name)) bonesByName.set(o.name, o);
-    const bare = bareBone(o.name);
+    const bare = bareBoneCfg(o.name, rigCfg);
     if (bare !== o.name && !bonesByName.has(bare)) bonesByName.set(bare, o);
   });
 
@@ -177,12 +244,23 @@ function buildRigAdapter(group, mixer) {
     obj[parts[parts.length - 1]] = val;
   };
 
-  // Try each table key with both the bare name and the 'mixamorig:'
-  // prefix — Mixamo packs prefix, Motus Digital packs don't.
-  for (const [bareName, target] of Object.entries(BONE_TO_CODE)) {
-    const bone = bonesByName.get(bareName) || bonesByName.get(`mixamorig:${bareName}`);
-    if (!bone) continue;
-    setAt(target.path, bone);
+  if (boneMap) {
+    // Registry-driven path: rigCfg.boneMap is { 'BareName': 'rig.path' }
+    // (string), and prefix-strip / suffix-regex are applied via
+    // bareBoneCfg() so the original FBX bone names match.
+    for (const [bareName, path] of Object.entries(boneMap)) {
+      const bone = bonesByName.get(bareName);
+      if (!bone) continue;
+      setAt(path, bone);
+    }
+  } else {
+    // Legacy path — try each hardcoded table key with both the bare
+    // name and the 'mixamorig:' prefix.
+    for (const [bareName, target] of Object.entries(BONE_TO_CODE)) {
+      const bone = bonesByName.get(bareName) || bonesByName.get(`mixamorig:${bareName}`);
+      if (!bone) continue;
+      setAt(target.path, bone);
+    }
   }
 
   // Compute bone lengths so IK (or any consumer that reads
@@ -278,26 +356,48 @@ function defaultScaleForUrl(url) {
 
 // Load a character FBX or GLB from a URL and return the rig adapter.
 // opts.scale defaults to 0.01 for FBX (Mixamo cm) or 1.0 for GLB.
+// opts.rigId — explicit rig config id ('mixamo' | 'motus' | 'biped').
+//              When omitted, Registry.detectRigId() auto-detects.
+// opts.rigCfg — explicit parsed rigCfg (bypasses registry).
 export async function loadCharacterFBX(scene, url, opts = {}) {
   const isGLB = /\.(glb|gltf)$/i.test(url);
-  const { scale = defaultScaleForUrl(url) } = opts;
+  const { scale = defaultScaleForUrl(url), rigId = null, rigCfg = null } = opts;
   const loader = loaderForUrl(url);
+  // Resolve rigCfg: explicit > registry-by-id > defer to detect-on-load
+  let resolvedCfg = rigCfg;
+  if (!resolvedCfg && rigId) {
+    const reg = await getRegistry();
+    if (reg) resolvedCfg = reg.rig(rigId);
+  }
   return new Promise((resolve, reject) => {
-    loader.load(url, (loaded) => {
+    loader.load(url, async (loaded) => {
       // GLTFLoader returns { scene, animations, ... }; FBXLoader returns
       // a Group directly. Unify by extracting `group` + `animations`.
       const group = isGLB ? loaded.scene : loaded;
       if (isGLB && loaded.animations && !group.animations) {
         group.animations = loaded.animations;
       }
+      // Auto-detect rig if no cfg was specified.
+      if (!resolvedCfg) {
+        const reg = await getRegistry();
+        if (reg) {
+          const boneNames = [];
+          group.traverse(o => { if (o.isBone && o.name) boneNames.push(o.name); });
+          const detected = reg.detectRigId(boneNames);
+          if (detected) {
+            resolvedCfg = reg.rig(detected);
+            console.log(`[character_fbx] auto-detected rig "${detected}" for ${url}`);
+          }
+        }
+      }
       // Re-enter the FBX path with the unified group below.
-      _onLoadGroup(scene, group, scale, resolve);
+      _onLoadGroup(scene, group, scale, resolve, resolvedCfg);
     }, undefined, reject);
   });
 }
 
 // Shared post-load step (used by both FBX and GLB paths).
-function _onLoadGroup(scene, group, scale, resolve) {
+function _onLoadGroup(scene, group, scale, resolve, rigCfg = null) {
   group.scale.setScalar(scale);
   let skinnedMesh = null;
   group.traverse((o) => {
@@ -324,8 +424,13 @@ function _onLoadGroup(scene, group, scale, resolve) {
     if (clip.duration < 0.01) continue;
     actions.set(clip.name, mixer.clipAction(clip));
   }
-  const rig = buildRigAdapter(group, mixer);
+  const rig = buildRigAdapter(group, mixer, rigCfg);
   rig._fbx.actions = actions;
+  rig._fbx.rigCfg = rigCfg;
+  // Normalize to the unified Rig interface (anim/rig_adapter.js). For
+  // FBX this is a no-op for the existing methods; it adds rig.kind +
+  // rig.hasClips so downstream code can treat any rig uniformly.
+  adaptRig(rig);
   scene.add(group);
   // Auto-play the first clip if any.
   const firstClipName = actions.keys().next().value;

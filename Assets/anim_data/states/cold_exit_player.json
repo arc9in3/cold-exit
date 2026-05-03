@@ -1,0 +1,37 @@
+{
+  "id": "cold_exit_player",
+  "label": "Cold Exit player — clip selection (Phase 1: replicates player.js:1695-1737 exactly)",
+  "rigId": "motus",
+  "_phase1Note": "Phase 1 ports the existing if/else cascade verbatim. Future phases (graph.js + bone_mask.js) will add layers + per-bone masks + true blending; for now this is a flat priority list of single-clip states, evaluated top-down with first-match-wins. Speed-driven timeScale lives on the state via speedRef; the evaluator returns it alongside the clip name.",
+
+  "states": {
+    "fire_crouch": { "clip": "W1_Crouch_Fire_Single",       "loop": false },
+    "fire_stand":  { "clip": "W1_Stand_Fire_Single",        "loop": false },
+    "crouch_walk": { "clip": "W1_CrouchWalk_Aim_F_Loop_IPC", "loop": true,  "speedRef": 1.0 },
+    "crouch_aim":  { "clip": "W1_Crouch_Aim_Idle_IPC",       "loop": true },
+    "crouch_idle": { "clip": "W1_Crouch_Idle_IPC",           "loop": true },
+    "run":         { "clip": "W1_Jog_Aim_F_Loop_IPC",        "loop": true,  "speedRef": 3.5 },
+    "walk":        { "clip": "W1_Walk_Aim_F_Loop_IPC",       "loop": true,  "speedRef": 1.6 },
+    "stand_aim":   { "clip": "W1_Stand_Aim_Idle_IPC",        "loop": true },
+    "stand_idle":  { "clip": "W1_Stand_Relaxed_Idle_IPC",    "loop": true }
+  },
+
+  "_inputsNote": "The evaluator is given an `inputs` object derived from playerState. Inputs used here: swinging, crouched, moving, running, aim. See src/anim/state_machine.js#deriveInputs for the mapping from playerState → inputs.",
+
+  "selectionPriority": [
+    { "state": "fire_crouch", "all": ["swinging", "crouched"] },
+    { "state": "fire_stand",  "all": ["swinging"] },
+    { "state": "crouch_walk", "all": ["crouched", "moving"] },
+    { "state": "crouch_aim",  "all": ["crouched", "aim"] },
+    { "state": "crouch_idle", "all": ["crouched"] },
+    { "state": "run",         "all": ["running"] },
+    { "state": "walk",        "all": ["moving"] },
+    { "state": "stand_aim",   "all": ["aim"] },
+    { "state": "stand_idle",  "all": [] }
+  ],
+
+  "playback": {
+    "fadeMs": 180,
+    "timeScaleClamp": [0.5, 1.5]
+  }
+}

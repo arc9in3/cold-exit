@@ -1,0 +1,36 @@
+{
+  "id": "biped",
+  "label": "3ds Max Biped (Bip001-* prefix, _N numeric suffix)",
+  "scaleHint": 1.0,
+  "handedness": "char_left_is_world_plus_x",
+  "_handednessNote": "Biped's L/R follows the same convention as Mixamo. Char's Left = code rightArm.",
+  "bonePrefixStrip": [],
+  "boneSuffixStripRegex": "_\\d+$",
+  "boneMap": {
+    "Bip001-Pelvis":       "hips",
+    "Bip001-Spine":        "stomach",
+    "Bip001-Spine1":       "chest",
+    "Bip001-Neck":         "neck",
+    "Bip001-Head":         "head",
+    "Bip001-L-Clavicle":   "rightArm.shoulder.pivot",
+    "Bip001-L-UpperArm":   "rightArm.shoulder.pivot",
+    "Bip001-L-Forearm":    "rightArm.elbow",
+    "Bip001-L-Hand":       "rightArm.wrist",
+    "Bip001-R-Clavicle":   "leftArm.shoulder.pivot",
+    "Bip001-R-UpperArm":   "leftArm.shoulder.pivot",
+    "Bip001-R-Forearm":    "leftArm.elbow",
+    "Bip001-R-Hand":       "leftArm.wrist",
+    "Bip001-L-Thigh":      "rightLeg.thigh.pivot",
+    "Bip001-L-Calf":       "rightLeg.knee",
+    "Bip001-L-Foot":       "rightLeg.ankle",
+    "Bip001-R-Thigh":      "leftLeg.thigh.pivot",
+    "Bip001-R-Calf":       "leftLeg.knee",
+    "Bip001-R-Foot":       "leftLeg.ankle"
+  },
+  "logicalGroups": {
+    "lower":  ["hips", "stomach", "leftLeg.*", "rightLeg.*"],
+    "upper":  ["chest", "neck", "head", "leftArm.*", "rightArm.*"],
+    "top":    ["chest", "neck", "head", "leftArm.*", "rightArm.*"],
+    "bottom": ["hips", "stomach", "leftLeg.*", "rightLeg.*"]
+  }
+}

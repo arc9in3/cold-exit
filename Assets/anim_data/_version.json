@@ -1,0 +1,5 @@
+{
+  "schemaVersion": 1,
+  "compatible": [1],
+  "notes": "Cold Exit modular animation system schema. Major bumps when JSON shapes change in incompatible ways."
+}
