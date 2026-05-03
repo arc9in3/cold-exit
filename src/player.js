@@ -1974,6 +1974,11 @@ export function createPlayer(scene) {
   // material color writes), only writes when the cached value differs.
   function applyArmorTint(equipment) {
     if (!equipment) return;
+    // FBX rig has its own per-mesh MeshStandardMaterials baked into
+    // the loaded asset — no rig.materials.{bodyMat, armMat, ...} to
+    // poke. Tinting is a no-op until/unless we add an explicit FBX
+    // material-swap pipeline.
+    if (!rig.materials) return;
     const set = (mat, hex, last) => {
       if (mat.color._lastHex !== hex) {
         mat.color.setHex(hex);
