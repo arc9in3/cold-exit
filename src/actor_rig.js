@@ -358,8 +358,13 @@ export const DEFAULT_DIMS_FEMALE = {
       r: 0.30, y: -0.05, z: 0,
       scaleX: 1.00, scaleY: 0.58, scaleZ: 0.90,
       pitchX: 0.10,
+      // Bottom factor widened (was 0.62) so the bowl bottom matches
+      // the leg attach width — without this the thighs popped out
+      // INSIDE the bowl footprint at full width and a visible step
+      // formed at the hipBowl/thigh seam. 0.85 closes that step
+      // while keeping the iliac-to-pubic narrowing the refs show.
       wedgeTopFactor: 1.00,
-      wedgeBotFactor: 0.62,
+      wedgeBotFactor: 0.85,
     },
     // PRUNED for the simplification pass: hipFront, pec, lumbar,
     // upperAbdomen, lowerAbdomen, trapezius. The hipBowl + bust +
@@ -1002,26 +1007,27 @@ export function buildRig(opts = {}) {
     wristJoint.castShadow = false;
     wristJoint.userData.zone = 'arm';
     wrist.add(wristJoint);
-    // Hand — tapered cylinder wedge (per bodyshapes ref) instead of
-    // a box. Wider at the wrist (palm), narrower toward the
-    // fingertips. Oriented along Y like the forearm so the cylinder
-    // axis runs from wrist out to fingers.
+    // Hand — tapered cylinder wedge. Wider at the wrist (palm),
+    // narrower toward the fingertips. Length = handH * 0.8 so it
+    // reads as a compact fist, not a sausage extension. Previous
+    // value (handH * 1.4) made the hand ~half the forearm length
+    // visually, which read as a claw.
     const hand = (() => {
       const pivot = new THREE.Group();
       pivot.position.set(0, A.handY * scale, 0);
+      const handLen = A.handH * 0.8 * scale;
       const wedgeMesh = new THREE.Mesh(
         _cyl(
           (A.handW * 0.55) * scale,    // wider at palm
           (A.handW * 0.40) * scale,    // narrower at fingertips
-          A.handH * 1.4 * scale,        // length from wrist to fingertips
+          handLen,
           16,
         ),
         handMat,
       );
       // Cylinder is Y-centered; offset so the TOP sits at wrist (y=0).
-      wedgeMesh.position.y = -A.handH * 0.7 * scale;
-      // Slight non-uniform scale to flatten the hand front-to-back so
-      // it reads as a flattened palm/fist rather than a true cylinder.
+      wedgeMesh.position.y = -handLen * 0.5;
+      // Flatten on Z so the hand reads as a palm/fist, not a column.
       wedgeMesh.scale.set(1.0, 1.0, 0.65);
       wedgeMesh.castShadow = true;
       wedgeMesh.userData.zone = 'arm';

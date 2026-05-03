@@ -1188,9 +1188,18 @@ addDimsFolder(dimsFolder, state.dims, []);
 
 // Apply female baseline at boot since we default-archetype to female.
 // Rebuilds dimsFolder + state.dims so the sliders reflect the female
-// rig values, not the male defaults.
+// rig values, not the male defaults. Also clears the male-default
+// signature flags (visor / neckCable / sheath / bandolier) — those
+// were on by default and were bleeding through onto the female rig
+// (visible as a back-sheath strip down the chest in T-pose, etc.).
 if (state.archetype.sex === 'female') {
   applyArchetypeBaseline('female');
+  state.sig.signature = false;
+  state.sig.visor = false;
+  state.sig.ponytail = false;
+  state.sig.neckCable = false;
+  state.sig.sheath = false;
+  state.colors.hair = 0x0a0a0a;
   rebuildRig();
 }
 
