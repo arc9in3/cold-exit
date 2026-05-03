@@ -104,37 +104,21 @@ function _runUpperBodyIK(rig, state, aimPoint, aimPitch) {
   }
 
   // Step 2: each spine bone above spine_01 + neck + head gets a
-  // WORLD-frame aim delta converted to its parent's frame.
-  // Bone-local Euler interpretation depends on axis convention
-  // (UEFN bones have local X along the bone, so a "yaw" around
-  // local Y reads as a lean). Building the delta around world Y
-  // and rotating it into the parent's frame produces correct
-  // pitch + yaw regardless of bone export axes.
-  const YAW_WEIGHTS   = [0,    0.10, 0.16, 0.20, 0.24];  // spine_01 is stabilized, skip
+  // LOCAL aim delta. Through the parent chain, deltas compound,
+  // so the arms (children of spine_05's clavicle) inherit the full
+  // chest twist.
+  const YAW_WEIGHTS   = [0,    0.10, 0.16, 0.20, 0.24];
   const PITCH_WEIGHTS = [0,    0.10, 0.14, 0.18, 0.20];
-  const _parentInvW = new THREE.Quaternion();
-  const _parentW    = new THREE.Quaternion();
-  const _deltaWorld = new THREE.Quaternion();
-  const _deltaPar   = new THREE.Quaternion();
   const applyChain = (bone, yawAmt, pitchAmt) => {
     if (!bone || !bone.parent) return;
     const bindLocal = fbx._upperBodyBindLocal.get(bone);
     if (!bindLocal) return;
     bone.quaternion.copy(bindLocal);
-    if (Math.abs(yawAmt) < 0.001 && Math.abs(pitchAmt) < 0.001) {
-      bone.updateMatrixWorld(true);
-      return;
+    if (Math.abs(yawAmt) > 0.001 || Math.abs(pitchAmt) > 0.001) {
+      _aimDeltaE.set(pitchAmt, yawAmt, 0, 'YXZ');
+      _aimDeltaQ.setFromEuler(_aimDeltaE);
+      bone.quaternion.multiply(_aimDeltaQ);
     }
-    // World-frame delta: yaw around world Y, pitch around world X.
-    _aimDeltaE.set(pitchAmt, yawAmt, 0, 'YXZ');
-    _deltaWorld.setFromEuler(_aimDeltaE);
-    // Convert to parent's local frame: deltaPar = parentW⁻¹ × deltaWorld × parentW
-    bone.parent.getWorldQuaternion(_parentW);
-    _parentInvW.copy(_parentW).invert();
-    _deltaPar.copy(_parentInvW).multiply(_deltaWorld).multiply(_parentW);
-    // bone.local = deltaPar × bindLocal (left-multiply so the rotation
-    // happens in parent's frame around world axes).
-    bone.quaternion.copy(_deltaPar).multiply(bindLocal);
     bone.updateMatrixWorld(true);
   };
   for (let i = 1; i < fbx._spineChain.length; i++) {
