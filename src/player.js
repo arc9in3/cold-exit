@@ -51,12 +51,14 @@ function _runUpperBodyIK(rig, state, aimPoint, aimPitch) {
   // body forward; we want backward when below ADS so arms rise).
   aimPitch += (state._gaspPitchOffset || 0);
 
-  // Resolve spine chain + neck + head on first call.
+  // Resolve spine chain + neck + head + clavicles on first call.
   if (!fbx._spineChain) {
     const bones = fbx.bonesByName;
     const candidates = ['spine_01', 'spine_02', 'spine_03', 'spine_04', 'spine_05'];
     fbx._spineChain = candidates.map(n => bones?.get(n) || null).filter(Boolean);
     fbx._neckBone = bones?.get('neck_01') || null;
+    fbx._clavicleL = bones?.get('clavicle_l') || null;
+    fbx._clavicleR = bones?.get('clavicle_r') || null;
   }
 
   // Hip-sway cancellation: stabilize ONLY spine_01 to a fixed
@@ -2083,7 +2085,26 @@ export function createPlayer(scene) {
           }
         }
         if (_gaspSmCfg) {
-          const pick = selectGaspLocomotion(_gaspSmCfg, state, planarSpeed, velocity, rig.group.rotation.y);
+          // Reinterpret velocity as BODY-RELATIVE for sector picking.
+          // Cold Exit's input (FORWARD/RIGHT vectors) is camera-relative,
+          // so pressing D produces a world vector that isn't necessarily
+          // body's-right when body faces away from camera (= ADS toward
+          // a forward cursor). User reports the mental model is body-
+          // relative: D = body's right strafe regardless of body facing.
+          // Synthesize a velocity in body-frame from the player's
+          // input intent (move.x, move.y), then feed that through the
+          // sector picker.
+          let pickVel = velocity;
+          if (input?.move && (Math.abs(input.move.x) + Math.abs(input.move.y) > 0.05)) {
+            const yaw = rig.group.rotation.y;
+            const fwdX = Math.sin(yaw), fwdZ = Math.cos(yaw);
+            const rgtX = Math.cos(yaw), rgtZ = -Math.sin(yaw);
+            pickVel = {
+              x: fwdX * input.move.y + rgtX * input.move.x,
+              z: fwdZ * input.move.y + rgtZ * input.move.x,
+            };
+          }
+          const pick = selectGaspLocomotion(_gaspSmCfg, state, planarSpeed, pickVel, rig.group.rotation.y);
           if (window.__animDebug && pick && rig._fbx.currentClipName !== pick.clip) {
             console.log(`[gasp] sector=${pick.sector} bucket=${pick.bucket} clip=${pick.clip}`,
               `body=${rig.group.rotation.y.toFixed(2)} cursor=${cursorYaw.toFixed(2)}`,
