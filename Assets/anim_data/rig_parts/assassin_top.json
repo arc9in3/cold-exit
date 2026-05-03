@@ -1,8 +1,8 @@
 {
   "id": "assassin_top",
   "label": "Assassin (top half — chest up)",
-  "src": "Assets/models/characters/eve.glb",
-  "_srcNote": "TEMPORARY — assassin.glb has zero exported bones (it's a static mesh, not a rigged character). Pointed at eve.glb so the composer pipeline has a real biped skeleton to work against. Swap to a real top-only rig once one is available; the rig_compose code already filters for the 'top' bone subset via the anchorBone reparenting.",
+  "src": "Assets/models/characters/Man_Rig_Correct.glb",
+  "_srcNote": "Man_Rig_Correct.glb is the working second rig source (assassin.glb has zero exported bones — it's a static mesh, not rigged). If anchor lookup fails on a future asset swap, src/anim/rig_compose.js dumps the available bone names to console so you can pick the right anchor.",
   "rigType": "biped",
   "exposes": "top",
   "anchorBone": "Bip001-Spine1",

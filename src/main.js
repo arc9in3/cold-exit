@@ -812,6 +812,24 @@ window.__dumpRigBones = async (url) => {
   return arr;
 };
 
+// Console: __compositionStatus()
+//   Sanity-check what the player rig currently is. Returns kind +
+//   bone count + clip count + composed-from for composed rigs.
+window.__compositionStatus = () => {
+  const r = player.rig;
+  if (!r) return 'no rig';
+  const out = {
+    kind:        r.kind || 'unknown',
+    hasGraph:    !!r._fbx?.graph,
+    bones:       r._fbx?.bonesByName?.size || 0,
+    clips:       r._fbx?.actions?.size || 0,
+    composedOf:  r._fbx?.composed ? `${r._fbx.composed.top} + ${r._fbx.composed.bottom}` : null,
+    rigId:       r._fbx?.rigCfg?.id || null,
+  };
+  console.table(out);
+  return out;
+};
+
 // Console: __useCharacter('eve_alt')
 //   Loads a composed character (top half + bottom half from different
 //   sources) per Assets/anim_data/rig_compose/<id>.json. Phase 3 of
