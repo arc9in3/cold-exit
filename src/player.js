@@ -1732,6 +1732,35 @@ export function createPlayer(scene) {
         rig.group.position.copy(procgenGroup.position);
         rig.group.rotation.copy(procgenGroup.rotation);
       }
+      // Defensive clamp — never let the rig dip below ground. The
+      // upstream sources (gameplay physics, coop interp, animation
+      // scale offsets) shouldn't go negative, but if any of them
+      // produce a transient negative Y, this catches it before the
+      // visible glitch lands. window.__animDebug logs the source.
+      if (rig.group.position.y < 0) {
+        if (window.__animDebug) {
+          console.warn('[fbx] rig.group.y dipped below 0 — clamping', {
+            y: rig.group.position.y,
+            procgenY: procgenGroup?.position.y,
+            time: performance.now().toFixed(0),
+          });
+        }
+        rig.group.position.y = 0;
+      }
+      // The SkinnedMesh inside the rig may have its OWN position
+      // mutated by the loaded clip (some packs author the mesh's
+      // root translation rather than a hip-bone position track).
+      // Lock its local position to whatever it was at load time so
+      // animations can't translate it. Cached on first hit.
+      const sk = rig._fbx._skinnedMesh ||= (() => {
+        let m = null;
+        rig.group.traverse(o => { if (o.isSkinnedMesh && !m) m = o; });
+        if (m) rig._fbx._skinnedMeshBaseY = m.position.y;
+        return m;
+      })();
+      if (sk && rig._fbx._skinnedMeshBaseY !== undefined) {
+        sk.position.y = rig._fbx._skinnedMeshBaseY;
+      }
       // Clip selection — sourced from
       // Assets/anim_data/states/cold_exit_player.json via the JSON
       // state machine (src/anim/state_machine.js). The JSON encodes
