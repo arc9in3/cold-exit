@@ -47,18 +47,31 @@ function _runUpperBodyIK(rig, state, aimPoint, aimPitch, dt = 1/60) {
   if (!rig || !rig._fbx) return;
   const fbx = rig._fbx;
   const aimYaw = state.chestTwist || 0;
-  // Add the GASP pitch-up baseline (negative aimPitch tilts upper
-  // body forward; we want backward when below ADS so arms rise).
-  aimPitch += (state._gaspPitchOffset || 0);
+  // Per user feedback: minimize spine LEAN (pitch). Cursor cursor-Y
+  // aim is handled by the gun anchor pitch already; spine pitch
+  // here is purely cosmetic body language. Cap the value entering
+  // the spine distribution so the upper body never tips more than
+  // ~5° from upright.
+  // (state._gaspPitchOffset, set per-frame in the GASP block, is
+  // intentionally ignored here — earlier it added -0.18 rad in
+  // hipfire to lift arms via spine lean. Now arms inherit clip
+  // pose and the gun anchor handles aim direction.)
+  const SPINE_PITCH_LIMIT = 0.09;   // ≈ 5° max lean
+  const spinePitch = Math.max(-SPINE_PITCH_LIMIT,
+                              Math.min(SPINE_PITCH_LIMIT, aimPitch * 0.4));
   // Recoil pulse — kickRecoil() set fbx._recoilT and _recoilAmt;
   // decay over time and add a backward pitch contribution. ~180ms
-  // total, peak at trigger, smooth ease-out.
+  // total, peak at trigger, smooth ease-out. Kept on top of the
+  // capped spine pitch since recoil IS allowed to break the clamp
+  // briefly (~60ms) for impact feel.
+  let recoilPitch = 0;
   if (fbx._recoilT > 0) {
     fbx._recoilT = Math.max(0, fbx._recoilT - dt);
-    const phase = fbx._recoilT / 0.18;            // 1.0 → 0.0
-    const k = phase * phase;                       // ease-out quadratic
-    aimPitch += -fbx._recoilAmt * k;               // negative = pitch UP (gun rises)
+    const phase = fbx._recoilT / 0.18;
+    const k = phase * phase;
+    recoilPitch = -fbx._recoilAmt * k;
   }
+  aimPitch = spinePitch + recoilPitch;
 
   // Resolve spine chain + neck + head + clavicles on first call.
   if (!fbx._spineChain) {
