@@ -17,9 +17,8 @@
 //
 // Returns the chosen agent (or null on dismiss) via .show().
 
-import { rollRoster, SPECIAL_MERCS, checkMercUnlock, checkWeaponUnlock } from './recruiter.js';
-
-const REFRESH_COST = 50;
+import { rollRoster, SPECIAL_MERCS, NAMED_RECRUITS_BY_ID, checkMercUnlock, checkWeaponUnlock } from './recruiter.js';
+import { refreshCost, getChips, spendChips, REHIRE_DISCOUNT } from './agency_economy.js';
 
 const STYLE = `
 #recruiter-root {
@@ -161,6 +160,43 @@ const STYLE = `
   color: #a8987a; font-style: italic;
   margin-top: 2px;
 }
+.rcard-ability {
+  font-size: 11px; color: #c0d8e0;
+  background: #0e1620;
+  border: 1px solid #2a4858;
+  border-radius: 2px;
+  padding: 6px 8px;
+  margin-top: 4px;
+}
+.rcard-ability-label {
+  font-weight: 600; letter-spacing: 0.04em;
+}
+.rcard-ability-desc { color: #98a8b0; margin-top: 2px; }
+.rcard-relic {
+  font-size: 11px; color: #d4b8e8;
+  background: #161020;
+  border: 1px solid #4a3858;
+  border-radius: 2px;
+  padding: 6px 8px;
+  margin-top: 4px;
+}
+.rcard-relic-label {
+  font-weight: 600; letter-spacing: 0.04em;
+}
+.rcard-relic-desc { color: #a898b8; margin-top: 2px; }
+.rcard-perk {
+  font-size: 11px; color: #b8d8b0;
+  background: #101810;
+  border: 1px solid #2a482a;
+  border-radius: 2px;
+  padding: 6px 8px;
+  margin-top: 4px;
+}
+.rcard-loadout {
+  font-size: 10px; color: #8a8a78;
+  margin-top: 4px;
+  text-transform: uppercase; letter-spacing: 0.08em;
+}
 .rcard-footer {
   margin-top: auto; padding-top: 8px;
   border-top: 1px solid #2a2620;
@@ -219,7 +255,7 @@ export class RecruiterUI {
         <div id="recruiter-flavor">"I've got three live ones today. Take a look."</div>
         <div id="recruiter-options"></div>
         <div id="recruiter-actions">
-          <button class="rec-btn" id="recruiter-refresh">Refresh roster — ${REFRESH_COST}c</button>
+          <button class="rec-btn" id="recruiter-refresh">Refresh roster — <span id="recruiter-refresh-cost">${refreshCost(0)}</span>c</button>
           <button class="rec-btn" id="recruiter-close">Walk away</button>
         </div>
       </div>
@@ -244,8 +280,10 @@ export class RecruiterUI {
 
   _refreshPaid() {
     const credits = this._currentCredits();
-    if (credits < REFRESH_COST) return;
-    if (!this.opts.spendCredits(REFRESH_COST)) return;
+    const cost = refreshCost(this._refreshCount || 0);
+    if (credits < cost) return;
+    if (!this.opts.spendCredits(cost)) return;
+    this._refreshCount = (this._refreshCount || 0) + 1;
     this.roster = rollRoster(this.opts.unlockedSpecials || new Set());
     this._render();
   }
@@ -257,7 +295,10 @@ export class RecruiterUI {
   _render() {
     const credits = this._currentCredits();
     this.creditsEl.textContent = `${credits}c on hand`;
-    this.refreshBtn.disabled = credits < REFRESH_COST;
+    const cost = refreshCost(this._refreshCount || 0);
+    this.refreshBtn.disabled = credits < cost;
+    const costEl = this.root.querySelector('#recruiter-refresh-cost');
+    if (costEl) costEl.textContent = String(cost);
     this.optionsEl.innerHTML = '';
     for (const a of this.roster) {
       this.optionsEl.appendChild(this._cardEl(a, credits));
@@ -271,15 +312,37 @@ export class RecruiterUI {
       + (credits < a.hirePrice ? ' disabled' : '');
     const stat = (label, key) => `
       <div class="rcard-stat-label">${label}</div>
-      <div class="rcard-stat-bar"><div class="rcard-stat-fill" style="width:${a.stats[key]}%"></div></div>
+      <div class="rcard-stat-bar"><div class="rcard-stat-fill" style="width:${Math.min(100, a.stats[key])}%"></div></div>
       <div class="rcard-stat-val">${a.stats[key]}</div>`;
-    const weaponBlock = a.kind === 'special' ? `
-      <div class="rcard-weapon">
+    // Special-merc blocks: weapon, ability, relic, starting items.
+    let extraBlocks = '';
+    if (a.kind === 'special') {
+      const merc = SPECIAL_MERCS[a.mercId];
+      extraBlocks += `<div class="rcard-weapon">
         <div class="rcard-weapon-label">${a.weapon.label}</div>
         <div class="rcard-weapon-flavor">${a.weapon.flavor}</div>
-      </div>
-    ` : '';
+      </div>`;
+      if (merc?.ability) {
+        extraBlocks += `<div class="rcard-ability">
+          <div class="rcard-ability-label">★ ${merc.ability.name}</div>
+          <div class="rcard-ability-desc">${merc.ability.desc}</div>
+        </div>`;
+      }
+      if (merc?.relic) {
+        extraBlocks += `<div class="rcard-relic">
+          <div class="rcard-relic-label">◆ ${merc.relic.name}</div>
+          <div class="rcard-relic-desc">${merc.relic.desc}</div>
+        </div>`;
+      }
+      if (merc?.startingItems?.length) {
+        extraBlocks += `<div class="rcard-loadout">Loadout: ${merc.startingItems.join(' · ')}</div>`;
+      }
+    } else if (a.kind === 'named' && a.perk) {
+      // Named recruit perk — green-tinted block.
+      extraBlocks += `<div class="rcard-perk">★ ${a.perk}</div>`;
+    }
     const tierBadge = a.kind === 'special' ? '<span class="tier special">special</span>' :
+      a.kind === 'named' ? `<span class="tier">${a.tier} · named</span>` :
       `<span class="tier">${a.tier}</span>`;
     card.innerHTML = `
       <div class="rcard-portrait">portrait ${a.portraitSeed.toString().slice(-4)}</div>
@@ -293,7 +356,7 @@ export class RecruiterUI {
         ${stat('NRV', 'nrv')}
       </div>
       <div class="rcard-quirk">${a.quirk}</div>
-      ${weaponBlock}
+      ${extraBlocks}
       <div class="rcard-footer">
         <span class="rcard-price${credits < a.hirePrice ? ' unaffordable' : ''}">${a.hirePrice}c</span>
         <span class="rcard-contract">${a.contract.type}</span>
