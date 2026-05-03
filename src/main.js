@@ -669,6 +669,32 @@ window.__useFbx = async (url) => {
   return `loaded ${url}, clips: ${player.rig.clipNames?.().join(', ')}`;
 };
 
+// Console: __openRecruiter() — open the agency recruiter modal.
+// Wires the modal to the agency_economy chip balance so spent chips
+// debit and refresh costs ladder per session.
+window.__openRecruiter = async () => {
+  const [{ RecruiterUI }, econ] = await Promise.all([
+    import('./ui_recruiter.js'),
+    import('./agency_economy.js'),
+  ]);
+  if (!window.__recruiterUI) {
+    window.__recruiterUI = new RecruiterUI({
+      getCredits:       () => econ.getChips(),
+      spendCredits:     (n) => econ.spendChips(n),
+      addAgentToRoster: (a) => {
+        // Persist hire to the agency state via window.__agencyRoster.
+        window.__agencyRoster = window.__agencyRoster || [];
+        window.__agencyRoster.push(a);
+        console.log(`[agency] hired ${a.codename} (${a.kind})`);
+      },
+      unlockedSpecials: window.__agencyUnlockedSpecials || new Set(),
+      mercProgress:     window.__agencyMercProgress || {},
+      onClose:          () => {},
+    });
+  }
+  return await window.__recruiterUI.show();
+};
+
 // Console: __useEve()           — load Assets/models/characters/eve.glb
 //          __useEveDetailed()   — load eve1.glb (24MB, more polys/textures)
 //          __useEveWithUAL()    — eve.glb + Universal Animation Library
