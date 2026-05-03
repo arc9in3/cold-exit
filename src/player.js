@@ -47,31 +47,18 @@ function _runUpperBodyIK(rig, state, aimPoint, aimPitch, dt = 1/60) {
   if (!rig || !rig._fbx) return;
   const fbx = rig._fbx;
   const aimYaw = state.chestTwist || 0;
-  // Per user feedback: minimize spine LEAN (pitch). Cursor cursor-Y
-  // aim is handled by the gun anchor pitch already; spine pitch
-  // here is purely cosmetic body language. Cap the value entering
-  // the spine distribution so the upper body never tips more than
-  // ~5° from upright.
-  // (state._gaspPitchOffset, set per-frame in the GASP block, is
-  // intentionally ignored here — earlier it added -0.18 rad in
-  // hipfire to lift arms via spine lean. Now arms inherit clip
-  // pose and the gun anchor handles aim direction.)
-  const SPINE_PITCH_LIMIT = 0.09;   // ≈ 5° max lean
-  const spinePitch = Math.max(-SPINE_PITCH_LIMIT,
-                              Math.min(SPINE_PITCH_LIMIT, aimPitch * 0.4));
+  // Add the GASP pitch-up baseline (negative aimPitch tilts upper
+  // body forward; we want backward when below ADS so arms rise).
+  aimPitch += (state._gaspPitchOffset || 0);
   // Recoil pulse — kickRecoil() set fbx._recoilT and _recoilAmt;
   // decay over time and add a backward pitch contribution. ~180ms
-  // total, peak at trigger, smooth ease-out. Kept on top of the
-  // capped spine pitch since recoil IS allowed to break the clamp
-  // briefly (~60ms) for impact feel.
-  let recoilPitch = 0;
+  // total, peak at trigger, smooth ease-out.
   if (fbx._recoilT > 0) {
     fbx._recoilT = Math.max(0, fbx._recoilT - dt);
-    const phase = fbx._recoilT / 0.18;
-    const k = phase * phase;
-    recoilPitch = -fbx._recoilAmt * k;
+    const phase = fbx._recoilT / 0.18;            // 1.0 → 0.0
+    const k = phase * phase;                       // ease-out quadratic
+    aimPitch += -fbx._recoilAmt * k;               // negative = pitch UP (gun rises)
   }
-  aimPitch = spinePitch + recoilPitch;
 
   // Resolve spine chain + neck + head + clavicles on first call.
   if (!fbx._spineChain) {
@@ -127,13 +114,15 @@ function _runUpperBodyIK(rig, state, aimPoint, aimPitch, dt = 1/60) {
     }
   }
 
-  // Step 2: spine yaw distribution is ZEROED per user feedback —
-  // any spine yaw read as side-lean due to UEFN bone-axis
-  // convention. Yaw is now applied to clavicle bones directly
-  // (world-frame, see step 3). Spine pitch stays as a tiny
-  // capped contribution for life signal only.
-  const YAW_WEIGHTS   = [0, 0, 0, 0, 0];
-  const PITCH_WEIGHTS = [0, 0.04, 0.08, 0.10, 0.12];
+  // Step 2: each spine bone above spine_01 + neck + head gets a
+  // LOCAL aim delta. Through the parent chain, deltas compound,
+  // so the arms (children of spine_05's clavicle) inherit the full
+  // chest twist.
+  // LEAN REDUCTION step 1 — halved from baseline so we can dial
+  // in iteratively. Baseline was [0,.10,.16,.20,.24] yaw +
+  // [0,.10,.14,.18,.20] pitch; this is 50%.
+  const YAW_WEIGHTS   = [0,    0.05, 0.08, 0.10, 0.12];
+  const PITCH_WEIGHTS = [0,    0.05, 0.07, 0.09, 0.10];
   const applyChain = (bone, yawAmt, pitchAmt) => {
     if (!bone || !bone.parent) return;
     const bindLocal = fbx._upperBodyBindLocal.get(bone);
@@ -149,51 +138,11 @@ function _runUpperBodyIK(rig, state, aimPoint, aimPitch, dt = 1/60) {
   for (let i = 1; i < fbx._spineChain.length; i++) {
     applyChain(fbx._spineChain[i], aimYaw * YAW_WEIGHTS[i], aimPitch * PITCH_WEIGHTS[i]);
   }
-  // Clavicles — apply the FULL chestTwist yaw in WORLD frame so the
-  // arms rotate toward cursor without leaning the spine. World-yaw
-  // is converted into the clavicle's parent (spine_05) frame:
-  //   delta_local = parent.world.invert() * worldYawQ * parent.world
-  // Then bone.local = delta_local * bind_local (left-multiply, so
-  // the rotation is applied around the parent's frame). Result is
-  // a clean horizontal arm sweep regardless of bone-axis convention.
-  if (Math.abs(aimYaw) > 0.001 && (fbx._clavicleL || fbx._clavicleR)) {
-    const _clavWorldYaw = new THREE.Quaternion().setFromAxisAngle(
-      new THREE.Vector3(0, 1, 0), aimYaw);
-    const _clavParentW = new THREE.Quaternion();
-    const _clavLocal = new THREE.Quaternion();
-    if (!fbx._clavLBindLocal && fbx._clavicleL) {
-      fbx._clavLBindLocal = fbx._clavicleL.quaternion.clone();
-    }
-    if (!fbx._clavRBindLocal && fbx._clavicleR) {
-      fbx._clavRBindLocal = fbx._clavicleR.quaternion.clone();
-    }
-    for (const [bone, bind] of [
-      [fbx._clavicleL, fbx._clavLBindLocal],
-      [fbx._clavicleR, fbx._clavRBindLocal],
-    ]) {
-      if (!bone || !bind || !bone.parent) continue;
-      bone.parent.getWorldQuaternion(_clavParentW);
-      _clavLocal.copy(_clavParentW).invert()
-        .multiply(_clavWorldYaw).multiply(_clavParentW);
-      bone.quaternion.copy(_clavLocal).multiply(bind);
-      bone.updateMatrixWorld(true);
-    }
-  } else if (fbx._clavicleL && fbx._clavLBindLocal) {
-    // Chest twist is zero — restore both clavicles to bind so they
-    // don't accumulate stale rotation from a previous frame.
-    fbx._clavicleL.quaternion.copy(fbx._clavLBindLocal);
-    if (fbx._clavicleR && fbx._clavRBindLocal) {
-      fbx._clavicleR.quaternion.copy(fbx._clavRBindLocal);
-    }
-  }
-  // Neck + head: NO direct write. Earlier attempts applied a yaw
-  // delta in bone-LOCAL frame, but UEFN bone-local axes don't
-  // align with world (local Y points up the bone after the spine
-  // chain twists), so "yaw around local Y" read as a lean.
-  // Letting these bones stay at bind-local means their WORLD
-  // rotation inherits spine_05's accumulated yaw via the parent
-  // chain — head naturally turns to face the cursor with no lean.
-  // (Skipped: applyChain on neck + head.)
+  // Neck + head: yaw ONLY. User feedback — pitching the head/neck
+  // reads as a lean and breaks the silhouette. Head turns to face
+  // the cursor; neck stays straight; pitch contribution = 0.
+  applyChain(fbx._neckBone, aimYaw * 0.10, 0);
+  applyChain(rig.head,      aimYaw * 0.30, 0);
 }
 
 // Lazy-load the player FBX clip-selection state machine. Until the
