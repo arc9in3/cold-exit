@@ -490,7 +490,7 @@ export class HideoutUI {
     //   'cards'       — 3 wanted-poster cards visible
     //   'weapon'      — mission prep / stash / weapon loadout
     //   'leaderboard' — full-screen leaderboards list
-    this.contractorStep = 'home';
+    this.contractorStep = 'cards';
     // Live-feed shuffle interval id — keeps the contract ticker
     // feeling alive. Cleared on hideout close + on tab change.
     this._feedIntervalId = 0;
@@ -579,7 +579,7 @@ export class HideoutUI {
     this._lastRunSnapshot = runSnapshot || null;
     this._evaluateContractClaim();
     this.tab = 'contractor';
-    this.contractorStep = 'home';
+    this.contractorStep = 'cards';
     this._currentGreeting = null;          // re-roll the host's opening line
     this.visible = true;
     document.body.classList.add('hideout-active');
@@ -598,7 +598,7 @@ export class HideoutUI {
     this._extractedQueue = [];
     this._lastRunSnapshot = null;
     this.tab = 'contractor';
-    this.contractorStep = 'home';
+    this.contractorStep = 'cards';
     this._currentGreeting = null;          // re-roll the host's opening line
     this.visible = true;
     document.body.classList.add('hideout-active');
@@ -927,7 +927,7 @@ export class HideoutUI {
         const fromTab = this.tab;
         this.tab = t.id;
         if (t.id === 'contractor') {
-          this.contractorStep = 'home';
+          this.contractorStep = 'cards';
           // Re-roll the opening line whenever the player walks back
           // into the contracts office from another station.
           if (fromTab !== 'contractor') this._currentGreeting = null;
@@ -1912,7 +1912,7 @@ export class HideoutUI {
 
     // Side rails — visible on home + cards. Hidden on weapon and
     // leaderboard steps where they'd compete with the focal content.
-    if (this.contractorStep === 'home' || this.contractorStep === 'cards') {
+    if (this.contractorStep === 'cards') {
       const feed = document.createElement('div');
       feed.className = 'contractor-feed';
       feed.innerHTML = `<div class="feed-head">LIVE CONTRACT FEED</div>${this._renderLiveFeedHTML()}`;
@@ -1960,18 +1960,11 @@ export class HideoutUI {
       wrap.appendChild(host);
     }
 
-    // Step-specific content.
-    if (this.contractorStep === 'home') {
-      const cta = document.createElement('button');
-      cta.id = 'contractor-cta';
-      cta.type = 'button';
-      cta.textContent = 'START NEW RUN';
-      cta.addEventListener('click', () => {
-        this.contractorStep = 'cards';
-        this.render();
-      });
-      wrap.appendChild(cta);
-    } else if (this.contractorStep === 'cards') {
+    // Step-specific content. The legacy 'home' step (a standalone
+    // START NEW RUN button that did nothing but advance to 'cards')
+    // has been collapsed away: opening the contractor tab now lands
+    // directly on the cards grid. One fewer click before gameplay.
+    if (this.contractorStep === 'cards') {
       this._refreshCardSlots(allDefs, activeId);
       // "SELECT A CONTRACT" header above the cards grid.
       const heading = document.createElement('div');
@@ -2011,11 +2004,8 @@ export class HideoutUI {
       });
       refreshBar.appendChild(refreshBtn);
       wrap.appendChild(refreshBar);
-
-      wrap.appendChild(this._renderBackButton('Back', () => {
-        this.contractorStep = 'home';
-        this.render();
-      }));
+      // No back button — cards IS the entry point now (home step
+      // collapsed). Back from leaderboard / weapon flows back here.
     } else if (this.contractorStep === 'weapon') {
       wrap.appendChild(this._renderMissionPrepSection());
     } else if (this.contractorStep === 'leaderboard') {
@@ -2558,7 +2548,7 @@ export class HideoutUI {
     wrap.appendChild(cols);
 
     wrap.appendChild(this._renderBackButton('Back', () => {
-      this.contractorStep = 'home';
+      this.contractorStep = 'cards';
       this.render();
     }));
     return wrap;
@@ -3002,7 +2992,7 @@ export class HideoutUI {
     const head = document.createElement('div');
     head.className = 'hideout-section-head trainer-head-with-portrait';
     head.innerHTML = `
-      <img class="trainer-portrait" src="Assets/generated/art-recruiter-portrait-v3-via-qwen-image.png" alt="" aria-hidden="true" decoding="async">
+      <img class="trainer-portrait" src="Assets/generated/gen-recruiter-portrait-via-qwen-image-v650-v667-v827-v808.png" alt="" aria-hidden="true" decoding="async">
       <div class="trainer-head-text">
         <div class="hideout-section-title">TRAINER</div>
         <div class="hideout-section-sub">Spend marks earned by dying. Each track levels up in place — buy a tier, the notch lights, the next tier becomes available. <b>${marks}</b> marks on file.</div>
