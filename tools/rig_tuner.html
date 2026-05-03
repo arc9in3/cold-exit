@@ -370,6 +370,179 @@ function rebuildRig() {
 }
 rebuildRig();
 
+// ============================================================
+// PRIMITIVE-RIG LOADER
+// ============================================================
+// Builds a rig from the flat-primitive JSON authored in rig_builder
+// (Assets/anatomy/*.json), maps the named primitives to the bone
+// structure updateAnim() expects, and replaces the live rig in the
+// scene. Lets the rig_tuner play animations on the new builder rigs.
+function buildRigFromPrimitives(primitives) {
+  const groups = new Map();
+  const meshes = new Map();
+  const rootGroup = new THREE.Group();
+
+  for (const p of primitives) {
+    const g = new THREE.Group();
+    g.name = p.name;
+    g.position.set(p.pos.x, p.pos.y, p.pos.z);
+    g.rotation.set(p.rot.x, p.rot.y, p.rot.z);
+    if (p.scaleChildren !== false) {
+      g.scale.set(p.scale.x, p.scale.y, p.scale.z);
+    } else {
+      g.scale.set(1, 1, 1);
+    }
+    groups.set(p.id, g);
+
+    let geo;
+    if (p.type === 'cylinder') {
+      geo = new THREE.CylinderGeometry(p.shape.topR, p.shape.botR, p.shape.h, p.shape.segs);
+      const td = p.shape.topDepth ?? 1.0;
+      const bd = p.shape.botDepth ?? 1.0;
+      if (Math.abs(td - bd) > 1e-4) {
+        const pos = geo.attributes.position;
+        for (let i = 0; i < pos.count; i++) {
+          const y = pos.getY(i);
+          const t = Math.max(0, Math.min(1, (y + p.shape.h / 2) / p.shape.h));
+          const d = bd + (td - bd) * t;
+          pos.setZ(i, pos.getZ(i) * d);
+        }
+        pos.needsUpdate = true;
+        geo.computeVertexNormals();
+      }
+    } else if (p.type === 'sphere') {
+      geo = new THREE.SphereGeometry(p.shape.r, p.shape.segsW, p.shape.segsH);
+    } else if (p.type === 'box') {
+      geo = new THREE.BoxGeometry(p.shape.w, p.shape.h, p.shape.d);
+    } else if (p.type === 'cone') {
+      geo = new THREE.ConeGeometry(p.shape.r, p.shape.h, p.shape.segs);
+    }
+    const opacity = p.opacity ?? 1.0;
+    const mat = new THREE.MeshStandardMaterial({
+      color: new THREE.Color(p.color),
+      roughness: 0.85, metalness: 0.05,
+      transparent: opacity < 0.999,
+      opacity,
+    });
+    const m = new THREE.Mesh(geo, mat);
+    m.castShadow = true; m.receiveShadow = true;
+    if (p.type === 'cylinder' && Math.abs((p.shape.topDepth ?? 1) - (p.shape.botDepth ?? 1)) < 1e-4 && (p.shape.topDepth ?? 1) !== 1) {
+      m.scale.z = p.shape.topDepth;
+    }
+    if (p.scaleChildren === false) m.scale.set(p.scale.x, p.scale.y, p.scale.z);
+    g.add(m);
+    meshes.set(p.id, m);
+  }
+
+  // Parent groups
+  for (const p of primitives) {
+    const g = groups.get(p.id);
+    if (p.parentId && groups.has(p.parentId)) {
+      groups.get(p.parentId).add(g);
+    } else {
+      rootGroup.add(g);
+    }
+  }
+
+  // Map primitive ids → the bone structure updateAnim writes to.
+  // Missing bones get an empty Group so anim writes don't crash —
+  // they just don't animate that limb.
+  const get = (id) => groups.get(id) || new THREE.Group();
+  const getMesh = (id) => meshes.get(id) || null;
+  const pelvisPrim = primitives.find(p => p.id === 'pelvis');
+  const hipY = pelvisPrim ? pelvisPrim.pos.y : 1.1;
+
+  return {
+    group: rootGroup,
+    hips: get('pelvis'),
+    pelvis: getMesh('pelvis'),
+    stomach: get('ribs'), stomachMesh: getMesh('ribs'),
+    chest: get('chest'),  chestMesh: getMesh('chest'),
+    chestPlate: null, belt: null, collar: null,
+    neck: get('neck'), neckMesh: getMesh('neck'),
+    head: get('head'), headMesh: getMesh('head'),
+    jawMesh: null,
+    leftArm: {
+      shoulder: { pivot: get('lshoulder'), mesh: getMesh('lupperarm') },
+      shoulderBulge: getMesh('lshoulder'), shoulderPad: null,
+      elbow: get('lelbow'), elbowBulge: getMesh('lelbow'),
+      forearm: { pivot: get('lforearm'), mesh: getMesh('lforearm') },
+      wristCuff: null,
+      wrist: get('lwrist'),
+      hand: { pivot: get('lhand'), mesh: getMesh('lhand') },
+    },
+    rightArm: {
+      shoulder: { pivot: get('rshoulder'), mesh: getMesh('rupperarm') },
+      shoulderBulge: getMesh('rshoulder'), shoulderPad: null,
+      elbow: get('relbow'), elbowBulge: getMesh('relbow'),
+      forearm: { pivot: get('rforearm'), mesh: getMesh('rforearm') },
+      wristCuff: null,
+      wrist: get('rwrist'),
+      hand: { pivot: get('rhand'), mesh: getMesh('rhand') },
+    },
+    leftLeg: {
+      thigh: { pivot: get('lhip'), mesh: getMesh('lthigh') },
+      hipBulge: getMesh('lhip'), thighRig: null,
+      knee: get('lknee'), kneeBulge: getMesh('lknee'), kneePad: null,
+      calf: { pivot: get('lcalf'), mesh: getMesh('lcalf') },
+      bootTop: null,
+      ankle: get('lankle'),
+      foot: { pivot: get('lfoot'), mesh: getMesh('lfoot') },
+    },
+    rightLeg: {
+      thigh: { pivot: get('rhip'), mesh: getMesh('rthigh') },
+      hipBulge: getMesh('rhip'), thighRig: null,
+      knee: get('rknee'), kneeBulge: getMesh('rknee'), kneePad: null,
+      calf: { pivot: get('rcalf'), mesh: getMesh('rcalf') },
+      bootTop: null,
+      ankle: get('rankle'),
+      foot: { pivot: get('rfoot'), mesh: getMesh('rfoot') },
+    },
+    leftShoulderAnchor: new THREE.Group(),
+    rightShoulderAnchor: new THREE.Group(),
+    scale: 1.0,
+    dims: { hipY, torso: { depthRatio: 0.85 }, head: {}, legs: {}, arms: {} },
+    meshes: Array.from(meshes.values()),
+    torso: get('chest'), torsoMesh: getMesh('chest'),
+  };
+}
+
+async function loadPrimitiveRig(url) {
+  try {
+    const res = await fetch(url);
+    if (!res.ok) throw new Error('HTTP ' + res.status);
+    const primitives = await res.json();
+    if (rig) {
+      scene.remove(rig.group);
+      rig.group.traverse(o => { if (o.isMesh) o.geometry?.dispose?.(); });
+    }
+    rig = buildRigFromPrimitives(primitives);
+    initAnim(rig);
+    scene.add(rig.group);
+    rebuildJointMap();
+    if (tControls?.object) tControls.detach();
+    selectedJoint = null;
+    refreshEditorUI();
+    window.__rig = rig;
+    const toast = document.getElementById('export-toast');
+    if (toast) {
+      toast.textContent = 'Loaded primitive rig: ' + url.split('/').pop();
+      toast.classList.add('show');
+      setTimeout(() => toast.classList.remove('show'), 1500);
+    }
+  } catch (e) {
+    console.error('[primitive rig load]', e);
+    const toast = document.getElementById('export-toast');
+    if (toast) {
+      toast.textContent = 'Load failed: ' + e.message;
+      toast.classList.add('show');
+      setTimeout(() => toast.classList.remove('show'), 2000);
+    }
+  }
+}
+
+// (Primitive-rigs GUI folder is set up further down once `gui` exists.)
+
 // ---------- pose-editor gizmo ----------
 // TransformControls in rotate mode gives x/y/z ring handles around the
 // attached object. Attaching to a joint PIVOT group lets the user
@@ -800,6 +973,16 @@ function applyArchetypeBaseline(sex) {
   });
   f.add(state.shape, 'bustScale', 0.5, 1.6, 0.05).name('bust scale').onChange(() => rebuildRig());
   f.add(state.shape, 'gluteScale', 0.5, 1.6, 0.05).name('glute scale').onChange(() => rebuildRig());
+}
+
+// Primitive rigs (from rig_builder) — replace the legacy DIMS rig
+// with one built from a flat-primitive JSON. Anim continues to
+// drive it via the bone-name mapping in buildRigFromPrimitives.
+{
+  const f = gui.addFolder('primitive rigs (from rig_builder)');
+  f.add({ female:     () => loadPrimitiveRig('../Assets/anatomy/female-rig.json') }, 'female').name('load female');
+  f.add({ male:       () => loadPrimitiveRig('../Assets/anatomy/male-rig.json') }, 'male').name('load male');
+  f.add({ bodyshapes: () => loadPrimitiveRig('../Assets/anatomy/bodyshapes-rig.json') }, 'bodyshapes').name('load bodyshapes');
 }
 
 // --- part scaler ---------------------------------------------------
