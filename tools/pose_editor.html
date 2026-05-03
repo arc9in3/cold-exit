@@ -142,7 +142,7 @@
     </div>
 
     <div class="row-buttons">
-      <button id="apply-stance" class="active">Apply rifle stance preview</button>
+      <button id="apply-stance">Apply rifle stance preview</button>
       <button id="flip-cam">Flip camera</button>
     </div>
     <div class="legend">
@@ -321,9 +321,14 @@ async function loadClip() {
   }
   if (!clips.length) return;
   const clip = clips[0].clone();
-  // strip 'root.*' tracks (FBX import-scale + axis bake on the
-  // top-level node) so the mannequin doesn't get shrunk/rotated.
-  clip.tracks = clip.tracks.filter(t => !/^root\./.test(t.name));
+  // Filter tracks aggressively — only keep tracks that target a
+  // bone we know about. Anything else (root, Armature, mesh
+  // transforms) carries import-scale + axis bake from the FBX
+  // conversion and would collapse / spin the mannequin.
+  clip.tracks = clip.tracks.filter(t => {
+    const targetName = (t.name || '').split('.')[0];
+    return boneByName.has(targetName);
+  });
   if (currentAction) currentAction.stop();
   currentAction = mixer.clipAction(clip);
   currentAction.setLoop(THREE.LoopRepeat, Infinity);
@@ -575,9 +580,10 @@ function applyDeltas() {
   }
 }
 
-// Optional rifle-stance preview matching player.js (so the user
-// edits ON TOP of the in-game stance, or can disable to start clean).
-let stancePreview = true;
+// Optional rifle-stance preview matching player.js. Default OFF so
+// the user gets a clean clip pose first; toggle on to edit on top
+// of the shipped stance.
+let stancePreview = false;
 const STANCE_WEIGHTS = [0, 0.05, 0.18, 0.35, 0.42];
 const STANCE_BONES = ['spine_01','spine_02','spine_03','spine_04','spine_05'];
 const STANCE_YAW = 0.26;
@@ -765,6 +771,10 @@ renderer.domElement.addEventListener('pointerdown', (e) => {
 });
 
 // ---------- bone proxies (small spheres at each editable bone) ----
+//
+// Rendered at scene level (not as children of bones) so they can't
+// affect skinned-mesh binding. Each proxy's position is updated
+// every frame from the bone's world position.
 const boneProxies = [];
 const proxyMat = new THREE.MeshBasicMaterial({ color: 0xc9a87a, transparent: true,
                                                 opacity: 0.85, depthTest: false });
@@ -772,11 +782,19 @@ function createBoneProxies() {
   for (const name of EDITABLE_BONES) {
     const bone = boneByName.get(name);
     if (!bone) continue;
-    const sph = new THREE.Mesh(new THREE.SphereGeometry(0.02, 10, 8), proxyMat);
+    const sph = new THREE.Mesh(new THREE.SphereGeometry(0.025, 10, 8), proxyMat);
     sph.userData.boneName = name;
+    sph.userData.bone = bone;
     sph.renderOrder = 998;
-    bone.add(sph);
+    scene.add(sph);
     boneProxies.push(sph);
+  }
+}
+const _proxyTmp = new THREE.Vector3();
+function updateBoneProxies() {
+  for (const sph of boneProxies) {
+    sph.userData.bone.getWorldPosition(_proxyTmp);
+    sph.position.copy(_proxyTmp);
   }
 }
 
@@ -845,6 +863,7 @@ let proxiesBuilt = false;
     createBoneProxies();
     proxiesBuilt = true;
   }
+  if (proxiesBuilt) updateBoneProxies();
   // Body yaw from aim slider (matches game's rigid cursor track).
   rigGroup.rotation.y = +aimYaw.value;
 
