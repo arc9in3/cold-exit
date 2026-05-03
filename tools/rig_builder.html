@@ -141,8 +141,18 @@ let primitives = [];
 let primIndex = new Map();   // id → primitive
 let meshIndex = new Map();   // id → THREE.Mesh
 let groupIndex = new Map();  // id → THREE.Group (parent target for children)
+let boneIndex = new Map();   // id → THREE.Object3D (axes helper at group origin)
 let selectedId = null;
 let nextId = 1;
+
+// Display state for the bone visualizer overlay. When true every
+// primitive's group origin gets an AxesHelper drawn on top of the
+// mesh — useful for seeing where the joint / pivot point of each
+// part sits while the mesh is set transparent.
+const display = {
+  showBones: false,
+  boneSize: 0.08,
+};
 
 const rootGroup = new THREE.Group();
 scene.add(rootGroup);
@@ -162,18 +172,44 @@ function defaultPrim(type) {
     rot: { x: 0, y: 0, z: 0 },
     scale: { x: 1, y: 1, z: 1 },
     color: '#3a4048',
+    opacity: 1.0,
   };
-  if (type === 'cylinder') base.shape = { topR: 0.10, botR: 0.10, h: 0.30, segs: 24 };
+  if (type === 'cylinder') base.shape = {
+    topR: 0.10, botR: 0.10, h: 0.30, segs: 24,
+    // Per-end Z depth taper. When topDepth != botDepth the cylinder's
+    // vertices get per-Y Z-scaled so top and bottom have different
+    // front-back depths (egg / pyramid-section profile). Default 1/1
+    // = uniform circular cylinder.
+    topDepth: 1.0, botDepth: 1.0,
+  };
   if (type === 'sphere')   base.shape = { r: 0.12, segsW: 24, segsH: 16 };
   if (type === 'box')      base.shape = { w: 0.20, h: 0.20, d: 0.20 };
   if (type === 'cone')     base.shape = { r: 0.12, h: 0.20, segs: 24 };
   return base;
 }
 
+// Per-end Z taper for cylinders. When topDepth != botDepth, deform
+// each vertex's Z by a per-Y interpolated factor between bot and top.
+// Top of cylinder ends up scaled by topDepth, bottom by botDepth,
+// linear in between. End caps stay flat (their vertices share Y).
+function applyCylinderDepthTaper(geo, topDepth, botDepth, h) {
+  if (Math.abs(topDepth - botDepth) < 1e-4 && Math.abs(topDepth - 1.0) < 1e-4) return;
+  const pos = geo.attributes.position;
+  for (let i = 0; i < pos.count; i++) {
+    const y = pos.getY(i);
+    const t = Math.max(0, Math.min(1, (y + h / 2) / h));
+    const d = botDepth + (topDepth - botDepth) * t;
+    pos.setZ(i, pos.getZ(i) * d);
+  }
+  pos.needsUpdate = true;
+  geo.computeVertexNormals();
+}
+
 function buildMeshFor(prim) {
   let geo;
   if (prim.type === 'cylinder') {
     geo = new THREE.CylinderGeometry(prim.shape.topR, prim.shape.botR, prim.shape.h, prim.shape.segs);
+    applyCylinderDepthTaper(geo, prim.shape.topDepth ?? 1.0, prim.shape.botDepth ?? 1.0, prim.shape.h);
   } else if (prim.type === 'sphere') {
     geo = new THREE.SphereGeometry(prim.shape.r, prim.shape.segsW, prim.shape.segsH);
   } else if (prim.type === 'box') {
@@ -183,10 +219,14 @@ function buildMeshFor(prim) {
   } else {
     throw new Error('unknown primitive type: ' + prim.type);
   }
+  const opacity = (prim.opacity == null) ? 1.0 : prim.opacity;
   const mat = new THREE.MeshStandardMaterial({
     color: new THREE.Color(prim.color),
     roughness: 0.85,
     metalness: 0.05,
+    transparent: opacity < 1.0,
+    opacity,
+    depthWrite: opacity >= 0.999,    // fully opaque writes depth normally
   });
   const mesh = new THREE.Mesh(geo, mat);
   mesh.castShadow = true;
@@ -204,9 +244,15 @@ function rebuild() {
     m.material?.dispose?.();
     m.parent?.remove(m);
   }
+  for (const b of boneIndex.values()) {
+    b.parent?.remove(b);
+    if (b.geometry) b.geometry.dispose?.();
+    if (b.material) b.material.dispose?.();
+  }
   for (const g of groupIndex.values()) g.parent?.remove(g);
   meshIndex = new Map();
   groupIndex = new Map();
+  boneIndex = new Map();
   primIndex = new Map();
   for (const p of primitives) primIndex.set(p.id, p);
 
@@ -237,6 +283,24 @@ function rebuild() {
     meshIndex.set(p.id, m);
   }
 
+  // Bone helpers — at each group's origin, draw an AxesHelper so the
+  // pivot point of each primitive is visible. Drawn on top of the
+  // mesh (renderOrder + depthTest off) so transparent meshes don't
+  // hide the bone marker.
+  if (display.showBones) {
+    for (const p of primitives) {
+      const g = groupIndex.get(p.id);
+      const axes = new THREE.AxesHelper(display.boneSize);
+      // Render-on-top so the bones always show, even through opaque
+      // primitive surfaces. Useful while authoring.
+      axes.material.depthTest = false;
+      axes.material.depthWrite = false;
+      axes.renderOrder = 999;
+      g.add(axes);
+      boneIndex.set(p.id, axes);
+    }
+  }
+
   // Selection ring
   refreshSelectionVisual();
 }
@@ -265,6 +329,26 @@ function refreshSelectionVisual() {
 // GUI
 // ============================================================
 const gui = new GUI({ title: 'rig builder', width: 360 });
+
+const displayFolder = gui.addFolder('display');
+displayFolder.add(display, 'showBones').name('show bones (axes)').onChange(rebuild);
+displayFolder.add(display, 'boneSize', 0.01, 0.5, 0.01).name('bone size').onChange(rebuild);
+displayFolder.add({
+  allTransparent: () => {
+    for (const p of primitives) p.opacity = 0.35;
+    rebuild();
+    rebuildEditor();
+    showToast('All primitives → 35% opacity.');
+  },
+}, 'allTransparent').name('all → 35% opacity');
+displayFolder.add({
+  allOpaque: () => {
+    for (const p of primitives) p.opacity = 1.0;
+    rebuild();
+    rebuildEditor();
+    showToast('All primitives → opaque.');
+  },
+}, 'allOpaque').name('all → opaque');
 
 const addFolder = gui.addFolder('add primitive');
 const addOps = {
@@ -354,10 +438,25 @@ function rebuildEditor() {
     .name('color')
     .onChange(rebuild));
 
+  // Opacity — set < 1 to make the primitive transparent so you can
+  // see bone helpers, child primitives, or the inside of the part
+  // while authoring. Default 1.0 (fully opaque).
+  if (p.opacity == null) p.opacity = 1.0;
+  editorControls.push(editorFolder
+    .add(p, 'opacity', 0.0, 1.0, 0.01)
+    .name('opacity')
+    .onChange(rebuild));
+
   // Shape-specific dims
   if (p.type === 'cylinder') {
-    editorControls.push(editorFolder.add(p.shape, 'topR', 0.001, 1, 0.005).name('top radius').onChange(rebuild));
-    editorControls.push(editorFolder.add(p.shape, 'botR', 0.001, 1, 0.005).name('bot radius').onChange(rebuild));
+    editorControls.push(editorFolder.add(p.shape, 'topR', 0.001, 1, 0.005).name('top radius (X)').onChange(rebuild));
+    editorControls.push(editorFolder.add(p.shape, 'botR', 0.001, 1, 0.005).name('bot radius (X)').onChange(rebuild));
+    // Per-end Z depth taper. 1.0 = circular cylinder. Different top
+    // vs bot creates an oval/egg cross-section that varies along Y.
+    if (p.shape.topDepth == null) p.shape.topDepth = 1.0;
+    if (p.shape.botDepth == null) p.shape.botDepth = 1.0;
+    editorControls.push(editorFolder.add(p.shape, 'topDepth', 0.05, 3, 0.01).name('top depth (Z)').onChange(rebuild));
+    editorControls.push(editorFolder.add(p.shape, 'botDepth', 0.05, 3, 0.01).name('bot depth (Z)').onChange(rebuild));
     editorControls.push(editorFolder.add(p.shape, 'h',    0.005, 2, 0.005).name('height').onChange(rebuild));
     editorControls.push(editorFolder.add(p.shape, 'segs', 4, 64, 1).name('segments').onChange(rebuild));
   } else if (p.type === 'sphere') {
