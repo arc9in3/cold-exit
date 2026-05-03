@@ -643,6 +643,16 @@ function tickFootsteps(dt, pi) {
   }
 }
 const player = createPlayer(scene);
+// Eager-warm the anim registry so the first FBX/GLB swap (and
+// __useCharacter / __playScene calls) don't pay the JSON-fetch
+// latency on the click. Surfaces JSON parse errors at boot rather
+// than first-rig-swap. Fire-and-forget; downstream calls await it
+// via getRegistry()'s shared promise.
+import('./anim/registry.js').then(m => m.Registry.create('Assets/anim_data/'))
+  .then(reg => { window.__animRegistry = reg; console.log('[anim] registry warmed:',
+    Object.fromEntries(Array.from(reg._rigs.keys()).map(id => [id, !!reg._rigs.get(id).boneMap]))); })
+  .catch(err => console.warn('[anim] registry warmup failed:', err.message));
+
 // Debug hooks for the FBX rig swap. Invoke from console:
 //   __useFbx('Assets/models/Idle.fbx')
 //   __useFbx('Assets/models/animations/FBX_Pistol_Starter_27A/Animation/In-Place/W1_Stand_Relaxed_Idle_IPC.fbx')
@@ -733,6 +743,65 @@ window.__playScene = async (sceneId) => {
   });
   window.__activeCutscenes.push(cs);
   return cs;
+};
+
+// Console: __listComposed() / __listRigParts()
+//   Diagnostic enumeration of available compose / rig_part configs.
+//   The registry doesn't expose a list method (it's lazy-loaded), so
+//   these probe a hard-coded set of known ids. Keep in sync with the
+//   files actually in Assets/anim_data/{rig_compose,rig_parts}/.
+window.__listComposed = async () => {
+  const KNOWN = ['eve_alt'];
+  const reg = window.__animRegistry;
+  if (!reg) return 'registry not warmed';
+  const out = {};
+  for (const id of KNOWN) {
+    out[id] = await reg.compose(id).catch(e => `error: ${e.message}`);
+  }
+  console.table(out);
+  return out;
+};
+window.__listRigParts = async () => {
+  const KNOWN = ['assassin_top', 'eve_bottom'];
+  const reg = window.__animRegistry;
+  if (!reg) return 'registry not warmed';
+  const out = {};
+  for (const id of KNOWN) {
+    out[id] = await reg.rigPart(id).catch(e => `error: ${e.message}`);
+  }
+  console.table(out);
+  return out;
+};
+
+// Console: __dumpRigBones('Assets/models/characters/assassin.glb')
+//   Loads a model into the scene and dumps every Bone name it
+//   contains. Useful when authoring rig_compose JSON: the composer
+//   needs anchor bone names that exactly match what the asset
+//   exports, and naming conventions vary per model.
+window.__dumpRigBones = async (url) => {
+  const { loadCharacterFBX } = await import('./character_fbx.js');
+  const r = await loadCharacterFBX(scene, url);
+  const names = new Set();
+  // 1. Scene-graph bones (FBX exports usually live here).
+  r.group.traverse(o => { if (o.isBone) names.add(o.name); });
+  // 2. SkinnedMesh skeleton.bones[] (GLTF exports usually live here).
+  r.group.traverse(o => {
+    if (o.isSkinnedMesh && o.skeleton && o.skeleton.bones) {
+      for (const b of o.skeleton.bones) if (b.name) names.add(b.name);
+    }
+  });
+  // 3. Anything Object3D with a typical bone-name pattern (Bip001*,
+  //    mixamorig:*, common rig names).
+  r.group.traverse(o => {
+    if (!o.name) return;
+    if (/^(Bip001|mixamorig:|Hips|Pelvis|Spine|Neck|Head|LeftArm|RightArm|LeftLeg|RightLeg)/.test(o.name)) {
+      names.add(o.name);
+    }
+  });
+  const arr = Array.from(names);
+  console.log(`[bones] ${url} → ${arr.length} unique names`);
+  console.log(arr.join('\n'));
+  return arr;
 };
 
 // Console: __useCharacter('eve_alt')

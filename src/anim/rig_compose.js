@@ -81,13 +81,23 @@ export function mergeRigs(scene, cmp, topPart, bottomPart, topRig, bottomRig) {
   const conn = cmp.connection || {};
   const ns = cmp.boneNamespace || { top: 'T_', bottom: 'B_' };
 
-  // Find the anchor bones on each part.
-  const topAnchorBone    = topRig._fbx.bonesByName.get(conn.topAnchor)
-                        || _findBone(topRig.group, conn.topAnchor);
-  const bottomAnchorBone = bottomRig._fbx.bonesByName.get(conn.bottomAnchor)
-                        || _findBone(bottomRig.group, conn.bottomAnchor);
+  // Find the anchor bones on each part. Try the bonesByName map
+  // (prefix-stripped + suffix-stripped) first, then a deep traverse
+  // for the raw name, then a fuzzy match against the bone-name list
+  // (case-insensitive substring) so partial matches in
+  // unfamiliar exports still resolve.
+  const topAnchorBone    = _resolveAnchor(topRig,    conn.topAnchor);
+  const bottomAnchorBone = _resolveAnchor(bottomRig, conn.bottomAnchor);
   if (!topAnchorBone || !bottomAnchorBone) {
-    throw new Error(`[rig_compose] anchor bones not found: top=${conn.topAnchor} bottom=${conn.bottomAnchor}`);
+    // Dump bone lists from both rigs so the author can pick the
+    // right anchor names without a separate __dumpRigBones round-
+    // trip. Cheap because we already have these resolved on the rigs.
+    const topNames    = _listBoneNames(topRig);
+    const bottomNames = _listBoneNames(bottomRig);
+    console.error(`[rig_compose] anchor bones not found.`);
+    console.error(`  top "${conn.topAnchor}" → ${topAnchorBone ? 'OK' : 'MISS'}; available bones (${topNames.length}):`, topNames);
+    console.error(`  bottom "${conn.bottomAnchor}" → ${bottomAnchorBone ? 'OK' : 'MISS'}; available bones (${bottomNames.length}):`, bottomNames);
+    throw new Error(`[rig_compose] anchor bones not found: top=${conn.topAnchor} bottom=${conn.bottomAnchor} — see console for available bone lists`);
   }
 
   // 1. Reparent top's anchor under bottom's anchor.
@@ -178,6 +188,46 @@ export function mergeRigs(scene, cmp, topPart, bottomPart, topRig, bottomRig) {
   adaptRig(composedRig);
   composedRig.kind = 'composed';
   return composedRig;
+}
+
+// Resolve an anchor bone by name. Tries (1) bonesByName map (which
+// includes prefix/suffix-stripped variants), (2) deep traverse for
+// raw match, (3) fuzzy substring match (case-insensitive) so e.g.
+// 'Spine1' matches 'Bip001-Spine1_347'.
+function _resolveAnchor(rig, name) {
+  if (!rig || !name) return null;
+  let bone = rig._fbx?.bonesByName?.get(name);
+  if (bone) return bone;
+  bone = _findBone(rig.group, name);
+  if (bone) return bone;
+  // Fuzzy: scan all bones (scene-graph + skeleton.bones) for any
+  // whose name contains `name` as a substring.
+  const all = _listBoneNames(rig, /*returnObjects=*/true);
+  const lc = name.toLowerCase();
+  for (const o of all) {
+    if (o.name && o.name.toLowerCase().includes(lc)) return o;
+  }
+  return null;
+}
+
+// List bone names (or the bone Object3Ds if returnObjects=true)
+// from both the scene graph and the SkinnedMesh skeleton.bones[].
+function _listBoneNames(rig, returnObjects = false) {
+  const out = returnObjects ? [] : new Set();
+  const seen = new Set();
+  const push = (o) => {
+    if (!o || !o.name || seen.has(o)) return;
+    seen.add(o);
+    if (returnObjects) out.push(o);
+    else out.add(o.name);
+  };
+  rig.group?.traverse?.(o => { if (o.isBone) push(o); });
+  rig.group?.traverse?.(o => {
+    if (o.isSkinnedMesh && o.skeleton?.bones) {
+      for (const b of o.skeleton.bones) push(b);
+    }
+  });
+  return returnObjects ? out : Array.from(out);
 }
 
 // Collect every descendant Bone of `root` (inclusive). Returns the
