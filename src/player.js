@@ -1969,11 +1969,19 @@ export function createPlayer(scene) {
           const excess = (Math.abs(aimVsTarget) - TWIST_LIMIT) * Math.sign(aimVsTarget);
           targetYaw += excess;  // pull target toward aim
         }
-        // Lerp current body yaw toward target.
-        let dyaw = targetYaw - rig.group.rotation.y;
+        // Track GASP body yaw INDEPENDENTLY of procgen — the
+        // procgenGroup.rotation.copy() above resets rig.group.y to
+        // procgen's lagging body yaw each frame, so a + lerp on
+        // top would only ever close half the gap. We persist our
+        // own _bodyYaw on rig._fbx and write it directly.
+        let curBody = rig._fbx._bodyYaw;
+        if (curBody === undefined) curBody = rig.group.rotation.y;
+        let dyaw = targetYaw - curBody;
         while (dyaw >  Math.PI) dyaw -= 2 * Math.PI;
         while (dyaw < -Math.PI) dyaw += 2 * Math.PI;
-        rig.group.rotation.y += dyaw * (1 - Math.exp(-lerpRate * dt));
+        curBody += dyaw * (1 - Math.exp(-lerpRate * dt));
+        rig._fbx._bodyYaw = curBody;
+        rig.group.rotation.y = curBody;
         // Chest twist = aim minus current body yaw (post-lerp).
         let chestTwist = cursorYaw - rig.group.rotation.y;
         while (chestTwist >  Math.PI) chestTwist -= 2 * Math.PI;
@@ -2057,6 +2065,11 @@ export function createPlayer(scene) {
         }
         if (_gaspSmCfg) {
           const pick = selectGaspLocomotion(_gaspSmCfg, state, planarSpeed, velocity, rig.group.rotation.y);
+          if (window.__animDebug && pick && rig._fbx.currentClipName !== pick.clip) {
+            console.log(`[gasp] sector=${pick.sector} bucket=${pick.bucket} clip=${pick.clip}`,
+              `body=${rig.group.rotation.y.toFixed(2)} cursor=${cursorYaw.toFixed(2)}`,
+              `vel=(${velocity.x.toFixed(2)},${velocity.z.toFixed(2)}) ads=${ads}`);
+          }
           if (pick && rig._fbx.currentClipName !== pick.clip) {
             const action = rig.play(pick.clip, { fadeMs: pick.playback?.fadeMs ?? 200, loop: pick.loop });
             rig._fbx.currentClipName = pick.clip;
