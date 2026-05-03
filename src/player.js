@@ -172,6 +172,28 @@ function _runUpperBodyIK(rig, state, aimPoint, aimPitch, dt = 1/60) {
       bone.quaternion.copy(_delta).multiply(bind);
       bone.updateMatrixWorld(true);
     }
+    // Counter the bladed-stance bias on the dominant clavicle so
+    // the hand lines up with the gun (which sits on the body-forward
+    // axis = cursor line). Spine accumulated +stanceYaw rotation;
+    // we apply -stanceYaw on the firing-side clavicle in world frame
+    // to pull the arm BACK to body-forward. Net: shoulders bladed,
+    // hand at cursor line.
+    const dominantClav = state?.handedness === 'left'
+      ? fbx._clavicleL
+      : fbx._clavicleR;
+    if (dominantClav && dominantClav.parent) {
+      const counterQ = new THREE.Quaternion().setFromAxisAngle(
+        new THREE.Vector3(0, 1, 0), -stanceYaw);
+      dominantClav.parent.getWorldQuaternion(_parentW);
+      _delta.copy(_parentW).invert().multiply(counterQ).multiply(_parentW);
+      let bind = fbx._upperBodyBindLocal.get(dominantClav);
+      if (!bind) {
+        bind = dominantClav.quaternion.clone();
+        fbx._upperBodyBindLocal.set(dominantClav, bind);
+      }
+      dominantClav.quaternion.copy(_delta).multiply(bind);
+      dominantClav.updateMatrixWorld(true);
+    }
   }
   // Neck + head: yaw ONLY. User feedback — pitching the head/neck
   // reads as a lean and breaks the silhouette. Head turns to face
@@ -2143,16 +2165,6 @@ export function createPlayer(scene) {
           let gunYaw = cursorYaw - rig.group.rotation.y;
           while (gunYaw >  Math.PI) gunYaw -= 2 * Math.PI;
           while (gunYaw < -Math.PI) gunYaw += 2 * Math.PI;
-          // Counter the rifle-stance bladed twist so the gun
-          // re-aligns with the cursor instead of pointing along
-          // the bladed body axis. The spine rotation moves the
-          // hands (and the visible gun) ~15° toward the right
-          // shoulder; subtract that here so the muzzle ends up
-          // back on the cursor line.
-          const _cls2 = state?.equipped?.class;
-          const _isRifle = _cls2 === 'rifle' || _cls2 === 'shotgun'
-            || _cls2 === 'sniper' || _cls2 === 'lmg';
-          if (_isRifle) gunYaw -= 0.26;
           // Pitch the gun anchor toward target Y when the cursor is
           // significantly above or below chest height — head shots,
           // dropped enemies, low-cover targets all need the muzzle
