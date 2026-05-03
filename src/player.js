@@ -126,12 +126,21 @@ export function createPlayer(scene) {
   const gunMat = new THREE.MeshStandardMaterial({
     color: 0x151515, roughness: 0.4, metalness: 0.6, emissive: 0x000000,
   });
-  // Weapons are sized in raw tunable metres (e.g. muzzleLength=0.5 for
-  // a rifle) but the character rig runs at rig.scale (0.77 ≈ 1.85m).
-  // Scaling the weapon meshes by the same factor keeps guns in
-  // proportion — otherwise a 0.5m rifle on a 1.85m character reads as
-  // an SMG-on-a-giant.
-  const WEAPON_SCALE = rig.scale || 1.0;
+  // Weapons are sized in raw tunable metres (e.g. muzzleLength=0.5
+  // for a rifle). The weapon mesh is parented to the wrist, which
+  // is already inside rig.group whose scale is rig.scale (0.77 for
+  // the player). So weapon WORLD size = local size × rig.scale.
+  //
+  // The previous code applied WEAPON_SCALE = rig.scale on TOP of
+  // that, double-scaling: a 0.5m rifle would render at 0.5 × 0.77 ×
+  // 0.77 = 0.296m world. Way too small — exactly the "SMG on a
+  // giant" the comment was trying to avoid.
+  //
+  // Fix: scale weapons by 1 / rig.scale so the local mesh.scale
+  // CANCELS the parent rig.scale and the weapon renders at its
+  // authored metre length in world space. A 0.5m rifle is now 0.5m
+  // in world.
+  const WEAPON_SCALE = 1.0 / (rig.scale || 1.0);
 
   const gunMesh = new THREE.Mesh(new THREE.BoxGeometry(0.12, 0.12, 0.5), gunMat);
   gunMesh.scale.setScalar(WEAPON_SCALE);
