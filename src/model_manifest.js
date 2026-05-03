@@ -288,6 +288,13 @@ export const MODEL_GRIP_OFFSET = {
   'lowpolyguns/SubmachineGun_3.fbx':         { x: 0, y: 0, z: -0.30 },  // SPC9
   'lowpolyguns/SubmachineGun_4.fbx':         { x: 0, y: 0, z: -0.30 },  // SPCA3
   'lowpolyguns/SubmachineGun_5.fbx':         { x: 0, y: 0, z: -0.30 },  // SPC223
+  // PISTOLS — fitToRadius centers the bbox at the hand. For pistols
+  // the bbox center sits roughly between the grip and the muzzle, so
+  // the grip ends up about half the gun-length BEHIND the hand.
+  // Negative Z pulls the model forward so the grip lands at the palm.
+  'weapons/SM_Police_Gun.fbx':               { x: 0, y: 0, z: -0.10 },  // 1911
+  'weapons/SM_Civilian_Pistol.fbx':          { x: 0, y: 0, z: -0.08 },  // Makarov
+  'weapons/SM_Special_Pistol.fbx':           { x: 0, y: 0, z: -0.10 },  // .357 Magnum / Desert Eagle
   // Melee — handle is at one end of the mesh, but fitToRadius
   // centres the bbox at the hand, so the handle ends up ~half the
   // mesh length away. Negative Z shifts the model back so the grip

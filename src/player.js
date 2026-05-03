@@ -480,8 +480,18 @@ export function createPlayer(scene) {
       const muzzleTilt = (cls === 'pistol') ? -0.50 : 0;
       gunMesh.rotation.set(Math.PI / 2 + muzzleTilt, 0, 0);
       inHandModel.rotation.set(Math.PI / 2 + muzzleTilt, 0, 0);
-      gunMesh.position.set(0, -(0.1 + len / 2) * ws, 0);
-      muzzle.position.set(0, -(0.1 + len) * ws, 0);
+      // Position offset varies by class:
+      //   pistol — sit AT the hand pivot. Grip touches palm, muzzle
+      //            extends forward. The (0.1 + len/2) shouldered
+      //            formula put a 1911 ~38cm below the wrist.
+      //   smg    — small forward offset since the off hand is on the
+      //            forepart further along the gun.
+      //   other  — keep the original shouldered-style offset.
+      const handYOffset = (cls === 'pistol') ? -0.04 * ws
+                       :  (cls === 'smg')    ? -(0.05 + len / 4) * ws
+                       :                        -(0.1 + len / 2) * ws;
+      gunMesh.position.set(0, handYOffset, 0);
+      muzzle.position.set(0, handYOffset - (len / 2) * ws, 0);
       inHandModel.position.copy(gunMesh.position);
     }
     buildAccessories(weapon);
