@@ -365,6 +365,16 @@ export const MODEL_SCALE_OVERRIDE = {
   // Outliers within a pack — these win over PACK_SCALE_DEFAULTS.
   'weapons/SM_Civilian_Pistol.glb':         0.55,  // Makarov — was way too big
   'weapons/SM_Police_Submachine_Gun.glb':   1.10,  // P90 — was a tad small
+  // AK-family rifles (AK47 / AKS-47 / AKS-74 / AK104 / Draco NAK9) —
+  // the AssaultRifle_1..5 GLBs render at ~1.44m at the default rifle
+  // class fit scale, which reads as oversized vs the ~0.88m real AK
+  // length. 0.62 brings them down to ~0.9m — slightly stylized for
+  // iso readability but no longer clown-cartoonish.
+  'lowpolyguns/AssaultRifle_1.glb':         0.62,  // Draco NAK9
+  'lowpolyguns/AssaultRifle_2.glb':         0.62,  // AK47
+  'lowpolyguns/AssaultRifle_3.glb':         0.62,  // AKS-47
+  'lowpolyguns/AssaultRifle_4.glb':         0.62,  // AKS-74
+  'lowpolyguns/AssaultRifle_5.glb':         0.62,  // AK104
 };
 export function scaleForModelPath(fullPath) {
   if (!fullPath) return 1.0;
