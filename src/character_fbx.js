@@ -396,6 +396,37 @@ export async function loadCharacterFBX(scene, url, opts = {}) {
   });
 }
 
+// Strip position tracks for the root / hip bone so the character
+// doesn't bounce up-and-down during locomotion-cycle clips. Mixamo
+// and Motus packs author a small hip-Y oscillation (stride bounce)
+// that intermittently sinks the feet below ground when the rig's
+// group.position.y is exactly 0. Idle/aim clips carry the same
+// authoring artifact in subtle form.
+//
+// We blanket-strip ANY position track whose target bone bareName
+// is in the root-set below. Rotation tracks pass through, so the
+// hips still rotate / yaw normally for the locomotion pose.
+const _ROOT_BONE_BARE = new Set([
+  'Hips', 'Bip001-Pelvis', 'Pelvis', 'Bip001', 'Root',
+  'mixamorig:Hips',
+]);
+function _stripRootMotion(clip) {
+  if (!clip || !clip.tracks) return;
+  clip.tracks = clip.tracks.filter(track => {
+    // Track names look like 'BoneName.position' / 'BoneName.quaternion'.
+    // Extract the bone name + property and decide.
+    const match = track.name.match(/^(.+)\.(position|quaternion|scale)(\[.+\])?$/);
+    if (!match) return true;
+    const [, boneName, prop] = match;
+    if (prop !== 'position') return true;
+    // Bare-name match (strip 'mixamorig:' prefix + trailing _\d+ if present).
+    let bare = boneName;
+    if (bare.startsWith('mixamorig:')) bare = bare.slice('mixamorig:'.length);
+    bare = bare.replace(/_\d+$/, '');
+    return !_ROOT_BONE_BARE.has(bare);
+  });
+}
+
 // Shared post-load step (used by both FBX and GLB paths).
 function _onLoadGroup(scene, group, scale, resolve, rigCfg = null) {
   group.scale.setScalar(scale);
@@ -419,9 +450,15 @@ function _onLoadGroup(scene, group, scale, resolve, rigCfg = null) {
   const mixer = new THREE.AnimationMixer(mixerRoot);
   // Pre-build one Action per clip so play(name) can fade in fast.
   // Skip empty clips (Mixamo always exports a 'Take 001' placeholder).
+  // Strip root-bone POSITION tracks before binding — even "in-place"
+  // captures often have a small hip-bone Y oscillation (stride bounce)
+  // that produces intermittent foot-clip-through-ground glitches when
+  // group.position.y is at exactly 0. We keep rotations on the hip
+  // bone (those drive the body's pose) but null out translation.
   const actions = new Map();
   for (const clip of (group.animations || [])) {
     if (clip.duration < 0.01) continue;
+    _stripRootMotion(clip);
     actions.set(clip.name, mixer.clipAction(clip));
   }
   const rig = buildRigAdapter(group, mixer, rigCfg);
@@ -454,6 +491,7 @@ export async function loadAnimationFBX(rig, url, clipName = null) {
       let added = 0;
       for (const clip of animations) {
         if (clip.duration < 0.01) continue;
+        _stripRootMotion(clip);
         // Single-clip merge: use provided clipName. Multi-clip merge
         // (UAL): use each clip's own name.
         const name = (animations.length === 1 && clipName)
