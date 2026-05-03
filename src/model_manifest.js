@@ -292,7 +292,7 @@ export const MODEL_GRIP_OFFSET = {
   // the bbox center sits roughly between the grip and the muzzle, so
   // the grip ends up about half the gun-length BEHIND the hand.
   // Negative Z pulls the model forward so the grip lands at the palm.
-  'weapons/SM_Police_Gun.glb':               { x: 0, y: 0, z: -0.10 },  // 1911
+  'weapons/SM_Police_Gun.glb':               { x: 0, y: 0, z: -0.04 },  // 1911 — was -0.10, pulled forward slightly per user feedback
   'weapons/SM_Civilian_Pistol.glb':          { x: 0, y: 0, z: -0.08 },  // Makarov
   'weapons/SM_Special_Pistol.glb':           { x: 0, y: 0, z: -0.10 },  // .357 Magnum / Desert Eagle
   // Melee — handle is at one end of the mesh, but fitToRadius
@@ -365,6 +365,7 @@ export const MODEL_SCALE_OVERRIDE = {
   // Outliers within a pack — these win over PACK_SCALE_DEFAULTS.
   'weapons/SM_Civilian_Pistol.glb':         0.55,  // Makarov — was way too big
   'weapons/SM_Police_Submachine_Gun.glb':   1.10,  // P90 — was a tad small
+  'weapons/SM_Police_Gun.glb':              0.50,  // 1911 — was 2× too big at default scale
   // AK-family rifles (AK47 / AKS-47 / AKS-74 / AK104 / Draco NAK9) —
   // the AssaultRifle_1..5 GLBs render at ~1.44m at the default rifle
   // class fit scale, which reads as oversized vs the ~0.88m real AK
