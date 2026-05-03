@@ -107,11 +107,14 @@ export function selectGaspLocomotion(smCfg, playerState, planarSpeed, velocity, 
              sector: 'F', bucket: 'idle', weaponClass };
   }
 
-  // Speed bucket.
+  // Speed bucket. ADS clamps to run max — sprint pose with the
+  // shouldered rifle reads jarring (gun whips around) and most
+  // shooters slow movement under ADS anyway.
+  const ads = (playerState?.adsAmount || 0) > 0.5;
   let bucket;
-  if      (planarSpeed <= (T.walkMax ?? 1.6))   bucket = 'walk';
-  else if (planarSpeed <= (T.runMax ?? 3.5))    bucket = 'run';
-  else                                          bucket = 'sprint';
+  if      (planarSpeed <= (T.walkMax ?? 1.6))                bucket = 'walk';
+  else if (planarSpeed <= (T.runMax ?? 3.5) || ads)          bucket = 'run';
+  else                                                       bucket = 'sprint';
 
   // Direction: project velocity into body-local frame, pick 8-way.
   const ang = bodyLocalAngle(velocity, bodyYaw || 0);

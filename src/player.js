@@ -62,10 +62,12 @@ function _runUpperBodyIK(rig, state, aimPoint, aimPitch) {
     fbx._spineChain = candidates.map(n => bones?.get(n) || null).filter(Boolean);
     fbx._spineBaseQs = fbx._spineChain.map(b => b.quaternion.clone());
   }
-  // Yaw weights — sum to 1.0. Bottom-light, top-heavy. Pitch
-  // weights similarly.
-  const YAW_WEIGHTS   = [0.06, 0.12, 0.22, 0.28, 0.32];
-  const PITCH_WEIGHTS = [0.05, 0.10, 0.20, 0.30, 0.35];
+  // Yaw weights — bottom-light, top-heavy. Reduced from earlier
+  // (0.06..0.32 → 0.03..0.20) so the upper body doesn't bob with
+  // every chest-twist micro-update from the cursor; combined
+  // weight ≈ 0.65 (rest goes to neck + head).
+  const YAW_WEIGHTS   = [0.03, 0.07, 0.13, 0.18, 0.20];
+  const PITCH_WEIGHTS = [0.03, 0.06, 0.12, 0.18, 0.22];
   for (let i = 0; i < fbx._spineChain.length; i++) {
     const bone = fbx._spineChain[i];
     if (!bone || !bone.quaternion || !bone.parent) continue;
@@ -1892,9 +1894,13 @@ export function createPlayer(scene) {
       if (lowestFootY === Infinity) lowestFootY = 0;
       const wantSink = -lowestFootY;
       const cur = rig._fbx._crouchSinkY ?? 0;
-      // Faster lerp during crouch transition (15/s) so feet don't
-      // visibly hover; slower otherwise (8/s) for smooth normal play.
-      const rate = (Math.abs(wantSink - cur) > 0.05) ? 15 : 8;
+      // Lerp toward the target sink. Stride-induced foot Y
+      // oscillation propagates into the WHOLE rig (and especially
+      // the upper body, which then bobs with every step). Heavy
+      // damping in steady state (4/s, ~1.5s convergence — slower
+      // than a running stride so the bob averages out). Faster
+      // (12/s) only during big transitions like entering crouch.
+      const rate = (Math.abs(wantSink - cur) > 0.10) ? 12 : 4;
       rig._fbx._crouchSinkY = cur + (wantSink - cur) * (1 - Math.exp(-rate * dt));
       rig.group.position.y += rig._fbx._crouchSinkY;
       // The SkinnedMesh inside the rig may have its OWN position
@@ -1942,7 +1948,10 @@ export function createPlayer(scene) {
         let lerpRate;
         if (ads) {
           targetYaw = cursorYaw;
-          lerpRate = 30;       // snap fast for clean aim
+          // Was 30/s — snapped jarringly when entering ADS while
+          // moving sideways. 10/s gives a perceptible-but-smooth
+          // body re-orientation as aim takes over.
+          lerpRate = 10;
         } else if (moving) {
           targetYaw = movementYaw;
           lerpRate = 14;       // body briskly tracks movement
@@ -1970,7 +1979,13 @@ export function createPlayer(scene) {
         while (chestTwist >  Math.PI) chestTwist -= 2 * Math.PI;
         while (chestTwist < -Math.PI) chestTwist += 2 * Math.PI;
         chestTwist = Math.max(-TWIST_LIMIT - 0.1, Math.min(TWIST_LIMIT + 0.1, chestTwist));
-        state.chestTwist = chestTwist;
+        // Smooth the chest twist so cursor-jitter and per-frame
+        // numerical noise don't propagate as visible bone
+        // oscillation. 22/s lerp = ~140ms convergence; fast enough
+        // to track real cursor motion, slow enough to filter jitter.
+        const prevTwist = rig._fbx._smoothTwist ?? chestTwist;
+        rig._fbx._smoothTwist = prevTwist + (chestTwist - prevTwist) * (1 - Math.exp(-22 * dt));
+        state.chestTwist = rig._fbx._smoothTwist;
         // Gun-anchor lerps between hipfire (chest height ≈ 1.30m
         // after the 1.15× rig scale → ~1.50 visible) and ADS
         // (eye-line ≈ 1.55m → ~1.78 visible). Forward distance
