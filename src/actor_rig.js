@@ -497,37 +497,29 @@ export const DEFAULT_DIMS_FEMALE = {
     heel: { w: 0.06, h: 0.06, d: 0.05, y: -0.03, z: -0.08 },
   },
   arms: {
-    shoulderInset: 0.36,    // wider shoulder line
-    // Arm proportions — heroic / anatomical read. Forearm slightly
-    // longer than upper arm pushes the elbow above midpoint so the
-    // joint reads as the cleavage between two distinct lobes (per
-    // bodyshapes ref) instead of "ball stuck mid-cylinder".
-    //   upperArmH 0.32  — shoulder → elbow (short)
-    //   forearmH  0.92  — elbow → wrist (long terminal sweep)
-    //   Elbow sits at ~26% along the arm — close to the shoulder
-    //   with most of the visible reach being a long tapered forearm.
-    upperArmH: 0.32,
-    forearmH: 0.92,
+    shoulderInset: 0.36,
+    // Equal upper / forearm — elbow at exact mid-arm. The Y-position
+    // ping-pong (50%, 46%, 61%, 50%, 37%, 26%) wasn't converging
+    // because the shoulder bulge sphere was being read as "the elbow
+    // ball near the shoulder" — it's the most visible sphere on the
+    // arm. Removing it (shoulderBulgeR: 0) leaves the elbow as the
+    // ONLY ball, planted clearly at mid-arm.
+    upperArmH: 0.62,
+    forearmH: 0.62,
     // Cylinder taper at the elbow seam: upperArmBotR > forearmTopR
-    // by ~25% so the cylinders form a clear inverted step. Combined
-    // with the larger-than-both elbow ball, the joint reads as a
-    // circle popping between two lobes.
-    upperArmTopR: 0.085,
+    // so the cylinders form a clear step. Combined with the
+    // larger-than-both elbow ball, the joint pops as a circle.
+    // Slimmed upperArmTopR so there's no "shoulder thickness" look.
+    upperArmTopR: 0.070,
     upperArmBotR: 0.060,
     forearmTopR: 0.048,
     forearmBotR: 0.038,
-    // Shoulder bulge slimmed — was 0.10, dominated the silhouette.
-    // 0.07 reads as a smooth bridge from chest to deltoid, not a
-    // stacked beach ball.
-    shoulderBulgeR: 0.07,
-    // Elbow ball substantially bigger than both adjoining cylinder
-    // radii (0.060 / 0.048) so it clearly pops as a joint sphere.
+    // No shoulder ball — was being mistaken for the elbow.
+    shoulderBulgeR: 0,
+    // Elbow ball — the ONLY ball on the arm. Sits at mid-arm.
     elbowBulgeR: 0.11,
     handW: 0.09, handH: 0.10, handD: 0.13,
-    // Bicep pruned for female — slim arms read clean as tapered
-    // cylinders + visible elbow joint, no extra muscle lobe needed.
     bicep: null,
-    // Gear overlays stripped from female default per bodyshapes ref.
     shoulderPadR: 0,
     wristCuffR: 0, wristCuffH: 0,
   },
