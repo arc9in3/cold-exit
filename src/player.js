@@ -119,18 +119,17 @@ function _runUpperBodyIK(rig, state, aimPoint, aimPitch, dt = 1/60) {
   // so the arms (children of spine_05's clavicle) inherit the full
   // chest twist.
   // LEAN REDUCTION step 1 — halved from baseline so we can dial
-  // Spine distribution all zeroed for cursor-tracking (body itself
-  // locks to cursor). But the upper spine gets a STATIC stance
-  // offset when the player is holding a rifle-class weapon — the
-  // shouldered-rifle pose naturally angles the chest ~15° toward
-  // the dominant (right) shoulder so the gun stock seats against
-  // the pectoral. Distributed across upper spine bones with a
-  // negative yaw (right shoulder forward in Three.js +X→-Z convention).
+  // Spine distribution zeroed for cursor-tracking (body locks to
+  // cursor). Rifle-class weapons get a STATIC bladed-stance twist
+  // applied in WORLD frame (not bone-local Euler) — bone-local
+  // axes on UEFN spine bones aren't aligned with world Y after
+  // the chain accumulates, so a local-Y "yaw" reads as a roll.
+  // World-frame conversion below produces a clean horizontal twist.
   const cls = state?.equipped?.class;
   const isRifleStance = cls === 'rifle' || cls === 'shotgun'
     || cls === 'sniper' || cls === 'lmg';
-  const stanceYaw = isRifleStance ? 0.52 : 0;   // +30° (was 15° — bumped per user feedback)
-  const STANCE_WEIGHTS = [0, 0.05, 0.18, 0.35, 0.42];  // sum = 1.0; stacked on upper spine
+  const stanceYaw = isRifleStance ? 0.26 : 0;   // +15° bladed pose
+  const STANCE_WEIGHTS = [0, 0.05, 0.18, 0.35, 0.42];
   const YAW_WEIGHTS   = [0, 0, 0, 0, 0];
   const PITCH_WEIGHTS = [0, 0, 0, 0, 0];
   const applyChain = (bone, yawAmt, pitchAmt) => {
@@ -146,8 +145,33 @@ function _runUpperBodyIK(rig, state, aimPoint, aimPitch, dt = 1/60) {
     bone.updateMatrixWorld(true);
   };
   for (let i = 1; i < fbx._spineChain.length; i++) {
-    const yaw = aimYaw * YAW_WEIGHTS[i] + stanceYaw * STANCE_WEIGHTS[i];
-    applyChain(fbx._spineChain[i], yaw, aimPitch * PITCH_WEIGHTS[i]);
+    applyChain(fbx._spineChain[i], aimYaw * YAW_WEIGHTS[i], aimPitch * PITCH_WEIGHTS[i]);
+  }
+  // Rifle-stance twist — applied in WORLD frame after local Euler
+  // pass. Each spine bone left-multiplies a parent-frame conversion
+  // of a world-Y rotation:
+  //   bone.local = (parent.world⁻¹ × worldYawQ × parent.world) × bind
+  // This guarantees the rotation is around world Y regardless of
+  // the bone's local axis convention — pure horizontal twist, no
+  // lean.
+  if (Math.abs(stanceYaw) > 0.001) {
+    const _stanceWorldQ = new THREE.Quaternion().setFromAxisAngle(
+      new THREE.Vector3(0, 1, 0), stanceYaw);
+    const _parentW = new THREE.Quaternion();
+    const _delta = new THREE.Quaternion();
+    for (let i = 1; i < fbx._spineChain.length; i++) {
+      const bone = fbx._spineChain[i];
+      const bind = fbx._upperBodyBindLocal.get(bone);
+      if (!bone || !bone.parent || !bind) continue;
+      const w = STANCE_WEIGHTS[i];
+      if (w < 0.001) continue;
+      const partial = new THREE.Quaternion().setFromAxisAngle(
+        new THREE.Vector3(0, 1, 0), stanceYaw * w);
+      bone.parent.getWorldQuaternion(_parentW);
+      _delta.copy(_parentW).invert().multiply(partial).multiply(_parentW);
+      bone.quaternion.copy(_delta).multiply(bind);
+      bone.updateMatrixWorld(true);
+    }
   }
   // Neck + head: yaw ONLY. User feedback — pitching the head/neck
   // reads as a lean and breaks the silhouette. Head turns to face
