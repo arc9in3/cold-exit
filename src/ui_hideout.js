@@ -1598,8 +1598,11 @@ export class HideoutUI {
     const head = document.createElement('div');
     head.className = 'hideout-section-head';
     head.innerHTML = `
-      <div class="hideout-section-title">ARMORER</div>
-      <div class="hideout-section-sub">Rank <b>${rank}</b> · <b>${unlocked.size}</b> / ${totalUnlockable} weapons unlocked. Spend chips to permanently add a weapon to your stash.</div>
+      <div class="hideout-section-portrait" data-npc="armorer"></div>
+      <div class="hideout-section-text">
+        <div class="hideout-section-title">ARMORER</div>
+        <div class="hideout-section-sub">Rank <b>${rank}</b> · <b>${unlocked.size}</b> / ${totalUnlockable} weapons unlocked. Spend chips to permanently add a weapon to your stash.</div>
+      </div>
     `;
     wrap.appendChild(head);
 
@@ -1725,8 +1728,11 @@ export class HideoutUI {
     const head = document.createElement('div');
     head.className = 'hideout-section-head';
     head.innerHTML = `
-      <div class="hideout-section-title">VENDORS</div>
-      <div class="hideout-section-sub">Pay merchants to carry more stock in-run. Mystery vendors included.</div>
+      <div class="hideout-section-portrait" data-npc="fence"></div>
+      <div class="hideout-section-text">
+        <div class="hideout-section-title">VENDORS</div>
+        <div class="hideout-section-sub">Pay merchants to carry more stock in-run. Mystery vendors included.</div>
+      </div>
     `;
     wrap.appendChild(head);
 
@@ -1809,8 +1815,11 @@ export class HideoutUI {
     const head = document.createElement('div');
     head.className = 'hideout-section-head';
     head.innerHTML = `
-      <div class="hideout-section-title">BLACK MARKET</div>
-      <div class="hideout-section-sub">Sigils on file: <b>${sigils}</b>. Earn more from megaboss-bounty contracts.</div>
+      <div class="hideout-section-portrait" data-npc="blackmarket"></div>
+      <div class="hideout-section-text">
+        <div class="hideout-section-title">BLACK MARKET</div>
+        <div class="hideout-section-sub">Sigils on file: <b>${sigils}</b>. Earn more from megaboss-bounty contracts.</div>
+      </div>
     `;
     wrap.appendChild(head);
 
@@ -1954,7 +1963,7 @@ export class HideoutUI {
       const host = document.createElement('div');
       host.className = 'contractor-host';
       host.innerHTML = `
-        <div class="host-portrait" aria-hidden="true"><div class="host-glyph">◆</div></div>
+        <div class="host-portrait" aria-hidden="true"></div>
         <div class="host-bubble"><div class="host-quote">"${greeting}"</div></div>
       `;
       wrap.appendChild(host);
@@ -3573,14 +3582,14 @@ export class HideoutUI {
       }
       .host-portrait {
         width: 240px; height: 240px;
-        background: radial-gradient(circle at 50% 35%, #2a1a2a 0%, #0a0a14 90%);
+        background:
+          url('/Assets/generated/avatar-claudie-v2.png') center 55% / 80% no-repeat,
+          radial-gradient(circle at 50% 35%, #2a1a2a 0%, #0a0a14 90%);
         border: 1px solid rgba(178,112,224,0.4); border-radius: 2px;
-        display: flex; align-items: center; justify-content: center;
         box-shadow: inset 0 0 30px rgba(178,112,224,0.15);
+        image-rendering: -webkit-optimize-contrast;
       }
-      .host-glyph {
-        font-size: 90px; color: #b870e0; opacity: 0.6;
-      }
+      .host-glyph { display: none; }
       .host-bubble {
         background: rgba(20,16,28,0.92);
         border: 1px solid rgba(178,112,224,0.4);
@@ -4435,6 +4444,25 @@ export class HideoutUI {
       .hideout-section-head {
         margin-bottom: 12px;
         animation: hideout-tab-enter 280ms 60ms ease-out both;
+        display: flex; align-items: center; gap: 14px;
+      }
+      .hideout-section-text { flex: 1; min-width: 0; }
+      .hideout-section-portrait {
+        width: 72px; height: 72px; flex: 0 0 72px;
+        border: 1px solid rgba(178,112,224,0.3); border-radius: 4px;
+        background-color: #11141d;
+        background-repeat: no-repeat; background-position: center top;
+        background-size: cover;
+        box-shadow: inset 0 -20px 30px rgba(0,0,0,0.55);
+      }
+      .hideout-section-portrait[data-npc="armorer"] {
+        background-image: url('/Assets/generated/art-armorer-portrait-v3-via-qwen-image.png');
+      }
+      .hideout-section-portrait[data-npc="fence"] {
+        background-image: url('/Assets/generated/art-fence-portrait-v3-via-qwen-image.png');
+      }
+      .hideout-section-portrait[data-npc="blackmarket"] {
+        background-image: url('/Assets/generated/art-black-marketeer-portrait-via-qwen-image.png');
       }
       .hideout-section-title {
         font-size: 13px; color: #5a8acf; letter-spacing: 2px;
