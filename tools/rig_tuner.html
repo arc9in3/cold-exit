@@ -1076,14 +1076,13 @@ function rebuildParterFolder() {
   };
   parterFolder.add(state.parter, 'mirror', ['none', 'x', 'y', 'z']).name('mirror axis')
     .onChange(saveTransform);
-  // Wide min/max for the same reason as the scale sliders — without
-  // it lil-gui's text input only fires on commit (blur/enter), which
-  // looks broken when the user is dragging or typing live.
-  parterFolder.add(state.parter, 'offX', -10, 10, 0.005).name('offset X (left/right)')
+  // Clamps -3 → 3 per user spec. Slider+input combo (lil-gui's
+  // text-only mode without min/max ignored live keystrokes).
+  parterFolder.add(state.parter, 'offX', -3, 3, 0.005).name('offset X (left/right)')
     .onChange(saveTransform);
-  parterFolder.add(state.parter, 'offY', -10, 10, 0.005).name('offset Y (up/down)')
+  parterFolder.add(state.parter, 'offY', -3, 3, 0.005).name('offset Y (up/down)')
     .onChange(saveTransform);
-  parterFolder.add(state.parter, 'offZ', -10, 10, 0.005).name('offset Z (front/back)')
+  parterFolder.add(state.parter, 'offZ', -3, 3, 0.005).name('offset Z (front/back)')
     .onChange(saveTransform);
   parterFolder.add({
     reset: () => {
