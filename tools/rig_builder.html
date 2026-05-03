@@ -609,6 +609,47 @@ ioFolder.add({
     }
   },
 }, 'importJson').name('import from prompt');
+// Preset loader — fetches an authored rig JSON from the dev server
+// and replaces the current primitives with it. Uses the same restore
+// path as load (localStorage) so the editor + parts list refresh
+// cleanly. The presets list points at canonical bodies under
+// Assets/anatomy/.
+const PRESETS = {
+  bodyshapes: '../Assets/anatomy/bodyshapes-rig.json',
+};
+async function loadPreset(name) {
+  const url = PRESETS[name];
+  if (!url) { showToast(`Unknown preset: ${name}`); return; }
+  try {
+    const res = await fetch(url);
+    if (!res.ok) throw new Error(`HTTP ${res.status}`);
+    const data = await res.json();
+    primitives = data;
+    let maxN = 0;
+    for (const p of primitives) {
+      const m = (p.id || '').match(/_(\w+)$/);
+      if (m) {
+        const n = parseInt(m[1], 36);
+        if (!isNaN(n) && n > maxN) maxN = n;
+      }
+    }
+    nextId = maxN + 1;
+    selectedId = null;
+    rebuild();
+    rebuildPartsFolder();
+    rebuildEditor();
+    showToast(`Loaded preset: ${name}.`);
+  } catch (e) {
+    showToast(`Preset load failed: ${e.message}`);
+    console.error('[rig builder] preset load failed:', e);
+  }
+}
+ioFolder.add({
+  bodyshapes: () => loadPreset('bodyshapes'),
+}, 'bodyshapes').name('load preset → bodyshapes');
+// Expose for headless verification + devtools poking.
+window.__loadPreset = loadPreset;
+
 ioFolder.add({
   clear: () => {
     if (!confirm('Clear all primitives?')) return;
