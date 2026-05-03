@@ -2541,10 +2541,19 @@ export function createPlayer(scene) {
     // offsets. GASP/FBX path: trigger a short additive pulse stored
     // on rig._fbx that decays over ~180ms — chest pitches back, gun
     // muzzle rises, lerps back to neutral. Read by _runUpperBodyIK
-    // and the gun anchor each frame.
+    // and the gun anchor each frame. Magnitude scales with weapon
+    // class so a sniper kicks harder than a pistol.
     if (rig._fbx) {
-      rig._fbx._recoilT = 0.18;     // seconds remaining
-      rig._fbx._recoilAmt = 0.10;   // peak rad on chest pitch
+      const cls = state.equipped?.class;
+      const amt = cls === 'sniper' ? 0.18
+                : cls === 'shotgun' ? 0.16
+                : cls === 'lmg' ? 0.13
+                : cls === 'rifle' ? 0.12
+                : cls === 'smg' ? 0.08
+                : cls === 'flame' ? 0.04
+                : 0.10;             // pistol / default
+      rig._fbx._recoilT = 0.18;
+      rig._fbx._recoilAmt = amt;
     } else {
       pokeRecoil(rig);
     }
