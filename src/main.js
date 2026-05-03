@@ -712,6 +712,25 @@ window.__useEveWithUAL = async () => {
   return `eve.glb + UAL clips: ${player.rig.clipNames?.().length} total`;
 };
 
+// Console: __useCharacter('eve_alt')
+//   Loads a composed character (top half + bottom half from different
+//   sources) per Assets/anim_data/rig_compose/<id>.json. Phase 3 of
+//   the modular animation system.
+window.__useCharacter = async (composeId) => {
+  const { loadComposedCharacter } = await import('./anim/rig_compose.js');
+  const composedRig = await loadComposedCharacter(scene, composeId);
+  // Hide procgen rig + flip closure binding (same dance as __useFbx).
+  if (player._procgenRig && player._procgenRig.group) {
+    player._procgenRig.group.visible = false;
+  }
+  if (player.rig && player.rig !== player._procgenRig && player.rig !== composedRig) {
+    if (player.rig.group) player.rig.group.visible = false;
+  }
+  player.rig = composedRig;
+  if (typeof player._setRig === 'function') player._setRig(composedRig);
+  return `composed ${composeId} loaded — clips: ${composedRig.clipNames?.().length || 0}`;
+};
+
 // Load the Motus Digital pistol pack — base mesh + skeleton + 16
 // movement / aim / fire / jump animations all merged into one mixer.
 // player.update's clip-name mapping already knows the W1_* names so

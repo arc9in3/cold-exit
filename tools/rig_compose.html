@@ -1,0 +1,220 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<title>cold exit · rig compose</title>
+<style>
+  :root { color-scheme: dark; }
+  html, body {
+    margin: 0; padding: 0;
+    width: 100%; height: 100%;
+    background: #0c0c10;
+    font-family: system-ui, -apple-system, Segoe UI, sans-serif;
+    color: #cbd2dc;
+    overflow: hidden;
+  }
+  #stage { position: absolute; inset: 0; }
+  #crumb {
+    position: absolute; top: 10px; left: 14px;
+    font-size: 12px; color: #60697a;
+    background: rgba(14,16,22,0.7);
+    padding: 6px 10px;
+    border-radius: 4px;
+    pointer-events: none;
+  }
+  #crumb b { color: #c9a87a; }
+  #panel {
+    position: absolute; top: 10px; right: 14px;
+    width: 280px;
+    background: rgba(14,16,22,0.92);
+    border: 1px solid #2a2f3a;
+    padding: 12px;
+    border-radius: 6px;
+    font-size: 12px;
+  }
+  #panel h2 { margin: 0 0 10px 0; font-size: 13px; color: #c9a87a; }
+  #panel label { display: block; margin: 8px 0 3px 0; color: #8a93a3; }
+  #panel select, #panel input {
+    width: 100%; box-sizing: border-box;
+    background: #1a1d24; color: #cbd2dc;
+    border: 1px solid #2a2f3a; padding: 4px;
+    font-family: inherit; font-size: 12px;
+  }
+  #panel button {
+    margin-top: 12px; width: 100%;
+    background: #1f2a18; color: #a8d68a;
+    border: 1px solid #3e5a2e; padding: 8px;
+    border-radius: 4px; cursor: pointer; font-size: 12px;
+  }
+  #panel button:hover { background: #2a3a20; }
+  #panel pre {
+    margin-top: 10px; max-height: 200px; overflow: auto;
+    background: #0a0c10; border: 1px solid #2a2f3a;
+    padding: 6px; font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
+    font-size: 11px; color: #8a93a3;
+  }
+  #status { margin-top: 8px; color: #6a8a4a; font-size: 11px; }
+</style>
+<script type="importmap">
+{
+  "imports": {
+    "three": "https://unpkg.com/three@0.161.0/build/three.module.js",
+    "three/addons/": "https://unpkg.com/three@0.161.0/examples/jsm/"
+  }
+}
+</script>
+</head>
+<body>
+<div id="stage"></div>
+<div id="crumb"><b>rig compose</b> · pick top + bottom · dial alignment Y · save JSON</div>
+<div id="panel">
+  <h2>Composed character</h2>
+  <label>id</label>
+  <input id="cmp-id" type="text" value="eve_alt" />
+  <label>top part</label>
+  <select id="cmp-top"></select>
+  <label>bottom part</label>
+  <select id="cmp-bottom"></select>
+  <label>alignment Y (m)</label>
+  <input id="cmp-y" type="number" step="0.01" value="0.0" />
+  <button id="cmp-load">Load + preview</button>
+  <button id="cmp-save">Copy JSON to clipboard</button>
+  <div id="status"></div>
+  <pre id="cmp-json"></pre>
+</div>
+<script type="module">
+import * as THREE from 'three';
+import { OrbitControls } from 'three/addons/controls/OrbitControls.js';
+import { loadComposedCharacter, mergeRigs } from '../src/anim/rig_compose.js';
+import { loadCharacterFBX } from '../src/character_fbx.js';
+import { Registry } from '../src/anim/registry.js';
+
+const stage = document.getElementById('stage');
+const renderer = new THREE.WebGLRenderer({ antialias: true });
+renderer.setPixelRatio(devicePixelRatio);
+renderer.setSize(stage.clientWidth, stage.clientHeight);
+renderer.outputColorSpace = THREE.SRGBColorSpace;
+stage.appendChild(renderer.domElement);
+
+const scene = new THREE.Scene();
+scene.background = new THREE.Color(0x0c0c10);
+scene.add(new THREE.HemisphereLight(0xffffff, 0x222233, 1.0));
+const dir = new THREE.DirectionalLight(0xffffff, 0.8);
+dir.position.set(3, 5, 4);
+scene.add(dir);
+
+const camera = new THREE.PerspectiveCamera(45, stage.clientWidth/stage.clientHeight, 0.1, 100);
+camera.position.set(2, 1.4, 4);
+const controls = new OrbitControls(camera, renderer.domElement);
+controls.target.set(0, 1.0, 0);
+controls.update();
+
+addEventListener('resize', () => {
+  renderer.setSize(stage.clientWidth, stage.clientHeight);
+  camera.aspect = stage.clientWidth/stage.clientHeight;
+  camera.updateProjectionMatrix();
+});
+
+let activeRig = null;
+function clearActive() {
+  if (activeRig?.group) {
+    scene.remove(activeRig.group);
+    activeRig.group.traverse(o => {
+      if (o.geometry) o.geometry.dispose?.();
+      if (o.material) {
+        if (Array.isArray(o.material)) o.material.forEach(m => m?.dispose?.());
+        else o.material.dispose?.();
+      }
+    });
+  }
+  activeRig = null;
+}
+
+const status = (msg, ok = true) => {
+  const el = document.getElementById('status');
+  el.textContent = msg;
+  el.style.color = ok ? '#6a8a4a' : '#d68a8a';
+};
+
+// Populate rig-part dropdowns by reading the manifest directory.
+// Static list for now — update when new rig_parts are authored.
+const KNOWN_PARTS = ['assassin_top', 'eve_bottom'];
+const topSel = document.getElementById('cmp-top');
+const botSel = document.getElementById('cmp-bottom');
+for (const id of KNOWN_PARTS) {
+  topSel.add(new Option(id, id));
+  botSel.add(new Option(id, id));
+}
+topSel.value = 'assassin_top';
+botSel.value = 'eve_bottom';
+
+function buildCmpJson() {
+  const id = document.getElementById('cmp-id').value || 'untitled';
+  return {
+    id,
+    label: `${id} (composed)`,
+    rigId: 'biped',
+    parts: {
+      top:    topSel.value,
+      bottom: botSel.value,
+    },
+    connection: {
+      topAnchor:        'Bip001-Spine1',
+      bottomAnchor:     'Bip001-Pelvis',
+      alignmentOffsetY: parseFloat(document.getElementById('cmp-y').value) || 0,
+    },
+    boneNamespace: { top: 'T_', bottom: 'B_' },
+    overrides: { materials: { top: null, bottom: null } },
+  };
+}
+
+function refreshJson() {
+  document.getElementById('cmp-json').textContent = JSON.stringify(buildCmpJson(), null, 2);
+}
+['cmp-id', 'cmp-y'].forEach(id => document.getElementById(id).addEventListener('input', refreshJson));
+topSel.addEventListener('change', refreshJson);
+botSel.addEventListener('change', refreshJson);
+refreshJson();
+
+document.getElementById('cmp-load').addEventListener('click', async () => {
+  status('loading…');
+  clearActive();
+  try {
+    // Build the cmp inline (don't require the JSON file to exist on
+    // disk yet — this tool's job is to AUTHOR it).
+    const cmp = buildCmpJson();
+    const reg = await Registry.create('Assets/anim_data/');
+    const topPart    = await reg.rigPart(cmp.parts.top);
+    const bottomPart = await reg.rigPart(cmp.parts.bottom);
+    const [topRig, bottomRig] = await Promise.all([
+      loadCharacterFBX(scene, topPart.src,    { rigId: cmp.rigId }),
+      loadCharacterFBX(scene, bottomPart.src, { rigId: cmp.rigId }),
+    ]);
+    activeRig = mergeRigs(scene, cmp, topPart, bottomPart, topRig, bottomRig);
+    status('loaded — orbit to inspect');
+  } catch (e) {
+    status('error: ' + e.message, false);
+    console.error(e);
+  }
+});
+
+document.getElementById('cmp-save').addEventListener('click', async () => {
+  const text = JSON.stringify(buildCmpJson(), null, 2);
+  try {
+    await navigator.clipboard.writeText(text);
+    status(`copied ${text.length} chars to clipboard`);
+  } catch (e) {
+    status('clipboard failed — see console', false);
+    console.log(text);
+  }
+});
+
+(function tick() {
+  requestAnimationFrame(tick);
+  if (activeRig?.update) activeRig.update(1/60);
+  controls.update();
+  renderer.render(scene, camera);
+})();
+</script>
+</body>
+</html>

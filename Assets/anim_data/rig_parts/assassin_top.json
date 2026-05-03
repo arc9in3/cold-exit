@@ -1,0 +1,14 @@
+{
+  "id": "assassin_top",
+  "label": "Assassin (top half — chest up)",
+  "src": "Assets/models/characters/assassin.glb",
+  "rigType": "biped",
+  "exposes": "top",
+  "anchorBone": "Bip001-Spine1",
+  "_anchorNote": "anchorBone is the bone that the composer attaches as a child of the bottom part's hip joint. For 'top' parts this is typically Spine1 (chest); the chain Spine1 → Neck → Head → arms comes along.",
+  "materials": {
+    "body":  null,
+    "metal": null
+  },
+  "_materialNote": "Override entries are filled in by the rig_compose tool — keys appear here so authors know what slots exist."
+}

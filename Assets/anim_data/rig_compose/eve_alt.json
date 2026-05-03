@@ -1,0 +1,27 @@
+{
+  "id": "eve_alt",
+  "label": "Eve alt — assassin torso + eve legs",
+  "rigId": "biped",
+  "_rigIdNote": "Composed characters declare a rigId so the engine knows which logicalGroups (top/bottom) apply. Both parts must share the same rigId — composer rejects cross-rig composition (e.g. mixamo top + biped bottom) since clip retargeting is out of scope for Phase 3.",
+  "parts": {
+    "top":    "assassin_top",
+    "bottom": "eve_bottom"
+  },
+  "connection": {
+    "topAnchor":         "Bip001-Spine1",
+    "bottomAnchor":      "Bip001-Pelvis",
+    "alignmentOffsetY":  0.0,
+    "_alignmentNote": "Vertical offset added to the top's anchor world position so chest sits at the right height on the bottom's hip. Tuned by tools/rig_compose.html."
+  },
+  "boneNamespace": {
+    "top":    "T_",
+    "bottom": "B_",
+    "_namespaceNote": "Prefix added to colliding bone names. e.g. both parts may export 'Bip001-Spine' — the composer renames top's to 'T_Bip001-Spine' and bottom's to 'B_Bip001-Spine' to avoid lookup collisions in the merged skeleton. Bones above hip in the bottom part and bones below hip in the top part are dropped before namespacing."
+  },
+  "overrides": {
+    "materials": {
+      "top":    null,
+      "bottom": null
+    }
+  }
+}

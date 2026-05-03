@@ -1,0 +1,12 @@
+{
+  "id": "eve_bottom",
+  "label": "Eve (bottom half — hip down)",
+  "src": "Assets/models/characters/eve.glb",
+  "rigType": "biped",
+  "exposes": "bottom",
+  "anchorBone": "Bip001-Pelvis",
+  "_anchorNote": "anchorBone for a 'bottom' part is the hip/pelvis bone that becomes the composed character's root. Top parts' anchorBone reparents under THIS bone.",
+  "materials": {
+    "pants": null
+  }
+}
