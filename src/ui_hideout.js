@@ -877,7 +877,9 @@ export class HideoutUI {
     topbar.id = 'hideout-topbar';
     topbar.innerHTML = `
       <button id="hideout-sysmenu" type="button" title="Tutorial / Leaderboard / Options">☰</button>
-      <div id="hideout-title">COLD EXIT</div>
+      <div id="hideout-title">
+        <span class="title-cold">COLD</span><span class="title-sep" aria-hidden="true">▮</span><span class="title-exit">EXIT</span>
+      </div>
       <div id="hideout-wallets">
         <span class="wallet"><span class="lbl">CHIPS</span> <b>${chips}</b></span>
         <span class="wallet"><span class="lbl">MARKS</span> <b>${marks}</b></span>
@@ -1341,8 +1343,11 @@ export class HideoutUI {
     const head = document.createElement('div');
     head.className = 'hideout-section-head';
     head.innerHTML = `
-      <div class="hideout-section-title">VAULT</div>
-      <div class="hideout-section-sub">Persistent item storage between runs. Items here survive death and can be loaded into your loadout for the next run.</div>
+      <div class="hideout-section-portrait" data-npc="vault"></div>
+      <div class="hideout-section-text">
+        <div class="hideout-section-title">VAULT</div>
+        <div class="hideout-section-sub">Persistent item storage between runs. Items here survive death and can be loaded into your loadout for the next run.</div>
+      </div>
     `;
     wrap.appendChild(head);
     wrap.appendChild(this._renderBankSection());
@@ -3001,7 +3006,7 @@ export class HideoutUI {
     const head = document.createElement('div');
     head.className = 'hideout-section-head trainer-head-with-portrait';
     head.innerHTML = `
-      <img class="trainer-portrait" src="Assets/generated/gen-recruiter-portrait-via-qwen-image-v650-v667-v827-v808.png" alt="" aria-hidden="true" decoding="async">
+      <img class="trainer-portrait" src="Assets/generated/gen-art-trainer-portrait-via-qwen-image.png" alt="" aria-hidden="true" decoding="async">
       <div class="trainer-head-text">
         <div class="hideout-section-title">TRAINER</div>
         <div class="hideout-section-sub">Spend marks earned by dying. Each track levels up in place — buy a tier, the notch lights, the next tier becomes available. <b>${marks}</b> marks on file.</div>
@@ -4377,9 +4382,25 @@ export class HideoutUI {
         display: flex; align-items: center; gap: 16px;
         padding: 14px 22px; border-bottom: 1px solid #1f2530;
       }
+      /* Title styled to match the COLD EXIT wordmark from the
+         splash composition (Assets/coldexit.png): clean white COLD,
+         small cyan separator block with bloom, dimmer EXIT.
+         Pure CSS so it scales cleanly at any viewport size — the
+         splash image itself is too cropped/dark to crop a clean
+         transparent wordmark out of inline. */
       #hideout-title {
-        font-size: 16px; font-weight: 700; color: #5a8acf;
-        letter-spacing: 3px; text-transform: uppercase;
+        display: flex; align-items: center; gap: 8px;
+        font-size: 22px; font-weight: 800;
+        letter-spacing: 6px; text-transform: uppercase;
+        font-family: 'Inter', system-ui, sans-serif;
+      }
+      #hideout-title .title-cold { color: #ffffff; }
+      #hideout-title .title-exit { color: #6f93b4; }
+      #hideout-title .title-sep {
+        color: #4ec9d4;
+        font-size: 14px; line-height: 1;
+        transform: translateY(-1px);
+        text-shadow: 0 0 12px rgba(78,201,212,0.65);
       }
       #hideout-wallets {
         flex: 1; text-align: right; color: #c9a87a; font-size: 13px;
@@ -4463,6 +4484,9 @@ export class HideoutUI {
       }
       .hideout-section-portrait[data-npc="blackmarket"] {
         background-image: url('/Assets/generated/art-black-marketeer-portrait-via-qwen-image.png');
+      }
+      .hideout-section-portrait[data-npc="vault"] {
+        background-image: url('/Assets/generated/gen-art-vault-keeper-portrait-via-qwen-image.png');
       }
       .hideout-section-title {
         font-size: 13px; color: #5a8acf; letter-spacing: 2px;

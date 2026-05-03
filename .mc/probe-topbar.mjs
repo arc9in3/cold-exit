@@ -1,0 +1,11 @@
+import pw from 'file:///C:/work/mission-control/node_modules/playwright/index.js';
+const { chromium } = pw;
+const browser = await chromium.launch({ headless: true });
+const page = await browser.newPage({ viewport: { width: 1600, height: 900 } });
+await page.goto('http://localhost:8080/', { waitUntil: 'load' });
+await page.waitForTimeout(2200);
+const el = await page.locator('#hideout-title').first();
+await el.screenshot({ path: 'C:/Users/Landon/AppData/Local/Temp/coldexit-yglitch/topbar-title.png' });
+await page.screenshot({ path: 'C:/Users/Landon/AppData/Local/Temp/coldexit-yglitch/topbar-full.png', clip: { x: 0, y: 0, width: 700, height: 100 } });
+await browser.close();
+console.log('saved topbar shots');
