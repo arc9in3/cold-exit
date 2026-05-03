@@ -2563,7 +2563,9 @@ export function updateAnim(rig, state, dt) {
   // offset the off-hand gun off-cursor.
   const supportShoulderYaw = state.akimbo
     ? 0                          // parallel forward — track cursor
-    : 0.55 * supportYawSign;     // inward — two-hand-grip default
+    : noWeaponPose
+      ? 0                        // unarmed idle — arm hangs at the side, no centerline reach
+      : 0.55 * supportYawSign;   // inward — two-hand-grip default
   // Pitch — match the weapon arm so both hands rise together. Same
   // formula in both modes; akimbo only differs in yaw + elbow bend.
   supportArm.shoulder.pivot.rotation.x = rightShoulder - armLeanComp + supportSideSway - idleShoulderDrop + idleWeaponDrift;
@@ -2574,7 +2576,12 @@ export function updateAnim(rig, state, dt) {
   const supportElbowPump = Math.abs(supportSideSway) * 0.4;
   supportArm.elbow.rotation.x = state.akimbo
     ? rightElbow + idleWeaponDrift * 0.4
-    : rightElbow - 0.18 - supportElbowPump + idleWeaponDrift * 0.4;
+    : noWeaponPose
+      // Unarmed idle — match the weapon-arm elbow exactly. The -0.18
+      // "tuck toward centerline" is a two-hand-grip detail; without a
+      // weapon to grip, it just folds the arm across the chest.
+      ? rightElbow + idleWeaponDrift * 0.4
+      : rightElbow - 0.18 - supportElbowPump + idleWeaponDrift * 0.4;
 
   // Grip curl — rotate each hand pivot forward so the hand reads as
   // a closed fist on the weapon grip, not a flat palm hanging off
