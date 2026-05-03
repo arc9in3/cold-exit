@@ -1,0 +1,25 @@
+{
+  "id": "intro_lab",
+  "label": "Intro: lab — first scripted cutscene (Phase 4 demo)",
+  "duration": 8.0,
+  "_durationNote": "Master-clock seconds. Engine clamps step() to this; play loops to a stop on completion.",
+
+  "actors": {
+    "alice": {
+      "characterId": "eve_alt",
+      "_characterIdNote": "Resolves first against rig_compose/<id>.json (composed) — falls through to rigs/<id>.json if unavailable.",
+      "spawn": [0, 0, 0],
+      "stateMachine": "cold_exit_player"
+    }
+  },
+
+  "tracks": [
+    { "actor": "alice", "t": 0.0, "event": "play",    "state": "stand_idle" },
+    { "actor": "alice", "t": 1.5, "event": "play",    "state": "walk" },
+    { "actor": "alice", "t": 5.0, "event": "play",    "state": "stand_aim" },
+    { "actor": "alice", "t": 6.5, "event": "trigger", "oneShot": "W1_Stand_Fire_Single" },
+    { "kind": "camera", "t": 0.0, "from": [5, 2, 5], "to": [3, 1.6, 3], "lookAt": "alice" },
+    { "kind": "camera", "t": 4.5, "from": [3, 1.6, 3], "to": [1.2, 1.5, 2.5], "lookAt": "alice" },
+    { "kind": "audio",  "t": 0.5, "src": "Assets/audio/door_creak.ogg" }
+  ]
+}

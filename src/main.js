@@ -712,6 +712,29 @@ window.__useEveWithUAL = async () => {
   return `eve.glb + UAL clips: ${player.rig.clipNames?.().length} total`;
 };
 
+// Console: __playScene('intro_lab')
+//   Loads Assets/anim_data/scenes/<id>.json and runs it against a
+//   shared master clock. The cutscene auto-ticks via the main render
+//   loop hook (see __activeCutscenes below).
+window.__activeCutscenes = window.__activeCutscenes || [];
+window.__playScene = async (sceneId) => {
+  const { loadAndPlayScene } = await import('./anim/cutscene.js');
+  const cs = await loadAndPlayScene(scene, sceneId, {
+    onCamera: (from, to, lookAt) => {
+      if (window.__camera) {
+        window.__camera.position.fromArray(to);
+        // No tween — applied instantaneously; tooling tools/cutscene.html
+        // will add tweens in a follow-up.
+        const target = lookAt && cs.actors.get(lookAt)?.rig?.group?.position;
+        if (target && window.__controls) window.__controls.target.copy(target);
+      }
+    },
+    onAudio: (src) => { console.log('[cutscene] audio cue', src); /* hook real audio in P4 follow-up */ },
+  });
+  window.__activeCutscenes.push(cs);
+  return cs;
+};
+
 // Console: __useCharacter('eve_alt')
 //   Loads a composed character (top half + bottom half from different
 //   sources) per Assets/anim_data/rig_compose/<id>.json. Phase 3 of
@@ -17614,6 +17637,16 @@ function _safeRender(rawDt, modalPaused = false) {
     // Hideout-active swap — when the diegetic hideout scene is
     // visible, render IT to the shared canvas instead of the game
     // scene. Keeps a single renderer / canvas / GL context.
+    // Tick active cutscenes BEFORE render so any state changes the
+    // cutscene applies (camera moves, anim state on actors) land on
+    // this frame. Done cutscenes are pruned. Independent of the
+    // render-target dispatch chain below.
+    if (window.__activeCutscenes && window.__activeCutscenes.length) {
+      for (const cs of window.__activeCutscenes) {
+        try { cs.step(rawDt); } catch (e) { console.warn('[cutscene]', e); }
+      }
+      window.__activeCutscenes = window.__activeCutscenes.filter(cs => cs.playing || cs.t < cs.duration);
+    }
     const hsActive = hideoutUI?.isOpen?.() && hideoutUI._scene && hideoutUI._scene.visible;
     if (hsActive) {
       try {

@@ -1,0 +1,27 @@
+{
+  "id": "eve",
+  "label": "Eve — character overrides (props, materials, bone offsets)",
+  "_schemaNote": "L5 overrides per the modular animation plan. This file is per-CHARACTER (eve, eve_alt, motus_default, ...), independent of per-WEAPON tables in src/model_manifest.js. Tools/overrides.html (Phase 4 follow-up) edits this file.",
+
+  "props": {
+    "primaryWeapon": {
+      "bone":     "leftArm.wrist",
+      "offset":   [0, 0, -0.30],
+      "rotation": [0, 1.5708, 0],
+      "_note": "leftArm.wrist in code-space = char's RIGHT hand (handedness flip per rigs/*.json). Default mounting matches the existing one-handed pistol pose."
+    },
+    "secondary": {
+      "bone":   "hips",
+      "offset": [-0.15, 0, 0.05]
+    }
+  },
+
+  "materials": {
+    "body":   { "tintHex": null },
+    "top":    { "tintHex": null },
+    "bottom": { "tintHex": null }
+  },
+
+  "boneOffsets": {
+  }
+}
