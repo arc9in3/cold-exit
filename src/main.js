@@ -668,6 +668,59 @@ window.__useFbx = async (url) => {
   await mod.swapPlayerToFbxRig(player, scene, url);
   return `loaded ${url}, clips: ${player.rig.clipNames?.().join(', ')}`;
 };
+
+// Load the Motus Digital pistol pack — base mesh + skeleton + 16
+// movement / aim / fire / jump animations all merged into one mixer.
+// player.update's clip-name mapping already knows the W1_* names so
+// idle / walk / jog / crouch / fire automatically swap with player
+// state once this is loaded. Console: __usePistolPack()
+window.__usePistolPack = async () => {
+  const PACK = 'Assets/models/animations/FBX_Pistol_Starter_27A';
+  // Load order matters — first call brings in the mesh + skeleton.
+  // We pick W1_Stand_Relaxed_Idle_IPC as the base because it's the
+  // expected resting state, and the player.update clip mapping
+  // defaults to that name when state is plain idle (no aim, no
+  // movement, no crouch).
+  const baseClip = 'W1_Stand_Relaxed_Idle_IPC';
+  const inPlace = [
+    'W1_Stand_Aim_Idle_IPC',
+    'W1_Crouch_Idle_IPC',
+    'W1_Crouch_Aim_Idle_IPC',
+    'W1_Walk_Aim_F_Loop_IPC',
+    'W1_Jog_Aim_F_Loop_IPC',
+    'W1_CrouchWalk_Aim_F_Loop_IPC',
+    'W1_Stand_Aim_Turn_In_Place_L_Loop_IPC',
+    'W1_Stand_Aim_Turn_In_Place_R_Loop_IPC',
+  ];
+  const fire = [
+    'W1_Stand_Fire_Single',
+    'W1_Crouch_Fire_Single',
+  ];
+  const jump = [
+    'W1_Stand_Aim_Jump_Start_IPC',
+    'W1_Stand_Aim_Jump_Air_IPC',
+    'W1_Stand_Aim_Jump_End_IPC',
+    'W1_Walk_Aim_F_Jump_RU_End_IPC',
+    'W1_Jog_Aim_F_Jump_RU_End_IPC',
+  ];
+
+  const playerMod = await import('./player.js');
+  await playerMod.swapPlayerToFbxRig(player, scene, `${PACK}/Animation/In-Place/${baseClip}.fbx`);
+
+  const charMod = await import('./character_fbx.js');
+  const merge = async (name, subdir) => {
+    try {
+      await charMod.loadAnimationFBX(player.rig, `${PACK}/Animation/${subdir}/${name}.fbx`, name);
+    } catch (e) {
+      console.warn(`[pistol-pack] skipped ${name}:`, e.message);
+    }
+  };
+  for (const n of inPlace) await merge(n, 'In-Place');
+  for (const n of fire)    await merge(n, 'Fire');
+  for (const n of jump)    await merge(n, 'In-Place/Split_Jumps');
+
+  return `pistol pack loaded — ${player.rig.clipNames?.().length} clips: ${player.rig.clipNames?.().join(', ')}`;
+};
 const input = new Input(renderer.domElement, camera, groundPlane);
 const combat = new Combat(scene);
 const dummies = new DummyManager(scene);
