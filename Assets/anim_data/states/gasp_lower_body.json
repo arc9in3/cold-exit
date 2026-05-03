@@ -1,0 +1,49 @@
+{
+  "id": "gasp_lower_body",
+  "label": "GASP UEFN locomotion — lower-body 8-way + speed tiers",
+  "rigId": "gasp_uefn",
+  "_note": "Drives the LOWER half only (hips, legs). Upper body is owned by a separate layer + the IK pass that points the gun at the cursor. Direction selection: project velocity into body-relative space, pick the 8-way sector closest to it. Speed selection: idle / walk / run / sprint thresholds.",
+
+  "thresholds": {
+    "moving":     0.2,
+    "walkMax":    1.6,
+    "runMax":     3.5,
+    "sprintMax":  6.0,
+    "crouched":   "from playerState"
+  },
+
+  "states": {
+    "stand_idle":    { "clip": "M_Neutral_Stand_Idle_Loop_Pistol",   "loop": true },
+    "crouch_idle":   { "clip": "M_Neutral_Crouch_Idle_Loop_Pistol",  "loop": true },
+
+    "walk_F":  { "clip": "M_Neutral_Walk_Loop_F_Pistol",  "loop": true, "speedRef": 1.6 },
+    "walk_B":  { "clip": "M_Neutral_Walk_Loop_B_Pistol",  "loop": true, "speedRef": 1.6 },
+    "walk_FL": { "clip": "M_Neutral_Walk_Loop_FL_Pistol", "loop": true, "speedRef": 1.6 },
+    "walk_FR": { "clip": "M_Neutral_Walk_Loop_FR_Pistol", "loop": true, "speedRef": 1.6 },
+    "walk_BL": { "clip": "M_Neutral_Walk_Loop_BL_Pistol", "loop": true, "speedRef": 1.6 },
+    "walk_BR": { "clip": "M_Neutral_Walk_Loop_BR_Pistol", "loop": true, "speedRef": 1.6 },
+
+    "run_F":   { "clip": "M_Neutral_Run_Loop_F_Pistol",   "loop": true, "speedRef": 3.5 },
+    "run_B":   { "clip": "M_Neutral_Run_Loop_B_Pistol",   "loop": true, "speedRef": 3.5 },
+    "run_FL":  { "clip": "M_Neutral_Run_Loop_FL_Pistol",  "loop": true, "speedRef": 3.5 },
+    "run_FR":  { "clip": "M_Neutral_Run_Loop_FR_Pistol",  "loop": true, "speedRef": 3.5 },
+    "run_BL":  { "clip": "M_Neutral_Run_Loop_BL_Pistol",  "loop": true, "speedRef": 3.5 },
+    "run_BR":  { "clip": "M_Neutral_Run_Loop_BR_Pistol",  "loop": true, "speedRef": 3.5 },
+
+    "sprint_F":{ "clip": "M_Neutral_Sprint_Loop_F_Pistol", "loop": true, "speedRef": 6.0 },
+
+    "crouch_F":  { "clip": "M_Neutral_Crouch_Loop_F_Pistol",  "loop": true, "speedRef": 1.0 },
+    "crouch_B":  { "clip": "M_Neutral_Crouch_Loop_B_Pistol",  "loop": true, "speedRef": 1.0 },
+    "crouch_FL": { "clip": "M_Neutral_Crouch_Loop_FL_Pistol", "loop": true, "speedRef": 1.0 },
+    "crouch_FR": { "clip": "M_Neutral_Crouch_Loop_FR_Pistol", "loop": true, "speedRef": 1.0 },
+    "crouch_BL": { "clip": "M_Neutral_Crouch_Loop_BL_Pistol", "loop": true, "speedRef": 1.0 },
+    "crouch_BR": { "clip": "M_Neutral_Crouch_Loop_BR_Pistol", "loop": true, "speedRef": 1.0 }
+  },
+
+  "_selectionNote": "selectGaspLocomotion(playerState, planarSpeed, velocity, bodyYaw) in src/anim/locomotion.js implements: (a) speed bucket via thresholds.* (b) direction bucket via 8-way angle from velocity-vs-bodyYaw. (c) crouch override prefixes 'crouch_'. Returned state name then maps via this.states.",
+
+  "playback": {
+    "fadeMs": 200,
+    "timeScaleClamp": [0.5, 1.5]
+  }
+}

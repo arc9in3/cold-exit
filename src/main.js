@@ -909,6 +909,49 @@ window.__usePistolPack = async () => {
   return `pistol pack loaded — ${player.rig.clipNames?.().length} clips: ${player.rig.clipNames?.().join(', ')}`;
 };
 
+// Console: __useGaspMannequin()
+//   Loads the UEFN GASP mannequin mesh + the curated 8-way directional
+//   loop clips (walk/run/sprint/crouch + idle). The lower body is
+//   driven by gasp_lower_body.json (8-way direction × speed-tier
+//   blend). Upper body is owned by the IK pass that points the gun
+//   at the cursor.
+window.__useGaspMannequin = async () => {
+  const PACK = 'Assets/models/animations/gasp_glb';
+  const playerMod = await import('./player.js');
+  await playerMod.swapPlayerToFbxRig(player, scene, `${PACK}/SKM_UEFN_Mannequin.glb`,
+                                     { rigId: 'gasp_uefn' });
+
+  const charMod = await import('./character_fbx.js');
+  // Curated subset of clips — the locomotion state machine references
+  // these by name. Order matters only for cosmetic console output.
+  const CLIPS = [
+    'M_Neutral_Stand_Idle_Loop_Pistol',
+    'M_Neutral_Crouch_Idle_Loop_Pistol',
+    'M_Neutral_Walk_Loop_F_Pistol',  'M_Neutral_Walk_Loop_B_Pistol',
+    'M_Neutral_Walk_Loop_FL_Pistol', 'M_Neutral_Walk_Loop_FR_Pistol',
+    'M_Neutral_Walk_Loop_BL_Pistol', 'M_Neutral_Walk_Loop_BR_Pistol',
+    'M_Neutral_Run_Loop_F_Pistol',   'M_Neutral_Run_Loop_B_Pistol',
+    'M_Neutral_Run_Loop_FL_Pistol',  'M_Neutral_Run_Loop_FR_Pistol',
+    'M_Neutral_Run_Loop_BL_Pistol',  'M_Neutral_Run_Loop_BR_Pistol',
+    'M_Neutral_Sprint_Loop_F_Pistol',
+    'M_Neutral_Crouch_Loop_F_Pistol',  'M_Neutral_Crouch_Loop_B_Pistol',
+    'M_Neutral_Crouch_Loop_FL_Pistol', 'M_Neutral_Crouch_Loop_FR_Pistol',
+    'M_Neutral_Crouch_Loop_BL_Pistol', 'M_Neutral_Crouch_Loop_BR_Pistol',
+  ];
+  for (const n of CLIPS) {
+    try {
+      await charMod.loadAnimationFBX(player.rig, `${PACK}/${n}.glb`, n);
+    } catch (e) {
+      console.warn(`[gasp] skipped ${n}:`, e.message);
+    }
+  }
+  // Mark the rig so player.update knows to drive lower-body via the
+  // GASP locomotion selector. Upper-body IK is owned by player.js
+  // when this flag is set.
+  player.rig._fbx.useGaspLocomotion = true;
+  return `gasp mannequin loaded — ${player.rig.clipNames?.().length} clips`;
+};
+
 // AUTO-LOAD on game start — the Motus pistol pack becomes the default
 // player rig instead of the procgen rig. Procgen stays in scene as a
 // hidden fallback (so __useFbx(null) can flip back).
@@ -927,8 +970,18 @@ const _wantFbxDefault = (() => {
 if (_wantFbxDefault) {
   setTimeout(async () => {
     try {
-      const result = await window.__usePistolPack();
-      console.log('[anim] default rig swapped to FBX pistol pack:', result);
+      // Default: GASP UEFN mannequin + 8-way locomotion. Set
+      // localStorage.coldExitDefaultRig = 'pistol' to swap back to
+      // the Motus pistol pack, or 'procgen' for the original
+      // primitive rig.
+      const choice = (() => {
+        try { return localStorage.getItem('coldExitDefaultRig'); }
+        catch (_) { return null; }
+      })();
+      const result = (choice === 'pistol')
+        ? await window.__usePistolPack()
+        : await window.__useGaspMannequin();
+      console.log('[anim] default rig loaded:', result);
     } catch (err) {
       console.warn('[anim] FBX auto-load failed; staying on procgen:', err.message);
     }

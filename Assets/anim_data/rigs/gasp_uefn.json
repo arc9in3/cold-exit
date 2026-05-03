@@ -1,0 +1,42 @@
+{
+  "id": "gasp_uefn",
+  "label": "Unreal Engine GASP UEFN Mannequin (lowercase _l/_r suffix)",
+  "scaleHint": 1.0,
+  "handedness": "char_left_is_world_plus_x",
+  "_handednessNote": "UEFN naming follows Unreal convention — _l = char's physical left = world +X. Maps to Cold Exit's rightArm (handedness flip per project convention).",
+  "bonePrefixStrip": [],
+  "boneSuffixStripRegex": null,
+  "boneMap": {
+    "pelvis":     "hips",
+    "spine_01":   "stomach",
+    "spine_03":   "chest",
+    "spine_04":   "chest",
+    "spine_05":   "chest",
+    "neck_01":    "neck",
+    "head":       "head",
+
+    "clavicle_l": "rightArm.shoulder.pivot",
+    "upperarm_l": "rightArm.shoulder.pivot",
+    "lowerarm_l": "rightArm.elbow",
+    "hand_l":     "rightArm.wrist",
+
+    "clavicle_r": "leftArm.shoulder.pivot",
+    "upperarm_r": "leftArm.shoulder.pivot",
+    "lowerarm_r": "leftArm.elbow",
+    "hand_r":     "leftArm.wrist",
+
+    "thigh_l":    "rightLeg.thigh.pivot",
+    "calf_l":     "rightLeg.knee",
+    "foot_l":     "rightLeg.ankle",
+
+    "thigh_r":    "leftLeg.thigh.pivot",
+    "calf_r":     "leftLeg.knee",
+    "foot_r":     "leftLeg.ankle"
+  },
+  "logicalGroups": {
+    "lower":  ["hips", "stomach", "leftLeg.*", "rightLeg.*"],
+    "upper":  ["chest", "neck", "head", "leftArm.*", "rightArm.*"],
+    "top":    ["chest", "neck", "head", "leftArm.*", "rightArm.*"],
+    "bottom": ["hips", "stomach", "leftLeg.*", "rightLeg.*"]
+  }
+}

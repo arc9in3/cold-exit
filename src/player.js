@@ -9,6 +9,70 @@ import { buildRig, initAnim, updateAnim, pokeHit, pokeRecoil, pokeDeath,
 import { buildMeleePrimitive } from './melee_primitives.js';
 import { loadStateMachine, selectFromPlayerState, selectLayeredFromPlayerState, deriveInputs } from './anim/state_machine.js';
 import { attachGraph } from './anim/graph.js';
+import { selectGaspLocomotion } from './anim/locomotion.js';
+import { solveTwoBoneIK, resetIkCache } from './anim/ik_two_bone.js';
+
+// Lazy-load the GASP locomotion state machine (only fetched when a
+// rig with useGaspLocomotion=true is loaded). Same fire-and-forget
+// pattern as _ensurePlayerSmLoaded.
+let _gaspSmCfg = null;
+let _gaspSmFetched = false;
+function _ensureGaspSmLoaded() {
+  if (_gaspSmFetched) return;
+  _gaspSmFetched = true;
+  loadStateMachine('gasp_lower_body').then(cfg => {
+    _gaspSmCfg = cfg;
+    if (cfg) console.log('[player] gasp_lower_body state machine loaded');
+  }).catch(err => {
+    console.warn('[player] gasp SM load failed:', err.message);
+  });
+}
+
+// Aim-IK target scratch (world-space point the wrist should reach).
+const _aimIkTarget = new THREE.Vector3();
+const _aimIkPole = new THREE.Vector3();
+
+// Upper-body IK pass for the GASP rig — runs AFTER the locomotion
+// clip's mixer.update so we OVERWRITE the arm bones with cursor-
+// aimed IK. The chest + head still get yaw/pitch additive deltas
+// via the existing world-space delta math.
+function _runUpperBodyIK(rig, state, aimPoint, aimPitch) {
+  if (!rig || !rig._fbx) return;
+  const fbx = rig._fbx;
+  fbx.armIkCache = fbx.armIkCache || { left: {}, right: {} };
+  // Aim target — where the wrists should converge. For now point
+  // both wrists at the cursor-projected world position. If aimPoint
+  // is null (no cursor target), reach forward in the body's facing.
+  if (aimPoint) {
+    _aimIkTarget.copy(aimPoint);
+  } else {
+    _aimIkTarget.set(0, 1.4, 0).applyMatrix4(rig.group.matrixWorld);
+    _aimIkTarget.z += 2.0;
+  }
+  // Pole hint — elbow-out direction. World +Y bias keeps the elbow
+  // raised (gun grip pose) instead of letting it drop sideways.
+  _aimIkPole.set(0, 1, 0);
+
+  // Right arm (= code's leftArm — handedness flip).
+  if (rig.leftArm?.shoulder?.pivot && rig.leftArm.elbow && rig.leftArm.wrist) {
+    solveTwoBoneIK(
+      rig.leftArm.shoulder.pivot, rig.leftArm.elbow, rig.leftArm.wrist,
+      _aimIkTarget, _aimIkPole, fbx.armIkCache.left);
+  }
+  // Left arm (= code's rightArm) — only if dual-wielding / akimbo.
+  // Otherwise leave it tucked at the body via the locomotion clip.
+  if (state.offhandEquipped && rig.rightArm?.shoulder?.pivot
+      && rig.rightArm.elbow && rig.rightArm.wrist) {
+    solveTwoBoneIK(
+      rig.rightArm.shoulder.pivot, rig.rightArm.elbow, rig.rightArm.wrist,
+      _aimIkTarget, _aimIkPole, fbx.armIkCache.right);
+  }
+  // Chest + head additive aim — same path the existing FBX block
+  // uses (snapshot-restore-multiply) but kept here for the GASP rig
+  // so locomotion clips don't rotate the chest the wrong way.
+  // Compute a delta from the existing aimYaw / aimPitch sources.
+  // (player.update closes over state.chestTwist + aimPitch above.)
+}
 
 // Lazy-load the player FBX clip-selection state machine. Until the
 // JSON is fetched, the legacy if/else cascade below runs as a
@@ -1761,6 +1825,46 @@ export function createPlayer(scene) {
       if (sk && rig._fbx._skinnedMeshBaseY !== undefined) {
         sk.position.y = rig._fbx._skinnedMeshBaseY;
       }
+      // GASP locomotion path — engaged when the rig was loaded via
+      // __useGaspMannequin() which sets rig._fbx.useGaspLocomotion.
+      // Drives the LOWER body via 8-way directional clip selection
+      // (forward / back / diagonals at walk / run / sprint / crouch
+      // tiers) computed from velocity vs body-yaw. Upper body is
+      // owned by the IK solve below.
+      if (rig._fbx.useGaspLocomotion) {
+        _ensureGaspSmLoaded();
+        if (_gaspSmCfg) {
+          const pick = selectGaspLocomotion(_gaspSmCfg, state, planarSpeed, velocity, rig.group.rotation.y);
+          if (pick && rig._fbx.currentClipName !== pick.clip) {
+            const action = rig.play(pick.clip, { fadeMs: pick.playback?.fadeMs ?? 200, loop: pick.loop });
+            rig._fbx.currentClipName = pick.clip;
+            rig._fbx.currentAction = action;
+          }
+          if (pick?.speedRef && rig._fbx.currentAction) {
+            const clamp = pick.playback?.timeScaleClamp ?? [0.5, 1.5];
+            rig._fbx.currentAction.timeScale = Math.max(clamp[0], Math.min(clamp[1], planarSpeed / pick.speedRef));
+          } else if (rig._fbx.currentAction) {
+            rig._fbx.currentAction.timeScale = 1.0;
+          }
+          rig.update(dt);
+          // Upper body IK — point the wrists at the aim target. The
+          // arms came from the locomotion clip (which is a gun-pose
+          // clip with arms forward); IK overwrites the arm bones to
+          // make them track the cursor. Chest + head get yaw/pitch
+          // additive deltas via the existing world-space IK math.
+          _runUpperBodyIK(rig, state, aimPoint, aimPitch);
+          // Done with anim for this frame.
+          // Skip the remainder of the FBX clip-selection block via
+          // a continue-like construct: structured as a labeled
+          // break-out. Use an early return-from-function would skip
+          // the gameplay-update tail; we use a conditional flag.
+          rig._fbx._gaspHandled = true;
+        }
+      }
+      if (rig._fbx._gaspHandled) {
+        rig._fbx._gaspHandled = false;
+        // Re-enter outer loop for next frame.
+      } else {
       // Clip selection — sourced from
       // Assets/anim_data/states/cold_exit_player.json via the JSON
       // state machine (src/anim/state_machine.js). The JSON encodes
@@ -1925,6 +2029,7 @@ export function createPlayer(scene) {
       };
       applyWorldIK(rig.chest, '_aimChestBase', aimYaw * 0.60, aimPitch * 0.55);
       applyWorldIK(rig.head,  '_aimHeadBase',  aimYaw * 0.40, aimPitch * 0.45);
+      } // end of !_gaspHandled branch
     } else {
     updateAnim(rig, {
       speed: planarSpeed,
