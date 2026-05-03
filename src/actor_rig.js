@@ -2314,16 +2314,24 @@ export function updateAnim(rig, state, dt) {
     ? Math.max(0, 1 - gaitT) * (1 - a.aimBlend) * (1 - (a.dashBlend || 0)) * (1 - crouch * 0.7)
         * (state.attacking || state.blockPose || state.meleeStance ? 0 : 1)
     : 0;
+  // Reset chest + head Z to a known baseline EVERY frame. Nothing else
+  // in updateAnim writes these axes, so without this reset, the
+  // contrapposto delta below accumulated frame-over-frame and the
+  // upper body slowly spun. (REGRESSION: rig_tuner idle pose was
+  // observed rotating clockwise.)
+  rig.chest.rotation.z = 0;
+  rig.head.rotation.z = 0;
   if (contrappostoGate > 0.02) {
     const cf = contrappostoGate * (0.85 + breath * 0.15);
     // Hip cock: right hip down → weight on right leg. +Z rotation
     // raises the LEFT side of the hips, so the apparent stance is
-    // weight-on-right.
+    // weight-on-right. Hips.z gets a hard absolute write at line ~2305
+    // (idleHipRoll + gaitHipRoll), so this += stacks cleanly.
     rig.hips.rotation.z += cf * 0.07;
     // Chest counter-tilt: shoulders compensate the hip cock.
-    rig.chest.rotation.z = (rig.chest.rotation.z || 0) - cf * 0.04;
+    rig.chest.rotation.z = -cf * 0.04;
     // Head tilt: a touch in the same direction as the chest.
-    rig.head.rotation.z = (rig.head.rotation.z || 0) + cf * 0.05;
+    rig.head.rotation.z = cf * 0.05;
   }
 
   // --- pose: arms -----------------------------------------------------
