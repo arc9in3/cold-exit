@@ -7,7 +7,8 @@ import { buildRig, initAnim, updateAnim, pokeHit, pokeRecoil, pokeDeath,
          RIFLE_WEAPON_HIP, RIFLE_WEAPON_AIM,
          SMG_WEAPON_HIP,   SMG_WEAPON_AIM } from './actor_rig.js';
 import { buildMeleePrimitive } from './melee_primitives.js';
-import { loadStateMachine, selectFromPlayerState } from './anim/state_machine.js';
+import { loadStateMachine, selectFromPlayerState, selectLayeredFromPlayerState, deriveInputs } from './anim/state_machine.js';
+import { attachGraph } from './anim/graph.js';
 
 // Lazy-load the player FBX clip-selection state machine. Until the
 // JSON is fetched, the legacy if/else cascade below runs as a
@@ -1728,7 +1729,62 @@ export function createPlayer(scene) {
       // before the SM JSON finishes loading on first run.
       _ensurePlayerSmLoaded();
       let target, loop, speedRef, fadeMs, tsClamp;
-      if (_playerSmCfg) {
+      // Phase 2 — layered graph path. Engaged ONLY when:
+      //   1. SM JSON has `layers`
+      //   2. The rig has clips for every state both layers reference
+      //   3. The rigCfg has logicalGroups (top/bottom mask data)
+      // Otherwise fall through to the Phase 1 single-track path so
+      // existing behaviour is preserved when prereqs aren't met.
+      let usedLayered = false;
+      if (_playerSmCfg && _playerSmCfg.layers && rig._fbx.rigCfg?.logicalGroups) {
+        if (!rig._fbx.graph) {
+          // Pre-flight: only attach the graph if every required clip
+          // exists on the rig. Otherwise stick with single-track.
+          const allClipsPresent = _playerSmCfg.layers.every(L =>
+            Object.values(L.states || {}).every(s => rig._fbx.actions.has(s.clip))
+          );
+          if (allClipsPresent) {
+            const g = attachGraph(rig);
+            for (const L of _playerSmCfg.layers) {
+              g.defineLayer(L.name, {
+                boneMaskGroup: L.boneMaskGroup || null,
+                additive: !!L.additive,
+                blendMs: L.blendMs ?? 180,
+              });
+            }
+            console.log('[player/anim] Phase 2 layered graph engaged');
+          } else {
+            // Mark so we don't retry every frame.
+            rig._fbx.layeredUnavailable = true;
+          }
+        }
+        if (rig._fbx.graph) {
+          const layered = selectLayeredFromPlayerState(_playerSmCfg, state, planarSpeed);
+          if (layered) {
+            for (const L of layered.layers) {
+              if (!L.pick) continue;
+              const cur = rig._fbx.graph.tracks[rig._fbx.graph.layerByName.get(L.name)];
+              const curClip = cur?.action?.getClip().name || null;
+              if (curClip !== L.pick.clip) {
+                rig._fbx.graph.playOnLayer(L.name, L.pick.clip, {
+                  loop: L.pick.loop,
+                  weight: 1.0,
+                });
+              }
+              // Speed-match locomotion timeScale on the layer.
+              if (L.pick.speedRef && cur?.action) {
+                const clamp = L.pick.playback?.timeScaleClamp ?? [0.5, 1.5];
+                const ts = Math.max(clamp[0], Math.min(clamp[1], planarSpeed / L.pick.speedRef));
+                cur.action.timeScale = ts;
+              } else if (cur?.action) {
+                cur.action.timeScale = 1.0;
+              }
+            }
+            usedLayered = true;
+          }
+        }
+      }
+      if (!usedLayered && _playerSmCfg) {
         const pick = selectFromPlayerState(_playerSmCfg, state, planarSpeed);
         if (pick) {
           target = pick.clip;
@@ -1770,25 +1826,27 @@ export function createPlayer(scene) {
         fadeMs = 180;
         tsClamp = [0.5, 1.5];
       }
-      if (rig._fbx.currentClipName !== target) {
-        const action = rig.play(target, { fadeMs, loop });
-        const bindings = action?._propertyBindings || [];
-        const bound = bindings.filter(b => b && b.binding && b.binding.node).length;
-        console.log(`[fbx] clip → ${target} (action=${!!action}, tracks=${action?.getClip().tracks.length}, bound=${bound}, speed=${planarSpeed.toFixed(2)})`);
-        rig._fbx.currentClipName = target;
-        rig._fbx.currentAction = action; // remember for live timeScale tweaks below
+      if (!usedLayered) {
+        if (target && rig._fbx.currentClipName !== target) {
+          const action = rig.play(target, { fadeMs, loop });
+          const bindings = action?._propertyBindings || [];
+          const bound = bindings.filter(b => b && b.binding && b.binding.node).length;
+          console.log(`[fbx] clip → ${target} (action=${!!action}, tracks=${action?.getClip().tracks.length}, bound=${bound}, speed=${planarSpeed.toFixed(2)})`);
+          rig._fbx.currentClipName = target;
+          rig._fbx.currentAction = action;
+        }
+        // Match the playing clip's timeScale to actual ground speed.
+        if (speedRef && rig._fbx.currentAction) {
+          const ts = Math.max(tsClamp[0], Math.min(tsClamp[1], planarSpeed / speedRef));
+          rig._fbx.currentAction.timeScale = ts;
+        } else if (rig._fbx.currentAction) {
+          rig._fbx.currentAction.timeScale = 1.0;
+        }
+        rig.update(dt);
+      } else {
+        // Layered path — graph.step() ticks the shared mixer.
+        rig._fbx.graph.step(dt);
       }
-      // Match the playing clip's timeScale to actual ground speed so
-      // feet don't skate. Reference speeds come from the SM state's
-      // speedRef (was the inline SPEED_REF table previously). Outside
-      // locomotion clips, timeScale stays 1.0.
-      if (speedRef && rig._fbx.currentAction) {
-        const ts = Math.max(tsClamp[0], Math.min(tsClamp[1], planarSpeed / speedRef));
-        rig._fbx.currentAction.timeScale = ts;
-      } else if (rig._fbx.currentAction) {
-        rig._fbx.currentAction.timeScale = 1.0;
-      }
-      rig.update(dt);
       // Aim IK — additive on top of the clip pose. The mixer just set
       // every bone to its keyframed rotation; we layer chest yaw/pitch
       // and head yaw/pitch to point the character at the cursor.

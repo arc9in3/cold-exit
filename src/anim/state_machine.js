@@ -111,3 +111,37 @@ export function selectFromPlayerState(smCfg, playerState, planarSpeed) {
   const inputs = deriveInputs(playerState, planarSpeed);
   return pickClip(smCfg, inputs);
 }
+
+// ============================================================
+// Phase 2 — layered selection
+// ============================================================
+//
+// The Phase 2 SM JSON has a `layers` array; each layer has its own
+// states + selectionPriority + bone-mask group. selectLayered()
+// returns a per-layer pick:
+//   { layers: [ { name, boneMaskGroup, blendMs, additive, pick }, ... ] }
+// where `pick` has the same shape as pickClip()'s output.
+export function selectLayered(smCfg, inputs) {
+  if (!smCfg || !smCfg.layers) return null;
+  const out = { layers: [] };
+  for (const layer of smCfg.layers) {
+    const sub = {
+      states: layer.states || {},
+      selectionPriority: layer.selectionPriority || [],
+      playback: smCfg.playback,
+    };
+    const pick = pickClip(sub, inputs);
+    out.layers.push({
+      name: layer.name,
+      boneMaskGroup: layer.boneMaskGroup || null,
+      blendMs: layer.blendMs ?? 180,
+      additive: !!layer.additive,
+      pick,
+    });
+  }
+  return out;
+}
+
+export function selectLayeredFromPlayerState(smCfg, playerState, planarSpeed) {
+  return selectLayered(smCfg, deriveInputs(playerState, planarSpeed));
+}

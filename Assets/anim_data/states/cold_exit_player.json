@@ -33,5 +33,48 @@
   "playback": {
     "fadeMs": 180,
     "timeScaleClamp": [0.5, 1.5]
-  }
+  },
+
+  "_phase2Note": "Phase 2 introduces a layered format for true upper/lower-body split. Engine code prefers `layers` when present and falls back to `selectionPriority` (Phase 1) when not. The layered format is consumed by src/anim/graph.js + the per-bone mask patch in src/anim/bone_mask.js.",
+
+  "layers": [
+    {
+      "name": "base",
+      "boneMaskGroup": "bottom",
+      "blendMs": 180,
+      "states": {
+        "idle":        { "clip": "W1_Stand_Relaxed_Idle_IPC",   "loop": true },
+        "walk":        { "clip": "W1_Walk_Aim_F_Loop_IPC",      "loop": true, "speedRef": 1.6 },
+        "run":         { "clip": "W1_Jog_Aim_F_Loop_IPC",       "loop": true, "speedRef": 3.5 },
+        "crouch_idle": { "clip": "W1_Crouch_Idle_IPC",          "loop": true },
+        "crouch_walk": { "clip": "W1_CrouchWalk_Aim_F_Loop_IPC", "loop": true, "speedRef": 1.0 }
+      },
+      "selectionPriority": [
+        { "state": "crouch_walk", "all": ["crouched", "moving"] },
+        { "state": "crouch_idle", "all": ["crouched"] },
+        { "state": "run",         "all": ["running"] },
+        { "state": "walk",        "all": ["moving"] },
+        { "state": "idle",        "all": [] }
+      ]
+    },
+    {
+      "name": "combat",
+      "boneMaskGroup": "top",
+      "blendMs": 80,
+      "states": {
+        "fire_stand":  { "clip": "W1_Stand_Fire_Single",  "loop": false },
+        "fire_crouch": { "clip": "W1_Crouch_Fire_Single", "loop": false },
+        "aim_stand":   { "clip": "W1_Stand_Aim_Idle_IPC", "loop": true },
+        "aim_crouch":  { "clip": "W1_Crouch_Aim_Idle_IPC","loop": true },
+        "relaxed":     { "clip": "W1_Stand_Relaxed_Idle_IPC", "loop": true }
+      },
+      "selectionPriority": [
+        { "state": "fire_crouch", "all": ["swinging", "crouched"] },
+        { "state": "fire_stand",  "all": ["swinging"] },
+        { "state": "aim_crouch",  "all": ["crouched", "aim"] },
+        { "state": "aim_stand",   "all": ["aim"] },
+        { "state": "relaxed",     "all": [] }
+      ]
+    }
+  ]
 }
