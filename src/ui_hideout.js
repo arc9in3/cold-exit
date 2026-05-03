@@ -2349,7 +2349,7 @@ export class HideoutUI {
       const confirm = document.createElement('button');
       confirm.className = 'loadout-confirm';
       confirm.type = 'button';
-      confirm.textContent = 'CONFIRM LOADOUT';
+      confirm.textContent = 'DEPLOY';
       confirm.disabled = !selected;
       confirm.addEventListener('click', () => {
         if (!getSelectedStarterWeapon()) return;
