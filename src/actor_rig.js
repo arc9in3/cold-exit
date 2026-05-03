@@ -611,6 +611,11 @@ export function buildRig(opts = {}) {
   // Defaults to the project's accent-gold so any caller that opts into a
   // visor without specifying a colour still gets a coherent look.
   const accentColor = opts.accentColor ?? 0xf2c060;
+  // Signature accent — used for the asymmetric strap/bandolier so the
+  // protagonist's signature prop can wear a character color (red on
+  // the femme fatale, gold on the operator, etc.). Defaults to gear
+  // color so existing rigs that don't set it stay un-tinted.
+  const signatureColor = opts.signatureColor ?? null;
   // Hair gets its own colour so a female-with-bob can have black hair
   // riding on a dark-grey body without the bob disappearing into the
   // body silhouette. Defaults to bodyColor so existing rigs that don't
@@ -631,6 +636,7 @@ export function buildRig(opts = {}) {
     return m;
   })();
   const hairMat = makeMat(hairColor, toon);
+  const signatureMat = signatureColor != null ? makeMat(signatureColor, toon) : null;
   const bodyMat = makeMat(bodyColor, toon);
   const headMat = makeMat(headColor, toon);
   const legMat  = makeMat(legColor,  toon);
@@ -1540,7 +1546,7 @@ export function buildRig(opts = {}) {
     const stratW = 0.04 * scale;
     const stratH = 0.55 * scale;
     const stratD = 0.06 * scale;
-    bandolier = new THREE.Mesh(_box(stratW, stratH, stratD), gearMat);
+    bandolier = new THREE.Mesh(_box(stratW, stratH, stratD), signatureMat || gearMat);
     // Place at chest center, then rotate ~30° around Z so it runs
     // shoulder-to-opposite-hip diagonally. Z rotation in this rig's
     // chest-local frame tilts the long axis toward the side.
@@ -2333,6 +2339,28 @@ export function updateAnim(rig, state, dt) {
   // weight-shifting onto the planted foot but doesn't waddle.
   const gaitHipRoll = Math.cos(a.cycle) * Tg.hipRollAmplitude * gaitT * (1 + crouch * Tc.hipRoll);
   rig.hips.rotation.z = idleHipRoll + gaitHipRoll;
+
+  // Femme contrapposto idle — hip cocked, opposite shoulder dropped,
+  // slight head tilt. Detected via the bust-dim presence (female DIMS
+  // are the only overlay that defines head.bust). Gated on idle: gait
+  // blend zero, no aim, no swing/melee/block. Damped by breath so it
+  // breathes naturally instead of locking into a rigid pose.
+  const isFemme = !!rig.dims?.head?.bust;
+  const contrappostoGate = isFemme
+    ? Math.max(0, 1 - gaitT) * (1 - a.aimBlend) * (1 - (a.dashBlend || 0)) * (1 - crouch * 0.7)
+        * (state.attacking || state.blockPose || state.meleeStance ? 0 : 1)
+    : 0;
+  if (contrappostoGate > 0.02) {
+    const cf = contrappostoGate * (0.85 + breath * 0.15);
+    // Hip cock: right hip down → weight on right leg. +Z rotation
+    // raises the LEFT side of the hips, so the apparent stance is
+    // weight-on-right.
+    rig.hips.rotation.z += cf * 0.07;
+    // Chest counter-tilt: shoulders compensate the hip cock.
+    rig.chest.rotation.z = (rig.chest.rotation.z || 0) - cf * 0.04;
+    // Head tilt: a touch in the same direction as the chest.
+    rig.head.rotation.z = (rig.head.rotation.z || 0) + cf * 0.05;
+  }
 
   // --- pose: arms -----------------------------------------------------
   // Both hands are always on the weapon: the baseline pose is a

@@ -156,6 +156,7 @@ const state = {
     boot: 0x1a1510,   // dark leather
     accent: 0xf2c060, // visor / glow strip — project's accent-gold
     hair: 0x0a0a0a,   // black — bob cut for the female default
+    signature: 0xd24868, // bandolier strap — project bad-red, char accent
   },
   // Signature-prop toggles. Default ON so the tuner shows the full
   // protagonist silhouette out of the box.
@@ -340,6 +341,7 @@ function rebuildRig() {
     sheath: state.sig.sheath,
     accentColor: state.colors.accent,
     hairColor:   state.colors.hair,
+    signatureColor: state.colors.signature,
     sex: state.archetype.sex,
     bustScale: state.shape.bustScale,
     gluteScale: state.shape.gluteScale,
@@ -1407,12 +1409,13 @@ rebuildParterFolder();
     female() {
       state.archetype.sex = 'female';
       applyArchetypeBaseline('female');
-      state.sig.signature = false;   // bandolier off — body is the read
+      state.sig.signature = true;    // red bandolier — character accent
       state.sig.visor = false;
-      state.sig.ponytail = false;    // bob cut, no ponytail
+      state.sig.ponytail = false;
       state.sig.neckCable = false;
       state.sig.sheath = false;
-      state.colors.hair = 0x0a0a0a;  // black bob
+      state.colors.hair = 0x0a0a0a;
+      state.colors.signature = 0xd24868;
       for (const c of f.controllers) c.updateDisplay();
       gui.controllersRecursive().forEach(c => c.updateDisplay());
       rebuildRig();
@@ -1474,12 +1477,13 @@ addDimsFolder(dimsFolder, state.dims, []);
 // (visible as a back-sheath strip down the chest in T-pose, etc.).
 if (state.archetype.sex === 'female') {
   applyArchetypeBaseline('female');
-  state.sig.signature = false;
+  state.sig.signature = true;       // red bandolier — character accent
   state.sig.visor = false;
   state.sig.ponytail = false;
   state.sig.neckCable = false;
   state.sig.sheath = false;
   state.colors.hair = 0x0a0a0a;
+  state.colors.signature = 0xd24868;
   rebuildRig();
 }
 
