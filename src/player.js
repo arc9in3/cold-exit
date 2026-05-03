@@ -135,11 +135,14 @@ function _runUpperBodyIK(rig, state, aimPoint, aimPitch, dt = 1/60) {
   for (let i = 1; i < fbx._spineChain.length; i++) {
     applyChain(fbx._spineChain[i], aimYaw * YAW_WEIGHTS[i], aimPitch * PITCH_WEIGHTS[i]);
   }
-  // Neck + head: yaw ONLY. User feedback — pitching the head/neck
-  // reads as a lean and breaks the silhouette. Head turns to face
-  // the cursor; neck stays straight; pitch contribution = 0.
-  applyChain(fbx._neckBone, aimYaw * 0.10, 0);
-  applyChain(rig.head,      aimYaw * 0.30, 0);
+  // Neck + head: NO direct write. Earlier attempts applied a yaw
+  // delta in bone-LOCAL frame, but UEFN bone-local axes don't
+  // align with world (local Y points up the bone after the spine
+  // chain twists), so "yaw around local Y" read as a lean.
+  // Letting these bones stay at bind-local means their WORLD
+  // rotation inherits spine_05's accumulated yaw via the parent
+  // chain — head naturally turns to face the cursor with no lean.
+  // (Skipped: applyChain on neck + head.)
 }
 
 // Lazy-load the player FBX clip-selection state machine. Until the
