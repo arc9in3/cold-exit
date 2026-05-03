@@ -1752,7 +1752,7 @@ export function createPlayer(scene) {
                 blendMs: L.blendMs ?? 180,
               });
             }
-            console.log('[player/anim] Phase 2 layered graph engaged');
+            if (window.__animDebug) console.log('[player/anim] Phase 2 layered graph engaged');
           } else {
             // Mark so we don't retry every frame.
             rig._fbx.layeredUnavailable = true;
@@ -1829,9 +1829,11 @@ export function createPlayer(scene) {
       if (!usedLayered) {
         if (target && rig._fbx.currentClipName !== target) {
           const action = rig.play(target, { fadeMs, loop });
-          const bindings = action?._propertyBindings || [];
-          const bound = bindings.filter(b => b && b.binding && b.binding.node).length;
-          console.log(`[fbx] clip → ${target} (action=${!!action}, tracks=${action?.getClip().tracks.length}, bound=${bound}, speed=${planarSpeed.toFixed(2)})`);
+          if (window.__animDebug) {
+            const bindings = action?._propertyBindings || [];
+            const bound = bindings.filter(b => b && b.binding && b.binding.node).length;
+            console.log(`[fbx] clip → ${target} (action=${!!action}, tracks=${action?.getClip().tracks.length}, bound=${bound}, speed=${planarSpeed.toFixed(2)})`);
+          }
           rig._fbx.currentClipName = target;
           rig._fbx.currentAction = action;
         }

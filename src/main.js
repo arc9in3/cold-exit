@@ -745,6 +745,12 @@ window.__playScene = async (sceneId) => {
   return cs;
 };
 
+// Console: __animDebug = true   — flip animation logging on/off
+//   Off by default. When on, [fbx] clip transitions + the layered
+//   graph engagement log appear in console. Useful when authoring
+//   state machines or debugging clip selection.
+window.__animDebug = window.__animDebug || false;
+
 // Console: __listComposed() / __listRigParts()
 //   Diagnostic enumeration of available compose / rig_part configs.
 //   The registry doesn't expose a list method (it's lazy-loaded), so
