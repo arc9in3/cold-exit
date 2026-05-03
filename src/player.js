@@ -1855,21 +1855,30 @@ export function createPlayer(scene) {
         // Layered path — graph.step() ticks the shared mixer.
         rig._fbx.graph.step(dt);
       }
-      // Aim IK — additive on top of the clip pose. We multiply a
-      // delta quaternion onto the mixer-driven base instead of using
-      // `rotation += ...` so the IK can't accumulate over frames if
-      // the active clip happens to NOT animate the bone (which would
-      // leave bone.rotation unchanged each tick and turn += into a
-      // continuous spin — the bug that produced "rotates like a clock").
-      // 60/40 chest/head split for yaw, ~55/45 for pitch.
+      // Aim IK — additive on top of the clip pose. CRITICAL: clips
+      // like W1_Stand_Aim_Idle_IPC don't necessarily key every spine
+      // bone, so we can't trust the mixer to reset rig.chest /
+      // rig.head each frame. If we just multiplied deltaQ onto the
+      // current quaternion, the delta would accumulate frame after
+      // frame → continuous spin (the "rotates like a clock" bug).
+      //
+      // Fix: cache the bone's post-mixer quaternion ONCE per swap
+      // (the clip's authored bind-rotation), and each frame RESTORE
+      // it before applying the fresh delta. Net result: bone.q is
+      // (clipBase * deltaQ) every frame regardless of whether the
+      // mixer wrote it, with no accumulation.
       const aimYaw = state.chestTwist || 0;
-      // aimPitch was computed earlier in this same function (line ~1611).
+      const fbx = rig._fbx;
       if (rig.chest && rig.chest.quaternion) {
+        if (!fbx._aimChestBase) fbx._aimChestBase = rig.chest.quaternion.clone();
+        rig.chest.quaternion.copy(fbx._aimChestBase);
         _aimDeltaE.set(aimPitch * 0.55, aimYaw * 0.60, 0, 'YXZ');
         _aimDeltaQ.setFromEuler(_aimDeltaE);
         rig.chest.quaternion.multiply(_aimDeltaQ);
       }
       if (rig.head && rig.head.quaternion) {
+        if (!fbx._aimHeadBase) fbx._aimHeadBase = rig.head.quaternion.clone();
+        rig.head.quaternion.copy(fbx._aimHeadBase);
         _aimDeltaE.set(aimPitch * 0.45, aimYaw * 0.40, 0, 'YXZ');
         _aimDeltaQ.setFromEuler(_aimDeltaE);
         rig.head.quaternion.multiply(_aimDeltaQ);
