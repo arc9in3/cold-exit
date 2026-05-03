@@ -119,10 +119,12 @@ function _runUpperBodyIK(rig, state, aimPoint, aimPitch, dt = 1/60) {
   // so the arms (children of spine_05's clavicle) inherit the full
   // chest twist.
   // LEAN REDUCTION step 1 — halved from baseline so we can dial
-  // in iteratively. Baseline was [0,.10,.16,.20,.24] yaw +
-  // [0,.10,.14,.18,.20] pitch; this is 50%.
-  const YAW_WEIGHTS   = [0,    0.05, 0.08, 0.10, 0.12];
-  const PITCH_WEIGHTS = [0,    0.05, 0.07, 0.09, 0.10];
+  // Spine distribution all zeroed — body itself locks to cursor
+  // (rigid ADS-style yaw tracking) so chest twist is 0 by
+  // construction. Spine pitch also off; gun anchor handles target-Y
+  // via its own pitch IK. Bones stay at their bind-local pose.
+  const YAW_WEIGHTS   = [0, 0, 0, 0, 0];
+  const PITCH_WEIGHTS = [0, 0, 0, 0, 0];
   const applyChain = (bone, yawAmt, pitchAmt) => {
     if (!bone || !bone.parent) return;
     const bindLocal = fbx._upperBodyBindLocal.get(bone);
@@ -2040,38 +2042,15 @@ export function createPlayer(scene) {
           : (state.bodyYaw || 0);
         const adsAmt = state.adsAmount || 0;
         const ads = adsAmt > 0.5;
-        const moving = planarSpeed > 0.1;
-        const movementYaw = moving
-          ? Math.atan2(velocity.x, velocity.z)
-          : cursorYaw;
-        // Pick a target body yaw based on mode.
-        let targetYaw;
-        let lerpRate;
-        if (ads) {
-          targetYaw = cursorYaw;
-          lerpRate = 20;       // tight tracking under ADS
-        } else if (moving) {
-          // Hipfire: body lerps SLOWLY toward movement direction so
-          // the directional locomotion clips (sidestep, backpedal,
-          // etc.) play visibly during the rotation transition. If
-          // the body snaps to movement instantly, the lower body
-          // always reads as walk_F regardless of input direction.
-          targetYaw = movementYaw;
-          lerpRate = 4;        // ~250ms to fully align (was 14/s)
-        } else {
-          targetYaw = cursorYaw;
-          lerpRate = 5;        // idle rotation toward aim
-        }
-        // Twist-compensation clamp — when |aim-target| > limit, the
-        // root absorbs the excess so chest stays within twist range.
-        const TWIST_LIMIT = ads ? 0 : (Math.PI / 2);  // 0 in ADS (body=aim), 90° hipfire
-        let aimVsTarget = cursorYaw - targetYaw;
-        while (aimVsTarget >  Math.PI) aimVsTarget -= 2 * Math.PI;
-        while (aimVsTarget < -Math.PI) aimVsTarget += 2 * Math.PI;
-        if (Math.abs(aimVsTarget) > TWIST_LIMIT) {
-          const excess = (Math.abs(aimVsTarget) - TWIST_LIMIT) * Math.sign(aimVsTarget);
-          targetYaw += excess;  // pull target toward aim
-        }
+        // RIGID CURSOR FOLLOW — body always tracks cursor regardless
+        // of ADS / hipfire / moving / idle. User: 'lets go with the
+        // consolation of making everything act like ADS does now.
+        // rigid follow of the cursor upper body.' Drops the
+        // hipfire-follows-movement / idle-slow-rotation modes.
+        const targetYaw = cursorYaw;
+        const lerpRate = 20;
+        // Twist clamp = 0 since body == aim by construction.
+        const TWIST_LIMIT = 0;
         // Track GASP body yaw INDEPENDENTLY of procgen — the
         // procgenGroup.rotation.copy() above resets rig.group.y to
         // procgen's lagging body yaw each frame, so a + lerp on
