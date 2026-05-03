@@ -67,6 +67,32 @@ const QUICK_MELEE_BY_CLASS = {
              startup: 0.12, active: 0.14, recovery: 0.20 },
 };
 
+// Async helper to swap the player's procgen rig out for a Mixamo
+// FBX rig at runtime. Use case:
+//   const player = createPlayer(scene);
+//   await swapPlayerToFbxRig(player, scene, 'Assets/models/Idle.fbx');
+//
+// The procgen rig stays in scene but is hidden; player.rig now points
+// at the FBX adapter so weapon attach (rig.rightArm.hand.pivot etc.)
+// keeps working through the rest of the codebase. updateAnim
+// auto-detects rig._fbx and routes to the AnimationMixer instead.
+export async function swapPlayerToFbxRig(player, scene, url, opts = {}) {
+  const { loadCharacterFBX } = await import('./character_fbx.js');
+  const fbxRig = await loadCharacterFBX(scene, url, opts);
+  // Hide the procgen rig — keep it in scene for fast revert.
+  if (player.rig && player.rig.group) player.rig.group.visible = false;
+  player._procgenRig = player.rig;       // remember for revert
+  player.rig = fbxRig;
+  // Mirror the world group transform so the FBX inherits whatever
+  // position/rotation the procgen rig was using (player respawn,
+  // hideout placement, etc.).
+  if (player._procgenRig?.group) {
+    fbxRig.group.position.copy(player._procgenRig.group.position);
+    fbxRig.group.rotation.copy(player._procgenRig.group.rotation);
+  }
+  return fbxRig;
+}
+
 export function createPlayer(scene) {
   // Jointed player rig — shared with enemies. `body` below is aliased
   // to the rig's chest mesh so AI cover + hit raycasts still resolve to
@@ -1630,6 +1656,27 @@ export function createPlayer(scene) {
     // suppressed. The rig's existing two-arm aim blend already
     // covers the symmetric pose; we just need a nonzero target.
     const akimboAimBlend = state.offhandEquipped ? 0.75 : 0;
+    // FBX path — when an FBX rig is loaded (rig._fbx present),
+    // updateAnim's procedural code is bypassed and the AnimationMixer
+    // drives the bones from the embedded clips. Map player state to
+    // a clip name; loadCharacterFBX returns a rig.play(name) helper
+    // that handles the cross-fade.
+    if (rig._fbx) {
+      // Clip selection — currently only 'idle' is shipped; walk /
+      // run / aim / fire would map here as more FBX clips are added.
+      // Falls back to whatever's playing if the requested clip isn't
+      // loaded (rig.play does loose-match on first non-empty clip).
+      let target = 'idle';
+      if (state.attack && state.attack.phase !== 'idle') target = 'attack';
+      else if ((state.adsAmount || 0) > 0.5) target = 'aim';
+      else if (planarSpeed > 3.5) target = 'run';
+      else if (planarSpeed > 0.05) target = 'walk';
+      if (rig._fbx.currentClipName !== target) {
+        rig.play(target, { fadeMs: 180, loop: true });
+        rig._fbx.currentClipName = target;
+      }
+      rig.update(dt);
+    } else {
     updateAnim(rig, {
       speed: planarSpeed,
       // Pass adsAmount directly so the chest→head-level raise eases
@@ -1659,6 +1706,7 @@ export function createPlayer(scene) {
       aimYaw: state.chestTwist || 0,
       aimPitch,
     }, dt);
+    } // end procgen rig branch (FBX rig branch returned above)
 
     // --- weapon-offset overlay (per-frame, shouldered classes) ------
     // Rotates / nudges gunMesh + inHandModel + muzzle on top of the
