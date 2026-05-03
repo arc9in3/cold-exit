@@ -2403,11 +2403,17 @@ export function updateAnim(rig, state, dt) {
   const noWeaponPose = !state.rifleHold && !state.meleeStance
                      && !state.akimbo && !state.attacking
                      && !state.blockPose && !state.aiming;
+  // "noWeaponPose" was originally relaxed arms-at-side. In a combat
+  // extraction shooter the character ALWAYS has a weapon — the default
+  // visible idle should read as low-ready (hands up at chest, elbows
+  // bent ~75°), not as a civilian. Tuned to ~75% of the full rifle-
+  // hold pose so it visually breaks from "actively aiming" but still
+  // reads as a tactical operator who hasn't shouldered the gun.
   const chestShoulderPitch = noWeaponPose
-    ? -0.08 - aimPitchV * 0.10
+    ? -0.45 - aimPitchV * 0.20
     : (-0.60 - aimPitchV * 0.55 + crouchBias);
   const chestElbow = noWeaponPose
-    ? -0.18
+    ? -0.72
     : (-0.97 - tuckBias);
   const headShoulderPitch  = -1.75 - aimPitchV * 0.80 + crouchBias * 0.40;
   const headElbow          =  0.18 - tuckBias * 0.40;
@@ -2571,7 +2577,7 @@ export function updateAnim(rig, state, dt) {
   const supportShoulderYaw = state.akimbo
     ? 0                          // parallel forward — track cursor
     : noWeaponPose
-      ? 0                        // unarmed idle — arm hangs at the side, no centerline reach
+      ? 0.35 * supportYawSign    // ready pose — moderate inward so hands converge near centerline
       : 0.55 * supportYawSign;   // inward — two-hand-grip default
   // Pitch — match the weapon arm so both hands rise together. Same
   // formula in both modes; akimbo only differs in yaw + elbow bend.
@@ -2584,10 +2590,10 @@ export function updateAnim(rig, state, dt) {
   supportArm.elbow.rotation.x = state.akimbo
     ? rightElbow + idleWeaponDrift * 0.4
     : noWeaponPose
-      // Unarmed idle — match the weapon-arm elbow exactly. The -0.18
-      // "tuck toward centerline" is a two-hand-grip detail; without a
-      // weapon to grip, it just folds the arm across the chest.
-      ? rightElbow + idleWeaponDrift * 0.4
+      // Ready pose — small extra tuck so the off hand cups near where
+      // a weapon foregrip would be. Less than the full -0.18 two-hand-
+      // grip so it doesn't cross the body.
+      ? rightElbow - 0.10 + idleWeaponDrift * 0.4
       : rightElbow - 0.18 - supportElbowPump + idleWeaponDrift * 0.4;
 
   // Grip curl — rotate each hand pivot forward so the hand reads as
