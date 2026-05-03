@@ -5199,14 +5199,22 @@ export const ENCOUNTER_DEFS = {
         boss, label, disc,
         complete: false,
         rewardSpawned: false,
+        bossSeenAlive: false,
       };
     },
     tick(dt, ctx) {
       const s = ctx.state;
       if (s.complete || !s.boss) return;
+      // Latch once the boss is observed alive, so the !alive check below
+      // can't false-fire on a boss that spawned in a bad state. Without
+      // this, the relic could drop the same frame the encounter spawned
+      // if the boss happened to be created with alive=false (race in
+      // melees.spawn or a stale reference).
+      if (s.boss.alive) s.bossSeenAlive = true;
       // Watch for boss death — drop the relic at his last known
-      // position the frame after he flips to !alive.
-      if (!s.boss.alive && !s.rewardSpawned) {
+      // position the frame after he flips to !alive. Require the
+      // boss to have been seen alive at least once first.
+      if (s.bossSeenAlive && !s.boss.alive && !s.rewardSpawned) {
         s.rewardSpawned = true;
         const bx = s.boss.group ? s.boss.group.position.x : s.disc.cx;
         const bz = s.boss.group ? s.boss.group.position.z : s.disc.cz;
@@ -5573,9 +5581,21 @@ export function pickEncounterForLevel(levelIndex, completedSet, runStats = null,
   // encounter requested a continuation (`forceFollowup`), that id
   // is placed here regardless of the random pool. Returns null if
   // the queued id no longer exists, so the normal roll still runs.
+  // REGRESSION: queued followups must STILL respect the encounter's
+  // condition + oncePerSave + eligibility. Otherwise a stale queue
+  // entry (e.g. spicy_arena pushed by a forgotten previous run) can
+  // resurrect a one-shot reward chain without the prerequisites.
   const queued = takeEncounterFollowupForFloor();
   if (queued && ENCOUNTER_DEFS[queued.id]) {
-    return ENCOUNTER_DEFS[queued.id];
+    const qDef = ENCOUNTER_DEFS[queued.id];
+    const cooldownMap = getEncounterCooldowns();
+    const runCount = getRunCount();
+    const tier = currentEncounterTier();
+    const ok = isEncounterEligible(qDef, completedSet, cooldownMap, runCount, tier)
+      && (!qDef.condition
+          || qDef.condition({ levelIndex, completed: completedSet, runStats, artifacts, inventory }));
+    if (ok) return qDef;
+    // Otherwise drop it on the floor and fall through to the normal roll.
   }
   // Hidden encounter-tier filter — encounter_tier.js reads run /
   // contract / boss / sigil meta-state and produces a 0..3 ceiling.
