@@ -60,6 +60,7 @@
 import * as THREE from 'three';
 import { OrbitControls } from 'three/addons/controls/OrbitControls.js';
 import { TransformControls } from 'three/addons/controls/TransformControls.js';
+import { FBXLoader } from 'three/addons/loaders/FBXLoader.js';
 import GUI from 'lil-gui';
 import {
   buildRig, initAnim, updateAnim, DEFAULT_DIMS,
@@ -1225,6 +1226,82 @@ function applyArchetypeBaseline(sex) {
   f.add({ bodyshapes: () => loadPrimitiveRig('../Assets/anatomy/bodyshapes-rig.json') }, 'bodyshapes').name('load bodyshapes');
 }
 
+// ============================================================
+// FBX preview — load Mixamo-format FBX with skinned mesh + animation
+// ============================================================
+// Loads Assets/models/Idle.fbx (or any FBX) and plays the embedded
+// animation via three's AnimationMixer. Hides the current procgen
+// rig while the FBX is shown so the two don't overlap. This is a
+// preview surface — eventually the goal is to retarget the FBX
+// animation curves onto the JSON rig's bones, but for now we just
+// render the Mixamo character + idle directly.
+let fbxAsset = null; // { group, mixer, actions, originalRigVisible }
+
+function unloadFbx() {
+  if (!fbxAsset) return;
+  if (fbxAsset.group) {
+    scene.remove(fbxAsset.group);
+    fbxAsset.group.traverse(o => {
+      if (o.geometry) o.geometry.dispose?.();
+      if (o.material) {
+        if (Array.isArray(o.material)) o.material.forEach(m => m?.dispose?.());
+        else o.material.dispose?.();
+      }
+    });
+  }
+  if (fbxAsset.mixer) fbxAsset.mixer.stopAllAction();
+  fbxAsset = null;
+  if (rig && rig.group) rig.group.visible = true;
+}
+
+async function loadFbx(url) {
+  unloadFbx();
+  const loader = new FBXLoader();
+  return new Promise((resolve, reject) => {
+    loader.load(url, (group) => {
+      // Mixamo FBX is in centimetres — scale to metres.
+      group.scale.setScalar(0.01);
+      group.position.set(0, 0, 0);
+      group.traverse((o) => {
+        if (o.isMesh) {
+          o.castShadow = true;
+          o.receiveShadow = true;
+        }
+      });
+      const mixer = new THREE.AnimationMixer(group);
+      const actions = [];
+      for (const clip of (group.animations || [])) {
+        const action = mixer.clipAction(clip);
+        action.play();
+        actions.push(action);
+      }
+      scene.add(group);
+      if (rig && rig.group) rig.group.visible = false;
+      fbxAsset = { group, mixer, actions };
+      console.log('[fbx] loaded', url, 'clips:', (group.animations || []).map(c => `${c.name} (${c.duration.toFixed(2)}s)`));
+      const toast = document.getElementById('export-toast');
+      if (toast) {
+        toast.textContent = `Loaded FBX: ${url.split('/').pop()} (${(group.animations || []).length} clips)`;
+        toast.classList.add('show');
+        setTimeout(() => toast.classList.remove('show'), 2500);
+      }
+      resolve(group);
+    }, undefined, reject);
+  });
+}
+
+{
+  const f = gui.addFolder('FBX preview (Mixamo)');
+  f.close();
+  f.add({ idle: () => loadFbx('../Assets/models/Idle.fbx').catch(e => console.error('[fbx]', e)) }, 'idle').name('load Idle.fbx');
+  f.add({ unload: () => unloadFbx() }, 'unload').name('unload FBX');
+  // Speed slider so we can preview slowed/accelerated playback.
+  const speedProxy = { speed: 1.0 };
+  f.add(speedProxy, 'speed', 0.1, 2.0, 0.05).name('playback speed').onChange((v) => {
+    if (fbxAsset && fbxAsset.mixer) fbxAsset.mixer.timeScale = v;
+  });
+}
+
 // --- part scaler ---------------------------------------------------
 // Pick a body part, drag X/Y/Z sliders, the rig updates live. This is
 // the in-tuner character-creator surface: clicking a different part
@@ -2200,6 +2277,10 @@ function tick() {
   // the selected chains. In edit-pose mode it's still useful — the
   // user may pose by gizmo on some joints and IK on others.
   if (rig) applyIK();
+  // FBX animation mixer — drives the Mixamo idle / loaded clip when
+  // an FBX is currently displayed. Independent of the procgen rig
+  // (which is hidden while the FBX is up).
+  if (fbxAsset && fbxAsset.mixer) fbxAsset.mixer.update(dt);
   controls.update();
   renderer.render(scene, camera);
   requestAnimationFrame(tick);
