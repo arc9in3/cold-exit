@@ -498,6 +498,13 @@ export const DEFAULT_DIMS_FEMALE = {
   },
   arms: {
     shoulderInset: 0.28,    // narrower shoulders
+    // Arms lengthened ~15% so they read as proportional rather than
+    // "retracted and short" against the narrower female frame. Slim
+    // radii combined with default-male length made the arms look
+    // truncated. Real-world armspan ≈ height; pushing here gets the
+    // tips down to mid-thigh as expected.
+    upperArmH: 0.40,
+    forearmH: 0.34,
     upperArmTopR: 0.085,
     upperArmBotR: 0.065,
     forearmTopR: 0.07,
