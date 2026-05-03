@@ -1894,13 +1894,18 @@ export function createPlayer(scene) {
       if (lowestFootY === Infinity) lowestFootY = 0;
       const wantSink = -lowestFootY;
       const cur = rig._fbx._crouchSinkY ?? 0;
-      // Lerp toward the target sink. Stride-induced foot Y
-      // oscillation propagates into the WHOLE rig (and especially
-      // the upper body, which then bobs with every step). Heavy
-      // damping in steady state (4/s, ~1.5s convergence — slower
-      // than a running stride so the bob averages out). Faster
-      // (12/s) only during big transitions like entering crouch.
-      const rate = (Math.abs(wantSink - cur) > 0.10) ? 12 : 4;
+      // Asymmetric lerp — running has an AIRBORNE phase where both
+      // feet briefly leave ground; lowestFootY jumps UP and a
+      // symmetric lerp would chase it, bobbing the whole rig.
+      //   sinking deeper (foot fell, want more negative): snap fast
+      //   rising (foot lifted, want less negative):       lerp slow
+      // Net: rig anchors at the lowest planted foot height; brief
+      // airborne moments don't lift the rig.
+      const goingDown = wantSink < cur;
+      const bigTransition = Math.abs(wantSink - cur) > 0.10;
+      const rate = bigTransition
+        ? 12
+        : (goingDown ? 25 : 2);
       rig._fbx._crouchSinkY = cur + (wantSink - cur) * (1 - Math.exp(-rate * dt));
       rig.group.position.y += rig._fbx._crouchSinkY;
       // The SkinnedMesh inside the rig may have its OWN position
