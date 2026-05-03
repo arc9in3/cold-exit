@@ -135,8 +135,11 @@ function _runUpperBodyIK(rig, state, aimPoint, aimPitch, dt = 1/60) {
   for (let i = 1; i < fbx._spineChain.length; i++) {
     applyChain(fbx._spineChain[i], aimYaw * YAW_WEIGHTS[i], aimPitch * PITCH_WEIGHTS[i]);
   }
-  applyChain(fbx._neckBone, aimYaw * 0.10, aimPitch * 0.16);
-  applyChain(rig.head,      aimYaw * 0.20, aimPitch * 0.30);
+  // Neck + head: yaw ONLY. User feedback — pitching the head/neck
+  // reads as a lean and breaks the silhouette. Head turns to face
+  // the cursor; neck stays straight; pitch contribution = 0.
+  applyChain(fbx._neckBone, aimYaw * 0.10, 0);
+  applyChain(rig.head,      aimYaw * 0.30, 0);
 }
 
 // Lazy-load the player FBX clip-selection state machine. Until the
