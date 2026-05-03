@@ -2408,17 +2408,17 @@ export function updateAnim(rig, state, dt) {
   const noWeaponPose = !state.rifleHold && !state.meleeStance
                      && !state.akimbo && !state.attacking
                      && !state.blockPose && !state.aiming;
-  // "noWeaponPose" was originally relaxed arms-at-side. In a combat
-  // extraction shooter the character ALWAYS has a weapon — the default
-  // visible idle should read as low-ready (hands up at chest, elbows
-  // bent ~75°), not as a civilian. Tuned to ~75% of the full rifle-
-  // hold pose so it visually breaks from "actively aiming" but still
-  // reads as a tactical operator who hasn't shouldered the gun.
+  // "noWeaponPose" — ready stance, hands at chest pointing forward.
+  // Tuned to MATCH the armed pose values so a player who's between
+  // weapon swaps or has no weapon equipped still reads as a combat-
+  // ready operator. Previous 75% blend left the hand below chest;
+  // user wants it AT chest level. The full -0.60 / -0.97 values
+  // mirror the armed (rifleHold) pose exactly.
   const chestShoulderPitch = noWeaponPose
-    ? -0.45 - aimPitchV * 0.20
+    ? -0.60 - aimPitchV * 0.30
     : (-0.60 - aimPitchV * 0.55 + crouchBias);
   const chestElbow = noWeaponPose
-    ? -0.72
+    ? -0.95
     : (-0.97 - tuckBias);
   const headShoulderPitch  = -1.75 - aimPitchV * 0.80 + crouchBias * 0.40;
   const headElbow          =  0.18 - tuckBias * 0.40;
