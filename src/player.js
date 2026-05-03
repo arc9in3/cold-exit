@@ -471,9 +471,15 @@ export function createPlayer(scene) {
       inHandModel.position.copy(gunMesh.position);
     } else {
       // Hand-local forward is -Y (thanks to the cumulative arm rot).
-      // Align the box length with -Y by rotating 90° around X.
-      gunMesh.rotation.set(Math.PI / 2, 0, 0);
-      inHandModel.rotation.set(Math.PI / 2, 0, 0);
+      // Pistol-class extra: tilt the gun an additional ~30° so the
+      // muzzle reads as pointing FORWARD in world space rather than
+      // following the wrist's rest-pose drop. The arm-fold position
+      // (chestElbow ~ -0.97 rad in firing, ~ -0.72 ready) leaves the
+      // wrist's local -Y pointing down-forward; an extra -0.5 rad on
+      // gunMesh.rotation.x straightens that to roughly horizontal.
+      const muzzleTilt = (cls === 'pistol') ? -0.50 : 0;
+      gunMesh.rotation.set(Math.PI / 2 + muzzleTilt, 0, 0);
+      inHandModel.rotation.set(Math.PI / 2 + muzzleTilt, 0, 0);
       gunMesh.position.set(0, -(0.1 + len / 2) * ws, 0);
       muzzle.position.set(0, -(0.1 + len) * ws, 0);
       inHandModel.position.copy(gunMesh.position);

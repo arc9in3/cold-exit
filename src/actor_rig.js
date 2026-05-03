@@ -1788,23 +1788,18 @@ export const POSE_TUNABLES = {
   // modifiers that zero out when not crouched). Touching these is the
   // only way to dial back the upright run bob / plant dip / hip roll.
   gait: {
-    bobAmplitude: 0.03,           // vertical bob amplitude (m, scaled by rs)
-    runBobMult: 1.4,              // run-vs-walk multiplier on the bob
-    plantDipAmplitude: 0.015,     // heel-strike hip dip (m, scaled by rs)
-    hipRollAmplitude: 0.035,      // gait-driven hip roll (rad)
-    // Spinal counter-rotation: hips yaw +sin(cycle), chest counter-yaws
-    // -sin(cycle) (in world space), so the upper and lower body twist
-    // against each other across the stride. Aim direction is preserved
-    // via a 2x subtract on chest.rotation.y. Damped while aiming so ADS
-    // doesn't make the hips wiggle under a locked-on shoulder.
-    gaitYawAmplitude: 0.08,       // peak hip-yaw amplitude during gait (rad)
-    // Forward lean during run was 0.16 (~9°). Bumped to 0.22 (~12.6°)
-    // for a more aggressive run silhouette. The arm-lean compensation
-    // (`armLeanComp` in updateAnim) subtracts this from shoulder pitch
-    // so the gun stays level — verified the chain references runLean
-    // directly, not a stale hardcoded constant.
-    runLeanWalk: 0.04,            // forward lean per blendWalk
-    runLeanRun: 0.22,             // forward lean per blendRun
+    // RUN CYCLE — re-tuned 2026-05-03 for less-bouncy / more athletic
+    // read. Previous values were 0.03 bob + 1.4× run mult (= 0.042 run
+    // bob, ~4cm vertical bounce per step), 0.22 run lean (~12.6°
+    // forward), 0.035 hip roll, 0.08 gait yaw. Combined the body read
+    // as 'springy' rather than 'agile sprinter'.
+    bobAmplitude: 0.018,          // halved — flatter run silhouette
+    runBobMult: 1.1,              // run only slightly more than walk
+    plantDipAmplitude: 0.010,     // softer heel-strike dip
+    hipRollAmplitude: 0.022,      // tightened — less waddle
+    gaitYawAmplitude: 0.05,       // tightened — chest+hips wiggle less
+    runLeanWalk: 0.03,            // walk lean barely visible
+    runLeanRun: 0.10,             // run lean ~5.7° (was ~12.6°) — agile, not anime
   },
   // Kneel pose — fires when state.crouched && speed < kneel.threshold.
   // At full blend, overrides the crouch-pose leg rotations (one knee
@@ -1858,7 +1853,10 @@ export function updateAnim(rig, state, dt) {
   // Cycle speed: idle sway ~0.9 Hz, walk ~1.6 Hz, run ~2.5 Hz. Halved
   // from the previous values — was running too fast for actual ground
   // speed, feet sliding. Each cycle covers ONE left+right step pair.
-  let freq = 0.9 + a.blendWalk * 0.7 + a.blendRun * 0.9;
+  // Run cadence bumped (was 0.9; running cycles ~1.8 Hz). Real running
+  // is ~3 Hz step rate; raised to 0.9+1.5=2.4 Hz at full run so feet
+  // turn over fast enough to look athletic instead of pedaling.
+  let freq = 0.9 + a.blendWalk * 0.7 + a.blendRun * 1.5;
   // Crouch SPEEDS UP the gait cadence — sneaking reads as fast little
   // shuffle steps, not slow long bike-pedal swings. Reversed from the
   // earlier 0.40 reduction per playtest: 'looks like he's pedaling a
@@ -2054,7 +2052,11 @@ export function updateAnim(rig, state, dt) {
   // swing, producing the stiff compass-walk look. Now the knee flex
   // peaks at mid-swing (phase=π), which is when a real leg's knee is
   // highest.
-  const strideAmp = (a.blendWalk * 0.45 + a.blendRun * 0.25) * strideScale;
+  // Run stride amp bumped (was 0.25 — shorter than walk's 0.45, which
+  // produced the 'tiny mincing run' look). Real running has BIGGER
+  // strides than walking. 0.55 rad gives the running silhouette
+  // proper leg extension to match the bumped cadence.
+  const strideAmp = (a.blendWalk * 0.45 + a.blendRun * 0.55) * strideScale;
   // Swing-forward lift: extra negative (forward) thigh angle at
   // mid-swing. Run uses a big value to produce the high-knee look.
   // Crouch suppresses this hard — fast small steps don't need the
@@ -2072,7 +2074,9 @@ export function updateAnim(rig, state, dt) {
   // at toe-off (phase=π/2). Using `sin(phase)` with the convention
   // that positive ankle rotation = plantarflex (toe-down) gives the
   // right phasing.
-  const ankleRoll = 0.35 * gaitT * strideScale * (1 - crouch * 0.75);
+  // Ankle roll bumped 0.35 → 0.55. Heel-toe action was barely visible
+  // before; 0.55 gives a proper toe-off + heel-strike read.
+  const ankleRoll = 0.55 * gaitT * strideScale * (1 - crouch * 0.75);
 
   const leftWin  = (1 - Math.cos(a.cycle)) / 2;     // peaks at mid-swing (phase=π)
   const rightWin = (1 + Math.cos(a.cycle)) / 2;     // offset by π, opposite phase
