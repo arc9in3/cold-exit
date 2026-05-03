@@ -538,7 +538,7 @@ export function createPlayer(scene) {
         // pistols so small they vanished into the fist; these values
         // sit between the old (pre-scale) numbers and the halved pass.
         const CLASS_SCALE = {
-          pistol: 0.45,
+          pistol: 0.22,   // halved — 0.45 was rendering 1911 ~2× too big in hand
           smg:    0.65,
           rifle:  0.75,
           shotgun:0.75,

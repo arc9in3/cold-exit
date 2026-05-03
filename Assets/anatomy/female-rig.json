@@ -276,10 +276,10 @@
     "parentId": "lankle",
     "pos": { "x": 0, "y": -0.025, "z": 0.07 },
     "rot": { "x": 1.5707963267948966, "y": 0, "z": 0 },
-    "scale": { "x": 1, "y": 1.3, "z": 0.85 },
+    "scale": { "x": 0.85, "y": 0.95, "z": 0.80 },
     "color": "#3a4048",
     "opacity": 1,
-    "shape": { "topR": 0.04, "botR": 0.045, "h": 0.13, "segs": 12, "topDepth": 1, "botDepth": 1 },
+    "shape": { "topR": 0.034, "botR": 0.038, "h": 0.11, "segs": 12, "topDepth": 1, "botDepth": 1 },
     "scaleChildren": true
   },
   {
@@ -350,10 +350,10 @@
     "parentId": "rankle",
     "pos": { "x": 0, "y": -0.025, "z": 0.07 },
     "rot": { "x": 1.5707963267948966, "y": 0, "z": 0 },
-    "scale": { "x": 1, "y": 1.3, "z": 0.85 },
+    "scale": { "x": 0.85, "y": 0.95, "z": 0.80 },
     "color": "#3a4048",
     "opacity": 1,
-    "shape": { "topR": 0.04, "botR": 0.045, "h": 0.13, "segs": 12, "topDepth": 1, "botDepth": 1 },
+    "shape": { "topR": 0.034, "botR": 0.038, "h": 0.11, "segs": 12, "topDepth": 1, "botDepth": 1 },
     "scaleChildren": true
   },
   {
