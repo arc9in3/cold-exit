@@ -1826,8 +1826,14 @@ export function createPlayer(scene) {
       // ~1.0m crouched leg compression). Eased lerp for smooth
       // transitions in/out of crouch.
       const wantSink = state.crouched ? -0.55 : 0;
-      rig._fbx._crouchSinkY = (rig._fbx._crouchSinkY ?? 0)
-        + (wantSink - (rig._fbx._crouchSinkY ?? 0)) * (1 - Math.exp(-10 * dt));
+      // Asymmetric rate — crouching DOWN snaps fast (25/s) so the
+      // body tracks the leg-fold without feet clipping ground;
+      // standing back up eases gentler (12/s) so the silhouette
+      // pop isn't jarring.
+      const cur = rig._fbx._crouchSinkY ?? 0;
+      const goingDown = wantSink < cur;
+      const rate = goingDown ? 25 : 12;
+      rig._fbx._crouchSinkY = cur + (wantSink - cur) * (1 - Math.exp(-rate * dt));
       rig.group.position.y += rig._fbx._crouchSinkY;
       // The SkinnedMesh inside the rig may have its OWN position
       // mutated by the loaded clip (some packs author the mesh's
@@ -1876,12 +1882,41 @@ export function createPlayer(scene) {
         // after the 1.15× rig scale → ~1.50 visible) and ADS
         // (eye-line ≈ 1.55m → ~1.78 visible). Forward distance
         // stays steady (gun extends past hands at all times).
+        // YAW — anchor faces cursor exactly (in body-local terms):
+        //   anchor.y = cursorYaw - bodyYaw
+        // So the BULLET ORIGIN always points at the cursor, even
+        // while the body lags within the chest-twist deadzone.
         if (rig._gunAnchor) {
           const ads = state.adsAmount || 0;
           const hipY = 1.30, adsY = 1.55;
           rig._gunAnchor.position.y = hipY + (adsY - hipY) * ads;
-          rig._gunAnchor.position.z = 0.45;  // forward distance
-          rig._gunAnchor.rotation.set(0, 0, 0);  // always parallel to ground
+          rig._gunAnchor.position.z = 0.45;
+          let gunYaw = cursorYaw - rig.group.rotation.y;
+          while (gunYaw >  Math.PI) gunYaw -= 2 * Math.PI;
+          while (gunYaw < -Math.PI) gunYaw += 2 * Math.PI;
+          rig._gunAnchor.rotation.set(0, gunYaw, 0);
+        }
+        // Arm-shoulder twist for extended aim range — when the
+        // cursor is FAR off-axis (residual past the chest's 45°
+        // limit), rotate the dominant clavicle / upperarm to point
+        // toward the gun-anchor direction. Visually: the chest
+        // twists 45°, the firing-side shoulder pulls forward by
+        // half the residual, and the gun extends laterally on the
+        // anchor. Smoothes the pose so the arm doesn't visibly
+        // disconnect from the gun.
+        const residual = Math.max(0, Math.abs(chestTwist === TWIST_LIMIT ? (cursorYaw - rig.group.rotation.y) : 0) - TWIST_LIMIT);
+        const armYawTotal = residual * Math.sign(cursorYaw - rig.group.rotation.y) * 0.5;
+        const armBone = state.handedness === 'right'
+          ? rig.rightArm?.shoulder?.pivot
+          : rig.leftArm?.shoulder?.pivot;
+        if (armBone && armBone.quaternion) {
+          if (!rig._fbx._armBaseQ) rig._fbx._armBaseQ = armBone.quaternion.clone();
+          armBone.quaternion.copy(rig._fbx._armBaseQ);
+          if (Math.abs(armYawTotal) > 0.001) {
+            _aimDeltaE.set(0, armYawTotal, 0, 'YXZ');
+            _aimDeltaQ.setFromEuler(_aimDeltaE);
+            armBone.quaternion.multiply(_aimDeltaQ);
+          }
         }
         if (_gaspSmCfg) {
           const pick = selectGaspLocomotion(_gaspSmCfg, state, planarSpeed, velocity, rig.group.rotation.y);

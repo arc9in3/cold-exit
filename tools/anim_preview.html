@@ -1,0 +1,270 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<title>cold exit · animation preview</title>
+<style>
+  :root { color-scheme: dark; }
+  html, body { margin: 0; padding: 0; width: 100%; height: 100%;
+    background: #0c0c10; color: #cbd2dc;
+    font-family: system-ui, -apple-system, Segoe UI, sans-serif;
+    overflow: hidden;
+  }
+  #stage { position: absolute; inset: 0; }
+  #panel { position: absolute; top: 10px; right: 14px;
+    width: 320px; max-height: 95vh; overflow-y: auto;
+    background: rgba(14,16,22,0.92);
+    border: 1px solid #2a2f3a;
+    padding: 12px; border-radius: 6px; font-size: 12px;
+  }
+  #panel h2 { margin: 0 0 10px 0; font-size: 13px; color: #c9a87a; }
+  #panel select, #panel input {
+    width: 100%; box-sizing: border-box;
+    background: #1a1d24; color: #cbd2dc;
+    border: 1px solid #2a2f3a; padding: 4px;
+    font-family: inherit; font-size: 12px; margin-bottom: 6px;
+  }
+  #panel button {
+    width: 100%; background: #1f2a18; color: #a8d68a;
+    border: 1px solid #3e5a2e; padding: 6px;
+    border-radius: 4px; cursor: pointer; font-size: 12px;
+    margin-top: 4px;
+  }
+  #panel button:hover { background: #2a3a20; }
+  #panel button.active { background: #3a5a20; color: #cee99a; }
+  #clips-list { max-height: 70vh; overflow-y: auto; padding: 0; margin: 6px 0 0 0; list-style: none; }
+  #clips-list li { padding: 4px 6px; cursor: pointer; border-radius: 3px; }
+  #clips-list li:hover { background: #1a1d24; }
+  #clips-list li.active { background: #2a3a18; color: #cee99a; }
+  #info { color: #6a8a4a; font-size: 11px; margin-top: 6px; }
+  #search { margin-top: 6px; }
+  #scrub { width: 100%; }
+  .pill { display: inline-block; padding: 1px 6px; margin: 1px; border-radius: 8px;
+    background: #1a1d24; font-size: 10px; color: #8a93a3; }
+</style>
+<script type="importmap">
+{
+  "imports": {
+    "three": "https://unpkg.com/three@0.161.0/build/three.module.js",
+    "three/addons/": "https://unpkg.com/three@0.161.0/examples/jsm/"
+  }
+}
+</script>
+</head>
+<body>
+<div id="stage"></div>
+<div id="panel">
+  <h2>animation preview</h2>
+  <label>character mesh</label>
+  <select id="mesh-sel">
+    <option value="Assets/models/animations/gasp_glb/SKM_UEFN_Mannequin.glb" selected>UEFN Mannequin (gaspfix)</option>
+  </select>
+  <label>clip pack</label>
+  <select id="pack-sel">
+    <option value="Assets/models/animations/gasp_glb/" selected>gasp_glb (gaspfix essentials)</option>
+    <option value="Assets/models/animations/FBX_Pistol_Starter_27A_glb/">FBX_Pistol_Starter_27A_glb (Motus pistol pack)</option>
+  </select>
+  <input id="search" type="text" placeholder="filter clips…" />
+  <input id="scrub" type="range" min="0" max="1000" value="0" />
+  <button id="loop-toggle" class="active">loop: on</button>
+  <button id="speed-half">0.5×</button>
+  <button id="speed-1">1×</button>
+  <button id="speed-2">2×</button>
+  <ul id="clips-list"></ul>
+  <div id="info"></div>
+</div>
+<script type="module">
+import * as THREE from 'three';
+import { OrbitControls } from 'three/addons/controls/OrbitControls.js';
+import { GLTFLoader } from 'three/addons/loaders/GLTFLoader.js';
+
+const stage = document.getElementById('stage');
+const renderer = new THREE.WebGLRenderer({ antialias: true });
+renderer.setPixelRatio(devicePixelRatio);
+renderer.setSize(stage.clientWidth, stage.clientHeight);
+renderer.outputColorSpace = THREE.SRGBColorSpace;
+stage.appendChild(renderer.domElement);
+
+const scene = new THREE.Scene();
+scene.background = new THREE.Color(0x0c0c10);
+scene.add(new THREE.HemisphereLight(0xffffff, 0x222233, 1.0));
+const dir = new THREE.DirectionalLight(0xffffff, 0.8);
+dir.position.set(3, 5, 4);
+scene.add(dir);
+// Ground reference plane.
+const grid = new THREE.GridHelper(10, 20, 0x444455, 0x222233);
+scene.add(grid);
+
+const camera = new THREE.PerspectiveCamera(45, stage.clientWidth/stage.clientHeight, 0.1, 100);
+camera.position.set(2.2, 1.5, 3.5);
+const controls = new OrbitControls(camera, renderer.domElement);
+controls.target.set(0, 1.0, 0);
+controls.update();
+addEventListener('resize', () => {
+  renderer.setSize(stage.clientWidth, stage.clientHeight);
+  camera.aspect = stage.clientWidth/stage.clientHeight;
+  camera.updateProjectionMatrix();
+});
+
+const loader = new GLTFLoader();
+const meshSel = document.getElementById('mesh-sel');
+const packSel = document.getElementById('pack-sel');
+const searchInput = document.getElementById('search');
+const clipsList = document.getElementById('clips-list');
+const info = document.getElementById('info');
+const scrub = document.getElementById('scrub');
+const loopBtn = document.getElementById('loop-toggle');
+
+let mixer = null;
+let activeAction = null;
+let activeClipName = null;
+let charGroup = null;
+let clipCache = new Map();   // url → AnimationClip[]
+let allClipsByName = new Map();  // name → { url, idx }
+let loop = true;
+let speed = 1.0;
+
+async function loadCharacter(url) {
+  if (charGroup) {
+    scene.remove(charGroup);
+    charGroup.traverse(o => {
+      if (o.geometry) o.geometry.dispose();
+      if (o.material) (Array.isArray(o.material) ? o.material : [o.material]).forEach(m => m?.dispose());
+    });
+  }
+  const gltf = await loader.loadAsync(url);
+  charGroup = gltf.scene;
+  scene.add(charGroup);
+  // Scale match — UEFN already at meters; pistol-pack mannequin came converted at 1.15
+  const isUefn = url.includes('UEFN');
+  if (!isUefn) charGroup.scale.setScalar(1.15);
+  // Anchor mixer to the SkinnedMesh so clip tracks bind to the
+  // skinned skeleton (otherwise duplicate-deformer issue keeps
+  // mesh in bind pose).
+  let sk = null;
+  charGroup.traverse(o => { if (o.isSkinnedMesh && !sk) sk = o; });
+  mixer = new THREE.AnimationMixer(sk || charGroup);
+  info.textContent = `loaded mesh, ${charGroup.children.length} root children`;
+}
+
+async function loadPackClips(packUrl) {
+  // Discover clip files via fetch on a directory listing — not
+  // generally available. Fall back to a known list per pack.
+  const KNOWN_GASP = [
+    'M_Neutral_Stand_Idle_Loop_Pistol', 'M_Neutral_Crouch_Idle_Loop_Pistol',
+    'M_Neutral_Walk_Loop_F_Pistol', 'M_Neutral_Walk_Loop_B_Pistol',
+    'M_Neutral_Walk_Loop_FL_Pistol', 'M_Neutral_Walk_Loop_FR_Pistol',
+    'M_Neutral_Walk_Loop_BL_Pistol', 'M_Neutral_Walk_Loop_BR_Pistol',
+    'M_Neutral_Run_Loop_F_Pistol', 'M_Neutral_Run_Loop_B_Pistol',
+    'M_Neutral_Run_Loop_FL_Pistol', 'M_Neutral_Run_Loop_FR_Pistol',
+    'M_Neutral_Run_Loop_BL_Pistol', 'M_Neutral_Run_Loop_BR_Pistol',
+    'M_Neutral_Sprint_Loop_F_Pistol',
+    'M_Neutral_Crouch_Loop_F_Pistol', 'M_Neutral_Crouch_Loop_B_Pistol',
+    'M_Neutral_Crouch_Loop_FL_Pistol', 'M_Neutral_Crouch_Loop_FR_Pistol',
+    'M_Neutral_Crouch_Loop_BL_Pistol', 'M_Neutral_Crouch_Loop_BR_Pistol',
+    'M_Neutral_Stand_Idle_Loop_Rifle', 'M_Neutral_Crouch_Idle_Loop_Rifle',
+    'M_Neutral_Walk_Loop_F_Rifle', 'M_Neutral_Walk_Loop_B_Rifle',
+    'M_Neutral_Walk_Loop_FL_Rifle', 'M_Neutral_Walk_Loop_FR_Rifle',
+    'M_Neutral_Walk_Loop_BL_Rifle', 'M_Neutral_Walk_Loop_BR_Rifle',
+    'M_Neutral_Run_Loop_F_Rifle',
+    'M_Neutral_Run_Loop_FL_Rifle', 'M_Neutral_Run_Loop_FR_Rifle',
+    'M_Neutral_Crouch_Loop_F_Rifle',
+    'M_Neutral_Crouch_Loop_FL_Rifle', 'M_Neutral_Crouch_Loop_FR_Rifle',
+    'M_Neutral_Jump_Loop_Fall_Pistol',
+    'M_Neutral_Stand_Idle_Break_v01_Pistol',
+  ];
+  const KNOWN_PISTOL_PACK = [
+    'W1_Stand_Relaxed_Idle_IPC', 'W1_Stand_Aim_Idle_IPC',
+    'W1_Crouch_Idle_IPC', 'W1_Crouch_Aim_Idle_IPC',
+    'W1_Walk_Aim_F_Loop_IPC', 'W1_Jog_Aim_F_Loop_IPC',
+    'W1_CrouchWalk_Aim_F_Loop_IPC',
+    'W1_Stand_Aim_Turn_In_Place_L_Loop_IPC',
+    'W1_Stand_Aim_Turn_In_Place_R_Loop_IPC',
+    'W1_Stand_Fire_Single', 'W1_Crouch_Fire_Single',
+    'W1_Stand_Aim_Jump_Start_IPC', 'W1_Stand_Aim_Jump_Air_IPC',
+    'W1_Stand_Aim_Jump_End_IPC',
+    'W1_Walk_Aim_F_Jump_RU_End_IPC', 'W1_Jog_Aim_F_Jump_RU_End_IPC',
+  ];
+  const known = packUrl.includes('gasp') ? KNOWN_GASP : KNOWN_PISTOL_PACK;
+  allClipsByName.clear();
+  for (const name of known) {
+    allClipsByName.set(name, { url: `${packUrl}${name}.glb` });
+  }
+  rebuildList();
+  info.textContent = `${known.length} clips in pack`;
+}
+
+function rebuildList() {
+  const filter = searchInput.value.trim().toLowerCase();
+  clipsList.innerHTML = '';
+  for (const [name] of allClipsByName) {
+    if (filter && !name.toLowerCase().includes(filter)) continue;
+    const li = document.createElement('li');
+    li.textContent = name;
+    if (name === activeClipName) li.classList.add('active');
+    li.addEventListener('click', () => playClip(name));
+    clipsList.appendChild(li);
+  }
+}
+searchInput.addEventListener('input', rebuildList);
+
+async function playClip(name) {
+  const entry = allClipsByName.get(name);
+  if (!entry) return;
+  let clips = clipCache.get(entry.url);
+  if (!clips) {
+    const gltf = await loader.loadAsync(entry.url);
+    clips = gltf.animations || [];
+    clipCache.set(entry.url, clips);
+  }
+  if (!clips.length) {
+    info.textContent = `[${name}] no animation tracks`;
+    return;
+  }
+  if (activeAction) activeAction.fadeOut(0.15);
+  const clip = clips[0];
+  activeAction = mixer.clipAction(clip);
+  activeAction.setLoop(loop ? THREE.LoopRepeat : THREE.LoopOnce, Infinity);
+  activeAction.timeScale = speed;
+  activeAction.reset().fadeIn(0.15).play();
+  activeClipName = name;
+  scrub.max = Math.round(clip.duration * 1000);
+  info.innerHTML = `<span class="pill">${name}</span>` +
+    `<span class="pill">${clip.duration.toFixed(2)}s</span>` +
+    `<span class="pill">${clip.tracks.length} tracks</span>`;
+  rebuildList();
+}
+
+loopBtn.addEventListener('click', () => {
+  loop = !loop;
+  loopBtn.textContent = `loop: ${loop ? 'on' : 'off'}`;
+  loopBtn.classList.toggle('active', loop);
+  if (activeAction) activeAction.setLoop(loop ? THREE.LoopRepeat : THREE.LoopOnce, Infinity);
+});
+document.getElementById('speed-half').addEventListener('click', () => { speed = 0.5; if (activeAction) activeAction.timeScale = speed; });
+document.getElementById('speed-1').addEventListener('click', () => { speed = 1.0; if (activeAction) activeAction.timeScale = speed; });
+document.getElementById('speed-2').addEventListener('click', () => { speed = 2.0; if (activeAction) activeAction.timeScale = speed; });
+scrub.addEventListener('input', () => {
+  if (activeAction) activeAction.time = scrub.value / 1000;
+});
+
+meshSel.addEventListener('change', () => loadCharacter(meshSel.value));
+packSel.addEventListener('change', () => loadPackClips(packSel.value));
+
+await loadCharacter(meshSel.value);
+await loadPackClips(packSel.value);
+
+const clock = new THREE.Clock();
+(function tick() {
+  requestAnimationFrame(tick);
+  const dt = clock.getDelta();
+  if (mixer) mixer.update(dt);
+  if (activeAction && !scrub.matches(':active')) {
+    scrub.value = (activeAction.time * 1000) | 0;
+  }
+  controls.update();
+  renderer.render(scene, camera);
+})();
+</script>
+</body>
+</html>

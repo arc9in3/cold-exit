@@ -64,6 +64,21 @@ export function bodyLocalAngle(velocity, bodyYaw) {
   return Math.atan2(-localX, localZ);
 }
 
+// Map a weapon.class to a GASP clip-set suffix. Pistol-style grips
+// (one-handed low-ready) get the _Pistol clips; rifle-style grips
+// (two-handed shouldered) get the _Rifle clips. Melee falls back to
+// _Pistol since GASP doesn't ship melee-stance clips.
+function _clipSuffixForWeapon(weaponClass) {
+  switch (weaponClass) {
+    case 'rifle': case 'shotgun': case 'sniper': case 'lmg':
+      return 'Rifle';
+    case 'pistol': case 'smg': case 'revolver': case 'flame':
+    case 'melee': case undefined: case null:
+    default:
+      return 'Pistol';
+  }
+}
+
 // Select the lower-body clip from a GASP-style state machine config
 // + per-frame playerState/velocity/bodyYaw.
 //
@@ -113,12 +128,22 @@ export function selectGaspLocomotion(smCfg, playerState, planarSpeed, velocity, 
   }
   if (!s) return null;
 
-  // ADS swap — when state.adsAmount > 0.5, prefer the rifle (ADS /
-  // shouldered) variant of the picked clip if one exists. The clip
-  // metadata maps a base clip name to its ADS sibling via the
-  // 'adsClip' field; absent → no swap.
-  const ads = (playerState?.adsAmount || 0) > 0.5;
-  const clipName = (ads && s.adsClip) ? s.adsClip : s.clip;
+  // Weapon-class swap — pistols/SMGs/revolvers stay on _Pistol clips
+  // (one-handed low-ready); rifles/shotguns/snipers/LMGs swap to
+  // _Rifle clips (two-handed shouldered). The state-machine entry
+  // is keyed off the BASE clip; we substitute the suffix at the
+  // last segment of the clip name.
+  const weaponClass = playerState?.equipped?.class;
+  const wantSuffix = _clipSuffixForWeapon(weaponClass);
+  let clipName = s.clip;
+  if (wantSuffix === 'Rifle' && clipName.endsWith('_Pistol')) {
+    const candidate = clipName.slice(0, -'_Pistol'.length) + '_Rifle';
+    // Only swap if we actually have the _Rifle variant authored;
+    // otherwise stay on _Pistol so the state still resolves.
+    if (s.adsClip || (smCfg._availableClips && smCfg._availableClips.has(candidate))) {
+      clipName = s.adsClip || candidate;
+    }
+  }
 
   return {
     stateId: id,
@@ -127,6 +152,6 @@ export function selectGaspLocomotion(smCfg, playerState, planarSpeed, velocity, 
     speedRef: s.speedRef ?? null,
     sector,
     bucket: prefix,
-    ads,
+    weaponClass,
   };
 }

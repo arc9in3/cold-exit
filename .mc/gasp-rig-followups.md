@@ -33,3 +33,10 @@ do a focused pass on them once locomotion + ADS swap settles.
   fixes the aiming-up case but the hipfire path will still read as
   "low ready" while running. Acceptable per user feedback, just
   visible.
+
+- **No recoil animation when shooting.** Each shot should pulse
+  a quick additive on chest + dominant upper arm (arm kicks back
+  ~0.06 rad, chest pitches back ~0.03 rad, decays over ~180ms).
+  `src/anim/additive.js` has triggerRecoil() that does exactly
+  this; needs to be wired to the player.update fire path on the
+  GASP rig.
