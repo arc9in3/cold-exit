@@ -129,7 +129,7 @@ function _runUpperBodyIK(rig, state, aimPoint, aimPitch, dt = 1/60) {
   const cls = state?.equipped?.class;
   const isRifleStance = cls === 'rifle' || cls === 'shotgun'
     || cls === 'sniper' || cls === 'lmg';
-  const stanceYaw = isRifleStance ? 0.26 : 0;   // +15° — sign flipped per user feedback
+  const stanceYaw = isRifleStance ? 0.52 : 0;   // +30° (was 15° — bumped per user feedback)
   const STANCE_WEIGHTS = [0, 0.05, 0.18, 0.35, 0.42];  // sum = 1.0; stacked on upper spine
   const YAW_WEIGHTS   = [0, 0, 0, 0, 0];
   const PITCH_WEIGHTS = [0, 0, 0, 0, 0];
