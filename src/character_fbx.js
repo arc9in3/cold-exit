@@ -51,37 +51,47 @@
 import * as THREE from 'three';
 import { FBXLoader } from 'three/addons/loaders/FBXLoader.js';
 
-const MIXAMO_TO_CODE = {
+// Bare bone names (without the optional 'mixamorig:' prefix).
+// Both Mixamo (mixamorig:Hips) and Motus Digital (Hips) export packs
+// use the same naming scheme; the lookup in buildRigAdapter strips
+// the prefix before checking this table.
+const BONE_TO_CODE = {
   // torso chain
-  'mixamorig:Hips':         { path: 'hips' },
-  'mixamorig:Spine':        { path: 'stomach' },
-  'mixamorig:Spine1':       { path: 'chest' },
-  'mixamorig:Spine2':       { path: 'chest' }, // some Mixamo rigs split — alias to chest
-  'mixamorig:Neck':         { path: 'neck' },
-  'mixamorig:Head':         { path: 'head' },
+  'Hips':         { path: 'hips' },
+  'Spine':        { path: 'stomach' },
+  'Spine1':       { path: 'chest' },
+  'Spine2':       { path: 'chest' }, // some rigs split — alias to chest
+  'Neck':         { path: 'neck' },
+  'Head':         { path: 'head' },
 
-  // ARMS — mixamo Left → code rightArm (handedness flip).
-  // Mixamo includes a separate Shoulder + Arm bone; we map both to
-  // shoulder.pivot since the procgen rig collapses them.
-  'mixamorig:LeftShoulder': { path: 'rightArm.shoulder.pivot' },
-  'mixamorig:LeftArm':      { path: 'rightArm.shoulder.pivot' },
-  'mixamorig:LeftForeArm':  { path: 'rightArm.elbow' },
-  'mixamorig:LeftHand':     { path: 'rightArm.wrist' },
+  // ARMS — pack's "Left*" → code rightArm (handedness flip).
+  // Mixamo/Motus include a separate Shoulder + Arm bone; we map both
+  // to shoulder.pivot since the procgen rig collapses them.
+  'LeftShoulder': { path: 'rightArm.shoulder.pivot' },
+  'LeftArm':      { path: 'rightArm.shoulder.pivot' },
+  'LeftForeArm':  { path: 'rightArm.elbow' },
+  'LeftHand':     { path: 'rightArm.wrist' },
 
-  'mixamorig:RightShoulder':{ path: 'leftArm.shoulder.pivot' },
-  'mixamorig:RightArm':     { path: 'leftArm.shoulder.pivot' },
-  'mixamorig:RightForeArm': { path: 'leftArm.elbow' },
-  'mixamorig:RightHand':    { path: 'leftArm.wrist' },
+  'RightShoulder':{ path: 'leftArm.shoulder.pivot' },
+  'RightArm':     { path: 'leftArm.shoulder.pivot' },
+  'RightForeArm': { path: 'leftArm.elbow' },
+  'RightHand':    { path: 'leftArm.wrist' },
 
   // LEGS — same handedness flip.
-  'mixamorig:LeftUpLeg':    { path: 'rightLeg.thigh.pivot' },
-  'mixamorig:LeftLeg':      { path: 'rightLeg.knee' },
-  'mixamorig:LeftFoot':     { path: 'rightLeg.ankle' },
+  'LeftUpLeg':    { path: 'rightLeg.thigh.pivot' },
+  'LeftLeg':      { path: 'rightLeg.knee' },
+  'LeftFoot':     { path: 'rightLeg.ankle' },
 
-  'mixamorig:RightUpLeg':   { path: 'leftLeg.thigh.pivot' },
-  'mixamorig:RightLeg':     { path: 'leftLeg.knee' },
-  'mixamorig:RightFoot':    { path: 'leftLeg.ankle' },
+  'RightUpLeg':   { path: 'leftLeg.thigh.pivot' },
+  'RightLeg':     { path: 'leftLeg.knee' },
+  'RightFoot':    { path: 'leftLeg.ankle' },
 };
+
+// Lookup helper — strips 'mixamorig:' prefix if present.
+function bareBone(name) {
+  if (!name) return name;
+  return name.startsWith('mixamorig:') ? name.slice('mixamorig:'.length) : name;
+}
 
 // Walk the loaded FBX scene graph, find every bone matching the
 // mixamorig:* names, and stamp them onto the rig adapter. Returns
@@ -92,9 +102,14 @@ function buildRigAdapter(group, mixer) {
   // group tree and look for Bone objects.
   const bonesByName = new Map();
   group.traverse((o) => {
-    if (o.isBone || (o.name && o.name.startsWith('mixamorig:'))) {
-      bonesByName.set(o.name, o);
-    }
+    if (!o.isBone && !(o.name && (o.name.startsWith('mixamorig:') || BONE_TO_CODE[bareBone(o.name)]))) return;
+    // Register under exact name AND bare name so callers can look up
+    // either 'mixamorig:Hips' or just 'Hips' interchangeably. Many
+    // packs also duplicate bones (deformer + skeleton copies); the
+    // first registration wins which is the visible animation root.
+    if (!bonesByName.has(o.name)) bonesByName.set(o.name, o);
+    const bare = bareBone(o.name);
+    if (bare !== o.name && !bonesByName.has(bare)) bonesByName.set(bare, o);
   });
 
   // Build an empty rig skeleton. Each "joint" is `{ pivot: bone }`
@@ -132,8 +147,10 @@ function buildRigAdapter(group, mixer) {
     obj[parts[parts.length - 1]] = val;
   };
 
-  for (const [mixName, target] of Object.entries(MIXAMO_TO_CODE)) {
-    const bone = bonesByName.get(mixName);
+  // Try each table key with both the bare name and the 'mixamorig:'
+  // prefix — Mixamo packs prefix, Motus Digital packs don't.
+  for (const [bareName, target] of Object.entries(BONE_TO_CODE)) {
+    const bone = bonesByName.get(bareName) || bonesByName.get(`mixamorig:${bareName}`);
     if (!bone) continue;
     setAt(target.path, bone);
   }

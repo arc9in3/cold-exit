@@ -1302,6 +1302,98 @@ async function loadFbx(url) {
   });
 }
 
+// MotusMan + pistol-animation pack — base skeleton + 26 stand/walk/
+// jog/crouch/aim/fire/jump animations. Loaded base mesh once, then
+// addAnim() merges additional clips into the same mixer so the
+// dropdown can crossfade between them.
+{
+  const PACK = '../Assets/models/animations/FBX_Pistol_Starter_27A';
+  const ANIMS = [
+    'W1_Stand_Relaxed_Idle_IPC',
+    'W1_Stand_Aim_Idle_IPC',
+    'W1_Crouch_Idle_IPC',
+    'W1_Crouch_Aim_Idle_IPC',
+    'W1_Walk_Aim_F_Loop_IPC',
+    'W1_Jog_Aim_F_Loop_IPC',
+    'W1_CrouchWalk_Aim_F_Loop_IPC',
+    'W1_Stand_Aim_Turn_In_Place_L_Loop_IPC',
+    'W1_Stand_Aim_Turn_In_Place_R_Loop_IPC',
+  ];
+  const fireAnims = [
+    'W1_Stand_Fire_Single',
+    'W1_Crouch_Fire_Single',
+  ];
+  const jumpAnims = [
+    'W1_Stand_Aim_Jump_Start_IPC',
+    'W1_Stand_Aim_Jump_Air_IPC',
+    'W1_Stand_Aim_Jump_End_IPC',
+    'W1_Walk_Aim_F_Jump_RU_End_IPC',
+    'W1_Jog_Aim_F_Jump_RU_End_IPC',
+  ];
+  // Load base mesh + first animation, then merge the rest.
+  const f = gui.addFolder('FBX preview (MotusMan + pistol pack)');
+  f.close();
+  let motusRig = null;
+  const loadPack = async () => {
+    unloadFbx();
+    if (motusRig) {
+      try { (await import('../src/character_fbx.js')).unloadCharacterFBX(scene, motusRig); } catch (_) {}
+      motusRig = null;
+    }
+    try {
+      const mod = await import('../src/character_fbx.js');
+      // Use the first idle animation as the base so we have a posed
+      // skeleton + mesh. Additional clips merge into the same mixer.
+      motusRig = await mod.loadCharacterFBX(scene, `${PACK}/Animation/In-Place/${ANIMS[0]}.fbx`);
+      for (const name of ANIMS.slice(1).concat(fireAnims, jumpAnims)) {
+        const url = fireAnims.includes(name)
+          ? `${PACK}/Animation/Fire/${name}.fbx`
+          : jumpAnims.includes(name)
+            ? `${PACK}/Animation/In-Place/Split_Jumps/${name}.fbx`
+            : `${PACK}/Animation/In-Place/${name}.fbx`;
+        try { await mod.loadAnimationFBX(motusRig, url, name); } catch (e) { console.warn(`[motus] skipped ${name}:`, e.message); }
+      }
+      // Hide procgen rig so the FBX takes the stage.
+      if (rig && rig.group) rig.group.visible = false;
+      console.log('[motus] loaded clips:', motusRig.clipNames());
+      const toast = document.getElementById('export-toast');
+      if (toast) {
+        toast.textContent = `MotusMan loaded — ${motusRig.clipNames().length} clips`;
+        toast.classList.add('show');
+        setTimeout(() => toast.classList.remove('show'), 2500);
+      }
+    } catch (e) {
+      console.error('[motus]', e);
+    }
+  };
+  f.add({ load: loadPack }, 'load').name('load MotusMan + all clips');
+  // Clip picker — populated AFTER load. Use a string proxy so lil-gui
+  // shows it as a dropdown, with placeholder until clips are present.
+  const clipProxy = { clip: '(load first)' };
+  const clipCtrl = f.add(clipProxy, 'clip', ['(load first)']).name('clip').onChange((name) => {
+    if (motusRig && motusRig.play) motusRig.play(name, { fadeMs: 200 });
+  });
+  // Refresh dropdown options after load. lil-gui requires recreating.
+  f.add({ refresh: () => {
+    if (!motusRig) return;
+    const names = motusRig.clipNames();
+    if (!names.length) return;
+    clipCtrl.options(names);
+    clipCtrl.setValue(names[0]);
+  } }, 'refresh').name('refresh clip list');
+  f.add({ unload: () => {
+    if (motusRig) {
+      import('../src/character_fbx.js').then(mod => mod.unloadCharacterFBX(scene, motusRig));
+      motusRig = null;
+    }
+    if (rig && rig.group) rig.group.visible = true;
+  } }, 'unload').name('unload MotusMan');
+  const motusSpeed = { speed: 1.0 };
+  f.add(motusSpeed, 'speed', 0.1, 2.0, 0.05).name('playback speed').onChange((v) => {
+    if (motusRig) motusRig.setPlaybackSpeed(v);
+  });
+}
+
 // --- part scaler ---------------------------------------------------
 // Pick a body part, drag X/Y/Z sliders, the rig updates live. This is
 // the in-tuner character-creator surface: clicking a different part
