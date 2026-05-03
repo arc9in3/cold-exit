@@ -38,11 +38,16 @@ const RIGHT = new THREE.Vector3(1, 0, -1).normalize();
 const _aimChestScratch = new THREE.Vector3();
 const _muzzleTipScratch = new THREE.Vector3();
 // Scratches for the FBX aim-IK quaternion path. The IK applies a
-// delta quaternion to the bone's mixer-driven base each frame; using
-// quat-multiply instead of `rotation += ...` avoids accumulation when
-// the bone isn't animated by the active clip.
+// delta quaternion to the bone's mixer-driven base each frame in
+// WORLD space (not bone-local) — bone local axes vary by export
+// pack (Motus / Mixamo / Biped all author them differently), so
+// "yaw on bone-local Y" can be a lean depending on the pack. Doing
+// the rotation in world frame and then converting to local-of-parent
+// makes the IK behave the same regardless of bone orientation.
 const _aimDeltaQ = new THREE.Quaternion();
 const _aimDeltaE = new THREE.Euler(0, 0, 0, 'YXZ');
+const _aimParentWorldQ = new THREE.Quaternion();
+const _aimComposeQ = new THREE.Quaternion();
 
 // Movement modes. Only one is active at a time.
 const MODE = {
@@ -1869,20 +1874,28 @@ export function createPlayer(scene) {
       // mixer wrote it, with no accumulation.
       const aimYaw = state.chestTwist || 0;
       const fbx = rig._fbx;
-      if (rig.chest && rig.chest.quaternion) {
-        if (!fbx._aimChestBase) fbx._aimChestBase = rig.chest.quaternion.clone();
-        rig.chest.quaternion.copy(fbx._aimChestBase);
-        _aimDeltaE.set(aimPitch * 0.55, aimYaw * 0.60, 0, 'YXZ');
+      // Apply IK in WORLD space and convert back to bone-local. The
+      // bone's final world rotation should be:
+      //   parentWorld * localBase * localDelta  ==  worldDelta * parentWorld * localBase
+      // Solving for localDelta:
+      //   localDelta = (parentWorld * localBase)^-1 * worldDelta * (parentWorld * localBase)
+      const applyWorldIK = (bone, baseKey, yawAmt, pitchAmt) => {
+        if (!bone || !bone.quaternion || !bone.parent) return;
+        if (!fbx[baseKey]) fbx[baseKey] = bone.quaternion.clone();
+        bone.quaternion.copy(fbx[baseKey]);
+        // Build world-space delta — pitch around world X, yaw around world Y.
+        _aimDeltaE.set(pitchAmt, yawAmt, 0, 'YXZ');
         _aimDeltaQ.setFromEuler(_aimDeltaE);
-        rig.chest.quaternion.multiply(_aimDeltaQ);
-      }
-      if (rig.head && rig.head.quaternion) {
-        if (!fbx._aimHeadBase) fbx._aimHeadBase = rig.head.quaternion.clone();
-        rig.head.quaternion.copy(fbx._aimHeadBase);
-        _aimDeltaE.set(aimPitch * 0.45, aimYaw * 0.40, 0, 'YXZ');
-        _aimDeltaQ.setFromEuler(_aimDeltaE);
-        rig.head.quaternion.multiply(_aimDeltaQ);
-      }
+        // M = parentWorld * localBase  (bone's world quaternion at clip-base).
+        bone.parent.getWorldQuaternion(_aimParentWorldQ);
+        _aimComposeQ.copy(_aimParentWorldQ).multiply(fbx[baseKey]);
+        // localDelta = M^-1 * worldDelta * M
+        // Reuse _aimDeltaQ slot for the result.
+        const localDelta = _aimComposeQ.clone().invert().multiply(_aimDeltaQ).multiply(_aimComposeQ);
+        bone.quaternion.multiply(localDelta);
+      };
+      applyWorldIK(rig.chest, '_aimChestBase', aimYaw * 0.60, aimPitch * 0.55);
+      applyWorldIK(rig.head,  '_aimHeadBase',  aimYaw * 0.40, aimPitch * 0.45);
     } else {
     updateAnim(rig, {
       speed: planarSpeed,
