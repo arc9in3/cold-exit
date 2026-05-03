@@ -919,29 +919,26 @@ window.__useGaspMannequin = async () => {
   // weapon scales tuned around the procgen rig.
   if (player.rig?.group) player.rig.group.scale.setScalar(1.15);
 
-  // GUN ANCHOR — Object3D parented to the dominant WRIST BONE so
-  // the gun physically follows the hand (no lag). User feedback:
-  // "the gun moves out of your hands first and then your hand/body
-  // catch up. can we have the hands as children of the gun and
-  // its movement/rotation?" — solved by anchoring the gun to the
-  // wrist bone directly. Cursor following propagates: clavicle
-  // yaw → arm chain → wrist → anchor → gun. Hand and gun move
-  // as one rigid unit.
-  if (player.rig && player.rig._fbx) {
-    const dominantWrist = player.rig.rightArm?.wrist || player.rig.leftArm?.wrist;
-    if (dominantWrist) {
-      const anchor = new (await import('three')).Object3D();
-      anchor.name = '_gunAnchor';
-      // Offset within the wrist's local frame: forward + slight
-      // up so the gun extends past the fingers, not inside the palm.
-      anchor.position.set(0, 0.06, 0.10);
-      // Counter-scale rig.group's outer scale so weapons render at
-      // authored size regardless of the 1.15× character scale.
-      const groupScale = player.rig.group.scale.x || 1.0;
-      anchor.scale.setScalar(1.0 / groupScale);
-      dominantWrist.add(anchor);
-      player.rig._gunAnchor = anchor;
-    }
+  // GUN ANCHOR — stable Object3D parented under rig.group (NOT a
+  // bone) so it inherits body yaw but NOT clip-driven chest twist
+  // or arm bone movement. Gun + muzzle attach here for hipfire +
+  // ADS poses. Position lerps between chest height (hipfire) and
+  // eye height (ADS) based on state.adsAmount; rotation stays
+  // identity so the gun is always parallel to the ground and
+  // pointing body-forward (which equals cursor direction since
+  // body yaw is locked to aim).
+  if (player.rig && player.rig.group) {
+    const anchor = new (await import('three')).Object3D();
+    anchor.name = '_gunAnchor';
+    anchor.position.set(0, 1.30, 0.45);  // hipfire default
+    // Counter-scale so weapons render at their AUTHORED metre size
+    // regardless of the rig.group's outer scale. Without this, the
+    // 1.15× rig scale bump above multiplies into gun mesh world
+    // size, making every weapon ~15% larger than the procgen path.
+    const groupScale = player.rig.group.scale.x || 1.0;
+    anchor.scale.setScalar(1.0 / groupScale);
+    player.rig.group.add(anchor);
+    player.rig._gunAnchor = anchor;
   }
 
   const charMod = await import('./character_fbx.js');
