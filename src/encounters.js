@@ -1689,7 +1689,12 @@ export const ENCOUNTER_DEFS = {
         s.complete = true;
         if (ctx.markEncounterComplete) ctx.markEncounterComplete('fountain');
         if (s.hint) s.hint.visible = false;
-        if (s.progress) s.progress.userData.setText('The fountain accepts your offering.');
+        // REGRESSION: bug-14 — keep the final count visible alongside
+        // the acceptance line. The previous text replaced the count
+        // before the player could see it tick to full capacity.
+        if (s.progress) s.progress.userData.setText(
+          `${s.thrown} / ${def.THRESHOLD}c — fountain accepts your offering.`
+        );
         // Spawn a single-item chest holding the King's Signet.
         if (ctx.spawnSignetChest) {
           // Push the chest further out (was 1.8m, fountain mesh
