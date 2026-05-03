@@ -79,10 +79,19 @@ const QUICK_MELEE_BY_CLASS = {
 export async function swapPlayerToFbxRig(player, scene, url, opts = {}) {
   const { loadCharacterFBX } = await import('./character_fbx.js');
   const fbxRig = await loadCharacterFBX(scene, url, opts);
-  // Hide the procgen rig — keep it in scene for fast revert.
-  if (player.rig && player.rig.group) player.rig.group.visible = false;
-  player._procgenRig = player.rig;       // remember for revert
+  // Hide the procgen rig — keep it in scene for fast revert. Save
+  // the procgen rig once on first swap; subsequent swaps go FBX→FBX
+  // and we don't want to overwrite our procgen reference.
+  if (player.rig && player.rig.group && !player._procgenRig) {
+    player._procgenRig = player.rig;
+  }
+  if (player._procgenRig?.group) player._procgenRig.group.visible = false;
   player.rig = fbxRig;
+  // Critical: flip the closure binding inside player.update so the
+  // FBX branch (`if (rig._fbx)`) actually fires. Without this, the
+  // update loop keeps using the procgen rig that was captured at
+  // construction.
+  if (typeof player._setRig === 'function') player._setRig(fbxRig);
   // Mirror the world group transform so the FBX inherits whatever
   // position/rotation the procgen rig was using (player respawn,
   // hideout placement, etc.).
@@ -97,7 +106,11 @@ export function createPlayer(scene) {
   // Jointed player rig — shared with enemies. `body` below is aliased
   // to the rig's chest mesh so AI cover + hit raycasts still resolve to
   // the same target they always did (userData.isPlayer preserved).
-  const rig = buildRig({
+  // `let` not `const` so swapPlayerToFbxRig can flip this closure
+  // binding to the FBX adapter at runtime. The update() closure
+  // below reads `rig` directly, so reassigning here is what makes
+  // the FBX branch fire after a swap.
+  let rig = buildRig({
     scale: 0.77,          // ~1.85m character — matches world / weapon scale
     // All-dark operator palette. Head uses a dark hood/balaclava
     // colour so no skin shows; only the visor-like gear stripe on
@@ -2096,8 +2109,14 @@ export function createPlayer(scene) {
     }).catch(() => {});
   }
 
+  // Setter for swapPlayerToFbxRig — flips the closure-captured `rig`
+  // binding so update() sees the new rig (FBX adapter or procgen).
+  // External `player.rig` is also updated by the swap helper for
+  // consumers that read the public field (gunman.js, weapon attach,
+  // etc.).
+  function _setRig(newRig) { rig = newRig; }
   return {
-    mesh: group, body, rig, update, setWeapon, setOffhandWeapon, prewarmWeapon, takeDamage, heal, applyStatus,
+    mesh: group, body, rig, _setRig, update, setWeapon, setOffhandWeapon, prewarmWeapon, takeDamage, heal, applyStatus,
     tryMeleeAttack, tryQuickMelee, cancelCombo,
     tryParry, isBlocking, isParryActive,
     consumeStamina, refundStamina, applyDerivedStats, restoreFullHealth,
