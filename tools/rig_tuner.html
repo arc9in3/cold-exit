@@ -183,6 +183,16 @@ const state = {
     selected: 'chest',
     scaleX: 1.0, scaleY: 1.0, scaleZ: 1.0,
     lastX: 1.0,  lastY: 1.0,  lastZ: 1.0,
+    // Per-part mirror + offset, keyed by part name. Mirror flips the
+    // mesh scale on the chosen axis (negative scale). Offsets shift
+    // the mesh.position. Both apply ONLY to the targeted part — they
+    // don't propagate down the bone chain like a bone transform
+    // would. Persisted across part-selection changes.
+    transforms: {},   // { partName: { mirror: 'none'|'x'|'y'|'z', offX, offY, offZ } }
+    // Live editor display for the currently selected part. Edited
+    // via the GUI; copied back into transforms[selected] on change.
+    mirror: 'none',
+    offX: 0, offY: 0, offZ: 0,
   },
   pose: {
     preset: 'idle',
@@ -343,6 +353,10 @@ function rebuildRig() {
   window.__camera = camera;
   window.__controls = controls;
   window.__renderer = renderer;
+  // Re-apply per-part mirror + offset transforms after every rebuild.
+  // The function is defined later in the script; guard with typeof so
+  // the boot path before the GUI exists doesn't error.
+  if (typeof applyPartTransformsToRig === 'function') applyPartTransformsToRig();
 }
 rebuildRig();
 
@@ -851,6 +865,78 @@ function applyPartAxis(part, axis, newValue) {
   state.parter['last' + axis.toUpperCase()] = newValue;
 }
 
+// Part name → list of mesh refs to transform (mirror / offset).
+// Returns nothing for parts whose meshes don't exist on the current
+// archetype (e.g., bust on male). Each entry has { mesh, sign } where
+// sign flips the X-offset for paired parts so positive offsetX
+// "spreads them apart" on both sides.
+function getPartTransformTargets(partName) {
+  if (!rig) return [];
+  switch (partName) {
+    case 'head':       return [{ mesh: rig.headMesh,  sign: 1 }];
+    case 'neck':       return [{ mesh: rig.neckMesh,  sign: 1 }];
+    case 'chest':      return [{ mesh: rig.chestMesh, sign: 1 }];
+    case 'stomach':    return [{ mesh: rig.stomachMesh, sign: 1 }];
+    case 'hips':       return rig.pelvis ? [{ mesh: rig.pelvis, sign: 1 }] : [];
+    case 'thighs':     return [
+      { mesh: rig.leftLeg.thigh.mesh,  sign: -1 },
+      { mesh: rig.rightLeg.thigh.mesh, sign: +1 },
+    ];
+    case 'calves':     return [
+      { mesh: rig.leftLeg.calf.mesh,  sign: -1 },
+      { mesh: rig.rightLeg.calf.mesh, sign: +1 },
+    ];
+    case 'feet':       return [
+      { mesh: rig.leftLeg.foot.mesh,  sign: -1 },
+      { mesh: rig.rightLeg.foot.mesh, sign: +1 },
+    ];
+    case 'upperArms':  return [
+      { mesh: rig.leftArm.shoulder.mesh,  sign: -1 },
+      { mesh: rig.rightArm.shoulder.mesh, sign: +1 },
+    ];
+    case 'forearms':   return [
+      { mesh: rig.leftArm.forearm.mesh,  sign: -1 },
+      { mesh: rig.rightArm.forearm.mesh, sign: +1 },
+    ];
+    case 'hands':      return [
+      { mesh: rig.leftArm.hand.mesh,  sign: -1 },
+      { mesh: rig.rightArm.hand.mesh, sign: +1 },
+    ];
+    // For composite primitives (bust, glutes, hipBowl) there's no
+    // single named mesh — they're added inline during build. Skip
+    // for now; transforms on these are best applied via dim sliders.
+    case 'bust':       return [];
+    case 'glutes':     return [];
+    case 'shoulderWidth': return [];
+    default: return [];
+  }
+}
+
+// Walks state.parter.transforms after every rebuildRig and applies
+// each part's mirror/offset to its mesh(es). Captures original
+// position once per build so re-applying transforms doesn't drift —
+// each rebuild produces fresh meshes at default position.
+function applyPartTransformsToRig() {
+  if (!rig) return;
+  for (const [partName, t] of Object.entries(state.parter.transforms || {})) {
+    if (!t) continue;
+    const targets = getPartTransformTargets(partName);
+    for (const tgt of targets) {
+      if (!tgt.mesh) continue;
+      // Offsets — X is sign-flipped for paired parts so positive offX
+      // moves both outward / spreads them. Y + Z are shared.
+      tgt.mesh.position.x += (t.offX || 0) * tgt.sign;
+      tgt.mesh.position.y += (t.offY || 0);
+      tgt.mesh.position.z += (t.offZ || 0);
+      // Mirror — negative scale on one axis. Affects only this mesh,
+      // not the children of its pivot, so the bone chain still works.
+      if (t.mirror === 'x') tgt.mesh.scale.x *= -1;
+      if (t.mirror === 'y') tgt.mesh.scale.y *= -1;
+      if (t.mirror === 'z') tgt.mesh.scale.z *= -1;
+    }
+  }
+}
+
 let parterFolder = null;
 function rebuildParterFolder() {
   if (parterFolder) parterFolder.destroy();
@@ -858,22 +944,58 @@ function rebuildParterFolder() {
   parterFolder.add(state.parter, 'selected', Object.keys(PART_AXIS_MAP))
     .name('selected part')
     .onChange(() => {
-      // Reset sliders + last-trackers to 1.0 — the current dims
-      // become the new baseline for this part's next scaling pass.
+      // Reset scale sliders to 1.0 (current dims = new baseline).
       state.parter.scaleX = state.parter.lastX = 1.0;
       state.parter.scaleY = state.parter.lastY = 1.0;
       state.parter.scaleZ = state.parter.lastZ = 1.0;
+      // Load the saved mirror+offset for this part into the editor
+      // controls (or zeros if this is the first time it's been
+      // selected). Persisted in state.parter.transforms keyed by name.
+      const saved = state.parter.transforms[state.parter.selected] || {};
+      state.parter.mirror = saved.mirror || 'none';
+      state.parter.offX = saved.offX || 0;
+      state.parter.offY = saved.offY || 0;
+      state.parter.offZ = saved.offZ || 0;
       for (const c of parterFolder.controllers) c.updateDisplay();
     });
   // Plain number inputs — no min/max clamps. Typing any value sets
-  // the scale exactly; lil-gui's slider+clamp behavior stripped per
-  // user request so typed overrides aren't truncated.
+  // the scale exactly.
   parterFolder.add(state.parter, 'scaleX').name('scale X (width)')
     .onChange((v) => { applyPartAxis(state.parter.selected, 'x', v); rebuildRig(); });
   parterFolder.add(state.parter, 'scaleY').name('scale Y (height)')
     .onChange((v) => { applyPartAxis(state.parter.selected, 'y', v); rebuildRig(); });
   parterFolder.add(state.parter, 'scaleZ').name('scale Z (depth)')
     .onChange((v) => { applyPartAxis(state.parter.selected, 'z', v); rebuildRig(); });
+
+  // Per-part mirror + offset. Edited values are saved into
+  // state.parter.transforms[selected] on change so they persist
+  // when switching parts and re-apply after each rebuildRig.
+  const saveTransform = () => {
+    state.parter.transforms[state.parter.selected] = {
+      mirror: state.parter.mirror,
+      offX: state.parter.offX,
+      offY: state.parter.offY,
+      offZ: state.parter.offZ,
+    };
+    rebuildRig();
+  };
+  parterFolder.add(state.parter, 'mirror', ['none', 'x', 'y', 'z']).name('mirror axis')
+    .onChange(saveTransform);
+  parterFolder.add(state.parter, 'offX').name('offset X (left/right)')
+    .onChange(saveTransform);
+  parterFolder.add(state.parter, 'offY').name('offset Y (up/down)')
+    .onChange(saveTransform);
+  parterFolder.add(state.parter, 'offZ').name('offset Z (front/back)')
+    .onChange(saveTransform);
+  parterFolder.add({
+    reset: () => {
+      delete state.parter.transforms[state.parter.selected];
+      state.parter.mirror = 'none';
+      state.parter.offX = 0; state.parter.offY = 0; state.parter.offZ = 0;
+      for (const c of parterFolder.controllers) c.updateDisplay();
+      rebuildRig();
+    },
+  }, 'reset').name('reset mirror + offset');
 }
 rebuildParterFolder();
 
