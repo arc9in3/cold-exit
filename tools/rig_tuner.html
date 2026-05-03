@@ -865,11 +865,14 @@ function rebuildParterFolder() {
       state.parter.scaleZ = state.parter.lastZ = 1.0;
       for (const c of parterFolder.controllers) c.updateDisplay();
     });
-  parterFolder.add(state.parter, 'scaleX', 0.30, 2.0, 0.02).name('scale X (width)')
+  // Plain number inputs — no min/max clamps. Typing any value sets
+  // the scale exactly; lil-gui's slider+clamp behavior stripped per
+  // user request so typed overrides aren't truncated.
+  parterFolder.add(state.parter, 'scaleX').name('scale X (width)')
     .onChange((v) => { applyPartAxis(state.parter.selected, 'x', v); rebuildRig(); });
-  parterFolder.add(state.parter, 'scaleY', 0.30, 2.0, 0.02).name('scale Y (height)')
+  parterFolder.add(state.parter, 'scaleY').name('scale Y (height)')
     .onChange((v) => { applyPartAxis(state.parter.selected, 'y', v); rebuildRig(); });
-  parterFolder.add(state.parter, 'scaleZ', 0.30, 2.0, 0.02).name('scale Z (depth)')
+  parterFolder.add(state.parter, 'scaleZ').name('scale Z (depth)')
     .onChange((v) => { applyPartAxis(state.parter.selected, 'z', v); rebuildRig(); });
 }
 rebuildParterFolder();
