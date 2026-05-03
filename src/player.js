@@ -1711,14 +1711,31 @@ export function createPlayer(scene) {
       }
       if (rig._fbx.currentClipName !== target) {
         const action = rig.play(target, { fadeMs: 180, loop: !swinging });
-        // Diagnostic — log every clip switch with bind count so we can
-        // see WHY a clip isn't visibly playing (action returned null,
-        // tracks didn't bind, etc.). Throttled to ONE log per switch
-        // (currentClipName comparison gates).
         const bindings = action?._propertyBindings || [];
         const bound = bindings.filter(b => b && b.binding && b.binding.node).length;
         console.log(`[fbx] clip → ${target} (action=${!!action}, tracks=${action?.getClip().tracks.length}, bound=${bound}, speed=${planarSpeed.toFixed(2)})`);
         rig._fbx.currentClipName = target;
+        rig._fbx.currentAction = action; // remember for live timeScale tweaks below
+      }
+      // Match the playing clip's timeScale to actual ground speed so
+      // feet don't skate. Reference speeds are ballpark for the Motus
+      // pack — Walk authored for ~1.6 m/s, Jog ~3.5 m/s, CrouchWalk
+      // ~1.0 m/s. Outside locomotion clips (idle / aim_idle / fire),
+      // timeScale stays 1.0.
+      const SPEED_REF = {
+        W1_Walk_Aim_F_Loop_IPC: 1.6,
+        W1_Jog_Aim_F_Loop_IPC: 3.5,
+        W1_CrouchWalk_Aim_F_Loop_IPC: 1.0,
+      };
+      const ref = SPEED_REF[target];
+      if (ref && rig._fbx.currentAction) {
+        // Clamp so we don't get freakishly fast or frozen anims when
+        // the player tap-walks or hits speed peaks. 0.5..1.5 keeps
+        // the visible motion within natural cadence.
+        const ts = Math.max(0.5, Math.min(1.5, planarSpeed / ref));
+        rig._fbx.currentAction.timeScale = ts;
+      } else if (rig._fbx.currentAction) {
+        rig._fbx.currentAction.timeScale = 1.0;
       }
       rig.update(dt);
     } else {
