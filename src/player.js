@@ -2145,55 +2145,15 @@ export function createPlayer(scene) {
         //   anchor.y = cursorYaw - bodyYaw
         // So the BULLET ORIGIN always points at the cursor, even
         // while the body lags within the chest-twist deadzone.
-        if (rig._gunAnchor) {
-          const ads = state.adsAmount || 0;
-          // Track the dominant hand-bone's WORLD position so the
-          // gun visually pins to the hand. Damped lerp so the
-          // anchor doesn't shake with locomotion-clip arm-swing
-          // (~0.05 lerp factor per frame, snappy enough to
-          // visually follow but smoothed against stride).
-          const handBone = state.handedness === 'right'
-            ? rig.rightArm?.wrist
-            : rig.leftArm?.wrist;
-          if (handBone) {
-            handBone.getWorldPosition(_handTrackV);
-            // Convert world hand position to rig.group local.
-            rig.group.worldToLocal(_handTrackV);
-            // Hipfire keeps gun lower (chest height); ADS raises
-            // toward eye-line. Blend the hand-tracked Y with the
-            // target height.
-            const hipY = 1.30, adsY = 1.55;
-            const wantY = hipY + (adsY - hipY) * ads;
-            rig._gunAnchor.position.x += (_handTrackV.x - rig._gunAnchor.position.x) * 0.18;
-            rig._gunAnchor.position.y += (Math.max(_handTrackV.y, wantY * 0.9) - rig._gunAnchor.position.y) * 0.18;
-            rig._gunAnchor.position.z += (Math.max(_handTrackV.z, 0.30) - rig._gunAnchor.position.z) * 0.18;
-          } else {
-            const hipY = 1.30, adsY = 1.55;
-            rig._gunAnchor.position.set(0, hipY + (adsY - hipY) * ads, 0.45);
-          }
-          let gunYaw = cursorYaw - rig.group.rotation.y;
-          while (gunYaw >  Math.PI) gunYaw -= 2 * Math.PI;
-          while (gunYaw < -Math.PI) gunYaw += 2 * Math.PI;
-          // Pitch the gun anchor toward target Y when the cursor is
-          // significantly above or below chest height — head shots,
-          // dropped enemies, low-cover targets all need the muzzle
-          // angled rather than parallel-to-ground.
-          let gunPitch = 0;
-          if (aimPoint) {
-            const chestWorldY = rig.group.position.y + 1.30;
-            const dy = aimPoint.y - chestWorldY;
-            const dxz = Math.hypot(aimPoint.x - rig.group.position.x,
-                                   aimPoint.z - rig.group.position.z);
-            if (dxz > 0.1) {
-              // Apply only past a deadband so flat aim stays flat.
-              const rawPitch = Math.atan2(dy, dxz);
-              if      (rawPitch >  0.10) gunPitch = -(rawPitch - 0.10);
-              else if (rawPitch < -0.10) gunPitch = -(rawPitch + 0.10);
-              gunPitch = Math.max(-0.6, Math.min(0.6, gunPitch));
-            }
-          }
-          rig._gunAnchor.rotation.set(gunPitch, gunYaw, 0);
-        }
+        // Gun anchor is now parented to the dominant WRIST bone
+        // (set up in __useGaspMannequin). Position + rotation stay
+        // at their wrist-local bind values: the wrist bone itself
+        // is driven by arm IK + clavicle yaw, so the anchor (and
+        // gun) inherit world transform from the wrist. No per-frame
+        // hand-tracking lerp; no separate cursor-yaw on the anchor.
+        // Gun and hand move as one rigid unit, cursor following
+        // comes from the arm chain rotating toward cursor via the
+        // clavicle world-yaw injection in _runUpperBodyIK.
         // Hipfire pitch-up baseline — the GASP _Pistol clips
         // author the arms in low-ready (downward) pose. We add a
         // negative-pitch offset to aimPitch when NOT ADS so the
