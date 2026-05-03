@@ -2,8 +2,8 @@
   "id": "gasp_uefn",
   "label": "Unreal Engine GASP UEFN Mannequin (lowercase _l/_r suffix)",
   "scaleHint": 1.0,
-  "handedness": "char_left_is_world_plus_x",
-  "_handednessNote": "UEFN naming follows Unreal convention — _l = char's physical left = world +X. Maps to Cold Exit's rightArm (handedness flip per project convention).",
+  "handedness": "name_aligned",
+  "_handednessNote": "Earlier convention flipped char-left → code-rightArm so procgen's authored axes lined up. The UEFN clips already pose arms in world space (gun-forward in the locomotion clips), so we DON'T flip — code's rightArm stays the right arm. This makes _handAnchor() with state.handedness='right' attach the gun to the char's right hand (hand_r), matching the clip's posed gun-grip.",
   "bonePrefixStrip": [],
   "boneSuffixStripRegex": null,
   "boneMap": {
@@ -15,23 +15,23 @@
     "neck_01":    "neck",
     "head":       "head",
 
-    "clavicle_l": "rightArm.shoulder.pivot",
-    "upperarm_l": "rightArm.shoulder.pivot",
-    "lowerarm_l": "rightArm.elbow",
-    "hand_l":     "rightArm.wrist",
+    "clavicle_l": "leftArm.shoulder.pivot",
+    "upperarm_l": "leftArm.shoulder.pivot",
+    "lowerarm_l": "leftArm.elbow",
+    "hand_l":     "leftArm.wrist",
 
-    "clavicle_r": "leftArm.shoulder.pivot",
-    "upperarm_r": "leftArm.shoulder.pivot",
-    "lowerarm_r": "leftArm.elbow",
-    "hand_r":     "leftArm.wrist",
+    "clavicle_r": "rightArm.shoulder.pivot",
+    "upperarm_r": "rightArm.shoulder.pivot",
+    "lowerarm_r": "rightArm.elbow",
+    "hand_r":     "rightArm.wrist",
 
-    "thigh_l":    "rightLeg.thigh.pivot",
-    "calf_l":     "rightLeg.knee",
-    "foot_l":     "rightLeg.ankle",
+    "thigh_l":    "leftLeg.thigh.pivot",
+    "calf_l":     "leftLeg.knee",
+    "foot_l":     "leftLeg.ankle",
 
-    "thigh_r":    "leftLeg.thigh.pivot",
-    "calf_r":     "leftLeg.knee",
-    "foot_r":     "leftLeg.ankle"
+    "thigh_r":    "rightLeg.thigh.pivot",
+    "calf_r":     "rightLeg.knee",
+    "foot_r":     "rightLeg.ankle"
   },
   "logicalGroups": {
     "lower":  ["hips", "stomach", "leftLeg.*", "rightLeg.*"],
