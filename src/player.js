@@ -676,14 +676,22 @@ export function createPlayer(scene) {
     const ws = WEAPON_SCALE;
     const usingGunAnchor = !!(rig._gunAnchor && anchor === rig._gunAnchor);
     if (usingGunAnchor) {
-      // GASP path — anchor is a plain Object3D under rig.group.
-      // Local axes align with rig.group: +Z forward, +Y up, +X right.
-      // Gun barrel extends along +Z. No axis swap needed regardless
-      // of weapon class.
+      // GASP path — anchor is a plain Object3D under rig.group,
+      // tracking the dominant hand bone position. Gun barrel extends
+      // along anchor's +Z. Most of the gun's length sits FORWARD
+      // of the anchor; a small portion sits behind so the grip
+      // overlaps the hand instead of floating at the front.
+      // Was len/2 forward (grip at anchor, full gun forward) —
+      // for long rifles like the AK that put the muzzle ~1.4m in
+      // front of the body. New offset = len * 0.2 means box center
+      // is at 20% of length forward, so back of gun sits ~30cm
+      // behind anchor (at the wrist / inner hand) and muzzle is
+      // ~70% of length forward of anchor.
       gunMesh.rotation.set(0, 0, 0);
       inHandModel.rotation.set(0, 0, 0);
-      gunMesh.position.set(0, 0, (len / 2) * ws);
-      muzzle.position.set(0, 0, len * ws);
+      const fwd = len * 0.2;
+      gunMesh.position.set(0, 0, fwd * ws);
+      muzzle.position.set(0, 0, (fwd + len / 2) * ws);
       inHandModel.position.copy(gunMesh.position);
     } else if (isShouldered) {
       // Chest-local forward is +Z (no axis swap needed). Stock sits at
