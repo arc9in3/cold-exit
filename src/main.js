@@ -855,7 +855,12 @@ window.__useCharacter = async (composeId) => {
 // idle / walk / jog / crouch / fire automatically swap with player
 // state once this is loaded. Console: __usePistolPack()
 window.__usePistolPack = async () => {
-  const PACK = 'Assets/models/animations/FBX_Pistol_Starter_27A';
+  // GLB pack converted via tools/convert-pistol-pack.sh — root motion
+  // stripped at conversion time so feet don't clip the ground at
+  // runtime. Per the GLB-only directive (memory file
+  // feedback_glb_only_no_fbx_runtime.md) the FBX dir below is kept
+  // for reference but no runtime path loads from it.
+  const PACK = 'Assets/models/animations/FBX_Pistol_Starter_27A_glb';
   // Load order matters — first call brings in the mesh + skeleton.
   // We pick W1_Stand_Relaxed_Idle_IPC as the base because it's the
   // expected resting state, and the player.update clip mapping
@@ -885,19 +890,21 @@ window.__usePistolPack = async () => {
   ];
 
   const playerMod = await import('./player.js');
-  await playerMod.swapPlayerToFbxRig(player, scene, `${PACK}/Animation/In-Place/${baseClip}.fbx`);
+  await playerMod.swapPlayerToFbxRig(player, scene, `${PACK}/${baseClip}.glb`);
 
   const charMod = await import('./character_fbx.js');
-  const merge = async (name, subdir) => {
+  const merge = async (name) => {
     try {
-      await charMod.loadAnimationFBX(player.rig, `${PACK}/Animation/${subdir}/${name}.fbx`, name);
+      await charMod.loadAnimationFBX(player.rig, `${PACK}/${name}.glb`, name);
     } catch (e) {
       console.warn(`[pistol-pack] skipped ${name}:`, e.message);
     }
   };
-  for (const n of inPlace) await merge(n, 'In-Place');
-  for (const n of fire)    await merge(n, 'Fire');
-  for (const n of jump)    await merge(n, 'In-Place/Split_Jumps');
+  // The Blender batch flattens the per-pack subdir layout — every
+  // .glb sits at the top of $PACK so we just pass the bare clip name.
+  for (const n of inPlace) await merge(n);
+  for (const n of fire)    await merge(n);
+  for (const n of jump)    await merge(n);
 
   return `pistol pack loaded — ${player.rig.clipNames?.().length} clips: ${player.rig.clipNames?.().join(', ')}`;
 };
