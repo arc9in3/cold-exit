@@ -643,6 +643,25 @@ function tickFootsteps(dt, pi) {
   }
 }
 const player = createPlayer(scene);
+// Debug hooks for the FBX rig swap. Invoke from console:
+//   __useFbx('Assets/models/Idle.fbx')
+//   __useFbx('Assets/models/animations/FBX_Pistol_Starter_27A/Animation/In-Place/W1_Stand_Relaxed_Idle_IPC.fbx')
+//   __useFbx(null)   // revert to procgen
+window.__player = player;
+window.__scene = scene;
+window.__useFbx = async (url) => {
+  const mod = await import('./player.js');
+  if (!url) {
+    // Revert — show procgen rig, hide FBX.
+    if (player._procgenRig) {
+      player._procgenRig.group.visible = true;
+      player.rig = player._procgenRig;
+    }
+    return 'reverted to procgen';
+  }
+  await mod.swapPlayerToFbxRig(player, scene, url);
+  return `loaded ${url}, clips: ${player.rig.clipNames?.().join(', ')}`;
+};
 const input = new Input(renderer.domElement, camera, groundPlane);
 const combat = new Combat(scene);
 const dummies = new DummyManager(scene);

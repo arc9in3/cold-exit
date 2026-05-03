@@ -15,25 +15,46 @@ page.on('console', m => {
 });
 
 await page.goto('http://localhost:8080/', { waitUntil: 'networkidle' });
-await page.waitForTimeout(2500);
+await page.waitForTimeout(3500);
 
-// Try to swap the player rig once the game has booted.
-const result = await page.evaluate(async () => {
-  if (!window.__player || !window.__scene) {
-    return { ok: false, reason: 'no __player/__scene exposed' };
+// Click through the menus to actually drop into a level.
+await page.evaluate(() => {
+  const buttons = Array.from(document.querySelectorAll('button, .btn, [role="button"]'));
+  const start = buttons.find(b => /start.*run|start new|begin/i.test(b.textContent || ''));
+  if (start) start.click();
+});
+await page.waitForTimeout(2000);
+// Pick the first contract card.
+await page.evaluate(() => {
+  const cards = Array.from(document.querySelectorAll('.contract-card, [data-contract-id], .pick-contract-card'));
+  if (cards[0]) cards[0].click();
+});
+await page.waitForTimeout(1500);
+// Confirm/embark
+await page.evaluate(() => {
+  const buttons = Array.from(document.querySelectorAll('button, .btn'));
+  const go = buttons.find(b => /embark|confirm|deploy|begin contract|start run/i.test(b.textContent || ''));
+  if (go) go.click();
+});
+await page.waitForTimeout(5000);
+
+// Try to load the MotusMan + pistol pack via the new __useFbx hook.
+const url = process.env.FBX_URL
+  || 'Assets/models/animations/FBX_Pistol_Starter_27A/Animation/In-Place/W1_Stand_Relaxed_Idle_IPC.fbx';
+const result = await page.evaluate(async (u) => {
+  if (typeof window.__useFbx !== 'function') {
+    return { ok: false, reason: 'no __useFbx hook on window' };
   }
   try {
-    const mod = await import('/src/player.js');
-    if (!mod.swapPlayerToFbxRig) return { ok: false, reason: 'no swap helper exported' };
-    await mod.swapPlayerToFbxRig(window.__player, window.__scene, '/Assets/models/Idle.fbx');
-    return { ok: true, clips: window.__player.rig.clipNames?.() };
+    const out = await window.__useFbx(u);
+    return { ok: true, msg: out };
   } catch (e) {
     return { ok: false, reason: String(e?.message || e) };
   }
-});
+}, url);
 console.log('swap result:', JSON.stringify(result));
 
-await page.waitForTimeout(2000);
+await page.waitForTimeout(2500);
 await page.screenshot({ path: `${OUT}/_fbx-in-game.png` });
 await browser.close();
 console.log('saved:', `${OUT}/_fbx-in-game.png`);

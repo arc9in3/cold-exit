@@ -1662,17 +1662,42 @@ export function createPlayer(scene) {
     // a clip name; loadCharacterFBX returns a rig.play(name) helper
     // that handles the cross-fade.
     if (rig._fbx) {
-      // Clip selection — currently only 'idle' is shipped; walk /
-      // run / aim / fire would map here as more FBX clips are added.
-      // Falls back to whatever's playing if the requested clip isn't
-      // loaded (rig.play does loose-match on first non-empty clip).
+      // Position sync — game movement code drives `player.mesh`
+      // (the procgen rig group, kept in scene + hidden after swap).
+      // Mirror its world position + rotation onto the FBX group so
+      // the FBX character moves with the player.
+      const procgenGroup = window.__player?._procgenRig?.group;
+      if (procgenGroup) {
+        rig.group.position.copy(procgenGroup.position);
+        rig.group.rotation.copy(procgenGroup.rotation);
+      }
+      // Clip selection — maps player state to a Motus / Mixamo clip
+      // name. Pack-specific names (W1_Stand_Aim_Idle_IPC etc.) take
+      // priority, then bare names (idle / walk / run / aim) for
+      // Mixamo single-anim packs. Falls back to whatever's playing
+      // if the requested clip isn't loaded (rig.play does a loose
+      // first-non-empty-clip match).
       let target = 'idle';
-      if (state.attack && state.attack.phase !== 'idle') target = 'attack';
-      else if ((state.adsAmount || 0) > 0.5) target = 'aim';
-      else if (planarSpeed > 3.5) target = 'run';
-      else if (planarSpeed > 0.05) target = 'walk';
+      const aim = (state.adsAmount || 0) > 0.4;
+      const swinging = state.attack && state.attack.phase !== 'idle';
+      const moving = planarSpeed > 0.05;
+      const running = planarSpeed > 3.5;
+      const crouched = !!state.crouched;
+      if (swinging) {
+        target = crouched ? 'W1_Crouch_Fire_Single' : 'W1_Stand_Fire_Single';
+      } else if (crouched && moving) {
+        target = 'W1_CrouchWalk_Aim_F_Loop_IPC';
+      } else if (crouched) {
+        target = aim ? 'W1_Crouch_Aim_Idle_IPC' : 'W1_Crouch_Idle_IPC';
+      } else if (running) {
+        target = 'W1_Jog_Aim_F_Loop_IPC';
+      } else if (moving) {
+        target = 'W1_Walk_Aim_F_Loop_IPC';
+      } else {
+        target = aim ? 'W1_Stand_Aim_Idle_IPC' : 'W1_Stand_Relaxed_Idle_IPC';
+      }
       if (rig._fbx.currentClipName !== target) {
-        rig.play(target, { fadeMs: 180, loop: true });
+        rig.play(target, { fadeMs: 180, loop: !swinging });
         rig._fbx.currentClipName = target;
       }
       rig.update(dt);
