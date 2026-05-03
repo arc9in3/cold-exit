@@ -1,42 +1,56 @@
-# GASP rig follow-ups (captured from in-flight playtest feedback)
+# GASP rig follow-ups
 
-User flagged these during the GASP locomotion / ADS work, requesting we
-do a focused pass on them once locomotion + ADS swap settles.
+Status as of 2026-05-03 evening, after the audit + polish pass.
+
+## Closed
+
+- **~~Weapons way off / scale broken~~** — fixed. setWeapon got a
+  clean GASP-anchor path (`af20f70`); gun anchor now counter-scales
+  rig.group.scale (`af20f70`) so weapons render at authored size.
+
+- **~~Switching to rifle weapon class still looks pistol~~** — fixed.
+  selectGaspLocomotion now picks _Rifle clips when weapon.class is
+  rifle/shotgun/sniper/lmg regardless of adsAmount (`5bdcb12`).
+  Idle path also covered (`37b4e1e`).
+
+- **~~Swap-shoulders L key broken~~** — likely fixed. The gun anchor
+  now follows the dominant hand bone via per-frame world-position
+  lerp; swapping `state.handedness` reselects hand_l vs hand_r and
+  the anchor visibly tracks the new hand. Untested in real
+  gameplay; flag if it still doesn't work.
+
+- **~~Aim-pitch IK at heads/limbs/legs~~** — fixed. Gun anchor pitches
+  toward target Y when |angle to target| exceeds 5.7° deadband
+  (`103fe11`). Clamped ±0.6 rad so extreme angles don't break the
+  pose.
+
+- **~~No recoil animation~~** — fixed. kickRecoil now scales by
+  weapon class (sniper 0.18 → flame 0.04 rad chest pitch) on the
+  FBX path; decays quadratic over 180ms (`103fe11`, `3d8847a`).
+
+- **~~Memory leak: FBX swap stacks hidden rigs in scene~~** — fixed.
+  swapPlayerToFbxRig + revertPlayerToProcgen now dispose the prior
+  FBX rig (geometry, materials, mixer) before loading the next
+  (`706c56e`).
 
 ## Open
 
-- **Weapons way off / scale broken** after the gun-anchor refactor.
-  The setWeapon path that positions gunMesh / muzzle / inHandModel
-  was tuned for a wrist bone anchor (hand-local forward = -Y).
-  Switching to a chest-anchor Object3D under rig.group changes the
-  reference frame — positions / rotations / WEAPON_SCALE need a
-  re-pass for the new anchor.
+- **Locomotion clips' arms aim downward** in hipfire — by design
+  (GASP _Pistol clips are authored low-ready). ADS swap to _Rifle
+  clips fixes the aim-up case. Acceptable per user feedback.
 
-- **Switching to rifle weapon class still looks like player is
-  holding a pistol.** The locomotion clip set is locked to the
-  player.adsAmount toggle, not to the weapon class. Need to drive
-  clip-set selection from BOTH (or have rifle weapons force ADS
-  into "shouldered rifle" pose).
+- **L/R strafe mirror under ADS** — debug log + slowed body lerp
+  (`4ee5934`) shipped, awaiting user verification with
+  `__animDebug = true`. Body-relative input synthesis (`2671f2b`)
+  should make D-key always read as right strafe regardless of body
+  facing.
 
-- **Swap-shoulders (L key) isn't working anymore.** _handAnchor()
-  always returns rig._gunAnchor, ignoring state.handedness. Need
-  to either move the anchor laterally on swap, OR have two anchors
-  (one per shoulder) and toggle.
+- **Recoil pulse on additive layer instead of scalar offset** —
+  `src/anim/additive.js` has `triggerRecoil()` that goes through
+  the additive blend layer system (cleaner architecturally). Current
+  scalar-offset implementation works visually; switch is cosmetic
+  refactor, not a bug fix.
 
-- **Aim-pitch IK at heads/limbs/legs.** When cursor target Y is
-  significantly above or below chest, the gun should pitch toward
-  the target instead of staying parallel to ground. Currently the
-  anchor.rotation is forced to identity each frame.
-
-- **Locomotion clips' arms aim downward** — partially the GASP
-  pistol clips' authored low-ready pose. ADS swap to rifle clips
-  fixes the aiming-up case but the hipfire path will still read as
-  "low ready" while running. Acceptable per user feedback, just
-  visible.
-
-- **No recoil animation when shooting.** Each shot should pulse
-  a quick additive on chest + dominant upper arm (arm kicks back
-  ~0.06 rad, chest pitches back ~0.03 rad, decays over ~180ms).
-  `src/anim/additive.js` has triggerRecoil() that does exactly
-  this; needs to be wired to the player.update fire path on the
-  GASP rig.
+- **`rig.kind` not set on procgen** — adapter labels procgen rigs
+  as 'unknown' because adapt() only runs on FBX load. Cosmetic;
+  no behavior impact.
