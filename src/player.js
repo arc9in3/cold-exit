@@ -2161,26 +2161,17 @@ export function createPlayer(scene) {
           }
         }
         if (_gaspSmCfg) {
-          // Reinterpret velocity as BODY-RELATIVE for sector picking.
-          // Cold Exit's input (FORWARD/RIGHT vectors) is camera-relative,
-          // so pressing D produces a world vector that isn't necessarily
-          // body's-right when body faces away from camera (= ADS toward
-          // a forward cursor). User reports the mental model is body-
-          // relative: D = body's right strafe regardless of body facing.
-          // Synthesize a velocity in body-frame from the player's
-          // input intent (move.x, move.y), then feed that through the
-          // sector picker.
-          let pickVel = velocity;
-          if (input?.move && (Math.abs(input.move.x) + Math.abs(input.move.y) > 0.05)) {
-            const yaw = rig.group.rotation.y;
-            const fwdX = Math.sin(yaw), fwdZ = Math.cos(yaw);
-            const rgtX = Math.cos(yaw), rgtZ = -Math.sin(yaw);
-            pickVel = {
-              x: fwdX * input.move.y + rgtX * input.move.x,
-              z: fwdZ * input.move.y + rgtZ * input.move.x,
-            };
-          }
-          const pick = selectGaspLocomotion(_gaspSmCfg, state, planarSpeed, pickVel, rig.group.rotation.y);
+          // Use the ACTUAL world velocity for sector picking. Body is
+          // rigid-locked to cursor; velocity-vs-body-yaw gives the
+          // honest body-relative motion direction. When cursor and
+          // movement disagree (e.g. cursor left, D-key world right),
+          // the velocity ends up body-back-or-side and the picker
+          // selects the appropriate backstep / strafe clip.
+          // (Earlier body-relative synth from input.move was hiding
+          // this — D always returned body-right regardless of
+          // velocity, so cursor-vs-velocity disagreement read as
+          // walk_FR even when the real motion was a backpedal.)
+          const pick = selectGaspLocomotion(_gaspSmCfg, state, planarSpeed, velocity, rig.group.rotation.y);
           if (window.__animDebug && pick && rig._fbx.currentClipName !== pick.clip) {
             console.log(`[gasp] sector=${pick.sector} bucket=${pick.bucket} clip=${pick.clip}`,
               `body=${rig.group.rotation.y.toFixed(2)} cursor=${cursorYaw.toFixed(2)}`,
