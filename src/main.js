@@ -109,7 +109,7 @@ import { getCoopTransport } from './coop/transport.js';
 import { buildRig as _buildAllyRig, initAnim as _initAllyAnim, updateAnim as _updateAllyAnim } from './actor_rig.js';
 import {
   encodeEnemySnapshot, encodeSnapshotsPerPeer,
-  applyEnemySnapshot, applyLootSnapshot, applyDroneSnapshot,
+  applyLootSnapshot, applyDroneSnapshot,
   applyMegaBossSnapshot,
   pushSnapshotForInterp, pickInterpSnapshots, applyInterpolated,
   clearSnapshotBuffer,
@@ -121,7 +121,7 @@ window.__resetHints = resetHints;
 // "I'm on build XYZ" without inspecting the bundle. Date stamps the
 // version so a quick glance tells you how stale the build is. Both
 // values render into the bottom-right #build-version label.
-const BUILD_VERSION = '2d9d875+leaderboard-remote-in-hideout';
+const BUILD_VERSION = '2d9d875+coop-bodyloot-takeall-fix';
 // Build date intentionally bumped each deploy so the corner label
 // reflects the current snapshot.
 const BUILD_DATE    = '2026-05-01';
@@ -13181,7 +13181,11 @@ function tryInteract({ nearItem, body, bodies, npc, container }) {
         _bodyPile: true,
         _bodyCount: bodies.length,
         _groundRefs: refs,
-        _removeGround: ({ body: srcBody, item }) => {
+        // REGRESSION: bug-23 — argument may be undefined when ui_loot
+        // passes a stale refs[idx] (UI/loot index desync after rapid
+        // pickups). Default param keeps destructuring from throwing
+        // before the existing !srcBody guard runs.
+        _removeGround: ({ body: srcBody, item } = {}) => {
           if (!srcBody || !srcBody.loot) return;
           const i = srcBody.loot.indexOf(item);
           if (i >= 0) srcBody.loot.splice(i, 1);
