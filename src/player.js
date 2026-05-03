@@ -1977,8 +1977,13 @@ export function createPlayer(scene) {
           targetYaw = cursorYaw;
           lerpRate = 20;       // tight tracking under ADS
         } else if (moving) {
+          // Hipfire: body lerps SLOWLY toward movement direction so
+          // the directional locomotion clips (sidestep, backpedal,
+          // etc.) play visibly during the rotation transition. If
+          // the body snaps to movement instantly, the lower body
+          // always reads as walk_F regardless of input direction.
           targetYaw = movementYaw;
-          lerpRate = 14;       // body briskly tracks movement
+          lerpRate = 4;        // ~250ms to fully align (was 14/s)
         } else {
           targetYaw = cursorYaw;
           lerpRate = 5;        // idle rotation toward aim
@@ -2108,7 +2113,9 @@ export function createPlayer(scene) {
           if (window.__animDebug && pick && rig._fbx.currentClipName !== pick.clip) {
             console.log(`[gasp] sector=${pick.sector} bucket=${pick.bucket} clip=${pick.clip}`,
               `body=${rig.group.rotation.y.toFixed(2)} cursor=${cursorYaw.toFixed(2)}`,
-              `vel=(${velocity.x.toFixed(2)},${velocity.z.toFixed(2)}) ads=${ads}`);
+              `mv=(${input?.move?.x?.toFixed(2) ?? '?'},${input?.move?.y?.toFixed(2) ?? '?'})`,
+              `vel=(${velocity.x.toFixed(2)},${velocity.z.toFixed(2)})`,
+              `pickVel=(${pickVel.x?.toFixed(2)},${pickVel.z?.toFixed(2)}) ads=${ads}`);
           }
           if (pick && rig._fbx.currentClipName !== pick.clip) {
             const action = rig.play(pick.clip, { fadeMs: pick.playback?.fadeMs ?? 200, loop: pick.loop });
