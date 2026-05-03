@@ -1,0 +1,15 @@
+{
+  "_comment": "Melee stance. Knife/blade in main hand, forward and slightly low — ready to thrust. Off hand back and at chest height for balance / guard. Body bladed (turned ~25°) so leading shoulder faces target.",
+  "rotations": {
+    "chest": { "x": 0, "y": 0.45, "z": 0 },
+    "head":  { "x": 0, "y": -0.35, "z": 0 }
+  },
+  "ikTargets": {
+    "leftHand":  { "enabled": true, "x": -0.10, "y": 1.05, "z": 0.55 },
+    "rightHand": { "enabled": true, "x":  0.18, "y": 1.30, "z": 0.05 },
+    "head":      { "enabled": false, "x": 0, "y": 1.7, "z": 1 },
+    "leftFoot":  { "enabled": false, "x": -0.13, "y": 0, "z": 0 },
+    "rightFoot": { "enabled": false, "x":  0.13, "y": 0, "z": 0 }
+  },
+  "hips": { "y": 1.205 }
+}
