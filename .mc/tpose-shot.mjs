@@ -71,8 +71,9 @@ await page.evaluate(() => {
   // Reframe camera: pulled back to fit the full T-pose (arms extend
   // ~0.8m each side; rig stands ~2.5m tall) + slight 3/4 angle so
   // the wedge limbs read in 3D rather than flattening.
-  cam.position.set(3.0, 1.6, 5.0);
-  ctrl.target.set(0, 1.30, 0);
+  // Pulled back so the full T-pose armspan fits in frame.
+  cam.position.set(0, 1.4, 4.5);
+  ctrl.target.set(0, 1.20, 0);
   ctrl.update();
 });
 

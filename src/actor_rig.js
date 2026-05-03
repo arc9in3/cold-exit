@@ -497,14 +497,16 @@ export const DEFAULT_DIMS_FEMALE = {
     heel: { w: 0.06, h: 0.06, d: 0.05, y: -0.03, z: -0.08 },
   },
   arms: {
-    shoulderInset: 0.28,    // narrower shoulders
-    // Arms lengthened ~15% so they read as proportional rather than
-    // "retracted and short" against the narrower female frame. Slim
-    // radii combined with default-male length made the arms look
-    // truncated. Real-world armspan ≈ height; pushing here gets the
-    // tips down to mid-thigh as expected.
-    upperArmH: 0.40,
-    forearmH: 0.34,
+    shoulderInset: 0.32,    // shoulder width pulled outboard a notch
+    // Arms substantially longer per user feedback ("arms collapsed
+    // onto shoulders, not arms spread out"). Female arms inherit
+    // male-default 0.35/0.30 length unless overridden, and the
+    // narrower female frame made them read truncated. Pushing well
+    // past anatomical for visual readability — armspan now ~30%
+    // greater than height which is comic-style but reads correctly
+    // at game scale.
+    upperArmH: 0.52,
+    forearmH: 0.45,
     upperArmTopR: 0.085,
     upperArmBotR: 0.065,
     forearmTopR: 0.07,
