@@ -960,16 +960,20 @@ window.__useGaspMannequin = async () => {
     'M_Neutral_Crouch_Loop_FL_Pistol', 'M_Neutral_Crouch_Loop_FR_Pistol',
     'M_Neutral_Crouch_Loop_BL_Pistol', 'M_Neutral_Crouch_Loop_BR_Pistol',
     // ADS / shouldered (Rifle pose). selectGaspLocomotion swaps to
-    // these when state.adsAmount > 0.5.
+    // these for rifle-class weapons. Full 8-way coverage matching
+    // the pistol set.
     'M_Neutral_Stand_Idle_Loop_Rifle',
     'M_Neutral_Crouch_Idle_Loop_Rifle',
     'M_Neutral_Walk_Loop_F_Rifle',  'M_Neutral_Walk_Loop_B_Rifle',
     'M_Neutral_Walk_Loop_FL_Rifle', 'M_Neutral_Walk_Loop_FR_Rifle',
     'M_Neutral_Walk_Loop_BL_Rifle', 'M_Neutral_Walk_Loop_BR_Rifle',
-    'M_Neutral_Run_Loop_F_Rifle',
+    'M_Neutral_Run_Loop_F_Rifle',   'M_Neutral_Run_Loop_B_Rifle',
     'M_Neutral_Run_Loop_FL_Rifle',  'M_Neutral_Run_Loop_FR_Rifle',
-    'M_Neutral_Crouch_Loop_F_Rifle',
+    'M_Neutral_Run_Loop_BL_Rifle',  'M_Neutral_Run_Loop_BR_Rifle',
+    'M_Neutral_Sprint_Loop_F_Rifle',
+    'M_Neutral_Crouch_Loop_F_Rifle',  'M_Neutral_Crouch_Loop_B_Rifle',
     'M_Neutral_Crouch_Loop_FL_Rifle', 'M_Neutral_Crouch_Loop_FR_Rifle',
+    'M_Neutral_Crouch_Loop_BL_Rifle', 'M_Neutral_Crouch_Loop_BR_Rifle',
   ];
   for (const n of CLIPS) {
     try {
