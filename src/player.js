@@ -628,7 +628,18 @@ export function createPlayer(scene) {
     if (inHandModel.parent !== anchor) anchor.add(inHandModel);
 
     const ws = WEAPON_SCALE;
-    if (isShouldered) {
+    const usingGunAnchor = !!(rig._gunAnchor && anchor === rig._gunAnchor);
+    if (usingGunAnchor) {
+      // GASP path — anchor is a plain Object3D under rig.group.
+      // Local axes align with rig.group: +Z forward, +Y up, +X right.
+      // Gun barrel extends along +Z. No axis swap needed regardless
+      // of weapon class.
+      gunMesh.rotation.set(0, 0, 0);
+      inHandModel.rotation.set(0, 0, 0);
+      gunMesh.position.set(0, 0, (len / 2) * ws);
+      muzzle.position.set(0, 0, len * ws);
+      inHandModel.position.copy(gunMesh.position);
+    } else if (isShouldered) {
       // Chest-local forward is +Z (no axis swap needed). Stock sits at
       // anchor, barrel extends forward by `len`.
       gunMesh.rotation.set(0, 0, 0);
