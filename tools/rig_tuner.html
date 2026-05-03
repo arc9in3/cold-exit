@@ -1831,58 +1831,87 @@ const _vA = new THREE.Vector3(), _vB = new THREE.Vector3(), _vC = new THREE.Vect
 const _qA = new THREE.Quaternion(), _qB = new THREE.Quaternion();
 const _mA = new THREE.Matrix4();
 function solveTwoBoneIK(rootPivot, midPivot, upperLen, lowerLen, targetWorld, poleHint) {
-  // 1) target in root-local space
-  rootPivot.parent.updateWorldMatrix(true, false);
-  _mA.copy(rootPivot.parent.matrixWorld).invert();
-  _vA.copy(targetWorld).applyMatrix4(_mA);
-  // root pivot offset within parent (rootPivot.position is the joint origin)
-  _vA.sub(rootPivot.position);
-  // 2) clamp distance
-  const reach = upperLen + lowerLen;
-  const minReach = Math.abs(upperLen - lowerLen) * 1.02;
+  // Scale-correct IK that works in WORLD coordinates throughout. The
+  // previous version converted the target to rootPivot.parent's local
+  // frame via matrixWorld.invert() — which divides by parent world
+  // scale. For a parent with non-uniform scale (e.g. the JSON rig's
+  // chest inheriting (1.5, 1.5, 1.368) from the pelvis chain), the
+  // resulting math sheared and the chain landed ~0.8m off target.
+  //
+  // World-space approach:
+  //   1. target relative to root in WORLD axes/units
+  //   2. world bone lengths = local bone lengths × parent's avg world scale
+  //   3. solve cosine law in world units
+  //   4. convert the desired upper-bone WORLD direction into the
+  //      parent's world-rotation frame (NOT scale) — that's the local
+  //      direction the rotation must produce
+  //   5. set rootPivot.quaternion to rotate (0,-1,0) → that direction
+  //
+  // Step 4 ignores parent scale shear when applying rotation. For
+  // parent scales that are mostly uniform (Z slightly different from
+  // X/Y, like 1.5/1.5/1.368), the residual error is ~10% of position;
+  // for purely uniform parents, it's exact.
+  rootPivot.getWorldPosition(_vA);
+  _vB.copy(targetWorld).sub(_vA); // target relative to root in world
+  rootPivot.parent.getWorldScale(_vC);
+  const avgScale = (_vC.x + _vC.y + _vC.z) / 3;
+  const upperWorld = upperLen * avgScale;
+  const lowerWorld = lowerLen * avgScale;
+  const reach = upperWorld + lowerWorld;
+  const minReach = Math.abs(upperWorld - lowerWorld) * 1.02;
   let clamped = false;
-  let d = _vA.length();
-  if (d > reach * 0.999) { _vA.multiplyScalar(reach * 0.999 / d); d = reach * 0.999; clamped = true; }
-  if (d < minReach)      { _vA.normalize().multiplyScalar(minReach); d = minReach; clamped = true; }
-  // 3) law of cosines for elbow/knee bend angle
-  const a = upperLen, b = lowerLen;
+  let d = _vB.length();
+  if (d > reach * 0.999) { _vB.multiplyScalar(reach * 0.999 / d); d = reach * 0.999; clamped = true; }
+  if (d < minReach)      { _vB.normalize().multiplyScalar(minReach); d = minReach; clamped = true; }
+  const a = upperWorld, b = lowerWorld;
   const cosKnee = Math.max(-1, Math.min(1, (a*a + b*b - d*d) / (2 * a * b)));
-  const kneeAngle = Math.PI - Math.acos(cosKnee); // 0 = straight, π = fully folded
-  // 4) thigh/shoulder pitch — solve the upper-bone angle so the chain reaches the target
-  // Place the chain in the plane defined by `_vA` (root→target) and the pole hint.
-  // The upper bone makes angle α with the root→target vector where
-  //     cos α = (a² + d² − b²) / (2ad)
+  const kneeAngle = Math.PI - Math.acos(cosKnee);
   const cosUpper = Math.max(-1, Math.min(1, (a*a + d*d - b*b) / (2 * a * d)));
   const upperAngle = Math.acos(cosUpper);
-  // Build a basis: forward = root→target normalized, pole = poleHint perp to forward
-  const fwd = _vB.copy(_vA).normalize();
-  const pole = _vC.copy(poleHint).sub(fwd.clone().multiplyScalar(_vC.dot(fwd))).normalize();
-  // If poleHint was parallel to forward, fall back to world up
-  if (!isFinite(pole.x) || pole.lengthSq() < 1e-4) pole.set(0, 1, 0);
-  // Upper bone direction: rotate forward toward pole by upperAngle
-  const upper = new THREE.Vector3()
-    .copy(fwd).multiplyScalar(Math.cos(upperAngle))
-    .addScaledVector(pole, Math.sin(upperAngle));
-  // Convert upper-bone direction into a thigh/shoulder rotation. The
-  // upper bone in this rig hangs DOWN at rest (local +Y to -Y). So
-  // we want a quaternion that rotates (0, -1, 0) into `upper`.
-  _qA.setFromUnitVectors(new THREE.Vector3(0, -1, 0), upper);
+  const fwdWorld = _vB.clone().normalize();
+  // Pole hint is in LOCAL frame by convention — convert to world via
+  // parent's world rotation.
+  const parentWorldQuat = new THREE.Quaternion();
+  rootPivot.parent.getWorldQuaternion(parentWorldQuat);
+  const poleWorld = poleHint.clone().applyQuaternion(parentWorldQuat);
+  const polePerp = poleWorld.sub(fwdWorld.clone().multiplyScalar(poleWorld.dot(fwdWorld)));
+  if (!isFinite(polePerp.x) || polePerp.lengthSq() < 1e-4) polePerp.set(0, 1, 0);
+  polePerp.normalize();
+  const upperWorldDir = fwdWorld.clone().multiplyScalar(Math.cos(upperAngle))
+    .addScaledVector(polePerp, Math.sin(upperAngle));
+  // Convert world direction back to parent's rotation-only frame so
+  // the quaternion we set produces the right WORLD orientation (modulo
+  // parent scale shear).
+  const parentInvRot = parentWorldQuat.clone().invert();
+  const upperLocal = upperWorldDir.clone().applyQuaternion(parentInvRot).normalize();
+  _qA.setFromUnitVectors(new THREE.Vector3(0, -1, 0), upperLocal);
   rootPivot.quaternion.copy(_qA);
-  // Mid bone — bend by `kneeAngle` in the plane (forward × pole).
-  // The natural bend axis in the upper-bone's local frame is `pole`
-  // rotated into local frame by inverse of root quaternion.
-  const localPole = pole.clone().applyQuaternion(_qA.clone().invert());
-  // For elbow/knee: rotate around the local pole axis by kneeAngle
-  _qB.setFromAxisAngle(new THREE.Vector3(1, 0, 0), kneeAngle);
-  // Use the X-axis hinge (the rig's knee/elbow rotates around its
-  // local X) — the rig is built with X as the bend axis, so a single
-  // rotation.x = kneeAngle is the canonical bend.
-  void localPole;
+  // Force a world matrix update on the upperarm chain so the elbow's
+  // world position reflects the new shoulder rotation. Without this
+  // getWorldPosition() returns stale data and the forearm aim is off.
+  rootPivot.updateMatrixWorld(true);
+  // Forearm aim — point the lower bone directly at the target. This
+  // handles the elbow bend axis correctly regardless of how the
+  // shoulder rotated, instead of the old "always bend around local X"
+  // assumption (which only worked when arms hung straight down).
+  const elbowWorldPos = new THREE.Vector3();
+  midPivot.getWorldPosition(elbowWorldPos);
+  const forearmDirWorld = new THREE.Vector3().subVectors(targetWorld, elbowWorldPos).normalize();
+  const elbowParentQuat = new THREE.Quaternion();
+  midPivot.parent.getWorldQuaternion(elbowParentQuat);
+  const forearmDirLocal = forearmDirWorld.clone()
+    .applyQuaternion(elbowParentQuat.invert())
+    .normalize();
+  _qB.setFromUnitVectors(new THREE.Vector3(0, -1, 0), forearmDirLocal);
   midPivot.quaternion.copy(_qB);
+  void kneeAngle;
   return clamped;
 }
 
 // Estimate bone segment lengths from rig dims, scaled by the rig.
+// dims.arms.upperArmH / forearmH are in PARENT-LOCAL frame (post-scale).
+// solveTwoBoneIK above multiplies by parent's avg world scale to get
+// world units, so we keep the multiplication out of here.
 function ikBoneLens() {
   const rs = rig.scale;
   const dims = rig.dims;

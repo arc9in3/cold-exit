@@ -1,12 +1,12 @@
 {
-  "_comment": "Rifle held at hip, ready stance. PLACEHOLDER VALUES — needs in-editor authoring with the user driving gizmos. Loads + applies cleanly via the new pipeline; rotations need creative tuning.",
+  "_comment": "Rifle held at hip. IK-driven hand placement: main hand (code 'leftHand' = char's right) on grip near right hip, off hand (code 'rightHand' = char's left) on forepart further forward. Light chest twist + head turn. IK solver computes shoulder + elbow rotations.",
   "rotations": {
     "chest": { "x": 0, "y": 0.18, "z": 0 },
     "head":  { "x": 0.05, "y": -0.10, "z": 0 }
   },
   "ikTargets": {
-    "leftHand":  { "enabled": false, "x": -0.18, "y": 1.10, "z": 0.28 },
-    "rightHand": { "enabled": false, "x":  0.06, "y": 1.18, "z": 0.55 },
+    "leftHand":  { "enabled": true, "x": -0.18, "y": 1.10, "z": 0.28 },
+    "rightHand": { "enabled": true, "x":  0.06, "y": 1.18, "z": 0.55 },
     "head":      { "enabled": false, "x": 0, "y": 1.7, "z": 1 },
     "leftFoot":  { "enabled": false, "x": -0.13, "y": 0, "z": 0 },
     "rightFoot": { "enabled": false, "x":  0.13, "y": 0, "z": 0 }
