@@ -119,10 +119,18 @@ function _runUpperBodyIK(rig, state, aimPoint, aimPitch, dt = 1/60) {
   // so the arms (children of spine_05's clavicle) inherit the full
   // chest twist.
   // LEAN REDUCTION step 1 — halved from baseline so we can dial
-  // Spine distribution all zeroed — body itself locks to cursor
-  // (rigid ADS-style yaw tracking) so chest twist is 0 by
-  // construction. Spine pitch also off; gun anchor handles target-Y
-  // via its own pitch IK. Bones stay at their bind-local pose.
+  // Spine distribution all zeroed for cursor-tracking (body itself
+  // locks to cursor). But the upper spine gets a STATIC stance
+  // offset when the player is holding a rifle-class weapon — the
+  // shouldered-rifle pose naturally angles the chest ~15° toward
+  // the dominant (right) shoulder so the gun stock seats against
+  // the pectoral. Distributed across upper spine bones with a
+  // negative yaw (right shoulder forward in Three.js +X→-Z convention).
+  const cls = state?.equipped?.class;
+  const isRifleStance = cls === 'rifle' || cls === 'shotgun'
+    || cls === 'sniper' || cls === 'lmg';
+  const stanceYaw = isRifleStance ? -0.26 : 0;  // -15° = right shoulder fwd
+  const STANCE_WEIGHTS = [0, 0.05, 0.18, 0.35, 0.42];  // sum = 1.0; stacked on upper spine
   const YAW_WEIGHTS   = [0, 0, 0, 0, 0];
   const PITCH_WEIGHTS = [0, 0, 0, 0, 0];
   const applyChain = (bone, yawAmt, pitchAmt) => {
@@ -138,7 +146,8 @@ function _runUpperBodyIK(rig, state, aimPoint, aimPitch, dt = 1/60) {
     bone.updateMatrixWorld(true);
   };
   for (let i = 1; i < fbx._spineChain.length; i++) {
-    applyChain(fbx._spineChain[i], aimYaw * YAW_WEIGHTS[i], aimPitch * PITCH_WEIGHTS[i]);
+    const yaw = aimYaw * YAW_WEIGHTS[i] + stanceYaw * STANCE_WEIGHTS[i];
+    applyChain(fbx._spineChain[i], yaw, aimPitch * PITCH_WEIGHTS[i]);
   }
   // Neck + head: yaw ONLY. User feedback — pitching the head/neck
   // reads as a lean and breaks the silhouette. Head turns to face
