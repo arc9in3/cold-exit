@@ -220,6 +220,12 @@ function defaultPrim(type) {
     pos: { x: 0, y: 1.0, z: 0 },
     rot: { x: 0, y: 0, z: 0 },
     scale: { x: 1, y: 1, z: 1 },
+    // When true (default), scale propagates to descendants via the
+    // group transform — scaling the pelvis bigger also scales the
+    // legs / arms attached to it. When false, scale is applied to
+    // the MESH only, so this primitive grows / shrinks while its
+    // children stay at their authored size.
+    scaleChildren: true,
     color: '#3a4048',
     opacity: 1.0,
   };
@@ -313,21 +319,32 @@ function rebuild() {
     groupIndex.set(p.id, g);
   }
 
-  // Parent groups according to parentId
+  // Parent groups according to parentId.
+  // scaleChildren TRUE (default): group.scale = primitive.scale, mesh.scale = 1
+  //   → both this primitive AND its descendants scale together.
+  // scaleChildren FALSE: group.scale = 1, mesh.scale = primitive.scale
+  //   → only this primitive's mesh scales; descendants attached to
+  //   the group stay at their authored size.
   for (const p of primitives) {
     const g = groupIndex.get(p.id);
     const parent = p.parentId ? groupIndex.get(p.parentId) : rootGroup;
     parent.add(g);
-    // Local transform on the group
     g.position.set(p.pos.x, p.pos.y, p.pos.z);
     g.rotation.set(p.rot.x, p.rot.y, p.rot.z);
-    g.scale.set(p.scale.x, p.scale.y, p.scale.z);
+    if (p.scaleChildren !== false) {
+      g.scale.set(p.scale.x, p.scale.y, p.scale.z);
+    } else {
+      g.scale.set(1, 1, 1);
+    }
   }
 
   // Build mesh inside each group
   for (const p of primitives) {
     const g = groupIndex.get(p.id);
     const m = buildMeshFor(p);
+    if (p.scaleChildren === false) {
+      m.scale.set(p.scale.x, p.scale.y, p.scale.z);
+    }
     g.add(m);
     meshIndex.set(p.id, m);
   }
@@ -369,18 +386,30 @@ tControls.addEventListener('dragging-changed', (e) => {
   controls.enabled = !e.value;
   // Drag started — push undo snapshot before any value change.
   if (e.value) pushUndo();
-  // Drag ended — flush the group's live transform back into the
-  // primitive data so save/export captures the move.
+  // Drag ended — flush the live transform back into the primitive
+  // data so save/export captures the move. Scale source depends on
+  // scaleChildren: if false the gizmo was attached to the MESH
+  // (so descendants stay put); if true it was attached to the GROUP
+  // (descendants scale with parent).
   if (!e.value && selectedId) {
     const p = primIndex.get(selectedId);
     const g = groupIndex.get(selectedId);
+    const m = meshIndex.get(selectedId);
     if (p && g) {
+      // Position always lives on the group regardless of mode.
       p.pos.x = g.position.x;
       p.pos.y = g.position.y;
       p.pos.z = g.position.z;
-      p.scale.x = g.scale.x;
-      p.scale.y = g.scale.y;
-      p.scale.z = g.scale.z;
+      // Scale: pull from whichever object the gizmo was attached to.
+      if (display.gizmoMode === 'scale' && p.scaleChildren === false && m) {
+        p.scale.x = m.scale.x;
+        p.scale.y = m.scale.y;
+        p.scale.z = m.scale.z;
+      } else {
+        p.scale.x = g.scale.x;
+        p.scale.y = g.scale.y;
+        p.scale.z = g.scale.z;
+      }
       rebuildEditor();
     }
   }
@@ -392,9 +421,19 @@ function attachGizmoToSelected() {
     tControls.detach();
     return;
   }
+  const p = primIndex.get(selectedId);
   const g = groupIndex.get(selectedId);
-  if (g) tControls.attach(g);
-  else tControls.detach();
+  const m = meshIndex.get(selectedId);
+  // For scale + scaleChildren=false, attach to the mesh so the
+  // gizmo's drag scales just the mesh (descendants outside the mesh
+  // are unaffected). Translate always uses the group.
+  if (display.gizmoMode === 'scale' && p && p.scaleChildren === false && m) {
+    tControls.attach(m);
+  } else if (g) {
+    tControls.attach(g);
+  } else {
+    tControls.detach();
+  }
 }
 
 let selRing = null;
@@ -523,7 +562,15 @@ function rebuildEditor() {
       .name('rot ' + axis)
       .onChange(rebuild));
   }
-  // Scale
+  // Scale + scale-children toggle. When `scaleChildren` is OFF, scale
+  // applies to the mesh only — descendants attached to this primitive
+  // stay at their authored size. Useful for resizing the pelvis/root
+  // without warping the legs + arms attached to it.
+  if (p.scaleChildren == null) p.scaleChildren = true;
+  editorControls.push(editorFolder
+    .add(p, 'scaleChildren')
+    .name('scale children')
+    .onChange(() => { rebuild(); attachGizmoToSelected(); }));
   for (const axis of ['x', 'y', 'z']) {
     editorControls.push(editorFolder
       .add(p.scale, axis, 0.05, 5, 0.01)
