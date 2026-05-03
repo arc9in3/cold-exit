@@ -2143,6 +2143,16 @@ export function createPlayer(scene) {
           let gunYaw = cursorYaw - rig.group.rotation.y;
           while (gunYaw >  Math.PI) gunYaw -= 2 * Math.PI;
           while (gunYaw < -Math.PI) gunYaw += 2 * Math.PI;
+          // Counter the rifle-stance bladed twist so the gun
+          // re-aligns with the cursor instead of pointing along
+          // the bladed body axis. The spine rotation moves the
+          // hands (and the visible gun) ~15° toward the right
+          // shoulder; subtract that here so the muzzle ends up
+          // back on the cursor line.
+          const _cls2 = state?.equipped?.class;
+          const _isRifle = _cls2 === 'rifle' || _cls2 === 'shotgun'
+            || _cls2 === 'sniper' || _cls2 === 'lmg';
+          if (_isRifle) gunYaw -= 0.26;
           // Pitch the gun anchor toward target Y when the cursor is
           // significantly above or below chest height — head shots,
           // dropped enemies, low-cover targets all need the muzzle
