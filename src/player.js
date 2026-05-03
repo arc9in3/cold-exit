@@ -1825,16 +1825,18 @@ export function createPlayer(scene) {
       // 0.55m gets us there empirically (1.15× scaled rig with
       // ~1.0m crouched leg compression). Eased lerp for smooth
       // transitions in/out of crouch.
-      const wantSink = state.crouched ? -0.55 : 0;
-      // Asymmetric rate — crouching DOWN snaps fast (25/s) so the
-      // body tracks the leg-fold without feet clipping ground;
-      // standing back up eases gentler (12/s) so the silhouette
-      // pop isn't jarring.
+      // Crouch sink — calibrated so feet stay AT ground level when
+      // the leg-fold from the clip lifts them (= silhouette appears
+      // shorter without clipping through ground). 0.35m matches
+      // ~0.30m visible ankle-rise from the GASP crouch loops at
+      // 1.15× rig scale. Symmetric 18/s lerp — fast enough that
+      // crouch-walk doesn't flicker, gentle enough that the
+      // standing-up rise isn't a snap. Final position clamped to
+      // >=0 so even mid-transition we never go subterranean.
+      const wantSink = state.crouched ? -0.35 : 0;
       const cur = rig._fbx._crouchSinkY ?? 0;
-      const goingDown = wantSink < cur;
-      const rate = goingDown ? 25 : 12;
-      rig._fbx._crouchSinkY = cur + (wantSink - cur) * (1 - Math.exp(-rate * dt));
-      rig.group.position.y += rig._fbx._crouchSinkY;
+      rig._fbx._crouchSinkY = cur + (wantSink - cur) * (1 - Math.exp(-18 * dt));
+      rig.group.position.y = Math.max(0, rig.group.position.y + rig._fbx._crouchSinkY);
       // The SkinnedMesh inside the rig may have its OWN position
       // mutated by the loaded clip (some packs author the mesh's
       // root translation rather than a hip-bone position track).
@@ -1867,7 +1869,11 @@ export function createPlayer(scene) {
         let dyaw = cursorYaw - rig.group.rotation.y;
         while (dyaw >  Math.PI) dyaw -= 2 * Math.PI;
         while (dyaw < -Math.PI) dyaw += 2 * Math.PI;
-        const TWIST_LIMIT = Math.PI / 4;          // 45° deadzone
+        // 75° deadzone — wider than the procgen rig's 45° because
+        // the GASP locomotion clips already hold the upper body
+        // forward; the chest can twist further before reading as
+        // "sideways" silhouette. Beyond 75° the body catches up.
+        const TWIST_LIMIT = Math.PI * 5 / 12;     // 75° deadzone
         const BODY_CATCH_RATE = 6.0;              // 1/s — body lerp toward cursor when outside deadzone
         const overshoot = Math.max(0, Math.abs(dyaw) - TWIST_LIMIT) * Math.sign(dyaw);
         rig.group.rotation.y += overshoot * (1 - Math.exp(-BODY_CATCH_RATE * dt));
