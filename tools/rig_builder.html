@@ -766,6 +766,7 @@ ioFolder.add({
 const PRESETS = {
   bodyshapes: '../Assets/anatomy/bodyshapes-rig.json',
   female:     '../Assets/anatomy/female-rig.json',
+  male:       '../Assets/anatomy/male-rig.json',
 };
 async function loadPreset(name) {
   const url = PRESETS[name];
@@ -800,6 +801,9 @@ ioFolder.add({
 ioFolder.add({
   female: () => loadPreset('female'),
 }, 'female').name('load preset → female');
+ioFolder.add({
+  male: () => loadPreset('male'),
+}, 'male').name('load preset → male');
 // Expose for headless verification + devtools poking.
 window.__loadPreset = loadPreset;
 
