@@ -1001,13 +1001,81 @@ gui.domElement.addEventListener('focusout', () => { _kbField = null; }, true);
       }
     },
   }, 'savePose').name('save pose to Assets/poses/');
+  // ============================================================
+  // WEAPON STUB — visualization aid for pose authoring
+  // ============================================================
+  // A simple box mesh that auto-positions between the two hand IK
+  // targets. Lets you see whether the hand placement reads as a
+  // believable weapon hold instead of guessing from hand positions
+  // alone. Size + color picked by pose name prefix (rifle-* / smg-*
+  // / melee). Hidden for pose names that don't suggest a weapon
+  // (idle, etc.) or when one of the hand IK targets is disabled.
+  let weaponStub = null;
+  const ensureWeaponStub = () => {
+    if (weaponStub) return weaponStub;
+    const geo = new THREE.BoxGeometry(1, 1, 1); // unit cube; scaled per pose
+    // MeshBasicMaterial bypasses scene lighting so the weapon color is
+    // exact regardless of the rig_tuner's dim default lighting. This is
+    // a debug visualization, not a final asset, so we don't want it
+    // affected by shadows or ambient brightness.
+    const mat = new THREE.MeshBasicMaterial({ color: 0xffaa44 });
+    weaponStub = new THREE.Mesh(geo, mat);
+    weaponStub.castShadow = false;
+    weaponStub.receiveShadow = false;
+    // Render on top of the rig — debug-only viz, want it always visible
+    // even when arm geometry would otherwise occlude it.
+    weaponStub.renderOrder = 999;
+    weaponStub.material.depthTest = false;
+    weaponStub.material.transparent = true;
+    weaponStub.material.opacity = 0.92;
+    scene.add(weaponStub);
+    return weaponStub;
+  };
+  const weaponSpec = (poseName) => {
+    if (!poseName) return null;
+    // Bright high-contrast colors so the weapon clearly reads against
+    // the dark rig — these are debug/preview values, not in-game art.
+    if (poseName.startsWith('rifle')) return { length: 0.85, thickness: 0.07, color: 0xffaa44 };
+    if (poseName.startsWith('smg'))   return { length: 0.50, thickness: 0.06, color: 0xff6644 };
+    if (poseName === 'melee')         return { length: 0.30, thickness: 0.03, color: 0xddffff };
+    return null;
+  };
+  const updateWeaponStub = (poseName, ikData) => {
+    const spec = weaponSpec(poseName);
+    const w = ensureWeaponStub();
+    const left = ikData?.leftHand;
+    const right = ikData?.rightHand;
+    if (!spec || !left || !right || !left.enabled || !right.enabled) {
+      w.visible = false;
+      return;
+    }
+    // Axis from main hand (leftHand in code) to off hand (rightHand).
+    // Place the weapon center at the midpoint, oriented along that axis.
+    const a = new THREE.Vector3(left.x, left.y, left.z);
+    const b = new THREE.Vector3(right.x, right.y, right.z);
+    const mid = a.clone().add(b).multiplyScalar(0.5);
+    const axis = b.clone().sub(a);
+    const handSpan = axis.length();
+    const dir = axis.clone().normalize();
+    // Default box X-axis aligns to the hand-to-hand axis.
+    const q = new THREE.Quaternion().setFromUnitVectors(new THREE.Vector3(1, 0, 0), dir);
+    w.position.copy(mid);
+    w.quaternion.copy(q);
+    // Length = max(handSpan + 0.15, spec.length) so weapon extends a
+    // bit past whichever hand is gripping closer to the muzzle.
+    const len = Math.max(handSpan + 0.15, spec.length);
+    w.scale.set(len, spec.thickness, spec.thickness);
+    w.material.color.setHex(spec.color);
+    w.visible = true;
+  };
+
   // Load pose JSON and apply: set joint rotations, IK target positions,
   // hips Y. Missing rotations stay at 0; missing IK targets get disabled.
   // Side effect: freezes procedural anim — otherwise updateAnim() would
   // overwrite the pose on the very next frame. The IK solver still
   // runs on top of the frozen pose so IK-pinned chains (hands on
   // weapon) keep working.
-  const applyPose = (data) => {
+  const applyPose = (data, poseName = null) => {
     pushUndo();
     state.pose.freeze = true;
     // Zero everything first so a partial pose doesn't mix with current.
@@ -1031,6 +1099,7 @@ gui.domElement.addEventListener('focusout', () => { _kbField = null; }, true);
       }
     }
     if (data.hips && typeof data.hips.y === 'number') rig.hips.position.y = data.hips.y;
+    updateWeaponStub(poseName, data.ikTargets);
     // Sync the freeze checkbox UI so the user sees the state change.
     gui.controllersRecursive().forEach(c => c.updateDisplay());
     refreshEditorUI();
@@ -1043,7 +1112,7 @@ gui.domElement.addEventListener('focusout', () => { _kbField = null; }, true);
         const r = await fetch(`../Assets/poses/${encodeURIComponent(loadProxy.name)}.json`);
         if (!r.ok) throw new Error(`HTTP ${r.status}`);
         const data = await r.json();
-        applyPose(data);
+        applyPose(data, loadProxy.name);
         showToast(`Loaded ${loadProxy.name}`);
       } catch (e) {
         showToast(`Load failed: ${e.message}`);
