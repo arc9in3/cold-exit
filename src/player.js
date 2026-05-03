@@ -1869,11 +1869,11 @@ export function createPlayer(scene) {
         let dyaw = cursorYaw - rig.group.rotation.y;
         while (dyaw >  Math.PI) dyaw -= 2 * Math.PI;
         while (dyaw < -Math.PI) dyaw += 2 * Math.PI;
-        // 75° deadzone — wider than the procgen rig's 45° because
-        // the GASP locomotion clips already hold the upper body
-        // forward; the chest can twist further before reading as
-        // "sideways" silhouette. Beyond 75° the body catches up.
-        const TWIST_LIMIT = Math.PI * 5 / 12;     // 75° deadzone
+        // 90° deadzone — chest can twist a full quarter-turn before
+        // the body needs to catch up. GASP clips hold the upper
+        // body forward in their authored pose so the silhouette
+        // reads correctly through this range.
+        const TWIST_LIMIT = Math.PI / 2;          // 90° deadzone
         const BODY_CATCH_RATE = 6.0;              // 1/s — body lerp toward cursor when outside deadzone
         const overshoot = Math.max(0, Math.abs(dyaw) - TWIST_LIMIT) * Math.sign(dyaw);
         rig.group.rotation.y += overshoot * (1 - Math.exp(-BODY_CATCH_RATE * dt));

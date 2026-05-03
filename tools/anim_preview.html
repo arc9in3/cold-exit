@@ -138,9 +138,11 @@ async function loadCharacter(url) {
   // Scale match — UEFN already at meters; pistol-pack mannequin came converted at 1.15
   const isUefn = url.includes('UEFN');
   if (!isUefn) charGroup.scale.setScalar(1.15);
-  // Anchor mixer to the SkinnedMesh so clip tracks bind to the
-  // skinned skeleton (otherwise duplicate-deformer issue keeps
-  // mesh in bind pose).
+  // Anchor mixer to the SkinnedMesh — clip tracks bind by NAME
+  // against bones in the skeleton. We DON'T want clips' top-level
+  // "root" tracks (which carry the source FBX's import-scale +
+  // axis bake) to apply to the loaded mannequin's root because
+  // they'd shrink it 100× / rotate it 90°.
   let sk = null;
   charGroup.traverse(o => { if (o.isSkinnedMesh && !sk) sk = o; });
   mixer = new THREE.AnimationMixer(sk || charGroup);
@@ -222,7 +224,14 @@ async function playClip(name) {
     return;
   }
   if (activeAction) activeAction.fadeOut(0.15);
-  const clip = clips[0];
+  // Drop tracks targeting the clip's top-level "root" object —
+  // those carry import-scale + axis bake from the source FBX
+  // conversion and would shrink/rotate the whole mannequin if
+  // applied. Keeping ONLY tracks that bind to bones (everything
+  // under the SkinnedMesh's skeleton) gives clean playback.
+  const filtered = clips[0].clone();
+  filtered.tracks = filtered.tracks.filter(t => !/^root\./.test(t.name));
+  const clip = filtered;
   activeAction = mixer.clipAction(clip);
   activeAction.setLoop(loop ? THREE.LoopRepeat : THREE.LoopOnce, Infinity);
   activeAction.timeScale = speed;
