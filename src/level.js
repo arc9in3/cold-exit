@@ -423,17 +423,40 @@ export class Level {
     };
 
     if (Math.random() < 0.85) addBranch('subBoss');
-    if (Math.random() < 0.70) addBranch('merchant');
-    if (Math.random() < 0.50) addBranch('healer');
+    // Track shop placements so we can guarantee at least one shop room
+    // per level. With 8 independent rolls (merchant 70%, healer 50%,
+    // gunsmith 35%, armorer 30%, tailor 25%, relicSeller 18%,
+    // blackMarket 12%) the probability of every roll failing is small
+    // (~2.6%) but non-zero, plus addBranch can silently fail when no
+    // free door is available — bug #47 ("sometimes there is no shop").
+    // Force a merchant placement at the end if nothing landed.
+    let shopPlaced = false;
+    const tryShop = (type, p) => {
+      if (Math.random() < p) {
+        if (addBranch(type)) shopPlaced = true;
+      }
+    };
+    tryShop('merchant', 0.70);
+    tryShop('healer', 0.50);
     // Specialty scatter rooms — each independently rolled so players see
     // different shop lineups between runs.
-    if (Math.random() < 0.35) addBranch('gunsmith');
-    if (Math.random() < 0.30) addBranch('armorer');
-    if (Math.random() < 0.25) addBranch('tailor');
-    if (Math.random() < 0.18) addBranch('relicSeller');
-    if (Math.random() < 0.12) addBranch('blackMarket');
-    // Rare bear merchant branch — 25% per level.
+    tryShop('gunsmith', 0.35);
+    tryShop('armorer', 0.30);
+    tryShop('tailor', 0.25);
+    tryShop('relicSeller', 0.18);
+    tryShop('blackMarket', 0.12);
+    // Rare bear merchant branch — 25% per level. Doesn't satisfy the
+    // shop guarantee (it's a bonus, not the regular merchant rotation).
     if (Math.random() < 0.25) addBranch('bearMerchant');
+    // Guarantee at least one regular shop room. Falls back through the
+    // shop types in order until one of them places (addBranch can
+    // return null when the level is door-saturated).
+    if (!shopPlaced) {
+      for (const type of ['merchant', 'healer', 'gunsmith', 'armorer',
+                          'tailor', 'relicSeller', 'blackMarket']) {
+        if (addBranch(type)) { shopPlaced = true; break; }
+      }
+    }
 
     this.rooms = rooms;
     this.bossRoomId = rooms.find(r => r.type === 'boss').id;
