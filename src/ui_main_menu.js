@@ -13,7 +13,8 @@ export class MainMenuUI {
                 getQuality, setQuality, getDevTools, setDevTools,
                 getMusicEnabled, setMusicEnabled,
                 getPlayerName, setPlayerName,
-                getCharacterStyle, setCharacterStyle }) {
+                getCharacterStyle, setCharacterStyle,
+                onGrantAllCurrencies, onClearSaveData }) {
     this.onPlay = onPlay;
     this.onQuickStart = onQuickStart;
     this.onTutorial = onTutorial;
@@ -32,6 +33,10 @@ export class MainMenuUI {
     this.setPlayerName = setPlayerName || (() => {});
     this.getCharacterStyle = getCharacterStyle || (() => 'operator');
     this.setCharacterStyle = setCharacterStyle || (() => {});
+    // Account-debug hooks. Optional — when not wired, the settings
+    // section is hidden so production builds don't ship the buttons.
+    this.onGrantAllCurrencies = onGrantAllCurrencies || null;
+    this.onClearSaveData = onClearSaveData || null;
 
     this.visible = false;
     this.view = 'root';   // 'root' | 'settings' | 'leaderboard'
@@ -243,6 +248,89 @@ export class MainMenuUI {
       styleValEl.textContent = styleSel.value === 'marine' ? 'Space Marine' : 'Operator';
     });
     this.bodyEl.appendChild(styleRow);
+
+    // Account Debug — only rendered when the hooks are wired in
+    // main.js. Two destructive actions: grant every currency to a
+    // capped value, and wipe all `tacticalrogue:*` localStorage
+    // keys. Both run from the existing options modal so the player
+    // doesn't need a console.
+    if (this.onGrantAllCurrencies || this.onClearSaveData) {
+      const debugHeader = document.createElement('div');
+      debugHeader.className = 'menu-row';
+      debugHeader.style.cssText = 'border-top: 1px solid rgba(155, 139, 106, 0.25); padding-top: 14px; margin-top: 8px;';
+      debugHeader.innerHTML = `
+        <label style="color:#f2c060; letter-spacing: 2px;">ACCOUNT DEBUG</label>
+        <div class="menu-row-hint">Destructive — only use for testing.</div>
+      `;
+      this.bodyEl.appendChild(debugHeader);
+
+      if (this.onGrantAllCurrencies) {
+        const grantRow = document.createElement('div');
+        grantRow.className = 'menu-row';
+        const grantBtn = document.createElement('button');
+        grantBtn.type = 'button';
+        grantBtn.className = 'menu-btn';
+        grantBtn.textContent = 'Grant All Currencies';
+        const grantStatus = document.createElement('span');
+        grantStatus.className = 'menu-row-val';
+        grantStatus.textContent = '';
+        grantBtn.addEventListener('click', () => {
+          let summary;
+          try { summary = this.onGrantAllCurrencies(); }
+          catch (e) { grantStatus.textContent = 'failed'; return; }
+          grantStatus.textContent = summary || 'granted';
+          grantStatus.style.color = '#6abe5a';
+          setTimeout(() => { grantStatus.textContent = ''; grantStatus.style.color = ''; }, 4000);
+        });
+        grantRow.appendChild(grantBtn);
+        grantRow.appendChild(grantStatus);
+        this.bodyEl.appendChild(grantRow);
+      }
+
+      if (this.onClearSaveData) {
+        const clearRow = document.createElement('div');
+        clearRow.className = 'menu-row';
+        const clearBtn = document.createElement('button');
+        clearBtn.type = 'button';
+        clearBtn.className = 'menu-btn';
+        clearBtn.textContent = 'Clear Save Data';
+        clearBtn.style.color = '#c94a3a';
+        const clearStatus = document.createElement('span');
+        clearStatus.className = 'menu-row-val';
+        clearStatus.textContent = '';
+        // Two-stage confirm — first click arms, second click within
+        // 4 seconds actually wipes. Avoids a popup but still gates
+        // accidental clicks.
+        let armed = false;
+        let armedTimer = null;
+        clearBtn.addEventListener('click', () => {
+          if (!armed) {
+            armed = true;
+            clearBtn.textContent = 'CONFIRM — wipe all save data?';
+            clearStatus.textContent = 'click again to confirm';
+            clearStatus.style.color = '#d0a030';
+            armedTimer = setTimeout(() => {
+              armed = false;
+              clearBtn.textContent = 'Clear Save Data';
+              clearStatus.textContent = '';
+              clearStatus.style.color = '';
+            }, 4000);
+            return;
+          }
+          if (armedTimer) clearTimeout(armedTimer);
+          armed = false;
+          let summary;
+          try { summary = this.onClearSaveData(); }
+          catch (e) { clearStatus.textContent = 'failed'; return; }
+          clearBtn.textContent = 'Clear Save Data';
+          clearStatus.textContent = summary || 'wiped — reload page';
+          clearStatus.style.color = '#6abe5a';
+        });
+        clearRow.appendChild(clearBtn);
+        clearRow.appendChild(clearStatus);
+        this.bodyEl.appendChild(clearRow);
+      }
+    }
 
     this.bodyEl.appendChild(this._btn('Back', () => { this.view = 'root'; this.render(); }));
   }

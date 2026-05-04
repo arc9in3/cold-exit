@@ -89,7 +89,7 @@ import {
   getRelicPermits,
   getContractRank, setContractRank,
   getRecruiterUnlocks,
-  getRankPoints, awardRankPoints, rankPointsForNext,
+  getRankPoints, awardRankPoints, rankPointsForNext, setRankPoints,
   getDemonBearGranted,
   getMarks, setMarks,
   getPersistentChips, setPersistentChips,
@@ -3992,6 +3992,37 @@ const mainMenuUI = new MainMenuUI({
   onOpenHideout: () => {
     mainMenuUI.hide();
     hideoutUI.open();
+  },
+  // Account Debug — local-only convenience for testing. Both actions
+  // mutate localStorage directly; the in-memory `persistentChips`
+  // mirror is reseeded after grant so the HUD reflects the change
+  // without a reload.
+  onGrantAllCurrencies: () => {
+    const AMOUNT = 100000;
+    setPersistentChips(AMOUNT);
+    persistentChips = AMOUNT;
+    setMarks(AMOUNT);
+    setSigils(AMOUNT);
+    setRankPoints(AMOUNT);
+    return `${AMOUNT.toLocaleString()} of each (chips/marks/sigils/rank pts)`;
+  },
+  onClearSaveData: () => {
+    let removed = 0;
+    try {
+      // Iterate over a copy of the keys — removeItem mutates while
+      // we walk. Only touch this game's namespace to avoid wiping
+      // unrelated apps' localStorage.
+      const keys = [];
+      for (let i = 0; i < localStorage.length; i++) {
+        const k = localStorage.key(i);
+        if (k && k.startsWith('tacticalrogue:')) keys.push(k);
+      }
+      for (const k of keys) { localStorage.removeItem(k); removed++; }
+    } catch (_) {}
+    // Re-seed the in-memory chip mirror to the freshly-cleared zero
+    // so the HUD reads correctly until the user reloads.
+    persistentChips = 0;
+    return `wiped ${removed} keys — reload to fully reset state`;
   },
 });
 
