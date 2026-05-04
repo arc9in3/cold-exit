@@ -2226,7 +2226,33 @@ export function createPlayer(scene) {
           // this — D always returned body-right regardless of
           // velocity, so cursor-vs-velocity disagreement read as
           // walk_FR even when the real motion was a backpedal.)
-          const pick = selectGaspLocomotion(_gaspSmCfg, state, planarSpeed, velocity, rig.group.rotation.y);
+          let pick = selectGaspLocomotion(_gaspSmCfg, state, planarSpeed, velocity, rig.group.rotation.y);
+          // Dash override: while in DASH/SLIDE the picker would just
+          // return the highest-speed locomotion clip (sprint_F or
+          // a clamped run_F), which doesn't read as a discrete dash.
+          // Force sprint_F regardless of velocity direction so the
+          // forward-driving lean of the sprint clip plays no matter
+          // which direction the dash is in (body's already locked
+          // to cursor; sprint reads as dash visually). Pair with a
+          // bumped timeScaleClamp upper bound so the legs whip.
+          const isDash = state.mode === MODE.DASH || state.mode === MODE.SLIDE;
+          if (isDash && _gaspSmCfg.states?.sprint_F) {
+            const sprint = _gaspSmCfg.states.sprint_F;
+            const wantSuffix = state?.equipped?.class
+              && (state.equipped.class === 'rifle' || state.equipped.class === 'shotgun'
+                  || state.equipped.class === 'sniper' || state.equipped.class === 'lmg');
+            const clipName = wantSuffix && sprint.adsClip ? sprint.adsClip : sprint.clip;
+            pick = {
+              stateId: 'sprint_F',
+              clip: clipName,
+              loop: sprint.loop !== false,
+              speedRef: 4.0,                           // slightly slower than sprint's 6.0 baseline so timeScale > 1
+              sector: 'F',
+              bucket: 'dash',
+              playback: { fadeMs: 80, timeScaleClamp: [1.4, 2.4] },
+              weaponClass: state?.equipped?.class,
+            };
+          }
           if (window.__animDebug && pick && rig._fbx.currentClipName !== pick.clip) {
             console.log(`[gasp] sector=${pick.sector} bucket=${pick.bucket} clip=${pick.clip}`,
               `body=${rig.group.rotation.y.toFixed(2)} cursor=${cursorYaw.toFixed(2)}`,
