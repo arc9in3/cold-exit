@@ -3656,7 +3656,11 @@ function _ensureCoopLobby() {
       // playerKeys + shows the HUD toast.
       const color = body && body.c;
       if (!color) return;
-      if (!playerKeys.has(color)) {
+      // Bug #48 guard: don't accept a keycard whose door doesn't
+      // exist locally. Avoids the "have a keycard but no room for it"
+      // state when peers desync on door state.
+      const hasDoor = level?.keycardDoors && level.keycardDoors[color];
+      if (hasDoor && !playerKeys.has(color)) {
         playerKeys.add(color);
         try { transientHudMsg(`+${String(color).toUpperCase()} KEYCARD`, 2.4); } catch (_) {}
         try { sfx.pickup(); } catch (_) {}
@@ -10281,13 +10285,22 @@ function _onEnemyKilledImpl(enemy, opts = {}) {
   // rpc-keycard-grant guards against double-grants via the
   // playerKeys.has check.
   if (enemy.keyDrop) {
-    if (!playerKeys.has(enemy.keyDrop)) {
+    // Bug #48: only grant the keycard if there's actually a door of
+    // this color on the level. Otherwise the player ends up with a
+    // keycard they can't use anywhere ("keycard room missing but
+    // keycard is available"). The auto-unlock pass during regen
+    // strips keyDrop from enemies whose colour got auto-opened, but
+    // there are still race paths (coop unlock broadcasts, future
+    // edge cases) where a holder retains a keyDrop color whose door
+    // has been removed from `keycardDoors`. Defensive null-check.
+    const stillHasDoor = level?.keycardDoors && level.keycardDoors[enemy.keyDrop];
+    if (stillHasDoor && !playerKeys.has(enemy.keyDrop)) {
       playerKeys.add(enemy.keyDrop);
       transientHudMsg(`+${enemy.keyDrop.toUpperCase()} KEYCARD`, 2.4);
       sfx.pickup();
     }
     try {
-      if (transport && transport.isOpen) {
+      if (stillHasDoor && transport && transport.isOpen) {
         transport.send('rpc-keycard-grant', { c: enemy.keyDrop });
       }
     } catch (_) { /* relay may be down — local pickup still succeeded */ }
