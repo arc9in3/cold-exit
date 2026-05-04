@@ -251,7 +251,17 @@ export class LootManager {
     // proximity check + lazy paint.
     slot.sprite.visible = false;
     slot.group.position.set(position.x, 0.45, position.z);
-    slot.group.visible = true;
+    // Coop: hide the local mesh on the host when the loot is claimed
+    // by a specific peer (instanced drops). The entry stays in
+    // this.items so the per-peer snapshot still includes it for the
+    // claimer; we just don't render it on this client. The snapshot
+    // encoder reads claimedBy directly and ignores group.visible
+    // (see snapshot.js _encodeLootForPeer), so hiding doesn't break
+    // the wire fanout.
+    const _hostHideClaimed = (typeof window !== 'undefined')
+      && window.__coopIsHost
+      && claimedBy != null;
+    slot.group.visible = !_hostHideClaimed;
 
     const entry = {
       // Coop net ID for snapshot reconciliation. Host assigns from

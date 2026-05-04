@@ -630,25 +630,24 @@ export class LootUI {
 
   _takeAll() {
     if (!this.target) return;
-    const items = (this.target.loot || []).slice();
-    const remaining = [];
-    const remainingRefs = [];
     const refs = this.target._groundRefs || null;
-    for (let i = 0; i < items.length; i++) {
-      const item = items[i];
-      // Loot-all auto-equips only on STRICTLY better rarity; equal
-      // rarity goes to the pack so the player keeps what they chose.
+    // Walk end → start so splice indices stay valid as we remove.
+    // CRITICAL: must splice in place (not rebuild via assignment) so
+    // the coop body-take wrap installed by open() fires for every
+    // placed item. Replacing the array reference orphans the wrap
+    // and lets a joiner repeatedly re-loot the same body until the
+    // host walks up. (REGRESSION: bug-coop-bodyloot-takeall)
+    const arr = this.target.loot;
+    if (!Array.isArray(arr)) return;
+    for (let i = arr.length - 1; i >= 0; i--) {
+      const item = arr[i];
       const r = this._smartPlace(item, /*allowEqualEquip=*/false);
-      if (!r.placed) {
-        remaining.push(item);
-        if (refs) remainingRefs.push(refs[i]);
-      } else if (refs) {
-        // Ground source: removing a ground handle on successful pickup.
-        this.target._removeGround?.(refs[i]);
+      if (r.placed) {
+        if (refs && this.target._removeGround) this.target._removeGround(refs[i]);
+        arr.splice(i, 1);
+        if (refs) refs.splice(i, 1);
       }
     }
-    this.target.loot = remaining;
-    if (refs) this.target._groundRefs = remainingRefs;
     this.render();
   }
 

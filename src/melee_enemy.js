@@ -861,7 +861,11 @@ export class MeleeEnemyManager {
         continue;
       }
 
-      this._updateAI(e, ctx, dt);
+      // Coop joiner skips melee AI — see gunman.js for rationale.
+      // Rig anim + death physics fire below regardless.
+      if (!ctx.coopJoiner) {
+        this._updateAI(e, ctx, dt);
+      }
 
       // --- idle chatter ---------------------------------------------
       // Smash-themed phrases roll on a per-enemy cooldown. Fires in
