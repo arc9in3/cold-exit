@@ -45,7 +45,7 @@ import {
   liveProgressFor, tryClaimContract, isContractUnlocked, buildModifiers, difficultyScore,
   rankRewardFor, rankPerKillFor,
 } from './contracts.js';
-import { iconForItem, inferRarity, rarityColor, CONSUMABLE_DEFS, ARMOR_DEFS } from './inventory.js';
+import { iconForItem, inferRarity, rarityColor, weaponImageMirrorStyle, CONSUMABLE_DEFS, ARMOR_DEFS } from './inventory.js';
 
 // Baseline starter-weapon roster — five always-free common picks,
 // one per major class. Must match BASELINE_STARTER_NAMES in main.js.
@@ -2631,10 +2631,21 @@ export class HideoutUI {
     else if (state === 'buyable') action = `<button type="button" class="amini-cta buy">Unlock · ${cost}c</button>`;
     else if (state === 'locked')  action = `<div class="amini-cta locked">Rank ${reqRank} to unlock</div>`;
 
+    // Mirror the icon image where the in-game model is mirrored —
+    // without this, weapons whose source PNG was authored barrel-RIGHT
+    // (RT-700, Mosin, Cheytac, etc.) read flipped vs barrel-LEFT
+    // weapons (AWP, AK47) when shown side-by-side in the armory grid.
+    // Bug #45 — RT-700 pointed right while everything else pointed
+    // left in the armory and customize screen. Other inventory
+    // surfaces (Stash, loot drop, ui_customize, ui_details) already
+    // applied this style; the armory mini tiles were the only outlier.
+    const mirror = weaponImageMirrorStyle({
+      baseName: weapon.name, name: weapon.name, type: weapon.type,
+    });
     tile.innerHTML = `
       <div class="amini-icon">
         ${icon
-          ? `<img src="${icon}" alt="">`
+          ? `<img src="${icon}" alt="" style="${mirror}">`
           : `<div class="amini-icon-fallback">?</div>`}
       </div>
       <div class="amini-name">${weapon.displayName ?? weapon.name}</div>
