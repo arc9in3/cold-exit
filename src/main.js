@@ -6858,6 +6858,8 @@ const _yUp = new THREE.Vector3(0, 1, 0);
 const _tmpDir2 = new THREE.Vector3();
 const _tmpMid = new THREE.Vector3();
 const _tmpQuat = new THREE.Quaternion();
+const _tmpFwdNeg = new THREE.Vector3();
+const _tmpRayOrigin = new THREE.Vector3();
 
 function updateBeamAndCone(playerInfo, aimInfo, inputState) {
   const w = currentWeapon();
@@ -6898,14 +6900,23 @@ function updateBeamAndCone(playerInfo, aimInfo, inputState) {
     flashConeMesh.visible = false;
     return;
   }
-  const forward = _tmpDir2.clone().normalize();
+  // Normalize in place — `.clone()` here was allocating a fresh Vector3
+  // every frame. _tmpDir2 was already set + lengthSq-checked above, so
+  // mutating it directly is safe. Saves one allocation per frame in the
+  // beam path; trace shows updateBeamAndCone runs 240×/s.
+  _tmpDir2.normalize();
+  const forward = _tmpDir2;
 
   if (laser && lightsEnabled) {
     // Start length = variant's max range. Raycast against walls so
     // the beam stops at the first obstacle instead of punching
     // through geometry (sightline, obvious cover tell).
     const maxLen = laserAtt.laserRange || 12;
-    const rayOrigin = origin.clone();
+    // Reuse a scratch vector — origin.clone() allocated a fresh
+    // Vector3 every laser-active frame, even though we only need a
+    // local copy to bump the y up by LASER_Y_OFFSET.
+    _tmpRayOrigin.copy(origin);
+    const rayOrigin = _tmpRayOrigin;
     // Lift the laser up by a constant offset so it reads as
     // emitting from a chest-mounted module on the gun rather than
     // tracking the natural height of the grip. The Math.max floor
@@ -6946,7 +6957,11 @@ function updateBeamAndCone(playerInfo, aimInfo, inputState) {
     const angleRad = ((light.lightCone.angleDeg || 40) * Math.PI) / 180;
     const baseR = Math.tan(angleRad * 0.5) * range;
     // Orient so cone apex (+Y) faces backward → cone base flares forward.
-    _tmpQuat.setFromUnitVectors(_yUp, forward.clone().negate());
+    // Use a dedicated scratch vector so we don't clobber `forward` (still
+    // referenced below for spotlight target direction). Saves the Vector3
+    // allocation that `forward.clone().negate()` would create per frame.
+    _tmpFwdNeg.copy(forward).negate();
+    _tmpQuat.setFromUnitVectors(_yUp, _tmpFwdNeg);
     _tmpMid.copy(origin).addScaledVector(forward, range / 2);
     flashConeMesh.position.copy(_tmpMid);
     flashConeMesh.quaternion.copy(_tmpQuat);
