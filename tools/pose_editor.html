@@ -101,6 +101,65 @@
 
     <label>Specific weapon (loads with in-game scale + grip offset)</label>
     <select id="weapon"></select>
+    <div class="row-buttons">
+      <button id="weap-prev">‹ Prev in class</button>
+      <button id="weap-next">Next in class ›</button>
+    </div>
+
+    <h2>Weapon transform — <span id="weapon-tune-label">—</span></h2>
+    <div class="legend" style="margin:4px 0">
+      Drag sliders to dial grip offset (meters in gun-anchor local space),
+      rotation (radians, applied to the wrap), and scale (multiplier on the
+      manifest's per-path scale). Reset returns to the manifest defaults.
+      The change is live — no reload. Copy-patch button at the bottom of
+      this section emits a JS snippet for <code>src/model_manifest.js</code>.
+    </div>
+    <h3 style="color:#9aa;font-size:10px;margin:8px 0 2px;text-transform:uppercase;letter-spacing:0.04em">Grip offset (m)</h3>
+    <div class="row">
+      <span class="axis">X</span>
+      <input type="range" id="wt-grip-x" min="-0.6" max="0.6" step="0.005" value="0">
+      <span class="val" id="wt-grip-x-v">0.000</span>
+    </div>
+    <div class="row">
+      <span class="axis">Y</span>
+      <input type="range" id="wt-grip-y" min="-0.6" max="0.6" step="0.005" value="0">
+      <span class="val" id="wt-grip-y-v">0.000</span>
+    </div>
+    <div class="row">
+      <span class="axis">Z</span>
+      <input type="range" id="wt-grip-z" min="-0.6" max="0.6" step="0.005" value="0">
+      <span class="val" id="wt-grip-z-v">0.000</span>
+    </div>
+    <h3 style="color:#9aa;font-size:10px;margin:8px 0 2px;text-transform:uppercase;letter-spacing:0.04em">Rotation (rad)</h3>
+    <div class="row">
+      <span class="axis">X</span>
+      <input type="range" id="wt-rot-x" min="-3.14" max="3.14" step="0.01" value="0">
+      <span class="val" id="wt-rot-x-v">0.00</span>
+    </div>
+    <div class="row">
+      <span class="axis">Y</span>
+      <input type="range" id="wt-rot-y" min="-3.14" max="3.14" step="0.01" value="0">
+      <span class="val" id="wt-rot-y-v">0.00</span>
+    </div>
+    <div class="row">
+      <span class="axis">Z</span>
+      <input type="range" id="wt-rot-z" min="-3.14" max="3.14" step="0.01" value="0">
+      <span class="val" id="wt-rot-z-v">0.00</span>
+    </div>
+    <h3 style="color:#9aa;font-size:10px;margin:8px 0 2px;text-transform:uppercase;letter-spacing:0.04em">Scale multiplier</h3>
+    <div class="row">
+      <span class="axis">×</span>
+      <input type="range" id="wt-scale" min="0.2" max="3.0" step="0.01" value="1.0">
+      <span class="val" id="wt-scale-v">1.00</span>
+    </div>
+    <div class="row-buttons">
+      <button id="wt-reset">Reset to manifest</button>
+      <button id="wt-flip-mirror">Toggle mirror (X-flip)</button>
+    </div>
+    <div class="row-buttons">
+      <button id="wt-copy-patch" class="primary">Copy patch for model_manifest.js</button>
+    </div>
+    <textarea id="wt-output" readonly style="min-height:90px">// patch output appears here</textarea>
 
     <label>Pose / clip</label>
     <select id="clip">
@@ -454,20 +513,29 @@ function rebuildWeaponPicker() {
 rebuildWeaponPicker();
 weaponSel.addEventListener('change', loadWeaponForClass);
 
+// Per-weapon tuning state. Keyed by manifest path. Stores absolute
+// (post-edit) values; manifest defaults form the initial population.
+const weaponTunings = new Map();
+// Cached load context for the currently loaded weapon — re-used by
+// applyWeaponTuning() so slider drags don't reload the GLB.
+let weaponBase = null;
+
 async function loadWeaponForClass() {
   const cls  = clsSel.value;
   const name = weaponSel.value;
   const path = MODEL_BY_WEAPON_NAME[name];
   clearWeapon();
+  weaponBase = null;
   if (!path) {
     console.warn(`[pose-editor] no model path for weapon name "${name}"`);
+    refreshTuningUI();
     return;
   }
   const w = (tunables.weapons || []).find(x => x.name === name) ||
             { muzzleLength: 0.55, muzzleGirth: 0.13 };
   const len  = w.muzzleLength || 0.55;
   const cs = (cls === 'rifle' || cls === 'shotgun' || cls === 'sniper' || cls === 'lmg') ? 0.36 : 0.22;
-  const ws = scaleForModelPath(path) || 1.0;
+  const wsManifest = scaleForModelPath(path) || 1.0;
   const isLong = cls === 'rifle' || cls === 'shotgun' || cls === 'sniper' || cls === 'lmg';
   const fwd = isLong ? (len * 0.2) : (len / 2);
 
@@ -482,35 +550,67 @@ async function loadWeaponForClass() {
     return;
   }
   const clone = gltf.scene.clone(true);
-  const targetLong = len * cs * ws * 2.0;
+  // Fit-to-radius is computed AT manifest scale; the user's per-weapon
+  // scaleMul slider then multiplies this fit on top. Storing the base
+  // fit lets applyWeaponTuning() recompute clone.scale without reload.
+  const targetLong = len * cs * wsManifest * 2.0;
   const bbox = new THREE.Box3().setFromObject(clone);
   const size = new THREE.Vector3(); bbox.getSize(size);
   const longest = Math.max(size.x, size.y, size.z) || 1;
-  const fit = targetLong / longest;
-  clone.scale.setScalar(fit);
+  const baseFit = targetLong / longest;
+  clone.scale.setScalar(baseFit);
   bbox.setFromObject(clone);
   const ctr = new THREE.Vector3(); bbox.getCenter(ctr);
   clone.position.sub(ctr);
 
-  // Apply manifest grip offset + rotation override + mirror.
-  // shouldMirrorInHand expects an item-like with name/baseName, not a
-  // path string — so reconstruct that here. lowpolyguns / accessories
-  // packs need x-flip to align muzzle with +Z.
-  const grip = gripOffsetForModelPath(path) || { x: 0, y: 0, z: 0 };
-  const rot  = rotationOverrideForModelPath(path);
-  const mirror = shouldMirrorInHand({ name });
   const wrap = new THREE.Group();
   wrap.add(clone);
-  if (mirror) clone.scale.x *= -1;
-  if (rot) wrap.rotation.set(rot.x || 0, rot.y || 0, rot.z || 0);
-  wrap.position.set((grip.x || 0) * ws, (grip.y || 0) * ws, (grip.z || 0) * ws + fwd * ws);
   weaponMesh = wrap;
   gunAnchor.add(weaponMesh);
-  muzzle.position.set(0, 0, (fwd + len / 2) * ws);
+
+  // Capture base values; applyWeaponTuning fills wrap.position/rotation
+  // and clone.scale based on the slider state.
+  const manifestGrip = gripOffsetForModelPath(path) || { x: 0, y: 0, z: 0 };
+  const manifestRot  = rotationOverrideForModelPath(path) || { x: 0, y: 0, z: 0 };
+  const manifestMirror = shouldMirrorInHand({ name });
+  weaponBase = {
+    name, path, cls, len, cs, fwd, baseFit, wsManifest,
+    clone, wrap,
+    manifestGrip, manifestRot, manifestMirror,
+  };
+
+  // Seed slider state from prior tuning OR manifest defaults.
+  const t = weaponTunings.get(path) || {
+    gripX: manifestGrip.x || 0, gripY: manifestGrip.y || 0, gripZ: manifestGrip.z || 0,
+    rotX:  manifestRot.x  || 0, rotY:  manifestRot.y  || 0, rotZ:  manifestRot.z  || 0,
+    scaleMul: 1.0,
+    mirror: manifestMirror,
+  };
+  weaponTunings.set(path, t);
+  refreshTuningUI();
+  applyWeaponTuning();
+
+  muzzle.position.set(0, 0, (fwd + len / 2) * wsManifest);
   console.log(`[pose-editor] loaded weapon ${name} → ${path}`,
-    { len, cs, ws, fit, longest: longest.toFixed(3),
-      pos: wrap.position.toArray().map(v => v.toFixed(3)),
-      mirror });
+    { len, cs, wsManifest, baseFit, longest: longest.toFixed(3) });
+}
+
+function applyWeaponTuning() {
+  if (!weaponBase) return;
+  const t = weaponTunings.get(weaponBase.path);
+  if (!t) return;
+  const { clone, wrap, baseFit, wsManifest, fwd } = weaponBase;
+  // Clone scale = baseFit × scaleMul, with mirror applied as x-sign flip.
+  const sx = baseFit * t.scaleMul * (t.mirror ? -1 : 1);
+  const sy = baseFit * t.scaleMul;
+  const sz = baseFit * t.scaleMul;
+  clone.scale.set(sx, sy, sz);
+  wrap.rotation.set(t.rotX, t.rotY, t.rotZ);
+  wrap.position.set(
+    t.gripX * wsManifest,
+    t.gripY * wsManifest,
+    t.gripZ * wsManifest + fwd * wsManifest,
+  );
 }
 function clearWeapon() {
   if (weaponMesh) {
@@ -887,6 +987,136 @@ document.getElementById('reset-all').addEventListener('click', () => {
     ['x','y','z'].forEach(a => { refs[a].value = 0; refs[a + 'v'].textContent = '0.00'; });
   }
   rebuildOutput();
+});
+
+// ---------- weapon tuning UI wiring ------------------------------
+const wtSliders = {
+  gripX: document.getElementById('wt-grip-x'),
+  gripY: document.getElementById('wt-grip-y'),
+  gripZ: document.getElementById('wt-grip-z'),
+  rotX:  document.getElementById('wt-rot-x'),
+  rotY:  document.getElementById('wt-rot-y'),
+  rotZ:  document.getElementById('wt-rot-z'),
+  scaleMul: document.getElementById('wt-scale'),
+};
+const wtVals = {
+  gripX: document.getElementById('wt-grip-x-v'),
+  gripY: document.getElementById('wt-grip-y-v'),
+  gripZ: document.getElementById('wt-grip-z-v'),
+  rotX:  document.getElementById('wt-rot-x-v'),
+  rotY:  document.getElementById('wt-rot-y-v'),
+  rotZ:  document.getElementById('wt-rot-z-v'),
+  scaleMul: document.getElementById('wt-scale-v'),
+};
+function refreshTuningUI() {
+  const label = document.getElementById('weapon-tune-label');
+  if (!weaponBase) {
+    label.textContent = '—';
+    for (const k of Object.keys(wtSliders)) {
+      wtSliders[k].value = (k === 'scaleMul') ? 1.0 : 0;
+      wtVals[k].textContent = (k === 'scaleMul') ? '1.00' :
+        (k.startsWith('grip') ? '0.000' : '0.00');
+    }
+    return;
+  }
+  label.textContent = `${weaponBase.name} (${weaponBase.path})`;
+  const t = weaponTunings.get(weaponBase.path);
+  for (const k of Object.keys(wtSliders)) {
+    wtSliders[k].value = t[k];
+    wtVals[k].textContent = (k === 'scaleMul')
+      ? t[k].toFixed(2)
+      : (k.startsWith('grip') ? t[k].toFixed(3) : t[k].toFixed(2));
+  }
+}
+for (const k of Object.keys(wtSliders)) {
+  wtSliders[k].addEventListener('input', () => {
+    if (!weaponBase) return;
+    const t = weaponTunings.get(weaponBase.path);
+    t[k] = +wtSliders[k].value;
+    wtVals[k].textContent = (k === 'scaleMul')
+      ? t[k].toFixed(2)
+      : (k.startsWith('grip') ? t[k].toFixed(3) : t[k].toFixed(2));
+    applyWeaponTuning();
+  });
+}
+document.getElementById('wt-reset').addEventListener('click', () => {
+  if (!weaponBase) return;
+  const { path, manifestGrip, manifestRot, manifestMirror } = weaponBase;
+  weaponTunings.set(path, {
+    gripX: manifestGrip.x || 0, gripY: manifestGrip.y || 0, gripZ: manifestGrip.z || 0,
+    rotX:  manifestRot.x  || 0, rotY:  manifestRot.y  || 0, rotZ:  manifestRot.z  || 0,
+    scaleMul: 1.0,
+    mirror: manifestMirror,
+  });
+  refreshTuningUI();
+  applyWeaponTuning();
+});
+document.getElementById('wt-flip-mirror').addEventListener('click', () => {
+  if (!weaponBase) return;
+  const t = weaponTunings.get(weaponBase.path);
+  t.mirror = !t.mirror;
+  applyWeaponTuning();
+});
+document.getElementById('weap-prev').addEventListener('click', () => cycleWeapon(-1));
+document.getElementById('weap-next').addEventListener('click', () => cycleWeapon(+1));
+function cycleWeapon(dir) {
+  const opts = [...weaponSel.options].map(o => o.value);
+  if (!opts.length) return;
+  const i = opts.indexOf(weaponSel.value);
+  const next = (i + dir + opts.length) % opts.length;
+  weaponSel.value = opts[next];
+  loadWeaponForClass();
+}
+document.getElementById('wt-copy-patch').addEventListener('click', () => {
+  // Emit JS-style entries for MODEL_GRIP_OFFSET / MODEL_ROTATION_OVERRIDE /
+  // MODEL_SCALE_OVERRIDE — only for paths whose tuning differs from
+  // their current manifest values. Easy paste into model_manifest.js.
+  const gripLines = [];
+  const rotLines  = [];
+  const scaleLines = [];
+  for (const [path, t] of weaponTunings) {
+    const mg = gripOffsetForModelPath(path) || { x: 0, y: 0, z: 0 };
+    const mr = rotationOverrideForModelPath(path) || { x: 0, y: 0, z: 0 };
+    const ms = scaleForModelPath(path) || 1.0;
+    const gripChanged = Math.abs(t.gripX - (mg.x || 0)) > 1e-4
+                     || Math.abs(t.gripY - (mg.y || 0)) > 1e-4
+                     || Math.abs(t.gripZ - (mg.z || 0)) > 1e-4;
+    const rotChanged  = Math.abs(t.rotX  - (mr.x || 0)) > 1e-4
+                     || Math.abs(t.rotY  - (mr.y || 0)) > 1e-4
+                     || Math.abs(t.rotZ  - (mr.z || 0)) > 1e-4;
+    const scaleNew = +(ms * t.scaleMul).toFixed(4);
+    const scaleChanged = Math.abs(scaleNew - ms) > 1e-4;
+    if (gripChanged) {
+      gripLines.push(`  '${path}': { x: ${(+t.gripX).toFixed(3)}, y: ${(+t.gripY).toFixed(3)}, z: ${(+t.gripZ).toFixed(3)} },`);
+    }
+    if (rotChanged) {
+      rotLines.push(`  '${path}': { x: ${(+t.rotX).toFixed(3)}, y: ${(+t.rotY).toFixed(3)}, z: ${(+t.rotZ).toFixed(3)} },`);
+    }
+    if (scaleChanged) {
+      scaleLines.push(`  '${path}': ${scaleNew},`);
+    }
+  }
+  const parts = [];
+  if (gripLines.length) {
+    parts.push('// MODEL_GRIP_OFFSET — paste into the existing object in src/model_manifest.js');
+    parts.push(...gripLines);
+    parts.push('');
+  }
+  if (rotLines.length) {
+    parts.push('// MODEL_ROTATION_OVERRIDE — paste into the existing object');
+    parts.push(...rotLines);
+    parts.push('');
+  }
+  if (scaleLines.length) {
+    parts.push('// MODEL_SCALE_OVERRIDE — paste into the existing object');
+    parts.push(...scaleLines);
+    parts.push('');
+  }
+  const out = parts.length ? parts.join('\n') : '// no tuning changes from manifest defaults';
+  const ta = document.getElementById('wt-output');
+  ta.value = out;
+  ta.select();
+  navigator.clipboard.writeText(out).catch(() => document.execCommand('copy'));
 });
 
 // keyboard shortcuts
