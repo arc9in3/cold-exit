@@ -1572,7 +1572,7 @@ export const tunables = {
       // recoil from the in-line bolt makes it remarkably controllable
       // for the rate of fire.
       unlockRank: 8, unlockCost: 800,
-      name: 'Kriss Vector', type: 'ranged', class: 'smg', rarity: 'rare',
+      name: 'Kriss Vector', displayName: 'Vector V9', type: 'ranged', class: 'smg', rarity: 'rare',
       attachmentSlots: ['muzzle', 'underRail', 'sideRail', 'topRail', 'stock', 'grip', 'trigger', 'magazine'],
       fireMode: 'auto', fireRate: 20, damage: 22, range: 28,
       hipSpread: 0.170, adsSpread: 0.040,
@@ -1842,7 +1842,7 @@ export const tunables = {
       // 10.5" SBR — same platform, shorter barrel. Less range, more
       // hip-fire spread, faster reload from compact handling.
       unlockRank: 8,
-      name: 'AR-15 SBR', type: 'ranged', class: 'rifle', rarity: 'uncommon',
+      name: 'AR-15 SBR', displayName: 'AR-4 SBR', type: 'ranged', class: 'rifle', rarity: 'uncommon',
       attachmentSlots: ['muzzle', 'barrel', 'underRail', 'sideRail', 'topRail', 'stock', 'grip', 'trigger', 'magazine'],
       fireMode: 'auto', fireRate: 13, damage: 24, range: 46,
       hipSpread: 0.13, adsSpread: 0.020,
@@ -1856,7 +1856,7 @@ export const tunables = {
       // its size + brace-only ergos. Bigger mag than other pistols
       // (30) since it takes AR mags; weaker damage from short barrel.
       unlockRank: 5,
-      name: 'AR-15 Pistol', type: 'ranged', class: 'pistol', rarity: 'rare',
+      name: 'AR-15 Pistol', displayName: 'AR-4 Pistol', type: 'ranged', class: 'pistol', rarity: 'rare',
       attachmentSlots: ['muzzle', 'underRail', 'sideRail', 'topRail', 'grip', 'trigger', 'magazine'],
       fireMode: 'auto', fireRate: 13, damage: 22, range: 36,
       hipSpread: 0.16, adsSpread: 0.028,
@@ -1870,7 +1870,7 @@ export const tunables = {
       // on a pistol-caliber platform. Higher mag than typical pistols,
       // poor accuracy at range, decent close-quarters chaos.
       unlockRank: 11,
-      name: 'Draco NAK9', type: 'ranged', class: 'pistol', rarity: 'uncommon',
+      name: 'Draco NAK9', displayName: 'Draco N9', type: 'ranged', class: 'pistol', rarity: 'uncommon',
       attachmentSlots: ['muzzle', 'underRail', 'sideRail', 'topRail', 'grip', 'trigger', 'magazine'],
       fireMode: 'auto', fireRate: 17.5, damage: 20, range: 32,
       hipSpread: 0.18, adsSpread: 0.030,
@@ -1923,7 +1923,7 @@ export const tunables = {
       // a time, slug round (single high-damage projectile, not pellets
       // like a regular shotgun). Long reload, very high per-shot dmg.
       unlockRank: 6, unlockCost: 400,
-      name: 'Henry Slug Rifle', type: 'ranged', class: 'shotgun', rarity: 'uncommon',
+      name: 'Henry Slug Rifle', displayName: 'Falcon Slug Rifle', type: 'ranged', class: 'shotgun', rarity: 'uncommon',
       attachmentSlots: ['muzzle', 'topRail', 'stock', 'trigger'],
       fireMode: 'semi', fireRate: 1.0, damage: 88, range: 50,
       hipSpread: 0.07, adsSpread: 0.008,
@@ -1937,7 +1937,7 @@ export const tunables = {
       // but with the lowpoly tactical-furniture FBX. Slightly faster
       // fire and tighter ADS spread thanks to chassis ergonomics.
       unlockRank: 5,
-      name: 'Remington 700 Tactical', type: 'ranged', class: 'sniper', rarity: 'rare',
+      name: 'Remington 700 Tactical', displayName: 'RT-700 Tactical', type: 'ranged', class: 'sniper', rarity: 'rare',
       attachmentSlots: ['muzzle', 'barrel', 'underRail', 'sideRail', 'topRail', 'stock', 'grip', 'trigger', 'magazine'],
       fireMode: 'semi', fireRate: 1.6, damage: 92, range: 110,
       hipSpread: 0.09, adsSpread: 0.005,
