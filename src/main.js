@@ -13432,7 +13432,7 @@ function _restoreWall(m) {
 // room edges and the player had to reposition to see them.
 const OCCL_ENEMY_RANGE = 24;   // extended from 16 — covers typical rifle engagement arcs
 
-function _addOcclusionHits(from, target, blockers, outSet) {
+function _addOcclusionHits(from, target, blockers, outSet, alsoOutSet = null) {
   _occlDir.copy(target).sub(from);
   const dist = _occlDir.length();
   if (dist < 0.001) return;
@@ -13453,6 +13453,7 @@ function _addOcclusionHits(from, target, blockers, outSet) {
     if (h.object.material && h.object.material.opacity === 0
         && h.object.userData?._origOpacity === undefined) continue;
     outSet.add(h.object);
+    if (alsoOutSet) alsoOutSet.add(h.object);
   }
 }
 
@@ -13501,11 +13502,26 @@ function updateWallOcclusion() {
     //        the cost adds up across late-game rooms with many enemies.
     //    Threat state still gates whether DISTANT idle enemies cast
     //    at all (they don't past OCCL_ENEMY_RANGE).
+    //
+    //    Per-enemy frame stagger: each enemy only casts every other
+    //    frame, alternating with its index so half the enemies get
+    //    fresh rays per frame and the other half hold their previous
+    //    occlusion result. Carries forward the prior frame's faded
+    //    walls for the held half so the visual is stable. Cuts the
+    //    per-frame raycast count roughly in half on rooms with
+    //    many enemies — the dominant cost in the steady-state tick
+    //    profile (2026-05-04 in-run trace showed ~15% combined
+    //    raycast time, mostly from this fn).
     if (qualityFlags.wallOcclusionForEnemies) {
       const idleRangeSq = OCCL_ENEMY_RANGE * OCCL_ENEMY_RANGE;
       const farFanRangeSq = 12 * 12;
       const gunmenList = gunmen.gunmen;
       const meleesList = melees.enemies;
+      // Active enemies (firing/swinging) bypass the stagger so the
+      // "wall fades when an enemy starts shooting through it" feedback
+      // stays instant; only patrolling / idle enemies get the every-
+      // other-frame cadence.
+      const phase = frameCounter & 1;
       for (let i = 0, total = gunmenList.length + meleesList.length; i < total; i++) {
         const e = i < gunmenList.length ? gunmenList[i] : meleesList[i - gunmenList.length];
         if (!e.alive) continue;
@@ -13518,12 +13534,24 @@ function updateWallOcclusion() {
         const s = e.state;
         const active = !!s && s !== 'idle' && s !== 'sleep' && s !== 'dead';
         if (!active && d2 > idleRangeSq) continue;
+        // Stagger non-active enemies. Re-add last frame's walls so the
+        // fade doesn't pop on the held frame.
+        if (!active && (i & 1) !== phase) {
+          if (e._lastOcclWalls) {
+            for (const m of e._lastOcclWalls) nextFaded.add(m);
+          }
+          continue;
+        }
         // Distance-tiered fan count: 4 close, 2 far.
         const fanCount = d2 <= farFanRangeSq ? 4 : 2;
+        // Track this enemy's contribution so the held-frame branch
+        // can replay it.
+        const myWalls = e._lastOcclWalls || (e._lastOcclWalls = new Set());
+        myWalls.clear();
         for (let k = 0; k < fanCount; k++) {
           const off = _ENEMY_FAN_OFFSETS[k];
           _occlTargetPt.set(ex + off.dx, off.y, ez + off.dz);
-          _addOcclusionHits(camera.position, _occlTargetPt, blockers, nextFaded);
+          _addOcclusionHits(camera.position, _occlTargetPt, blockers, nextFaded, myWalls);
         }
       }
     }
