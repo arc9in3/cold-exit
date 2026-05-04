@@ -13820,13 +13820,55 @@ function tryInteract({ nearItem, body, bodies, npc, container }) {
       }
     }
     // Two or more items in the pickup radius — open the ground-loot modal
-    // instead of auto-picking one. Otherwise fast single-item pickup.
+    // instead of auto-picking one. Bug #43: when bodies are ALSO nearby,
+    // merge their loot into the same modal so the player sees every
+    // item in one view. Each item carries its source (loot.remove for
+    // ground, body splice for body items) so taking still routes
+    // correctly.
     const nearby = loot.allWithin(player.mesh.position, tunables.loot.pickupRadius);
-    if (nearby.length >= 2) {
+    const nearbyBodyList = nearbyBodies(player.mesh.position, 2.2);
+    const groundQualifies = nearby.length >= 2;
+    const bodiesQualify = nearbyBodyList.length > 0
+      && nearbyBodyList.some(b => b.loot && b.loot.length);
+    if (groundQualifies || (nearby.length >= 1 && bodiesQualify)) {
+      // Build a unified target with both ground items and body items.
+      const merged = [];
+      const refs = [];
+      for (const n of nearby) {
+        merged.push(n.item);
+        refs.push({ kind: 'ground', ref: n, item: n.item });
+      }
+      for (const b of nearbyBodyList) {
+        if (!b.loot) continue;
+        for (const it of b.loot) {
+          merged.push(it);
+          refs.push({ kind: 'body', body: b, item: it });
+        }
+      }
       const target = {
-        loot: nearby.map(n => n.item),
-        _groundRefs: nearby.slice(),
-        _removeGround: (ref) => { loot.remove(ref); sfx.pickup(); },
+        loot: merged,
+        _groundRefs: refs,
+        _bodyPile: bodiesQualify,
+        _bodyCount: nearbyBodyList.length,
+        // Unified remove: dispatch by ref.kind so ground items go
+        // through loot.remove and body items splice from body.loot.
+        _removeGround: (ref = {}) => {
+          if (ref.kind === 'ground') {
+            loot.remove(ref.ref);
+            sfx.pickup();
+          } else if (ref.kind === 'body') {
+            const srcBody = ref.body;
+            if (!srcBody || !srcBody.loot) return;
+            const i = srcBody.loot.indexOf(ref.item);
+            if (i >= 0) srcBody.loot.splice(i, 1);
+            if (srcBody.loot.length === 0) srcBody.looted = true;
+          } else {
+            // Legacy ground-only ref shape — pre-merge callers passed
+            // the loot ref directly without a kind tag.
+            loot.remove(ref);
+            sfx.pickup();
+          }
+        },
         looted: false,
       };
       lootUI.open(target);
