@@ -37,23 +37,22 @@ export function isMegaBossLevel(idx) {
   return typeof idx === 'number' && idx >= 10 && idx % 5 === 0;
 }
 
-// --- Persistent encounter counter ---------------------------------
-// Exported so sibling megabosses (Echo, General) can read the same
-// "lifetime mega-boss kills" index and scale their HP / wave caps
-// off it. Bumped from this module on Arboter death; sibling bosses
-// bump from their own _die paths via main.js.
-const STORAGE_KEY = 'tacticalrogue_megaboss_encounters';
-export function getEncounterCount() {
-  try {
-    const raw = localStorage.getItem(STORAGE_KEY);
-    const n = parseInt(raw, 10);
-    return Number.isFinite(n) && n >= 0 ? n : 0;
-  } catch (_) { return 0; }
-}
-export function bumpEncounterCount() {
-  try { localStorage.setItem(STORAGE_KEY, String(getEncounterCount() + 1)); }
-  catch (_) {}
-}
+// --- Per-run encounter counter ------------------------------------
+// Counts megaboss kills WITHIN the current run. Used by Arboter /
+// Echo / General constructors to scale HP and damage off `k = kills
+// so far this run`, so a run's first megaboss is always the easy
+// version and difficulty only ramps if the player chains multiple
+// megabosses in one run. Reset to 0 by main.js on every run start
+// (startRunWithWeaponDef calls resetEncounterCount).
+//
+// Was previously persisted to localStorage as a lifetime counter,
+// which made first-megaboss spawns scale with prior runs' kills —
+// players who'd cleared the boss before saw HP = 27k / 39k / 51k+
+// on what should be a fresh run.
+let _encounterCount = 0;
+export function getEncounterCount() { return _encounterCount; }
+export function bumpEncounterCount() { _encounterCount += 1; }
+export function resetEncounterCount() { _encounterCount = 0; }
 
 // --- Bark library --------------------------------------------------
 // 16 robotic barks. Boss yells one on phase enter, on attack ramp-up,

@@ -27,6 +27,7 @@ import {
   MegaBoss, isMegaBossLevel, buildMegaBossLoot,
   getEncounterCount as getMegaBossEncounterCount,
   bumpEncounterCount as bumpMegaBossEncounterCount,
+  resetEncounterCount as resetMegaBossEncounterCount,
 } from './megaboss.js';
 import { MegaBossEcho, buildEchoLoot } from './megaboss_echo.js';
 import { MegaBossGeneral, buildGeneralLoot } from './megaboss_general.js';
@@ -1547,6 +1548,10 @@ function startNewRun(weaponClass) {
     _runStartContractCompletions = 0;
   } catch (_) {}
   _resetEncounterCompletionForRun();
+  // Per-run megaboss difficulty: reset the encounter index so the
+  // run's first megaboss is the easy version regardless of how many
+  // megabosses the player has killed in past runs.
+  resetMegaBossEncounterCount();
   // Clear restart-snapshot stack — last run's checkpoints don't apply
   // to this run. The first floor's saveLevelStart will repopulate.
   _levelStartSnapshots.length = 0;
@@ -2034,6 +2039,10 @@ function startRunWithWeaponDef(def) {
   currentWeaponIndex = 0;
   level.index = 0;
   runStats.reset();
+  // Per-run megaboss difficulty: reset the encounter index so the
+  // run's first megaboss is the easy version regardless of how many
+  // megabosses the player has killed in past runs.
+  resetMegaBossEncounterCount();
   shrineHpBonus = 0;
   pendingShopRerolls = 0;
   giftSacrificeHp = 0;
