@@ -277,7 +277,21 @@ gunAnchor.add(muzzle);
     if (o.isSkinnedMesh && !skinnedMesh) skinnedMesh = o;
     if (o.isBone) boneByName.set(o.name, o);
   });
-  mixer = new THREE.AnimationMixer(skinnedMesh || mannequin);
+  // IMPORTANT: mixer must be rooted at a node that contains every
+  // possible track target. Bones in GLTF skinning often live as
+  // siblings of the SkinnedMesh under an Armature node — rooting
+  // at SkinnedMesh leaves PropertyBinding unable to resolve those
+  // bones. Root at the gltf scene so PropertyBinding can traverse
+  // into the Armature and find the bones; our track-name filter
+  // (boneByName.has) still blocks any non-bone target.
+  mixer = new THREE.AnimationMixer(mannequin);
+  console.log(`[pose-editor] mannequin loaded — ${boneByName.size} bones indexed`);
+  if (!boneByName.size) {
+    document.getElementById('boot-error').style.display = 'block';
+    document.getElementById('boot-error').textContent =
+      'No bones found in mannequin GLB. Check mesh-loader and ' +
+      'GLB file at ' + MESH_URL;
+  }
   buildBoneUI();
   await loadClip();
 })();
@@ -325,10 +339,16 @@ async function loadClip() {
   // bone we know about. Anything else (root, Armature, mesh
   // transforms) carries import-scale + axis bake from the FBX
   // conversion and would collapse / spin the mannequin.
+  const beforeN = clip.tracks.length;
   clip.tracks = clip.tracks.filter(t => {
     const targetName = (t.name || '').split('.')[0];
     return boneByName.has(targetName);
   });
+  console.log(`[pose-editor] clip ${base}_${suffix}: kept ${clip.tracks.length}/${beforeN} tracks`);
+  if (!clip.tracks.length) {
+    console.warn('[pose-editor] all tracks filtered out — sample track names were:',
+      clips[0].tracks.slice(0, 5).map(t => t.name));
+  }
   if (currentAction) currentAction.stop();
   currentAction = mixer.clipAction(clip);
   currentAction.setLoop(THREE.LoopRepeat, Infinity);
