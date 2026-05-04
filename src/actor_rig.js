@@ -2821,38 +2821,68 @@ export function updateAnim(rig, state, dt) {
     // Skipped for: akimbo (own gun in support hand), pistol
     // (hands meet at grip — FK already correct), and any state
     // that doesn't expose the weapon anchors.
-    if (!state.akimbo
-        && rig._weaponGripAnchor
-        && rig._weaponMuzzleAnchor
-        && state.weaponClass !== 'pistol'
-        && state.weaponClass !== 'melee') {
+    // Support-arm IK gates: skip during akimbo / pistol / melee,
+    // and require both weapon anchors. If anchors are TEMPORARILY
+    // null (e.g., one frame between weapon-mesh swap and anchor
+    // re-cache), fall back to the previous frame's IK target — that
+    // way a single-frame anchor loss doesn't snap the support arm
+    // out of position and back next frame, which read as the visible
+    // "arm jumping out of position momentarily" the user reported.
+    const ikEnabled = !state.akimbo
+      && state.weaponClass !== 'pistol'
+      && state.weaponClass !== 'melee';
+    if (ikEnabled) {
       const fraction = SUPPORT_GRIP_FRACTION_BY_CLASS[state.weaponClass] ?? 0.50;
       if (fraction > 0.01) {
-        // Flush world matrices so the gun's anchors reflect the
-        // FK + spine writes we just made (Three doesn't auto-
-        // update world transforms when you set local rotations).
-        rig.root.updateMatrixWorld(true);
-        rig._weaponGripAnchor.getWorldPosition(_ikGripWorld);
-        rig._weaponMuzzleAnchor.getWorldPosition(_ikMuzzleWorld);
-        _ikSupportTarget.lerpVectors(_ikGripWorld, _ikMuzzleWorld, fraction);
-        // Pole hint: away from the spine + slightly down. Computed
-        // from the rig itself so it works regardless of which side
-        // is the support arm or which way the character faces.
-        supportArm.shoulder.pivot.getWorldPosition(_ikSupportShoulderWorld);
-        rig.chest.getWorldPosition(_ikChestWorld);
-        _ikPoleHint.subVectors(_ikSupportShoulderWorld, _ikChestWorld).normalize();
-        _ikPoleHint.y -= 0.3;
-        _ikPoleHint.normalize();
-        if (!rig._supportIkCache) rig._supportIkCache = {};
-        solveTwoBoneIK(
-          supportArm.shoulder.pivot,
-          supportArm.elbow,
-          supportArm.wrist,
-          _ikSupportTarget,
-          _ikPoleHint,
-          rig._supportIkCache,
-        );
+        const haveAnchors = !!(rig._weaponGripAnchor && rig._weaponMuzzleAnchor);
+        // Lazy-init the carry cache that survives one-frame anchor losses.
+        if (!rig._supportIkLastTarget) {
+          rig._supportIkLastTarget = new THREE.Vector3();
+          rig._supportIkLastPole   = new THREE.Vector3();
+          rig._supportIkLastValid  = false;
+        }
+        if (haveAnchors) {
+          // Flush world matrices so the gun's anchors reflect the
+          // FK + spine writes we just made (Three doesn't auto-
+          // update world transforms when you set local rotations).
+          rig.root.updateMatrixWorld(true);
+          rig._weaponGripAnchor.getWorldPosition(_ikGripWorld);
+          rig._weaponMuzzleAnchor.getWorldPosition(_ikMuzzleWorld);
+          _ikSupportTarget.lerpVectors(_ikGripWorld, _ikMuzzleWorld, fraction);
+          // Pole hint: away from the spine + slightly down. Computed
+          // from the rig itself so it works regardless of which side
+          // is the support arm or which way the character faces.
+          supportArm.shoulder.pivot.getWorldPosition(_ikSupportShoulderWorld);
+          rig.chest.getWorldPosition(_ikChestWorld);
+          _ikPoleHint.subVectors(_ikSupportShoulderWorld, _ikChestWorld).normalize();
+          _ikPoleHint.y -= 0.3;
+          _ikPoleHint.normalize();
+          rig._supportIkLastTarget.copy(_ikSupportTarget);
+          rig._supportIkLastPole.copy(_ikPoleHint);
+          rig._supportIkLastValid = true;
+        } else if (rig._supportIkLastValid) {
+          // Anchors briefly missing — reuse last frame's target/pole.
+          // Avoids a one-frame skip that would let the FK shoulder/
+          // elbow values dominate, popping the support arm.
+          _ikSupportTarget.copy(rig._supportIkLastTarget);
+          _ikPoleHint.copy(rig._supportIkLastPole);
+        }
+        if (haveAnchors || rig._supportIkLastValid) {
+          if (!rig._supportIkCache) rig._supportIkCache = {};
+          solveTwoBoneIK(
+            supportArm.shoulder.pivot,
+            supportArm.elbow,
+            supportArm.wrist,
+            _ikSupportTarget,
+            _ikPoleHint,
+            rig._supportIkCache,
+          );
+        }
       }
+    } else {
+      // IK disabled by class change — invalidate the cache so a future
+      // re-enable doesn't reuse stale-target data from the wrong weapon.
+      rig._supportIkLastValid = false;
     }
   } else if (rig.rightShoulderAnchor && rig.leftShoulderAnchor) {
     // Non-rifle holds don't use the shoulder anchor for weapon
