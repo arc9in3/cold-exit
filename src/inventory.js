@@ -153,6 +153,7 @@ export const JUNK_RENDER_BY_ID = {
   junk_skull:          'Assets/proposed/junk_skull.png',
   junk_monocle:        'Assets/proposed/junk_monocle.png',
   junk_dogtags:        'Assets/proposed/junk_dogtags.png',
+  junk_bouquet:        'Assets/generated/art-bouquet-of-flowers-solid-bg.png',
 };
 
 // Curated consumable PNG overrides — same idea as the gear / junk
@@ -407,6 +408,7 @@ const JUNK_ICON_BY_ID = {
   junk_radio:    'ICON_SM_Chr_Attach_Radio_01_Military.png',
   junk_carbatt:  'ICON_SM_Chr_Attach_Battery_01_Military.png',
   junk_scrap:    'ICON_MilitaryCombat_Inventory_Crafting_01_Underlay.png',
+  junk_bouquet:  'ICON_MilitaryCombat_Map_Plants_01_Underlay.png',
 };
 
 export function iconForItem(item) {
@@ -1477,6 +1479,7 @@ export const JUNK_DEFS = {
   encryptedDrv: { id: 'junk_drive',    name: 'Encrypted Drive',    type: 'junk', tint: 0x60b0ff, sellValue: 260,  rarity: 'uncommon',  description: 'Data · valuable',       stackMax: 9 },
   monocle:      { id: 'junk_monocle',  name: 'Jeweled Monocle',    type: 'junk', tint: 0xf0d070, sellValue: 210,  rarity: 'uncommon',  description: 'Fancy eyewear',         stackMax: 3 },
   cigaretteCase:{ id: 'junk_cigcase',  name: 'Silver Cigarette Case', type: 'junk', tint: 0xbfbfbf, sellValue: 185, rarity: 'uncommon', description: 'Engraved silver',        stackMax: 5 },
+  bouquet:      { id: 'junk_bouquet',  name: 'Bouquet of Flowers', type: 'junk', tint: 0xe890b0, sellValue: 130,  rarity: 'uncommon',  description: 'Peonies and lace · still fresh', stackMax: 2 },
   // Rare — meaningful fence money.
   rareDoc:      { id: 'junk_doc',      name: 'Classified Document',type: 'junk', tint: 0x8a9eff, sellValue: 400,  rarity: 'rare',      description: 'Intel · sells well',    stackMax: 9 },
   diamondRing:  { id: 'junk_ring',     name: 'Diamond Ring',       type: 'junk', tint: 0xeaeaff, sellValue: 580,  rarity: 'rare',      description: 'Jewelry · high value',  stackMax: 9 },

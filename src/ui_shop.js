@@ -94,6 +94,30 @@ const AFFIX_PRICE_WEIGHT = {
 // Higher count (legendary-only 3-perk rolls) multiplies the premium.
 const PERK_PRICE_PER = 0.18;
 
+// Per-merchant room art for the shop modal background. A merchant kind
+// without an entry falls back to the default dark gradient. The art is
+// layered behind a translucent overlay in `_renderKeeper` so item grids
+// stay readable.
+const KEEPER_ROOM_ART = {
+  healer: 'Assets/generated/art-healer-room-v2-via-qwen-image.png',
+  relicSeller: 'Assets/generated/art-relic-seller-room-v2.png',
+};
+
+// Per-merchant painted portrait. Takes priority over the rig snapshot in
+// `_renderKeeper` when present; rig snapshot remains the fallback for
+// kinds without painted art so the panel never goes blank.
+const KEEPER_PORTRAIT_ART = {
+  blackMarket: 'Assets/generated/gen-black-marketeer-portrait-v2-via-qwen-image.png',
+  healer: 'Assets/generated/art-healer-portrait-via-qwen-image-v694-v719.png',
+  relicSeller: 'Assets/generated/art-relic-seller-portrait-v3-via-qwen-image.png',
+  // The Fence is the visual identity for the `merchant` kind ("The Fixer"
+  // in KEEPERS) per docs/art-requests-characters.md (#2: "THE FENCE —
+  // general merchant").
+  merchant: 'Assets/generated/art-fence-portrait-v2-via-qwen-image-r3-v474-v430-v996.png',
+  armorer: 'Assets/generated/art-armorer-portrait-v3-via-qwen-image.png',
+  gunsmith: 'Assets/generated/art-gunsmith-portrait-v3-via-qwen-image-r2-v375-v881-v128-v753-v399-v425.png',
+};
+
 function _affixPerkPremium(item) {
   let premium = 0;
   if (item.affixes && item.affixes.length) {
@@ -252,6 +276,7 @@ export class ShopUI {
       </div>
     `;
     document.body.appendChild(this.root);
+    this.cardEl = this.root.querySelector('#shop-card');
     this.stockEl = this.root.querySelector('#shop-stock');
     this.bagEl = this.root.querySelector('#shop-bag');
     this.buybackEl = this.root.querySelector('#shop-buyback');
@@ -1132,7 +1157,10 @@ export class ShopUI {
     const kind = this.merchant?.kind;
     let portrait = null;
     if (kind && kind !== 'bearMerchant') {
-      try { portrait = keeperPortrait(kind); } catch (_) { portrait = null; }
+      portrait = KEEPER_PORTRAIT_ART[kind] || null;
+      if (!portrait) {
+        try { portrait = keeperPortrait(kind); } catch (_) { portrait = null; }
+      }
     }
     this.keeperPortraitEl.innerHTML = portrait
       ? `<img class="shop-keeper-avatar" src="${portrait}" alt="">`
@@ -1140,6 +1168,24 @@ export class ShopUI {
     this.keeperNameEl.textContent = k.name;
     this.keeperNameEl.style.color = k.tone;
     this.keeperFlavorEl.textContent = k.flavor;
+    // Room art per merchant. Photo sits behind a strong dark gradient
+    // overlay so the item grids and headings stay legible. Kinds without
+    // a mapped room fall back to the original solid gradient.
+    const roomArt = KEEPER_ROOM_ART[kind];
+    if (this.cardEl) {
+      if (roomArt) {
+        this.cardEl.style.backgroundImage =
+          `linear-gradient(180deg, rgba(16,18,26,0.78) 0%, rgba(8,9,15,0.88) 100%), url("${roomArt}")`;
+        this.cardEl.style.backgroundSize = 'cover, cover';
+        this.cardEl.style.backgroundPosition = 'center, center';
+        this.cardEl.style.backgroundRepeat = 'no-repeat, no-repeat';
+      } else {
+        this.cardEl.style.backgroundImage = '';
+        this.cardEl.style.backgroundSize = '';
+        this.cardEl.style.backgroundPosition = '';
+        this.cardEl.style.backgroundRepeat = '';
+      }
+    }
   }
 
   _buildCell(item, price, mode) {
