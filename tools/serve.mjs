@@ -82,10 +82,37 @@ function patchManifestObject(content, objectName, entries, valueFmt) {
   for (const [key, value] of Object.entries(entries)) {
     const valStr = valueFmt(value);
     const keyEsc = key.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
-    const re = new RegExp(`^([ \\t]*)'${keyEsc}':[ \\t]*[^\\n]*$`, 'm');
+    // Capture the line as (indent)('key':)(rhs). RHS may contain a
+    // trailing line/block comment we must preserve so existing
+    // documentation isn't lost on UPDATE. We split rhs at depth-0
+    // (outside object braces + quotes) and re-emit the comment.
+    const re = new RegExp(`^([ \\t]*)'${keyEsc}':[ \\t]*(.*)$`, 'm');
     const m = body.match(re);
     if (m) {
-      body = body.replace(re, `${m[1]}'${key}': ${valStr},`);
+      const indent = m[1];
+      const rhs = m[2];
+      // Walk rhs left-to-right tracking { } depth + quote state;
+      // first '//' or '/*' at depth 0 outside quotes marks the
+      // start of the trailing comment.
+      let depth = 0, inSingle = false, inDouble = false;
+      let commentStart = -1;
+      for (let j = 0; j < rhs.length - 1; j++) {
+        const c = rhs[j], n = rhs[j + 1];
+        if (inSingle) { if (c === '\\') j++; else if (c === "'") inSingle = false; continue; }
+        if (inDouble) { if (c === '\\') j++; else if (c === '"') inDouble = false; continue; }
+        if (c === "'") { inSingle = true; continue; }
+        if (c === '"') { inDouble = true; continue; }
+        if (c === '{') { depth++; continue; }
+        if (c === '}') { depth--; continue; }
+        if (depth === 0 && c === '/' && (n === '/' || n === '*')) {
+          commentStart = j;
+          break;
+        }
+      }
+      const trailing = commentStart >= 0
+        ? '  ' + rhs.slice(commentStart).trimEnd()
+        : '';
+      body = body.replace(re, `${indent}'${key}': ${valStr},${trailing}`);
     } else {
       // Insert before the closing '}'. Trim any trailing whitespace
       // from body, append our line, restore newline so the closing
