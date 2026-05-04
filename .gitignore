@@ -61,3 +61,10 @@ Assets/models/animations/Universal Animation Library*/
 profiling/*.json
 profiling/*.json.gz
 tools/__pycache__/
+
+# Large source FBX files — runtime is GLB-only. Idle.fbx (110 MB)
+# was stripped from history 2026-05-04 because it exceeded GitHub's
+# 100 MB limit. Keep local copies if needed for re-export but don't
+# track them. Specific files listed (not blanket *.fbx) so the
+# already-tracked W1_* and Man_New_Idle FBXes stay tracked.
+Assets/models/Idle.fbx

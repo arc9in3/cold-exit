@@ -1293,7 +1293,10 @@ async function loadFbx(url) {
 {
   const f = gui.addFolder('FBX preview (Mixamo)');
   f.close();
-  f.add({ idle: () => loadFbx('../Assets/models/Idle.fbx').catch(e => console.error('[fbx]', e)) }, 'idle').name('load Idle.fbx');
+  // Was '../Assets/models/Idle.fbx' (110 MB) — stripped from repo
+  // history. Use the GLB-converted W1_Stand_Aim_Idle clip from the
+  // already-shipped Mixamo pack as the example load instead.
+  f.add({ idle: () => loadFbx('../Assets/models/animations/FBX_Pistol_Starter_27A_glb/W1_Stand_Aim_Idle.glb').catch(e => console.error('[fbx]', e)) }, 'idle').name('load idle clip');
   f.add({ unload: () => unloadFbx() }, 'unload').name('unload FBX');
   // Speed slider so we can preview slowed/accelerated playback.
   const speedProxy = { speed: 1.0 };
