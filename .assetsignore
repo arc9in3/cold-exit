@@ -1,13 +1,33 @@
- .git
-  .gitignore
-  .gitattributes
-  .cloudflareignore
-  Assets/*.zip
-  Assets/*.unitypackage
-  worker
-  README.md
-  BACKLOG.md
-  DESIGN.md
-  bugs
-  .claude
-  node_modules
+.git
+.gitignore
+.gitattributes
+.cloudflareignore
+worker
+README.md
+BACKLOG.md
+DESIGN.md
+bugs
+.claude
+.mc
+audits
+profiling
+docs
+node_modules
+Assets/models/Idle.fbx
+Assets/models/Bg.fbx
+Assets/models/Man_FullRig.fbx
+Assets/models/Man_New_Idle.fbx
+Assets/models/Man_New_Male_Standing_Pose.fbx
+Assets/models/Man_Rig_Correct.fbx
+Assets/models/Man_Rig_Correct_1.fbx
+Assets/models/Man_Rig_Correct_1_Male_Standing_Pose.fbx
+Assets/models/T-shirt1.fbx
+Assets/models/T-shirt2.fbx
+Assets/models/animations
+Assets/proposed
+*.fbx
+**/*.fbx
+*.zip
+**/*.zip
+*.unitypackage
+**/*.unitypackage

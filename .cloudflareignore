@@ -1,9 +1,20 @@
 .git
-  .gitignore
-  .gitattributes
-  worker
-  README.md
-  BACKLOG.md
-  DESIGN.md
-  bugs
-  .claude
+.gitignore
+.gitattributes
+worker
+README.md
+BACKLOG.md
+DESIGN.md
+bugs
+.claude
+.mc
+audits
+profiling
+docs
+node_modules
+# Source FBX files — runtime only loads GLB. FBX is conversion-only
+# (per memory: glb_only_no_fbx_runtime). Idle.fbx alone is 111 MiB
+# which exceeds Cloudflare Pages' 25 MiB per-file limit.
+*.fbx
+**/*.fbx
+**/*.zip
