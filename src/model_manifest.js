@@ -361,21 +361,82 @@ const PACK_SCALE_DEFAULTS = {
   'melee/':                   0.95,   // animpic POLY melee
   'tools/':                   1.00,
 };
+// Per-class visible-size targets after fitToRadius. Each weapon's
+// override is computed as target / (2 × muzzleLength) so every
+// weapon in a class renders to the same on-screen diameter
+// regardless of its declared length. Anchors (validated by user):
+//   - AK47 muzzleLength=0.96 at override 0.62 ⇒ rifle visible 1.20
+//   - AWP muzzleLength=1.45 at override 0.45 ⇒ sniper visible 1.30
+//   - KSG-12 muzzleLength=0.86 at override 0.40 ⇒ shotgun visible 0.70
+// Adjust class targets here when re-tuning visual size; per-weapon
+// values follow automatically from the formula.
+//
+// Targets in rig-local units after fitToRadius; fitToRadius itself
+// produces visible_diameter = 2 × targetRadius.
+//
+// To re-derive these values, use the probe at:
+//   playwright eval → import('/src/tunables.js'), measure each
+//   model's bounding box length, override = target / rawLen.
+// (See conversation 2026-05-04 for the original sweep.)
 export const MODEL_SCALE_OVERRIDE = {
-  // Outliers within a pack — these win over PACK_SCALE_DEFAULTS.
-  'weapons/SM_Civilian_Pistol.glb':         0.55,  // Makarov — was way too big
-  'weapons/SM_Police_Submachine_Gun.glb':   1.10,  // P90 — was a tad small
-  'weapons/SM_Police_Gun.glb':              0.50,  // 1911 — was 2× too big at default scale
-  // AK-family rifles (AK47 / AKS-47 / AKS-74 / AK104 / Draco NAK9) —
-  // the AssaultRifle_1..5 GLBs render at ~1.44m at the default rifle
-  // class fit scale, which reads as oversized vs the ~0.88m real AK
-  // length. 0.62 brings them down to ~0.9m — slightly stylized for
-  // iso readability but no longer clown-cartoonish.
-  'lowpolyguns/AssaultRifle_1.glb':         0.62,  // Draco NAK9
-  'lowpolyguns/AssaultRifle_2.glb':         0.62,  // AK47
-  'lowpolyguns/AssaultRifle_3.glb':         0.62,  // AKS-47
-  'lowpolyguns/AssaultRifle_4.glb':         0.62,  // AKS-74
-  'lowpolyguns/AssaultRifle_5.glb':         0.62,  // AK104
+  // ── Pistols (target visible 0.30) ──
+  'weapons/SM_Civilian_Pistol.glb':         0.30,  // Makarov (mL 0.50)
+  'weapons/SM_Army_Pistol.glb':             0.31,  // Glock 17 (mL 0.48)
+  'weapons/SM_Police_Gun.glb':              0.27,  // M1911 (mL 0.55)
+  'weapons/SM_Hunting_Pistol.glb':          0.21,  // Desert Eagle / Jessica's Rage (mL 0.72-0.75)
+  'lowpolyguns/Revolver_1.glb':             0.27,  // Colt 357 (mL 0.55)
+  'lowpolyguns/Revolver_3.glb':             0.24,  // Colt Python (mL 0.62)
+  'lowpolyguns/Revolver_4.glb':             0.38,  // .38 Special (mL 0.40)
+  'lowpolyguns/Revolver_5.glb':             0.24,  // Colt Anaconda / Colt Six Shooter (mL 0.62)
+  'lowpolyguns/AssaultRifle2_3.glb':        0.24,  // AR-15 Pistol (mL 0.62)
+  // ── SMGs (target visible 0.60) ──
+  'weapons/SM_Army_Submachine_Gun.glb':     0.43,  // UMP45 (mL 0.70)
+  'weapons/SM_Civilian_Submachine_Gun.glb': 0.42,  // PDW (mL 0.72)
+  'weapons/SM_Police_Submachine_Gun.glb':   0.50,  // P90 (mL 0.60)
+  'weapons/SM_Tactical_Submachine_Gun.glb': 0.45,  // Kriss Vector (mL 0.66)
+  'lowpolyguns/SubmachineGun_1.glb':        0.58,  // Spectre CQB (mL 0.52)
+  'lowpolyguns/SubmachineGun_2.glb':        0.45,  // Spectre (mL 0.66)
+  'lowpolyguns/SubmachineGun_3.glb':        0.41,  // SPC9 (mL 0.74)
+  'lowpolyguns/SubmachineGun_4.glb':        0.38,  // SPCA3 (mL 0.78)
+  'lowpolyguns/SubmachineGun_5.glb':        0.36,  // SPC223 (mL 0.84)
+  // ── Rifles (target visible 1.20 — AK47 anchor) ──
+  'lowpolyguns/AssaultRifle_1.glb':         0.62,  // Draco NAK9 (mL 0.58, but pistol-sized AR — leave at AK rate)
+  'lowpolyguns/AssaultRifle_2.glb':         0.62,  // AK47 (anchor, mL 0.96)
+  'lowpolyguns/AssaultRifle_3.glb':         0.64,  // AKS-47 (mL 0.94)
+  'lowpolyguns/AssaultRifle_4.glb':         0.65,  // AKS-74 (mL 0.92)
+  'lowpolyguns/AssaultRifle_5.glb':         0.70,  // AK104 (mL 0.86)
+  'lowpolyguns/AssaultRifle2_1.glb':        0.77,  // CAR-15 (mL 0.78)
+  'lowpolyguns/AssaultRifle2_2.glb':        0.65,  // M4 (mL 0.92)
+  'lowpolyguns/AssaultRifle2_4.glb':        0.77,  // AR-15 SBR (mL 0.78)
+  'lowpolyguns/Bullpup_1.glb':              0.71,  // JARD J68 (mL 0.84)
+  'lowpolyguns/Bullpup_2.glb':              0.73,  // JARD J67 (mL 0.82)
+  'lowpolyguns/Bullpup_3.glb':              0.68,  // JARD J56 (mL 0.88)
+  'weapons/Assault_Rifle_5_56_Prototype.glb': 0.65, // M16 (mL 0.92)
+  'weapons/SM_Assault_Rifle_9x39.glb':      0.68,  // AS VAL (mL 0.88)
+  'weapons/SM_Police_Sniper_Rifle.glb':     0.61,  // VSS (mL 0.98)
+  'weapons/SM_Bulpam_Assault_Rifle.glb':    0.68,  // AUG A3-CQC (mL 0.88)
+  // ── Shotguns (target visible 0.70 — KSG anchor) ──
+  'weapons/Modern_Pump_Action_Shotgun.glb': 0.40,  // KSG-12 (anchor, mL 0.86)
+  'weapons/SM_Army_Shotgun.glb':            0.41,  // Benelli M4 / Dragonbreath (mL 0.85/0.78)
+  'weapons/SM_Assault_Shotgun.glb':         0.43,  // AA-12 (mL 0.82)
+  'lowpolyguns/Shotgun_1.glb':              0.38,  // Mossberg 500 (mL 0.92)
+  'lowpolyguns/Shotgun_3.glb':              0.37,  // Remington 870 (mL 0.95)
+  'lowpolyguns/Shotgun_4.glb':              0.32,  // Henry Slug Rifle (mL 1.10)
+  'lowpolyguns/Shotgun_SawedOff.glb':       0.70,  // Sawed-Off (mL 0.50, short → larger override)
+  // ── Snipers (target visible 1.30 — AWP anchor) ──
+  'lowpolyguns/SniperRifle_1.glb':          0.59,  // Remington 700 (mL 1.10)
+  'lowpolyguns/SniperRifle_2.glb':          0.55,  // Remington 700 Tactical (mL 1.18)
+  'lowpolyguns/SniperRifle_3.glb':          0.45,  // AWP (anchor, mL 1.45)
+  'lowpolyguns/SniperRifle_4.glb':          0.55,  // (mL ~1.18 inferred)
+  'lowpolyguns/SniperRifle_5.glb':          0.48,  // .338 Lapua (mL 1.35)
+  'lowpolyguns/SniperRifle_6.glb':          0.57,  // Hunting Rifle (mL 1.15)
+  'weapons/SM_Army_Sniper_Rifle.glb':       0.52,  // SVD Dragunov (mL 1.25)
+  'weapons/SM_High_Precision_Sniper_Rifle.glb': 0.41, // Cheytac Intervention (mL 1.60)
+  // ── LMGs (target visible 1.30) ──
+  'weapons/SM_Light_Machine_Gun.glb':       0.62,  // M249 (mL 1.05)
+  'weapons/SM_Heavy_Machine_Gun.glb':       0.58,  // Type 80 LMG / Flamethrower (mL 1.12 / 0.95)
+  // ── Exotics (target visible 1.40) ──
+  'weapons/SM_Rocket_Launchers_01.glb':     0.50,  // Widowmaker (mL 1.40)
 };
 export function scaleForModelPath(fullPath) {
   if (!fullPath) return 1.0;
