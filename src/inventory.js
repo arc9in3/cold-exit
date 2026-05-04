@@ -1971,11 +1971,16 @@ export function wrapWeapon(w, opts = {}) {
     itemCategory: 'weapon',
     rarity: rolledRarity,
     mastercraft: mastercraft || undefined,
-    name: mcPrefix + (namePrefix ? `${namePrefix} ${w.name}` : w.name),
+    // Display name. Prefer the brand-safe fictional displayName from
+    // the weapon def when present (e.g. 'RK-47' instead of 'AK47'),
+    // fall back to the original `name` for weapons without a fictional
+    // alias yet. The mastercraft / rarity prefixes wrap whichever wins.
+    name: mcPrefix + (namePrefix ? `${namePrefix} ${w.displayName ?? w.name}` : (w.displayName ?? w.name)),
     // Original tunable name without the rarity / mastercraft prefix.
     // Lookups against WEAPON_RENDER_BY_NAME / MODEL_BY_WEAPON_NAME
     // use this so 'Refined Benelli M4' still resolves the Benelli M4
-    // render PNG + FBX.
+    // render PNG + FBX. Always uses the internal `name`, never the
+    // displayName, so save files and asset lookups stay stable.
     baseName: w.name,
     tint: w.tracerColor,
     damage: newDmg,

@@ -2637,16 +2637,17 @@ export class HideoutUI {
           ? `<img src="${icon}" alt="">`
           : `<div class="amini-icon-fallback">?</div>`}
       </div>
-      <div class="amini-name">${weapon.name}</div>
+      <div class="amini-name">${weapon.displayName ?? weapon.name}</div>
       <div class="amini-meta">${weapon.class || ''}${weapon.rarity ? ` · ${weapon.rarity}` : ''}</div>
       <div class="amini-stats">${dmg + rps + range}</div>
       ${action}
     `;
+    const _wn = weapon.displayName ?? weapon.name;
     tile.title = state === 'locked'
-      ? `${weapon.name} · Locked — reach Rank ${reqRank} to unlock for purchase.`
+      ? `${_wn} · Locked — reach Rank ${reqRank} to unlock for purchase.`
       : state === 'buyable'
-        ? `Unlock ${weapon.name} for ${cost}c (${weapon.rarity || 'common'} ${weapon.class || ''})`
-        : `${weapon.name} · ${weapon.rarity || 'common'} ${weapon.class || ''}`;
+        ? `Unlock ${_wn} for ${cost}c (${weapon.rarity || 'common'} ${weapon.class || ''})`
+        : `${_wn} · ${weapon.rarity || 'common'} ${weapon.class || ''}`;
     if ((state === 'owned' || state === 'taking') && onClick) {
       tile.style.cursor = 'pointer';
       tile.addEventListener('click', (e) => { e.stopPropagation(); onClick(); });

@@ -349,7 +349,7 @@ export const tunables = {
   },
   weapons: [
     {
-      name: 'Makarov',
+      name: 'Makarov', displayName: 'Makar PMK',
       type: 'ranged',
       class: 'pistol',
       rarity: 'common',
@@ -373,7 +373,7 @@ export const tunables = {
     },
     {
       unlockRank: 7,
-      name: 'Benelli M4',
+      name: 'Benelli M4', displayName: 'Beneli M4',
       type: 'ranged',
       class: 'shotgun',
       rarity: 'uncommon',
@@ -397,7 +397,7 @@ export const tunables = {
     },
     {
       unlockRank: 10, unlockCost: 1000,
-      name: 'M249',
+      name: 'M249', displayName: 'SAW-249',
       type: 'ranged',
       class: 'lmg',
       rarity: 'rare',
@@ -482,7 +482,7 @@ export const tunables = {
       // Reads through the firePlayerProjectile path (main.js:4108)
       // because fireMode === 'projectile'.
       unlockRank: 18, unlockCost: 1500,
-      name: 'Widowmaker Rocket Launcher',
+      name: 'Widowmaker Rocket Launcher', displayName: 'Widowmaker',
       type: 'ranged',
       class: 'exotic',
       rarity: 'rare',
@@ -600,7 +600,7 @@ export const tunables = {
       // Iconic early unlock — chip-buyable at rank 1 for permanent
       // stash access; also drops in the world for in-run pickup.
       unlockRank: 1, unlockCost: 100,
-      name: 'Glock 17', type: 'ranged', class: 'pistol', rarity: 'common',
+      name: 'Glock 17', displayName: 'Block 17', type: 'ranged', class: 'pistol', rarity: 'common',
       attachmentSlots: ['muzzle', 'sideRail', 'topRail', 'grip', 'trigger', 'magazine'],
       fireMode: 'semi', fireRate: 6.25, damage: 32, range: 34,
       hipSpread: 0.07, adsSpread: 0.008,
@@ -613,7 +613,7 @@ export const tunables = {
     {
       // Iconic early unlock — chip-buyable at rank 2; also world-drops.
       unlockRank: 2, unlockCost: 120,
-      name: 'UMP45', type: 'ranged', class: 'smg', rarity: 'common',
+      name: 'UMP45', displayName: 'UM-45', type: 'ranged', class: 'smg', rarity: 'common',
       attachmentSlots: ['muzzle', 'underRail', 'sideRail', 'topRail', 'stock', 'grip', 'trigger', 'magazine'],
       fireMode: 'auto', fireRate: 10, damage: 22, range: 28,
       hipSpread: 0.161, adsSpread: 0.038,
@@ -623,7 +623,7 @@ export const tunables = {
       magSize: 25, reloadTime: 1.6,
     },
     {
-      name: 'PDW', type: 'ranged', class: 'smg', rarity: 'common',
+      name: 'PDW', displayName: 'PDW-9', type: 'ranged', class: 'smg', rarity: 'common',
       attachmentSlots: ['muzzle', 'underRail', 'sideRail', 'topRail', 'stock', 'grip', 'trigger', 'magazine'],
       fireMode: 'auto', fireRate: 14, damage: 15, range: 28,
       hipSpread: 0.170, adsSpread: 0.041,
@@ -634,7 +634,7 @@ export const tunables = {
     },
     {
       unlockRank: 13,
-      name: 'P90', type: 'ranged', class: 'smg', rarity: 'rare',
+      name: 'P90', displayName: 'P-50', type: 'ranged', class: 'smg', rarity: 'rare',
       attachmentSlots: ['muzzle', 'underRail', 'sideRail', 'topRail', 'stock', 'grip', 'magazine'],
       fireMode: 'auto', fireRate: 15, damage: 14, range: 30,
       hipSpread: 0.151, adsSpread: 0.036,
@@ -649,7 +649,7 @@ export const tunables = {
       // common slot so a fresh stash can include a rifle option.
       // Lower DPS than uncommon autos (~133 vs ~310) but reaches
       // farther, so the starter rifle plays as a marksman trainer.
-      name: 'Mini-14', type: 'ranged', class: 'rifle', rarity: 'common',
+      name: 'Mini-14', displayName: 'Ranger M14', type: 'ranged', class: 'rifle', rarity: 'common',
       attachmentSlots: ['muzzle', 'barrel', 'underRail', 'sideRail', 'topRail', 'stock', 'grip', 'trigger', 'magazine'],
       fireMode: 'semi', fireRate: 3.5, damage: 38, range: 62,
       hipSpread: 0.10, adsSpread: 0.012,
@@ -663,7 +663,7 @@ export const tunables = {
       // uncommon rarity so the rank-up flow doesn't stall on chip-
       // saving); also drops in the world.
       unlockRank: 4, unlockCost: 200,
-      name: 'AK47', type: 'ranged', class: 'rifle', rarity: 'uncommon',
+      name: 'AK47', displayName: 'RK-47', type: 'ranged', class: 'rifle', rarity: 'uncommon',
       attachmentSlots: ['muzzle', 'barrel', 'underRail', 'sideRail', 'topRail', 'stock', 'grip', 'trigger', 'magazine'],
       fireMode: 'auto', fireRate: 10, damage: 32, range: 58,
       hipSpread: 0.12, adsSpread: 0.018,
@@ -674,7 +674,7 @@ export const tunables = {
     },
     {
       unlockRank: 8, unlockCost: 800,
-      name: 'AS VAL', type: 'ranged', class: 'rifle', rarity: 'rare',
+      name: 'AS VAL', displayName: 'VOLK VR-9', type: 'ranged', class: 'rifle', rarity: 'rare',
       attachmentSlots: ['muzzle', 'barrel', 'underRail', 'sideRail', 'topRail', 'stock', 'grip', 'trigger', 'magazine'],
       fireMode: 'auto', fireRate: 15, damage: 32, range: 50,
       hipSpread: 0.13, adsSpread: 0.020,
@@ -691,7 +691,7 @@ export const tunables = {
       // range; semi-auto only so it reads as a marksman rifle vs. the
       // VAL's close-range auto role.
       unlockRank: 8, unlockCost: 800,
-      name: 'VSS', type: 'ranged', class: 'rifle', rarity: 'rare',
+      name: 'VSS', displayName: 'VOLK SR', type: 'ranged', class: 'rifle', rarity: 'rare',
       attachmentSlots: ['muzzle', 'barrel', 'underRail', 'sideRail', 'topRail', 'stock', 'grip', 'trigger', 'magazine'],
       fireMode: 'semi', fireRate: 4.0, damage: 58, range: 72,
       hipSpread: 0.10, adsSpread: 0.011,
@@ -704,7 +704,7 @@ export const tunables = {
     // --- Revolvers ---
     {
       unlockRank: 6,
-      name: 'Colt Anaconda .44', type: 'ranged', class: 'pistol', rarity: 'common',
+      name: 'Colt Anaconda .44', displayName: 'Crossfire .44', type: 'ranged', class: 'pistol', rarity: 'common',
       attachmentSlots: ['sideRail', 'topRail', 'grip', 'trigger'],
       fireMode: 'semi', fireRate: 2.6, damage: 70, range: 38,
       hipSpread: 0.06, adsSpread: 0.005,
@@ -715,7 +715,7 @@ export const tunables = {
     },
     {
       unlockRank: 14,
-      name: 'Desert Eagle .50', type: 'ranged', class: 'pistol', rarity: 'rare',
+      name: 'Desert Eagle .50', displayName: 'Sand Eagle XR', type: 'ranged', class: 'pistol', rarity: 'rare',
       attachmentSlots: ['muzzle', 'sideRail', 'topRail', 'grip', 'trigger', 'magazine'],
       fireMode: 'semi', fireRate: 2.4, damage: 110, range: 42,
       hipSpread: 0.085, adsSpread: 0.006,
@@ -725,7 +725,7 @@ export const tunables = {
       magSize: 7, reloadTime: 1.5,
     },
     {
-      name: 'M1911', type: 'ranged', class: 'pistol', rarity: 'common',
+      name: 'M1911', displayName: '1911-A1', type: 'ranged', class: 'pistol', rarity: 'common',
       attachmentSlots: ['muzzle', 'sideRail', 'topRail', 'grip', 'trigger', 'magazine'],
       fireMode: 'semi', fireRate: 5.0, damage: 44, range: 34,
       hipSpread: 0.068, adsSpread: 0.007,
@@ -742,7 +742,7 @@ export const tunables = {
       // Iconic early unlock — chip-buyable at rank 3 for permanent
       // stash; also drops in the world. Bolt-action sniper intro.
       unlockRank: 3, unlockCost: 150,
-      name: 'Remington 700', type: 'ranged', class: 'sniper', rarity: 'common',
+      name: 'Remington 700', displayName: 'RT-700', type: 'ranged', class: 'sniper', rarity: 'common',
       attachmentSlots: ['muzzle', 'barrel', 'sideRail', 'topRail', 'stock', 'grip', 'trigger', 'magazine'],
       fireMode: 'semi', fireRate: 1.3, damage: 72, range: 80,
       hipSpread: 0.13, adsSpread: 0.005,
@@ -753,7 +753,7 @@ export const tunables = {
     },
     {
       unlockRank: 11,
-      name: 'SVD Dragunov', type: 'ranged', class: 'sniper', rarity: 'rare',
+      name: 'SVD Dragunov', displayName: 'Dragunov SR', type: 'ranged', class: 'sniper', rarity: 'rare',
       attachmentSlots: ['muzzle', 'barrel', 'sideRail', 'topRail', 'stock', 'grip', 'trigger', 'magazine'],
       fireMode: 'semi', fireRate: 4.0, damage: 78, range: 82,
       hipSpread: 0.1, adsSpread: 0.005,
@@ -764,7 +764,7 @@ export const tunables = {
     },
     {
       unlockRank: 16, unlockCost: 2500, shieldBreaker: true,
-      name: 'Cheytac Intervention', type: 'ranged', class: 'sniper', rarity: 'epic',
+      name: 'Cheytac Intervention', displayName: 'CT-200', type: 'ranged', class: 'sniper', rarity: 'epic',
       attachmentSlots: ['muzzle', 'topRail', 'stock', 'trigger', 'underRail'],
       // .408 CheyTac is a bolt-action anti-materiel platform. ~0.4/s
       // = one round every ~2.5s including bolt cycle. Reload bumped
@@ -780,7 +780,7 @@ export const tunables = {
     // --- Extended rifle lineup ---
     {
       unlockRank: 7,
-      name: 'M16', type: 'ranged', class: 'rifle', rarity: 'uncommon',
+      name: 'M16', displayName: 'AR-16', type: 'ranged', class: 'rifle', rarity: 'uncommon',
       attachmentSlots: ['muzzle', 'barrel', 'underRail', 'sideRail', 'topRail', 'stock', 'grip', 'trigger', 'magazine'],
       fireMode: 'auto', fireRate: 12, damage: 26, range: 70,
       hipSpread: 0.12, adsSpread: 0.016,
@@ -794,7 +794,7 @@ export const tunables = {
       // range than the standard rifle baseline. Per-platform CQB/CQC
       // rule: trade reach for in-room cyclic suppression.
       unlockRank: 8,
-      name: 'AUG A3-CQC', type: 'ranged', class: 'rifle', rarity: 'uncommon',
+      name: 'AUG A3-CQC', displayName: 'AGRA AC', type: 'ranged', class: 'rifle', rarity: 'uncommon',
       attachmentSlots: ['muzzle', 'barrel', 'underRail', 'sideRail', 'topRail', 'stock', 'grip', 'trigger', 'magazine'],
       fireMode: 'auto', fireRate: 14, damage: 24, range: 48,
       hipSpread: 0.14, adsSpread: 0.020,
@@ -807,7 +807,7 @@ export const tunables = {
     // --- LMG lineup ---
     {
       unlockRank: 10, unlockCost: 1000,
-      name: 'Type 80 LMG', type: 'ranged', class: 'lmg', rarity: 'rare',
+      name: 'Type 80 LMG', displayName: 'Type-80', type: 'ranged', class: 'lmg', rarity: 'rare',
       attachmentSlots: ['muzzle', 'barrel', 'underRail', 'sideRail', 'topRail', 'stock', 'grip'],
       fireMode: 'auto', fireRate: 12, damage: 36, range: 65,
       hipSpread: 0.22, adsSpread: 0.028,
@@ -820,7 +820,7 @@ export const tunables = {
     // --- Extended shotgun ---
     {
       unlockRank: 9,
-      name: 'AA-12', type: 'ranged', class: 'shotgun', rarity: 'uncommon',
+      name: 'AA-12', displayName: 'AS-12', type: 'ranged', class: 'shotgun', rarity: 'uncommon',
       attachmentSlots: ['muzzle', 'sideRail', 'topRail', 'stock', 'grip', 'magazine'],
       fireMode: 'auto', fireRate: 5.0, damage: 14, range: 18,
       hipSpread: 0.2, adsSpread: 0.1,
@@ -987,7 +987,7 @@ export const tunables = {
     // weaker combos than the katana; shared combo structure so the player
     // can still swing them.
     {
-      name: 'Combat Knife',
+      name: 'Combat Knife', displayName: 'Combat Knife',
       type: 'melee', class: 'melee', rarity: 'common',
       meleeThreshold: 2.8,
       tracerColor: 0xc0c0c8,
@@ -1040,7 +1040,7 @@ export const tunables = {
       ],
     },
     {
-      name: 'Baseball Bat',
+      name: 'Baseball Bat', displayName: 'Baseball Bat',
       type: 'melee', class: 'melee', rarity: 'uncommon',
       meleeThreshold: 3.0,
       tracerColor: 0xb98a5c,
@@ -1065,7 +1065,7 @@ export const tunables = {
       // Cursor distance from player picks a 'close' or 'far' variant per step.
       // Each step: startup (rooted) → active (lunges + deals damage once) →
       // recovery (rooted) → window (LMB chains to next step; timeout resets).
-      name: 'katana',
+      name: 'katana', displayName: 'Katana',
       type: 'melee',
       class: 'melee',
       rarity: 'rare',
@@ -1107,7 +1107,7 @@ export const tunables = {
     // --- Extended melee lineup ---
     {
       worldDrop: false,
-      name: 'Brass Knuckles',
+      name: 'Brass Knuckles', displayName: 'Brass Knuckles',
       type: 'melee', class: 'melee', rarity: 'common',
       meleeThreshold: 2.5,
       tracerColor: 0xc99030,
@@ -1197,7 +1197,7 @@ export const tunables = {
     },
     {
       worldDrop: false,
-      name: 'Fire Axe',
+      name: 'Fire Axe', displayName: 'Fire Axe',
       type: 'melee', class: 'melee', rarity: 'uncommon',
       meleeThreshold: 3.1,
       tracerColor: 0xb04030,
@@ -1274,7 +1274,7 @@ export const tunables = {
     },
     {
       unlockRank: 10,
-      name: 'Colt Python',
+      name: 'Colt Python', displayName: 'Crossfire Python',
       type: 'ranged',
       class: 'pistol',
       rarity: 'uncommon',
@@ -1298,7 +1298,7 @@ export const tunables = {
     },
     {
       unlockRank: 6,
-      name: 'Colt 357',
+      name: 'Colt 357', displayName: 'Crossfire .357',
       type: 'ranged',
       class: 'pistol',
       rarity: 'common',
@@ -1322,7 +1322,7 @@ export const tunables = {
     },
     {
       unlockRank: 7,
-      name: '.38 Special',
+      name: '.38 Special', displayName: 'Iron .38',
       type: 'ranged',
       class: 'pistol',
       rarity: 'common',
@@ -1346,7 +1346,7 @@ export const tunables = {
     },
     {
       unlockRank: 11,
-      name: 'Colt Six Shooter',
+      name: 'Colt Six Shooter', displayName: 'Crossfire Six-Shooter',
       type: 'ranged',
       class: 'pistol',
       rarity: 'uncommon',
@@ -1370,7 +1370,7 @@ export const tunables = {
     },
     {
       unlockRank: 6, unlockCost: 400,
-      name: 'Spectre',
+      name: 'Spectre', displayName: 'Specter M4',
       type: 'ranged',
       class: 'smg',
       rarity: 'uncommon',
@@ -1400,7 +1400,7 @@ export const tunables = {
       // the standard Spectre. Per the CQB/CQC rule: trade reach for
       // in-room cyclic suppression.
       unlockRank: 5,
-      name: 'Spectre CQB',
+      name: 'Spectre CQB', displayName: 'Specter CQB',
       type: 'ranged',
       class: 'smg',
       rarity: 'common',
@@ -1424,7 +1424,7 @@ export const tunables = {
     },
     {
       unlockRank: 9,
-      name: 'SPC9',
+      name: 'SPC9', displayName: 'SPC-9',
       type: 'ranged',
       class: 'smg',
       rarity: 'uncommon',
@@ -1448,7 +1448,7 @@ export const tunables = {
     },
     {
       unlockRank: 8,
-      name: 'CAR-15',
+      name: 'CAR-15', displayName: 'CR-15',
       type: 'ranged',
       class: 'rifle',
       rarity: 'uncommon',
@@ -1472,7 +1472,7 @@ export const tunables = {
     },
     {
       unlockRank: 7,
-      name: 'AKS-74',
+      name: 'AKS-74', displayName: 'RK-74',
       type: 'ranged',
       class: 'rifle',
       rarity: 'uncommon',
@@ -1496,7 +1496,7 @@ export const tunables = {
     },
     {
       unlockRank: 12,
-      name: 'AK104',
+      name: 'AK104', displayName: 'RK-104',
       type: 'ranged',
       class: 'rifle',
       rarity: 'rare',
@@ -1520,7 +1520,7 @@ export const tunables = {
     },
     {
       unlockRank: 6,
-      name: 'JARD J67',
+      name: 'JARD J67', displayName: 'JARD J67',
       type: 'ranged',
       class: 'rifle',
       rarity: 'rare',
@@ -1543,7 +1543,7 @@ export const tunables = {
       reloadTime: 1.5,
     },
     {
-      name: 'Mossberg 500',
+      name: 'Mossberg 500', displayName: 'MB-500',
       type: 'ranged',
       class: 'shotgun',
       rarity: 'common',
@@ -1583,7 +1583,7 @@ export const tunables = {
     },
     {
       unlockRank: 5,
-      name: 'Remington 870',
+      name: 'Remington 870', displayName: 'RT-870',
       type: 'ranged',
       class: 'shotgun',
       rarity: 'common',
@@ -1607,7 +1607,7 @@ export const tunables = {
     },
     {
       unlockRank: 5, unlockCost: 200,
-      name: 'Sawed-Off Shotgun',
+      name: 'Sawed-Off Shotgun', displayName: 'Sawed-Off',
       type: 'ranged',
       class: 'shotgun',
       rarity: 'common',
@@ -1655,7 +1655,7 @@ export const tunables = {
     },
     {
       unlockRank: 18, shieldBreaker: true,
-      name: 'AWP',
+      name: 'AWP', displayName: 'AW-308',
       type: 'ranged',
       class: 'sniper',
       rarity: 'epic',
@@ -1682,7 +1682,7 @@ export const tunables = {
     },
     {
       unlockRank: 17, shieldBreaker: true,
-      name: '.338 Lapua',
+      name: '.338 Lapua', displayName: 'Lapua-338',
       type: 'ranged',
       class: 'sniper',
       rarity: 'rare',
@@ -1709,7 +1709,7 @@ export const tunables = {
     },
     {
       unlockRank: 4,
-      name: 'Hunting Rifle',
+      name: 'Hunting Rifle', displayName: 'Ranger 30',
       type: 'ranged',
       class: 'sniper',
       rarity: 'common',
@@ -1829,7 +1829,7 @@ export const tunables = {
       // weapon. Iconic early unlock — chip-buyable at rank 4 alongside
       // the AK47; also drops in the world.
       unlockRank: 4, unlockCost: 200,
-      name: 'M4', type: 'ranged', class: 'rifle', rarity: 'uncommon',
+      name: 'M4', displayName: 'AR-4', type: 'ranged', class: 'rifle', rarity: 'uncommon',
       attachmentSlots: ['muzzle', 'barrel', 'underRail', 'sideRail', 'topRail', 'stock', 'grip', 'trigger', 'magazine'],
       fireMode: 'auto', fireRate: 12, damage: 26, range: 56,
       hipSpread: 0.11, adsSpread: 0.016,

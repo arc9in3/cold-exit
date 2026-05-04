@@ -17995,11 +17995,12 @@ function tick() {
     let weaponLabel = 'unarmed';
     let ammoLabel = '';
     if (weapon) {
+      const _wn = weapon.displayName ?? weapon.name;
       weaponLabel = weapon.type === 'melee'
-        ? `${weapon.name} (melee ${playerInfo.attackPhase !== 'idle'
+        ? `${_wn} (melee ${playerInfo.attackPhase !== 'idle'
             ? `step ${playerInfo.attackStep + 1}/${weapon.combo.length} ${playerInfo.attackPhase}`
             : 'ready'})`
-        : `${weapon.name} (${weapon.fireMode})`;
+        : `${_wn} (${weapon.fireMode})`;
       if (typeof weapon.ammo === 'number') {
         ammoLabel = ` ${weapon.ammo}/${weapon.magSize}` +
           (weapon.reloadingT > 0 ? ` reload ${weapon.reloadingT.toFixed(1)}s` : '');
