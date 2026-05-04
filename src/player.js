@@ -5,12 +5,13 @@ import { getCharacterStyle } from './prefs.js';
 import { loadModelClone, fitToRadius } from './gltf_cache.js';
 import { buildRig, initAnim, updateAnim, pokeHit, pokeRecoil, pokeDeath,
          RIFLE_WEAPON_HIP, RIFLE_WEAPON_AIM,
-         SMG_WEAPON_HIP,   SMG_WEAPON_AIM } from './actor_rig.js';
+         SMG_WEAPON_HIP,   SMG_WEAPON_AIM,
+         SUPPORT_GRIP_FRACTION_BY_CLASS } from './actor_rig.js';
 import { buildMeleePrimitive } from './melee_primitives.js';
 import { loadStateMachine, selectFromPlayerState, selectLayeredFromPlayerState, deriveInputs } from './anim/state_machine.js';
 import { attachGraph } from './anim/graph.js';
 import { selectGaspLocomotion } from './anim/locomotion.js';
-import { solveTwoBoneIK, resetIkCache } from './anim/ik_two_bone.js';
+import { solveTwoBoneIK, solvePostClipTwoBoneIK, resetIkCache } from './anim/ik_two_bone.js';
 
 // Lazy-load the GASP locomotion state machine (only fetched when a
 // rig with useGaspLocomotion=true is loaded). Same fire-and-forget
@@ -51,14 +52,27 @@ function _runUpperBodyIK(rig, state, aimPoint, aimPitch, dt = 1/60) {
   // body forward; we want backward when below ADS so arms rise).
   aimPitch += (state._gaspPitchOffset || 0);
   // Recoil pulse — kickRecoil() set fbx._recoilT and _recoilAmt;
-  // decay over time and add a backward pitch contribution. ~180ms
-  // total, peak at trigger, smooth ease-out.
+  // decay over time. ~180ms total, peak at trigger, smooth ease-out.
+  // Drives THREE additive layers each frame:
+  //   1. aimPitch += -recoil — chest/spine pitch backward (muzzle rises)
+  //   2. dominant shoulder kick — additive rotation on the gun-arm
+  //      shoulder so the visible arm jerks rearward (not just spine)
+  //   3. dominant elbow kick — small bend on the gun-arm elbow so the
+  //      forearm absorbs some of the kick (reads as "gun pushes the
+  //      forearm back into a slightly tighter bend")
+  // Layers 2 and 3 fire on bones AFTER the spine writes below, so
+  // they're applied to the post-locomotion bone state. Stored as
+  // pendingRecoilKick — used in the dominant-arm clavicle/upperarm
+  // block further down. Magnitudes scaled to the recoil amount.
+  let recoilK = 0;
   if (fbx._recoilT > 0) {
     fbx._recoilT = Math.max(0, fbx._recoilT - dt);
     const phase = fbx._recoilT / 0.18;            // 1.0 → 0.0
-    const k = phase * phase;                       // ease-out quadratic
-    aimPitch += -fbx._recoilAmt * k;               // negative = pitch UP (gun rises)
+    recoilK = phase * phase;                       // ease-out quadratic
+    aimPitch += -fbx._recoilAmt * recoilK;         // chest pitches up (muzzle rises)
   }
+  // Stash for the arm-kick block below.
+  fbx._pendingRecoilK = recoilK;
 
   // Resolve spine chain + neck + head + clavicles on first call.
   if (!fbx._spineChain) {
@@ -195,11 +209,86 @@ function _runUpperBodyIK(rig, state, aimPoint, aimPitch, dt = 1/60) {
       dominantClav.updateMatrixWorld(true);
     }
   }
+
+  // ── Recoil arm-kick ─────────────────────────────────────────
+  // During the recoil pulse (~180ms after firing), apply additive
+  // rotations on the dominant arm's shoulder and elbow so the arm
+  // visibly jerks back instead of just having the chest tilt up.
+  // Magnitudes scale with the kickRecoil amount (sniper hits hardest,
+  // pistol softest). The chest pitch from aimPitch already runs in
+  // the spine writes above; this layer is what makes the arm itself
+  // pop back. Reads from fbx._pendingRecoilK (set above).
+  const _recK = fbx._pendingRecoilK || 0;
+  if (_recK > 0 && fbx._recoilAmt) {
+    const dominantArm = state?.handedness === 'left' ? rig.leftArm : rig.rightArm;
+    const shoulderPiv = dominantArm?.shoulder?.pivot;
+    const elbow = dominantArm?.elbow;
+    // Shoulder kick: rotate arm rearward (positive X = pitch back in
+    // typical bone-local convention for upper arms). Magnitude = ~3×
+    // the chest pitch so the arm motion is visibly bigger than the
+    // spine motion. Multiply per-frame, additive on top of clip pose.
+    const shoulderKick = _recK * fbx._recoilAmt * 3.0;
+    if (shoulderPiv) {
+      shoulderPiv.rotation.x -= shoulderKick;
+    }
+    // Elbow kick: small additional bend so the forearm absorbs some
+    // of the kick. Smaller magnitude than the shoulder.
+    const elbowKick = _recK * fbx._recoilAmt * 1.5;
+    if (elbow) {
+      elbow.rotation.x -= elbowKick;
+    }
+    if (shoulderPiv) shoulderPiv.updateMatrixWorld(true);
+  }
+
   // Neck + head: yaw ONLY. User feedback — pitching the head/neck
   // reads as a lean and breaks the silhouette. Head turns to face
   // the cursor; neck stays straight; pitch contribution = 0.
   applyChain(fbx._neckBone, aimYaw * 0.10, 0);
   applyChain(rig.head,      aimYaw * 0.30, 0);
+
+  // ── Support-arm IK (option 5: gun-anchored target) ─────────
+  // Target is computed from the gun's grip + muzzle anchors —
+  // both are children of the right-hand wrist, so they move with
+  // the gun automatically. No re-binding, no per-aim-angle
+  // authoring. Five class-level fractions are the only knobs.
+  //
+  // Uses solvePostClipTwoBoneIK (post-AnimationMixer solver) —
+  // reads current bone state every frame instead of caching a
+  // bind direction. This is what fixes the wild swinging from
+  // the previous solveTwoBoneIK attempt: the post-clip solver
+  // doesn't compose its delta with the clip's per-frame rotation.
+  const _ikCls = state.equipped?.class;
+  const _ikFrac = SUPPORT_GRIP_FRACTION_BY_CLASS[_ikCls];
+  if (_ikFrac && _ikFrac > 0.01
+      && !state.offhandEquipped
+      && rig._weaponGripAnchor
+      && rig._weaponMuzzleAnchor
+      && rig.leftArm?.shoulder?.pivot
+      && rig.leftArm?.elbow
+      && rig.leftArm?.wrist) {
+    rig.group.updateMatrixWorld(true);
+    const _gW = new THREE.Vector3();
+    const _mW = new THREE.Vector3();
+    rig._weaponGripAnchor.getWorldPosition(_gW);
+    rig._weaponMuzzleAnchor.getWorldPosition(_mW);
+    const _target = _gW.clone().lerp(_mW, _ikFrac);
+    // Pole hint = away from spine + slightly down. Computed
+    // dynamically so it works at any character orientation.
+    const _shW = new THREE.Vector3();
+    const _chW = new THREE.Vector3();
+    rig.leftArm.shoulder.pivot.getWorldPosition(_shW);
+    rig.chest.getWorldPosition(_chW);
+    const _pole = _shW.clone().sub(_chW).normalize();
+    _pole.y -= 0.3;
+    _pole.normalize();
+    solvePostClipTwoBoneIK(
+      rig.leftArm.shoulder.pivot,
+      rig.leftArm.elbow,
+      rig.leftArm.wrist,
+      _target,
+      _pole,
+    );
+  }
 }
 
 // Lazy-load the player FBX clip-selection state machine. Until the
@@ -467,6 +556,14 @@ export function createPlayer(scene) {
   muzzle.position.set(0, -(0.1 + 0.5) * WEAPON_SCALE, 0);
   handPivot.add(muzzle);
 
+  // Expose grip + muzzle anchors on the rig so the support-arm IK in
+  // actor_rig.js can solve the support hand onto the gun's actual
+  // grip→muzzle line every frame. Without these the rig falls back
+  // to FK-only and the support hand drifts off-line at non-authored
+  // aim angles.
+  rig._weaponGripAnchor   = gunMesh;
+  rig._weaponMuzzleAnchor = muzzle;
+
   // In-hand FBX weapon model — mirrors gunMesh's parent + orientation
   // so imported weapon art tracks the hand too. FBXes authored +Z
   // forward need the same 90° X-rotation to align with the arm axis.
@@ -729,6 +826,17 @@ export function createPlayer(scene) {
     if (gunMesh.parent !== anchor) anchor.add(gunMesh);
     if (muzzle.parent  !== anchor) anchor.add(muzzle);
     if (inHandModel.parent !== anchor) anchor.add(inHandModel);
+
+    // Re-bind the support-IK anchors on every setWeapon. The player's
+    // rig is a `let` in createPlayer's scope and can be flipped from
+    // procgen → FBX by swapPlayerToFbxRig() via _setRig(). The
+    // closure here resolves `rig` to whichever is current, so this
+    // always lands on the active rig — and re-runs every weapon swap
+    // for safety.
+    if (rig) {
+      rig._weaponGripAnchor   = gunMesh;
+      rig._weaponMuzzleAnchor = muzzle;
+    }
 
     const ws = WEAPON_SCALE;
     const usingGunAnchor = !!(rig._gunAnchor && anchor === rig._gunAnchor);
@@ -2043,7 +2151,14 @@ export function createPlayer(scene) {
         if (_handTrackV.y < lowestFootY) lowestFootY = _handTrackV.y;
       }
       if (lowestFootY === Infinity) lowestFootY = 0;
-      const wantSink = -lowestFootY;
+      // Foot bone sits at the ankle — the visible foot mesh extends
+      // BELOW the ankle by ~8cm on a typical Mixamo/GASP rig. Without
+      // this offset, the ground-clamp lifts only until the ANKLE is
+      // at Y=0, which leaves the toes/sole poking through the floor.
+      // Override per-rig via rig._fbx.footGroundOffset if a character
+      // export uses different proportions (e.g. taller boots).
+      const FOOT_GROUND_OFFSET = rig._fbx.footGroundOffset ?? 0.08;
+      const wantSink = -lowestFootY + FOOT_GROUND_OFFSET;
       const cur = rig._fbx._crouchSinkY ?? 0;
       // Asymmetric lerp inverted from the previous attempt:
       //   wantSink > cur (lowestFoot is BELOW ground, rig should
@@ -2185,14 +2300,15 @@ export function createPlayer(scene) {
           }
           rig._gunAnchor.rotation.set(gunPitch, gunYaw, 0);
         }
-        // Hipfire pitch-up baseline — the GASP _Pistol clips
-        // author the arms in low-ready (downward) pose. We add a
-        // negative-pitch offset to aimPitch when NOT ADS so the
-        // spine distribution naturally tilts the upper body
-        // upward, lifting the arms (and gun) to chest height.
-        // 0 at full ADS (rifle clips already hold arms level),
-        // -0.18 rad (~10°) at full hipfire.
-        state._gaspPitchOffset = (1 - adsAmt) * -0.18;
+        // Hipfire arm-pitch baseline. Was -0.18 rad (~10° upward)
+        // to lift the GASP Pistol clips' low-ready arms up to
+        // chest height. User wants arms lowered for hipfire across
+        // the board, so the offset is now +0.10 (~6° downward) —
+        // arms hang naturally at hip level when not ADS, and
+        // smoothly raise to clip-authored aim level as adsAmt → 1.
+        // Bump magnitude if arms still read too high; flip sign
+        // to restore old behavior.
+        state._gaspPitchOffset = (1 - adsAmt) * 0.10;
         // Arm-shoulder twist for extended aim range — when the
         // cursor is FAR off-axis (residual past the chest's 45°
         // limit), rotate the dominant clavicle / upperarm to point
@@ -2592,11 +2708,25 @@ export function createPlayer(scene) {
       group.position.y + (state.crouched ? 0.85 : 1.25),
       group.position.z,
     );
+    // Gun-barrel forward direction — derived from the actual gun's
+    // grip→muzzle vector each frame. Lasers and any other "the gun
+    // is pointing this way" effect should use THIS rather than
+    // recomputing forward from cursor-minus-muzzle, because at
+    // certain aim angles the muzzle's world position can swing past
+    // the cursor (the muzzle traces a circle around the player as
+    // they turn) and cursor-based forward briefly flips backward.
+    const _muzzleW = muzzle.getWorldPosition(new THREE.Vector3());
+    const _gripW = gunMesh.getWorldPosition(new THREE.Vector3());
+    const _muzzleForward = _muzzleW.clone().sub(_gripW);
+    if (_muzzleForward.lengthSq() > 1e-6) _muzzleForward.normalize();
+    else _muzzleForward.set(0, 0, 1);
     return {
       position: group.position,
       aim: aimPoint || null,
       facing: facing.clone(),
-      muzzleWorld: muzzle.getWorldPosition(new THREE.Vector3()),
+      muzzleWorld: _muzzleW,
+      gripWorld: _gripW,
+      muzzleForward: _muzzleForward,
       // Off-hand muzzle world position — used by main.js's akimbo
       // path so RMB tracers spawn from weapon2's muzzle instead of
       // weapon1's. Always populated even if akimbo isn't active so
@@ -2680,6 +2810,13 @@ export function createPlayer(scene) {
     if (gunMesh.parent !== newAnchor) newAnchor.add(gunMesh);
     if (muzzle.parent !== newAnchor) newAnchor.add(muzzle);
     if (inHandModel.parent !== newAnchor) newAnchor.add(inHandModel);
+    // Note: the visual body pose itself doesn't mirror here. A
+    // proper left-handed body pose requires either authored
+    // left-handed clips or a per-bone mirror retarget, both of
+    // which are larger projects. Earlier attempt to use
+    // rig.group.scale.x = -1 produced a vertical flip due to the
+    // imported rig's internal rotation conventions — don't retry
+    // that without first untangling the bone-axis convention.
   }
 
   // --- Character style: operator (default) vs marine -----------------
@@ -2881,7 +3018,16 @@ export function createPlayer(scene) {
   // External `player.rig` is also updated by the swap helper for
   // consumers that read the public field (gunman.js, weapon attach,
   // etc.).
-  function _setRig(newRig) { rig = newRig; }
+  function _setRig(newRig) {
+    rig = newRig;
+    // Re-bind support-IK anchors onto the new rig immediately. Without
+    // this, swapping procgen → FBX strands the anchors on the procgen
+    // rig and the FBX rig's IK gate never fires.
+    if (rig) {
+      rig._weaponGripAnchor   = gunMesh;
+      rig._weaponMuzzleAnchor = muzzle;
+    }
+  }
   return {
     mesh: group, body, rig, _setRig, update, setWeapon, setOffhandWeapon, prewarmWeapon, takeDamage, heal, applyStatus,
     tryMeleeAttack, tryQuickMelee, cancelCombo,

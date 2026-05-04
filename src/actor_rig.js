@@ -43,6 +43,34 @@
 // (deep-merged). The tuner in tools/rig_tuner.html drives these live.
 
 import * as THREE from 'three';
+import { solveTwoBoneIK } from './anim/ik_two_bone.js';
+
+// ---------- Support-hand IK constants ---------------------------------
+// Class-level fractions that put the support hand on the gun's grip→
+// muzzle line. 0 = hands meet at the pistol grip (one-hand hold);
+// higher = further forward toward the muzzle (foregrip / handguard).
+// Tuning these is the ONLY knob — IK does the rest. Per-weapon
+// overrides intentionally absent: every rifle inherits 'rifle' so a
+// new weapon doesn't need pose authoring.
+export const SUPPORT_GRIP_FRACTION_BY_CLASS = Object.freeze({
+  pistol:  0.00,    // hands meet at grip — IK skipped (FK handles)
+  smg:     0.30,
+  rifle:   0.50,
+  shotgun: 0.50,
+  sniper:  0.65,
+  lmg:     0.45,
+  exotic:  0.50,
+  melee:   0.00,    // skipped anyway via state.melee guard
+});
+
+// Reused scratch vectors to avoid GC churn — IK runs every frame
+// per character.
+const _ikGripWorld     = new THREE.Vector3();
+const _ikMuzzleWorld   = new THREE.Vector3();
+const _ikSupportTarget = new THREE.Vector3();
+const _ikSupportShoulderWorld = new THREE.Vector3();
+const _ikChestWorld    = new THREE.Vector3();
+const _ikPoleHint      = new THREE.Vector3();
 
 // Shared 3-step toon gradient — the same tone ramp as the imported
 // cel-shaded models in gltf_cache so the primitive actors match the
@@ -2776,6 +2804,56 @@ export function updateAnim(rig, state, dt) {
     }
     rig.rightShoulderAnchor.rotation.x = -armLeanComp;
     rig.leftShoulderAnchor.rotation.x  = -armLeanComp;
+
+    // Diagnostic removed after verifying the procgen-rig branch
+    // works for enemies. Player IK is in player.js's imported-rig
+    // path. To re-enable for debugging, log here gated by
+    // rig._ikDebugTick % 60 === 0.
+    // ── Support-arm IK ─────────────────────────────────────────
+    // After all FK + spine writes have run, override the support
+    // arm so its hand sits on the actual grip→muzzle line of the
+    // weapon. The authored Eulers above only produce a correct
+    // hand position at one aim angle; the IK makes it correct at
+    // every aim angle by solving against the gun's current world
+    // pose every frame. Five class-level fractions
+    // (SUPPORT_GRIP_FRACTION_BY_CLASS) are the only knobs.
+    //
+    // Skipped for: akimbo (own gun in support hand), pistol
+    // (hands meet at grip — FK already correct), and any state
+    // that doesn't expose the weapon anchors.
+    if (!state.akimbo
+        && rig._weaponGripAnchor
+        && rig._weaponMuzzleAnchor
+        && state.weaponClass !== 'pistol'
+        && state.weaponClass !== 'melee') {
+      const fraction = SUPPORT_GRIP_FRACTION_BY_CLASS[state.weaponClass] ?? 0.50;
+      if (fraction > 0.01) {
+        // Flush world matrices so the gun's anchors reflect the
+        // FK + spine writes we just made (Three doesn't auto-
+        // update world transforms when you set local rotations).
+        rig.root.updateMatrixWorld(true);
+        rig._weaponGripAnchor.getWorldPosition(_ikGripWorld);
+        rig._weaponMuzzleAnchor.getWorldPosition(_ikMuzzleWorld);
+        _ikSupportTarget.lerpVectors(_ikGripWorld, _ikMuzzleWorld, fraction);
+        // Pole hint: away from the spine + slightly down. Computed
+        // from the rig itself so it works regardless of which side
+        // is the support arm or which way the character faces.
+        supportArm.shoulder.pivot.getWorldPosition(_ikSupportShoulderWorld);
+        rig.chest.getWorldPosition(_ikChestWorld);
+        _ikPoleHint.subVectors(_ikSupportShoulderWorld, _ikChestWorld).normalize();
+        _ikPoleHint.y -= 0.3;
+        _ikPoleHint.normalize();
+        if (!rig._supportIkCache) rig._supportIkCache = {};
+        solveTwoBoneIK(
+          supportArm.shoulder.pivot,
+          supportArm.elbow,
+          supportArm.wrist,
+          _ikSupportTarget,
+          _ikPoleHint,
+          rig._supportIkCache,
+        );
+      }
+    }
   } else if (rig.rightShoulderAnchor && rig.leftShoulderAnchor) {
     // Non-rifle holds don't use the shoulder anchor for weapon
     // parenting. Zero the compensation rotation, AND restore any

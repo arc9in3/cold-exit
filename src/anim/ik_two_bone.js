@@ -162,3 +162,130 @@ export function resetIkCache(cache) {
   cache.elbowBindLocalQ = null;
   cache.shoulderBindWorldDir = null;
 }
+
+// ============================================================
+// solvePostClipTwoBoneIK — post-AnimationMixer two-bone IK
+// ============================================================
+//
+// Operates on the CURRENT bone state every frame, not on a cached
+// bind pose. Designed to run AFTER the AnimationMixer has applied
+// clip rotations — adds a delta on top of whatever pose the clip
+// produced, so the wrist lands on the target while the rest of the
+// arm chain still tracks clip motion (subject to the IK solve).
+//
+// Why a separate function (vs. solveTwoBoneIK above): the older
+// solver caches the bone's bind-pose world direction and applies a
+// rotation that maps THAT into the target direction. For
+// clip-driven bones the cached "bind" is whatever pose the bone
+// happened to be in on first call (almost never actually bind);
+// subsequent solves compose the cached delta with the clip's
+// per-frame rotation, producing the wild swinging seen in player.js's
+// imported-rig path. This solver reads the bone's current world
+// transform fresh each call, so the result is stable regardless of
+// how the clip is animating.
+//
+// Math: standard law-of-cosines two-bone IK. Plane defined by
+// (shoulder→target) + poleHint; elbow bends in that plane.
+//
+// Inputs:
+//   shoulder, elbow, wrist  — three Bone/Object3D in a parent chain
+//   targetWorld              — Vector3 in world space; wrist goes here
+//   poleHintWorld            — Vector3 direction; positive side is
+//                              where the elbow should swing toward
+//
+// Outputs: shoulder.quaternion + elbow.quaternion premultiplied
+// with the computed delta. Wrist orientation untouched (caller can
+// still author wrist via clip).
+
+// Renamed to avoid collision with the module-level scratch vars
+// declared above for solveTwoBoneIK.
+const _pcSh = new THREE.Vector3();
+const _pcEl = new THREE.Vector3();
+const _pcWr = new THREE.Vector3();
+const _pcToTarget = new THREE.Vector3();
+const _pcForward = new THREE.Vector3();
+const _pcUp = new THREE.Vector3();
+const _pcRight = new THREE.Vector3();
+const _pcBend = new THREE.Vector3();
+const _pcDesiredUpperDir = new THREE.Vector3();
+const _pcCurrentUpperDir = new THREE.Vector3();
+const _pcDesiredLowerDir = new THREE.Vector3();
+const _pcCurrentLowerDir = new THREE.Vector3();
+const _pcDeltaQ = new THREE.Quaternion();
+const _pcParentQ = new THREE.Quaternion();
+const _pcParentInvQ = new THREE.Quaternion();
+const _pcLocalDelta = new THREE.Quaternion();
+
+export function solvePostClipTwoBoneIK(shoulder, elbow, wrist, targetWorld, poleHintWorld) {
+  if (!shoulder || !elbow || !wrist || !targetWorld) return;
+
+  // Sample current world positions (post-clip).
+  shoulder.getWorldPosition(_pcSh);
+  elbow.getWorldPosition(_pcEl);
+  wrist.getWorldPosition(_pcWr);
+
+  const upperLen = _pcSh.distanceTo(_pcEl);
+  const lowerLen = _pcEl.distanceTo(_pcWr);
+  if (upperLen < 1e-4 || lowerLen < 1e-4) return;
+  const totalLen = upperLen + lowerLen;
+
+  _pcToTarget.subVectors(targetWorld, _pcSh);
+  let targetDist = _pcToTarget.length();
+  // Clamp to reachable so the arm extends straight when over-reach
+  // instead of NaN'ing through acos.
+  const maxReach = totalLen * 0.999;
+  if (targetDist > maxReach) targetDist = maxReach;
+  if (targetDist < 1e-4) return;
+
+  // Law of cosines — angle at shoulder between (shoulder→target)
+  // and (shoulder→elbow).
+  const a = upperLen, b = lowerLen, c = targetDist;
+  const cosShoulder = (a * a + c * c - b * b) / (2 * a * c);
+  const shoulderAngle = Math.acos(Math.max(-1, Math.min(1, cosShoulder)));
+
+  // Pose plane: forward = shoulder→target, up = poleHint, bend axis
+  // = perpendicular to forward in the (forward, up) plane. Elbow
+  // swings TOWARD bendAxis (= away from up-hint).
+  _pcForward.copy(_pcToTarget).normalize();
+  _pcUp.copy(poleHintWorld).normalize();
+  _pcRight.crossVectors(_pcForward, _pcUp).normalize();
+  _pcBend.crossVectors(_pcRight, _pcForward).normalize();
+
+  // Desired shoulder→elbow direction (rotate forward by
+  // -shoulderAngle around the right axis = tilt toward -bendAxis).
+  _pcDesiredUpperDir.copy(_pcForward).multiplyScalar(Math.cos(shoulderAngle))
+    .addScaledVector(_pcBend, -Math.sin(shoulderAngle));
+
+  // Current shoulder→elbow direction.
+  _pcCurrentUpperDir.subVectors(_pcEl, _pcSh).normalize();
+
+  // World-space rotation that maps current → desired.
+  _pcDeltaQ.setFromUnitVectors(_pcCurrentUpperDir, _pcDesiredUpperDir);
+
+  // Premultiply the world delta into the shoulder's local rotation:
+  //   newWorld = deltaQ * oldWorld
+  //   newLocal = parentInv * newWorld = (parentInv * deltaQ * parent) * oldLocal
+  if (shoulder.parent) {
+    shoulder.parent.getWorldQuaternion(_pcParentQ);
+    _pcParentInvQ.copy(_pcParentQ).invert();
+    _pcLocalDelta.copy(_pcParentInvQ).multiply(_pcDeltaQ).multiply(_pcParentQ);
+    shoulder.quaternion.premultiply(_pcLocalDelta);
+    shoulder.updateMatrixWorld(true);
+  }
+
+  // Recompute elbow + wrist positions after shoulder rotation, then
+  // bend the elbow so the forearm points at the target.
+  elbow.getWorldPosition(_pcEl);
+  wrist.getWorldPosition(_pcWr);
+  _pcDesiredLowerDir.subVectors(targetWorld, _pcEl).normalize();
+  _pcCurrentLowerDir.subVectors(_pcWr, _pcEl).normalize();
+
+  _pcDeltaQ.setFromUnitVectors(_pcCurrentLowerDir, _pcDesiredLowerDir);
+  if (elbow.parent) {
+    elbow.parent.getWorldQuaternion(_pcParentQ);
+    _pcParentInvQ.copy(_pcParentQ).invert();
+    _pcLocalDelta.copy(_pcParentInvQ).multiply(_pcDeltaQ).multiply(_pcParentQ);
+    elbow.quaternion.premultiply(_pcLocalDelta);
+    elbow.updateMatrixWorld(true);
+  }
+}

@@ -6802,8 +6802,25 @@ function updateBeamAndCone(playerInfo, aimInfo, inputState) {
   // supplies its own `laserColor` + `laserRange`.
   const laserAtt = w.attachments?.sideRail;
   const laser = !!(laserAtt && laserAtt.kind === 'laser');
-  const origin = playerInfo.muzzleWorld;
-  _tmpDir2.set(aimInfo.point.x - origin.x, 0, aimInfo.point.z - origin.z);
+  // Origin = the gun's GRIP world position (close to the body),
+  // not the muzzle (far out at the barrel tip). Anchoring at the
+  // grip makes the laser read like it's coming from the gun-mounted
+  // emitter near the trigger guard rather than the barrel end.
+  // Falls back to muzzleWorld if grip wasn't exposed (older rigs).
+  const origin = playerInfo.gripWorld || playerInfo.muzzleWorld;
+  // Forward = the gun's actual barrel direction (grip→muzzle),
+  // exposed by player.js as playerInfo.muzzleForward. Previously
+  // computed as cursor-minus-muzzle, which flipped sign whenever
+  // the muzzle (which traces a circle around the player as they
+  // turn) swung past the cursor — making the laser briefly point
+  // backwards. Using the gun's own forward axis is sign-stable.
+  if (playerInfo.muzzleForward) {
+    _tmpDir2.set(playerInfo.muzzleForward.x, 0, playerInfo.muzzleForward.z);
+  } else {
+    // Legacy fallback if an older player rig hasn't been updated
+    // to expose muzzleForward yet.
+    _tmpDir2.set(aimInfo.point.x - origin.x, 0, aimInfo.point.z - origin.z);
+  }
   if (_tmpDir2.lengthSq() < 0.0001) {
     laserMesh.visible = false;
     flashConeMesh.visible = false;
@@ -6817,7 +6834,14 @@ function updateBeamAndCone(playerInfo, aimInfo, inputState) {
     // through geometry (sightline, obvious cover tell).
     const maxLen = laserAtt.laserRange || 12;
     const rayOrigin = origin.clone();
-    rayOrigin.y = Math.max(rayOrigin.y, 1.05);   // shoulder height so floors don't clip
+    // Lift the laser up by a constant offset so it reads as
+    // emitting from a chest-mounted module on the gun rather than
+    // tracking the natural height of the grip. The Math.max floor
+    // covers the rare case the grip dips below the offset (e.g.
+    // crouch mid-transition, idle slouch). Tunable: increase the
+    // offset to raise the beam further, decrease to lower.
+    const LASER_Y_OFFSET = 0.18;
+    rayOrigin.y = Math.max(rayOrigin.y + LASER_Y_OFFSET, 1.20);
     _laserRay.set(rayOrigin, forward);
     _laserRay.far = maxLen;
     const hits = _laserRay.intersectObjects(level.solidObstacles?.() || level.obstacles || [], false);
