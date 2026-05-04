@@ -599,15 +599,50 @@ async function loadWeaponForClass() {
   applyWeaponTuning();
 
   muzzle.position.set(0, 0, (fwd + len / 2) * wsManifest);
-  // On-screen diagnostic so invisible-mesh issues surface without
-  // the user having to open devtools.
+
+  // Count meshes / materials in the clone so 'invisible weapon'
+  // failure modes can be diagnosed without devtools.
+  let meshCount = 0, matCount = 0, hasGeom = 0, transparentCount = 0;
+  clone.traverse(o => {
+    if (o.isMesh) {
+      meshCount++;
+      if (o.geometry) hasGeom++;
+      const ms = Array.isArray(o.material) ? o.material : (o.material ? [o.material] : []);
+      for (const m of ms) {
+        matCount++;
+        if (m.transparent || m.opacity < 1) transparentCount++;
+      }
+    }
+  });
+
+  // Drop a magenta wireframe locator sphere at wrap.position so the
+  // user can SEE where the weapon SHOULD be even if the GLB itself
+  // is invisible. Same parent (gunAnchor) and same local position
+  // as wrap → if locator is visible but the GLB isn't, it's a
+  // material/geometry issue with the GLB.
+  if (gunAnchor._locator) gunAnchor.remove(gunAnchor._locator);
+  const locator = new THREE.Mesh(
+    new THREE.SphereGeometry(0.08, 12, 8),
+    new THREE.MeshBasicMaterial({
+      color: 0xff00aa, wireframe: true, depthTest: false,
+    }),
+  );
+  locator.renderOrder = 999;
+  locator.position.copy(wrap.position);
+  gunAnchor.add(locator);
+  gunAnchor._locator = locator;
+
   const diag = document.getElementById('weapon-diag');
   if (diag) {
     const wp = wrap.position.toArray().map(v => v.toFixed(3)).join(',');
     const cs2 = clone.scale.toArray().map(v => v.toFixed(3)).join(',');
-    diag.textContent = `loaded ${name} | path=${path} | wsManifest=${wsManifest} `
-      + `baseFit=${baseFit.toFixed(4)} longest=${longest.toFixed(3)} | `
-      + `wrap.pos=(${wp}) clone.scale=(${cs2})`;
+    diag.textContent =
+      `loaded ${name}  path=${path}\n` +
+      `wsManifest=${wsManifest}  baseFit=${baseFit.toFixed(4)}  longest(native)=${longest.toFixed(3)}\n` +
+      `wrap.position=(${wp})  clone.scale=(${cs2})\n` +
+      `meshes=${meshCount}  materials=${matCount}  withGeom=${hasGeom}  transparent=${transparentCount}\n` +
+      `magenta wireframe sphere = where the weapon SHOULD be. If you see the sphere but no gun, it's a material/geometry issue.`;
+    diag.style.whiteSpace = 'pre-wrap';
   }
   console.log(`[pose-editor] loaded weapon ${name} → ${path}`,
     { len, cs, wsManifest, baseFit, longest: longest.toFixed(3),
@@ -615,6 +650,7 @@ async function loadWeaponForClass() {
       'clone.scale':   clone.scale.toArray(),
       'gunAnchor.position': gunAnchor.position.toArray(),
       'gunAnchor.scale': gunAnchor.scale.toArray(),
+      meshCount, matCount, hasGeom, transparentCount,
     });
 }
 
