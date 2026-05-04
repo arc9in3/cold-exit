@@ -571,17 +571,21 @@ async function loadWeaponForClass() {
   const ctr = new THREE.Vector3(); bbox.getCenter(ctr);
   clone.position.sub(ctr);
 
-  // Force DoubleSide on every material in the clone. Negative-scale
-  // mirror (lowpolyguns/*) inverts face winding; THREE normally
-  // auto-flips cull for negative-determinant matrices but on some
-  // material chains in r161 it doesn't, leaving the gun invisible
-  // from every angle. DoubleSide bypasses culling entirely. Cheap
-  // for static weapon meshes — they're not big enough for cull to
-  // matter perf-wise here.
+  // DEBUG: replace every material with a bright unlit basic
+  // material, side=DoubleSide, so we see geometry regardless of
+  // lighting / shaders / culling. Once visible we'll restore
+  // proper materials.
   clone.traverse(o => {
-    if (o.isMesh && o.material) {
-      const ms = Array.isArray(o.material) ? o.material : [o.material];
-      for (const m of ms) m.side = THREE.DoubleSide;
+    if (o.isMesh) {
+      o.material = new THREE.MeshBasicMaterial({
+        color: 0x40ff80,
+        side: THREE.DoubleSide,
+        wireframe: false,
+      });
+      // Also drop any frustum culling — a tight bbox after
+      // negative scale can place the mesh outside its own
+      // computed frustum.
+      o.frustumCulled = false;
     }
   });
 
@@ -629,11 +633,8 @@ async function loadWeaponForClass() {
     }
   });
 
-  // Drop a magenta wireframe locator sphere at wrap.position so the
-  // user can SEE where the weapon SHOULD be even if the GLB itself
-  // is invisible. Same parent (gunAnchor) and same local position
-  // as wrap → if locator is visible but the GLB isn't, it's a
-  // material/geometry issue with the GLB.
+  // Drop a magenta wireframe locator sphere at wrap.position
+  // (parented to gunAnchor — same local frame as the weapon).
   if (gunAnchor._locator) gunAnchor.remove(gunAnchor._locator);
   const locator = new THREE.Mesh(
     new THREE.SphereGeometry(0.08, 12, 8),
@@ -646,6 +647,26 @@ async function loadWeaponForClass() {
   gunAnchor.add(locator);
   gunAnchor._locator = locator;
 
+  // Also drop a SCENE-LEVEL locator at the gun's world position
+  // computed forward through the entire matrix chain. If the
+  // scene-level locator is visible but the gunAnchor-parented one
+  // isn't, the gunAnchor hierarchy is broken (gunAnchor not in
+  // scene, or its matrixWorld got corrupted somehow).
+  if (scene._weaponWorldLocator) scene.remove(scene._weaponWorldLocator);
+  rigGroup.updateWorldMatrix(true, true);
+  const worldPos = new THREE.Vector3();
+  wrap.getWorldPosition(worldPos);
+  const sceneLoc = new THREE.Mesh(
+    new THREE.BoxGeometry(0.15, 0.15, 0.15),
+    new THREE.MeshBasicMaterial({
+      color: 0x00ffff, wireframe: true, depthTest: false,
+    }),
+  );
+  sceneLoc.renderOrder = 999;
+  sceneLoc.position.copy(worldPos);
+  scene.add(sceneLoc);
+  scene._weaponWorldLocator = sceneLoc;
+
   const diag = document.getElementById('weapon-diag');
   if (diag) {
     const wp = wrap.position.toArray().map(v => v.toFixed(3)).join(',');
@@ -655,7 +676,9 @@ async function loadWeaponForClass() {
       `wsManifest=${wsManifest}  baseFit=${baseFit.toFixed(4)}  longest(native)=${longest.toFixed(3)}\n` +
       `wrap.position=(${wp})  clone.scale=(${cs2})\n` +
       `meshes=${meshCount}  materials=${matCount}  withGeom=${hasGeom}  transparent=${transparentCount}\n` +
-      `magenta wireframe sphere = where the weapon SHOULD be. If you see the sphere but no gun, it's a material/geometry issue.`;
+      `magenta sphere (parented to gunAnchor) + cyan box (scene-level) = where the weapon should be.\n` +
+      `world pos = (${worldPos.x.toFixed(3)}, ${worldPos.y.toFixed(3)}, ${worldPos.z.toFixed(3)})\n` +
+      `clone forced GREEN UNLIT material + frustumCulled=false. If still invisible after refresh, paste this whole panel back.`;
     diag.style.whiteSpace = 'pre-wrap';
   }
   console.log(`[pose-editor] loaded weapon ${name} → ${path}`,
