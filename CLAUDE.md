@@ -7,6 +7,19 @@ shooter, Three.js).
 project rules, repo conventions, critical interactions, and the
 multi-AI coordination policy. Everything below is Claude-specific.
 
+**Then read the rig topology map** at
+`~/.claude/projects/C--work-mission-control/memory/reference_cold_exit_map.md`
+before any animation, weapon-scale, IK, or rig-related change.
+That map documents the two animation rig paths (procgen for
+enemies, imported-GLB / GASP-clip for the player), the two IK
+solvers (`solveTwoBoneIK` for FK, `solvePostClipTwoBoneIK` for
+clip-driven), the weapon scale calibration (anchors: AK47=0.62,
+AWP=0.45, KSG=0.40), the `swapHandedness` mirror gotcha
+(`scale.x=-1` produces a vertical flip on this rig), and the
+hipfire/recoil knobs. It exists because rediscovering this
+topology has burned multiple multi-hour sessions; reading the
+map at session start prevents that loop.
+
 ## Your lane
 
 Iterative gameplay code. You're the lead on:
