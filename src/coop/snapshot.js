@@ -264,117 +264,6 @@ export function pickInterpSnapshots() {
   return { a, b, alpha: 1 };
 }
 
-// Apply a received snapshot to the joiner's local enemy lists.
-// Strategy: build a netId index from the local enemy arrays, then
-// for every entry in the snapshot find-and-update. Locals not in
-// the snapshot are killed (host says they're gone). The joiner's
-// enemies were spawned in lockstep with the host via seed sync, so
-// netIds line up — find-or-create is just find.
-export function applyEnemySnapshot(snap, gunmen, melees, lerp = 1) {
-  if (!snap) return;
-  const liveG = new Set();
-  const liveM = new Set();
-  for (const sg of snap.gunmen || []) {
-    liveG.add(sg.n);
-    const g = _findByNetId(gunmen.gunmen, sg.n);
-    if (!g) continue;
-    _applyTo(g, sg, lerp);
-  }
-  for (const sm of snap.melees || []) {
-    liveM.add(sm.n);
-    const e = _findByNetId(melees.enemies, sm.n);
-    if (!e) continue;
-    _applyTo(e, sm, lerp);
-  }
-  // Kill locals the host didn't include — they died on the host's
-  // sim and the joiner needs to mirror the death pose / corpse
-  // collapse. Driving the death through applyHit (with overkill
-  // damage) triggers the rig pose, deathT, alert hide, and the
-  // other visual side effects locally. The {coopVisualOnly: true}
-  // flag tells main.js's hit interceptor to skip the rpc-shoot
-  // forwarding and lets the local applyHit run; managers ignore
-  // the flag, but `silent: true` suppresses death sfx and witness
-  // alerts (we're already remote, no witness logic should fire).
-  // Loot / XP side effects live in the CALLER of applyHit (not
-  // inside it) so they don't fire here — joiner stays read-only.
-  // Synthetic hit direction — pokeDeath() inside applyHit gates the
-  // rig pose on `hitDir` being non-null, so passing null leaves the
-  // corpse standing upright. Any non-zero vector triggers the
-  // corpse collapse + ragdoll-lite physics. Forward-facing default;
-  // hit direction doesn't matter much for a remote-mirrored death.
-  const _coopHitDir = { x: 0, z: -1 };
-  for (const g of gunmen.gunmen) {
-    if (g.alive && !liveG.has(g.netId)) {
-      try {
-        g.manager.applyHit(g, (g.hp | 0) + 1, 'torso', _coopHitDir,
-          { silent: true, coopVisualOnly: true });
-      } catch (_) {
-        g.hp = 0; g.alive = false;
-      }
-    }
-  }
-  for (const e of melees.enemies) {
-    if (e.alive && !liveM.has(e.netId)) {
-      try {
-        e.manager.applyHit(e, (e.hp | 0) + 1, 'torso', _coopHitDir,
-          { silent: true, coopVisualOnly: true });
-      } catch (_) {
-        e.hp = 0; e.alive = false;
-      }
-    }
-  }
-  // Body loot mirror — host's corpses with unlooted items send the
-  // full item array. Joiner copies onto the local entity so the
-  // search-body interact uses the host's authoritative list. The
-  // looted flag flips when host's enemy.loot empties (corpse
-  // disappears from the corpses[] section).
-  const corpseSeen = new Set();
-  for (const c of (snap.corpses || [])) {
-    corpseSeen.add(c.n);
-    let entity = _findByNetId(gunmen.gunmen, c.n);
-    if (!entity) entity = _findByNetId(melees.enemies, c.n);
-    if (!entity) continue;
-    entity.loot = c.l || [];
-    entity.looted = false;
-  }
-  // Any local dead entity that ISN'T in the snapshot's corpse list
-  // is either (a) host already had it looted (host dropped it from
-  // loot) or (b) been around long enough that snapshots stopped
-  // including it — flag looted so the search prompt hides.
-  const flagLooted = (list) => {
-    for (const e of list) {
-      if (!e.alive && e.netId && !corpseSeen.has(e.netId)) {
-        if (!e.looted) {
-          e.looted = true;
-          e.loot = [];
-        }
-      }
-    }
-  };
-  flagLooted(gunmen.gunmen);
-  flagLooted(melees.enemies);
-}
-
-function _applyTo(entity, snap, lerp) {
-  // Position lerp toward snapshot — at lerp=1 this snaps; smaller
-  // values give visual smoothing between 20Hz packets. Yaw uses the
-  // same lerp but on the shortest arc.
-  const k = Math.max(0, Math.min(1, lerp));
-  const cur = entity.group.position;
-  cur.x += (snap.x - cur.x) * k;
-  cur.z += (snap.z - cur.z) * k;
-  // Shortest-arc yaw lerp.
-  let dy = (snap.y - entity.group.rotation.y);
-  while (dy > Math.PI) dy -= Math.PI * 2;
-  while (dy < -Math.PI) dy += Math.PI * 2;
-  entity.group.rotation.y += dy * k;
-  // Direct HP / state writes — these come from the authoritative
-  // sim, not local actions, so no animation-trigger logic runs.
-  entity.hp = snap.h;
-  if (snap.m) entity.maxHp = snap.m;
-  if (snap.s) entity.state = snap.s;
-}
-
 // Apply via interpolation between two buffered snapshots — the
 // standard Quake/Source approach. Picks the entity record from
 // `a` and `b`, lerps position + yaw at `alpha`. Smoother than
@@ -392,6 +281,7 @@ const _interpLiveG = new Set();
 const _interpLiveM = new Set();
 const _interpAGmap = new Map();
 const _interpAMmap = new Map();
+const _corpseSeen = new Set();
 export function applyInterpolated(gunmen, melees, lootMgr, spawnFn) {
   const pair = pickInterpSnapshots();
   if (!pair) return;
@@ -449,8 +339,9 @@ export function applyInterpolated(gunmen, melees, lootMgr, spawnFn) {
     const sa = aMmap.get(sb.n) || sb;
     _applyInterp(e, sa, sb, alpha);
   }
-  // Death sweep — same as applyEnemySnapshot. Locals alive but
-  // missing from the LATEST snapshot get killed visually.
+  // Death sweep — locals alive but missing from the LATEST snapshot
+  // get killed visually. (Same intent as the old snap-and-apply path
+  // before the interpolation refactor.)
   const _coopHitDir = _SHARED_HIT_DIR;
   for (const g of gunmen.gunmen) {
     if (g.alive && !liveG.has(g.netId)) {
@@ -478,15 +369,17 @@ export function applyInterpolated(gunmen, melees, lootMgr, spawnFn) {
   if (lootMgr && spawnFn) {
     applyLootSnapshot(b, lootMgr, spawnFn);
   }
-  // Body-loot mirror — also from latest snapshot. Pulled out into a
-  // helper so applyEnemySnapshot can share the pruning logic.
+  // Body-loot mirror — pulled out into a helper so the corpse +
+  // unlooted-loot section can be applied independently of the
+  // position-interp pass.
   _applyCorpseSection(b, gunmen, melees);
 }
 
 function _applyCorpseSection(snap, gunmen, melees) {
   if (!snap || !snap.corpses) return;
   const now = (typeof performance !== 'undefined') ? performance.now() : Date.now();
-  const seen = new Set();
+  _corpseSeen.clear();
+  const seen = _corpseSeen;
   for (const c of snap.corpses) {
     seen.add(c.n);
     let entity = _findByNetId(gunmen.gunmen, c.n);
