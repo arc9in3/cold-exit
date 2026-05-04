@@ -458,40 +458,47 @@ async function loadWeaponForClass() {
   const cls  = clsSel.value;
   const name = weaponSel.value;
   const path = MODEL_BY_WEAPON_NAME[name];
-  if (!path) { clearWeapon(); return; }
-  // Find the matching tunables entry (for muzzleLength/Girth → fitToRadius scale).
+  clearWeapon();
+  if (!path) {
+    console.warn(`[pose-editor] no model path for weapon name "${name}"`);
+    return;
+  }
   const w = (tunables.weapons || []).find(x => x.name === name) ||
             { muzzleLength: 0.55, muzzleGirth: 0.13 };
   const len  = w.muzzleLength || 0.55;
-  const girth = w.muzzleGirth || 0.12;
   const cs = (cls === 'rifle' || cls === 'shotgun' || cls === 'sniper' || cls === 'lmg') ? 0.36 : 0.22;
   const ws = scaleForModelPath(path) || 1.0;
-  // Mirror the in-game GASP setWeapon path:
-  //   fwd = (rifle-class) ? len*0.2 : len/2
-  //   gunMesh.position.z = fwd * ws
-  //   muzzle.position.z  = (fwd + len/2) * ws
   const isLong = cls === 'rifle' || cls === 'shotgun' || cls === 'sniper' || cls === 'lmg';
   const fwd = isLong ? (len * 0.2) : (len / 2);
 
-  clearWeapon();
-  const gltf = await loader.loadAsync(`${MODELS_BASE}${path}`);
+  let gltf;
+  try {
+    gltf = await loader.loadAsync(`${MODELS_BASE}${path}`);
+  } catch (err) {
+    console.error('[pose-editor] weapon load failed', `${MODELS_BASE}${path}`, err);
+    document.getElementById('boot-error').style.display = 'block';
+    document.getElementById('boot-error').textContent =
+      `Weapon load failed: ${path}\n${err.message || err}`;
+    return;
+  }
   const clone = gltf.scene.clone(true);
-  // Fit-to-radius: scale clone so longest dim ≈ len * cs * ws.
-  const targetLong = len * cs * ws * 2.0;   // matches actor_rig's fitToRadius behavior
+  const targetLong = len * cs * ws * 2.0;
   const bbox = new THREE.Box3().setFromObject(clone);
   const size = new THREE.Vector3(); bbox.getSize(size);
   const longest = Math.max(size.x, size.y, size.z) || 1;
   const fit = targetLong / longest;
   clone.scale.setScalar(fit);
-  // Recentre.
   bbox.setFromObject(clone);
   const ctr = new THREE.Vector3(); bbox.getCenter(ctr);
   clone.position.sub(ctr);
 
-  // Apply manifest grip offset + rotation override.
+  // Apply manifest grip offset + rotation override + mirror.
+  // shouldMirrorInHand expects an item-like with name/baseName, not a
+  // path string — so reconstruct that here. lowpolyguns / accessories
+  // packs need x-flip to align muzzle with +Z.
   const grip = gripOffsetForModelPath(path) || { x: 0, y: 0, z: 0 };
   const rot  = rotationOverrideForModelPath(path);
-  const mirror = shouldMirrorInHand(path);
+  const mirror = shouldMirrorInHand({ name });
   const wrap = new THREE.Group();
   wrap.add(clone);
   if (mirror) clone.scale.x *= -1;
@@ -499,9 +506,11 @@ async function loadWeaponForClass() {
   wrap.position.set((grip.x || 0) * ws, (grip.y || 0) * ws, (grip.z || 0) * ws + fwd * ws);
   weaponMesh = wrap;
   gunAnchor.add(weaponMesh);
-
-  // Move muzzle to (fwd + len/2) * ws.
   muzzle.position.set(0, 0, (fwd + len / 2) * ws);
+  console.log(`[pose-editor] loaded weapon ${name} → ${path}`,
+    { len, cs, ws, fit, longest: longest.toFixed(3),
+      pos: wrap.position.toArray().map(v => v.toFixed(3)),
+      mirror });
 }
 function clearWeapon() {
   if (weaponMesh) {
