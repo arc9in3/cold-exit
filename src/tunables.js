@@ -65,7 +65,7 @@ export const tunables = {
     duration: 0.2,
     cooldown: 0.25,
     doubleTapWindow: 0.22,
-    iFrames: 0.12,
+    iFrames: 0.24,
   },
   roll: {
     speed: 15,
