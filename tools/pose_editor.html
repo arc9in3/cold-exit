@@ -571,6 +571,20 @@ async function loadWeaponForClass() {
   const ctr = new THREE.Vector3(); bbox.getCenter(ctr);
   clone.position.sub(ctr);
 
+  // Force DoubleSide on every material in the clone. Negative-scale
+  // mirror (lowpolyguns/*) inverts face winding; THREE normally
+  // auto-flips cull for negative-determinant matrices but on some
+  // material chains in r161 it doesn't, leaving the gun invisible
+  // from every angle. DoubleSide bypasses culling entirely. Cheap
+  // for static weapon meshes — they're not big enough for cull to
+  // matter perf-wise here.
+  clone.traverse(o => {
+    if (o.isMesh && o.material) {
+      const ms = Array.isArray(o.material) ? o.material : [o.material];
+      for (const m of ms) m.side = THREE.DoubleSide;
+    }
+  });
+
   const wrap = new THREE.Group();
   wrap.add(clone);
   weaponMesh = wrap;
