@@ -70,11 +70,14 @@ export function bodyLocalAngle(velocity, bodyYaw) {
 //   Pistol          → two-handed low-ready (smg/flame/melee/default)
 function _clipSuffixForWeapon(weaponClass) {
   switch (weaponClass) {
-    case 'rifle': case 'shotgun': case 'sniper': case 'lmg':
+    // SMGs share Rifle clips for now — they're two-handed and the
+    // shouldered Rifle pose reads better than the two-handed-low-ready
+    // Pistol clip set. Author dedicated SMG clips later if needed.
+    case 'rifle': case 'shotgun': case 'sniper': case 'lmg': case 'smg':
       return 'Rifle';
     case 'pistol': case 'revolver':
       return 'OneHand_Pistol';
-    case 'smg': case 'flame':
+    case 'flame':
     case 'melee': case undefined: case null:
     default:
       return 'Pistol';
@@ -109,13 +112,22 @@ export function selectGaspLocomotion(smCfg, playerState, planarSpeed, velocity, 
              sector: 'F', bucket: 'idle', weaponClass };
   }
 
-  // Speed bucket. ADS clamps to run max — sprint pose with the
-  // shouldered rifle reads jarring (gun whips around) and most
-  // shooters slow movement under ADS anyway.
+  // Speed bucket.
+  //   - Sprint: high speed, no ADS (sprint pose with a shouldered
+  //     rifle reads jarring; gun whips around).
+  //   - Run: mid speed, not ADS.
+  //   - Walk: low speed OR any ADS speed.
+  // ADS forces walk regardless of how fast the player is actually
+  // moving. Real shooters slow you down under ADS, so the speed
+  // numerically lands in walk anyway, but capping here means we
+  // don't trigger the run/sprint clips at slow-motion timeScale
+  // when the ADS speed sits just above walkMax. Without this clamp
+  // a forward-ADS at ~2.0 m/s plays the run clip at ~0.57x speed.
   const ads = (playerState?.adsAmount || 0) > 0.5;
   let bucket;
-  if      (planarSpeed <= (T.walkMax ?? 1.6))                bucket = 'walk';
-  else if (planarSpeed <= (T.runMax ?? 3.5) || ads)          bucket = 'run';
+  if      (ads)                                              bucket = 'walk';
+  else if (planarSpeed <= (T.walkMax ?? 1.6))                bucket = 'walk';
+  else if (planarSpeed <= (T.runMax ?? 3.5))                 bucket = 'run';
   else                                                       bucket = 'sprint';
 
   // Direction: project velocity into body-local frame, pick 8-way.
