@@ -12746,13 +12746,20 @@ function acquireOverhead(cls) {
     overheadPool.push(el);
   }
   overheadCount++;
-  el.className = cls;
-  el.style.display = 'block';
+  // Skip className / display writes when nothing changed — these are
+  // among the hottest DOM writes in the per-frame HUD path (every
+  // enemy + reload ring + stealth marker churns through here),
+  // each unconditional write triggered a CSS recompute → layout →
+  // paint dirty. Profile (2026-05-04 in-run): updateOverhead alone
+  // contributed ~40% of the 14k layout events / 30s.
+  if (el._lastCls !== cls) { el.className = cls; el._lastCls = cls; }
+  if (el._lastDisplay !== 'block') { el.style.display = 'block'; el._lastDisplay = 'block'; }
   return el;
 }
 function endOverheadFrame() {
   for (let i = overheadCount; i < overheadPool.length; i++) {
-    overheadPool[i].style.display = 'none';
+    const el = overheadPool[i];
+    if (el._lastDisplay !== 'none') { el.style.display = 'none'; el._lastDisplay = 'none'; }
   }
   overheadCount = 0;
 }
@@ -12770,40 +12777,82 @@ function spawnRing(pos, pct, isEnemy = false, yOffset = 2.3) {
   const p = projectToScreen(pos, yOffset);
   if (p.behind) return;
   const el = acquireOverhead(`overhead-ring${isEnemy ? ' enemy' : ''}`);
-  el.style.left = `${p.x}px`;
-  el.style.top = `${p.y}px`;
-  el.style.setProperty('--fill', `${Math.max(0, Math.min(1, pct)) * 360}deg`);
+  // Use CSS transform instead of left/top — transforms compose on the
+  // GPU and don't trigger layout / style recompute, only paint. Cuts
+  // the per-frame layout cost on the overhead layer roughly to zero.
+  // Round to integer px so identical positions get cache hits.
+  const tx = (p.x | 0), ty = (p.y | 0);
+  if (el._lastTx !== tx || el._lastTy !== ty) {
+    el.style.transform = `translate(${tx}px, ${ty}px) translate(-50%, -50%)`;
+    el._lastTx = tx; el._lastTy = ty;
+  }
+  const deg = Math.max(0, Math.min(1, pct)) * 360;
+  // 1deg precision is plenty for a reload ring; bucket the value so
+  // identical fills don't churn setProperty.
+  const degBucket = deg | 0;
+  if (el._lastFillBucket !== degBucket) {
+    el.style.setProperty('--fill', `${deg}deg`);
+    el._lastFillBucket = degBucket;
+  }
 }
 function spawnMarker(pos, glyph, cls, yOffset = 2.6) {
   const p = projectToScreen(pos, yOffset);
   if (p.behind) return;
   const el = acquireOverhead(`overhead-marker ${cls}`);
-  el.style.left = `${p.x}px`;
-  el.style.top = `${p.y}px`;
-  el.textContent = glyph;
+  const tx = (p.x | 0), ty = (p.y | 0);
+  if (el._lastTx !== tx || el._lastTy !== ty) {
+    el.style.transform = `translate(${tx}px, ${ty}px) translate(-50%, -50%)`;
+    el._lastTx = tx; el._lastTy = ty;
+  }
+  if (el._lastGlyph !== glyph) {
+    el.textContent = glyph;
+    el._lastGlyph = glyph;
+  }
 }
 
 function updateOverhead(weapon, effWeapon, playerInfo, stealthMult) {
   if (!overheadLayerEl) return;
 
   // Stealth visuals — vignette + eye over player whose alpha scales with
-  // how visible the player is (higher alpha = more detectable).
+  // how visible the player is (higher alpha = more detectable). Cache
+  // all writes per-frame so unchanged values don't re-dirty the DOM —
+  // these were among the hottest layout/paint contributors per the
+  // 2026-05-04 in-run profile.
   const stealthy = stealthMult < 0.9;
   if (stealthVignetteEl) {
-    stealthVignetteEl.classList.toggle('active', stealthy);
-    // Darken more as the player gets stealthier.
-    stealthVignetteEl.style.opacity = stealthy
-      ? String(0.6 + (1 - Math.max(0.05, stealthMult)) * 0.4)
-      : '0';
+    if (stealthVignetteEl._lastActive !== stealthy) {
+      stealthVignetteEl.classList.toggle('active', stealthy);
+      stealthVignetteEl._lastActive = stealthy;
+    }
+    const op = stealthy
+      ? (0.6 + (1 - Math.max(0.05, stealthMult)) * 0.4)
+      : 0;
+    const opBucket = (op * 100) | 0;
+    if (stealthVignetteEl._lastOpBucket !== opBucket) {
+      stealthVignetteEl.style.opacity = String(op);
+      stealthVignetteEl._lastOpBucket = opBucket;
+    }
   }
   if (stealthy) {
     const p = projectToScreen(player.mesh.position, 2.8);
     if (!p.behind) {
       const el = acquireOverhead('overhead-eye');
-      el.style.left = `${p.x}px`;
-      el.style.top = `${p.y}px`;
-      el.style.opacity = String(Math.max(0.1, Math.min(1, stealthMult)));
-      el.textContent = stealthMult < 0.3 ? '◠' : '◉';
+      const tx = (p.x | 0), ty = (p.y | 0);
+      if (el._lastTx !== tx || el._lastTy !== ty) {
+        el.style.transform = `translate(${tx}px, ${ty}px) translate(-50%, -50%)`;
+        el._lastTx = tx; el._lastTy = ty;
+      }
+      const op = Math.max(0.1, Math.min(1, stealthMult));
+      const opBucket = (op * 100) | 0;
+      if (el._lastOpBucket !== opBucket) {
+        el.style.opacity = String(op);
+        el._lastOpBucket = opBucket;
+      }
+      const glyph = stealthMult < 0.3 ? '◠' : '◉';
+      if (el._lastGlyph !== glyph) {
+        el.textContent = glyph;
+        el._lastGlyph = glyph;
+      }
     }
   }
 
