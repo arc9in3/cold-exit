@@ -101,7 +101,17 @@ Lives at `cold-exit.pages.dev`. Custom domain planned.
 ## Running locally
 
 There is no build pipeline. Serve the repo root over any static HTTP
-server and open `index.html`:
+server and open `index.html`. The repo ships a zero-dep Node server
+pinned to port 8080 — same port `tools/coop-test-launch.sh local`
+expects, and what Playwright/Claude Code menu screenshots target:
+
+```
+node tools/serve.mjs
+# then: http://localhost:8080/
+```
+
+Alternative one-liner (no special MIME handling — broken on some
+Windows configs for ES modules):
 
 ```
 python -m http.server 8000
