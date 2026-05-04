@@ -3457,6 +3457,24 @@ function _ensureCoopLobby() {
       } catch (_) {}
       return;
     }
+    if (kind === 'rpc-team-kill') {
+      // Team-shared kill progress broadcast — every peer except the
+      // killer ticks their kill counter + contract objective. Killer-
+      // instanced rewards (credits / XP / skill points) NOT included
+      // here; those go via rpc-grant-rewards to the killer only.
+      // Run kill counter and contract progress are team resources so
+      // "kill N enemies" missions advance for all coop participants.
+      if (!body) return;
+      try {
+        if (body.k) runStats.addKill();
+        const arch = body.a || null;
+        if (arch) {
+          runStats.noteArchetypeKill(arch);
+          _applyContractPerKillReward(arch);
+        }
+      } catch (e) { console.warn('[coop] rpc-team-kill apply failed', e); }
+      return;
+    }
     if (kind === 'rpc-grant-rewards') {
       // Joiner-only — host attributed a kill we caused and is sending
       // the bundled rewards. Apply credits + skill points + kill +
@@ -10038,12 +10056,23 @@ function _onEnemyKilledImpl(enemy, opts = {}) {
   else if (enemy.variant === 'dasher') arch = 'dasher';
   else if (enemy.variant === 'tank') arch = 'tank';
   else if (enemy.kind === 'gunman') arch = 'gunman';
+  // Coop reward distribution. Two axes:
+  //   1. Killer-instanced rewards (credits, skill points, XP) — go
+  //      to the player who scored the kill only. Wallets are
+  //      per-player by design.
+  //   2. Team-shared progress (kill counter, contract objective tick,
+  //      archetype log) — advances for ALL peers regardless of who
+  //      pulled the trigger. Otherwise "kill 15 enemies" objectives
+  //      become a race instead of a team effort.
+  // The team-broadcast goes to every peer EXCEPT the killer, who
+  // already ticks team-shared progress in their own kill code path
+  // (host self-kill via the local ticks below; joiner via the
+  // rpc-grant-rewards handler that bumps runStats.addKill +
+  // _applyContractPerKillReward locally).
   if (_coopClaimer && _coopT_kill?.isOpen && _coopT_kill.isHost) {
-    // Joiner kill — bundle every reward (credits + skill points +
-    // kill count + archetype for contract progress) into one rpc.
-    // Skip the host's local apply entirely so we don't double-credit.
-    // Skip coin VFX too — the joiner's own client spawns it via the
-    // rpc-grant-rewards handler.
+    // Joiner kill — bundle every killer-instanced reward (credits +
+    // skill points + kill count + archetype) for the joiner.
+    // Host's local share of the team-progress runs immediately after.
     const credits = (!enemy.noXp ? rollCredits(enemy.tier || 'normal') : 0)
       + (!enemy.noXp && artifacts?.has('lucky_dice')
           ? ((1 + Math.floor(Math.random() * 6)) + (1 + Math.floor(Math.random() * 6)))
@@ -10060,6 +10089,22 @@ function _onEnemyKilledImpl(enemy, opts = {}) {
         x: +(enemy.group?.position?.x?.toFixed(2) ?? 0),
         z: +(enemy.group?.position?.z?.toFixed(2) ?? 0),
       }, _coopClaimer);
+    } catch (_) {}
+    // Host-side team-progress for the joiner kill.
+    try {
+      runStats.addKill();
+      runStats.noteArchetypeKill(arch);
+      _applyContractPerKillReward(arch);
+    } catch (_) { /* defensive */ }
+    // Broadcast team-progress to any peers OTHER than the killer.
+    // 2-peer typical, but supports up-to-4-peer rooms cleanly.
+    // transport.peers is a Map<peerId, {id, name}>; iterate keys.
+    try {
+      const peerIds = _coopT_kill.peers ? [..._coopT_kill.peers.keys()] : [];
+      for (const pid of peerIds) {
+        if (!pid || pid === _coopClaimer || pid === _coopT_kill.peerId) continue;
+        _coopT_kill.send('rpc-team-kill', { a: arch || '', k: 1 }, pid);
+      }
     } catch (_) {}
   } else {
     // Host (or single-player) self-kill — run the local reward path.
@@ -10086,6 +10131,18 @@ function _onEnemyKilledImpl(enemy, opts = {}) {
       runStats.noteArchetypeKill(arch);
       _applyContractPerKillReward(arch);
     } catch (e) { /* defensive — contract path must never break a kill */ }
+    // Host self-kill in coop — broadcast team-progress to every joiner
+    // so their kill counter + contract objective ticks. Killer-
+    // instanced rewards stay local (host already pocketed them above).
+    if (_coopT_kill?.isOpen && _coopT_kill.isHost) {
+      try {
+        const peerIds = _coopT_kill.peers ? [..._coopT_kill.peers.keys()] : [];
+        for (const pid of peerIds) {
+          if (!pid || pid === _coopT_kill.peerId) continue;
+          _coopT_kill.send('rpc-team-kill', { a: arch || '', k: 1 }, pid);
+        }
+      } catch (_) {}
+    }
   }
   // Corpse position fix-up — if the body's last position landed inside
   // a wall / pillar / prop AABB, push it out so the loot prompt can
