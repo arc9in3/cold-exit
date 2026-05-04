@@ -107,6 +107,9 @@
     </div>
 
     <h2>Weapon transform — <span id="weapon-tune-label">—</span></h2>
+    <div id="weapon-diag" style="font-size:10px;color:#9aa;background:#0f1014;padding:6px 8px;margin:4px 0;border:1px solid #2a2d34;border-radius:3px;word-break:break-all">
+      (no weapon loaded yet — pick one in the dropdown)
+    </div>
     <div class="legend" style="margin:4px 0">
       Drag sliders to dial grip offset (meters in gun-anchor local space),
       rotation (radians, applied to the wrap), and scale (multiplier on the
@@ -592,8 +595,23 @@ async function loadWeaponForClass() {
   applyWeaponTuning();
 
   muzzle.position.set(0, 0, (fwd + len / 2) * wsManifest);
+  // On-screen diagnostic so invisible-mesh issues surface without
+  // the user having to open devtools.
+  const diag = document.getElementById('weapon-diag');
+  if (diag) {
+    const wp = wrap.position.toArray().map(v => v.toFixed(3)).join(',');
+    const cs2 = clone.scale.toArray().map(v => v.toFixed(3)).join(',');
+    diag.textContent = `loaded ${name} | path=${path} | wsManifest=${wsManifest} `
+      + `baseFit=${baseFit.toFixed(4)} longest=${longest.toFixed(3)} | `
+      + `wrap.pos=(${wp}) clone.scale=(${cs2})`;
+  }
   console.log(`[pose-editor] loaded weapon ${name} → ${path}`,
-    { len, cs, wsManifest, baseFit, longest: longest.toFixed(3) });
+    { len, cs, wsManifest, baseFit, longest: longest.toFixed(3),
+      'wrap.position': wrap.position.toArray(),
+      'clone.scale':   clone.scale.toArray(),
+      'gunAnchor.position': gunAnchor.position.toArray(),
+      'gunAnchor.scale': gunAnchor.scale.toArray(),
+    });
 }
 
 function applyWeaponTuning() {
