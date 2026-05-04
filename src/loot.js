@@ -197,12 +197,20 @@ export class LootManager {
   }
 
   spawnItem(position, item, opts = {}) {
-    // Coop: instanced-per-player ownership tag. Defaults to null
-    // (visible to every peer in the room — shared loot, e.g. host's
-    // own kills). When the killer is a joiner, the rpc-shoot handler
-    // sets window.__coopCurrentClaimer for the duration of applyHit;
-    // any loot spawned during that chain inherits it as claimedBy.
-    // Explicit opts.claimedBy overrides the implicit thread-local.
+    // Coop: instanced-per-player ownership tag. Resolution order:
+    //   1. Explicit opts.claimedBy if the caller passed one (including
+    //      explicit null for "intentionally shared" drops like
+    //      joiner-side rpc-drop or shared encounter rewards).
+    //   2. window.__coopCurrentClaimer thread-local — set by RPC
+    //      handlers running joiner actions on host (rpc-shoot,
+    //      rpc-throwable) so loot from those flows lands on the
+    //      joiner who initiated the action.
+    //   3. The LOCAL peer ID when coop is open — so a host's own
+    //      kills produce instanced-to-host loot just like a joiner's
+    //      kills produce instanced-to-joiner loot via the thread-
+    //      local. Without this default, host-kill drops were null →
+    //      shared, and joiner could ninja-loot the host's kills.
+    //   4. null (single-player) — shared / unowned.
     const _coopClaimer = (typeof window !== 'undefined') ? window.__coopCurrentClaimer : null;
     const claimedBy = (opts && Object.prototype.hasOwnProperty.call(opts, 'claimedBy'))
       ? opts.claimedBy
