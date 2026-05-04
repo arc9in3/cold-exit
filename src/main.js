@@ -12901,16 +12901,27 @@ function updateOverhead(weapon, effWeapon, playerInfo, stealthMult) {
       const pct = 1 - (g.aiSettleT / g.aiSettleDur);
       spawnRing(g.group.position, pct, true);
     }
-    if ((g.dazzleT || 0) > 0) spawnMarker(g.group.position, '✦', 'overhead-star', 2.6);
-    else if ((g.blindT || 0) > 0) spawnMarker(g.group.position, '✺', 'overhead-flash', 2.6);
+    // Only show dazzle / blind status icons when the enemy is in line
+    // of sight. Bug #46: in boss rooms with invisible enemies, the
+    // overhead ✦ / ✺ icons floated over the world space they'd be in,
+    // revealing positions the player otherwise couldn't see.
+    // The threat ◉ marker stays gated on `_occluded` separately —
+    // that's the "I sensed something past a wall" indicator and is
+    // intentionally visible only when occluded.
+    if (!g._occluded) {
+      if ((g.dazzleT || 0) > 0) spawnMarker(g.group.position, '✦', 'overhead-star', 2.6);
+      else if ((g.blindT || 0) > 0) spawnMarker(g.group.position, '✺', 'overhead-flash', 2.6);
+    }
     if (g._occluded && _isEnemyActive(g)) {
       spawnMarker(g.group.position, '◉', 'overhead-threat', 2.6);
     }
   }
   for (const m of melees.enemies) {
     if (!m.alive) continue;
-    if ((m.dazzleT || 0) > 0) spawnMarker(m.group.position, '✦', 'overhead-star', 2.4);
-    else if ((m.blindT || 0) > 0) spawnMarker(m.group.position, '✺', 'overhead-flash', 2.4);
+    if (!m._occluded) {
+      if ((m.dazzleT || 0) > 0) spawnMarker(m.group.position, '✦', 'overhead-star', 2.4);
+      else if ((m.blindT || 0) > 0) spawnMarker(m.group.position, '✺', 'overhead-flash', 2.4);
+    }
     if (m._occluded && _isEnemyActive(m)) {
       spawnMarker(m.group.position, '◉', 'overhead-threat', 2.4);
     }
