@@ -273,23 +273,41 @@ gunAnchor.add(muzzle);
   const gltf = await loader.loadAsync(MESH_URL);
   mannequin = gltf.scene;
   rigGroup.add(mannequin);
+  // Find the SkinnedMesh first.
   mannequin.traverse(o => {
     if (o.isSkinnedMesh && !skinnedMesh) skinnedMesh = o;
-    if (o.isBone) boneByName.set(o.name, o);
   });
-  // IMPORTANT: mixer must be rooted at a node that contains every
-  // possible track target. Bones in GLTF skinning often live as
-  // siblings of the SkinnedMesh under an Armature node — rooting
-  // at SkinnedMesh leaves PropertyBinding unable to resolve those
-  // bones. Root at the gltf scene so PropertyBinding can traverse
-  // into the Armature and find the bones; our track-name filter
-  // (boneByName.has) still blocks any non-bone target.
-  mixer = new THREE.AnimationMixer(mannequin);
-  console.log(`[pose-editor] mannequin loaded — ${boneByName.size} bones indexed`);
+  // Index ONLY the bones that participate in this SkinnedMesh's
+  // skeleton. The gltf.scene can contain phantom Object3Ds with
+  // bone-shaped names (artifacts of the FBX→GLB conversion), and
+  // PropertyBinding's name-resolution may bind clip tracks to those
+  // instead of the real skinning bones — leaving the mesh in bind
+  // pose while invisible nodes spin. Restricting the editor to the
+  // skeleton's actual bones, and rooting the mixer at the SkinnedMesh,
+  // makes binding deterministic.
+  if (skinnedMesh && skinnedMesh.skeleton) {
+    for (const b of skinnedMesh.skeleton.bones) {
+      boneByName.set(b.name, b);
+    }
+  }
+  mixer = new THREE.AnimationMixer(skinnedMesh || mannequin);
+  // Verify there are no name collisions in the gltf scene that would
+  // confuse PropertyBinding (a node with the same name as a bone).
+  const dupes = [];
+  mannequin.traverse(o => {
+    if (!o.isBone && boneByName.has(o.name)) dupes.push(o.name);
+  });
+  if (dupes.length) {
+    console.warn(`[pose-editor] ${dupes.length} non-bone nodes share names with bones, renaming them:`, dupes);
+    mannequin.traverse(o => {
+      if (!o.isBone && boneByName.has(o.name)) o.name = `_phantom_${o.name}`;
+    });
+  }
+  console.log(`[pose-editor] mannequin loaded — ${boneByName.size} skeleton bones indexed`);
   if (!boneByName.size) {
     document.getElementById('boot-error').style.display = 'block';
     document.getElementById('boot-error').textContent =
-      'No bones found in mannequin GLB. Check mesh-loader and ' +
+      'No skeleton bones found in mannequin GLB. Check mesh-loader and ' +
       'GLB file at ' + MESH_URL;
   }
   buildBoneUI();
