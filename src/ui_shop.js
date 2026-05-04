@@ -99,23 +99,25 @@ const PERK_PRICE_PER = 0.18;
 // layered behind a translucent overlay in `_renderKeeper` so item grids
 // stay readable.
 const KEEPER_ROOM_ART = {
-  healer: 'Assets/generated/art-healer-room-v2-via-qwen-image.png',
-  relicSeller: 'Assets/generated/art-relic-seller-room-v2.png',
+  merchant: 'Assets/generated/artpass-merchant-room.png',
+  healer: 'Assets/generated/artpass-healer-room.png',
+  gunsmith: 'Assets/generated/artpass-gunsmith-room.png',
+  armorer: 'Assets/generated/artpass-armorer-room.png',
+  tailor: 'Assets/generated/artpass-tailor-room.png',
+  relicSeller: 'Assets/generated/artpass-relicSeller-room.png',
+  blackMarket: 'Assets/generated/artpass-blackMarket-room.png',
+  recruiter: 'Assets/generated/artpass-recruiter-room.png',
 };
 
-// Per-merchant painted portrait. Takes priority over the rig snapshot in
-// `_renderKeeper` when present; rig snapshot remains the fallback for
-// kinds without painted art so the panel never goes blank.
 const KEEPER_PORTRAIT_ART = {
-  blackMarket: 'Assets/generated/gen-black-marketeer-portrait-v2-via-qwen-image.png',
-  healer: 'Assets/generated/art-healer-portrait-via-qwen-image-v694-v719.png',
-  relicSeller: 'Assets/generated/art-relic-seller-portrait-v3-via-qwen-image.png',
-  // The Fence is the visual identity for the `merchant` kind ("The Fixer"
-  // in KEEPERS) per docs/art-requests-characters.md (#2: "THE FENCE —
-  // general merchant").
-  merchant: 'Assets/generated/art-fence-portrait-v2-via-qwen-image-r3-v474-v430-v996.png',
-  armorer: 'Assets/generated/art-armorer-portrait-v3-via-qwen-image.png',
-  gunsmith: 'Assets/generated/art-gunsmith-portrait-v3-via-qwen-image-r2-v375-v881-v128-v753-v399-v425.png',
+  merchant: 'Assets/generated/artpass-merchant-portrait.png',
+  healer: 'Assets/generated/artpass-healer-portrait.png',
+  gunsmith: 'Assets/generated/artpass-gunsmith-portrait.png',
+  armorer: 'Assets/generated/artpass-armorer-portrait.png',
+  tailor: 'Assets/generated/artpass-tailor-portrait.png',
+  relicSeller: 'Assets/generated/artpass-relicSeller-portrait.png',
+  blackMarket: 'Assets/generated/artpass-blackMarket-portrait.png',
+  recruiter: 'Assets/generated/artpass-recruiter-portrait.png',
 };
 
 function _affixPerkPremium(item) {

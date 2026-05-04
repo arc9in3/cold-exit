@@ -68,3 +68,8 @@ tools/__pycache__/
 # track them. Specific files listed (not blanket *.fbx) so the
 # already-tracked W1_* and Man_New_Idle FBXes stay tracked.
 Assets/models/Idle.fbx
+
+# Artpass working dir — backups of original silhouettes restored from
+# git HEAD for img2img alpha-compose. Not source of truth, just a
+# scratch area while regenerating the inventory art pass.
+Assets/_artpass_originals/

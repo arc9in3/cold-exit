@@ -3532,7 +3532,7 @@ export class HideoutUI {
         width: 100%; height: 100%;
         background:
           linear-gradient(180deg, rgba(12,14,22,0.78) 0%, rgba(20,16,28,0.86) 100%),
-          url('/Assets/generated/gen-art-contracts-board-bg-via-qwen-image-r8-bg-1777851547091.png') center/cover no-repeat,
+          url('/Assets/generated/artpass-env-contract-board-bg.png') center/cover no-repeat,
           #0c0e16;
         overflow: hidden;
       }

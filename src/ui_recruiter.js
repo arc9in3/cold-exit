@@ -35,7 +35,7 @@ const STYLE = `
 #recruiter-card {
   background:
     linear-gradient(180deg, rgba(26,24,20,0.82) 0%, rgba(16,14,10,0.92) 100%),
-    url("Assets/generated/the-whole-room-is-r2.png") center / cover no-repeat,
+    url("Assets/generated/artpass-recruiter-room.png") center / cover no-repeat,
     linear-gradient(180deg, #1a1814 0%, #100e0a 100%);
   border: 1px solid #3a3530;
   border-radius: 4px;
