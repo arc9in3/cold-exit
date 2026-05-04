@@ -3035,12 +3035,16 @@ function _ensureCoopLobby() {
   coopGhostRoot.name = 'coop-ghosts';
   scene.add(coopGhostRoot);
   const transport = getCoopTransport();
-  // Publish coop-host flag to window so non-imported modules
-  // (loot.js, etc.) can branch on it without forming a circular
-  // import. Updated on every state change below.
+  // Publish coop-host flag + local peer id to window so non-imported
+  // modules (loot.js, etc.) can branch on coop state without forming
+  // a circular import. Updated on every state change below.
+  // __coopLocalPeerId is the local peer's ID (host or joiner) used
+  // by spawnItem's claimedBy default so kills produce instanced-to-
+  // killer loot regardless of which peer scored the hit.
   const _publishHostFlag = () => {
     if (typeof window !== 'undefined') {
       window.__coopIsHost = transport.isOpen && transport.isHost;
+      window.__coopLocalPeerId = transport.isOpen ? (transport.peerId || null) : null;
     }
   };
   transport.addEventListener('open', _publishHostFlag);
@@ -3604,6 +3608,36 @@ function _ensureCoopLobby() {
         }
       } catch (err) {
         console.warn('[coop] rpc-grant-item apply failed', err);
+      }
+      return;
+    }
+    if (kind === 'rpc-keycard-grant') {
+      // Both peers receive — keycards are TEAM resources, not
+      // killer-instanced like credits/XP. Whichever peer killed the
+      // sub-boss broadcast the color; everyone adds it to their local
+      // playerKeys + shows the HUD toast.
+      const color = body && body.c;
+      if (!color) return;
+      if (!playerKeys.has(color)) {
+        playerKeys.add(color);
+        try { transientHudMsg(`+${String(color).toUpperCase()} KEYCARD`, 2.4); } catch (_) {}
+        try { sfx.pickup(); } catch (_) {}
+      }
+      return;
+    }
+    if (kind === 'rpc-door-open') {
+      // Either peer used a keycard to unlock a door — the other peer's
+      // local level needs to mirror the open. Looks up the door by
+      // color (keycardDoors is color-keyed) and runs the same
+      // _openDoor path the unlocker did.
+      const color = body && body.c;
+      if (!color || !level || !level.keycardDoors) return;
+      const door = level.keycardDoors[color];
+      if (door && level._openDoor) {
+        try { level._openDoor(door); } catch (err) { console.warn('[coop] rpc-door-open failed', err); }
+        // Drop the door from the keycardDoors index so subsequent
+        // tryKeycardUnlock calls don't try to re-open it.
+        delete level.keycardDoors[color];
       }
       return;
     }
@@ -9934,6 +9968,28 @@ function rollCredits(tier) {
 }
 
 function onEnemyKilled(enemy, opts = {}) {
+  // Coop loot-instancing guard. Loot spawned anywhere inside this
+  // function (mirror clone drops, normal drops at line ~9986, kill-
+  // chain spawns, etc.) inherits claimedBy from window.__coopCurrentClaimer.
+  // - Joiner kill: rpc-shoot handler set the thread-local to the
+  //   joiner's peerId before invoking applyHit → stays as joiner.
+  // - Host's own kill: thread-local is null going in; we set it to
+  //   the host's local peerId so host's kill drops are instanced to
+  //   host (not shared / null-claimed). Without this, a joiner could
+  //   ninja-loot every drop the host generated.
+  // - Single-player: __coopLocalPeerId is null → stays null → drops
+  //   are shared / unowned (correct, no other peer to instance for).
+  const _coopPrevClaimer = (typeof window !== 'undefined') ? window.__coopCurrentClaimer : null;
+  if (typeof window !== 'undefined' && !_coopPrevClaimer && window.__coopLocalPeerId) {
+    window.__coopCurrentClaimer = window.__coopLocalPeerId;
+  }
+  try {
+    return _onEnemyKilledImpl(enemy, opts);
+  } finally {
+    if (typeof window !== 'undefined') window.__coopCurrentClaimer = _coopPrevClaimer;
+  }
+}
+function _onEnemyKilledImpl(enemy, opts = {}) {
   // Mirror Encounter — clone drops a guaranteed mastercraft version
   // of the player's currently equipped weapon. We snapshot the
   // weapon NOW (not at clone-spawn time) since the player may have
@@ -10100,10 +10156,22 @@ function onEnemyKilled(enemy, opts = {}) {
   triggerHitStop(killFreeze);
   // Keycard drop — sub-bosses tagged with a key colour in regenLevel
   // hand the token straight to the HUD (no item pickup required).
+  // Coop: keycards are TEAM resources, not killer-instanced like
+  // credits / XP. Broadcast to ALL peers so everyone unlocks the
+  // door regardless of who scored the kill. The handler at
+  // rpc-keycard-grant guards against double-grants via the
+  // playerKeys.has check.
   if (enemy.keyDrop) {
-    playerKeys.add(enemy.keyDrop);
-    transientHudMsg(`+${enemy.keyDrop.toUpperCase()} KEYCARD`, 2.4);
-    sfx.pickup();
+    if (!playerKeys.has(enemy.keyDrop)) {
+      playerKeys.add(enemy.keyDrop);
+      transientHudMsg(`+${enemy.keyDrop.toUpperCase()} KEYCARD`, 2.4);
+      sfx.pickup();
+    }
+    try {
+      if (transport && transport.isOpen) {
+        transport.send('rpc-keycard-grant', { c: enemy.keyDrop });
+      }
+    } catch (_) { /* relay may be down — local pickup still succeeded */ }
   }
   // Exotic Cascade — capstone for the Demolitions class. Two paths:
   //  1. Kill came from an exotic weapon → drop a chain mark on the
@@ -13670,12 +13738,21 @@ function tryInteract({ nearItem, body, bodies, npc, container }) {
   // Keycard-gated door — consumes a held token matching the colour.
   // Shows a "need X key" prompt via transientHudMsg if the player
   // steps up without one in their pocket.
+  // Coop: when a peer unlocks, broadcast rpc-door-open so the other
+  // peer's local level mirrors the open. Each peer consumes their
+  // OWN copy of the keycard (each peer has their own playerKeys
+  // Set since the rpc-keycard-grant handler adds independently).
   const keyResult = level.tryKeycardUnlock(player.mesh.position, 2.6, playerKeys);
   if (keyResult) {
     if (keyResult.consumed) {
       playerKeys.delete(keyResult.consumed);
       sfx.doorUnlock();
       transientHudMsg(`${keyResult.consumed.toUpperCase()} KEY USED`, 1.4);
+      try {
+        if (transport && transport.isOpen) {
+          transport.send('rpc-door-open', { c: keyResult.consumed });
+        }
+      } catch (_) { /* relay down — local door still opened */ }
     } else if (keyResult.needsKey) {
       transientHudMsg(`Need ${keyResult.needsKey.toUpperCase()} keycard`, 1.4);
       fireHint('keycard');
