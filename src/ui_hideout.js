@@ -3530,7 +3530,10 @@ export class HideoutUI {
       .contractor-stage {
         position: relative;
         width: 100%; height: 100%;
-        background: linear-gradient(180deg, #0c0e16 0%, #14101c 100%);
+        background:
+          linear-gradient(180deg, rgba(12,14,22,0.78) 0%, rgba(20,16,28,0.86) 100%),
+          url('/Assets/generated/gen-art-contracts-board-bg-via-qwen-image-r6.png') center/cover no-repeat,
+          #0c0e16;
         overflow: hidden;
       }
 
@@ -4477,16 +4480,16 @@ export class HideoutUI {
         box-shadow: inset 0 -20px 30px rgba(0,0,0,0.55);
       }
       .hideout-section-portrait[data-npc="armorer"] {
-        background-image: url('/Assets/generated/art-armorer-portrait-v3-via-qwen-image.png');
+        background-image: url('/Assets/generated/art-armorer-portrait-v3-via-qwen-image-bg-1777706086510.png');
       }
       .hideout-section-portrait[data-npc="fence"] {
-        background-image: url('/Assets/generated/art-fence-portrait-v3-via-qwen-image.png');
+        background-image: url('/Assets/generated/art-fence-portrait-v3-via-qwen-image-bg-1777705843292.png');
       }
       .hideout-section-portrait[data-npc="blackmarket"] {
-        background-image: url('/Assets/generated/art-black-marketeer-portrait-via-qwen-image.png');
+        background-image: url('/Assets/generated/art-black-marketeer-portrait-via-qwen-image-bg-1777704741765.png');
       }
       .hideout-section-portrait[data-npc="vault"] {
-        background-image: url('/Assets/generated/gen-art-vault-keeper-portrait-via-qwen-image.png');
+        background-image: url('/Assets/generated/gen-art-vault-keeper-portrait-via-qwen-image-bg-1777845441426.png');
       }
       .hideout-section-title {
         font-size: 13px; color: #5a8acf; letter-spacing: 2px;
