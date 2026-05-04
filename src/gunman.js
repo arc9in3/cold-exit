@@ -264,6 +264,13 @@ export class GunmanManager {
     if (_ri && g.rig?.rightArmMeshes) {
       _ri.hideMeshes(g.rig.rightArmMeshes, true);
     }
+    // Bug #44: hide rig-attached weapon meshes too — same as the
+    // organic disarm path in applyHit. Without this, the tutorial's
+    // forceDisarm (after 2 arm hits) leaves the dummy holding a
+    // visible gun model.
+    if (g._heldWeaponMeshes) {
+      for (const m of g._heldWeaponMeshes) { if (m) m.visible = false; }
+    }
     g.weapon = null;
     g.burstLeft = 0;
     g.fireT = 0.8;
@@ -1021,6 +1028,15 @@ export class GunmanManager {
       if (g.rightArmGroup) g.rightArmGroup.visible = false;
       else g.rightArm.visible = false;
       g.gun.visible = false;
+      // Bug #44: hide the rig-attached weapon meshes too. Without this,
+      // the rig's <Weapon> sub-mesh stayed visible after disarm — the
+      // enemy still appeared to be holding a gun even though they'd
+      // dropped it. Don't `_stripDeadEnemyWeapon` (which removes from
+      // parent) — bosses can re-arm on the disarmedPhase='retrieve'
+      // path; restoring requires the meshes still parented to the rig.
+      if (g._heldWeaponMeshes) {
+        for (const m of g._heldWeaponMeshes) { if (m) m.visible = false; }
+      }
       // Source meshes go .visible=false above — but the InstancedMesh
       // doesn't honour source visibility. Flag the right-arm rig
       // meshes so syncFrame writes zero-scale matrices for those
@@ -1701,6 +1717,11 @@ export class GunmanManager {
             const _riReArmB = rigInstancer && rigInstancer();
             if (_riReArmB && g.rig?.rightArmMeshes) {
               _riReArmB.hideMeshes(g.rig.rightArmMeshes, false);
+            }
+            // Re-show the rig-attached weapon meshes that were hidden
+            // on disarm (bug #44 fix).
+            if (g._heldWeaponMeshes) {
+              for (const m of g._heldWeaponMeshes) { if (m) m.visible = true; }
             }
             g.aiMagLeft = g.weapon?.magSize || 30;
             g.aiReloadT = 0;
