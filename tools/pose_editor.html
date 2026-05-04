@@ -157,7 +157,8 @@
       <button id="wt-flip-mirror">Toggle mirror (X-flip)</button>
     </div>
     <div class="row-buttons">
-      <button id="wt-copy-patch" class="primary">Copy patch for model_manifest.js</button>
+      <button id="wt-save-disk" class="primary">Save to model_manifest.js</button>
+      <button id="wt-copy-patch">Copy as JS patch</button>
     </div>
     <textarea id="wt-output" readonly style="min-height:90px">// patch output appears here</textarea>
 
@@ -1067,6 +1068,66 @@ function cycleWeapon(dir) {
   weaponSel.value = opts[next];
   loadWeaponForClass();
 }
+// Build the diff payload — only paths whose tuning differs from the
+// current manifest values. Shared between save-to-disk + copy-as-patch.
+function buildTuningDiff() {
+  const gripOffsets = {};
+  const rotationOverrides = {};
+  const scaleOverrides = {};
+  for (const [path, t] of weaponTunings) {
+    const mg = gripOffsetForModelPath(path) || { x: 0, y: 0, z: 0 };
+    const mr = rotationOverrideForModelPath(path) || { x: 0, y: 0, z: 0 };
+    const ms = scaleForModelPath(path) || 1.0;
+    if (Math.abs(t.gripX - (mg.x || 0)) > 1e-4
+     || Math.abs(t.gripY - (mg.y || 0)) > 1e-4
+     || Math.abs(t.gripZ - (mg.z || 0)) > 1e-4) {
+      gripOffsets[path] = { x: t.gripX, y: t.gripY, z: t.gripZ };
+    }
+    if (Math.abs(t.rotX - (mr.x || 0)) > 1e-4
+     || Math.abs(t.rotY - (mr.y || 0)) > 1e-4
+     || Math.abs(t.rotZ - (mr.z || 0)) > 1e-4) {
+      rotationOverrides[path] = { x: t.rotX, y: t.rotY, z: t.rotZ };
+    }
+    const scaleNew = +(ms * t.scaleMul).toFixed(4);
+    if (Math.abs(scaleNew - ms) > 1e-4) {
+      scaleOverrides[path] = scaleNew;
+    }
+  }
+  return { gripOffsets, rotationOverrides, scaleOverrides };
+}
+
+document.getElementById('wt-save-disk').addEventListener('click', async () => {
+  const ta = document.getElementById('wt-output');
+  const payload = buildTuningDiff();
+  const totalChanged = Object.keys(payload.gripOffsets).length
+                     + Object.keys(payload.rotationOverrides).length
+                     + Object.keys(payload.scaleOverrides).length;
+  if (totalChanged === 0) {
+    ta.value = '// no tuning changes from manifest defaults';
+    return;
+  }
+  ta.value = `// saving ${totalChanged} entries to src/model_manifest.js…`;
+  try {
+    const r = await fetch('/api/save-weapon-tuning', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(payload),
+    });
+    const text = await r.text();
+    if (!r.ok) {
+      ta.value = `// save FAILED (${r.status}): ${text}\n// is tools/serve.mjs running?`;
+      return;
+    }
+    const data = JSON.parse(text);
+    ta.value = `// saved ${data.entriesPatched} entries to ${data.path}\n`
+             + `// (${Object.keys(payload.gripOffsets).length} grip, `
+             + `${Object.keys(payload.rotationOverrides).length} rotation, `
+             + `${Object.keys(payload.scaleOverrides).length} scale)`;
+  } catch (e) {
+    ta.value = `// save FAILED: ${e.message}\n// open via http://localhost:8080/tools/pose_editor.html (run "node tools/serve.mjs")`;
+  }
+});
+
 document.getElementById('wt-copy-patch').addEventListener('click', () => {
   // Emit JS-style entries for MODEL_GRIP_OFFSET / MODEL_ROTATION_OVERRIDE /
   // MODEL_SCALE_OVERRIDE — only for paths whose tuning differs from

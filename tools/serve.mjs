@@ -45,6 +45,105 @@ const MIME = {
   '.md':   'text/markdown; charset=utf-8',
 };
 
+// POST /api/save-weapon-tuning — patches src/model_manifest.js in place
+// with entries from the pose-editor's weapon transform panel.
+//
+// Body shape:
+//   { gripOffsets:        { '<path>': { x, y, z }, ... },
+//     rotationOverrides:  { '<path>': { x, y, z }, ... },
+//     scaleOverrides:     { '<path>': <number>,    ... } }
+//
+// Strategy: locate each of the three `export const <name> = { ... };`
+// object literals via brace counting, then for each entry either
+// replace the existing key's line in place (preserving indent and any
+// trailing comment) or insert a new line just before the closing
+// brace. Existing manifest comments and formatting are otherwise
+// preserved.
+const MANIFEST_PATH = resolve(ROOT, 'src', 'model_manifest.js');
+function patchManifestObject(content, objectName, entries, valueFmt) {
+  if (!entries || !Object.keys(entries).length) return { content, changed: 0 };
+  const startMarker = `export const ${objectName} = {`;
+  const startIdx = content.indexOf(startMarker);
+  if (startIdx === -1) throw new Error(`Manifest: no ${objectName}`);
+  let depth = 1;
+  let i = startIdx + startMarker.length;
+  while (i < content.length && depth > 0) {
+    const c = content[i];
+    if (c === '{') depth++;
+    else if (c === '}') depth--;
+    if (depth === 0) break;
+    i++;
+  }
+  if (depth !== 0) throw new Error(`Manifest: unbalanced braces in ${objectName}`);
+  const bodyStart = startIdx + startMarker.length;
+  const bodyEnd = i;
+  let body = content.slice(bodyStart, bodyEnd);
+  let changed = 0;
+  for (const [key, value] of Object.entries(entries)) {
+    const valStr = valueFmt(value);
+    const keyEsc = key.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+    const re = new RegExp(`^([ \\t]*)'${keyEsc}':[ \\t]*[^\\n]*$`, 'm');
+    const m = body.match(re);
+    if (m) {
+      body = body.replace(re, `${m[1]}'${key}': ${valStr},`);
+    } else {
+      // Insert before the closing '}'. Trim any trailing whitespace
+      // from body, append our line, restore newline so the closing
+      // brace lands on its own line.
+      const trimmed = body.replace(/[\s\n]+$/, '');
+      body = trimmed + `\n  '${key}': ${valStr},\n`;
+    }
+    changed++;
+  }
+  return {
+    content: content.slice(0, bodyStart) + body + content.slice(bodyEnd),
+    changed,
+  };
+}
+function fmtVec3(v) {
+  const n = (x) => Number((+x).toFixed(3));
+  return `{ x: ${n(v.x).toFixed(3)}, y: ${n(v.y).toFixed(3)}, z: ${n(v.z).toFixed(3)} }`;
+}
+function fmtScale(n) {
+  return Number((+n).toFixed(4)).toString();
+}
+async function handleSaveWeaponTuning(req, res) {
+  const chunks = [];
+  for await (const c of req) chunks.push(c);
+  let payload;
+  try {
+    payload = JSON.parse(Buffer.concat(chunks).toString('utf8'));
+  } catch {
+    res.writeHead(400); res.end('Bad JSON'); return;
+  }
+  const grip  = payload.gripOffsets       || {};
+  const rot   = payload.rotationOverrides || {};
+  const scale = payload.scaleOverrides    || {};
+  let content;
+  try {
+    content = await readFile(MANIFEST_PATH, 'utf8');
+  } catch (e) {
+    res.writeHead(500); res.end(`read failed: ${e.message}`); return;
+  }
+  let report;
+  try {
+    let n = 0;
+    let r = patchManifestObject(content, 'MODEL_GRIP_OFFSET',       grip,  fmtVec3); content = r.content; n += r.changed;
+    r     = patchManifestObject(content, 'MODEL_ROTATION_OVERRIDE', rot,   fmtVec3); content = r.content; n += r.changed;
+    r     = patchManifestObject(content, 'MODEL_SCALE_OVERRIDE',    scale, fmtScale); content = r.content; n += r.changed;
+    report = { entriesPatched: n };
+  } catch (e) {
+    res.writeHead(500); res.end(`patch failed: ${e.message}`); return;
+  }
+  try {
+    await writeFile(MANIFEST_PATH, content, 'utf8');
+  } catch (e) {
+    res.writeHead(500); res.end(`write failed: ${e.message}`); return;
+  }
+  res.writeHead(200, { 'Content-Type': 'application/json' });
+  res.end(JSON.stringify({ ok: true, ...report, path: 'src/model_manifest.js' }));
+}
+
 // POST /api/save-pose/<name> — writes JSON body to Assets/poses/<name>.json.
 // Restricted: name must be alphanumeric+dash, write path must stay inside
 // Assets/poses/. Used by the rig_tuner pose authoring flow.
@@ -75,6 +174,11 @@ const server = createServer(async (req, res) => {
     if (req.method === 'POST' && pathname.startsWith('/api/save-pose/')) {
       const name = pathname.slice('/api/save-pose/'.length);
       await handleSavePose(req, res, name);
+      return;
+    }
+
+    if (req.method === 'POST' && pathname === '/api/save-weapon-tuning') {
+      await handleSaveWeaponTuning(req, res);
       return;
     }
 
