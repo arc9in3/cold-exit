@@ -274,8 +274,12 @@ stage.appendChild(renderer.domElement);
 const scene = new THREE.Scene();
 scene.background = new THREE.Color(0x14161a);
 const camera = new THREE.PerspectiveCamera(45, 1, 0.05, 50);
-let camFront = false;     // false = behind (game default), true = in front (mirror view)
-camera.position.set(0, 1.6, -3.5);
+// Default camera in FRONT of the mannequin (positive Z) so the gun —
+// which extends forward of the body along +Z — is visible without
+// having to click 'Flip camera' first. Toggle with the button to see
+// the back-of-character iso angle the game uses.
+let camFront = true;
+camera.position.set(0, 1.6, 3.5);
 
 const resize = () => {
   const w = Math.max(1, stage.clientWidth);
