@@ -444,7 +444,12 @@ async function loadClip() {
   currentAction = mixer.clipAction(clip);
   currentAction.setLoop(THREE.LoopRepeat, Infinity);
   currentAction.play();
-  currentAction.paused = !isPlaying;
+  // Never pause the action — paused actions are skipped by the
+  // mixer, which means bone properties don't get re-written each
+  // frame and our delta composition stacks instead of replacing.
+  // Instead we hold action.time fixed when isPlaying is false (the
+  // tick loop calls mixer.update(0) so time can't auto-advance).
+  currentAction.paused = false;
   currentAction.time = 0;
   scrub.max = Math.round(clip.duration * 1000);
   scrub.value = 0;
@@ -461,7 +466,8 @@ clsSel.addEventListener('change', () => {
 clipSel.addEventListener('change', loadClip);
 playPause.addEventListener('click', () => {
   isPlaying = !isPlaying;
-  if (currentAction) currentAction.paused = !isPlaying;
+  // Action stays unpaused; tick loop just doesn't advance time
+  // when isPlaying is false. See the comment in loadClip().
   playPause.textContent = isPlaying ? '▶ Playing' : '⏸ Paused';
 });
 scrub.addEventListener('input', () => {
@@ -597,7 +603,11 @@ async function loadWeaponForClass() {
   // Capture base values; applyWeaponTuning fills wrap.position/rotation
   // and clone.scale based on the slider state.
   const manifestGrip = gripOffsetForModelPath(path) || { x: 0, y: 0, z: 0 };
-  const manifestRot  = rotationOverrideForModelPath(path) || { x: 0, y: 0, z: 0 };
+  // Game's clone.rotation default when no rotationOverride exists is
+  // (0, Math.PI/2, 0) — see player.js setWeapon path. The editor
+  // mirrors that fallback so the gun lands forward-pointing instead
+  // of facing 90° to the side. Manifest overrides win when set.
+  const manifestRot  = rotationOverrideForModelPath(path) || { x: 0, y: Math.PI / 2, z: 0 };
   const manifestMirror = shouldMirrorInHand({ name });
   weaponBase = {
     name, path, cls, len, cs, fwd, baseFit, wsManifest,
@@ -804,6 +814,17 @@ const _worldDQ = new THREE.Quaternion();
 const _localDQ = new THREE.Quaternion();
 
 function applyDeltas() {
+  // RESET each editable bone to its captured clip-pose quaternion
+  // BEFORE applying deltas. Without this, when the clip is paused
+  // THREE's mixer skips writing to bound properties, so a
+  // premultiply on bone.quaternion stacks each frame instead of
+  // composing onto a fresh clip pose — symptom: spine starts
+  // spinning forever after the slightest slider nudge.
+  for (const name of EDITABLE_BONES) {
+    const bone = boneByName.get(name);
+    const rest = boneRestLocal.get(name);
+    if (bone && rest) bone.quaternion.copy(rest);
+  }
   for (const name of EDITABLE_BONES) {
     const bone = boneByName.get(name);
     if (!bone) continue;
@@ -1171,16 +1192,20 @@ function buildTuningDiff() {
   const scaleOverrides = {};
   for (const [path, t] of weaponTunings) {
     const mg = gripOffsetForModelPath(path) || { x: 0, y: 0, z: 0 };
-    const mr = rotationOverrideForModelPath(path) || { x: 0, y: 0, z: 0 };
+    // Match the editor's load-time fallback: when no rotation
+    // override exists, the GAME's effective rotation is
+    // (0, π/2, 0). Compare against THAT, not identity, so we
+    // don't emit a redundant override for every weapon.
+    const mr = rotationOverrideForModelPath(path) || { x: 0, y: Math.PI / 2, z: 0 };
     const ms = scaleForModelPath(path) || 1.0;
     if (Math.abs(t.gripX - (mg.x || 0)) > 1e-4
      || Math.abs(t.gripY - (mg.y || 0)) > 1e-4
      || Math.abs(t.gripZ - (mg.z || 0)) > 1e-4) {
       gripOffsets[path] = { x: t.gripX, y: t.gripY, z: t.gripZ };
     }
-    if (Math.abs(t.rotX - (mr.x || 0)) > 1e-4
-     || Math.abs(t.rotY - (mr.y || 0)) > 1e-4
-     || Math.abs(t.rotZ - (mr.z || 0)) > 1e-4) {
+    if (Math.abs(t.rotX - mr.x) > 1e-4
+     || Math.abs(t.rotY - mr.y) > 1e-4
+     || Math.abs(t.rotZ - mr.z) > 1e-4) {
       rotationOverrides[path] = { x: t.rotX, y: t.rotY, z: t.rotZ };
     }
     const scaleNew = +(ms * t.scaleMul).toFixed(4);
@@ -1298,6 +1323,13 @@ let proxiesBuilt = false;
     if (isPlaying) mixer.update(dt);
     else mixer.update(0);   // ensure pose holds at scrub.time
   }
+  // Snapshot the post-mixer pose into boneRestLocal EVERY frame so
+  // applyStancePreview / applyDeltas have a fresh, non-accumulated
+  // base to compose onto. Without this, when the clip is paused
+  // THREE skips writing to bones and our premultiply stacks frame
+  // over frame — symptom: spine spinning forever after a slider
+  // nudge.
+  if (boneByName.size) captureRest();
   if (boneByName.size && !proxiesBuilt) {
     createBoneProxies();
     proxiesBuilt = true;
