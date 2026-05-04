@@ -83,13 +83,32 @@ function _encodeDrones(droneMgr) {
 // total size per body is small (~3-5 items, ~50 bytes each). Host
 // drives ownership; joiners send rpc-body-take to remove an item
 // after pickup, host applies + the next snapshot reflects.
-function _encodeCorpses(gunmen, melees) {
+// Corpse encoder. When forPeerId is provided AND the entity has a
+// per-peer loot map (e.lootByPeer), reads that peer's slice instead
+// of the shared e.loot. Falls back to e.loot for entities killed
+// outside coop or when forPeerId == null (single-player snapshot).
+//
+// Per-peer body-loot lets each player roll their own instanced
+// drops at kill time, mirroring how containers already work.
+function _encodeCorpses(gunmen, melees, forPeerId = null) {
   _scratch.corpses.length = 0;
   const collect = (list) => {
     for (const e of list) {
       if (!e || e.alive) continue;
-      if (e.looted) continue;
-      if (!e.loot || !e.loot.length) continue;
+      // Pick the per-peer slice if available, else the shared list.
+      const hasPeerMap = !!(forPeerId && e.lootByPeer);
+      const lootForPeer = hasPeerMap
+        ? (e.lootByPeer.get(forPeerId) || [])
+        : (e.loot || []);
+      // Skip only when THIS peer has nothing left. e.looted is a
+      // global "all peers empty" flag; if the local-peer slice still
+      // has items, send them — even if other peers have emptied
+      // their slices and the global flag was flipped. (Without this
+      // gate, host emptying their slice would set e.looted=true and
+      // the joiner's snapshot would drop the corpse, leaving the
+      // joiner unable to access their own remaining items.)
+      if (!hasPeerMap && e.looted) continue;
+      if (!lootForPeer.length) continue;
       _scratch.corpses.push({
         n: e.netId | 0,
         x: +(e.group.position.x.toFixed(2)),
@@ -97,7 +116,7 @@ function _encodeCorpses(gunmen, melees) {
         // Loot items shipped verbatim — they're the full item defs
         // already; serializing once at packet build is cheaper than
         // round-tripping per-take RPCs.
-        l: e.loot,
+        l: lootForPeer,
       });
     }
   };
@@ -148,6 +167,9 @@ function _encodeLootForPeer(loot, forPeerId) {
 // Returns a Map<peerId, snapshot>. Caller iterates and sends targeted.
 // Enemy section is the same across recipients so we build it once.
 export function encodeSnapshotsPerPeer(gunmen, melees, seq, t, loot, peerIds, droneMgr = null, megaBoss = null) {
+  // Build the truly-shared enemy section once; rebuild loot + corpses
+  // per-peer so each recipient sees only their own instanced ground
+  // drops AND only their own slice of body loot.
   const enemyPart = encodeEnemySnapshot(gunmen, melees, seq, t, null, droneMgr, megaBoss);
   const out = new Map();
   if (!peerIds || !peerIds.length) return out;
@@ -155,6 +177,7 @@ export function encodeSnapshotsPerPeer(gunmen, melees, seq, t, loot, peerIds, dr
     out.set(peerId, {
       ...enemyPart,
       loot: _encodeLootForPeer(loot, peerId),
+      corpses: _encodeCorpses(gunmen, melees, peerId),
     });
   }
   return out;
@@ -209,13 +232,12 @@ export function encodeEnemySnapshot(gunmen, melees, seq, t, loot = null, droneMg
     melees: _scratch.melees.slice(),
     drones: _encodeDrones(droneMgr),
     boss: _encodeMegaBoss(megaBoss),
-    // Note: loot section is empty here. Per-peer fanout via
-    // encodeSnapshotsPerPeer is the path that includes loot,
-    // so each recipient sees only their instanced items + shared.
+    // Note: loot + corpses sections are empty/shared-fallback here.
+    // Per-peer fanout via encodeSnapshotsPerPeer is the path that
+    // includes per-peer loot AND per-peer body loot. The shared
+    // fallback below covers single-player + legacy callers.
     loot: [],
-    // Corpses with searchable body-loot. Shared across all peers
-    // (anyone in the room can search any body).
-    corpses: _encodeCorpses(gunmen, melees),
+    corpses: _encodeCorpses(gunmen, melees, null),
   };
 }
 

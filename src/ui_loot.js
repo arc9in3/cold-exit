@@ -3,6 +3,24 @@ import { renderItemCell } from './ui_item_cell.js';
 import { GridContainer, stampItemDims } from './grid_container.js';
 import { thumbnailFor } from './item_thumbnails.js';
 
+// Coop body-loot is per-peer (each peer rolls their own slice at
+// kill time, stored on entity.lootByPeer). The 'looted' flag is
+// the GLOBAL "no peer has anything left" marker — only flip it true
+// when every per-peer slice is empty. Without this, the local peer
+// emptying their slice would mark looted=true and the snapshot
+// encoder would skip the body, leaving other peers unable to access
+// their own remaining items. Falls through to the simple
+// loot.length === 0 check for single-player / pre-coop bodies.
+function _isAllPeerSlicesEmpty(target) {
+  if (target && target.lootByPeer && target.lootByPeer.size > 0) {
+    for (const arr of target.lootByPeer.values()) {
+      if (Array.isArray(arr) && arr.length > 0) return false;
+    }
+    return true;
+  }
+  return (target?.loot?.length || 0) === 0;
+}
+
 // Workspace staging grid — shared across all loot sessions; cleared
 // every time the UI opens so it doesn't carry state between bodies.
 // Items left here when the UI closes drop to the ground at the
@@ -353,7 +371,7 @@ export class LootUI {
     // again when the loot UI isn't open.
     if (this.inventory) this.inventory._overflowSink = null;
     this.root.style.display = 'none';
-    if (this.target) this.target.looted = (this.target.loot?.length || 0) === 0;
+    if (this.target) this.target.looted = _isAllPeerSlicesEmpty(this.target);
     this.target = null;
     if (this.onClose) this.onClose();
   }
@@ -363,7 +381,7 @@ export class LootUI {
     this.bodyHidden = true;
     this.bodyColEl.style.display = 'none';
     if (this.bodyEl) this.bodyEl.classList.add('body-hidden');
-    if (this.target) this.target.looted = (this.target.loot?.length || 0) === 0;
+    if (this.target) this.target.looted = _isAllPeerSlicesEmpty(this.target);
   }
 
   _buildPlayerSilhouette() {

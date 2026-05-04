@@ -3521,9 +3521,14 @@ function _ensureCoopLobby() {
     }
     if (kind === 'rpc-body-take') {
       // Host-only — joiner took an item from a synced corpse.
-      // Splice it from the authoritative enemy.loot and mark looted
-      // when empty. Validate distance to prevent stale/spoofed
-      // takes after a body has migrated.
+      // Operates on the JOINER'S per-peer slice (target.lootByPeer.get(from))
+      // not the shared target.loot. Each peer rolled their own body
+      // loot at kill time; the joiner's rpc index is relative to
+      // their own slice. Falls back to target.loot for legacy bodies
+      // killed before lootByPeer was populated.
+      // The 'looted' flag flips when ALL peers' slices are empty, since
+      // a corpse with body loot still left for any peer keeps the
+      // search prompt visible on that peer's side.
       if (!transport.isHost || !body) return;
       const netId = body.n | 0;
       const idx = body.i | 0;
@@ -3536,10 +3541,25 @@ function _ensureCoopLobby() {
           if (m.netId === netId && !m.alive) { target = m; break; }
         }
       }
-      if (!target || !Array.isArray(target.loot)) return;
-      if (idx < 0 || idx >= target.loot.length) return;
-      target.loot.splice(idx, 1);
-      if (target.loot.length === 0) target.looted = true;
+      if (!target) return;
+      const peerSlice = (target.lootByPeer && target.lootByPeer.get(from)) || null;
+      const sliceToMutate = peerSlice || (Array.isArray(target.loot) ? target.loot : null);
+      if (!sliceToMutate) return;
+      if (idx < 0 || idx >= sliceToMutate.length) return;
+      sliceToMutate.splice(idx, 1);
+      // 'looted' is the global flag — only set when EVERY peer's
+      // slice is empty (no one has anything left to find on this
+      // body). Otherwise the corpse search prompt should still show
+      // for peers whose slice has remaining items.
+      let anyLeft = false;
+      if (target.lootByPeer && target.lootByPeer.size > 0) {
+        for (const arr of target.lootByPeer.values()) {
+          if (Array.isArray(arr) && arr.length > 0) { anyLeft = true; break; }
+        }
+      } else if (Array.isArray(target.loot) && target.loot.length > 0) {
+        anyLeft = true;
+      }
+      if (!anyLeft) target.looted = true;
       return;
     }
     if (kind === 'rpc-drop') {
@@ -10036,7 +10056,34 @@ function _onEnemyKilledImpl(enemy, opts = {}) {
   // Summoned minions (necromant adds, etc.) bypass loot + xp + credits
   // entirely — they're combat pressure, not a farming target.
   if (!enemy.noDrops) {
-    enemy.loot = buildBodyLoot(enemy);
+    // Per-peer body loot. In coop, every peer in the room rolls their
+    // OWN slice of the corpse's body-loot — same instancing model as
+    // containers. Without this each corpse had a single shared list
+    // and whoever opened it first emptied it for everyone.
+    //
+    // entity.loot points at the local peer's slice (host's slice on
+    // host, joiner's slice on joiner) so existing UI / RPC code that
+    // reads enemy.loot keeps working. The Map stores each peer's
+    // independent list; snapshot encoder reads
+    // enemy.lootByPeer.get(forPeerId) to send the right slice down
+    // the wire.
+    const _coopT_loot = (typeof getCoopTransport === 'function') ? getCoopTransport() : null;
+    if (_coopT_loot && _coopT_loot.isOpen && _coopT_loot.peers && _coopT_loot.peers.size > 0) {
+      enemy.lootByPeer = new Map();
+      // Local peer (host or joiner) gets its own roll.
+      enemy.lootByPeer.set(_coopT_loot.peerId, buildBodyLoot(enemy));
+      // Each other peer in the room gets an independent roll.
+      for (const pid of _coopT_loot.peers.keys()) {
+        if (pid === _coopT_loot.peerId) continue;
+        enemy.lootByPeer.set(pid, buildBodyLoot(enemy));
+      }
+      // entity.loot is a reference to the local peer's slice so
+      // existing splice-based take operations mutate the correct list.
+      enemy.loot = enemy.lootByPeer.get(_coopT_loot.peerId);
+    } else {
+      // Single-player path — single shared list.
+      enemy.loot = buildBodyLoot(enemy);
+    }
     enemy.looted = false;
   } else {
     enemy.loot = [];
