@@ -2427,34 +2427,35 @@ export class HideoutUI {
     const rankReward = rankRewardFor(def);
     const rankPerKill = rankPerKillFor(def);
 
+    // Card layout v2 (2026-05-04): drop the redundant "ELIMINATE
+    // TARGET" line, fold target conditions into the subtitle, render
+    // modifiers as iconified chips, and condense rewards into a
+    // horizontal strip with iconified values. Portrait + name still
+    // anchor the top.
+    const rewardChips = [];
+    rewardChips.push(`<span class="rwd chips" title="Bounty">${totalCap}c</span>`);
+    if (rankReward > 0 || rankPerKill > 0) {
+      const rTip = rankPerKill > 0 ? `Rank +${rankReward} (+${rankPerKill}/kill)` : `Rank +${rankReward}`;
+      rewardChips.push(`<span class="rwd rank" title="${rTip}">+${rankReward} rp</span>`);
+    }
+    if ((def.perKillReward | 0) > 0) {
+      rewardChips.push(`<span class="rwd chips small" title="Per kill chip bonus">+${def.perKillReward}c/kill</span>`);
+    }
+    if ((def.marksReward | 0) > 0) {
+      rewardChips.push(`<span class="rwd marks" title="Marks reward">+${def.marksReward} m</span>`);
+    }
+    if ((def.sigilsReward | 0) > 0) {
+      rewardChips.push(`<span class="rwd sigils" title="Sigils reward">+${def.sigilsReward} s</span>`);
+    }
+
     card.innerHTML = `
       <div class="wanted-portrait" data-portrait="${def.portrait || 'any'}">${this._portraitGlyph(def.portrait)}</div>
-      <div class="wanted-name">${def.label.toUpperCase()}</div>
-      <div class="wanted-mission">ELIMINATE TARGET</div>
-      <div class="wanted-conds">${def.targetCount} × ${targetLabel}</div>
-      ${this._renderModifierList(def)}
-      <div class="wanted-rewards">
-        <div class="wanted-reward-row">
-          <span class="wanted-reward-label">BOUNTY</span>
-          <span class="wanted-reward-val chips">${totalCap}c</span>
-        </div>
-        <div class="wanted-reward-row">
-          <span class="wanted-reward-label">RANK PTS</span>
-          <span class="wanted-reward-val rank">+${rankReward}${rankPerKill > 0 ? ` <span class="wanted-reward-perkill">(+${rankPerKill}/kill)</span>` : ''}</span>
-        </div>
-        ${(def.perKillReward | 0) > 0 ? `<div class="wanted-reward-row">
-          <span class="wanted-reward-label">PER KILL</span>
-          <span class="wanted-reward-val chips">+${def.perKillReward}c</span>
-        </div>` : ''}
-        ${(def.marksReward | 0) > 0 ? `<div class="wanted-reward-row">
-          <span class="wanted-reward-label">MARKS</span>
-          <span class="wanted-reward-val marks">+${def.marksReward}</span>
-        </div>` : ''}
-        ${(def.sigilsReward | 0) > 0 ? `<div class="wanted-reward-row">
-          <span class="wanted-reward-label">SIGILS</span>
-          <span class="wanted-reward-val sigils">+${def.sigilsReward}</span>
-        </div>` : ''}
+      <div class="wanted-head">
+        <div class="wanted-name">${def.label.toUpperCase()}</div>
+        <div class="wanted-conds">${def.targetCount} × ${targetLabel}</div>
       </div>
+      ${this._renderModifierList(def)}
+      <div class="wanted-rewards">${rewardChips.join('')}</div>
     `;
     if (isClaimed) {
       card.disabled = true;
@@ -2980,23 +2981,50 @@ export class HideoutUI {
     }
   }
 
+  // Modifier chips for the wanted-card. Tone-coded by category:
+  //   restriction (loadout limits, neutral)
+  //   threat      (enemy buffs, red-orange)
+  //   penalty     (player nerfs, deep red)
+  //   buff        (player upgrades, green)
+  // Each chip is a glyph + short label. Tooltip via title= for the
+  // full sentence so the card stays compact.
   _renderModifierList(def) {
     const m = def.modifiers || {};
-    const lines = [];
-    if (m.weaponClass === 'pistol') lines.push('Pistols only');
-    if (m.weaponClass === 'melee')  lines.push('Melee only');
-    if (m.noConsumables)            lines.push('No consumables');
-    if ((m.enemyHpMult || 1) > 1)   lines.push(`Enemy HP +${Math.round((m.enemyHpMult - 1) * 100)}%`);
-    if ((m.enemyDamageMult || 1) > 1) lines.push(`Enemy damage +${Math.round((m.enemyDamageMult - 1) * 100)}%`);
-    if ((m.spawnDensityMult || 1) > 1) lines.push(`Spawn density +${Math.round((m.spawnDensityMult - 1) * 100)}%`);
-    if ((m.eliteChanceMult || 1) > 1) lines.push(`Elites x${(m.eliteChanceMult).toFixed(1)}`);
-    if ((m.playerDamageTakenMult || 1) > 1) lines.push(`You take +${Math.round((m.playerDamageTakenMult - 1) * 100)}% damage`);
-    if ((m.playerDamageDealtMult || 1) !== 1) {
-      const pct = Math.round((m.playerDamageDealtMult - 1) * 100);
-      lines.push(`You deal ${pct >= 0 ? '+' : ''}${pct}% damage`);
+    const chips = [];
+    const push = (cls, glyph, label, full) =>
+      chips.push(`<span class="row-mod ${cls}" title="${full}">${glyph} ${label}</span>`);
+
+    if (m.weaponClass === 'pistol') push('restrict', '⚲', 'Pistols only', 'Restricted to pistol-class weapons');
+    if (m.weaponClass === 'melee')  push('restrict', '⚔', 'Melee only',   'Restricted to melee weapons');
+    if (m.noConsumables)            push('restrict', '⊘', 'No items',      'Consumables disabled this run');
+
+    if ((m.enemyHpMult || 1) > 1) {
+      const p = Math.round((m.enemyHpMult - 1) * 100);
+      push('threat', '♥', `+${p}% HP`, `Enemy HP +${p}%`);
     }
-    if (!lines.length) return '';
-    return `<ul class="row-mods">${lines.map(l => `<li>${l}</li>`).join('')}</ul>`;
+    if ((m.enemyDamageMult || 1) > 1) {
+      const p = Math.round((m.enemyDamageMult - 1) * 100);
+      push('threat', '⚡', `+${p}% dmg`, `Enemy damage +${p}%`);
+    }
+    if ((m.spawnDensityMult || 1) > 1) {
+      const p = Math.round((m.spawnDensityMult - 1) * 100);
+      push('threat', '⚏', `+${p}% spawns`, `Spawn density +${p}%`);
+    }
+    if ((m.eliteChanceMult || 1) > 1) {
+      push('threat', '★', `Elites ×${m.eliteChanceMult.toFixed(1)}`, `Elite chance ×${m.eliteChanceMult.toFixed(2)}`);
+    }
+    if ((m.playerDamageTakenMult || 1) > 1) {
+      const p = Math.round((m.playerDamageTakenMult - 1) * 100);
+      push('penalty', '⊕', `+${p}% taken`, `You take +${p}% damage`);
+    }
+    if ((m.playerDamageDealtMult || 1) !== 1) {
+      const p = Math.round((m.playerDamageDealtMult - 1) * 100);
+      const sign = p >= 0 ? '+' : '';
+      push(p >= 0 ? 'buff' : 'penalty', '⊖', `${sign}${p}% out`, `You deal ${sign}${p}% damage`);
+    }
+
+    if (!chips.length) return '';
+    return `<div class="row-mods">${chips.join('')}</div>`;
   }
 
   _unlockText(def, state) {
@@ -4328,45 +4356,61 @@ export class HideoutUI {
       .wanted-portrait[data-portrait="melee"]    { color: #d24868; }
       .wanted-portrait[data-portrait="boss"]     { color: #f2c060; }
       .wanted-portrait[data-portrait="megaboss"] { color: #f2a040; }
+      /* Card v2 (2026-05-04): tighter hierarchy — name + conds stacked
+         in one block, modifiers as iconified chips, rewards as a
+         horizontal strip. Drops the "ELIMINATE TARGET" line entirely. */
+      .wanted-head {
+        display: flex; flex-direction: column; gap: 2px;
+        margin-top: 4px;
+      }
       .wanted-name {
         font-size: 16px; font-weight: 700; color: #e8dfc8;
-        letter-spacing: 1.4px; margin-top: 6px;
-      }
-      .wanted-mission {
-        font-size: 10px; letter-spacing: 1.6px; color: #9b8b6a;
+        letter-spacing: 1.4px;
       }
       .wanted-conds {
-        font-size: 13px; color: #c9a87a; font-weight: 700;
+        font-size: 11px; color: #c9a87a; font-weight: 600;
+        letter-spacing: 0.6px;
       }
+      /* Modifier chips — iconified pills with tone-coded backgrounds.
+         restrict = neutral (loadout limits); threat = orange (enemy
+         buffs); penalty = deep red (player nerfs); buff = green. */
       .wanted-card .row-mods {
-        margin: 2px 0 0; padding: 0; list-style: none;
-        font-size: 10px; color: #d4a060;
+        display: flex; flex-wrap: wrap; gap: 4px;
+        justify-content: center;
+        margin: 4px 0 0; padding: 6px 0 0;
+        border-top: 1px dashed rgba(155, 139, 106, 0.18);
       }
-      .wanted-card .row-mods li { line-height: 1.4; }
-      /* Reward breakdown — line-by-line so each value reads on its
-         own. Player needs to compare bounty vs rank pts vs marks at a
-         glance, so each row gets its own line + label. */
+      .row-mod {
+        display: inline-flex; align-items: center; gap: 3px;
+        font-size: 10px; font-weight: 600; letter-spacing: 0.4px;
+        padding: 2px 6px; border-radius: 3px;
+        background: rgba(20, 22, 28, 0.7);
+        border: 1px solid rgba(155, 139, 106, 0.25);
+      }
+      .row-mod.restrict { color: #c4b89a; }
+      .row-mod.threat   { color: #e89860; border-color: rgba(232, 152, 96, 0.4); background: rgba(60, 28, 16, 0.4); }
+      .row-mod.penalty  { color: #d24868; border-color: rgba(210, 72, 104, 0.4); background: rgba(60, 16, 28, 0.4); }
+      .row-mod.buff     { color: #6abf78; border-color: rgba(106, 191, 120, 0.4); background: rgba(20, 50, 28, 0.4); }
+      /* Reward strip — single horizontal row of chips. Compact +
+         readable at a glance vs the old labeled rows. */
       .wanted-rewards {
-        display: flex; flex-direction: column; gap: 4px;
+        display: flex; flex-wrap: wrap; gap: 4px;
+        justify-content: center;
         margin-top: 6px; padding-top: 8px;
         border-top: 1px solid #2a2f3a;
       }
-      .wanted-reward-row {
-        display: flex; justify-content: space-between;
-        font-size: 13px; line-height: 1.2;
+      .rwd {
+        display: inline-flex; align-items: center;
+        font-size: 12px; font-weight: 700; letter-spacing: 0.4px;
+        padding: 3px 7px; border-radius: 3px;
+        background: rgba(15, 17, 22, 0.8);
+        border: 1px solid rgba(155, 139, 106, 0.18);
       }
-      .wanted-reward-label {
-        color: #6f6754; letter-spacing: 1.2px;
-        font-size: 10px; align-self: center;
-      }
-      .wanted-reward-val { font-weight: 700; }
-      .wanted-reward-val.chips  { color: #f2c060; }
-      .wanted-reward-val.rank   { color: #5a8acf; }
-      .wanted-reward-val.marks  { color: #6abf78; }
-      .wanted-reward-val.sigils { color: #b870e0; }
-      .wanted-reward-perkill {
-        color: #6f6754; font-size: 10px; font-weight: 400;
-      }
+      .rwd.small  { font-size: 10px; padding: 2px 5px; opacity: 0.85; }
+      .rwd.chips  { color: #f2c060; }
+      .rwd.rank   { color: #5a8acf; }
+      .rwd.marks  { color: #6abf78; }
+      .rwd.sigils { color: #b870e0; }
       .wanted-actions { display: flex; justify-content: center; gap: 6px; }
       .wanted-actions .hideout-btn { width: 100%; }
 
