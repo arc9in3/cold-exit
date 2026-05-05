@@ -10078,7 +10078,14 @@ function buildBodyLoot(enemy) {
   if (!isEmptyBody) {
     // Weapons: most enemies drop what they were using. Some grunts
     // come up gun-only (no melee fallback).
-    if (enemy.weapon) items.push(wrapWeapon(enemy.weapon));
+    if (enemy.weapon) {
+      // Disarmed enemies who re-arm by picking up a dropped (already-
+      // wrapped) item end up with `g.weapon` already carrying a rolled
+      // rarity prefix. Wrapping again double-prefixes ("Refined Refined
+      // M1911"). Detect via `baseName` which only wrapped instances
+      // carry, and pass the existing item straight through.
+      items.push(enemy.weapon.baseName ? enemy.weapon : wrapWeapon(enemy.weapon));
+    }
     const meleePool = tunables.weapons.filter(w =>
       w.type === 'melee' && !w.mythic && w.rarity !== 'mythic');
     const lowTierMelees = meleePool.filter(w => w.rarity === 'common' || w.rarity === 'uncommon');
