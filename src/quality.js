@@ -89,13 +89,14 @@ export const qualityFlags = {
   // pooled — material updates, draw calls, GC pressure.
   combatVfx: true,
   // ----- POTATO-only cuts (off only when tier === 'potato') -----
-  // Muzzle-flash sprite mesh. Kept on 'low' because it's a
-  // gameplay-readability cue (shooter direction). Off on potato
-  // where every per-shot draw counts more than the cue.
+  // NOTE: muzzleFlashSprites + tracerParticles are KEPT on every
+  // tier including potato. Both are gameplay-readability cues, not
+  // visual fluff: the flash tells the player which direction an
+  // enemy fired from, the tracer tells them where a hitscan landed.
+  // Cutting either felt like the game was being "lied to about" by
+  // the renderer. Flags retained for future opt-in cuts but the
+  // applyQuality assignment leaves them true on all tiers.
   muzzleFlashSprites: true,
-  // Tracer particles for hitscan weapons. Damage still applies; only
-  // the visual line is cut. Off on potato. Kept on low because
-  // tracers are core readability for hitscan vs slug weapons.
   tracerParticles: true,
   // Scene fog uniform. Fog is per-fragment and on TBDR mobile GPUs
   // each shader does the math even past fog.far. Killing it is a
@@ -129,10 +130,14 @@ export function applyQuality(mode, ctx = {}) {
   qualityFlags.postFx = !low;
   // Off on low + potato: pure visual fluff with no gameplay signal.
   qualityFlags.combatVfx = !low;
-  // POTATO-only: cuts that hurt visual identity / readability and
-  // are only justified by phone-class fillrate budgets.
-  qualityFlags.muzzleFlashSprites = !potato;
-  qualityFlags.tracerParticles = !potato;
+  // muzzleFlashSprites + tracerParticles stay TRUE on every tier
+  // (including potato) — both are gameplay-readability cues, not
+  // visual fluff. Kept as flags for future tunability but the
+  // assignment is constant true today.
+  qualityFlags.muzzleFlashSprites = true;
+  qualityFlags.tracerParticles = true;
+  // POTATO-only: cuts that hurt visual identity but don't carry
+  // gameplay information.
   qualityFlags.sceneFog = !potato;
   qualityFlags.ambientAudio = !potato;
   qualityFlags.renderScale = potato ? 0.7 : 1.0;
