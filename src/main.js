@@ -7446,7 +7446,7 @@ function recomputeStats() {
   // without threading level through every priceFor call site.
   if (typeof window !== 'undefined') window.__levelIndex = (level && level.index) | 0;
   skills.applyTo(derivedStats);
-  inventory.applyTo(derivedStats);
+  inventory.applyTo(derivedStats, currentWeapon());
   specialPerks.applyTo(derivedStats);           // legacy (kept for compat)
   skillTree.applyTo(derivedStats, currentWeapon());
   artifacts.applyTo(derivedStats);

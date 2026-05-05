@@ -2771,15 +2771,26 @@ export class Inventory {
   // counts via countEquippedSetPieces (separate code path) so a broken
   // 4-piece set stays "equipped" for set-bonus tracking — design call
   // we can flip if it feels wrong.
-  applyTo(stats) {
+  applyTo(stats, activeWeapon = undefined) {
+    // Weapon-slot items (weapon1/weapon2/melee) are GEAR-like in shape
+    // but only the wielded one should contribute its perks/affixes. A
+    // holstered secondary with Glass Cannon was permanently sapping
+    // -20 max HP regardless of which weapon you were firing (#28). When
+    // an activeWeapon is supplied, holstered weapon-slot items skip
+    // perks/affixes/apply() but still NO-OP on dmgReduction/etc since
+    // weapons don't carry those.
+    const WEAPON_SLOTS = new Set(['weapon1', 'weapon2', 'melee']);
     for (const slot of SLOT_IDS) {
       const item = this.equipment[slot];
       if (!item) continue;
       const broken = item.durability && item.durability.current <= 0;
       if (broken) continue;
+      const isWeaponSlot = WEAPON_SLOTS.has(slot);
+      const skipBuffs = isWeaponSlot && activeWeapon !== undefined && item !== activeWeapon;
       if (item.reduction) stats.dmgReduction += item.reduction;
       if (item.speedMult) stats.moveSpeedMult *= item.speedMult;
       if (item.stealthMult) stats.stealthMult = (stats.stealthMult || 1) * item.stealthMult;
+      if (skipBuffs) continue;
       if (typeof item.apply === 'function') item.apply(stats);
       // Random affixes (Diablo-style) — kind describes the stat it bumps.
       for (const aff of item.affixes || []) applyAffix(aff, stats);
