@@ -13136,10 +13136,13 @@ function updateOverhead(weapon, effWeapon, playerInfo, stealthMult) {
     // of sight. Bug #46: in boss rooms with invisible enemies, the
     // overhead ✦ / ✺ icons floated over the world space they'd be in,
     // revealing positions the player otherwise couldn't see.
+    // Also suppress on cloaked / hidden ambush variants — those have
+    // group.visible=false but pass the LoS gate, so the icon would
+    // still leak the position.
     // The threat ◉ marker stays gated on `_occluded` separately —
     // that's the "I sensed something past a wall" indicator and is
     // intentionally visible only when occluded.
-    if (!g._occluded) {
+    if (!g._occluded && !g.cloaked && !g.hidden) {
       if ((g.dazzleT || 0) > 0) spawnMarker(g.group.position, '✦', 'overhead-star', 2.6);
       else if ((g.blindT || 0) > 0) spawnMarker(g.group.position, '✺', 'overhead-flash', 2.6);
     }
@@ -13149,7 +13152,7 @@ function updateOverhead(weapon, effWeapon, playerInfo, stealthMult) {
   }
   for (const m of melees.enemies) {
     if (!m.alive) continue;
-    if (!m._occluded) {
+    if (!m._occluded && !m.cloaked && !m.hidden) {
       if ((m.dazzleT || 0) > 0) spawnMarker(m.group.position, '✦', 'overhead-star', 2.4);
       else if ((m.blindT || 0) > 0) spawnMarker(m.group.position, '✺', 'overhead-flash', 2.4);
     }
