@@ -1372,7 +1372,7 @@ export class HideoutUI {
     rightCol.className = 'hideout-stash-col';
     const rightTitle = document.createElement('div');
     rightTitle.className = 'hideout-col-title';
-    rightTitle.textContent = `STASH — ${stash.length} / ${upg.stashSlots} slots`;
+    rightTitle.textContent = `VAULT — ${stash.length} / ${upg.stashSlots} slots`;
     rightCol.appendChild(rightTitle);
     const grid = document.createElement('div');
     grid.className = 'hideout-stash-grid';
@@ -1497,14 +1497,14 @@ export class HideoutUI {
       <div class="hideout-extract-name">${(item.name || 'item').replace(/<[^>]+>/g, '')}</div>
       <div class="hideout-extract-meta">${r.toUpperCase()} · ${value}c on convert</div>
       <div class="hideout-extract-actions">
-        <button type="button" class="bank">Bank to Stash</button>
+        <button type="button" class="bank">Bank to Vault</button>
       </div>
     `;
     const btn = tile.querySelector('.bank');
     // Bank disabled if stash is full.
     const stashFull = usedSlots.size >= slotCap;
     btn.disabled = stashFull;
-    if (stashFull) btn.title = 'Stash is full. Sell an item or buy more slots.';
+    if (stashFull) btn.title = 'Vault is full. Sell an item or buy more slots.';
     btn.addEventListener('click', () => {
       const slot = stashAddItem(item, slotCap);
       if (slot < 0) return;
