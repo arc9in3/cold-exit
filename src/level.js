@@ -4448,6 +4448,194 @@ export class Level {
     }
     return best;
   }
+
+  // Level-gen invariants probe — exposed as a method so the playwright
+  // probe (and any future smoke runner) can call it post-generate to
+  // validate the level isn't broken in subtle ways. Returns
+  // `{ ok, failures }` where `failures` is an array of human-readable
+  // strings; `ok` is true iff every check passed.
+  //
+  // Manual run (from the dev console while a level is loaded):
+  //
+  //   const r = window.__level.runInvariants();
+  //   console.log(r.ok ? 'PASS' : 'FAIL', r.failures);
+  //
+  // Smoke harness wiring is deferred to a follow-up — for now the
+  // probe runs this in-process via `window.__level.runInvariants()`.
+  runInvariants(opts = {}) {
+    const failures = [];
+    const includeExit = !!opts.afterBossClear;
+
+    // 1. Flood-fill from playerSpawn over a 0.5m grid using the
+    //    cached solid-obstacles set.
+    const cell = 0.5;
+    // Aggregate bounds — every chain room PLUS the extraction room
+    // when we're checking after-boss-clear.
+    let minX = Infinity, maxX = -Infinity, minZ = Infinity, maxZ = -Infinity;
+    for (const r of this.rooms) {
+      if (!r.bounds) continue;
+      if (r.id < 0 && !includeExit) continue;
+      if (r.bounds.minX < minX) minX = r.bounds.minX;
+      if (r.bounds.maxX > maxX) maxX = r.bounds.maxX;
+      if (r.bounds.minZ < minZ) minZ = r.bounds.minZ;
+      if (r.bounds.maxZ > maxZ) maxZ = r.bounds.maxZ;
+    }
+    if (!isFinite(minX)) {
+      failures.push('no-room-bounds');
+      return { ok: false, failures };
+    }
+    // Pad the box so doorway corridors at the edges are inside the
+    // walkable area.
+    minX -= cell; maxX += cell; minZ -= cell; maxZ += cell;
+    const w = Math.ceil((maxX - minX) / cell);
+    const d = Math.ceil((maxZ - minZ) / cell);
+    const idx = (i, j) => i * d + j;
+    const visited = new Uint8Array(w * d);
+
+    // Helper — true when the cell at (i, j) is walkable. Treats
+    // doors with collisionXZ == null (unlocked) as open. Honors
+    // includeExit by virtually unlocking the extraction door.
+    const exitDoor = this.exitRoom?.doorMesh;
+    const _walkable = (cx, cz) => {
+      // Use _collidesAt with a small radius so the flood-fill
+      // probes the same body width as a player.
+      const rad = 0.30;
+      // Special-case the extraction door: when checking after-boss-
+      // clear, treat it as open even if collisionXZ is still set.
+      if (includeExit && exitDoor) {
+        const b = exitDoor.userData.collisionXZ;
+        if (b && cx > b.minX - rad && cx < b.maxX + rad
+             && cz > b.minZ - rad && cz < b.maxZ + rad) {
+          // Same overlap test the door mesh would otherwise reject —
+          // we let it through here.
+          // Need to verify that NO OTHER obstacle blocks this cell.
+          for (const o of this.obstacles) {
+            if (o === exitDoor) continue;
+            const ob = o.userData.collisionXZ;
+            if (!ob) continue;
+            if (cx > ob.minX - rad && cx < ob.maxX + rad
+             && cz > ob.minZ - rad && cz < ob.maxZ + rad) return false;
+          }
+          return true;
+        }
+      }
+      return !this._collidesAt(cx, cz, rad);
+    };
+
+    // BFS from the player spawn cell.
+    const sp = this.playerSpawn;
+    const si = Math.max(0, Math.min(w - 1, Math.floor((sp.x - minX) / cell)));
+    const sj = Math.max(0, Math.min(d - 1, Math.floor((sp.z - minZ) / cell)));
+    const queue = [[si, sj]];
+    visited[idx(si, sj)] = 1;
+    while (queue.length) {
+      const [i, j] = queue.shift();
+      const dirs = [[1,0],[-1,0],[0,1],[0,-1]];
+      for (const [di, dj] of dirs) {
+        const ni = i + di, nj = j + dj;
+        if (ni < 0 || ni >= w || nj < 0 || nj >= d) continue;
+        if (visited[idx(ni, nj)]) continue;
+        const cx = minX + (ni + 0.5) * cell;
+        const cz = minZ + (nj + 0.5) * cell;
+        if (!_walkable(cx, cz)) continue;
+        visited[idx(ni, nj)] = 1;
+        queue.push([ni, nj]);
+      }
+    }
+    const cellReached = (cx, cz) => {
+      const ci = Math.floor((cx - minX) / cell);
+      const cj = Math.floor((cz - minZ) / cell);
+      if (ci < 0 || ci >= w || cj < 0 || cj >= d) return false;
+      // Search a 3×3 neighborhood — the floor-fill probe lands on
+      // cell centres, but a room centroid can fall on a cell edge so
+      // an exact lookup mis-fires by half a cell. Looking 1 cell out
+      // gives ~0.7m tolerance, well below room size.
+      for (let oi = -1; oi <= 1; oi++) {
+        for (let oj = -1; oj <= 1; oj++) {
+          const i = ci + oi, j = cj + oj;
+          if (i < 0 || i >= w || j < 0 || j >= d) continue;
+          if (visited[idx(i, j)]) return true;
+        }
+      }
+      return false;
+    };
+
+    // 2. Every room centroid is reachable.
+    for (const r of this.rooms) {
+      if (r.id < 0 && !includeExit) continue;
+      if (!r.bounds) continue;
+      if (!cellReached(r.cx, r.cz)) {
+        failures.push(`room ${r.id} (${r.type}) centroid unreachable`);
+      }
+    }
+
+    // 3. Every encounter spawn reachable.
+    for (const r of this.rooms) {
+      const sp = r._encounterSpawn;
+      if (!sp) continue;
+      if (!cellReached(sp.x, sp.z)) {
+        failures.push(`room ${r.id} encounter spawn unreachable`);
+      }
+    }
+
+    // 4. Extraction-room interior reachable AFTER boss clear (toggled
+    //    via opts.afterBossClear).
+    if (includeExit && this.exitRoom) {
+      const er = this.exitRoom.room;
+      if (er && er.bounds) {
+        if (!cellReached(er.cx, er.cz)) {
+          failures.push('extraction room unreachable after boss clear');
+        }
+      }
+    }
+
+    // 5. Every obstacle + decoration has userData.kind.
+    for (const o of this.obstacles) {
+      // Walls placed via _addObstacle don't get a kind by default —
+      // they're outer-perimeter / interior-wall meshes. Allow walls
+      // through; only require kind on PROPS.
+      if (o.userData.isProp && !o.userData.kind) {
+        failures.push(`prop obstacle missing userData.kind at (${o.position.x.toFixed(1)},${o.position.z.toFixed(1)})`);
+      }
+    }
+    for (const dec of this.decorations) {
+      if (dec && !dec.userData?.kind) {
+        // Lights / targets don't always have geometry — still require
+        // kind so the harness can categorize them.
+        failures.push(`decoration missing userData.kind (type=${dec.type || 'unknown'})`);
+      }
+    }
+
+    // 6. Combat / subBoss rooms have ≥ 3 substantive props.
+    const SUBSTANTIVE = new Set([
+      'desk', 'table', 'couch', 'bed', 'bookshelf', 'cabinet',
+      'locker', 'crate', 'chair', 'nightstand', 'tv', 'coffeeTable',
+    ]);
+    const _propsInRoom = (room) => {
+      const b = room.bounds;
+      if (!b) return [];
+      const out = [];
+      for (const o of this.obstacles) {
+        if (!o.userData?.isProp) continue;
+        const k = o.userData.kind;
+        if (!k || !SUBSTANTIVE.has(k)) continue;
+        const px = o.position.x, pz = o.position.z;
+        if (px >= b.minX && px <= b.maxX && pz >= b.minZ && pz <= b.maxZ) {
+          out.push(o);
+        }
+      }
+      return out;
+    };
+    for (const r of this.rooms) {
+      if (r.type !== 'combat' && r.type !== 'subBoss') continue;
+      const props = _propsInRoom(r);
+      if (props.length < 3) {
+        failures.push(`room ${r.id} (${r.type}, theme=${r.theme || 'none'}) has ${props.length} substantive props (< 3)`);
+      }
+    }
+
+    return { ok: failures.length === 0, failures };
+  }
 }
 
 // 2D segment-vs-AABB clip (Liang-Barsky-lite). Returns true if the
