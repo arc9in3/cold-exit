@@ -4889,8 +4889,126 @@ export class Level {
     if (flips > 1) {
       failures.push({ kind: 'building-convex', reason: 'chain building tag flips > 1', flips });
     }
+    // (f) Wall-proxy raycast smoke check — guards against the regression
+    // class that #a45dbbf fixed (proxy.raycast returning a non-Vector3
+    // hit.point that crashed downstream .distanceTo() / .clone() callers).
+    // Walks 5-10 wall proxies and verifies a through-wall ray returns a
+    // real THREE.Vector3 hit.point with sane distance.
+    try {
+      const rc = this.runRaycastInvariants();
+      for (const f of rc.failures) failures.push(f);
+    } catch (err) {
+      failures.push({ kind: 'raycast', reason: 'runRaycastInvariants threw: ' + (err?.message || err) });
+    }
     const result = { ok: failures.length === 0, failures };
     if (typeof window !== 'undefined') window.__lastOutdoorInvariantCheck = result;
+    return result;
+  }
+
+  // Wall-proxy raycast smoke check. Pass 1C ships a wall_instancer that
+  // proxies AABB hits via a custom Mesh.raycast — earlier bug a45dbbf
+  // had the proxy returning a stub `{x,y,z}` for hit.point, which
+  // crashed the resolveAim / hasLineOfSight callers that immediately
+  // call .distanceTo() / .clone() on the point. Existing structural
+  // invariants (pathway / outdoor) didn't exercise raycaster.intersect
+  // at all, so the regression slipped through.
+  //
+  // This walks 5-10 wall proxies, fires a ray straight through each,
+  // and asserts:
+  //   - at least one hit registers (proxy isn't quietly skipped)
+  //   - hits[0].point IS a real THREE.Vector3 (isVector3 + distanceTo)
+  //   - hits[0].distance is finite, non-negative, ≤ ray length
+  // Failures push to `failures` with kind='raycast' + a reason string,
+  // matching the rest of runOutdoorInvariants's failure shape.
+  runRaycastInvariants() {
+    const failures = [];
+    if (!this.obstacles || !this.obstacles.length) {
+      return { ok: true, failures };
+    }
+    // Collect wall proxies. Cap at 10 so the smoke check stays cheap
+    // even on a 500-wall level.
+    const proxies = [];
+    for (const m of this.obstacles) {
+      if (m && m.isWallProxy) proxies.push(m);
+      if (proxies.length >= 60) break;     // sample pool, picked-down below
+    }
+    if (proxies.length === 0) {
+      // No walls is a legitimate state for the synthetic extraction
+      // room or a tutorial. Not a failure.
+      return { ok: true, failures };
+    }
+    // Take up to 10, evenly distributed across the pool so we test a
+    // mix of inner / outer / corridor walls.
+    const sampleCount = Math.min(10, proxies.length);
+    const step = proxies.length / sampleCount;
+    const RAY_LEN = 4.0;
+    const raycaster = new THREE.Raycaster();
+    raycaster.near = 0;
+    raycaster.far = RAY_LEN;
+    const _hits = [];
+    let okCount = 0;
+    for (let i = 0; i < sampleCount; i++) {
+      const proxy = proxies[Math.floor(i * step)];
+      if (!proxy || !proxy.position) continue;
+      // Pick the wall's dominant axis (the thinner of _w / _d) and fire
+      // a ray straight across it. Origin is offset by RAY_LEN/2 on the
+      // chosen axis from one side to the other; the wall sits in the
+      // middle so the ray cleanly enters at ~RAY_LEN/2 and exits a bit
+      // past the wall thickness.
+      const px = proxy.position.x, py = proxy.position.y, pz = proxy.position.z;
+      const w = proxy._w || 0.1, d = proxy._d || 0.1;
+      let originX, originZ, dirX, dirZ;
+      if (w >= d) {
+        // Wall runs along X — ray crosses on Z.
+        originX = px;
+        originZ = pz - RAY_LEN / 2;
+        dirX = 0; dirZ = 1;
+      } else {
+        // Wall runs along Z — ray crosses on X.
+        originX = px - RAY_LEN / 2;
+        originZ = pz;
+        dirX = 1; dirZ = 0;
+      }
+      raycaster.ray.origin.set(originX, py, originZ);
+      raycaster.ray.direction.set(dirX, 0, dirZ);
+      _hits.length = 0;
+      try {
+        proxy.raycast(raycaster, _hits);
+      } catch (err) {
+        failures.push({ kind: 'raycast', reason: 'proxy.raycast threw: ' + (err?.message || err) });
+        continue;
+      }
+      if (_hits.length === 0) {
+        failures.push({ kind: 'raycast', reason: 'wall proxy returned 0 hits for through-ray', kind_: 'proxy' });
+        continue;
+      }
+      const h0 = _hits[0];
+      if (!h0 || !h0.point) {
+        failures.push({ kind: 'raycast', reason: 'hits[0].point missing' });
+        continue;
+      }
+      // The contract: point MUST be a real THREE.Vector3. Anything else
+      // crashes downstream callers (see commit a45dbbf).
+      if (h0.point.isVector3 !== true) {
+        failures.push({ kind: 'raycast', reason: 'hits[0].point.isVector3 !== true' });
+        continue;
+      }
+      if (typeof h0.point.distanceTo !== 'function') {
+        failures.push({ kind: 'raycast', reason: 'hits[0].point.distanceTo not a function' });
+        continue;
+      }
+      if (!(h0.distance >= 0)) {
+        failures.push({ kind: 'raycast', reason: 'hits[0].distance < 0 or NaN: ' + h0.distance });
+        continue;
+      }
+      if (h0.distance > RAY_LEN + 1e-3) {
+        failures.push({ kind: 'raycast', reason: 'hits[0].distance > ray length: ' + h0.distance });
+        continue;
+      }
+      okCount++;
+    }
+    const result = { ok: failures.length === 0, failures, sampled: sampleCount, passed: okCount };
+    if (typeof window !== 'undefined') window.__lastRaycastInvariantCheck = result;
     return result;
   }
 
