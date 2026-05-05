@@ -1,0 +1,253 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<title>cold exit · AI behaviour probe (Pass 1)</title>
+<style>
+  :root { color-scheme: dark; }
+  html, body { margin: 0; padding: 0; background: #0c0c10; color: #cbd2dc;
+    font-family: system-ui, -apple-system, Segoe UI, sans-serif; height: 100vh; }
+  body { display: grid; grid-template-rows: auto 1fr auto; }
+  header { padding: 8px 14px; border-bottom: 1px solid #2a2f3a;
+    display: flex; gap: 12px; align-items: center; flex-wrap: wrap; }
+  header h1 { margin: 0; font-size: 14px; color: #c9a87a; flex: 1; }
+  header button {
+    background: #1f2a18; color: #a8d68a; border: 1px solid #3e5a2e;
+    padding: 4px 10px; border-radius: 3px; cursor: pointer; font-size: 12px;
+  }
+  header button:hover { background: #2a3a20; }
+  header button:disabled { opacity: 0.4; cursor: not-allowed; }
+  header label { font-size: 12px; color: #8a9aa8; }
+  header input { background: #1a1d24; color: #cbd2dc; border: 1px solid #2a2f3a;
+    padding: 3px 6px; font-size: 12px; width: 60px; }
+  iframe { width: 100%; height: 100%; border: 0; background: #000; }
+  pre { padding: 12px; background: #14171c; color: #a8d68a; font-size: 11px;
+    margin: 0; border-top: 1px solid #2a2f3a; white-space: pre-wrap;
+    word-break: break-word; max-height: 320px; overflow-y: auto; }
+  .ok { color: #6fd896; }
+  .warn { color: #d8a83a; }
+  .bad { color: #d8703a; }
+</style>
+</head>
+<body>
+<header>
+  <h1>AI probe — spatial hash + flow field + cover scoring (Pass 1)</h1>
+  <label>enemies <input type="number" id="enemy-count" value="8" min="1" max="20"></label>
+  <label>duration s <input type="number" id="duration-s" value="10" min="2" max="60"></label>
+  <button id="spawn-record">spawn + record</button>
+  <button id="invariants">re-run invariants</button>
+  <button id="open-game">open live game in new tab</button>
+</header>
+<iframe id="game" src="../index.html"></iframe>
+<pre id="out">load the game in the iframe, then click "spawn + record".
+
+what this probe captures (per the design's Pass 1 acceptance):
+- cover-use rate (% of frames where any gunman has _coverPos != null)
+- avg movement m/s per gunman
+- state transition histogram (idle / alerted / firing)
+- LoS hit rate (window broken vs intact vs full block) via __aiSpatial.losClear()
+- frame-time of gunmen.update() via performance marks
+- flow-field reachability sample at every gunman position</pre>
+<script type="module">
+const out = document.getElementById('out');
+const iframe = document.getElementById('game');
+const btnRun = document.getElementById('spawn-record');
+const btnInv = document.getElementById('invariants');
+const btnOpen = document.getElementById('open-game');
+function log(line, cls = '') {
+  const span = document.createElement('span');
+  if (cls) span.className = cls;
+  span.textContent = line + '\n';
+  out.appendChild(span);
+  out.scrollTop = out.scrollHeight;
+}
+function clear() { out.textContent = ''; }
+btnOpen.addEventListener('click', () => {
+  window.open('../index.html', '_blank');
+});
+btnInv.addEventListener('click', async () => {
+  const w = iframe.contentWindow;
+  if (!w || !w.__level) {
+    log('iframe not loaded — wait for the game to start a level', 'bad');
+    return;
+  }
+  try {
+    const path = w.__level.checkPathwayInvariants();
+    log(`pathway invariants: ${path.ok ? 'PASS' : 'FAIL'} (${path.failures.length} failures)`, path.ok ? 'ok' : 'bad');
+    if (!path.ok) for (const f of path.failures) log('  · ' + JSON.stringify(f), 'warn');
+  } catch (e) { log('checkPathwayInvariants threw: ' + e.message, 'bad'); }
+  try {
+    const out2 = w.__level.runOutdoorInvariants();
+    log(`outdoor invariants: ${out2.ok ? 'PASS' : 'FAIL'} (${out2.failures.length} failures)`, out2.ok ? 'ok' : 'bad');
+    if (!out2.ok) for (const f of out2.failures) log('  · ' + JSON.stringify(f), 'warn');
+  } catch (e) { log('runOutdoorInvariants threw: ' + e.message, 'bad'); }
+});
+btnRun.addEventListener('click', async () => {
+  clear();
+  btnRun.disabled = true;
+  btnInv.disabled = true;
+  try {
+    await runProbe();
+  } catch (e) {
+    log('probe failed: ' + (e?.stack || e), 'bad');
+  } finally {
+    btnRun.disabled = false;
+    btnInv.disabled = false;
+  }
+});
+async function runProbe() {
+  const w = iframe.contentWindow;
+  if (!w) throw new Error('no iframe contentWindow');
+  // Wait for the game to expose __debug + __gunmen + __level. Up to 30s.
+  log('waiting for game to spin up …');
+  const t0 = performance.now();
+  while (!(w.__debug && w.__gunmen && w.__level)) {
+    if (performance.now() - t0 > 30000) {
+      throw new Error('timed out waiting for window.__debug / __gunmen / __level');
+    }
+    await new Promise(r => setTimeout(r, 250));
+  }
+  log('game ready', 'ok');
+  // Confirm aiSpatial is wired.
+  if (!w.__aiSpatial) {
+    log('window.__aiSpatial missing — did the spatial-hash module load?', 'warn');
+  } else {
+    log('aiSpatial wired', 'ok');
+  }
+  const enemyCount = +document.getElementById('enemy-count').value || 8;
+  const durSec = +document.getElementById('duration-s').value || 10;
+  // Spawn enemies via __debug.spawnEnemies. The helper places them
+  // on a circle around the player and queues alert via the regular
+  // pipeline.
+  const r = w.__debug.spawnEnemies(enemyCount);
+  log(`spawned ${r.spawned} gunmen`, 'ok');
+  // Sample loop — read per-frame state for `durSec` seconds at 30Hz
+  // (approximate; uses setTimeout).
+  const samples = [];
+  const startSample = performance.now();
+  // Track each gunman's last position so we can derive movement.
+  const lastPos = new Map();
+  const stateHist = { idle: 0, alerted: 0, firing: 0, dead: 0, sleep: 0 };
+  // Frame-time for gunmen.update — we read from a wrapper. Patch
+  // the manager's update() to record durations, then restore at the
+  // end of sampling.
+  const gm = w.__gunmen;
+  const origUpdate = gm.update.bind(gm);
+  const updateTimings = [];
+  gm.update = function (ctx) {
+    const t0 = performance.now();
+    const r = origUpdate(ctx);
+    updateTimings.push(performance.now() - t0);
+    return r;
+  };
+  // Window-LoS counters.
+  const losBucket = { clear: 0, throughBroken: 0, blockedIntact: 0, fullBlock: 0 };
+  // Cover-use: frame counts where ≥1 gunman has _coverPos truthy.
+  let frameCount = 0, framesAnyCover = 0;
+  // Per-gunman flow-field-reachable counter.
+  let flowReachable = 0, flowSamples = 0;
+  // Sampling tick.
+  const sampleInterval = 1000 / 30;
+  let nextSample = startSample + sampleInterval;
+  const endAt = startSample + durSec * 1000;
+  // Stash initial gunman count so we can iterate consistently.
+  while (performance.now() < endAt) {
+    while (performance.now() < nextSample) {
+      await new Promise(r => requestAnimationFrame(r));
+    }
+    nextSample += sampleInterval;
+    const gunmen = gm.gunmen || [];
+    let anyCover = false;
+    for (const g of gunmen) {
+      if (!g) continue;
+      const k = g.netId || g._netId || g;
+      const pos = g.group?.position;
+      if (!pos) continue;
+      const last = lastPos.get(k);
+      if (last) {
+        const dx = pos.x - last.x, dz = pos.z - last.z;
+        const d = Math.hypot(dx, dz);
+        // Convert to per-second over the 1/30s interval.
+        const mps = d / (1 / 30);
+        last.movSum = (last.movSum || 0) + mps;
+        last.movN = (last.movN || 0) + 1;
+      }
+      lastPos.set(k, { x: pos.x, z: pos.z, movSum: last?.movSum || 0, movN: last?.movN || 0 });
+      // State histogram.
+      const s = g.state || 'idle';
+      if (stateHist[s] !== undefined) stateHist[s]++;
+      // Cover-use.
+      if (g._coverPos) anyCover = true;
+      // Flow-field probe.
+      if (w.__aiSpatial && w.__aiSpatial._flow) {
+        const f = w.__aiSpatial._flow;
+        flowSamples++;
+        if (typeof f.reachable === 'function' && f.reachable(pos.x, pos.z)) {
+          flowReachable++;
+        }
+      }
+      // Window-LoS classification — sample muzzle to player.
+      if (w.__aiWindowLos === undefined) {
+        // Lazy-import once. Static import isn't an option here
+        // because the iframe ESM may not surface its module graph
+        // to the parent. We just use the public window.__aiSpatial
+        // primitive (losClear) instead, which is good enough for a
+        // hit/miss bucket.
+        w.__aiWindowLos = false;
+      }
+      const player = w.__debug?.player?.mesh?.position;
+      if (player && w.__aiSpatial && w.__aiSpatial.losClear) {
+        const clear = w.__aiSpatial.losClear(pos.x, pos.z, player.x, player.z);
+        if (clear) losBucket.clear++;
+        else losBucket.fullBlock++;
+      }
+    }
+    if (anyCover) framesAnyCover++;
+    frameCount++;
+  }
+  // Restore the original update() so the game keeps running cleanly.
+  gm.update = origUpdate;
+  // -------- Report --------
+  log('--- probe results ---', 'ok');
+  log(`frames sampled: ${frameCount}`);
+  const coverRate = frameCount > 0 ? (framesAnyCover / frameCount) * 100 : 0;
+  log(`cover-use rate (any gunman): ${coverRate.toFixed(1)}%`,
+    coverRate >= 30 ? 'ok' : (coverRate >= 10 ? 'warn' : 'bad'));
+  // Avg movement per gunman.
+  const movs = [];
+  for (const v of lastPos.values()) {
+    if (v.movN > 0) movs.push(v.movSum / v.movN);
+  }
+  const avgMov = movs.length ? movs.reduce((a, b) => a + b, 0) / movs.length : 0;
+  log(`avg movement m/s (per gunman): ${avgMov.toFixed(2)}`);
+  log(`state histogram: idle=${stateHist.idle} alerted=${stateHist.alerted} firing=${stateHist.firing} dead=${stateHist.dead} sleep=${stateHist.sleep}`);
+  log(`LoS bucket: clear=${losBucket.clear} fullBlock=${losBucket.fullBlock} throughBroken=${losBucket.throughBroken} blockedIntact=${losBucket.blockedIntact}`);
+  log(`flow-field reachability: ${flowSamples > 0 ? ((flowReachable / flowSamples) * 100).toFixed(1) : '0.0'}% of samples on field`);
+  // Frame-time stats.
+  if (updateTimings.length) {
+    updateTimings.sort((a, b) => a - b);
+    const mean = updateTimings.reduce((a, b) => a + b, 0) / updateTimings.length;
+    const median = updateTimings[Math.floor(updateTimings.length / 2)];
+    const p95 = updateTimings[Math.floor(updateTimings.length * 0.95)];
+    const max = updateTimings[updateTimings.length - 1];
+    log(`gunmen.update() ms: mean=${mean.toFixed(3)} median=${median.toFixed(3)} p95=${p95.toFixed(3)} max=${max.toFixed(3)}`,
+      mean < 1.5 ? 'ok' : (mean < 3 ? 'warn' : 'bad'));
+  }
+  // Pathway invariants.
+  try {
+    const path = w.__level.checkPathwayInvariants();
+    log(`checkPathwayInvariants: ${path.ok ? 'PASS' : 'FAIL'}`, path.ok ? 'ok' : 'bad');
+  } catch (e) {
+    log('checkPathwayInvariants threw: ' + e.message, 'bad');
+  }
+  try {
+    const out2 = w.__level.runOutdoorInvariants();
+    log(`runOutdoorInvariants: ${out2.ok ? 'PASS' : 'FAIL'}`, out2.ok ? 'ok' : 'bad');
+  } catch (e) {
+    log('runOutdoorInvariants threw: ' + e.message, 'bad');
+  }
+  log('--- done ---', 'ok');
+}
+</script>
+</body>
+</html>
