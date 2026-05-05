@@ -738,6 +738,20 @@ export class Level {
       }
     }
     this._assignKeycards();
+
+    // Pass 1A pathway-invariant stamp. Result is read-only — purely
+    // informational for the dev console / probe HTML / future smoke
+    // harness. Wrapped in try/catch so a bad shape doesn't break
+    // generate(); the warn surfaces the problem either way.
+    try {
+      const inv = this.checkPathwayInvariants();
+      if (typeof window !== 'undefined') window.__lastInvariantCheck = inv;
+      if (!inv.ok) {
+        console.warn('[level] pathway-invariants FAIL after generate:', inv.failures);
+      }
+    } catch (err) {
+      console.warn('[level] checkPathwayInvariants threw:', err);
+    }
   }
 
   // Walk an encounter state object and remove any Three.js
@@ -4215,6 +4229,111 @@ export class Level {
       if (!visited.has(i)) unreachable.push(this.rooms[i]);
     }
     return { ok: unreachable.length === 0, unreachable };
+  }
+
+  // Pass 1A pathway-invariant check. Flood-fills a 0.5m grid from
+  // playerSpawn over the union of every room's walkableBounds. Every
+  // room's center must be reached, and every doorway gap (one
+  // probe-point per neighbor, 1m inward from the wall) must be
+  // reached. The result is also stamped on window.__lastInvariantCheck
+  // so a dev can read the latest status from the console.
+  //
+  // This is INFORMATIONAL — it doesn't auto-repair. Smoke harnesses
+  // call it; runtime never does.
+  checkPathwayInvariants() {
+    const failures = [];
+    if (!this.rooms.length) return { ok: true, failures };
+
+    const STEP = 0.5;
+    // Build a sparse grid of walkable cells. Key = `${ix},${iz}`
+    // where ix = round(x / STEP). We iterate every walkableBounds
+    // box across every room and stamp its interior cells walkable.
+    const walkable = new Set();
+    const cellKey = (ix, iz) => ix + ',' + iz;
+    for (const room of this.rooms) {
+      const wbList = room._walkableBounds;
+      if (!wbList || !wbList.length) continue;
+      for (const wb of wbList) {
+        const ix0 = Math.ceil(wb.minX / STEP);
+        const ix1 = Math.floor(wb.maxX / STEP);
+        const iz0 = Math.ceil(wb.minZ / STEP);
+        const iz1 = Math.floor(wb.maxZ / STEP);
+        for (let ix = ix0; ix <= ix1; ix++) {
+          for (let iz = iz0; iz <= iz1; iz++) {
+            walkable.add(cellKey(ix, iz));
+          }
+        }
+      }
+    }
+
+    // Seed BFS from the player spawn cell. If the spawn cell isn't in
+    // walkable (rare — happens if start room shape orphans the spawn),
+    // fall back to start room center. Any failure here is a bug.
+    const start = this.playerSpawn;
+    let sx = Math.round(start.x / STEP);
+    let sz = Math.round(start.z / STEP);
+    if (!walkable.has(cellKey(sx, sz))) {
+      const startRoom = this.rooms.find(r => r.type === 'start');
+      if (startRoom) {
+        sx = Math.round(startRoom.cx / STEP);
+        sz = Math.round(startRoom.cz / STEP);
+      }
+    }
+    if (!walkable.has(cellKey(sx, sz))) {
+      failures.push({ room: -1, reason: 'spawn point is not in any walkableBounds' });
+      window.__lastInvariantCheck = { ok: false, failures };
+      return { ok: false, failures };
+    }
+
+    const visited = new Set([cellKey(sx, sz)]);
+    const queue = [[sx, sz]];
+    while (queue.length) {
+      const [cx, cz] = queue.shift();
+      const neighbors = [[1,0], [-1,0], [0,1], [0,-1]];
+      for (const [dx, dz] of neighbors) {
+        const nx = cx + dx, nz = cz + dz;
+        const k = cellKey(nx, nz);
+        if (visited.has(k)) continue;
+        if (!walkable.has(k)) continue;
+        visited.add(k);
+        queue.push([nx, nz]);
+      }
+    }
+
+    // Assert every room center is reached. Synthetic rooms (id < 0,
+    // currently the extraction room) are intentionally skipped because
+    // the extraction door is locked until boss death.
+    for (const room of this.rooms) {
+      if (room.id < 0) continue;
+      const rx = Math.round(room.cx / STEP);
+      const rz = Math.round(room.cz / STEP);
+      if (!visited.has(cellKey(rx, rz))) {
+        failures.push({ room: room.id, reason: 'center unreachable from spawn' });
+      }
+    }
+    // Assert every doorway probe (1m inward) is reached.
+    for (const room of this.rooms) {
+      if (room.id < 0 || !room.neighbors) continue;
+      const b = room.bounds;
+      for (const n of room.neighbors) {
+        const other = this.rooms[n.otherId];
+        if (!other || other.id < 0) continue;
+        let dx, dz;
+        if (n.dir === 'north')      { dx = other.cx; dz = b.minZ + 1; }
+        else if (n.dir === 'south') { dx = other.cx; dz = b.maxZ - 1; }
+        else if (n.dir === 'east')  { dx = b.maxX - 1; dz = other.cz; }
+        else                         { dx = b.minX + 1; dz = other.cz; }
+        const ix = Math.round(dx / STEP);
+        const iz = Math.round(dz / STEP);
+        if (!visited.has(cellKey(ix, iz))) {
+          failures.push({ room: room.id, reason: `doorway ${n.dir} → ${n.otherId} unreachable` });
+        }
+      }
+    }
+
+    const result = { ok: failures.length === 0, failures };
+    if (typeof window !== 'undefined') window.__lastInvariantCheck = result;
+    return result;
   }
 
   nearElevatorDoor(pos, radius = 2.4) {
