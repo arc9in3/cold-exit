@@ -2357,6 +2357,10 @@ export class HideoutUI {
         </div>
       `;
     };
+    // Character style label — pulled from prefs (Tailor sets this).
+    // Capitalized for the figure caption; defaults to OPERATOR.
+    const charStyle = (typeof getCharacterStyle === 'function' ? getCharacterStyle() : null) || 'operator';
+    const charLabel = charStyle.charAt(0).toUpperCase() + charStyle.slice(1);
     charCol.innerHTML = `
       <div class="prep-section-head">EQUIPMENT</div>
       <div class="paperdoll-grid3">
@@ -2372,7 +2376,10 @@ export class HideoutUI {
             <div class="pd-callout-label">GEAR BONUSES</div>
             <div class="pd-callout-body">No set bonuses, perks, or affixes yet — equip gear to grow your power.</div>
           </div>
-          <div class="pd-figure-frame"><div class="pd-figure-glyph">◇</div></div>
+          <div class="pd-figure-frame">
+            <div class="pd-figure-glyph">◇</div>
+            <div class="pd-figure-caption">${charLabel.toUpperCase()}</div>
+          </div>
           <div class="pd-callout pd-callout-relics">
             <div class="pd-callout-label">RELICS</div>
             <div class="pd-callout-body">No relics yet — finish encounters or buy from the relic-seller.</div>
@@ -4432,10 +4439,16 @@ export class HideoutUI {
         flex: 1; min-height: 140px;
         background: radial-gradient(ellipse at 50% 35%, #20232c 0%, #0c0f15 80%);
         border: 1px solid #2c323c; border-radius: 5px;
-        display: flex; align-items: center; justify-content: center;
+        display: flex; flex-direction: column;
+        align-items: center; justify-content: center;
+        gap: 8px;
       }
       .pd-figure-glyph {
         font-size: 56px; color: rgba(155,139,106,0.45);
+      }
+      .pd-figure-caption {
+        font-size: 11px; letter-spacing: 2.2px; font-weight: 700;
+        color: #c9a87a; text-shadow: 0 1px 0 #000;
       }
       .pd-callout {
         background: rgba(20,23,29,0.85);
