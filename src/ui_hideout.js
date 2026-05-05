@@ -2203,10 +2203,25 @@ export class HideoutUI {
       const def = ac ? defForId(ac.activeContractId) : null;
       const banner = document.createElement('div');
       banner.className = 'prep-banner';
+      // Reward + rarity badges next to the title — give the player
+      // visibility on what they're risking gear for. Tier color
+      // matches the contract card's rarity outline so the visual
+      // language carries across screens.
+      const rewardBits = [];
+      if (def) {
+        if (def.reward) rewardBits.push(`<b>${def.reward}c</b> reward`);
+        if (def.perKillReward) rewardBits.push(`<b>${def.perKillReward}c</b> / kill`);
+        if (def.marksReward) rewardBits.push(`<b>${def.marksReward}</b> marks`);
+      }
+      const rarityHex = def?.rarity === 'legendary' ? '#f6b53b'
+        : def?.rarity === 'epic' ? '#b061d9'
+        : def?.rarity === 'rare' ? '#5fa8ff'
+        : def?.rarity === 'uncommon' ? '#6abf78'
+        : '#9aa0a8';
       banner.innerHTML = `
-        <div class="prep-eyebrow">LOADOUT</div>
+        <div class="prep-eyebrow">LOADOUT${def?.rarity ? ` · <span style="color:${rarityHex}">${def.rarity.toUpperCase()}</span>` : ''}</div>
         <div class="prep-title">${def ? def.label.toUpperCase() : 'NO CONTRACT ACTIVE'}</div>
-        ${def ? `<div class="prep-sub">${def.targetCount} × ${this._targetLabel(def.targetType, def.targetCount)}</div>` : ''}
+        ${def ? `<div class="prep-sub">${def.targetCount} × ${this._targetLabel(def.targetType, def.targetCount)}${rewardBits.length ? ` · ${rewardBits.join(' · ')}` : ''}</div>` : ''}
       `;
       wrap.appendChild(banner);
     }
