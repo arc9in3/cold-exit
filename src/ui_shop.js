@@ -1080,8 +1080,12 @@ export class ShopUI {
       });
       cell.addEventListener('contextmenu', (e) => {
         e.preventDefault();
-        if (canRepair) this._repair(it);
-        else this._sell(i);
+        // Right-click always sells (symmetric with stock-side
+        // right-click = buy). Repair stays driven by the explicit
+        // "Repair…" button. Old behaviour prioritised repair on broken
+        // items, which silently spent the player's credits when they
+        // just wanted to dump junk (#35).
+        this._sell(i);
       });
       cell.setAttribute('draggable', 'true');
       cell.addEventListener('dragstart', (e) => {
