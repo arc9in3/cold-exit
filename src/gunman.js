@@ -13,6 +13,8 @@ import { rigInstancer } from './rig_instancer.js';
 import { aiSpatial } from './ai_spatial.js';
 import { findCoverFor } from './ai_cover.js';
 import { windowLosBetween } from './ai_windows.js';
+import { assignRoles as squadAssignRoles, notifyDamage as squadNotifyDamage } from './ai_squad.js';
+import { mantleableAt, applyMantle, dropOff } from './ledges.js';
 
 // Strip the held weapon meshes off a dead enemy — detach the primitive
 // gun box, the FBX weaponModel group, and the muzzle anchor from the
@@ -92,7 +94,12 @@ const CHATTER_LINES = [
 // along the line to the player) and 'flanker' (approaches while maintaining
 // an angular offset). Aim is intentionally worse than the player's — weapon
 // spread multiplied by `tunables.ai.spreadMultiplier`.
-const STATE = { IDLE: 'idle', ALERTED: 'alerted', FIRING: 'firing', DEAD: 'dead', SLEEP: 'sleep' };
+// Pass 2 added RETREAT (low-hp self-heal under cover) and SUPPRESS
+// (anchor pinning the player while flankers reposition). Existing
+// switch (g.state) consumers fall through to default for these new
+// values — the behaviour for them is driven from _updateRanged below.
+const STATE = { IDLE: 'idle', ALERTED: 'alerted', FIRING: 'firing', DEAD: 'dead', SLEEP: 'sleep',
+  RETREAT: 'retreat', SUPPRESS: 'suppress' };
 
 // Per-variant profile overlay. `standard` is baseline; others tweak stats and
 // enable/disable behaviors (burst settle, dash, cover reposition).
@@ -975,6 +982,14 @@ export class GunmanManager {
     g.hp -= damage;
     g.flashT = tunables.enemy.hitFlashTime;
     if (g.state === STATE.IDLE || g.state === STATE.SLEEP) g.state = STATE.ALERTED;
+    // Pass 2 — damage-driven squad re-assignment. >20% maxHp in one
+    // hit OR any hit on the anchor flags the squad dirty so the next
+    // assignRoles tick reshuffles. Anchor-vs-flanker swap is handled
+    // inside ai_squad via the _squadAnchorHit flag.
+    try {
+      const frac = damage / Math.max(1, g.maxHp || 1);
+      squadNotifyDamage(g, frac);
+    } catch (e) { /* fail-soft */ }
     g.loseTargetT = tunables.ai.loseTargetTime;
     // Doorway-choke awareness — track hits in a 4s rolling window.
     // Two+ hits within the window from a player in a different room
@@ -1121,6 +1136,16 @@ export class GunmanManager {
         // Spatial hash never blocks the AI tick. If rebuild fails the
         // legacy code paths take over.
         if (typeof console !== 'undefined') console.warn('[ai_spatial] rebuild failed:', e);
+      }
+      // Pass 2 — squad role assignment (host-only). Throttled to 1Hz
+      // inside ai_squad; on-damage dirty bits are honoured. Mutates
+      // gunman.role; ride-along data (_flankTarget, _squadCoverHint)
+      // is read by the per-gunman branches below.
+      try {
+        const _squadStats = squadAssignRoles(ctx.level, this.gunmen, ctx.playerPos, { dt });
+        if (typeof window !== 'undefined') window.__aiSquad = _squadStats;
+      } catch (e) {
+        if (typeof console !== 'undefined') console.warn('[ai_squad] assignRoles failed:', e);
       }
     }
     // LOD scheduler — distant idle gunmen tick at half rate. Cuts AI
