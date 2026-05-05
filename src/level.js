@@ -2117,6 +2117,33 @@ export class Level {
     // two desks placed corner-to-corner, etc.) and to enforce a real
     // walking gap between props instead of letting them touch.
     const PROP_GAP = 0.45;
+    // Phase M step 4 — door clearance band. Cache every door's
+    // footprint + axis once per call so the prop-placement test
+    // can reject any candidate that lands within DOOR_WIDTH/2 + 1m
+    // along the door's axis. Stops props from spawning inside the
+    // doorway approach and pinning the player at the threshold.
+    const _doorBands = [];
+    {
+      const halfBand = DOOR_WIDTH / 2 + 1.0;
+      const inwardDepth = 2.5;   // band reach into both rooms
+      for (const o of this.obstacles) {
+        if (!o.userData?.isDoor) continue;
+        const dx = o.userData.cx, dz = o.userData.cz;
+        const geo = o.geometry?.parameters;
+        const horiz = (geo?.width || 0) > (geo?.depth || 0);
+        if (horiz) {
+          _doorBands.push({
+            minX: dx - halfBand, maxX: dx + halfBand,
+            minZ: dz - inwardDepth, maxZ: dz + inwardDepth,
+          });
+        } else {
+          _doorBands.push({
+            minX: dx - inwardDepth, maxX: dx + inwardDepth,
+            minZ: dz - halfBand, maxZ: dz + halfBand,
+          });
+        }
+      }
+    }
     const _propFootprintFree = (x, z, prop, yaw) => {
       const col = prop.collision || prop.footprint;
       if (!col) return true;
@@ -2131,6 +2158,16 @@ export class Level {
       }
       const halfW = w / 2 + PROP_GAP;
       const halfD = d / 2 + PROP_GAP;
+      // Door clearance — reject if the prop's footprint overlaps
+      // any door band.
+      for (let i = 0; i < _doorBands.length; i++) {
+        const db = _doorBands[i];
+        if (x + halfW <= db.minX) continue;
+        if (x - halfW >= db.maxX) continue;
+        if (z + halfD <= db.minZ) continue;
+        if (z - halfD >= db.maxZ) continue;
+        return false;
+      }
       for (const o of this.obstacles) {
         const ob = o.userData.collisionXZ;
         if (!ob) continue;
