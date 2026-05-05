@@ -1130,23 +1130,18 @@ export class HideoutUI {
     const state = getStoreState();
     const slot = state.stock[idx];
     if (!slot || slot.sold) return;
-    // Replacement warning — armor slots only one piece per slot at run
-    // start, so buying a second chest/head/etc. piece overwrites the
-    // first one (the displaced one falls into loose inventory at run
-    // start, not back into the store). Confirm before charging chips.
+    // Armor slots cap at one queued piece per slot. If something is
+    // already there, surface it via a non-blocking toast after the
+    // buy completes instead of a blocking popup — matches the
+    // no-popups UX rule. The displaced piece's chip cost is sunk;
+    // the player can un-queue via the paperdoll × if they regret it.
+    let displacedName = null;
     if (slot.kind === 'armor' && slot.armorSlot) {
       const queue = getStarterInventory();
       const existing = queue.find(q => q && q.__storeArmor && q.slot === slot.armorSlot);
       if (existing) {
         const exDef = ARMOR_DEFS && ARMOR_DEFS[existing.defId];
-        const exName = exDef?.name || existing.defId;
-        const ok = window.confirm(
-          `You already have ${exName} queued for the ${slot.armorSlot} slot.\n` +
-          `Buying ${slot.label} will replace it — the previous piece will be lost.\n\n` +
-          `Continue?`
-        );
-        if (!ok) return;
-        // Drop the displaced entry from the queue before adding the new one.
+        displacedName = exDef?.name || existing.defId;
         const next = queue.filter(q => !(q && q.__storeArmor && q.slot === slot.armorSlot));
         setStarterInventory(next);
       }
@@ -1161,6 +1156,14 @@ export class HideoutUI {
     }
     slot.sold = true;
     setStoreState(state);
+    // Toast — confirms the buy + flags any displaced armor so the
+    // swap doesn't happen silently.
+    if (typeof window !== 'undefined' && typeof window.__hudMsg === 'function') {
+      const msg = displacedName
+        ? `Queued ${slot.label} (replaced ${displacedName})`
+        : `Queued ${slot.label}`;
+      window.__hudMsg(msg, 3500);
+    }
     // Re-render so the paperdoll picks up the new slot art live.
     this.render();
   }
