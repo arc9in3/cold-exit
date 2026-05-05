@@ -1076,6 +1076,13 @@ initRigInstancer(scene);
 const gunmen = new GunmanManager(scene);
 const melees = new MeleeEnemyManager(scene);
 const drones = new DroneManager(scene);
+// Dev-time probe exposers — paired with window.__level. Lets the AI
+// behaviour probe pull per-frame state without crawling the scene.
+if (typeof window !== 'undefined') {
+  window.__gunmen = gunmen;
+  window.__melees = melees;
+  window.__drones = drones;
+}
 const loot = new LootManager(scene);
 const level = new Level(scene, { ground });
 const projectiles = new ProjectileManager(scene);
