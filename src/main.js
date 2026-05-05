@@ -17417,6 +17417,19 @@ function _ensureLevelUpBanner() {
   _levelUpBannerEl = el;
   return el;
 }
+// Warm both level-up banners at module load so the first runLevelUp +
+// runMasteryOffer don't pay style-injection + DOM-build cost mid-frame.
+// This was a measurable hitch during the first level-up prompt — both
+// keyframe blocks get parsed + the DOM nodes attach during gameplay.
+// Idempotent: subsequent calls return cached refs.
+if (typeof document !== 'undefined') {
+  // Defer until DOMContentLoaded so we don't race the body element.
+  const _warm = () => { try { _ensureLevelUpBanner(); _ensureClassLevelUpBanner(); } catch (_) {} };
+  if (document.readyState === 'loading') {
+    document.addEventListener('DOMContentLoaded', _warm, { once: true });
+  } else { _warm(); }
+}
+
 function _showLevelUpBanner(durationMs = 1800) {
   return new Promise((resolve) => {
     const el = _ensureLevelUpBanner();
