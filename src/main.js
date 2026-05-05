@@ -17053,8 +17053,19 @@ function updateRoomClearance(playerPos) {
       sfx.roomClear();
       sfx.doorUnlock();
       if (r.id === level.bossRoomId) {
+        // Reveal the extraction route — opens the locked door on the
+        // boss room's back wall + un-hides the extraction chamber's
+        // walls + props. Walk-into-zone trigger (level.isPlayerInExit)
+        // is unchanged; only the message + visuals reflect a "door
+        // opened, head through it" beat instead of the legacy
+        // "ring appeared at boss centroid" pop.
         level.revealExit();
-        fireHint('exit');
+        fireHint(level.exitRoom ? 'extractOpened' : 'exit');
+        try {
+          transientHudMsg(level.exitRoom
+            ? 'Extraction route opened'
+            : 'Floor extract revealed', 2.4);
+        } catch (_) { /* defensive — HUD may be unmounted in tutorials */ }
       }
       // Bloodied Rosary artifact — heal a chunk of max HP on clear.
       const heal = (derivedStats.roomClearHealFrac || 0);
