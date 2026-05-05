@@ -345,19 +345,42 @@ document.getElementById('show-outdoor').addEventListener('click', () => {
   regen();
 });
 document.getElementById('probe-all').addEventListener('click', () => {
-  const lvIdx = parseInt(document.getElementById('lvIdx').value, 10) || 1;
+  // Pass 1C smoke — sweep across the design-doc tiers (1, 5, 10, 15,
+  // 22) × 5 seeds each. Both pathway and outdoor invariants must
+  // pass on every generated level. Single failure → readout flips to
+  // .bad so the operator sees the problem at a glance.
+  const tiers = [1, 5, 10, 15, 22];
   const out = [];
-  for (let s = 1; s <= 10; s++) {
-    try {
-      const level = generateLevel(s, lvIdx);
-      const shapes = level.rooms.map(r => r.shape || 'rect');
-      const inv = level.checkPathwayInvariants ? level.checkPathwayInvariants() : null;
-      out.push(`seed ${s}: ${shapes.length} rooms · shapes: ${shapes.join(',')} · invariants: ${inv ? (inv.ok ? 'OK' : 'FAIL ' + JSON.stringify(inv.failures)) : 'n/a'}`);
-    } catch (err) {
-      out.push(`seed ${s}: ERROR ${err.message}`);
+  let okCount = 0, failCount = 0;
+  for (const lvIdx of tiers) {
+    for (let s = 1; s <= 5; s++) {
+      try {
+        const level = generateLevel(s, lvIdx);
+        const inv  = level.checkPathwayInvariants?.() || { ok: true };
+        const odi  = level.runOutdoorInvariants?.() || { ok: true };
+        const allOk = inv.ok && odi.ok;
+        if (allOk) okCount++; else failCount++;
+        const buildings = new Set(level.rooms.map(r => r.building).filter(Boolean));
+        const conns = (level._connectors || []).length;
+        const wins = (level._windows || []).length;
+        const led = (level.ledges || []).length;
+        out.push(
+          `tier ${lvIdx} seed ${s}: ${allOk ? 'OK' : 'FAIL'} · ` +
+          `rooms=${level.rooms.length} buildings=${[...buildings].join(',')} ` +
+          `connectors=${conns} windows=${wins} ledges=${led}` +
+          (inv.ok ? '' : ` PATH: ${JSON.stringify(inv.failures)}`) +
+          (odi.ok ? '' : ` OUT: ${JSON.stringify(odi.failures)}`)
+        );
+      } catch (err) {
+        failCount++;
+        out.push(`tier ${lvIdx} seed ${s}: ERROR ${err.message}`);
+      }
     }
   }
-  document.getElementById('invariant-out').textContent = out.join('\n');
+  out.unshift(`smoke result: ${okCount} OK, ${failCount} FAIL across ${tiers.length}×5 = ${tiers.length * 5}`);
+  const el = document.getElementById('invariant-out');
+  el.classList.toggle('bad', failCount > 0);
+  el.textContent = out.join('\n');
 });
 
 regen();
