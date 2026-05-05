@@ -3322,7 +3322,13 @@ export class HideoutUI {
       btn.addEventListener('click', () => {
         if (!spendMarks(nextCost)) return;
         setRecruiterUnlocked(nextId);
+        // Preserve scroll position across the re-render so buying a
+        // tier mid-list doesn't snap the panel back to the top (#17).
+        const _panel = document.getElementById('hideout-panel');
+        const _savedScroll = _panel ? _panel.scrollTop : 0;
         this.render();
+        const _panelAfter = document.getElementById('hideout-panel');
+        if (_panelAfter) _panelAfter.scrollTop = _savedScroll;
       });
       actions.appendChild(btn);
     }
