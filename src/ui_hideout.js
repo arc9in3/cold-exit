@@ -3623,8 +3623,17 @@ export class HideoutUI {
       color: '#e8dfc8', padding: '6px 10px', fontSize: '12px',
       letterSpacing: '0.6px', borderRadius: '3px', minWidth: '160px',
     });
-    input.addEventListener('change', () => setPlayerName(input.value));
-    input.addEventListener('blur',   () => setPlayerName(input.value));
+    // Toast on commit (change/blur), but only when the value actually
+    // changed — typing into the field shouldn't spam.
+    const _commitName = () => {
+      const before = getPlayerName();
+      const after = input.value || '';
+      if (before === after) return;
+      setPlayerName(after);
+      this._toast(`Callsign set to "${after || 'anon'}"`);
+    };
+    input.addEventListener('change', _commitName);
+    input.addEventListener('blur',   _commitName);
     nameRow.querySelector('.row-actions').appendChild(input);
     nameSec.appendChild(nameRow);
     wrap.appendChild(nameSec);
@@ -3633,9 +3642,15 @@ export class HideoutUI {
     const styleSec = document.createElement('div');
     styleSec.className = 'hideout-tier-group';
     styleSec.innerHTML = `<div class="hideout-tier-head"><span class="t" style="color:#c9a87a">SILHOUETTE</span></div>`;
+    // Five rig styles total (see STYLE_PALETTE in player.js). Tailor
+    // surfaces them all so anything the rig can render is pickable
+    // here — no hidden gating today.
     const styles = [
-      { id: 'operator', label: 'Operator', blurb: 'Stripped tactical silhouette. The default.' },
-      { id: 'marine',   label: 'Marine',   blurb: 'Heavy pauldrons and pack. Reads bigger from across a room.' },
+      { id: 'operator',   label: 'Operator',   blurb: 'Stripped tactical silhouette. The default.' },
+      { id: 'marine',     label: 'Marine',     blurb: 'Heavy pauldrons and pack. Reads bigger from across a room.' },
+      { id: 'recon',      label: 'Recon',      blurb: 'Lean, low-profile silhouette. Faster read at distance.' },
+      { id: 'juggernaut', label: 'Juggernaut', blurb: 'Bulked plate carrier and oversized helmet. Reads massive.' },
+      { id: 'wraith',     label: 'Wraith',     blurb: 'Hooded ghillie silhouette. Reads as creeping menace.' },
     ];
     const current = getCharacterStyle();
     for (const s of styles) {
@@ -3660,6 +3675,7 @@ export class HideoutUI {
         btn.addEventListener('click', () => {
           setCharacterStyle(s.id);
           if (this.ctx.applyCharacterStyle) this.ctx.applyCharacterStyle(s.id);
+          this._toast(`Silhouette: ${s.label}`);
           this.render();
         });
         actions.appendChild(btn);
