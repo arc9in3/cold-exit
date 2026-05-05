@@ -179,6 +179,30 @@ export function addOutlines(root, scale = OUTLINE_DEFAULT) {
   }
 }
 
+// Walk an imported model's subtree and drop any THREE.Light children.
+// Blender / FBX exports frequently bundle the editor's scene lights
+// (key/fill/rim, area lights set up for previews) into the exported
+// model. Each one we leave in place enters the renderer's active lights
+// array — every lit fragment shader iterates that array regardless of
+// distance, so a stray prop light costs every visible pixel its shader
+// pass. We never want auto-imported lights; the level's lights[] is
+// the canonical light source for gameplay (stealth, ambient).
+//
+// Counts are returned only for diagnostics; production code calls this
+// for the side-effect of pruning. A future debug flag could log per-url
+// counts to spot models that accidentally carry lighting.
+function _stripLights(root) {
+  const removals = [];
+  root.traverse((obj) => {
+    if (obj.isLight) removals.push(obj);
+  });
+  for (const l of removals) {
+    if (l.parent) l.parent.remove(l);
+    l.dispose?.();        // SpotLight/PointLight have a target/shadow to release
+  }
+  return removals.length;
+}
+
 export function loadModel(url) {
   if (_ready.has(url)) return Promise.resolve(_ready.get(url));
   if (_pending.has(url)) return _pending.get(url);
@@ -193,6 +217,15 @@ export function loadModel(url) {
         const atlasUrl = _atlasUrlFor(url);
         const atlas = atlasUrl ? _loadAtlas(atlasUrl) : null;
         _retintWithAtlas(root, atlas);
+        // Strip every embedded light. The level's stealth/ambient
+        // lighting is owned by Level.lights + ceiling-lamp SpotLights;
+        // anything an FBX/GLB brought along is editor-export bleed.
+        const stripped = _stripLights(root);
+        if (stripped > 0) {
+          // Single console line per URL on first import — subsequent
+          // clones reuse the cached template, so this fires once.
+          console.info(`[gltf_cache] stripped ${stripped} embedded light(s) from ${url}`);
+        }
         _ready.set(url, root);
         resolve(root);
       },

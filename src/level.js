@@ -11,6 +11,7 @@ import { assignBuildings, connectorEdgesFor } from './buildings.js';
 import { buildWindow } from './windows.js';
 import { buildSkybridge } from './skybridges.js';
 import { addLedge } from './ledges.js';
+import { initWallInstancer, wallInstancer } from './wall_instancer.js';
 
 // Shopkeeper palette per kind — body / head / pants / gear tint so
 // each shop's NPC reads as a distinct role in the world. Exported so
@@ -122,11 +123,19 @@ export class Level {
       r._encounterPlaceholder = false;
       r._encounterSpawn = null;
     }
+    // Wall proxies (added by the wall instancer) live in obstacles[]
+    // but are NOT real scene-graph members — their visual is rendered
+    // via per-color InstancedMesh objects owned by the instancer. The
+    // teardown() below tears down the InstancedMeshes; per-proxy
+    // dispose() is a no-op so the loop can run uniformly across real
+    // meshes + proxies without a branch.
     for (const m of this.obstacles) {
+      if (m.isWallProxy) continue;     // owned by wall_instancer.teardown()
       this.scene.remove(m);
       m.geometry.dispose();
       m.material.dispose();
     }
+    if (wallInstancer()) wallInstancer().teardown();
     for (const m of this.decorations) {
       this.scene.remove(m);
       if (m.geometry) m.geometry.dispose();
@@ -166,6 +175,10 @@ export class Level {
   generate() {
     this.clear();
     this.index += 1;
+    // Wall instancer — fresh per generate() so per-color pools start
+    // empty. clear() tore down the previous instancer; this re-init
+    // creates a new one bound to the same scene.
+    initWallInstancer(this.scene);
     // Tutorial mode override — build the practice room layout
     // instead of random-walking a normal chain.
     if (typeof window !== 'undefined' && window.__tutorialMode && window.__tutorialMode()) {
@@ -774,6 +787,16 @@ export class Level {
       }
     }
     this._assignKeycards();
+
+    // Decoration LOD — push every decoration that isn't already a
+    // _cullableProps entry into the cullable set so the per-frame
+    // proximity sweep (`updateDecorationCulling`) can hide it when
+    // the player is far away. Lights are explicitly skipped — light
+    // culling lives in `_roomLamps` + main.js's `updateRoomLightCulling`
+    // which uses different radii. Window groups and ceiling-lamp
+    // fixtures otherwise sit in the renderer's per-frame visit list
+    // even when the player is in a room two cells away.
+    this._registerDecorationsAsCullable();
 
     // Pass 1A pathway-invariant stamp. Result is read-only — purely
     // informational for the dev console / probe HTML / future smoke
@@ -3981,6 +4004,35 @@ export class Level {
   }
 
   _addObstacle(x, y, z, w, h, d, color) {
+    // Doors animate (scale.y on open, color flip on lock/unlock,
+    // material.opacity tweaks). They MUST stay as real THREE.Mesh
+    // objects — the wall instancer's static-bake model can't represent
+    // per-frame matrix mutations cleanly. Branch by color so DOOR_*
+    // and EXIT_COLOR route to the legacy mesh path; everything else
+    // (outer walls, inner walls, low cover, columns, platforms,
+    // elevator solid panels) goes through the instancer.
+    const isDynamicColor = (color === DOOR_COLOR
+                          || color === DOOR_OPEN_COLOR
+                          || color === EXIT_COLOR);
+    if (!isDynamicColor) {
+      const inst = wallInstancer();
+      if (inst) {
+        const proxy = inst.addWall(x, y, z, w, h, d, color);
+        if (proxy) {
+          proxy.userData.collisionXZ = {
+            minX: x - w / 2, maxX: x + w / 2,
+            minZ: z - d / 2, maxZ: z + d / 2,
+          };
+          if (y + h / 2 < WALL_HEIGHT / 2) proxy.userData.isLowCover = true;
+          this.obstacles.push(proxy);
+          this._dirtySolid();
+          return proxy;
+        }
+        // Pool overflow — fall through to legacy path so the wall is
+        // still rendered (just not via instancing). One-shot warning
+        // already fired inside the instancer.
+      }
+    }
     const mat = new THREE.MeshStandardMaterial({ color, roughness: 0.85 });
     const mesh = new THREE.Mesh(new THREE.BoxGeometry(w, h, d), mat);
     mesh.position.set(x, y, z);
@@ -4913,6 +4965,34 @@ export class Level {
         L.light.visible = inRange;
         if (L.fixture) L.fixture.visible = inRange;
       }
+    }
+  }
+
+  // End-of-generate sweep — push every decoration that isn't already
+  // tracked by the cullable set into it. Lights + light targets are
+  // skipped (their visibility is owned by `_roomLamps` + the per-frame
+  // light-cull sweep, which uses a 28m radius vs the 35m here). Wires
+  // ceiling-lamp fixtures, window groups, encounter visuals into the
+  // proximity-cull pipeline so the renderer skips far-room decorations
+  // entirely instead of paying the per-mesh frustum + matrixWorld
+  // walks every frame.
+  _registerDecorationsAsCullable() {
+    if (!this._cullableProps) this._cullableProps = [];
+    // O(N) lookup of already-registered objects — cullable arrays
+    // hold the .obj reference, so a Set of those is sufficient. The
+    // typical level has 80-150 decorations + 200+ cullable props
+    // already, so the constant cost is irrelevant.
+    const seen = new Set(this._cullableProps.map(p => p.obj));
+    for (const m of this.decorations) {
+      if (!m) continue;
+      if (m.isLight) continue;          // owned by _roomLamps cull
+      // light.target is an Object3D, not a Light. Skip explicitly.
+      if (m.userData && m.userData.kind === 'ceiling-lamp-target') continue;
+      if (seen.has(m)) continue;
+      const wp = m.position
+        ? { x: m.position.x, z: m.position.z }
+        : { x: 0, z: 0 };
+      this._cullableProps.push({ obj: m, x: wp.x, z: wp.z });
     }
   }
 
