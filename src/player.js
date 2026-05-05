@@ -2840,13 +2840,37 @@ export function createPlayer(scene) {
     body: 0x1e3a82, head: 0xdad2b0, leg: 0x1e3a82, arm: 0x1e3a82,
     hand: 0x0e1020, gear: 0xc89a3a, boot: 0x0e182a,
   };
+  // Three new silhouettes added 2026-05-04 — recon (urban grey-tan,
+  // light), juggernaut (heavy plate, deep red trim), wraith (matte
+  // black w/ teal accent). Same rig + decorations, different palettes.
+  // Cheap to add — just material color writes. Marine kept for
+  // backwards compat with anyone who has it saved.
+  const RECON_COLORS = {
+    body: 0x4a5060, head: 0x8a8b78, leg: 0x6a6e78, arm: 0x4a5060,
+    hand: 0x2c2e34, gear: 0x9aa48a, boot: 0x1c1e22,
+  };
+  const JUGGERNAUT_COLORS = {
+    body: 0x3a2624, head: 0x141518, leg: 0x2a1f1d, arm: 0x3a2624,
+    hand: 0x1c1010, gear: 0xa83840, boot: 0x140a0a,
+  };
+  const WRAITH_COLORS = {
+    body: 0x0c0d10, head: 0x080a0c, leg: 0x080a0c, arm: 0x0c0d10,
+    hand: 0x040608, gear: 0x2c8aa0, boot: 0x040608,
+  };
+  const STYLE_PALETTE = {
+    operator: OPERATOR_COLORS,
+    marine: MARINE_COLORS,
+    recon: RECON_COLORS,
+    juggernaut: JUGGERNAUT_COLORS,
+    wraith: WRAITH_COLORS,
+  };
   // Cache the active style baseline. applyArmorTint reads from this
   // when an armor slot is empty, so the body falls back to the
   // operator/marine palette instead of staying tinted.
   let _styleBase = OPERATOR_COLORS;
   function applyCharacterStyle(style) {
     const isMarine = style === 'marine';
-    const p = isMarine ? MARINE_COLORS : OPERATOR_COLORS;
+    const p = STYLE_PALETTE[style] || OPERATOR_COLORS;
     _styleBase = p;
     rig.materials.bodyMat.color.setHex(p.body);
     rig.materials.headMat.color.setHex(p.head);

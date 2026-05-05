@@ -230,22 +230,30 @@ export class MainMenuUI {
     this.bodyEl.appendChild(devRow);
 
     // Character style toggle — cosmetic-only, live-applied.
+    const styleLabels = {
+      operator: 'Operator',
+      marine: 'Space Marine',
+      recon: 'Recon',
+      juggernaut: 'Juggernaut',
+      wraith: 'Wraith',
+    };
     const styleCurrent = this.getCharacterStyle();
+    const curLabel = styleLabels[styleCurrent] || 'Operator';
     const styleRow = document.createElement('div');
     styleRow.className = 'menu-row';
+    const optHtml = Object.entries(styleLabels).map(([k, l]) =>
+      `<option value="${k}"${styleCurrent === k ? ' selected' : ''}>${l}</option>`
+    ).join('');
     styleRow.innerHTML = `
-      <label>Character Style <span class="menu-row-val">${styleCurrent === 'marine' ? 'Space Marine' : 'Operator'}</span></label>
-      <select class="menu-select">
-        <option value="operator"${styleCurrent === 'operator' ? ' selected' : ''}>Operator (default)</option>
-        <option value="marine"${styleCurrent === 'marine' ? ' selected' : ''}>Space Marine</option>
-      </select>
-      <div class="menu-row-hint">Cosmetic only — pauldrons, power pack, helmet from primitives.</div>
+      <label>Character Style <span class="menu-row-val">${curLabel}</span></label>
+      <select class="menu-select">${optHtml}</select>
+      <div class="menu-row-hint">Cosmetic only — palette swap on the procgen rig.</div>
     `;
     const styleSel = styleRow.querySelector('select');
     const styleValEl = styleRow.querySelector('.menu-row-val');
     styleSel.addEventListener('change', () => {
       this.setCharacterStyle(styleSel.value);
-      styleValEl.textContent = styleSel.value === 'marine' ? 'Space Marine' : 'Operator';
+      styleValEl.textContent = styleLabels[styleSel.value] || 'Operator';
     });
     this.bodyEl.appendChild(styleRow);
 
