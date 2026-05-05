@@ -8296,6 +8296,11 @@ function tickFlame(dt, playerInfo, weapon, inputState, aimInfo) {
     const nx = dx / Math.max(0.0001, d);
     const nz = dz / Math.max(0.0001, d);
     if (nx * dir.x + nz * dir.z < halfCos) continue;
+    // Wall check — flame jet must not pass through level geometry.
+    // Without this the cone hit-tests purely by cone geometry, so
+    // enemies one wall away still take damage and burn (bugs #21/#64).
+    const _flameTarget = new THREE.Vector3(c.group.position.x, 1.2, c.group.position.z);
+    if (!combat.hasLineOfSight(origin, _flameTarget, level.obstacles)) continue;
     const wasAlive = c.alive;
     runStats.addDamage(baseDmg);
     c.manager.applyHit(c, baseDmg, 'torso', dir, { weaponClass: 'melee' });
