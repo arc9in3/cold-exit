@@ -2053,7 +2053,13 @@ export class HideoutUI {
       refreshBtn.type = 'button';
       refreshBtn.className = 'hideout-btn primary';
       refreshBtn.textContent = 'REFRESH — 10 chips';
-      refreshBtn.disabled = !!claimed;
+      const refreshBroke = getPersistentChips() < 10;
+      refreshBtn.disabled = !!claimed || refreshBroke;
+      if (claimed) {
+        refreshBtn.title = 'You already have an active contract — finish or abandon it before rerolling.';
+      } else if (refreshBroke) {
+        refreshBtn.title = 'Need 10 chips to reroll the contract pool.';
+      }
       refreshBtn.addEventListener('click', () => {
         if (claimed) return;
         if (!this.ctx.spendChips || !this.ctx.spendChips(10)) return;
