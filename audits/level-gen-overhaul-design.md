@@ -312,3 +312,66 @@ trigger extraction.
 - Manual playthrough of level 1 confirms: feels like rooms, not noise.
 - No regressions in the existing wall-gen invariants from the
   `baseline-wall-gen-2026-05-05` tag.
+
+---
+
+## Pass 2 — perf pass (2026-05-05, branch `level-perf-pass`)
+
+After Pass 1A/1B/1C shipped, mesh count + draw call count had grown
+significantly. Probe (`tools/probe-perf.html` + baseline JSON at
+`audits/perf-baseline-2026-05-05.json`) was run on seed=1 across
+levels 1, 5, 10, 15, 25, before and after the perf changes.
+
+### Mesh count + draw calls per level (seed=1, no actors)
+
+| Level | Meshes (before → after) | Draw calls | Δ % | Lights |
+|---|---|---|---|---|
+| 1  | 811  → 549 | 549  | -32% | 8 |
+| 5  | 772  → 476 | 476  | -38% | 9 |
+| 10 | 970  → 719 | 719  | -26% | 13 |
+| 15 | 1097 → 700 | 700  | -36% | 13 |
+| 25 | 970  → 698 | 698  | -28% | 13 |
+
+`runOutdoorInvariants()` (which includes `checkPathwayInvariants`)
+passes for every probed tier post-perf-pass.
+
+### What changed
+
+1. **Wall InstancedMesh** (`src/wall_instancer.js`) — every static wall
+   (outer / inner / low cover / columns / platforms / elevator solid
+   panels) routes through one InstancedMesh per color. Doors stay on
+   the legacy mesh path because they animate.
+2. **Window frame merge** (`src/windows.js`) — sill + lintel + 2
+   mullions merged into one BufferGeometry per (w, h, sillH) tuple,
+   cached. Glass remains separate (independent shatter lifecycle).
+3. **GLB/FBX light strip** (`src/gltf_cache.js`) — every imported
+   model has its embedded lights pruned in `loadModel()` before the
+   template is cached. Catches editor preview lights that Blender /
+   FBX exporters sometimes ship with prop assets.
+4. **Decoration LOD** (`src/level.js _registerDecorationsAsCullable`) —
+   end-of-generate sweep pushes window groups, ceiling-lamp fixtures,
+   encounter visuals, etc. into `_cullableProps` so the per-frame
+   proximity sweep can hide them when the player is far. Lights are
+   skipped (they have their own narrower-radius cull).
+
+### Skipped / partial
+
+- **Generic prop instancing** (planter / lamp / chair / desk) — bigger
+  refactor than time allowed; each prop is a `THREE.Group` of 3-8
+  primitive sub-meshes with per-instance geometry caches that are
+  ALREADY shared. The remaining win comes from re-keying those by
+  (geom + material) and instancing each sub-mesh role. Deferred.
+- **Light audit at runtime** — the pre-perf live-game numbers (28
+  lights vs 9 registered) included AI rig lights + pooled effects;
+  this branch did not touch AI files. The gltf_cache strip catches
+  the asset-import path, which is the next-most-common source.
+
+### Hard rules verified
+
+- No regressions in `runOutdoorInvariants` or `checkPathwayInvariants`.
+- Wall collision still uses `userData.collisionXZ`. Bullet raycasts
+  in projectiles.js iterate `level.obstacles` which still receives
+  proxy entries for instanced walls.
+- Door animation paths (open/close, color flip, scale.y) untouched —
+  doors route around the wall instancer by color check.
+- `window.__level` still set; probe HTML reads it.
