@@ -191,6 +191,14 @@ function makeProxy(instancer, pool, slot, x, y, z, w, h, d, color) {
     _visible: true,
     position: { x, y, z, set(nx, ny, nz) { this.x = nx; this.y = ny; this.z = nz; } },
     rotation: { x: 0, y: 0, z: 0 },
+    // Three.js Raycaster.intersectObject calls `object.layers.test(...)`
+    // on every candidate before invoking raycast. Without this, the
+    // wall-occlusion + LoS raycasters crash on the first wall hit.
+    // Skip raycasting on wall proxies entirely — they're collision-only
+    // surfaces. Door / actor raycasts use real meshes with the standard
+    // Layers default, so they keep working.
+    layers: { test() { return false; }, mask: 0 },
+    raycast() {},                  // no-op: bullets/LoS use the obstacle list directly via `userData.collisionXZ`, not three's raycast
     userData: {},
     // Proxy geometry/material are stubs whose .dispose() is a no-op so
     // Level.clear()'s blanket dispose loop can run unchanged. The real
