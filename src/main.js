@@ -4121,6 +4121,21 @@ const mainMenuUI = new MainMenuUI({
 // from the browser console. No runtime cost; just a pointer.
 if (typeof window !== 'undefined') window.mainMenuUI = mainMenuUI;
 
+// Game-load reveal sweep — for returning players who already have
+// rank / chips / deaths banked from before the onboarding system
+// shipped. Without this, an existing rank-7 player would see the
+// hideout with only the Contractor tab until they next died or
+// extracted. The trigger is idempotent (each tab flag flips at most
+// once) so re-firing here is safe; new players land on a no-op
+// because their counts are still zero.
+try {
+  applyOnboardTriggers({
+    deathCount: getRunCount(),
+    chips: getPersistentChips(),
+    contractRank: getContractRank(),
+  });
+} catch (e) { console.warn('[onboard] load-time reveal sweep failed', e); }
+
 // Hideout — between-runs panel. Opens from the main menu's Hideout
 // button, on death (replaces the default "back to main menu" screen),
 // and from the cash-out path. ctx hooks bridge chip read/write to
