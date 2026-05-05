@@ -2112,7 +2112,10 @@ export class HideoutUI {
       // No back button — cards IS the entry point now (home step
       // collapsed). Back from leaderboard / weapon flows back here.
     } else if (this.contractorStep === 'weapon') {
-      wrap.appendChild(this._renderMissionPrepSection());
+      // Contractor-flow Loadout — no Pre-Mission Boost column. The
+      // store-buy mechanic lives on the Stash tab as its own
+      // dedicated surface (Armory ↔ Loadout split).
+      wrap.appendChild(this._renderMissionPrepSection({ withStore: false }));
     } else if (this.contractorStep === 'leaderboard') {
       wrap.appendChild(this._renderLeaderboardSection());
     }
@@ -2152,6 +2155,67 @@ export class HideoutUI {
     return wrap;
   }
 
+  // Loadout summary — compact preview of what the player will take
+  // into the run, resolving across all sources (selected weapon,
+  // queued starter inventory armor buys, baseline starter armor).
+  // Read-only at this layer; per-slot pickers come in a follow-up
+  // step. Renders nothing if no weapon picked yet (DEPLOY also
+  // disabled in that case so the absence reads correctly).
+  _renderLoadoutSummary(selectedName) {
+    if (!selectedName) return null;
+    const selectedDef = tunables.weapons.find(w => w.name === selectedName);
+    if (!selectedDef) return null;
+
+    // Queued armor buys from the Stash store. Key by slot so we can
+    // resolve baseline-vs-buy per slot in one pass.
+    const queuedArmorBySlot = {};
+    const queuedConsumables = [];
+    for (const q of getStarterInventory()) {
+      if (!q) continue;
+      if (q.__storeArmor && q.slot) queuedArmorBySlot[q.slot] = q;
+      else if (q.__storeConsumable) queuedConsumables.push(q);
+    }
+    // Baseline armor — must match `startNewRun` in main.js. Centralise
+    // the table here so the summary reads what the run will actually
+    // apply on deploy.
+    const BASELINE_BY_SLOT = {
+      chest:    'chest_light',
+      pants:    'pants_combat',
+      backpack: 'backpack_small',
+    };
+    const armorName = (slot) => {
+      const queued = queuedArmorBySlot[slot];
+      if (queued && ARMOR_DEFS && ARMOR_DEFS[queued.defId]) return ARMOR_DEFS[queued.defId].name;
+      const baseId = BASELINE_BY_SLOT[slot];
+      if (baseId && ARMOR_DEFS && ARMOR_DEFS[baseId]) return ARMOR_DEFS[baseId].name;
+      return null;
+    };
+
+    const wpnLabel = selectedDef.displayName ?? selectedDef.name;
+    const chestLbl = armorName('chest');
+    const pantsLbl = armorName('pants');
+    const packLbl  = armorName('backpack');
+    const consLbl  = queuedConsumables.length
+      ? queuedConsumables.length === 1
+        ? '1 item'
+        : `${queuedConsumables.length} items`
+      : 'starter bandage';
+
+    const wrap = document.createElement('div');
+    wrap.className = 'loadout-summary';
+    wrap.innerHTML = `
+      <div class="loadout-summary-head">TAKING INTO RUN</div>
+      <div class="loadout-summary-grid">
+        <div class="lsum-row"><span class="lsum-lbl">WEAPON</span><span class="lsum-val">${wpnLabel}</span></div>
+        ${chestLbl ? `<div class="lsum-row"><span class="lsum-lbl">CHEST</span><span class="lsum-val">${chestLbl}</span></div>` : ''}
+        ${pantsLbl ? `<div class="lsum-row"><span class="lsum-lbl">PANTS</span><span class="lsum-val">${pantsLbl}</span></div>` : ''}
+        ${packLbl ? `<div class="lsum-row"><span class="lsum-lbl">PACK</span><span class="lsum-val">${packLbl}</span></div>` : ''}
+        <div class="lsum-row"><span class="lsum-lbl">POCKETS</span><span class="lsum-val">${consLbl}</span></div>
+      </div>
+    `;
+    return wrap;
+  }
+
   // Mission-prep / stash screen — character placeholder middle-left
   // with paperdoll equipment slots arranged around them, weapon list
   // on the right, Confirm Loadout button centered. Click a weapon to
@@ -2161,7 +2225,11 @@ export class HideoutUI {
   // opts.withBackButton — show the "Back to contracts" button
   // Stash tab calls this with all three off; contractor stage with all on.
   _renderMissionPrepSection(opts = {}) {
-    const { withBanner = true, withConfirm = true, withBackButton = true } = opts;
+    // withStore — show the Pre-Mission Boost column. True from the
+    // Stash tab where players manage chip-buys; false from the
+    // contractor-flow Loadout step so DEPLOY is "pick from your
+    // collection," not "buy + pick" in the same view.
+    const { withBanner = true, withConfirm = true, withBackButton = true, withStore = true } = opts;
     const wrap = document.createElement('div');
     wrap.className = 'contractor-loadout';
 
@@ -2359,13 +2427,15 @@ export class HideoutUI {
 
     // ----- Right: Pre-Run Store (upgrades top · stock middle ·
     //        refresh button bottom · timer below) per the wireframe.
-    // Onboarding gate — first-run players don't see the store column
-    // yet; it reveals when applyOnboardTriggers fires `store` (chips
-    // ≥ 20 + first death). Pre-mission boosts are a layered system,
-    // not a Run-0 concept.
+    // Two gates layered:
+    //   withStore   — caller (Stash tab true, Loadout false) decides
+    //                  whether the column even renders. Loadout is
+    //                  pick-only; chip-buys live on the Stash tab.
+    //   _storeRevealed — onboarding gate; first-run players don't see
+    //                  the store yet, even on the Stash tab.
     const _storeRevealed = isOnboardSeen('store') || (typeof getRevealedHideoutTabs === 'function'
       && getRevealedHideoutTabs().has('store'));
-    if (!_storeRevealed) {
+    if (!withStore || !_storeRevealed) {
       // Skip the storeCol render entirely — early return out of this
       // section. The DEPLOY button + back button still wire up below
       // because they live outside the storeCol block.
@@ -2481,6 +2551,15 @@ export class HideoutUI {
     } // end of `if (_storeRevealed)` gate from the onboarding flow
 
     if (withConfirm) {
+      // Loadout summary — what the player is actually taking into the
+      // run. Resolves from the same sources `startNewRun` uses so the
+      // preview matches what'll appear in the inventory after deploy.
+      // Only renders on the contractor-flow Loadout step (withConfirm
+      // true); the standalone Stash tab gets nothing here because it's
+      // a manage surface, not a deploy surface.
+      const summary = this._renderLoadoutSummary(selected);
+      if (summary) wrap.appendChild(summary);
+
       const confirm = document.createElement('button');
       confirm.className = 'loadout-confirm';
       confirm.type = 'button';
@@ -4326,6 +4405,36 @@ export class HideoutUI {
       .pd-starter-ico.throwable {
         color: #c98a3a; font-size: 18px; font-weight: 700;
         background: rgba(40,28,16,0.85); border-color: rgba(201,138,58,0.4);
+      }
+      /* Loadout summary — compact horizontal grid of what's being
+         taken into the run. Sits above DEPLOY so the player has a
+         final read-out before committing. Tone matches the rest of
+         the prep panel (dark + tan accents). */
+      .loadout-summary {
+        margin-top: 10px;
+        padding: 10px 14px;
+        background: rgba(15, 17, 22, 0.6);
+        border: 1px solid rgba(155, 139, 106, 0.22);
+        border-radius: 4px;
+      }
+      .loadout-summary-head {
+        font-size: 9px; letter-spacing: 2.5px; color: #6f6754;
+        margin-bottom: 6px;
+        text-transform: uppercase;
+      }
+      .loadout-summary-grid {
+        display: flex; flex-wrap: wrap; gap: 4px 14px;
+      }
+      .lsum-row {
+        display: inline-flex; align-items: baseline; gap: 6px;
+        font-size: 11px; line-height: 1.4;
+      }
+      .lsum-lbl {
+        color: #6f6754; letter-spacing: 1.2px;
+        font-size: 9px; font-weight: 700;
+      }
+      .lsum-val {
+        color: #e8dfc8; font-weight: 700;
       }
       .loadout-confirm {
         position: absolute; left: 50%; bottom: 44px;
