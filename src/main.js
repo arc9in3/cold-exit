@@ -4813,10 +4813,21 @@ function difficultyScale() {
                   : lv === 1 ? 0.80
                   : lv === 2 ? 0.92
                   :            1.00;
+  // Contract modifier overlay — `enemyHpMult` / `enemyDamageMult` /
+  // `spawnDensityMult` / `eliteChanceMult` are authored on contract
+  // defs and read here so the per-floor difficulty curve stacks
+  // multiplicatively with the per-contract risk dial. Defaults to 1.0
+  // when no contract or no modifiers, so non-contract play is
+  // unchanged. Resolves once per call — the active modifier object
+  // is rebuilt on contract pick / run start.
+  const cm = (typeof _activeModifiers !== 'undefined') ? _activeModifiers : null;
+  const cHp     = cm?.enemyHpMult || 1;
+  const cDmg    = cm?.enemyDamageMult || 1;
+  const cElite  = cm?.eliteChanceMult || 1;
   return {
-    hpMult: 1 + 0.09 * lv,
-    damageMult: (1 + 0.06 * lv) * earlyMult,
-    rarityBias: Math.min(0.6, 0.04 * lv),
+    hpMult: (1 + 0.09 * lv) * cHp,
+    damageMult: (1 + 0.06 * lv) * earlyMult * cDmg,
+    rarityBias: Math.min(0.6, 0.04 * lv) * cElite,
     // <1 means faster reaction. Cap at 0.45× so it never goes below
     // a reasonable "trained operator" floor.
     reactionMult: Math.max(0.45, 1 - 0.025 * lv),
@@ -4826,6 +4837,10 @@ function difficultyScale() {
     // Aggression scalar — boss frequency/attack-rate multiplier.
     // Cap stays at 2.0; reached around level 21 in the new curve.
     aggression: Math.min(2.0, 1 + 0.05 * lv),
+    // Contract spawn-density override — read by enemy-spawn code in
+    // level / encounters when populating rooms. 1.0 = baseline; >1
+    // bumps the per-room enemy count.
+    spawnDensityMult: cm?.spawnDensityMult || 1,
   };
 }
 window.__difficultyScale = difficultyScale;
@@ -5308,6 +5323,32 @@ function _regenerateLevelImpl() {
     for (const sb of any) {
       if (!keyPool.length) break;
       keyAssignments.set(sb, keyPool.shift());
+    }
+  }
+  // Contract spawnDensityMult — if the active contract bumps spawn
+  // density, clone a fraction of normal-tier spawns at a small offset
+  // so the room reads as "more men in here" without breaking
+  // pathfinding (sub-bosses + boss + key holders skipped to keep the
+  // mission objective + key economy stable). Caps at 2.0× to prevent
+  // pathological room counts from a future modifier that goes too far.
+  {
+    const densMul = Math.max(1, Math.min(2.0, _activeModifiers?.spawnDensityMult || 1));
+    if (densMul > 1.001) {
+      const extras = [];
+      const cloneable = level.enemySpawns.filter(s =>
+        s.tier !== 'subBoss' && !s.majorBoss && !s.tutorialDummy
+        && !s.stealthTarget && !keyAssignments.has(s));
+      // densMul = 1.3 → clone ~30% of cloneable spawns. Random subset.
+      const cloneRate = densMul - 1;
+      for (const s of cloneable) {
+        if (Math.random() >= cloneRate) continue;
+        // Tiny offset to avoid exact-overlap spawn positions; AI
+        // separation would resolve overlap but this is cheaper.
+        const ox = (Math.random() - 0.5) * 1.4;
+        const oz = (Math.random() - 0.5) * 1.4;
+        extras.push({ ...s, x: (s.x || 0) + ox, z: (s.z || 0) + oz });
+      }
+      if (extras.length) level.enemySpawns.push(...extras);
     }
   }
   for (const s of level.enemySpawns) {
