@@ -38,6 +38,7 @@
 import * as THREE from 'three';
 import { addRamp, addRailing, addPlatform, WALL_HEIGHT, WALL_THICK } from './level_geom.js';
 import { buildWindow } from './windows.js';
+import { sharedMaterial } from './material_pool.js';
 
 // Default connector dimensions per kind. width is the perpendicular
 // span (corridor width), length is the run direction.
@@ -128,7 +129,7 @@ export function buildSkybridge(level, fromRoom, toRoom, kind, opts = {}) {
       // collision near-flat so AI can walk over.
       const floor = new THREE.Mesh(
         new THREE.BoxGeometry(maxX - minX, 0.08, maxZ - minZ),
-        new THREE.MeshStandardMaterial({ color: 0x3a3540, roughness: 0.9 }),
+        sharedMaterial({ color: 0x3a3540, roughness: 0.9 }),
       );
       floor.position.set(cx, 0.04, cz);
       floor.castShadow = false;
@@ -180,7 +181,8 @@ export function buildSkybridge(level, fromRoom, toRoom, kind, opts = {}) {
       // Build a collision proxy matching the glass slab.
       const proxyW = (axis === 'x') ? panelLen : (w.collision.d);
       const proxyD = (axis === 'x') ? (w.collision.d) : panelLen;
-      const proxyMat = new THREE.MeshBasicMaterial({
+      const proxyMat = sharedMaterial({
+        type: 'basic', color: 0xffffff,
         transparent: true, opacity: 0, depthWrite: false,
       });
       const proxy = new THREE.Mesh(
@@ -210,7 +212,7 @@ export function buildSkybridge(level, fromRoom, toRoom, kind, opts = {}) {
   if (dims.lowCeiling) {
     const ceil = new THREE.Mesh(
       new THREE.BoxGeometry(maxX - minX, 0.2, maxZ - minZ),
-      new THREE.MeshStandardMaterial({ color: 0x1a1a1f, roughness: 0.95 }),
+      sharedMaterial({ color: 0x1a1a1f, roughness: 0.95 }),
     );
     ceil.position.set(cx, 1.8, cz);
     ceil.castShadow = false;

@@ -107,6 +107,10 @@ export function buildWindow({ width = 4, height = 2.4, sillHeight = 1.0 } = {}) 
   // Glass pane — translucent slab that the player can see through.
   // Stamped with userData.kind = 'window' so the projectile system's
   // window-damage branch picks it up from a raw raycast hit.
+  //
+  // Per-instance material — not poolable: shatter() disposes this on
+  // breakage. If we pooled it, the first window to break would dispose
+  // the material every other intact window is still using.
   const glassMat = new THREE.MeshStandardMaterial({
     color: GLASS_COLOR,
     roughness: 0.05,

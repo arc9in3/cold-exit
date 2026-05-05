@@ -12,6 +12,7 @@
 
 import * as THREE from 'three';
 import { RoundedBoxGeometry } from 'three/addons/geometries/RoundedBoxGeometry.js';
+import { sharedMaterial } from './material_pool.js';
 
 // Global prop scale. With the rig now at ~1.85m (realistic human
 // scale), props authored at real-world sizes land at the right
@@ -35,7 +36,11 @@ function toonGradient() {
 }
 
 function mat(color) {
-  return new THREE.MeshToonMaterial({ color, gradientMap: toonGradient() });
+  // Routed through the shared pool — every prop primitive of the same
+  // colour now reuses one MeshToonMaterial instance instead of one
+  // per-mesh. The toon gradient texture is itself a module-level
+  // singleton (toonGradient), so the cache key reduces to the colour.
+  return sharedMaterial({ type: 'toon', color, gradientMap: toonGradient() });
 }
 
 function box(w, h, d, color, cast = true) {
@@ -375,7 +380,7 @@ export function buildLamp(opts = {}) {
   // and bloom in postfx gives the warm halo back. Light reduction
   // policy: only the player flashlight, muzzle-flash pool, ceiling
   // lamp budget, and a small VFX pool may use real dynamic lights.
-  const shadeMat = new THREE.MeshStandardMaterial({
+  const shadeMat = sharedMaterial({
     color: COL.linen,
     emissive: COL.lampGlow,
     emissiveIntensity: 1.4,
@@ -510,7 +515,7 @@ export function buildTV(opts = {}) {
   group.add(frame);
   const screen = box(w - 0.06, h - 0.06, 0.01, COL.tv);
   screen.position.set(0, 0.6 + h / 2, 0.05);
-  screen.material = new THREE.MeshBasicMaterial({ color: 0x224466 });
+  screen.material = sharedMaterial({ type: 'basic', color: 0x224466 });
   group.add(screen);
   return { group, collision: { w: standW, d: 0.3 } };
 }
@@ -635,8 +640,8 @@ export function buildNeonStick(opts = {}) {
   // core reads as a glow halo around the bar.
   const halo = new THREE.Mesh(
     new THREE.BoxGeometry(w + 0.04, h + 0.04, d + 0.04),
-    new THREE.MeshBasicMaterial({
-      color, transparent: true, opacity: 0.25, depthWrite: false,
+    sharedMaterial({
+      type: 'basic', color, transparent: true, opacity: 0.25, depthWrite: false,
     }),
   );
   halo.position.y = h / 2 + 0.05;
@@ -644,7 +649,7 @@ export function buildNeonStick(opts = {}) {
   // Inner emissive core.
   const core = new THREE.Mesh(
     new THREE.BoxGeometry(w, h, d),
-    new THREE.MeshBasicMaterial({ color }),
+    sharedMaterial({ type: 'basic', color }),
   );
   core.position.y = h / 2 + 0.05;
   group.add(core);
@@ -679,10 +684,13 @@ export function buildWindow(opts = {}) {
     group.add(side);
   }
   // Glass — slightly smaller than the frame, low-opacity emissive.
+  // NOTE: this prop's window glass is decorative-only (it's a wall
+  // ornament, not the breakable windows.js variant). No shatter path,
+  // no mutation — safe to pool.
   const glass = new THREE.Mesh(
     new THREE.BoxGeometry(w, h, 0.02),
-    new THREE.MeshBasicMaterial({
-      color: glassColor, transparent: true, opacity: 0.35,
+    sharedMaterial({
+      type: 'basic', color: glassColor, transparent: true, opacity: 0.35,
       depthWrite: false,
     }),
   );
@@ -797,8 +805,8 @@ export function buildWallSconce(opts = {}) {
   // Shade — small upward-flared cone.
   const shade = new THREE.Mesh(
     new THREE.ConeGeometry(0.10, 0.20, 12, 1, true),
-    new THREE.MeshBasicMaterial({
-      color, transparent: true, opacity: 0.85,
+    sharedMaterial({
+      type: 'basic', color, transparent: true, opacity: 0.85,
       side: THREE.DoubleSide,
     }),
   );
@@ -807,7 +815,7 @@ export function buildWallSconce(opts = {}) {
   // Tiny emissive bulb inside the shade.
   const bulb = new THREE.Mesh(
     new THREE.SphereGeometry(0.05, 8, 6),
-    new THREE.MeshBasicMaterial({ color }),
+    sharedMaterial({ type: 'basic', color }),
   );
   bulb.position.set(0, 1.74, 0.06);
   group.add(bulb);
@@ -854,7 +862,7 @@ export function buildEvacVan(opts = {}) {
   // as "door slid open, walk in here."
   const opening = new THREE.Mesh(
     new THREE.PlaneGeometry(w * 0.30, h * 0.55),
-    new THREE.MeshBasicMaterial({ color: 0x080808, side: THREE.DoubleSide }),
+    sharedMaterial({ type: 'basic', color: 0x080808, side: THREE.DoubleSide }),
   );
   opening.position.set(w * 0.10, h * 0.45 + 0.05, d / 2 + 0.01);
   group.add(opening);
@@ -875,7 +883,7 @@ export function buildEvacVan(opts = {}) {
   for (const sz of [-d * 0.32, d * 0.32]) {
     const hl = new THREE.Mesh(
       new THREE.BoxGeometry(0.05, 0.18, 0.20),
-      new THREE.MeshBasicMaterial({ color: 0xffe6a0 }),
+      sharedMaterial({ type: 'basic', color: 0xffe6a0 }),
     );
     hl.position.set(-w / 2 - 0.01, h * 0.45, sz);
     group.add(hl);
@@ -899,7 +907,7 @@ export function buildHeloPad(opts = {}) {
   // Painted ring.
   const ring = new THREE.Mesh(
     new THREE.RingGeometry(r * 0.85, r * 0.95, 32),
-    new THREE.MeshBasicMaterial({ color: 0xfff2a0, side: THREE.DoubleSide }),
+    sharedMaterial({ type: 'basic', color: 0xfff2a0, side: THREE.DoubleSide }),
   );
   ring.rotation.x = -Math.PI / 2;
   ring.position.y = 0.06;
@@ -925,7 +933,7 @@ export function buildHeloPad(opts = {}) {
   // Rotor — a thin disc cue.
   const rotor = new THREE.Mesh(
     new THREE.CylinderGeometry(r * 1.0, r * 1.0, 0.03, 28),
-    new THREE.MeshBasicMaterial({ color: 0x2a2a30, transparent: true, opacity: 0.4 }),
+    sharedMaterial({ type: 'basic', color: 0x2a2a30, transparent: true, opacity: 0.4 }),
   );
   rotor.position.set(0, 0.92, 0);
   group.add(rotor);
@@ -966,7 +974,7 @@ export function buildServiceElevator(opts = {}) {
   // Tiny call button — emissive green.
   const btn = new THREE.Mesh(
     new THREE.CircleGeometry(0.04, 12),
-    new THREE.MeshBasicMaterial({ color: 0x80ff80 }),
+    sharedMaterial({ type: 'basic', color: 0x80ff80 }),
   );
   btn.position.set(w / 2 + 0.20, 1.30, d / 2 + 0.001);
   group.add(btn);
@@ -995,7 +1003,7 @@ export function buildSewerGrate(opts = {}) {
   // gives the "something glowing in the sewer" cue.
   const beam = new THREE.Mesh(
     new THREE.CircleGeometry(Math.min(w, d) * 0.4, 16),
-    new THREE.MeshBasicMaterial({ color: 0x80c0ff, transparent: true, opacity: 0.4 }),
+    sharedMaterial({ type: 'basic', color: 0x80c0ff, transparent: true, opacity: 0.4 }),
   );
   beam.rotation.x = -Math.PI / 2;
   beam.position.y = 0.005;

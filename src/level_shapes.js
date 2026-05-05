@@ -30,6 +30,7 @@ import {
   WALL_THICK,
   DOOR_WIDTH,
 } from './level_geom.js';
+import { sharedMaterial } from './material_pool.js';
 
 // Shape selection table — see audits/level-gen-overhaul-design.md
 // "Goals (Pass 1B)" goal #11. Per-room-type weights bias subBoss/boss
@@ -458,7 +459,7 @@ const rotunda = {
       const length = chamfer * Math.SQRT2;
       const midX = c.x + c.dx * chamfer / 2;
       const midZ = c.z + c.dz * chamfer / 2;
-      const mat = new THREE.MeshStandardMaterial({
+      const mat = sharedMaterial({
         color: level._outerWallColor(), roughness: 0.85,
       });
       const mesh = new THREE.Mesh(

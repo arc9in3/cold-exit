@@ -10,6 +10,7 @@
 // imports level_shapes which would import level.js).
 
 import * as THREE from 'three';
+import { sharedMaterial, disposeIfNotShared } from './material_pool.js';
 
 export const WALL_HEIGHT = 3.0;
 export const WALL_THICK = 1.2;
@@ -37,9 +38,7 @@ export function addRamp(level, x1, z1, x2, z2, height, width = 2.0) {
   // before rotation. We rotate yaw around Y to align with the x1→x2
   // direction, then pitch around the local Z to tilt up.
   const geom = new THREE.BoxGeometry(length, 0.2, width);
-  const mat = new THREE.MeshStandardMaterial({
-    color: 0x5a4a3a, roughness: 0.9,
-  });
+  const mat = sharedMaterial({ color: 0x5a4a3a, roughness: 0.9 });
   const mesh = new THREE.Mesh(geom, mat);
   // Position the ramp's center at the midpoint of (x1, z1) and (x2, z2),
   // raised by half the height so the low end sits at y=0.
@@ -90,9 +89,7 @@ export function addRailing(level, x1, z1, x2, z2) {
   const isHoriz = Math.abs(dx) >= Math.abs(dz);
   const w = isHoriz ? length : railThick;
   const d = isHoriz ? railThick : length;
-  const mat = new THREE.MeshStandardMaterial({
-    color: 0x6a6a72, roughness: 0.6,
-  });
+  const mat = sharedMaterial({ color: 0x6a6a72, roughness: 0.6 });
   const mesh = new THREE.Mesh(new THREE.BoxGeometry(w, railHeight, d), mat);
   mesh.position.set(cx, railHeight / 2, cz);
   mesh.castShadow = false;
@@ -127,9 +124,7 @@ export function addPlatform(level, bbox, height) {
   const cz = (minZ + maxZ) / 2;
   // Single box from y=0 to y=height — engine-friendly: one mesh, one
   // collision AABB. Sides are covered because it's a solid box.
-  const mat = new THREE.MeshStandardMaterial({
-    color: 0x4a4a52, roughness: 0.85,
-  });
+  const mat = sharedMaterial({ color: 0x4a4a52, roughness: 0.85 });
   const mesh = new THREE.Mesh(new THREE.BoxGeometry(w, height, d), mat);
   mesh.position.set(cx, height / 2, cz);
   mesh.castShadow = false;
@@ -170,7 +165,9 @@ export function addArchOpening(level, wall, gapW, archH) {
   // Remove the original wall.
   level.scene.remove(wall);
   if (wall.geometry) wall.geometry.dispose();
-  if (wall.material) wall.material.dispose();
+  // Material may be pooled (shared across all walls of the same color);
+  // disposeIfNotShared skips those so other walls aren't corrupted.
+  if (wall.material) disposeIfNotShared(wall.material);
   const idx = level.obstacles.indexOf(wall);
   if (idx >= 0) level.obstacles.splice(idx, 1);
   level._dirtySolid();
