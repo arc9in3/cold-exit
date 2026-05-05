@@ -1100,6 +1100,74 @@ window.__debug = {
   tuneWeapon: _tuneWeapon,
   inspectWeapon: _inspectWeapon,
   level, combat, gunmen, melees, loot, projectiles,
+  // Live module-scope state exposed for the in-page perf harness
+  // (`scripts/_perf_*` runners). Read-only intent — mutating these
+  // out-of-band can desync the inventory / spawn pipelines. All
+  // accessed via getters so the TDZ for `inventory` (declared later
+  // in this file) doesn't trip when `__debug` is built here.
+  get inventory() { return inventory; },
+  get player() { return player; },
+  get tunables() { return tunables; },
+  wrapWeapon,
+  // High-level helpers for the perf cycler. setWeapon equips a weapon
+  // by name into weapon1 and runs the player's setWeapon model swap.
+  // spawnEnemies dumps N gunmen near the player for stress tests.
+  // spawnBoss summons a boss-archetype subBoss in front of the player.
+  setWeapon(name) {
+    const def = tunables.weapons.find(w => w.name === name);
+    if (!def) return { ok: false, reason: 'no-such-weapon', name };
+    const wrapped = wrapWeapon(def, { rarity: 'common', skipMastercraft: true });
+    inventory.equipment.weapon1 = wrapped;
+    if (player.setWeapon) player.setWeapon(wrapped);
+    if (typeof recomputeStats === 'function') try { recomputeStats(); } catch (_) {}
+    return { ok: true, name: wrapped.name, baseName: wrapped.baseName, displayName: def.displayName ?? def.name };
+  },
+  spawnEnemies(n = 5, weaponName = null, opts = {}) {
+    const px = player.mesh.position.x, pz = player.mesh.position.z;
+    const wDef = weaponName
+      ? tunables.weapons.find(w => w.name === weaponName)
+      : tunables.weapons.find(w => w.name === 'AK47');
+    const out = [];
+    for (let i = 0; i < n; i++) {
+      const angle = (i / n) * Math.PI * 2;
+      const r = 6 + Math.random() * 4;
+      const x = px + Math.cos(angle) * r;
+      const z = pz + Math.sin(angle) * r;
+      const w = wDef ? JSON.parse(JSON.stringify(wDef)) : null;
+      const g = gunmen.spawn ? gunmen.spawn(x, z, w, opts) : null;
+      if (g) out.push(g);
+    }
+    return { ok: true, spawned: out.length };
+  },
+  spawnBoss(archetype = 'flamer') {
+    const px = player.mesh.position.x, pz = player.mesh.position.z;
+    // Place the boss ~10m in front of the player on +Z so we have
+    // engagement distance before they close.
+    const x = px, z = pz + 10;
+    const w = tunables.weapons.find(w => w.name === 'AK47');
+    const wDef = w ? JSON.parse(JSON.stringify(w)) : null;
+    const opts = { tier: 'boss', archetype, hpMult: 6.0 };
+    const g = gunmen.spawn ? gunmen.spawn(x, z, wDef, opts) : null;
+    return { ok: !!g, archetype };
+  },
+  // Quick FPS snapshot — averages frames over the next ~1s. Returns a
+  // promise so the harness can await + chain. Reads via rAF count, no
+  // setup cost.
+  measureFps(durationMs = 1000) {
+    return new Promise((resolve) => {
+      let frames = 0;
+      const t0 = performance.now();
+      const tick = (t) => {
+        frames++;
+        if (t - t0 >= durationMs) {
+          resolve({ frames, ms: t - t0, fps: +(frames / ((t - t0) / 1000)).toFixed(1) });
+          return;
+        }
+        requestAnimationFrame(tick);
+      };
+      requestAnimationFrame(tick);
+    });
+  },
   // Scan every door's approach strip for blocking obstacles. Outer walls
   // flanking the gap and elevator-side walls are expected; anything else
   // getting returned here is a bug candidate. Match the same strip shape
