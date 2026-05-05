@@ -4,6 +4,8 @@ import { buildProp, getLevelTheme, INWARD_FACING_KINDS } from './props.js';
 import { buildRig, initAnim, updateAnim } from './actor_rig.js';
 import { makeContainer, pickContainerType, pickContainerSize, buildContainerMesh } from './containers.js';
 import { StaticObstacleGrid2D } from './obstacle_grid.js';
+import { pickTemplateForRoom, applyTemplate } from './room_templates.js';
+import { buildExtractionRoom } from './extraction_room.js';
 
 // Shopkeeper palette per kind — body / head / pants / gear tint so
 // each shop's NPC reads as a distinct role in the world. Exported so
@@ -1834,125 +1836,77 @@ export class Level {
       return prop;
     };
 
-    if (theme === 'library') {
-      // Reading nook: 1-2 bookshelves on a wall, a desk facing the
-      // room centre, and a chair tucked behind the desk.
-      const shelves = 1 + Math.floor(Math.random() * 2);
-      for (let i = 0; i < shelves; i++) _placeAndLoot('bookshelf', placeBackToWall);
-      if (Math.random() < 0.85) {
-        const desk = _placeAndLoot('desk', placeInterior);
-        if (desk) {
-          // Chair behind the desk (the side pointing AWAY from the
-          // room centre — that's where someone would sit). Falls back
-          // to any open side if the back is blocked.
-          _placeAdjacent(desk, 'chair', { facing: 'inward', preferSide: 'back' });
+    // -----------------------------------------------------------------
+    // Template dispatch — replaces the per-theme inline ladder with a
+    // single call into room_templates.js. The templates encode the
+    // same recipes (bookshelves on wall, desk + chair, couch +
+    // coffeeTable + tv, etc.) but with bumped density per the design:
+    //   - bookshelves min 2 max 4 instead of 1 max 2
+    //   - tables guaranteed 4 chairs when space allows
+    //   - warehouse stacks 2-3 crates not 1-2
+    //   - office gets 2 workstations baseline (not 1 + chance for 2)
+    //
+    // If pickTemplateForRoom returns null (room is smaller than every
+    // template's minSize, which is rare for normal 18x18 rooms) we
+    // fall through to the legacy inline arrangement below.
+    // -----------------------------------------------------------------
+    const _templateHelpers = {
+      placeAlongWall, placeBackToWall, placeInterior,
+      _placeAdjacent, _placeAcross, _placeAndLoot,
+      buildProp, _maybeLoot,
+    };
+    const _tpl = pickTemplateForRoom(room, theme);
+    let _templateApplied = false;
+    if (_tpl) {
+      const result = applyTemplate(this, room, _tpl, _templateHelpers);
+      // Stash the template id on the room so the smoke harness +
+      // probe can verify a template ran.
+      room._appliedTemplateId = _tpl.id;
+      // Consider the template applied if at least one prop landed —
+      // a 0-prop result usually means every wall slot was already
+      // taken by cover, in which case the legacy inline path won't
+      // do better either.
+      _templateApplied = result.placed > 0;
+    }
+    if (!_templateApplied) {
+      // Legacy inline arrangements — single-prop fallbacks per theme.
+      // Kept thin because the templates above cover the rich cases;
+      // this just guarantees a room isn't completely empty if the
+      // template selection couldn't find a fit.
+      if (theme === 'library') {
+        _placeAndLoot('bookshelf', placeBackToWall);
+        _placeAndLoot('bookshelf', placeBackToWall);
+      } else if (theme === 'lobby') {
+        const couch = buildProp('couch');
+        if (couch && placeAlongWall(couch)) {
+          _placeAdjacent(couch, 'coffeeTable', { facing: 'match', preferSide: 'front', gap: 0.30 });
         }
-      }
-    } else if (theme === 'lobby') {
-      // Reception arrangement: couch on a wall + coffee table directly
-      // in FRONT of the couch (anchored, not random) + a side chair
-      // facing the couch from across the coffee table. Reception desk
-      // optional.
-      const couch = buildProp('couch');
-      if (couch && placeAlongWall(couch)) {
-        const ct = _placeAdjacent(couch, 'coffeeTable', { facing: 'match', preferSide: 'front', gap: 0.30 });
-        if (ct && Math.random() < 0.55) {
-          // Side chair across from the coffee table — completes the
-          // conversation triangle.
-          _placeAdjacent(ct, 'chair', { facing: 'inward', preferSide: 'front' });
+      } else if (theme === 'bedroom') {
+        const bed = buildProp('bed');
+        if (bed && placeAlongWall(bed)) {
+          _placeAdjacent(bed, 'nightstand', { facing: 'match', preferSide: 'right', gap: 0.05 });
         }
-      }
-      if (Math.random() < 0.4) _placeAndLoot('desk', placeAlongWall);
-    } else if (theme === 'bedroom') {
-      // Bedroom set: bed against a wall + nightstand at the head end
-      // (matches anchor yaw so the nightstand sits beside the bed
-      // against the same wall, not poking into the room).
-      const bed = buildProp('bed');
-      if (bed && placeAlongWall(bed)) {
-        if (Math.random() < 0.85) {
-          // Nightstand on the right side of the bed (head end). Falls
-          // through to other sides if blocked.
-          const ns = _placeAdjacent(bed, 'nightstand', { facing: 'match', preferSide: 'right', gap: 0.05 });
-          _maybeLoot(ns);
-        }
-        // Occasional second nightstand on the OTHER side of the bed.
-        if (Math.random() < 0.30) {
-          const ns2 = _placeAdjacent(bed, 'nightstand', { facing: 'match', preferSide: 'left', gap: 0.05 });
-          _maybeLoot(ns2);
-        }
-      }
-    } else if (theme === 'livingRoom') {
-      // Living room arrangement: couch on wall + coffee table in
-      // front + tv across from the couch (placed by anchored projection,
-      // not a separate random wall slot — guarantees the tv ends up in
-      // the couch's sightline).
-      const couch = buildProp('couch');
-      if (couch && placeAlongWall(couch)) {
-        if (Math.random() < 0.85) {
+      } else if (theme === 'livingRoom') {
+        const couch = buildProp('couch');
+        if (couch && placeAlongWall(couch)) {
           _placeAdjacent(couch, 'coffeeTable', { facing: 'match', preferSide: 'front', gap: 0.40 });
         }
-        if (Math.random() < 0.70) {
-          // TV across from the couch — projects along couch's local
-          // +Z (its front), so the screen ends up facing the cushions.
-          _placeAcross(couch, 'tv', { minDist: 3.0, maxDist: 5.5 });
-        }
-      }
-    } else if (theme === 'warehouse') {
-      // Crate stack: pick a wall slot for the FIRST crate, then stack
-      // 1-2 more next to it so the eye reads "supply staging" instead
-      // of "random boxes." A barrel beside the stack completes it.
-      const c1 = buildProp('crate');
-      if (c1 && placeAlongWall(c1)) {
-        _maybeLoot(c1);
-        if (Math.random() < 0.65) {
-          const c2 = _placeAdjacent(c1, 'crate', { facing: 'match', gap: 0.05 });
-          if (c2) _maybeLoot(c2);
-        }
-        if (Math.random() < 0.40) {
-          const c3 = _placeAdjacent(c1, 'crate', { facing: 'match', gap: 0.05 });
-          if (c3) _maybeLoot(c3);
-        }
-        if (Math.random() < 0.55) {
-          const barrel = _placeAdjacent(c1, 'barrel', { facing: 'match', gap: 0.10 });
-          _maybeLoot(barrel);
-        }
-      }
-      // Pallet pad on the floor — flat, walkable, just a warehouse
-      // texture. Lootable so the player has a reason to step on it.
-      if (Math.random() < 0.55) {
-        const pal = buildProp('pallet');
-        if (pal && placeInterior(pal)) _maybeLoot(pal);
-      }
-    } else if (theme === 'office') {
-      // Workstation: desk against wall + chair behind it (back side =
-      // away from room centre = where someone sits) + filing cabinet on
-      // the same wall. Up to two workstations; cabinet shared.
-      const _workstation = () => {
+      } else if (theme === 'warehouse') {
+        const c1 = buildProp('crate');
+        if (c1 && placeAlongWall(c1)) _maybeLoot(c1);
+      } else if (theme === 'office') {
         const desk = buildProp('desk');
-        if (!desk || !placeAlongWall(desk)) return null;
-        _maybeLoot(desk);
-        // Chair on the room-centre side of the desk so it reads as
-        // "someone sits here facing their work."
-        _placeAdjacent(desk, 'chair', { facing: 'inward', preferSide: 'front' });
-        return desk;
-      };
-      _workstation();
-      if (Math.random() < 0.55) _workstation();
-      if (Math.random() < 0.55) _placeAndLoot('cabinet', placeAlongWall);
-      // Lamps come from the dedicated symmetric corner pass
-      // (_decorateRoomLamps) — no random interior drop here.
-    } else if (theme === 'kitchen') {
-      // Dining set: central table + chairs anchored on each of its
-      // 4 sides (2-4 per room; dropped if a side is blocked). Cabinet
-      // on a wall completes the room-as-room.
-      const table = buildProp('table');
-      if (table && placeInterior(table)) {
-        const chairCount = 2 + (Math.random() < 0.5 ? 1 : 0) + (Math.random() < 0.4 ? 1 : 0);
-        for (let i = 0; i < chairCount; i++) {
+        if (desk && placeAlongWall(desk)) {
+          _maybeLoot(desk);
+          _placeAdjacent(desk, 'chair', { facing: 'inward', preferSide: 'front' });
+        }
+      } else if (theme === 'kitchen') {
+        const table = buildProp('table');
+        if (table && placeInterior(table)) {
+          _placeAdjacent(table, 'chair', { facing: 'inward' });
           _placeAdjacent(table, 'chair', { facing: 'inward' });
         }
       }
-      if (Math.random() < 0.65) _placeAndLoot('cabinet', placeAlongWall);
     }
 
     // -----------------------------------------------------------------
