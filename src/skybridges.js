@@ -1,11 +1,20 @@
 // skybridges.js — Pass 1C connector-room generator.
 //
-// A "connector room" is a thin walkway that joins two non-adjacent
-// rooms in DIFFERENT buildings. The connector is built into the
+// A "connector room" is a thin walkway that joins two adjacent
+// cells in DIFFERENT buildings. The connector is built into the
 // world as its own level.rooms entry (id stays low-positive but is
 // allocated AFTER chain + branches; same shape as the synthetic
 // extraction room — has bounds / cx / cz / neighbors so roomAt()
 // can find the player while they're crossing).
+//
+// IMPORTANT: cell-graph topology is fixed by the cell pitch
+// (ROOM_W + WALL_THICK = ~19.2m), so a connector between two
+// adjacent cells fits in the WALL_THICK slot between them — about
+// 1.2m of run length. The visual difference between a connector and
+// a normal door is therefore floor color, railings (skybridge-open),
+// glass panels (skybridge-glass), or a low ceiling (sewer-tunnel).
+// "Long" 12m skybridges from the design doc require non-adjacent
+// rooms — that's a Pass 1D extension, not in scope here.
 //
 // Five kinds (from the design doc):
 //   skybridge-glass — fully enclosed glass tunnel (4×12). Bullets
