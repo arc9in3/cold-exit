@@ -2292,9 +2292,17 @@ export class HideoutUI {
     // Same iconForItem call as the in-game inventory uses, so the
     // icons match across surfaces.
     const queuedArmorBySlot = {};
+    // Vault armor — only promoted into a slot if no store-armor buy
+    // already targets that slot (matches summary precedence).
+    const queuedVaultArmorBySlot = {};
     for (const q of getStarterInventory()) {
-      if (q && q.__storeArmor && q.slot) {
+      if (!q) continue;
+      if (q.__storeArmor && q.slot) {
         queuedArmorBySlot[q.slot] = q;
+      } else if (q.__vaultItem && q.item?.type === 'armor' && q.item?.slot) {
+        if (!queuedArmorBySlot[q.item.slot] && !queuedVaultArmorBySlot[q.item.slot]) {
+          queuedVaultArmorBySlot[q.item.slot] = q.item;
+        }
       }
     }
     const BASELINE_DEFS_BY_SLOT = {
@@ -2314,6 +2322,15 @@ export class HideoutUI {
           return slotTile(slotKey, label, def.name, icon, glyph);
         }
         return slotTile(slotKey, label, queued.defId, null, glyph);
+      }
+      // Vault pull next — same render as a store buy but the name
+      // gets a † marker so the player knows it's coming from vault.
+      const fromVault = queuedVaultArmorBySlot[slotKey];
+      if (fromVault) {
+        const icon = iconForItem({
+          id: fromVault.id, name: fromVault.name, type: 'armor', slot: fromVault.slot,
+        });
+        return slotTile(slotKey, label, `${fromVault.name} †`, icon, glyph);
       }
       // Baseline default — chest_light / pants_combat / backpack_small.
       const baselineId = BASELINE_DEFS_BY_SLOT[slotKey];
