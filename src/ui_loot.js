@@ -712,6 +712,12 @@ export class LootUI {
       if (refs && this.target._removeGround) this.target._removeGround(refs[idx]);
       this.target.loot.splice(idx, 1);
       if (refs) refs.splice(idx, 1);
+    } else {
+      // Inventory full — surface a HUD toast so the player understands
+      // why the item is still visible on the body. Without this the
+      // silent failure looked like the right-click "equipped" the item
+      // back onto the corpse (#63).
+      window.__hudMsg?.(`No room — bag is full.`, 2.0);
     }
     this.render();
   }
