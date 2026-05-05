@@ -4684,6 +4684,50 @@ export class Level {
       }
     }
 
+    // ----- Flow-field reachability assertion -----
+    // Pass 1 added an AI flow field (src/ai_spatial.js). The path BFS
+    // above proves the level has door-graph reachability; the flow
+    // field is a denser per-cell direction map that the AI samples
+    // every frame. We assert it reaches every chain room so an enemy
+    // spawned anywhere can find a route to the player. Skipped when
+    // the spatial module hasn't been loaded yet (server-side smoke
+    // tests, headless invariant runs) — the spatial module attaches
+    // itself to window.__aiSpatial on first import. We deliberately
+    // do NOT pull in ai_spatial here; calling code (the dashboard /
+    // probe-ai.html) wires it up before invoking the invariant.
+    if (typeof window !== 'undefined' && window.__aiSpatial
+        && this.playerSpawn && this.rooms.length > 1) {
+      try {
+        const aiSpatial = window.__aiSpatial;
+        // Rebuild the spatial hash with no entries — we only care
+        // about the flow field over the level's static walkability.
+        aiSpatial.rebuild(this, {});
+        const flow = aiSpatial.flowFieldTo(
+          this.playerSpawn.x, this.playerSpawn.z);
+        if (flow && flow.cellCount > 0) {
+          // Probe every chain-room centre. A room whose centre cell
+          // isn't on the field implies the flow field can't route
+          // to/from it — same failure class as the door-BFS check
+          // above but for the AI's pathing primitive.
+          for (const room of this.rooms) {
+            if (room.id < 0) continue;
+            if (!flow.reachable(room.cx, room.cz)) {
+              failures.push({ room: room.id,
+                reason: 'flow-field unreachable from spawn' });
+            }
+          }
+        } else {
+          failures.push({ room: -2,
+            reason: 'flow-field empty (no walkable cells)' });
+        }
+      } catch (e) {
+        // Don't gate the invariant on the AI module — log + continue.
+        if (typeof console !== 'undefined') {
+          console.warn('[invariants] flow-field check threw:', e);
+        }
+      }
+    }
+
     const result = { ok: failures.length === 0, failures };
     if (typeof window !== 'undefined') window.__lastInvariantCheck = result;
     return result;
