@@ -6,6 +6,8 @@
 // context is created lazily on first `play()` call that follows an
 // interaction. We tolerate pre-interaction play calls by no-op'ing.
 
+import { qualityFlags } from './quality.js';
+
 let ctx = null;
 let master = null;
 let wet = null;             // reverb return bus
@@ -367,6 +369,10 @@ export const sfx = {
   ambientStart() {
     if (!unlocked || !ensureCtx()) return;
     if (ambientNodes) return;
+    // Potato tier: ambient bed is the noisiest CPU/audio-mixer cost
+    // on weak hardware. Skip start; ambientStop is a no-op when no
+    // bed is running.
+    if (qualityFlags && qualityFlags.ambientAudio === false) return;
     // Noise bed — looped white noise through a heavy low-pass +
     // band-reject to pull out mids so it reads as "HVAC hum".
     const src = ctx.createBufferSource();
