@@ -805,6 +805,15 @@ export class HideoutUI {
     }
   }
 
+  // Stamps a "need N more chips/marks/sigils" tooltip on a button when
+  // the player can't afford it. Caller still has to set btn.disabled
+  // separately — this only owns the title text.
+  _gateTitle(btn, have, need, currency = 'chips') {
+    if (have < need) {
+      btn.title = `Need ${need - have} more ${currency}.`;
+    }
+  }
+
   _showHint(msg) {
     let hint = document.getElementById('hideout-hint');
     if (!hint) {
@@ -1401,7 +1410,9 @@ export class HideoutUI {
         <button type="button" class="hideout-buy">Buy</button>
       `;
       const btn = upgRow.querySelector('.hideout-buy');
-      btn.disabled = getPersistentChips() < nextCost;
+      const have = getPersistentChips();
+      btn.disabled = have < nextCost;
+      this._gateTitle(btn, have, nextCost);
       btn.addEventListener('click', () => {
         if (!this.ctx.spendChips || !this.ctx.spendChips(nextCost)) return;
         const u = getHideoutUpgrades();
@@ -1703,7 +1714,9 @@ export class HideoutUI {
         <button type="button" class="hideout-buy">Buy</button>
       `;
       const btn = pouchRow.querySelector('.hideout-buy');
-      btn.disabled = getPersistentChips() < pouchCost;
+      const have = getPersistentChips();
+      btn.disabled = have < pouchCost;
+      this._gateTitle(btn, have, pouchCost);
       btn.addEventListener('click', () => {
         if (!this.ctx.spendChips || !this.ctx.spendChips(pouchCost)) return;
         setPouchSlots(pouch + 1);
@@ -1790,7 +1803,9 @@ export class HideoutUI {
         <button type="button" class="hideout-buy">Buy</button>
       `;
       const btn = rrRow.querySelector('.hideout-buy');
-      btn.disabled = getPersistentChips() < REROLL_UNLOCK_COST;
+      const have = getPersistentChips();
+      btn.disabled = have < REROLL_UNLOCK_COST;
+      this._gateTitle(btn, have, REROLL_UNLOCK_COST);
       btn.addEventListener('click', () => {
         if (!this.ctx.spendChips || !this.ctx.spendChips(REROLL_UNLOCK_COST)) return;
         setRerollUnlocked(true);
@@ -1831,7 +1846,9 @@ export class HideoutUI {
           <button type="button" class="hideout-buy">Upgrade</button>
         `;
         const btn = row.querySelector('.hideout-buy');
-        btn.disabled = getPersistentChips() < cost;
+        const have = getPersistentChips();
+        btn.disabled = have < cost;
+        this._gateTitle(btn, have, cost);
         btn.addEventListener('click', () => {
           if (!this.ctx.spendChips || !this.ctx.spendChips(cost)) return;
           setMerchantUpgrade(kind, lvl + 1);
@@ -2053,12 +2070,12 @@ export class HideoutUI {
       refreshBtn.type = 'button';
       refreshBtn.className = 'hideout-btn primary';
       refreshBtn.textContent = 'REFRESH — 10 chips';
-      const refreshBroke = getPersistentChips() < 10;
-      refreshBtn.disabled = !!claimed || refreshBroke;
+      const refreshHave = getPersistentChips();
+      refreshBtn.disabled = !!claimed || refreshHave < 10;
       if (claimed) {
         refreshBtn.title = 'You already have an active contract — finish or abandon it before rerolling.';
-      } else if (refreshBroke) {
-        refreshBtn.title = 'Need 10 chips to reroll the contract pool.';
+      } else {
+        this._gateTitle(refreshBtn, refreshHave, 10);
       }
       refreshBtn.addEventListener('click', () => {
         if (claimed) return;
@@ -2607,7 +2624,11 @@ export class HideoutUI {
     refreshBtn.className = 'store-refresh-btn';
     const REFRESH_COST = 10;
     refreshBtn.textContent = `Refresh now · ${REFRESH_COST}c`;
-    refreshBtn.disabled = getPersistentChips() < REFRESH_COST;
+    {
+      const have = getPersistentChips();
+      refreshBtn.disabled = have < REFRESH_COST;
+      this._gateTitle(refreshBtn, have, REFRESH_COST);
+    }
     refreshBtn.addEventListener('click', () => {
       if (!this.ctx.spendChips || !this.ctx.spendChips(REFRESH_COST)) return;
       this._refreshStore(true);
@@ -2622,7 +2643,11 @@ export class HideoutUI {
       fasterBtn.type = 'button';
       fasterBtn.className = 'store-faster-btn';
       fasterBtn.textContent = `Faster cadence · ${refCost}c · free refresh`;
-      fasterBtn.disabled = getPersistentChips() < refCost;
+      {
+        const have = getPersistentChips();
+        fasterBtn.disabled = have < refCost;
+        this._gateTitle(fasterBtn, have, refCost);
+      }
       fasterBtn.addEventListener('click', () => {
         if (!this.ctx.spendChips || !this.ctx.spendChips(refCost)) return;
         const s = getStoreState();
@@ -2912,7 +2937,9 @@ export class HideoutUI {
       <button type="button" class="lt-buy">Buy</button>
     `;
     const btn = tile.querySelector('.lt-buy');
-    btn.disabled = getPersistentChips() < slot.price;
+    const have = getPersistentChips();
+    btn.disabled = have < slot.price;
+    this._gateTitle(btn, have, slot.price);
     btn.addEventListener('click', () => this._buyStoreSlot(idx));
     return tile;
   }
