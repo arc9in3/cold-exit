@@ -1497,6 +1497,10 @@ export class HideoutUI {
       const slot = stashAddItem(item, slotCap);
       if (slot < 0) return;
       this._extractedQueue.splice(idx, 1);
+      const name = (item.name || 'item').replace(/<[^>]+>/g, '');
+      if (typeof window !== 'undefined' && typeof window.__hudMsg === 'function') {
+        window.__hudMsg(`Banked ${name} to vault`, 3000);
+      }
       this.render();
     });
     return tile;
@@ -1521,18 +1525,26 @@ export class HideoutUI {
       </div>
     `;
     if (queued) tile.classList.add('queued');
+    const itemName = (item.name || 'item').replace(/<[^>]+>/g, '');
+    const _toast = (msg, dur = 3000) => {
+      if (typeof window !== 'undefined' && typeof window.__hudMsg === 'function') {
+        window.__hudMsg(msg, dur);
+      }
+    };
     tile.querySelector('.take').addEventListener('click', () => {
       const cur = getStarterInventory();
       if (queued) {
         // Un-take: drop the queue entry that points to this slot.
         const next = cur.filter(q => !(q && q.__vaultItem && q.__vaultSlot === slot));
         setStarterInventory(next);
+        _toast(`Unqueued ${itemName}`);
       } else {
         // Take: queue the item; keep it in vault until the run
         // actually starts (consumeStarterInventory in main.js will
         // strip the vault row at run-start time, see _vaultPullForRun).
         cur.push({ __vaultItem: true, __vaultSlot: slot, item: { ...item }, rarity: item.rarity || null });
         setStarterInventory(cur);
+        _toast(`Queued ${itemName} for next run`);
       }
       this.render();
     });
@@ -1545,7 +1557,9 @@ export class HideoutUI {
         const next = getStarterInventory().filter(q => !(q && q.__vaultItem && q.__vaultSlot === slot));
         setStarterInventory(next);
       }
-      if (this.ctx.awardChips) this.ctx.awardChips(this._chipValueOf(removed));
+      const value = this._chipValueOf(removed);
+      if (this.ctx.awardChips) this.ctx.awardChips(value);
+      _toast(`Sold ${itemName} for ${value}c`);
       this.render();
     });
     return tile;
