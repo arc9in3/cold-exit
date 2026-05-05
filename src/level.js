@@ -6,6 +6,7 @@ import { makeContainer, pickContainerType, pickContainerSize, buildContainerMesh
 import { StaticObstacleGrid2D } from './obstacle_grid.js';
 import { pickTemplateForRoom, applyTemplate } from './room_templates.js';
 import { buildExtractionRoom } from './extraction_room.js';
+import { SHAPE_REGISTRY, pickShapeForRoom } from './level_shapes.js';
 
 // Shopkeeper palette per kind — body / head / pants / gear tint so
 // each shop's NPC reads as a distinct role in the world. Exported so
@@ -479,6 +480,21 @@ export class Level {
     // is walkable, and lshape / partition / pillars-grid / center-pit
     // layouts placed the floor disc inside an interior wall.
 
+    // Pass 1A — pick a shape per room. Default rect preserves the
+    // pre-overhaul behavior; non-rect shapes override _buildRoomPerimeter
+    // with their own outer + interior wall layout. Shape selection is
+    // weighted per room.type by level_shapes.js. Shape build() output
+    // (walkableBounds) is stashed on the room for the flood-fill
+    // invariant check to consume.
+    for (const room of rooms) {
+      room.shape = pickShapeForRoom(room);
+      // Tutorial rooms / synthetic rooms (extraction etc.) keep rect.
+      // Giant or doubled rooms also stay rect — the shape templates
+      // assume single-cell footprints and would tile poorly across a
+      // 2-cell extension.
+      if (room.giant || room.doubled) room.shape = 'rect';
+    }
+
     // --- Build walls + doors ----------------------------------------------
     const builtPairs = new Set();
     for (const room of rooms) this._buildRoomPerimeter(room);
@@ -493,7 +509,14 @@ export class Level {
 
     // Interior variants (split walls, narrowing hallways) go up before the
     // cover scatter so that cover can avoid placing inside interior walls.
+    //
+    // Pass 1A: SKIP this step when the room has a non-rect shape — the
+    // shape template owns its interior geometry, and stacking a layout
+    // variant on top would clobber the shape's walkability (e.g. a
+    // 'split' wall through a rotunda's chamfered corner). Rect rooms
+    // continue to use the layout system unchanged.
     for (const room of rooms) {
+      if (room.shape && room.shape !== 'rect') continue;
       if (room.layout === 'split' || room.layout === 'hallway' || room.layout === 'lshape'
           || room.layout === 'corridor' || room.layout === 'partition'
           || room.layout === 'closet'  || room.layout === 'bunker'
@@ -1130,8 +1153,45 @@ export class Level {
   // the doorway gap at the neighbor's center — not the wall midpoint — so
   // asymmetrically-sized rooms (e.g. doubled-up bosses) still align their
   // doors with the corridor room on the other side.
+  // Shape-aware outer-wall color reader. Shape templates need this so
+  // they can match the dynamic theme tint that the rect path bakes in
+  // via the module-scope `OUTER_WALL_COLOR`. Returning the live value
+  // means a shape built mid-generate uses the same tint as the rect
+  // walls placed in the same pass.
+  _outerWallColor() { return OUTER_WALL_COLOR; }
+
   _buildRoomPerimeter(room) {
+    // Shape dispatch — Pass 1A. Non-'rect' shapes own their own
+    // perimeter + interior wall layout. The shape's build() must:
+    //   1. produce outer walls with the same doorway gaps the rect
+    //      path leaves (so _buildDoor still aligns)
+    //   2. return walkableBounds — array of axis-aligned box-likes
+    //      whose union connects every doorway. checkPathwayInvariants
+    //      flood-fills over this set.
+    if (room.shape && room.shape !== 'rect') {
+      const tpl = SHAPE_REGISTRY[room.shape];
+      if (tpl && typeof tpl.build === 'function') {
+        try {
+          const out = tpl.build(this, room);
+          if (out && out.walkableBounds) {
+            room._walkableBounds = out.walkableBounds;
+          }
+          return;
+        } catch (err) {
+          console.warn(`[level] shape '${room.shape}' build failed for room ${room.id}; falling back to rect:`, err);
+          // Fall through to rect path below as a safety net so the
+          // room is still sealed even if the shape code throws.
+          room.shape = 'rect';
+        }
+      }
+    }
+    // rect path — preserved exactly as before. Stamp the full cell
+    // footprint as walkable so the invariant check has uniform data
+    // across all rooms regardless of shape choice.
     const b = room.bounds;
+    room._walkableBounds = [{
+      minX: b.minX, minZ: b.minZ, maxX: b.maxX, maxZ: b.maxZ,
+    }];
     const halfGap = DOOR_WIDTH / 2;
     const rooms = this.rooms;
     const neighborFor = (dir) => {
