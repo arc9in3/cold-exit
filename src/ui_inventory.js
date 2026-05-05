@@ -1125,20 +1125,30 @@ export class InventoryUI {
     // Skill-tree + special-perk entries can't stack with themselves
     // (they're identity-keyed), but a perk like Twin Fang rolling
     // onto two pieces of gear should clearly show × 2.
-    const perkCounts = new Map();   // key → { name, desc, source, count }
-    const recordPerk = (key, name, desc, sourceTag) => {
+    const perkCounts = new Map();   // key → { name, desc, source, count, activeCount }
+    const recordPerk = (key, name, desc, sourceTag, active = true) => {
       if (!key) return;
       const existing = perkCounts.get(key);
       if (existing) {
         existing.count += 1;
+        if (active) existing.activeCount += 1;
       } else {
-        perkCounts.set(key, { name, desc, source: sourceTag, count: 1 });
+        perkCounts.set(key, { name, desc, source: sourceTag, count: 1, activeCount: active ? 1 : 0 });
       }
     };
+    // Holstered weapon perks no longer apply (#28 fix), and broken
+    // items contribute nothing — flag both as INACTIVE so the player
+    // can see which perks aren't currently doing anything (#31).
+    const _activeWeapon = this.getActiveWeapon ? this.getActiveWeapon() : null;
+    const _WEAPON_SLOTS = new Set(['weapon1', 'weapon2', 'melee']);
     for (const slot of SLOT_IDS) {
       const it = eq[slot]; if (!it || !it.perks) continue;
+      const broken = it.durability && it.durability.current <= 0;
+      const isWeaponSlot = _WEAPON_SLOTS.has(slot);
+      const holstered = isWeaponSlot && _activeWeapon && it !== _activeWeapon;
+      const active = !broken && !holstered;
       for (const p of it.perks) {
-        recordPerk(p.id || p.name, p.name, p.description, 'GEAR');
+        recordPerk(p.id || p.name, p.name, p.description, 'GEAR', active);
       }
     }
     for (const id of (this.getSpecialPerks() || [])) {
@@ -1154,10 +1164,20 @@ export class InventoryUI {
       const desc = tier?.desc || def.desc || '';
       recordPerk('st:' + id, `${def.name} L${lv}`, desc, 'SKILL');
     }
-    for (const { name, desc, source, count } of perkCounts.values()) {
+    for (const { name, desc, source, count, activeCount } of perkCounts.values()) {
       const stackTag = count > 1 ? ` <span class="inv-prog-perk-stack">× ${count}</span>` : '';
-      perkRows.push(`<div class="inv-prog-perk">
-        <span class="inv-prog-perk-name">◆ ${name}${stackTag}</span>
+      // None of the gear copies are currently active (broken /
+      // holstered) — dim the row + stamp INACTIVE so the player knows
+      // why a listed perk isn't doing anything (#31).
+      const inactive = activeCount === 0;
+      const inactiveTag = inactive
+        ? ' <span class="inv-prog-perk-stack" style="color:#a06060">INACTIVE</span>'
+        : (activeCount < count
+            ? ` <span class="inv-prog-perk-stack" style="color:#a08060">${activeCount}/${count} ACTIVE</span>`
+            : '');
+      const dimStyle = inactive ? ' style="opacity:0.55"' : '';
+      perkRows.push(`<div class="inv-prog-perk"${dimStyle}>
+        <span class="inv-prog-perk-name">◆ ${name}${stackTag}${inactiveTag}</span>
         ${desc ? `<span class="inv-prog-perk-desc"> — ${desc}</span>` : ''}
         ${source ? `<span class="inv-prog-perk-src">${source}</span>` : ''}
       </div>`);
