@@ -73,4 +73,40 @@ if (shatterCalls !== 2) {
   process.exit(1);
 }
 
+// Integration — host encodes, joiner applies, end-to-end with bw key
+// living inside the same snapshot object encodeSnapshotsPerPeer
+// fans out to peers.
+import { encodeSnapshotsPerPeer } from '../src/coop/snapshot.js';
+const hostWinA = { state: { broken: false } };
+const hostWinB = { state: { broken: true } };
+const hostLevel = {
+  _windows: [
+    { window: hostWinA },
+    { window: hostWinB },
+  ],
+};
+const fanout = encodeSnapshotsPerPeer(
+  { gunmen: [] }, { enemies: [] }, 1, 0,
+  null, ['joinerA'], null, null, hostLevel,
+);
+const sentToA = fanout.get('joinerA');
+console.log('per-peer bw:', sentToA?.bw);
+if (JSON.stringify(sentToA?.bw) !== '[1]') {
+  console.error('FAIL: per-peer fanout missing bw');
+  process.exit(1);
+}
+const joinerWinA = { state: { broken: false } };
+const joinerWinB = { state: { broken: false } };
+const joinerLevel = {
+  _windows: [
+    { window: joinerWinA },
+    { window: joinerWinB },
+  ],
+};
+applyWindowsSnapshot(joinerLevel, sentToA);
+if (joinerWinA.state.broken !== false || joinerWinB.state.broken !== true) {
+  console.error('FAIL: joiner state mismatch after apply');
+  process.exit(1);
+}
+
 console.log('PASS — _encodeWindows + applyWindowsSnapshot behave correctly');
