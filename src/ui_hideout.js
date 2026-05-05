@@ -1076,12 +1076,26 @@ export class HideoutUI {
     wrap.className = 'hideout-tab-body';
     const head = document.createElement('div');
     head.className = 'hideout-section-head';
+    // If the player came here from the Loadout summary, show a
+    // prominent "Return to LOADOUT" button so they can finish the
+    // deploy without clicking back through Contractor + a contract
+    // card. Only renders when a contract is active.
+    const hasActiveContract = !!getActiveContract();
     head.innerHTML = `
       <div class="hideout-section-text">
         <div class="hideout-section-title">PRE-MISSION STORE</div>
         <div class="hideout-section-sub">Spend chips on starting gear for your next deploy. Stock rotates on a refresh timer; upgrade slot count or rarity ceiling on the right. Pick which weapons to bring on the LOADOUT screen.</div>
       </div>
+      ${hasActiveContract ? `<button type="button" class="hideout-btn primary return-loadout">▶ RETURN TO LOADOUT</button>` : ''}
     `;
+    if (hasActiveContract) {
+      head.querySelector('.return-loadout')?.addEventListener('click', () => {
+        this.tab = 'contractor';
+        this.contractorStep = 'weapon';
+        if (this._scene) this._scene.gotoStation('contracts');
+        this.render();
+      });
+    }
     wrap.appendChild(head);
     wrap.appendChild(this._renderMissionPrepSection({
       withBanner: false,
@@ -4854,6 +4868,15 @@ export class HideoutUI {
         margin-bottom: 12px;
         animation: hideout-tab-enter 280ms 60ms ease-out both;
         display: flex; align-items: center; gap: 14px;
+      }
+      /* Return-to-Loadout shortcut button. Sits in the section
+         head on the Pre-Mission Store tab when an active contract
+         is in flight, so the player can hop back to deploy without
+         re-traversing Contractor + the contract card. */
+      .hideout-btn.return-loadout {
+        flex: 0 0 auto;
+        padding: 10px 18px; font-size: 12px;
+        letter-spacing: 1.6px; font-weight: 700;
       }
       .hideout-section-text { flex: 1; min-width: 0; }
       .hideout-section-portrait {
