@@ -795,6 +795,16 @@ export class HideoutUI {
     return btn;
   }
 
+  // Tiny passthrough to the global HUD toast surface. Every hideout
+  // spend / state-mutating click should call this so the player gets
+  // visible feedback (matches the no-popups + visible-decisions rules).
+  // Falls back silently when the HUD isn't mounted (during boot, etc.).
+  _toast(msg, dur = 3000) {
+    if (typeof window !== 'undefined' && typeof window.__hudMsg === 'function') {
+      try { window.__hudMsg(msg, dur); } catch (_) {}
+    }
+  }
+
   _showHint(msg) {
     let hint = document.getElementById('hideout-hint');
     if (!hint) {
@@ -1395,7 +1405,9 @@ export class HideoutUI {
       btn.addEventListener('click', () => {
         if (!this.ctx.spendChips || !this.ctx.spendChips(nextCost)) return;
         const u = getHideoutUpgrades();
-        setHideoutUpgrades({ ...u, stashSlots: Math.min(STASH_SLOT_MAX, u.stashSlots + 1) });
+        const newSlots = Math.min(STASH_SLOT_MAX, u.stashSlots + 1);
+        setHideoutUpgrades({ ...u, stashSlots: newSlots });
+        this._toast(`Vault slot #${newSlots} unlocked · -${nextCost}c`);
         this.render();
       });
     }
@@ -1689,6 +1701,7 @@ export class HideoutUI {
       btn.addEventListener('click', () => {
         if (!this.ctx.spendChips || !this.ctx.spendChips(pouchCost)) return;
         setPouchSlots(pouch + 1);
+        this._toast(`Pouch slot #${pouch + 1} unlocked · -${pouchCost}c`);
         this.render();
       });
     }
@@ -1715,7 +1728,9 @@ export class HideoutUI {
     slotInc.addEventListener('click', () => {
       const cost = ss.slots * 60;
       if (!this.ctx.spendChips || !this.ctx.spendChips(cost)) return;
-      setStartingStoreState({ ...ss, slots: Math.min(9, ss.slots + 1) });
+      const nextSlots = Math.min(9, ss.slots + 1);
+      setStartingStoreState({ ...ss, slots: nextSlots });
+      this._toast(`Starting store: ${nextSlots} slots · -${cost}c`);
       this.render();
     });
     const tierInc = document.createElement('button');
@@ -1725,7 +1740,9 @@ export class HideoutUI {
     tierInc.addEventListener('click', () => {
       const cost = (ss.rarityTier + 1) * 200;
       if (!this.ctx.spendChips || !this.ctx.spendChips(cost)) return;
-      setStartingStoreState({ ...ss, rarityTier: Math.min(4, ss.rarityTier + 1) });
+      const nextTier = Math.min(4, ss.rarityTier + 1);
+      setStartingStoreState({ ...ss, rarityTier: nextTier });
+      this._toast(`Starting store: rarity tier ${nextTier} · -${cost}c`);
       this.render();
     });
     ssCtrls.appendChild(slotInc);
@@ -1771,6 +1788,7 @@ export class HideoutUI {
       btn.addEventListener('click', () => {
         if (!this.ctx.spendChips || !this.ctx.spendChips(REROLL_UNLOCK_COST)) return;
         setRerollUnlocked(true);
+        this._toast(`Reroll-any-shop unlocked · -${REROLL_UNLOCK_COST}c`);
         this.render();
       });
     }
@@ -1811,6 +1829,7 @@ export class HideoutUI {
         btn.addEventListener('click', () => {
           if (!this.ctx.spendChips || !this.ctx.spendChips(cost)) return;
           setMerchantUpgrade(kind, lvl + 1);
+          this._toast(`${labels[kind] || kind} → Tier ${lvl + 1} · -${cost}c`);
           this.render();
         });
       }
@@ -1850,6 +1869,7 @@ export class HideoutUI {
       permitGroup.appendChild(this._buildSigilRow(def, permits.has(def.id), sigils, () => {
         if (!spendSigils(def.cost)) return;
         setRelicPermitOwned(def.id);
+        this._toast(`Permit unlocked: ${def.label} · -${def.cost}s`);
         this.render();
       }));
     }
@@ -1869,6 +1889,7 @@ export class HideoutUI {
         if (!spendSigils(def.cost)) return;
         if (def.oneShot) queueKeystone(def.id);
         else setKeystoneOwned(def.id);
+        this._toast(`${def.oneShot ? 'Queued' : 'Owned'}: ${def.label} · -${def.cost}s`);
         this.render();
       }, isQueued));
     }
@@ -2031,6 +2052,7 @@ export class HideoutUI {
         if (claimed) return;
         if (!this.ctx.spendChips || !this.ctx.spendChips(10)) return;
         this._cardSlots = [];
+        this._toast('Contracts refreshed · -10c');
         this.render();
       });
       refreshBar.appendChild(refreshBtn);
@@ -2527,8 +2549,10 @@ export class HideoutUI {
       onClick: () => {
         if (!this.ctx.spendChips || !this.ctx.spendChips(slotCost)) return;
         const s = getStoreState();
-        setStoreState({ ...s, slots: Math.min(STORE_SLOT_MAX, s.slots + 1) });
+        const newSlots = Math.min(STORE_SLOT_MAX, s.slots + 1);
+        setStoreState({ ...s, slots: newSlots });
         this._refreshStore(true);
+        this._toast(`Store stock: ${newSlots} slots · -${slotCost}c · refreshed`);
         this.render();
       },
     }));
@@ -2541,9 +2565,11 @@ export class HideoutUI {
       onClick: () => {
         if (!this.ctx.spendChips || !this.ctx.spendChips(ceilCost)) return;
         const s = getStoreState();
-        setStoreState({ ...s, ceiling: Math.min(STORE_CEILING_MAX, s.ceiling + 1) });
+        const newCeil = Math.min(STORE_CEILING_MAX, s.ceiling + 1);
+        setStoreState({ ...s, ceiling: newCeil });
         // Free reroll on any store upgrade per design brief.
         this._refreshStore(true);
+        this._toast(`Store ceiling: ${ceilLabels[newCeil] || 'tier ' + newCeil} · -${ceilCost}c · refreshed`);
         this.render();
       },
     }));
@@ -2573,6 +2599,7 @@ export class HideoutUI {
     refreshBtn.addEventListener('click', () => {
       if (!this.ctx.spendChips || !this.ctx.spendChips(REFRESH_COST)) return;
       this._refreshStore(true);
+      this._toast(`Store stock refreshed · -${REFRESH_COST}c`);
       this.render();
     });
     footer.appendChild(refreshBtn);
@@ -2593,6 +2620,7 @@ export class HideoutUI {
         setStoreState({ ...s, refreshMs: next });
         // Free reroll on any store upgrade per design brief.
         this._refreshStore(true);
+        this._toast(`Store cadence: every ${(next / 3600000).toFixed(0)}h · -${refCost}c · refreshed`);
         this.render();
       });
       footer.appendChild(fasterBtn);
@@ -3497,6 +3525,7 @@ export class HideoutUI {
       btn.addEventListener('click', () => {
         if (!spendMarks(nextCost)) return;
         setRecruiterUnlocked(nextId);
+        this._toast(`${track.label} → Lv ${level + 1} · -${nextCost} marks`);
         // Preserve scroll position across the re-render so buying a
         // tier mid-list doesn't snap the panel back to the top (#17).
         const _panel = document.getElementById('hideout-panel');
@@ -3543,6 +3572,7 @@ export class HideoutUI {
         if (!reqsMet) return;
         if (!spendMarks(def.cost)) return;
         setRecruiterUnlocked(def.id);
+        this._toast(`Unlocked: ${def.label} · -${def.cost} marks`);
         this.render();
       });
       actions.appendChild(btn);
