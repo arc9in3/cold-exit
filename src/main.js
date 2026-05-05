@@ -17578,10 +17578,56 @@ function _showClassLevelUpBanner(durationMs = 1800) {
   });
 }
 
+// Phase M step 6 — fall-respawn fallback. If the player has somehow
+// clipped past every fall guard / outer perimeter (collision bug,
+// physics tunneling at high dt, etc.) and ended up outside the
+// aggregate level bbox + a 4m pad, teleport them back to the last
+// walkable XZ we recorded and dock 10 HP. The watch updates
+// _lastWalkableXZ every frame the player is inside the playable
+// volume, so the rebound point is always recent.
+const _lastWalkableXZ = { x: 0, z: 0, valid: false };
+function _fallRespawnWatch() {
+  if (!level || !player?.mesh || playerDead) return;
+  const rs = level.rooms;
+  if (!rs || !rs.length) return;
+  let minX = Infinity, maxX = -Infinity, minZ = Infinity, maxZ = -Infinity;
+  for (const r of rs) {
+    if (!r.bounds) continue;
+    if (r.bounds.minX < minX) minX = r.bounds.minX;
+    if (r.bounds.maxX > maxX) maxX = r.bounds.maxX;
+    if (r.bounds.minZ < minZ) minZ = r.bounds.minZ;
+    if (r.bounds.maxZ > maxZ) maxZ = r.bounds.maxZ;
+  }
+  if (!isFinite(minX)) return;
+  const PAD = 4;
+  const px = player.mesh.position.x;
+  const pz = player.mesh.position.z;
+  const inside = px >= minX - PAD && px <= maxX + PAD
+              && pz >= minZ - PAD && pz <= maxZ + PAD;
+  if (inside) {
+    _lastWalkableXZ.x = px;
+    _lastWalkableXZ.z = pz;
+    _lastWalkableXZ.valid = true;
+    return;
+  }
+  // Fell out. Snap back to last walkable cell (or spawn if we never
+  // recorded one) and dock 10 HP. transientHudMsg surfaces it so the
+  // player isn't confused.
+  const target = _lastWalkableXZ.valid
+    ? _lastWalkableXZ
+    : { x: level.playerSpawn.x, z: level.playerSpawn.z };
+  player.mesh.position.x = target.x;
+  player.mesh.position.z = target.z;
+  player.mesh.position.y = 0;
+  try { damagePlayer(10, 'fall', { source: 'fall-respawn', zone: 'torso' }); } catch (_) { /* defensive */ }
+  try { transientHudMsg?.('CLIPPED OUT — respawned (-10 HP)', 1.6); } catch (_) {}
+}
+
 function tick() {
   frameCounter = (frameCounter + 1) | 0;
   const rawDt = clock.getDelta();           // real elapsed since last frame
   let dt = Math.min(rawDt, 1 / 30);         // clamped for physics stability
+  _fallRespawnWatch();
   _perf.start('frame');
   // Tutorial hint queue ticks on rawDt so its fade timing is stable
   // even during hit-stop / pause windows. Internal queue is empty

@@ -99,9 +99,57 @@ export function addRailing(level, x1, z1, x2, z2) {
     minZ: cz - d / 2, maxZ: cz + d / 2,
   };
   mesh.userData.isRailing = true;
+  // Phase M step 6 — railings double as fall guards. The visible
+  // rail mesh blocks player movement; tagging isFallGuard lets
+  // debug tooling list every fall-defending segment in one query.
+  mesh.userData.isFallGuard = true;
   // Low cover hint for the aim system — short obstacle, treated as
   // crouchable cover.
   mesh.userData.isLowCover = true;
+  mesh.matrixAutoUpdate = false;
+  mesh.updateMatrix();
+  level.scene.add(mesh);
+  level.obstacles.push(mesh);
+  level._dirtySolid();
+  return mesh;
+}
+
+// Phase M step 6 — invisible fall guard. Thin (WALL_THICK) collision
+// wall, 0.6m tall, that blocks player movement off a raised edge but
+// renders nothing. Used along platform / catwalk / skybridge / parapet
+// edges so the player can't slip off into the void. visible=false so
+// the wall doesn't render; collisionXZ is the same AABB walls use.
+// Tag userData.isFallGuard = true so debug tooling + the runtime
+// fall-respawn watcher can identify these segments.
+export function addFallGuard(level, x1, z1, x2, z2) {
+  const dx = x2 - x1;
+  const dz = z2 - z1;
+  const length = Math.hypot(dx, dz);
+  if (length < 0.1) return null;
+  const cx = (x1 + x2) / 2;
+  const cz = (z1 + z2) / 2;
+  const guardH = 0.6;
+  const guardThick = WALL_THICK * 0.5;
+  const isHoriz = Math.abs(dx) >= Math.abs(dz);
+  const w = isHoriz ? length : guardThick;
+  const d = isHoriz ? guardThick : length;
+  // Pooled material — won't ever render (visible=false) but the
+  // BoxGeometry still participates in raycasts unless we exclude
+  // it. We don't want bullets to ricochet off the invisible guard
+  // either, so wire it as a collision-only proxy with a non-shadow,
+  // transparent material in case someone toggles visible=true for
+  // debugging.
+  const mat = sharedMaterial({ color: 0xff00ff, roughness: 0.9 });
+  const mesh = new THREE.Mesh(new THREE.BoxGeometry(w, guardH, d), mat);
+  mesh.position.set(cx, guardH / 2, cz);
+  mesh.visible = false;
+  mesh.castShadow = false;
+  mesh.receiveShadow = false;
+  mesh.userData.collisionXZ = {
+    minX: cx - w / 2, maxX: cx + w / 2,
+    minZ: cz - d / 2, maxZ: cz + d / 2,
+  };
+  mesh.userData.isFallGuard = true;
   mesh.matrixAutoUpdate = false;
   mesh.updateMatrix();
   level.scene.add(mesh);
@@ -142,6 +190,13 @@ export function addPlatform(level, bbox, height) {
   level.scene.add(mesh);
   level.obstacles.push(mesh);
   level._dirtySolid();
+  // Phase M step 6 — invisible fall guards along every platform
+  // edge. Defends against clip-onto-top scenarios so the player
+  // can't slip off the raised surface into the void.
+  addFallGuard(level, minX, minZ, maxX, minZ);   // north edge
+  addFallGuard(level, minX, maxZ, maxX, maxZ);   // south edge
+  addFallGuard(level, minX, minZ, minX, maxZ);   // west edge
+  addFallGuard(level, maxX, minZ, maxX, maxZ);   // east edge
   return mesh;
 }
 
