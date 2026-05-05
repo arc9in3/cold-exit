@@ -2157,6 +2157,21 @@ export class Inventory {
     this._bump();
   }
 
+  // Trainer-tab Quartermaster + various gear/skill perks accumulate a
+  // `pocketsBonus` integer in derivedStats. Without this hook the bonus
+  // had nowhere to land and the upgrade silently did nothing (#42).
+  // Each +1 bonus widens the grid by one column (BASE_POCKET_H rows
+  // tall) so a +1 pocket reads as +1 1-cell-tall × full-height column,
+  // matching how 1×1 pocket items look in the existing 4×2 grid.
+  setPocketBonus(n) {
+    const bonus = Math.max(0, n | 0);
+    const targetW = BASE_POCKET_W + bonus;
+    if (this.pocketsGrid.w === targetW && this.pocketsGrid.h === BASE_POCKET_H) return;
+    // resize() expands without disturbing entries when newW >= w.
+    this.pocketsGrid.resize(targetW, BASE_POCKET_H);
+    this._bump();
+  }
+
   // Swap two action-bar slots' contents. Accepts null contents on either
   // side so it doubles as "move to empty slot".
   swapActionSlots(a, b) {

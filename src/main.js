@@ -7532,6 +7532,12 @@ function recomputeStats() {
       derivedStats.maxHealthBonus = target - baseMax2;
     }
   }
+  // Pocket-grid resize — pocketsBonus folds in here so trainer-tab
+  // Quartermaster purchases (and gear/perk +pockets bonuses that
+  // landed in the same bag) actually grow the inventory grid (#42).
+  if (typeof inventory.setPocketBonus === 'function') {
+    inventory.setPocketBonus(derivedStats.pocketsBonus | 0);
+  }
   // Expose to window AFTER all modifiers have applied (skills, perks,
   // artifacts, equipment, buffs, trainer unlocks, contract mults,
   // equip-mods). Reading window.__derivedStats during recompute used
