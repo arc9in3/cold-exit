@@ -9,15 +9,37 @@
 //   - last input frame (if exposed via window.__lastInputFrame)
 //   - base64-encoded canvas screenshot
 //
-// POSTs to http://localhost:3001/api/bugs/intake (Mission Control
-// dashboard). On failure (dashboard offline / CORS / etc.) falls back
-// to console.log + clipboard copy.
+// Routing priority:
+//   1. Discord webhook (window.__COLD_EXIT_BUG_WEBHOOK or build-injected
+//      URL). Works from the live deploy because Discord webhooks are
+//      public-facing. Posts a compact embed + the screenshot as an
+//      attachment + the dump JSON as a markdown code block.
+//   2. Mission Control dashboard (http://localhost:3001/api/bugs/intake)
+//      — only when the user is running cold-exit alongside their MC
+//      stack at home.
+//   3. Console.log + clipboard fallback if neither is reachable.
+//
+// The Discord webhook URL is read at runtime from window.__COLD_EXIT_BUG_WEBHOOK
+// so it can be injected by an HTML <script> tag (e.g. Cloudflare Pages
+// build snippet or per-environment override) without rebuilding the
+// game module. If the URL contains 'webhooks/' Discord IDs we treat it
+// as a Discord webhook and route there first; otherwise we treat it as
+// a generic JSON intake endpoint.
 //
 // Idempotent — debounced 3s so accidental key-mash doesn't flood.
 
-const ENDPOINT = 'http://localhost:3001/api/bugs/intake';
+const DASHBOARD_ENDPOINT = 'http://localhost:3001/api/bugs/intake';
 const DEBOUNCE_MS = 3000;
 let _lastFiredT = 0;
+
+function _discordWebhookUrl() {
+  if (typeof window === 'undefined') return null;
+  const url = window.__COLD_EXIT_BUG_WEBHOOK;
+  if (!url || typeof url !== 'string') return null;
+  // Sanity check — must look like a Discord webhook URL.
+  if (!/discord(?:app)?\.com\/api\/webhooks\//i.test(url)) return null;
+  return url;
+}
 
 function _capturePayload() {
   const ts = new Date().toISOString();
@@ -117,24 +139,68 @@ function _capturePayload() {
   };
 }
 
-async function _post(payload) {
-  // Build a compact title so a list-view can identify the repro
-  // without expanding the body.
-  const title = `auto: stuck repro [seed=${payload.runSeed ?? '?'} idx=${payload.levelIndex ?? '?'} room=${payload.playerRoomId ?? '?'}]`;
-  const screenshot = payload.screenshot;
-  const bodyPayload = { ...payload };
-  delete bodyPayload.screenshot;
-  const body = '```json\n' + JSON.stringify(bodyPayload, null, 2) + '\n```';
+// Build a compact title so a list-view (Discord embed / MC dashboard
+// row) can identify the repro without expanding the body.
+function _titleFor(payload) {
+  return `auto: stuck repro [seed=${payload.runSeed ?? '?'} idx=${payload.levelIndex ?? '?'} room=${payload.playerRoomId ?? '?'}]`;
+}
 
-  const resp = await fetch(ENDPOINT, {
+// Post to a Discord channel webhook. Sends a multipart form so the
+// screenshot lands as a real attached image (.png) plus a JSON-only
+// payload describing the embed + the level dump. Bot listeners on
+// the channel parse the F2-marker in the embed footer to recognize
+// this as a structured stuck-repro.
+async function _postDiscord(webhookUrl, payload) {
+  const title = _titleFor(payload);
+  const screenshot = payload.screenshot;
+  const bodyPayload = { ...payload }; delete bodyPayload.screenshot;
+  // Truncate the dump so the message fits in Discord's 2000-char
+  // content limit; full JSON is attached as a file separately.
+  const dumpFull = JSON.stringify(bodyPayload, null, 2);
+  const dumpShort = dumpFull.length > 1500 ? dumpFull.slice(0, 1500) + '\n... (truncated; see dump.json attachment)' : dumpFull;
+  const embed = {
+    title: `🐛 ${title}`,
+    color: 0xd84a3a,
+    description:
+      `**Player:** \`${payload.playerPos ? `(${payload.playerPos.x}, ${payload.playerPos.z}) room=${payload.playerRoomId}` : '?'}\`\n` +
+      `**Walkability:** \`${payload.walkability?.ok ? 'OK' : `FAIL — unreachable: ${(payload.walkability?.unreachable || []).map(r=>'R'+r.id).join(', ') || '?'}`}\`\n` +
+      `**Gunmen alive:** ${payload.gunmen?.length ?? 0}  ·  **Melees alive:** ${payload.melees?.length ?? 0}\n` +
+      `**Boss room:** R${payload.bossRoomId ?? '?'}\n` +
+      '```json\n' + dumpShort + '\n```',
+    footer: { text: 'cold-exit-f2-dump v1' },
+    timestamp: payload.ts,
+  };
+  // Multipart: payload_json (the message) + file0 (screenshot) + file1 (full dump).
+  const fd = new FormData();
+  fd.append('payload_json', JSON.stringify({
+    content: '',
+    embeds: [embed],
+    allowed_mentions: { parse: [] },
+  }));
+  if (screenshot && screenshot.startsWith('data:image/')) {
+    const blob = await (await fetch(screenshot)).blob();
+    fd.append('files[0]', blob, 'screenshot.png');
+  }
+  fd.append('files[1]', new Blob([dumpFull], { type: 'application/json' }), 'dump.json');
+  const resp = await fetch(webhookUrl + '?wait=true', { method: 'POST', body: fd });
+  if (!resp.ok) throw new Error(`Discord webhook HTTP ${resp.status}`);
+  return resp.json();
+}
+
+// Post to Mission Control dashboard's bugs intake. Used when the
+// user is running cold-exit alongside their local MC stack and wants
+// the bug to land in the dashboard's bug list instead of (or in
+// addition to) Discord.
+async function _postDashboard(payload) {
+  const title = _titleFor(payload);
+  const screenshot = payload.screenshot;
+  const bodyPayload = { ...payload }; delete bodyPayload.screenshot;
+  const body = '```json\n' + JSON.stringify(bodyPayload, null, 2) + '\n```';
+  const resp = await fetch(DASHBOARD_ENDPOINT, {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
     body: JSON.stringify({
-      project: 'cold-exit',
-      title,
-      body,
-      screenshot,
-      severity: 'major',
+      project: 'cold-exit', title, body, screenshot, severity: 'major',
     }),
   });
   if (!resp.ok) throw new Error(`HTTP ${resp.status}`);
@@ -169,22 +235,38 @@ async function _fileBug() {
     _showToast('Bug capture failed (see console)', false);
     return;
   }
+  // Try Discord webhook first (works in live deploy), fall back to
+  // local dashboard, then clipboard. Each step is best-effort; we
+  // log specifically why we fell through so a user with a misconfigured
+  // webhook URL gets a clear console signal.
+  const webhook = _discordWebhookUrl();
+  if (webhook) {
+    try {
+      const result = await _postDiscord(webhook, payload);
+      console.log('[bug-report] posted to Discord:', result?.id || '(ok)');
+      _showToast('🐛 Bug posted to #cold-exit-bugs');
+      return;
+    } catch (err) {
+      console.warn('[bug-report] Discord webhook failed, trying dashboard:', err);
+    }
+  }
   try {
-    const result = await _post(payload);
-    console.log('[bug-report] filed:', result);
-    _showToast(`Bug filed — repro captured (#${result.id ?? '?'})`);
+    const result = await _postDashboard(payload);
+    console.log('[bug-report] filed via dashboard:', result);
+    _showToast(`Bug filed (#${result.id ?? '?'})`);
+    return;
   } catch (err) {
     console.warn('[bug-report] dashboard unreachable, falling back to clipboard:', err);
-    const text = JSON.stringify(payload, null, 2);
-    console.log('=== BUG REPORT (clipboard fallback) ===');
-    console.log(text);
-    console.log('=== END BUG REPORT ===');
-    try {
-      if (navigator?.clipboard?.writeText) await navigator.clipboard.writeText(text);
-      _showToast('Bug copied to clipboard (dashboard offline)', false);
-    } catch (_) {
-      _showToast('Bug logged to console (clipboard blocked)', false);
-    }
+  }
+  const text = JSON.stringify(payload, null, 2);
+  console.log('=== BUG REPORT (clipboard fallback) ===');
+  console.log(text);
+  console.log('=== END BUG REPORT ===');
+  try {
+    if (navigator?.clipboard?.writeText) await navigator.clipboard.writeText(text);
+    _showToast('Bug copied to clipboard (no webhook / dashboard)', false);
+  } catch (_) {
+    _showToast('Bug logged to console (clipboard blocked)', false);
   }
 }
 
