@@ -46,6 +46,7 @@ if (typeof window !== 'undefined') {
 import { mantleableAt, applyMantle, isOnLedge, dropOff } from './ledges.js';
 import { spawnDamageNumber } from './hud.js';
 import { initDebugPanel, setDebugPanelVisible } from './debug.js';
+import { initBugReport } from './bug_report.js';
 import { getDevToolsEnabled, setDevToolsEnabled, getPlayerName, setPlayerName,
          getStartingStoreState, setStartingStoreState,
          getCharacterStyle, setCharacterStyle,
@@ -701,6 +702,12 @@ import('./anim/registry.js').then(m => m.Registry.create('Assets/anim_data/'))
 //   __useFbx(null)   // revert to procgen
 window.__player = player;
 window.__scene = scene;
+// Phase M step 9 — bug-report tool needs transientHudMsg + the
+// in-game key listener. initBugReport binds `]` to file a stuck-state
+// repro POST to the Mission Control dashboard.
+window.transientHudMsg = transientHudMsg;
+try { initBugReport(); }
+catch (e) { console.warn('[bug-report] init failed:', e); }
 window.__useFbx = async (url) => {
   const mod = await import('./player.js');
   if (!url) {
@@ -1140,6 +1147,16 @@ if (typeof window !== 'undefined') {
 }
 const loot = new LootManager(scene);
 const level = new Level(scene, { ground });
+// Phase M step 9 — expose the level + run-seed handle so the in-game
+// bug-report tool (src/bug_report.js, ] keybind) can serialise full
+// repro state without a circular import.
+if (typeof window !== 'undefined') {
+  window.__level = level;
+  Object.defineProperty(window, '__runSeed', {
+    configurable: true,
+    get() { return _runSeed || null; },
+  });
+}
 const projectiles = new ProjectileManager(scene);
 
 // Live-tune helpers for the currently equipped weapon. `tuneWeapon`
