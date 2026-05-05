@@ -848,7 +848,11 @@ export class MegaBoss {
     const ang = Math.atan2(dx, dz);
     this._chargeTargetAng = ang;
     this._chargeDistance = dist;
-    const geom = new THREE.PlaneGeometry(2.6, dist);
+    // Visual width = 2× the damage radius (4.8m). Previous 2.6m
+    // corridor was narrower than the 2.4-radius damage circle, so
+    // players standing JUST outside the visible band still ate the
+    // hit (#11). Geometry width matches the actual hit volume now.
+    const geom = new THREE.PlaneGeometry(4.8, dist);
     const mat = _telegraphMat.clone();
     mat.opacity = 0;
     const m = new THREE.Mesh(geom, mat);
