@@ -10,6 +10,9 @@ import { modelForItem, shouldMirrorInHand,
 import { buildMeleePrimitive } from './melee_primitives.js';
 import { swapInBakedCorpse } from './corpse_bake.js';
 import { rigInstancer } from './rig_instancer.js';
+import { aiSpatial } from './ai_spatial.js';
+import { findCoverFor } from './ai_cover.js';
+import { windowLosBetween } from './ai_windows.js';
 
 // Strip the held weapon meshes off a dead enemy — detach the primitive
 // gun box, the FBX weaponModel group, and the muzzle anchor from the
@@ -1100,6 +1103,26 @@ export class GunmanManager {
 
   update(ctx) {
     const dt = ctx.dt;
+    // Refresh the AI spatial hash + flow field once per frame. This
+    // is the central index every per-gunman branch reads from below
+    // (neighbour query, LoS, flow-field path). Cheap — O(N) over
+    // alive entries — and isolated to the host's authoritative tick;
+    // joiner-side updates skip the flow-field sample inside
+    // _updateRanged so it stays network-stateless.
+    if (ctx.level && !ctx.coopJoiner) {
+      try {
+        aiSpatial.rebuild(ctx.level, {
+          gunmen: this.gunmen,
+          melees: (typeof window !== 'undefined' && window.__melees?.enemies) || [],
+          drones: (typeof window !== 'undefined' && window.__drones?.drones) || [],
+          player: ctx.playerPos,
+        });
+      } catch (e) {
+        // Spatial hash never blocks the AI tick. If rebuild fails the
+        // legacy code paths take over.
+        if (typeof console !== 'undefined') console.warn('[ai_spatial] rebuild failed:', e);
+      }
+    }
     // LOD scheduler — distant idle gunmen tick at half rate. Cuts AI
     // cost roughly in half on big late-game rooms with 6+ gunmen
     // sprinkled across adjacent rooms. Active enemies (alerted /
@@ -2218,8 +2241,18 @@ export class GunmanManager {
       g._shieldRefreshT = (g._shieldRefreshT || 0) - dt;
       if (g._shieldRefreshT <= 0 || !g._shieldRef || !g._shieldRef.alive) {
         g._shieldRefreshT = 0.5;
+        // Pass 1 — narrow the shield-bearer scan to spatial-hash
+        // neighbours within escort range (8m). Drops the inner loop
+        // from O(shieldBearers) to ~O(1) on dense rooms.
         let best = null, bestD = 40;
-        for (const sb of ctx.shieldBearers) {
+        const useSpatial = !!aiSpatial?.query;
+        const candidates = useSpatial
+          ? aiSpatial.query(g.group.position.x, g.group.position.z, 8)
+            .filter(c => c.kind === 'melee' && c.ent && c.ent.variant === 'shieldBearer')
+            .map(c => c.ent)
+          : ctx.shieldBearers;
+        for (const sb of candidates) {
+          if (!sb || !sb.alive) continue;
           if (sb.roomId !== undefined && g.roomId !== undefined && sb.roomId !== g.roomId) continue;
           const sdx = sb.group.position.x - g.group.position.x;
           const sdz = sb.group.position.z - g.group.position.z;
@@ -2246,6 +2279,52 @@ export class GunmanManager {
           };
         }
       }
+    }
+
+    // All-variants cover use — Pass 1 design: when health < 50% OR
+    // the player was firing within the last 1.5s, EVERY variant
+    // (not just coverSeeker) should head for the closest scored
+    // cover. Refresh once a second so we don't burn cycles on the
+    // O(obstacles) scan inside ai_cover. Cover persists for ~3s
+    // before we re-evaluate so the AI doesn't oscillate between two
+    // equally-good spots.
+    let coverTarget = null;
+    if (g.state !== STATE.IDLE && ctx.level && ctx.playerPos) {
+      const hpFrac = g.maxHp > 0 ? g.hp / g.maxHp : 1;
+      const _now = (typeof performance !== 'undefined' ? performance.now() : Date.now()) / 1000;
+      const recentlyHit = (g._hitWinStart && _now - g._hitWinStart < 4.0) || hpFrac < 0.5;
+      // Honour ctx.playerFiring if main.js provides it; otherwise the
+      // recently-hit fallback is the practical signal.
+      const playerShooting = !!ctx.playerFiring;
+      const shouldSeekCover = (hpFrac < 0.5 || recentlyHit || playerShooting)
+        // Skip during specific overrides — the existing tuck / suppress
+        // logic already places the gunman somewhere safe.
+        && !tuckTarget
+        && !escortTarget;
+      if (shouldSeekCover) {
+        g._coverRefreshT = (g._coverRefreshT || 0) - dt;
+        if (g._coverRefreshT <= 0
+            || !g._coverPos
+            || ((g._coverHoldT || 0) <= 0)) {
+          g._coverRefreshT = 1.0;
+          // findCoverFor is O(obstacles within 8m). Acceptable at 1Hz.
+          const spots = findCoverFor(ctx.level, g.group.position, ctx.playerPos, { maxRadius: 8 });
+          if (spots.length) {
+            const best = spots[0];
+            g._coverPos = { x: best.x, z: best.z, peekDir: best.peekDir };
+            g._coverHoldT = 3.0;
+          }
+        }
+        if (g._coverPos) {
+          coverTarget = g._coverPos;
+        }
+      } else {
+        // Drop the cover target once the trigger condition lapses so
+        // the gunman returns to normal chase. _coverPos lingers for
+        // the probe to read until the next refresh tick.
+        coverTarget = null;
+      }
+      g._coverHoldT = Math.max(0, (g._coverHoldT || 0) - dt);
     }
 
     if (g.state === STATE.ALERTED || g.state === STATE.FIRING) {
@@ -2336,6 +2415,21 @@ export class GunmanManager {
         } else {
           moveSign = 0;
         }
+      } else if (coverTarget) {
+        // Pass 1 cover use — walk to the scored cover spot. Hold
+        // position once we're within 0.5m so the gunman peeks from
+        // the chosen side instead of orbiting the prop. This is the
+        // hook the probe reads via g._coverPos to compute the cover-
+        // use rate metric.
+        const cdx = coverTarget.x - g.group.position.x;
+        const cdz = coverTarget.z - g.group.position.z;
+        const cd = Math.hypot(cdx, cdz);
+        if (cd > 0.5) {
+          approachDir.set(cdx / cd, 0, cdz / cd);
+          moveSign = 1;
+        } else {
+          moveSign = 0;
+        }
       } else if (escortTarget) {
         const edx = escortTarget.x - g.group.position.x;
         const edz = escortTarget.z - g.group.position.z;
@@ -2349,6 +2443,38 @@ export class GunmanManager {
       } else {
         if (dist > pref + tol) moveSign = 1;
         else if (dist < pref - tol) moveSign = -1;
+        // Flow-field bias — when neither door / tuck / escort is
+        // overriding the approach, swap the straight-line dir2d for
+        // a flow-field sample toward the player. The flow field
+        // routes around walls, so a gunman in a different room
+        // won't bee-line into a wall any more. Falls back to the
+        // existing approachDir if the field can't reach this cell
+        // (e.g. enemy on a ledge, network error, level not yet
+        // ready). Skipped when the gunman is in COMBAT range
+        // (within preferredRange + tolerance) so close-quarters
+        // strafing reads naturally instead of snapping to
+        // grid-axis movement.
+        const useFlow = !!aiSpatial?.flowFieldTo
+          && moveSign === 1
+          && dist > (pref + tol);
+        if (useFlow) {
+          const flow = aiSpatial.flowFieldTo(ctx.playerPos.x, ctx.playerPos.z);
+          if (flow && typeof flow.sample === 'function') {
+            const dir = flow.sample(g.group.position.x, g.group.position.z);
+            if (dir && (dir.dx !== 0 || dir.dz !== 0)) {
+              // Blend 70% flow + 30% direct heading. Pure flow-field
+              // sampling produces visible grid-aligned snaps; the
+              // 30% straight-line bleed smooths it back into a
+              // human-looking arc while still routing around walls.
+              const fx = dir.dx * 0.7 + (dir2d.x) * 0.3;
+              const fz = dir.dz * 0.7 + (dir2d.z) * 0.3;
+              const fl = Math.hypot(fx, fz);
+              if (fl > 0.001) {
+                approachDir.set(fx / fl, 0, fz / fl);
+              }
+            }
+          }
+        }
       }
       const slowK = g.slowT > 0 ? tunables.zones.legs.slowFactor : 1;
 
@@ -2684,6 +2810,12 @@ export class GunmanManager {
       // point of the archetype is to zone large open arenas, so a
       // random 20m-range pistol can't lock him out of firing.
       let muzzleLos = false;
+      // Pass 1 — when an intact window is between us and the player,
+      // we want to fire AT the window to break it (so a future
+      // segment is clear) rather than refuse the shot. Stamped on
+      // the gunman so the firing branch below can re-target the aim
+      // at the glass instead of the player.
+      g._fireAtWindow = null;
       const rangeOk = g.archetype === 'bulletHell'
         ? true
         : dist <= (g.weapon?.range || 0) * 1.2;
@@ -2692,7 +2824,25 @@ export class GunmanManager {
         const mTest = g.muzzle.getWorldPosition(_g_muzzleTest);
         if (canSee) {
           const aTest = _g_aimTest.set(ctx.playerPos.x, mTest.y, ctx.playerPos.z);
-          muzzleLos = ctx.combat.hasLineOfSight(mTest, aTest, ctx.obstacles);
+          // Window-aware LoS first — gives us "I see the player but
+          // a window's in the way" as a separate signal. We still
+          // run the BVH raycast for the precise body/cover hit
+          // because the AABB-step probe used by ai_windows is
+          // coarser than the BVH.
+          let windowSays = null;
+          try {
+            windowSays = windowLosBetween(ctx.level, mTest.x, mTest.z,
+              ctx.playerPos.x, ctx.playerPos.z);
+          } catch (e) { /* fail-soft */ }
+          if (windowSays && windowSays.blockedByIntactWindow) {
+            // Aim at the window instead — break it so the next
+            // tick gets a clean line. Bullet damage carries over to
+            // the windowState via the existing projectile path.
+            g._fireAtWindow = windowSays.blockedByIntactWindow;
+            muzzleLos = true;
+          } else {
+            muzzleLos = ctx.combat.hasLineOfSight(mTest, aTest, ctx.obstacles);
+          }
         } else if (suppressing) {
           muzzleLos = true; // already validated above
         }
@@ -2720,8 +2870,14 @@ export class GunmanManager {
           const weapon = g.weapon;
           const muzzleWorld = g.muzzle.getWorldPosition(_g_muzzle);
           // Suppressive shots aim at the last-known spot, not the live player.
+          // _fireAtWindow (set by the window-aware LoS branch above)
+          // re-routes the aim onto an intact window between us and
+          // the player so the next bullet breaks the glass and
+          // clears the line.
           const aim = _g_aim;
-          if (suppressing) {
+          if (g._fireAtWindow) {
+            aim.set(g._fireAtWindow.x, 0, g._fireAtWindow.z);
+          } else if (suppressing) {
             aim.set(g.lastKnownX, 0, g.lastKnownZ);
           } else {
             aim.copy(ctx.playerPos);
@@ -2863,16 +3019,37 @@ export class GunmanManager {
               g.aiSettleDur = settle;
               g.fireT += settle;
             }
-            // Cover-seekers break contact between bursts. Try to find
-            // an actual prop / column to tuck behind; fall back to a
-            // blind perpendicular dart if there's nothing nearby.
+            // Cover-seekers break contact between bursts. Cover use
+            // is now extended to ALL variants when health<50% OR the
+            // player has been firing recently — gated below outside
+            // this block. Here we still trigger the post-burst
+            // cover-find for the variants flagged coverSeek (the
+            // dedicated archetype + sub-bosses).
+            //
+            // ai_cover.findCoverFor returns the top-5 ranked cover
+            // candidates. We pick the best (highest score, with a
+            // small distance bias) and head there. Fallback chain:
+            //   1. ai_cover (the proper LoS-aware scorer)
+            //   2. legacy level.findCoverNear (single-prop heuristic)
+            //   3. blind perpendicular dart
             if (g.profile.coverSeek) {
               let coverDirX = 0, coverDirZ = 0;
-              if (ctx.level && ctx.level.findCoverNear && ctx.playerPos) {
-                const spot = ctx.level.findCoverNear(g.group.position, ctx.playerPos, 8);
-                if (spot) {
-                  const dxc = spot.x - g.group.position.x;
-                  const dzc = spot.z - g.group.position.z;
+              const spots = (ctx.level && ctx.playerPos)
+                ? findCoverFor(ctx.level, g.group.position, ctx.playerPos, { maxRadius: 8 })
+                : [];
+              const spot = spots.length ? spots[0] : null;
+              if (spot) {
+                g._coverPos = { x: spot.x, z: spot.z, peekDir: spot.peekDir };
+                const dxc = spot.x - g.group.position.x;
+                const dzc = spot.z - g.group.position.z;
+                const dl = Math.hypot(dxc, dzc);
+                if (dl > 0.001) { coverDirX = dxc / dl; coverDirZ = dzc / dl; }
+              } else if (ctx.level && ctx.level.findCoverNear && ctx.playerPos) {
+                const fb = ctx.level.findCoverNear(g.group.position, ctx.playerPos, 8);
+                if (fb) {
+                  g._coverPos = { x: fb.x, z: fb.z, peekDir: 0 };
+                  const dxc = fb.x - g.group.position.x;
+                  const dzc = fb.z - g.group.position.z;
                   const dl = Math.hypot(dxc, dzc);
                   if (dl > 0.001) { coverDirX = dxc / dl; coverDirZ = dzc / dl; }
                 }
@@ -2881,6 +3058,7 @@ export class GunmanManager {
                 const side = Math.random() < 0.5 ? -1 : 1;
                 coverDirX = -dir2d.z * side;
                 coverDirZ = dir2d.x * side;
+                g._coverPos = null;
               }
               g.repositionDirX = coverDirX;
               g.repositionDirZ = coverDirZ;
