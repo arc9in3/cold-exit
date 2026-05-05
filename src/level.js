@@ -4179,7 +4179,14 @@ export class Level {
   unlockDoorsForRoom(roomId) {
     for (const mesh of this.obstacles) {
       if (!mesh.userData.isDoor) continue;
-      if (!mesh.userData.connects.includes(roomId)) continue;
+      // Connector / extraction-room doors built outside _buildDoor (e.g.
+      // skybridges, extraction-room sealing door) don't carry a
+      // `connects` array — they're not part of the chain-room unlock
+      // graph and stay unlocked-on-condition (boss kill etc), not
+      // room-clear. Skip them silently.
+      const connects = mesh.userData.connects;
+      if (!connects || typeof connects.includes !== 'function') continue;
+      if (!connects.includes(roomId)) continue;
       if (mesh.userData.unlocked) continue;
       // Keycard-gated doors ignore room-clear unlocks — they only
       // open via tryKeycardUnlock with a matching held token.
