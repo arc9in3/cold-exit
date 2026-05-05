@@ -125,6 +125,11 @@ function statsFor(level) {
   let drawCalls = 0;       // ~mesh count, but each InstancedMesh = 1
   let verts = 0;
   let lights = 0;
+  // Unique-material count — every mesh's material(s) tracked by
+  // .uuid. The material-pool win shows up here: before pooling, a level
+  // had ~1000 unique materials; after, < 100 (one per (color, roughness,
+  // type) tuple, plus the frame/glass module singletons in windows.js).
+  const matUuids = new Set();
   const byKind = new Map();
   scene.traverse((o) => {
     if (o.isLight) {
@@ -140,6 +145,10 @@ function statsFor(level) {
       if (g && g.attributes && g.attributes.position) {
         verts += g.attributes.position.count * (o.count || 0);
       }
+      if (o.material) {
+        if (Array.isArray(o.material)) o.material.forEach(m => m && matUuids.add(m.uuid));
+        else matUuids.add(o.material.uuid);
+      }
     } else if (o.isMesh) {
       meshes += 1;
       drawCalls += 1;
@@ -151,6 +160,10 @@ function statsFor(level) {
                    (o.parent && o.parent.userData && o.parent.userData.kind) ||
                    'ANONYMOUS';
       byKind.set(kind, (byKind.get(kind) || 0) + 1);
+      if (o.material) {
+        if (Array.isArray(o.material)) o.material.forEach(m => m && matUuids.add(m.uuid));
+        else matUuids.add(o.material.uuid);
+      }
     }
   });
   // Registered ambient lights (stealth-system entries) — not Three.Light objects.
@@ -168,6 +181,7 @@ function statsFor(level) {
     verts,
     lights,
     registeredLights,
+    materials: matUuids.size,
     invariantOK,
     invariantNote,
     byKind: Object.fromEntries(
@@ -192,9 +206,9 @@ function fmtNum(n) {
 }
 
 function tableHTML(results, baseline) {
-  const cols = ['rooms', 'meshes', 'drawCalls', 'verts', 'obstacles',
-    'decorations', 'windows', 'ledges', 'lights', 'registeredLights',
-    'instancedMeshes'];
+  const cols = ['rooms', 'meshes', 'drawCalls', 'verts', 'materials',
+    'obstacles', 'decorations', 'windows', 'ledges', 'lights',
+    'registeredLights', 'instancedMeshes'];
   let html = '<table><thead><tr><th>level</th>';
   for (const c of cols) html += `<th>${c}</th>`;
   html += '</tr></thead><tbody>';
