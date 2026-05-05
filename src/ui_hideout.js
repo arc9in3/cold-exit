@@ -2015,14 +2015,17 @@ export class HideoutUI {
     const selectedDef = tunables.weapons.find(w => w.name === selectedName);
     if (!selectedDef) return null;
 
-    // Queued armor buys from the Stash store. Key by slot so we can
-    // resolve baseline-vs-buy per slot in one pass.
+    // Queued buys from the Pre-Mission Store. Armor is keyed by slot
+    // so we can resolve baseline-vs-buy per slot in one pass; buffs
+    // get a defId list so we can look up friendly names.
     const queuedArmorBySlot = {};
     const queuedConsumables = [];
+    const queuedBuffIds = [];
     for (const q of getStarterInventory()) {
       if (!q) continue;
       if (q.__storeArmor && q.slot) queuedArmorBySlot[q.slot] = q;
       else if (q.__storeConsumable) queuedConsumables.push(q);
+      else if (q.__storeBuff) queuedBuffIds.push(q.defId);
     }
     // Baseline armor — must match `startNewRun` in main.js. Centralise
     // the table here so the summary reads what the run will actually
@@ -2052,6 +2055,18 @@ export class HideoutUI {
     const consLbl = queuedConsumables.length
       ? `3× bandage + throwable + ${queuedConsumables.length} bought`
       : '3× bandage + throwable';
+    // Pre-Mission Boost buffs — spend chips on buff_speed/reload/luck
+    // and they apply at run start (see _applyStarterBuffs in main.js).
+    // Show each buff by its catalog name so the player can confirm
+    // their spend stuck. Skip the row entirely if no buffs queued —
+    // most runs won't have any and a "BOOSTS · none" row would just
+    // be visual noise.
+    const buffLbl = queuedBuffIds.length
+      ? queuedBuffIds.map(id => {
+          const def = STORE_BUFF_CATALOG.find(b => b.id === id);
+          return def ? def.name : id;
+        }).join(' · ')
+      : null;
 
     const wrap = document.createElement('div');
     wrap.className = 'loadout-summary';
@@ -2084,6 +2099,7 @@ export class HideoutUI {
     if (pantsLbl) grid.appendChild(_row('PANTS', pantsLbl, true));
     if (packLbl)  grid.appendChild(_row('PACK',  packLbl,  true));
     grid.appendChild(_row('POCKETS', consLbl, true));
+    if (buffLbl)  grid.appendChild(_row('BOOSTS', buffLbl, true));
     wrap.appendChild(grid);
     return wrap;
   }
