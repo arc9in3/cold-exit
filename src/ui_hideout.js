@@ -2074,10 +2074,27 @@ export class HideoutUI {
     const _rankNow = getContractRank();
     const _ptsNow = getRankPoints();
     const _ptsNext = rankPointsForNext(_rankNow);
+    // What unlocks next? Walks the rank-gated reveal thresholds in
+    // ascending order and surfaces the first one the player hasn't
+    // crossed yet. Hides the line entirely once everything is
+    // revealed (mid-late game).
+    const _nextUnlock = (() => {
+      const thresholds = [
+        { rank: 2,  label: 'ARMORER' },
+        { rank: 4,  label: 'TAILOR' },
+        { rank: 5,  label: 'VENDORS' },
+        { rank: 8,  label: 'MAILBOX' },
+        { rank: 10, label: 'VAULT' },
+        { rank: 12, label: 'BLACK MARKET' },
+      ];
+      const next = thresholds.find(t => _rankNow < t.rank);
+      return next ? `Next: ${next.label} @ Rank ${next.rank}` : '';
+    })();
     const corner = document.createElement('div');
     corner.className = 'contractor-corner';
     corner.innerHTML = `
       <div class="corner-line corner-rank">RANK <b>${_rankNow}</b> · <b>${_ptsNow}</b>/${_ptsNext} XP</div>
+      ${_nextUnlock ? `<div class="corner-line corner-next">${_nextUnlock}</div>` : ''}
       <div class="corner-line">MEGABOSSES <b>${unlockState.megabossKills}</b></div>
       <div class="corner-refresh">CONTRACT REFRESH<br><span class="refresh-time">${this._refreshCountdownStr()}</span></div>
     `;
@@ -4484,6 +4501,14 @@ export class HideoutUI {
         padding: 4px 0;
       }
       .corner-rank b { font-size: 16px; }
+      /* Upcoming unlock hint — small + subdued so it reads as a
+         signpost, not the primary number. Hidden via the conditional
+         render once the player has crossed every threshold. */
+      .corner-next {
+        font-size: 10px; letter-spacing: 1.3px;
+        color: #5a8acf; opacity: 0.85;
+        padding: 2px 0 4px;
+      }
       .corner-refresh {
         margin-top: 6px; padding-top: 6px;
         border-top: 1px solid rgba(90,138,207,0.2);
