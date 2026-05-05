@@ -2097,6 +2097,12 @@ export const ENCOUNTER_DEFS = {
           }
         }
         s.barkT = Math.max(0, s.barkT - dt);
+        // Don't resolve kill / consequence branches until the player has
+        // actually entered the room. Snipping NPCs through the doorway
+        // before crossing the threshold used to fast-forward the whole
+        // encounter (#61). Kills outside the room are still possible —
+        // we just defer the consequence until the player walks in.
+        if (!s.everEntered) return;
         // Detect first kill.
         const gAlive = s.pair.gunman && s.pair.gunman.alive;
         const kAlive = s.pair.kneeler && s.pair.kneeler.alive;
