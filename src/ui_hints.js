@@ -119,7 +119,12 @@ export function tickHints(dt) {
   const el = _ensureHintEl();
   const cur = _queue[0];
   if (!cur) {
-    el.style.opacity = '0';
+    // Cache the opacity write so the empty-queue path doesn't dirty
+    // the style every frame for the rest of the game.
+    if (el._lastOpacity !== '0') {
+      el.style.opacity = '0';
+      el._lastOpacity = '0';
+    }
     return;
   }
   if (cur.t === 0) {
@@ -132,6 +137,12 @@ export function tickHints(dt) {
   let alpha = 1;
   if (cur.t < 0.25) alpha = cur.t / 0.25;
   else if (cur.t > total - 0.4) alpha = Math.max(0, (total - cur.t) / 0.4);
-  el.style.opacity = String(alpha.toFixed(3));
+  // Quantize to 0.01 so identical-rounded alphas don't churn the
+  // style attribute. The fade is visually smooth at 0.01 steps.
+  const aStr = alpha.toFixed(2);
+  if (el._lastOpacity !== aStr) {
+    el.style.opacity = aStr;
+    el._lastOpacity = aStr;
+  }
   if (cur.t >= total) _queue.shift();
 }

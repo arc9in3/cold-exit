@@ -252,7 +252,12 @@ export class Input {
       this._gpadHeld.clear();
       return;
     }
-    const nowHeld = new Set();
+    // Ping-pong two Sets to avoid `new Set()` per pad poll. _gpadHeld
+    // is the "previous" frame; we fill _gpadHeldNext, then swap after
+    // edge-fire detection. Keeps allocations to two long-lived Sets.
+    if (!this._gpadHeldNext) this._gpadHeldNext = new Set();
+    const nowHeld = this._gpadHeldNext;
+    nowHeld.clear();
     // Buttons
     for (let i = 0; i < pad.buttons.length; i++) {
       if (!pad.buttons[i]) continue;
@@ -274,9 +279,9 @@ export class Input {
       const wasHeld = this._kbHeld.has(a) || this._gpadHeld.has(a);
       if (!wasHeld) this._fireAction(a);
     }
-    // Replace the gamepad-held set wholesale; release of a pad button
-    // only drops the gamepad source — keyboard hold (in _kbHeld) is
-    // untouched and continues to keep the action live for sample().
+    // Swap: nowHeld becomes the new "previous" set; the old _gpadHeld
+    // is reused as scratch on the next call.
+    this._gpadHeldNext = this._gpadHeld;
     this._gpadHeld = nowHeld;
   }
 
