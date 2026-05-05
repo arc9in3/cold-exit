@@ -192,13 +192,66 @@ function makeProxy(instancer, pool, slot, x, y, z, w, h, d, color) {
     position: { x, y, z, set(nx, ny, nz) { this.x = nx; this.y = ny; this.z = nz; } },
     rotation: { x: 0, y: 0, z: 0 },
     // Three.js Raycaster.intersectObject calls `object.layers.test(...)`
-    // on every candidate before invoking raycast. Without this, the
-    // wall-occlusion + LoS raycasters crash on the first wall hit.
-    // Skip raycasting on wall proxies entirely — they're collision-only
-    // surfaces. Door / actor raycasts use real meshes with the standard
-    // Layers default, so they keep working.
-    layers: { test() { return false; }, mask: 0 },
-    raycast() {},                  // no-op: bullets/LoS use the obstacle list directly via `userData.collisionXZ`, not three's raycast
+    // and `object.raycast(...)` on every candidate. We need both to work
+    // correctly because:
+    //   - hasLineOfSight (combat.js) raycasts the obstacle list to
+    //     decide enemy LoS / wall occlusion. Returning false from
+    //     layers.test() makes the raycaster skip every wall — AI then
+    //     thinks LoS is clear and shoots through walls.
+    //   - But the proxy isn't a real mesh; its geometry is just a
+    //     {parameters} stub, so the default Mesh.raycast (which walks
+    //     triangles) would crash. We provide our own raycast that
+    //     does an analytic ray-vs-AABB intersection from the wall's
+    //     world-space box (translation + scale baked into the
+    //     InstancedMesh slot, mirrored on the proxy via _w/_h/_d).
+    layers: { test() { return true; }, mask: 1 },
+    raycast(raycaster, intersects) {
+      // Skip if the proxy slot is hidden (zero-scaled in the InstancedMesh)
+      // or the raycaster doesn't include our layer.
+      if (!this._visible) return;
+      const ray = raycaster.ray;
+      const px = this.position.x, py = this.position.y, pz = this.position.z;
+      const minX = px - this._w / 2, maxX = px + this._w / 2;
+      const minY = py - this._h / 2, maxY = py + this._h / 2;
+      const minZ = pz - this._d / 2, maxZ = pz + this._d / 2;
+      // Slab-test ray vs AABB. Each axis: tNear = enter-distance,
+      // tFar = exit-distance. Intersection when max(tNear) <= min(tFar)
+      // AND that interval overlaps [near, far]. Standard branchless
+      // version is messier; explicit branches read fine for one wall.
+      const o = ray.origin, d = ray.direction;
+      let tmin = -Infinity, tmax = Infinity;
+      const axes = [
+        [o.x, d.x, minX, maxX],
+        [o.y, d.y, minY, maxY],
+        [o.z, d.z, minZ, maxZ],
+      ];
+      for (const [oi, di, lo, hi] of axes) {
+        if (Math.abs(di) < 1e-9) {
+          if (oi < lo || oi > hi) return;     // parallel + outside slab
+          continue;
+        }
+        let t1 = (lo - oi) / di;
+        let t2 = (hi - oi) / di;
+        if (t1 > t2) { const t = t1; t1 = t2; t2 = t; }
+        if (t1 > tmin) tmin = t1;
+        if (t2 < tmax) tmax = t2;
+        if (tmin > tmax) return;
+      }
+      // tmin = first entry distance (could be negative if ray starts inside).
+      const t = tmin >= 0 ? tmin : tmax;
+      if (t < raycaster.near || t > raycaster.far) return;
+      // Build a hit point. distance must be >= 0 for downstream code.
+      const hitX = o.x + d.x * t;
+      const hitY = o.y + d.y * t;
+      const hitZ = o.z + d.z * t;
+      intersects.push({
+        distance: t,
+        point: { x: hitX, y: hitY, z: hitZ, isVector3: true,
+                 clone() { return { ...this }; } },
+        object: this,
+        face: null, faceIndex: -1, uv: null,
+      });
+    },
     userData: {},
     // Proxy geometry/material are stubs whose .dispose() is a no-op so
     // Level.clear()'s blanket dispose loop can run unchanged. The real
