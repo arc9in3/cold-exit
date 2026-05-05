@@ -36,6 +36,7 @@ import {
   getMerchantUpgrades, setMerchantUpgrade, merchantUpgradeNextCost, MERCHANT_KINDS, MERCHANT_UPGRADE_MAX,
   getRerollUnlocked, setRerollUnlocked, REROLL_UNLOCK_COST,
   getRevealedHideoutTabs, isOnboardSeen, markOnboardSeen,
+  getPendingAnnouncements, markOnboardAnnounced,
 } from './prefs.js';
 import { tunables } from './tunables.js';
 import { BALANCE } from './balance.js';
@@ -137,6 +138,25 @@ const ONBOARD_GREETINGS = {
   mailbox:    '"Rewards from past contracts pile up. Claim what you\'ve earned."',
   vault:      '"Items here survive death. Reach in, plan ahead."',
   blackmarket:'"Sigils only. Permits unlock relics. Keystones bend the run."',
+};
+
+// Hideout-arrival announcement copy — the second-chance toast after
+// the death-time `★ NEW: X UNLOCKED` callout. More descriptive than
+// the death-time line because the player has time to read it now;
+// this is also the only message the player sees if they missed the
+// death-screen toast entirely. Order roughly matches the reveal
+// table so death-pair (recruiter + stash) reads naturally if both
+// fire on the same hideout entry.
+const ONBOARD_ANNOUNCEMENTS = {
+  recruiter:    '★ TRAINER UNLOCKED — Spend marks here to permanently level your stats.',
+  stash:        '★ STASH UNLOCKED — Items you stow before deploying carry over runs.',
+  store:        '★ PRE-MISSION STORE UNLOCKED — Spend chips on starting gear before deploy.',
+  quartermaster:'★ ARMORER UNLOCKED — Permanently add weapons to your starting rotation.',
+  tailor:       '★ TAILOR UNLOCKED — Customize codename, callsign, and character look.',
+  vendors:      '★ VENDORS UNLOCKED — Upgrade in-run merchant stock and rerolls.',
+  mailbox:      '★ MAILBOX UNLOCKED — Claim rewards from past contracts.',
+  vault:        '★ VAULT UNLOCKED — Persistent item storage that survives death.',
+  blackmarket:  '★ BLACK MARKET UNLOCKED — Spend sigils on relic permits and keystones.',
 };
 
 // Black Market — sigil-spend vendor. Permits unlock locked relics in
@@ -628,6 +648,31 @@ export class HideoutUI {
       this._startSceneLoop();
     }
     this.render();
+    // Hideout-arrival reveal-announcement — second chance after the
+    // death-time toast. For every revealed-but-not-yet-announced tab,
+    // fire a single descriptive toast so the player knows what just
+    // unlocked even if they missed the death screen. The first-click
+    // greeting still fires later as the tutorial moment for the tab.
+    try {
+      const pending = getPendingAnnouncements();
+      if (pending.length && typeof window !== 'undefined' && window.__hudMsg) {
+        // Stagger so multiple unlocks don't pile on top of each other.
+        // 800ms apart — long enough to read, short enough not to feel
+        // like a queue.
+        let delay = 600;
+        for (const id of pending) {
+          const blurb = ONBOARD_ANNOUNCEMENTS[id];
+          if (blurb) {
+            const txt = blurb;
+            setTimeout(() => {
+              try { window.__hudMsg(txt, 5.0); } catch (_) {}
+            }, delay);
+            delay += 800;
+          }
+          markOnboardAnnounced(id);
+        }
+      }
+    } catch (_) { /* announcement is best-effort */ }
   }
 
   close() {

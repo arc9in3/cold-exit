@@ -933,6 +933,43 @@ export function setCoopMode(v) {
   catch (_) {}
 }
 
+// Three-stage onboard reveal lifecycle:
+//   1. revealed    — trigger fired (death / rank-up / chip threshold)
+//   2. announced   — player has seen the "X UNLOCKED" toast on first
+//                    hideout-arrival after the reveal. Death-time
+//                    toasts can be missed mid-screen-transition; the
+//                    hideout-arrival toast is the second chance.
+//   3. seen        — player has actually clicked into the new tab,
+//                    triggering the in-character greeting (the
+//                    "tutorial moment" for that system).
+//
+// markOnboardAnnounced returns true on first-mark so callers can fire
+// the toast exactly once, mirroring markOnboardRevealed semantics.
+const ONBOARD_ANNOUNCED_KEY = 'tacticalrogue:onboardAnnounced:v1';
+export function isOnboardAnnounced(id) {
+  if (!id) return false;
+  return _readSet(ONBOARD_ANNOUNCED_KEY).has(id);
+}
+export function markOnboardAnnounced(id) {
+  if (!id) return false;
+  const set = _readSet(ONBOARD_ANNOUNCED_KEY);
+  if (set.has(id)) return false;
+  set.add(id);
+  _writeSet(ONBOARD_ANNOUNCED_KEY, set);
+  return true;
+}
+
+// Find every reveal that's hit `revealed` but not yet `announced`.
+// Used by the hideout-open path to surface a confirmation toast for
+// each unread unlock — the second chance after the death-time toast.
+export function getPendingAnnouncements() {
+  const revealed = _readSet(ONBOARD_REVEALED_KEY);
+  const announced = _readSet(ONBOARD_ANNOUNCED_KEY);
+  const out = [];
+  for (const id of revealed) if (!announced.has(id)) out.push(id);
+  return out;
+}
+
 // Resolve the reveal state of every hideout tab. Pure function — call
 // from the UI layer (tab strip render, command-deck side buttons) and
 // hide tabs whose id isn't in the returned Set. The contractor tab is
