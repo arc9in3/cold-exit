@@ -6626,7 +6626,50 @@ export class Level {
       }
       okCount++;
     }
-    const result = { ok: failures.length === 0, failures, sampled: sampleCount, passed: okCount };
+    // Pass 2 — squad role distribution warning. When ≥ 3 alive
+    // gunmen are aware of the player in the same room, the role
+    // distribution must include at least one of {anchor, rusher,
+    // flanker}. Emitted as a warning (kind:'squad', warning:true) so
+    // that a smoke run with zero spawned enemies — or any room
+    // without an active engagement — does not flip ok=false.
+    try {
+      const gm = (typeof window !== 'undefined') ? window.__gunmen : null;
+      const list = gm && gm.gunmen ? gm.gunmen : null;
+      if (list && list.length) {
+        // Group by room. Only count alive + aware (not idle/sleep/dead).
+        const groups = new Map();
+        for (const g of list) {
+          if (!g || !g.alive) continue;
+          const s = g.state;
+          if (s === 'idle' || s === 'sleep' || s === 'dead') continue;
+          const pos = g.group?.position;
+          if (!pos) continue;
+          const room = this.roomAt(pos.x, pos.z);
+          if (!room) continue;
+          const key = room.id ?? `${room.bounds?.minX | 0},${room.bounds?.minZ | 0}`;
+          let arr = groups.get(key);
+          if (!arr) { arr = []; groups.set(key, arr); }
+          arr.push(g);
+        }
+        for (const [key, arr] of groups) {
+          if (arr.length < 3) continue;
+          let hasAnchor = false, hasRusher = false, hasFlanker = false;
+          for (const g of arr) {
+            if (g.role === 'anchor') hasAnchor = true;
+            else if (g.role === 'rusher') hasRusher = true;
+            else if (g.role === 'flanker') hasFlanker = true;
+          }
+          if (!(hasAnchor && hasRusher && hasFlanker)) {
+            failures.push({ kind: 'squad', warning: true,
+              reason: `room ${key} has ${arr.length} aware gunmen but role set is missing one of {anchor,rusher,flanker}: anchor=${hasAnchor} rusher=${hasRusher} flanker=${hasFlanker}` });
+          }
+        }
+      }
+    } catch (e) { /* fail-soft — squad check never blocks the gate. */ }
+    // ok flag ignores `warning:true` failures so smoke runs without
+    // enemies still pass.
+    const hardFails = failures.filter(f => !(f && f.warning));
+    const result = { ok: hardFails.length === 0, failures, sampled: sampleCount, passed: okCount };
     if (typeof window !== 'undefined') window.__lastRaycastInvariantCheck = result;
     return result;
   }
