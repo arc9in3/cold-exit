@@ -178,8 +178,12 @@ const toastEl = (() => {
   const el = document.createElement('div');
   el.id = 'hud-toast';
   Object.assign(el.style, {
+    // z-index sits above the hideout overlay (which lives at 200/210)
+    // so Pre-Mission Store buy confirmations and other hideout-time
+    // toasts are visible. The toast is small and pinned to top-center
+    // so it doesn't obscure gameplay either.
     position: 'fixed', top: '64px', left: '50%', transform: 'translateX(-50%)',
-    zIndex: 50, pointerEvents: 'none',
+    zIndex: 260, pointerEvents: 'none',
     fontFamily: 'ui-monospace, SFMono-Regular, Menlo, Consolas, monospace',
     fontSize: '13px', fontWeight: '700',
     color: '#f2e7c9', textShadow: '0 0 8px rgba(0,0,0,0.9)',
