@@ -2214,11 +2214,14 @@ export class HideoutUI {
     const chestLbl = armorName('chest');
     const pantsLbl = armorName('pants');
     const packLbl  = armorName('backpack');
-    const consLbl  = queuedConsumables.length
-      ? queuedConsumables.length === 1
-        ? '1 item'
-        : `${queuedConsumables.length} items`
-      : 'starter bandage';
+    // Pockets summary — every run gets the starter kit
+    // (3 bandages + 1 random throwable, see `_seedStarterKit` in
+    // main.js) PLUS any queued chip-buy consumables on top. Show
+    // both pieces so the readout matches what the player will
+    // actually have on deploy.
+    const consLbl = queuedConsumables.length
+      ? `3× bandage + throwable + ${queuedConsumables.length} bought`
+      : '3× bandage + throwable';
 
     const wrap = document.createElement('div');
     wrap.className = 'loadout-summary';
