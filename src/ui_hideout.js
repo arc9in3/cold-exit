@@ -2084,12 +2084,26 @@ export class HideoutUI {
     const queuedConsumables = [];
     const queuedBuffIds = [];
     const queuedVaultItems = [];
+    // Vault armor that targets the same slot as a store-armor buy
+    // overrides only when no store buy is set (last-write-wins
+    // behavior in main.js). For the summary, prefer the store buy
+    // so the player sees what they paid chips for; otherwise show
+    // the vault armor.
     for (const q of getStarterInventory()) {
       if (!q) continue;
       if (q.__storeArmor && q.slot) queuedArmorBySlot[q.slot] = q;
       else if (q.__storeConsumable) queuedConsumables.push(q);
       else if (q.__storeBuff) queuedBuffIds.push(q.defId);
       else if (q.__vaultItem) queuedVaultItems.push(q.item);
+    }
+    // Promote vault-armor pulls into the per-slot armor map for any
+    // slot that doesn't already have a store-armor buy. The vault
+    // tile carries the raw item, which has `slot` and `name`.
+    const queuedVaultArmorBySlot = {};
+    for (const it of queuedVaultItems) {
+      if (it && it.type === 'armor' && it.slot && !queuedArmorBySlot[it.slot]) {
+        queuedVaultArmorBySlot[it.slot] = it;
+      }
     }
     // Baseline armor — must match `startNewRun` in main.js. Centralise
     // the table here so the summary reads what the run will actually
@@ -2102,6 +2116,12 @@ export class HideoutUI {
     const armorName = (slot) => {
       const queued = queuedArmorBySlot[slot];
       if (queued && ARMOR_DEFS && ARMOR_DEFS[queued.defId]) return ARMOR_DEFS[queued.defId].name;
+      // Vault armor targeting this slot overrides the baseline at
+      // run-start (see _materializeStarterItem in main.js), so the
+      // summary should reflect that. Tag with † so the player sees
+      // the source is vault, not the rotating store.
+      const fromVault = queuedVaultArmorBySlot[slot];
+      if (fromVault) return `${fromVault.name} †`;
       const baseId = BASELINE_BY_SLOT[slot];
       if (baseId && ARMOR_DEFS && ARMOR_DEFS[baseId]) return ARMOR_DEFS[baseId].name;
       return null;
@@ -2132,10 +2152,18 @@ export class HideoutUI {
         }).join(' · ')
       : null;
     // Vault pulls — items the player tapped "Take" on a vault tile.
-    // Same skip-when-empty rule as buffs; this row routes to the
-    // Vault tab instead of Pre-Mission Store.
-    const vaultLbl = queuedVaultItems.length
-      ? queuedVaultItems.map(it => (it?.name || 'item').replace(/<[^>]+>/g, '')).join(' · ')
+    // Filter out armor that's already being shown in CHEST / PANTS /
+    // PACK rows (no point listing it twice). Same skip-when-empty
+    // rule as buffs; this row routes to the Vault tab.
+    const vaultLblItems = queuedVaultItems.filter(it => {
+      if (!it) return false;
+      if (it.type === 'armor' && it.slot && queuedVaultArmorBySlot[it.slot] === it) {
+        return false;
+      }
+      return true;
+    });
+    const vaultLbl = vaultLblItems.length
+      ? vaultLblItems.map(it => (it?.name || 'item').replace(/<[^>]+>/g, '')).join(' · ')
       : null;
 
     const wrap = document.createElement('div');

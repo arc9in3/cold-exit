@@ -1798,7 +1798,17 @@ function _materializeStarterItem(raw) {
     // we just clone-and-return. The vault row itself is removed by
     // _vaultPullForRun (called once before consumeStarterInventory)
     // so we don't mutate vault state inside the materialization loop.
-    return raw.item ? { ...raw.item } : null;
+    if (!raw.item) return null;
+    const real = { ...raw.item };
+    // If this is armor, set __armorSlot so the run-start auto-equip
+    // path picks it up (mirrors __storeArmor). Without this, the
+    // armor would land in loose inventory and the player would have
+    // to manually equip on first floor — surprising after they
+    // explicitly picked it on the loadout screen.
+    if (real.type === 'armor' && real.slot) {
+      real.__armorSlot = real.slot;
+    }
+    return real;
   }
   return null;
 }
