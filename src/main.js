@@ -1150,6 +1150,11 @@ window.__debug = {
       ? tunables.weapons.find(w => w.name === weaponName)
       : tunables.weapons.find(w => w.name === 'AK47');
     const out = [];
+    // Honor the quality clamp here too — calling code (perf scripts,
+    // dev tooling) shouldn't accidentally bypass the on-tier limit.
+    if (qualityFlags.maxConcurrentEnemies !== Infinity) {
+      n = Math.min(n, qualityFlags.maxConcurrentEnemies | 0);
+    }
     for (let i = 0; i < n; i++) {
       const angle = (i / n) * Math.PI * 2;
       const r = 6 + Math.random() * 4;
@@ -9185,9 +9190,11 @@ function fireOneShot(playerInfo, weapon, aimPoint, isADS, aimOwner, aimZone) {
     combat.spawnFlash(tracerFrom, eff.tracerColor, qualityFlags.muzzleLights);
   }
   // Combat juice — eject brass + puff muzzle smoke. Both pooled. Skip
-  // for melee weapons. _tmpDir is the normalized fire direction, set
-  // up above for the spread / raycast loop.
-  if (eff?.class && eff.class !== 'melee') {
+  // for melee weapons AND on potato (the muzzleFlashSprites flag
+  // doubles as the shorthand for "all per-shot fluff visuals," since
+  // potato is the only tier where any of these are cut and the gate
+  // is binary).
+  if (eff?.class && eff.class !== 'melee' && qualityFlags.muzzleFlashSprites) {
     combat.spawnBrass(tracerFrom, _tmpDir);
     combat.spawnMuzzleSmoke(tracerFrom, _tmpDir);
   }
@@ -12727,8 +12734,10 @@ function aiFire(origin, dir, weapon, damageMult = 1, source = null) {
   const _afDist = Math.sqrt(_afdx * _afdx + _afdz * _afdz);
   sfx.enemyFire(weapon.class || 'pistol', _afDist);
   // Brass + smoke for AI fire — same distance gate as the SFX so
-  // off-screen volleys don't pay the particle cost.
-  if (_afDist < 30 && weapon.class && weapon.class !== 'melee') {
+  // off-screen volleys don't pay the particle cost. Potato cuts these
+  // entirely (every shot from 14+ enemies × ~5/s = a particle storm).
+  if (_afDist < 30 && weapon.class && weapon.class !== 'melee'
+      && qualityFlags.muzzleFlashSprites) {
     combat.spawnBrass(origin, dir);
     combat.spawnMuzzleSmoke(origin, dir);
   }

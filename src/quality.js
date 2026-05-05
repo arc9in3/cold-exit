@@ -128,7 +128,12 @@ export function applyQuality(mode, ctx = {}) {
   qualityFlags.sceneFog = !potato;
   qualityFlags.ambientAudio = !potato;
   qualityFlags.renderScale = potato ? 0.7 : 1.0;
-  qualityFlags.maxConcurrentEnemies = potato ? 14 : Infinity;
+  // Concurrent-enemy clamp. Profiling at 14 gunmen on 6× CPU throttle
+  // (≈ A11 single-thread) showed ~16 FPS — half the idle rate. Real
+  // A11 GPU is also weaker, so 8 is the playability ceiling for now.
+  // Sub-bosses + bosses + tutorial dummies + key-holders bypass the
+  // cap (objective-bearing — see spawn loop in main.js).
+  qualityFlags.maxConcurrentEnemies = potato ? 8 : Infinity;
 
   if (ctx.renderer) {
     ctx.renderer.shadowMap.enabled = !low;
