@@ -1407,7 +1407,20 @@ export class Level {
       const tpl = SHAPE_REGISTRY[room.shape];
       if (tpl && typeof tpl.build === 'function') {
         try {
+          // Phase M step 3 — tag every obstacle created by the shape
+          // template with userData.kind = 'shape-wall' so
+          // _clearDoorCorridors can recognise + clear them when a
+          // shape template seals off a doorway. We snapshot the
+          // obstacles length before the build then walk the new
+          // tail afterwards.
+          const _shapeStart = this.obstacles.length;
           const out = tpl.build(this, room);
+          for (let i = _shapeStart; i < this.obstacles.length; i++) {
+            const m = this.obstacles[i];
+            if (m && m.userData && !m.userData.kind) {
+              m.userData.kind = 'shape-wall';
+            }
+          }
           if (out && out.walkableBounds) {
             room._walkableBounds = out.walkableBounds;
             // Sanity guard — every doorway position must be inside
@@ -4774,6 +4787,22 @@ export class Level {
         if (!b) continue;
         if (b.maxX < stripMinX || b.minX > stripMaxX) continue;
         if (b.maxZ < stripMinZ || b.minZ > stripMaxZ) continue;
+        // Phase M step 3 — props that landed inside a door corridor
+        // (despite the prop-overlap pass + door-clearance band)
+        // get unconditionally cleared. Both the proxy collision is
+        // nulled AND the visible propGroup is hidden so a stray
+        // couch / bookshelf can't straddle a doorway.
+        if (o.userData.isProp) {
+          o.userData.collisionXZ = null;
+          o.visible = false;
+          if (o.userData.propGroup) o.userData.propGroup.visible = false;
+          continue;
+        }
+        // Phase M step 3 — shape-built walls (level_shapes.js) are
+        // cleared even when they share the outer-wall colour, so a
+        // shape template that misaligned an outer-wall segment
+        // can't seal off a doorway.
+        const isShapeWall = o.userData.kind === 'shape-wall';
         // Only outer walls that sit directly ON the door axis (the walls
         // that produced the gap) are preserved; outer walls further into
         // the room that happen to share the color still get cleared.
@@ -4781,7 +4810,7 @@ export class Level {
         const onDoorEdge = horizDoor
           ? Math.abs(((b.minZ + b.maxZ) / 2) - dz) < 0.8
           : Math.abs(((b.minX + b.maxX) / 2) - dx) < 0.8;
-        if (isOuterColor && onDoorEdge) continue;
+        if (!isShapeWall && isOuterColor && onDoorEdge) continue;
         o.userData.collisionXZ = null;
         o.visible = false;
         // Props register an invisible proxy mesh + a linked visible

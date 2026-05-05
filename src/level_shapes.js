@@ -97,6 +97,16 @@ function _doorCenters(level, room) {
   return out;
 }
 
+// Tag wall meshes built by shape templates with userData.kind so
+// _clearDoorCorridors can recognise + clear them when a shape
+// template sealed off a doorway (Phase M step 3). Pass the mesh
+// returned from level._addObstacle through this helper at every
+// shape-wall site below.
+function _tagShapeWall(mesh) {
+  if (mesh && mesh.userData) mesh.userData.kind = 'shape-wall';
+  return mesh;
+}
+
 // Helper — emit the four perimeter walls with door gaps. Mirrors
 // level.js _buildRoomPerimeter exactly so shapes can reuse the
 // "rectangle with door gaps" base when they only need partial
