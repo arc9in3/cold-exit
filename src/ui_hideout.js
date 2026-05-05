@@ -1071,14 +1071,25 @@ export class HideoutUI {
     // what's currently queued + the Pre-Mission Boost column. The
     // weapon picker moved to the Loadout step alone — having it on
     // both tabs caused the "I'm not sure where things land" friction
-    // the player flagged. No banner / confirm / back-button (those
-    // are contractor-flow chrome).
-    return this._renderMissionPrepSection({
+    // the player flagged.
+    const wrap = document.createElement('div');
+    wrap.className = 'hideout-tab-body';
+    const head = document.createElement('div');
+    head.className = 'hideout-section-head';
+    head.innerHTML = `
+      <div class="hideout-section-text">
+        <div class="hideout-section-title">PRE-MISSION STORE</div>
+        <div class="hideout-section-sub">Spend chips on starting gear for your next deploy. Stock rotates on a refresh timer; upgrade slot count or rarity ceiling on the right. Pick which weapons to bring on the LOADOUT screen.</div>
+      </div>
+    `;
+    wrap.appendChild(head);
+    wrap.appendChild(this._renderMissionPrepSection({
       withBanner: false,
       withConfirm: false,
       withBackButton: false,
       withWeaponPicker: false,
-    });
+    }));
+    return wrap;
   }
 
   // ----- TAKE A WEAPON section --------------------------------------
