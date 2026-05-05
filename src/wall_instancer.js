@@ -240,14 +240,17 @@ function makeProxy(instancer, pool, slot, x, y, z, w, h, d, color) {
       // tmin = first entry distance (could be negative if ray starts inside).
       const t = tmin >= 0 ? tmin : tmax;
       if (t < raycaster.near || t > raycaster.far) return;
-      // Build a hit point. distance must be >= 0 for downstream code.
-      const hitX = o.x + d.x * t;
-      const hitY = o.y + d.y * t;
-      const hitZ = o.z + d.z * t;
+      // Build a hit point. point MUST be a real THREE.Vector3 — downstream
+      // code (resolveAim's _resolveAimRaycast, melee proximity, etc.)
+      // calls .distanceTo() / .clone() / .sub() on it, all real Vector3
+      // methods. A plain {x,y,z} stub crashes those callers.
       intersects.push({
         distance: t,
-        point: { x: hitX, y: hitY, z: hitZ, isVector3: true,
-                 clone() { return { ...this }; } },
+        point: new THREE.Vector3(
+          o.x + d.x * t,
+          o.y + d.y * t,
+          o.z + d.z * t,
+        ),
         object: this,
         face: null, faceIndex: -1, uv: null,
       });
