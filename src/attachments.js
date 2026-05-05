@@ -459,8 +459,13 @@ export const ATTACHMENT_DEFS = {
   muzzle_brake_ak2: {
     id: 'att_brake_ak2', name: 'AK Slant Brake', type: 'attachment',
     slot: 'muzzle', tint: 0x44444a,
-    description: 'Angled-cut Soviet brake — pushes blast right to counter the platform\'s natural climb.',
-    modifier: { adsSpreadMult: 0.80, hipSpreadMult: 0.92 },
+    description: 'Angled-cut Soviet brake — pushes blast right to counter the platform\'s natural climb. Tighter on follow-up shots; modestly louder than a hider.',
+    // Differentiated from the Flash Hider line (which is purely a
+    // spread cut). Slant Brake leans into faster follow-up fire and
+    // hip-spread control with a noise cost — distinct stat shape so a
+    // common Slant Brake doesn't match an epic Flash Hider numerically
+    // (#27).
+    modifier: { hipSpreadMult: 0.86, adsSpreadMult: 0.92, fireRateMult: 1.05, noiseRangeMult: 1.10 },
   },
   muzzle_suppressor_chinese: {
     id: 'att_suppressor_chinese', name: 'PRC Suppressor', type: 'attachment',
