@@ -487,6 +487,15 @@ export class DetailsUI {
     // having to click the action-bar button.
     this._onKeyDown = (e) => {
       if (this.root.style.display === 'none') return;
+      // Tab / Escape close the panel — players reasonably expect both
+      // (Tab matches the inventory close hint, Escape is the universal
+      // dismiss). Bugs #30 + #62.
+      if (e.key === 'Tab' || e.key === 'Escape') {
+        this.hide();
+        e.preventDefault();
+        e.stopPropagation();
+        return;
+      }
       if (!this._item) return;
       const it = this._item;
       if (it.type === 'relic' || !this._isOwnedItem(it)) return;
