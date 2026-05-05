@@ -262,6 +262,28 @@ export const CONTRACT_DEFS = {
     unlockedAt: { contractsCompleted: 10 },
     modifiers: {},
   }),
+  // 2026-05-04: new RARE contracts that exercise the freshly-wired
+  // enemyDamageMult + eliteChanceMult fields (previously dead schema).
+  rare_bloodthirsty: _kill({
+    id: 'rare_bloodthirsty',
+    label: 'Bloodthirsty',
+    rarity: 'rare',
+    portrait: 'any',
+    targetType: 'any', targetCount: 20,
+    perKillReward: 22, reward: 240, marksReward: 7,
+    unlockedAt: { contractsCompleted: 9 },
+    modifiers: { enemyDamageMult: 1.4 },
+  }),
+  rare_elite_squad: _kill({
+    id: 'rare_elite_squad',
+    label: 'Elite Squad',
+    rarity: 'rare',
+    portrait: 'gunman',
+    targetType: 'gunman', targetCount: 10,
+    perKillReward: 38, reward: 260, marksReward: 8,
+    unlockedAt: { contractsCompleted: 9 },
+    modifiers: { eliteChanceMult: 2.0 },
+  }),
 
   // ============= EPIC — unlock at rank 15, stacked modifiers ========================
   epic_press_wave: _kill({
@@ -293,6 +315,19 @@ export const CONTRACT_DEFS = {
     perKillReward: 80, reward: 600, marksReward: 28,
     unlockedAt: { contractsCompleted: 18, megabossKills: 1 },
     modifiers: { enemyHpMult: 1.75, noConsumables: true },
+  }),
+  // 2026-05-04: stacked-modifier EPIC. Hardened + bloodthirsty +
+  // elite chance bumped — the highest threat-density contract that
+  // doesn't lock the loadout (no weaponClass restriction).
+  epic_warband: _kill({
+    id: 'epic_warband',
+    label: 'Warband',
+    rarity: 'epic',
+    portrait: 'any',
+    targetType: 'any', targetCount: 35,
+    perKillReward: 22, reward: 550, marksReward: 24,
+    unlockedAt: { contractsCompleted: 17, megabossKills: 1 },
+    modifiers: { enemyHpMult: 1.4, enemyDamageMult: 1.3, eliteChanceMult: 1.5 },
   }),
 
   // ============= LEGENDARY — unlock at rank 25 + 2 megabosses; the gauntlets =======
