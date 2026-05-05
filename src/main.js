@@ -82,7 +82,8 @@ import {
   getActiveContract, setActiveContract, awardMarks, bumpContractRank, bumpMegabossKills,
   bumpRunCount, queueEncounterFollowup,
   getUnlockedWeapons, isWeaponUnlocked, unlockWeapon,
-  consumeStarterInventory,
+  consumeStarterInventory, getStarterInventory,
+  stashRemoveAt,
   getSelectedStarterWeapon,
   getSigils, awardSigils, setSigils,
   consumeKeystoneQueue,
@@ -1688,6 +1689,12 @@ function startNewRun(weaponClass) {
   // that we materialize into real inventory items here so the rest
   // of the run code paths see normal item shapes.
   try {
+    // Sweep vault rows for any items the player tapped "Take" on so
+    // the vault state matches what's about to enter the run. Has to
+    // happen BEFORE consumeStarterInventory (which clears the queue),
+    // since _vaultPullForRun reads the same queue to figure out which
+    // vault slots to drop.
+    _vaultPullForRun();
     const queued = consumeStarterInventory();
     for (const raw of queued) {
       if (!raw) continue;
@@ -1785,7 +1792,29 @@ function _materializeStarterItem(raw) {
     // buff is effect-only.
     return null;
   }
+  if (raw.__vaultItem) {
+    // Player tapped "Take" on a vault tile. The raw entry holds the
+    // already-materialized item shape (rarity, mods, perks, etc.) so
+    // we just clone-and-return. The vault row itself is removed by
+    // _vaultPullForRun (called once before consumeStarterInventory)
+    // so we don't mutate vault state inside the materialization loop.
+    return raw.item ? { ...raw.item } : null;
+  }
   return null;
+}
+
+// Walk the queued starter inventory looking for __vaultItem markers
+// and remove the corresponding vault rows. Called once just before
+// consumeStarterInventory so the player's vault doesn't double-pay
+// (item enters the run AND stays in vault).
+function _vaultPullForRun() {
+  const queued = getStarterInventory();
+  const slots = new Set();
+  for (const q of queued) {
+    if (q && q.__vaultItem && Number.isFinite(q.__vaultSlot)) slots.add(q.__vaultSlot | 0);
+  }
+  if (!slots.size) return;
+  for (const slot of slots) stashRemoveAt(slot);
 }
 
 // Pending buff queue — populated by _materializeStarterItem at run

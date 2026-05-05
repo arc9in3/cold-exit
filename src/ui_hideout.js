@@ -1445,6 +1445,7 @@ export class HideoutUI {
     else if (item.__storeConsumable) { label = item.defId; kind = 'CON'; }
     else if (item.__storeAmmo) { label = item.defId; kind = 'AMM'; }
     else if (item.__storeBuff) { label = item.defId; kind = 'BUF'; }
+    else if (item.__vaultItem) { label = item.item?.name || 'vault item'; kind = 'VLT'; }
     row.innerHTML = `
       <span class="kind">${kind}</span>
       <span class="name">${label}</span>
@@ -1491,17 +1492,44 @@ export class HideoutUI {
     tile.className = 'hideout-stash-tile';
     tile.style.borderColor = rarityColor(item);
     const icon = iconForItem(item);
+    // Already-queued check — if the player has already tapped Take
+    // for this slot, the entry sits in starter inventory marked with
+    // __vaultItem + __vaultSlot=N. Surface that on the tile so they
+    // don't double-queue, and offer a one-click un-take.
+    const queued = getStarterInventory().some(q => q && q.__vaultItem && q.__vaultSlot === slot);
     tile.innerHTML = `
       ${icon ? `<img class="hideout-stash-icon" src="${icon}" alt="">` : ''}
       <div class="hideout-stash-name">${(item.name || 'item').replace(/<[^>]+>/g, '')}</div>
       <div class="hideout-stash-actions">
+        <button type="button" class="take${queued ? ' queued' : ''}">${queued ? '✓ Queued' : 'Take'}</button>
         <button type="button" class="sell">Sell (${this._chipValueOf(item)}c)</button>
       </div>
     `;
-    const sellBtn = tile.querySelector('.sell');
-    sellBtn.addEventListener('click', () => {
+    if (queued) tile.classList.add('queued');
+    tile.querySelector('.take').addEventListener('click', () => {
+      const cur = getStarterInventory();
+      if (queued) {
+        // Un-take: drop the queue entry that points to this slot.
+        const next = cur.filter(q => !(q && q.__vaultItem && q.__vaultSlot === slot));
+        setStarterInventory(next);
+      } else {
+        // Take: queue the item; keep it in vault until the run
+        // actually starts (consumeStarterInventory in main.js will
+        // strip the vault row at run-start time, see _vaultPullForRun).
+        cur.push({ __vaultItem: true, __vaultSlot: slot, item: { ...item }, rarity: item.rarity || null });
+        setStarterInventory(cur);
+      }
+      this.render();
+    });
+    tile.querySelector('.sell').addEventListener('click', () => {
       const removed = stashRemoveAt(slot);
       if (!removed) return;
+      // If this item was queued for next run, pull it from the queue
+      // too — selling overrides taking.
+      if (queued) {
+        const next = getStarterInventory().filter(q => !(q && q.__vaultItem && q.__vaultSlot === slot));
+        setStarterInventory(next);
+      }
       if (this.ctx.awardChips) this.ctx.awardChips(this._chipValueOf(removed));
       this.render();
     });
@@ -4864,13 +4892,29 @@ export class HideoutUI {
         font-size: 9px; color: #e8dfc8; text-align: center;
         max-height: 24px; overflow: hidden; line-height: 1.2;
       }
-      .hideout-stash-actions { width: 100%; }
+      .hideout-stash-actions {
+        width: 100%; display: flex; flex-direction: column; gap: 2px;
+      }
       .hideout-stash-actions button {
         width: 100%; background: rgba(40, 30, 50, 0.6);
         border: 1px solid #4a3060; color: #c9a87a;
         padding: 2px 4px; font: inherit; font-size: 9px;
         cursor: pointer; border-radius: 2px;
       }
+      /* Take-into-next-run button — gold-accented when not yet
+         queued, green-accented when already queued for the run. */
+      .hideout-stash-actions .take {
+        border-color: #6a5a30; color: #f2c060;
+        background: rgba(60, 50, 25, 0.4);
+      }
+      .hideout-stash-actions .take.queued {
+        border-color: #2c6a3a; color: #6abf78;
+        background: rgba(20, 50, 28, 0.5);
+      }
+      /* Vault tile gets a subtle gold outline when its item is
+         already queued, mirroring the take-button color so the
+         player can see at a glance which items will deploy with them. */
+      .hideout-stash-tile.queued { box-shadow: inset 0 0 0 1px rgba(106, 191, 120, 0.35); }
 
       .hideout-upgrade-row, .hideout-quart-buy-row {
         display: flex; align-items: center; justify-content: space-between;
