@@ -1,0 +1,19 @@
+# Files excluded from `wrangler pages deploy`. Cloudflare Pages caps
+# individual files at 25 MiB; large local artifacts (CPU traces, dev
+# screenshots, raw assets) live here for the team but don't ship.
+profiling/
+audits/
+.mc/
+.playwright-mcp/
+tasks.md
+BACKLOG.md
+review.bat
+review.sh
+
+# Pre-rembg / pre-process artifact dirs are huge and not user-facing
+Assets/_artpass_originals/
+Assets/_artpass_gear_pre_rembg/
+Assets/_artpass_outlier_pre_rembg/
+
+# Local-only tools (FBX viewer, rig builder etc) are dev-time, not for live
+tools/
