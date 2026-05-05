@@ -2065,15 +2065,19 @@ export class HideoutUI {
 
     // Queued buys from the Pre-Mission Store. Armor is keyed by slot
     // so we can resolve baseline-vs-buy per slot in one pass; buffs
-    // get a defId list so we can look up friendly names.
+    // get a defId list so we can look up friendly names. Vault pulls
+    // are tracked separately because they route to a different tab
+    // when clicked (Vault) instead of Pre-Mission Store.
     const queuedArmorBySlot = {};
     const queuedConsumables = [];
     const queuedBuffIds = [];
+    const queuedVaultItems = [];
     for (const q of getStarterInventory()) {
       if (!q) continue;
       if (q.__storeArmor && q.slot) queuedArmorBySlot[q.slot] = q;
       else if (q.__storeConsumable) queuedConsumables.push(q);
       else if (q.__storeBuff) queuedBuffIds.push(q.defId);
+      else if (q.__vaultItem) queuedVaultItems.push(q.item);
     }
     // Baseline armor — must match `startNewRun` in main.js. Centralise
     // the table here so the summary reads what the run will actually
@@ -2115,6 +2119,12 @@ export class HideoutUI {
           return def ? def.name : id;
         }).join(' · ')
       : null;
+    // Vault pulls — items the player tapped "Take" on a vault tile.
+    // Same skip-when-empty rule as buffs; this row routes to the
+    // Vault tab instead of Pre-Mission Store.
+    const vaultLbl = queuedVaultItems.length
+      ? queuedVaultItems.map(it => (it?.name || 'item').replace(/<[^>]+>/g, '')).join(' · ')
+      : null;
 
     const wrap = document.createElement('div');
     wrap.className = 'loadout-summary';
@@ -2130,16 +2140,16 @@ export class HideoutUI {
     // queued item for that slot. `focusKind` lets the store filter
     // and scroll to relevant stock so the click → manage loop is
     // one tap instead of "land in store, scan grid for chest items".
-    const _row = (label, val, focusKind) => {
+    const _row = (label, val, focusKind, jumpTab = 'stash') => {
       const btn = document.createElement('button');
       btn.type = 'button';
       btn.className = `lsum-row${focusKind ? ' lsum-clickable' : ''}`;
       btn.innerHTML = `<span class="lsum-lbl">${label}</span><span class="lsum-val">${val}</span>`;
       if (focusKind) {
         btn.addEventListener('click', () => {
-          this.tab = 'stash';
-          this._storeFocus = focusKind;
-          if (this._scene) this._scene.gotoStation('stash');
+          this.tab = jumpTab;
+          if (jumpTab === 'stash') this._storeFocus = focusKind;
+          if (this._scene) this._scene.gotoStation(jumpTab === 'vault' ? 'vault' : 'stash');
           this.render();
         });
       }
@@ -2151,6 +2161,7 @@ export class HideoutUI {
     if (packLbl)  grid.appendChild(_row('PACK',    packLbl,  'armor:backpack'));
     grid.appendChild(_row('POCKETS',               consLbl,  'consumable'));
     if (buffLbl)  grid.appendChild(_row('BOOSTS',  buffLbl,  'buff'));
+    if (vaultLbl) grid.appendChild(_row('VAULT',   vaultLbl, 'vault', 'vault'));
     wrap.appendChild(grid);
     return wrap;
   }
