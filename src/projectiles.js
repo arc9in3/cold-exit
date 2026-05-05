@@ -211,7 +211,7 @@ export class ProjectileManager {
       // were destroyed mid-air or ricocheted off invisible geometry.
       const hitWall = p.throwKind === 'molotov'
         ? false
-        : this._hitsObstacle(level, p.pos.x, p.pos.z, nx, ny, nz);
+        : this._hitsObstacle(level, p.pos.x, p.pos.z, nx, ny, nz, p.pos.y);
       if (hitWall) {
         if (p.type === 'rocket') {
           this._detPos.set(nx, Math.max(0.08, ny), nz);
@@ -268,7 +268,7 @@ export class ProjectileManager {
     this.projectiles = this.projectiles.filter((p) => !p.dead);
   }
 
-  _hitsObstacle(level, fromX, fromZ, x, y, z) {
+  _hitsObstacle(level, fromX, fromZ, x, y, z, fromY = y) {
     // Walls extend full height (~3m); props / cover / containers
     // are short (~1m). The previous coarse `y > 3` cutoff treated
     // every obstacle's AABB as if it reached 3m, so grenades and
@@ -288,12 +288,27 @@ export class ProjectileManager {
       )
       : (level.solidObstacles ? level.solidObstacles() : []);
     const PROP_TOP = 1.5;     // generous over-approximation of cover height
+    // Bug #36: grenades thrown FROM BEHIND cover were ricocheting
+    // back into the player. When a throwable is *rising* near prop
+    // height, the previous-frame y was below the AABB top and the
+    // current-frame y is above — the grenade is clearly arcing up
+    // and over the cover. Treat that crossing as a clean pass-through
+    // rather than a wall hit. Symmetric handling for descents on the
+    // far side: if the throwable was already above PROP_TOP on the
+    // previous frame, it's coming back down behind cover and we
+    // shouldn't snag it on the prop's invisible front face.
+    const wasAbovePropTop = fromY > PROP_TOP;
     for (const o of obstacles) {
       const b = o.userData.collisionXZ;
       if (!b) continue;
       const ud = o.userData;
       const isShort = !!(ud.isProp || ud.containerRef);
       if (isShort && y > PROP_TOP) continue;
+      // For short props, give the rising / falling arc the benefit of
+      // the doubt — a grenade visibly above prop height on either the
+      // previous or current frame should not collide with the prop's
+      // side face. Tall walls keep their original behaviour.
+      if (isShort && wasAbovePropTop) continue;
       const r = 0.1;
       if (x > b.minX - r && x < b.maxX + r && z > b.minZ - r && z < b.maxZ + r) {
         return true;
