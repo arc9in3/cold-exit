@@ -1,6 +1,6 @@
 import * as THREE from 'three';
 import { tunables } from './tunables.js';
-import { buildProp, getLevelTheme, INWARD_FACING_KINDS } from './props.js';
+import { buildProp, getLevelTheme, INWARD_FACING_KINDS, DESTRUCTIBLE_HP } from './props.js';
 import { buildRig, initAnim, updateAnim } from './actor_rig.js';
 import { makeContainer, pickContainerType, pickContainerSize, buildContainerMesh } from './containers.js';
 import { StaticObstacleGrid2D } from './obstacle_grid.js';
@@ -100,6 +100,12 @@ export class Level {
     // doesn't track. Without this, two rugs can stack, a bookshelf can
     // land on a rug, etc. Each entry: { minX, maxX, minZ, maxZ }.
     this._propFootprints = [];
+    // Phase J — destructible-prop sequential id counter. Stamped on
+    // every collision proxy whose kind is in DESTRUCTIBLE_HP so the
+    // coop snapshot can name destroyed entries by id (smaller +
+    // stable across host/joiner because gen runs the same seeded
+    // RNG path on both peers, so order matches). Reset in clear().
+    this._destructiblePropIdNext = 0;
     this.index = 0;
     this.bossRoomId = -1;
     // Registered ambient light sources (ceiling lamps, prop lamps,
@@ -159,6 +165,11 @@ export class Level {
     this.containers = [];
     this._keepouts = [];
     this._propFootprints = [];
+    // Reset destructible-prop id counter — host + joiner walk the
+    // same seeded gen path so ids assigned during placement match
+    // 1:1, but we still wipe between floors so a previous run's
+    // ids don't leak.
+    this._destructiblePropIdNext = 0;
     if (this.exitGroup) {
       this.scene.remove(this.exitGroup);
       this.exitGroup = null;
@@ -2889,9 +2900,161 @@ export class Level {
     const kind = prop.kind || prop.group?.userData?.kind || 'unknown-prop';
     proxy.userData.kind = kind;
     if (!prop.group.userData.kind) prop.group.userData.kind = kind;
+    // Phase J — destructible-prop HP stamp. Kinds in DESTRUCTIBLE_HP
+    // get a sequential propId + maxHp/hp/destroyed flags. We stamp
+    // BOTH the proxy and the visible group so visuals + collision
+    // agree (group.userData.destroyed flips when the prop pops).
+    // Ordering is deterministic because generate() runs through
+    // _withRunSeed (see main.js) and _registerProp is called
+    // synchronously down a stable code path — host + joiner end up
+    // assigning identical propIds.
+    const dHp = DESTRUCTIBLE_HP[kind];
+    if (dHp) {
+      const propId = this._destructiblePropIdNext++;
+      proxy.userData.propId = propId;
+      proxy.userData.maxHp = dHp;
+      proxy.userData.hp = dHp;
+      proxy.userData.destroyed = false;
+      prop.group.userData.propId = propId;
+      prop.group.userData.maxHp = dHp;
+      prop.group.userData.hp = dHp;
+      prop.group.userData.destroyed = false;
+    }
     this.scene.add(proxy);
     this.obstacles.push(proxy);
     return true;
+  }
+
+  // Phase J — break a destructible prop. Idempotent; safe to call on
+  // an already-destroyed proxy (single-line guard early-out). Mutates
+  // the proxy in place rather than splicing from `obstacles` so the
+  // propId index stays stable for the coop snapshot apply path.
+  //
+  // Side effects:
+  //   - userData.destroyed → true on both proxy + visible group
+  //   - collisionXZ → null (movement, projectile, AI grids skip it)
+  //   - propGroup.visible → false (renderer skips it)
+  //   - debris VFX via combat.spawnImpact at the prop center + a
+  //     0.6 m ring of follow-up impacts so the burst reads visually
+  //   - audio: best-effort sfx.bulletImpact (no per-material breaks
+  //     yet — the audio module synthesizes tones, not samples)
+  //   - lootable + unsearched container: spawns a single combined
+  //     ground pile via `level._spawnDestructibleLootSpill` (host-
+  //     authoritative; joiner mirrors via the regular ground-loot
+  //     snapshot path) and clears the prop's container ref so the
+  //     "Search <prop>" prompt no longer offers it.
+  //   - _dirtySolid() so the projectile / AI grids rebuild
+  destroyProp(proxy) {
+    if (!proxy || !proxy.userData) return;
+    if (proxy.userData.destroyed) return;       // idempotent
+    if (proxy.userData.maxHp == null) return;   // not a destructible
+    proxy.userData.destroyed = true;
+    proxy.userData.hp = 0;
+    proxy.userData.collisionXZ = null;
+    const group = proxy.userData.propGroup;
+    if (group) {
+      group.userData.destroyed = true;
+      group.userData.hp = 0;
+      group.visible = false;
+    }
+    // Loot-spill — find any container linked to this prop's group and
+    // produce a single ground pile representing the whole bundle.
+    // Resolves to a no-op if the prop wasn't lootable, was already
+    // searched, or the spawner isn't wired (single-player + host run
+    // it; joiner relies on the regular ground-loot snapshot).
+    try {
+      this._spawnDestructibleLootSpill(proxy);
+    } catch (err) {
+      if (typeof console !== 'undefined') {
+        console.warn('[level] destructible loot spill threw', err);
+      }
+    }
+    // Debris VFX — best-effort; combat may not be wired in test envs.
+    try {
+      const combat = (typeof window !== 'undefined') ? window.__combat : null;
+      const px = proxy.position?.x ?? group?.position?.x ?? 0;
+      const pz = proxy.position?.z ?? group?.position?.z ?? 0;
+      const py = (group ? (group.position?.y ?? 0) : 0) + 0.4;
+      if (combat && typeof combat.spawnImpact === 'function') {
+        const _hit = new THREE.Vector3(px, py, pz);
+        combat.spawnImpact(_hit);
+        // Cheap break-burst: 4 impacts in a 0.6 m ring around center.
+        for (let i = 0; i < 4; i++) {
+          const a = i * (Math.PI / 2);
+          combat.spawnImpact(new THREE.Vector3(
+            px + Math.cos(a) * 0.6, py, pz + Math.sin(a) * 0.6));
+        }
+      }
+      // Audio. We don't yet have per-material break samples — the
+      // audio module's synth has bulletImpact + explode but no
+      // wood / metal / glass break. Use bulletImpact as a placeholder
+      // until the asset pipeline lands real break samples.
+      const sfx = (typeof window !== 'undefined') ? window.__sfx : null;
+      if (sfx && typeof sfx.bulletImpact === 'function') sfx.bulletImpact();
+    } catch (_) { /* defensive — VFX is non-critical */ }
+    // Invalidate the projectile / AI / movement caches that key off
+    // the obstacle list. Same flag the wall-instancer + door-open
+    // paths use; cheap (just flips a dirty bit).
+    if (typeof this._dirtySolid === 'function') this._dirtySolid();
+  }
+
+  // Spawn a single ground-pile for a destructible prop's loot (Phase J).
+  // Per-design: ONE ground item representing the whole bundle, NOT one
+  // pile per inventory slot. Looks up the linked container in
+  // `level.containers`, spawns a single pile via the global ground-
+  // loot helper, and clears the container ref so the "Search" prompt
+  // no longer shows the destroyed prop.
+  //
+  // Joiner-side coop: skip the spawn — the host's spawn lands on the
+  // regular ground-loot snapshot and the joiner mirrors it through
+  // applyLootSnapshot. Otherwise both peers spawn duplicate piles.
+  _spawnDestructibleLootSpill(proxy) {
+    if (!proxy || !proxy.userData) return;
+    const group = proxy.userData.propGroup;
+    if (!group) return;
+    // Find the matching container entry. Match by group reference
+    // first (the lootable-prop path registers `group: prop.group`),
+    // fall back to position match for paths that registered a
+    // synthetic group.
+    if (!this.containers) return;
+    let entryIdx = -1;
+    for (let i = 0; i < this.containers.length; i++) {
+      const c = this.containers[i];
+      if (!c) continue;
+      if (c.group === group) { entryIdx = i; break; }
+    }
+    if (entryIdx < 0) return;       // not a lootable prop
+    const entry = this.containers[entryIdx];
+    if (!entry || !entry.container) return;
+    if (entry.container.looted) return;       // already searched
+    if (!entry.container.loot || !entry.container.loot.length) return;
+    // Coop-host gate: only the host runs the actual ground-spawn.
+    // Joiner path just clears the container ref so the prompt
+    // disappears — they'll see the spilled pile via the host's
+    // next loot snapshot tick.
+    const isJoiner = (typeof window !== 'undefined' && window.__coopIsJoiner === true);
+    if (!isJoiner) {
+      const spawnFn = (typeof window !== 'undefined') ? window.__spawnGroundLootBundle : null;
+      const px = proxy.position?.x ?? group.position?.x ?? 0;
+      const pz = proxy.position?.z ?? group.position?.z ?? 0;
+      if (typeof spawnFn === 'function') {
+        try {
+          spawnFn({ x: px, y: 0.4, z: pz }, entry.container.loot.slice());
+        } catch (err) {
+          if (typeof console !== 'undefined') {
+            console.warn('[level] ground-loot spill spawn threw', err);
+          }
+        }
+      }
+    }
+    // Whichever side we're on, mark the source container as looted
+    // so the "Search <prop>" prompt stops offering it. The container
+    // entry itself stays in `level.containers` because nothing else
+    // currently owns its lifecycle — keeping it around with looted=
+    // true matches the regular post-search state and the existing
+    // hint-system gate (line ~14421) skips looted containers cleanly.
+    entry.container.looted = true;
+    entry.container.loot = [];
   }
 
   // Public — register a keep-out disc so prop placement avoids the area.

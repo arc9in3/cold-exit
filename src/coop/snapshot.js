@@ -24,7 +24,7 @@
 // drop out-of-order packets and a future tick can do interpolation
 // between two snapshots.
 
-const _scratch = { gunmen: [], melees: [], drones: [], loot: [], corpses: [], brokenWindows: [] };
+const _scratch = { gunmen: [], melees: [], drones: [], loot: [], corpses: [], brokenWindows: [], destroyedProps: [] };
 
 // Windows snapshot — Phase H. Both peers regenerate the level from
 // the same _runSeed (see main.js:_runSeed + level-seed broadcast), so
@@ -48,6 +48,58 @@ function _encodeWindows(level) {
     if (st && st.broken) _scratch.brokenWindows.push(i);
   }
   return _scratch.brokenWindows.slice();
+}
+
+// Destructible-props snapshot — Phase J. Mirrors the windows pattern:
+// host re-encodes the full set of destroyed propIds every tick (cheap;
+// destructibles per level cap around 30-40), joiner re-applies
+// idempotently. Encoded under key `dp` on the per-frame snapshot.
+//
+// The propId counter is host-deterministic (level._destructiblePropIdNext
+// increments inside _registerProp during seeded gen), so id N on host
+// === id N on joiner. Joiner-apply walks the obstacle list, finds the
+// proxy with the matching propId, and calls level.destroyProp() if
+// not already destroyed. destroyProp() is itself idempotent so a
+// duplicate apply is a no-op.
+function _encodeDestroyedProps(level) {
+  _scratch.destroyedProps.length = 0;
+  if (!level || !level.obstacles) return _scratch.destroyedProps.slice();
+  for (const m of level.obstacles) {
+    const ud = m && m.userData;
+    if (!ud) continue;
+    if (ud.maxHp == null) continue;     // not destructible
+    if (!ud.destroyed) continue;
+    if (ud.propId == null) continue;
+    _scratch.destroyedProps.push(ud.propId | 0);
+  }
+  return _scratch.destroyedProps.slice();
+}
+
+// Joiner-side destructible-prop apply. snapshot.dp is an id list;
+// for each id, find the proxy in level.obstacles whose
+// userData.propId matches, and (if not already destroyed) call
+// level.destroyProp(). Idempotent across both axes — repeat ids in
+// successive snapshots are no-ops, and a prop the joiner already
+// destroyed locally for any reason is skipped.
+export function applyDestroyedPropsSnapshot(level, snapshot) {
+  if (!level || !level.obstacles || !snapshot) return;
+  const ids = snapshot.dp;
+  if (!ids || !ids.length) return;
+  // Build a propId → proxy map once per apply rather than scanning
+  // the whole obstacle list per id. Cheap: <100 obstacles per level
+  // and Map.set is O(1) amortized.
+  const map = new Map();
+  for (const m of level.obstacles) {
+    const pid = m && m.userData ? m.userData.propId : null;
+    if (pid != null) map.set(pid | 0, m);
+  }
+  for (const id of ids) {
+    const proxy = map.get(id | 0);
+    if (!proxy) continue;
+    if (proxy.userData?.destroyed) continue;
+    try { level.destroyProp(proxy); }
+    catch (e) { console.warn('[coop] destroyProp apply failed', e); }
+  }
 }
 
 // Joiner-side window apply. snapshot.bw is an index list; for each
@@ -292,6 +344,11 @@ export function encodeEnemySnapshot(gunmen, melees, seq, t, loot = null, droneMg
     // every packet so the joiner doesn't need a separate "windows
     // changed" event channel.
     bw: _encodeWindows(level),
+    // dp = destroyed-prop ids (Phase J). Same monotonic-state model
+    // as bw — host re-encodes the full set every tick, joiner mirrors
+    // idempotently via applyDestroyedPropsSnapshot. Empty until the
+    // first destructible pops on this floor.
+    dp: _encodeDestroyedProps(level),
   };
 }
 

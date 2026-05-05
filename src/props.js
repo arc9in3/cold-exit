@@ -1206,6 +1206,36 @@ export const INWARD_FACING_KINDS = new Set([
   'bookshelf', 'locker',
 ]);
 
+// Destructible-prop HP table (Phase J). Kinds in this table take
+// bullet damage like enemies do — once their hp drains they hide,
+// drop their collision, and spill any unsearched loot as a single
+// ground pile. Kinds NOT in the table (desk, cabinet, bookshelf,
+// couch, bed, pillar, nightstand, locker, wallSconce, planter,
+// extraction-* props, window — has its own break system, shape
+// primitives like railing/ramp/platform) are immune to bullet
+// damage on purpose: they read as heavy / structural / story-set
+// pieces that shouldn't pop on a stray round.
+//
+// Numbers are tuned to feel snappy with starter weapons:
+//   bottle / vase   — single rifle shot
+//   lamp / tv       — short burst
+//   pallet / chair  — sustained burst
+//   crate / barrel  — small magazine dump
+//   coffeeTable     — heavier; wood slab takes a beat
+//
+// Frozen so a typo (mutating instead of reading) crashes loud.
+export const DESTRUCTIBLE_HP = Object.freeze({
+  crate:       30,
+  barrel:      40,
+  vase:         8,
+  bottle:       4,
+  lamp:        12,
+  tv:          18,
+  coffeeTable: 35,
+  chair:       25,
+  pallet:      20,
+});
+
 export function buildProp(kind, opts) {
   const f = PROP_BUILDERS[kind];
   if (!f) return null;

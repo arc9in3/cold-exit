@@ -144,6 +144,7 @@ const {
   applyLootSnapshot, applyDroneSnapshot,
   applyMegaBossSnapshot,
   applyWindowsSnapshot,
+  applyDestroyedPropsSnapshot,
   pushSnapshotForInterp, pickInterpSnapshots, applyInterpolated,
   clearSnapshotBuffer,
 } = _coopSnapshotModule;
@@ -1096,6 +1097,46 @@ if (typeof window !== 'undefined') {
   window.__gunmen = gunmen;
   window.__melees = melees;
   window.__drones = drones;
+  // Phase J — level.destroyProp reaches for these via window.__*
+  // because level.js can't import main.js without a cycle. Combat is
+  // for the impact-burst FX, sfx for the break sound. Both are
+  // optional — destroyProp guards each with a typeof check.
+  window.__combat = combat;
+  window.__sfx = sfx;
+  // Phase J — destructible-prop loot spill. Takes a position and the
+  // container's full loot array; spawns each item as a ground entry
+  // clustered in a tight 0.4 m ring around the destruction point so
+  // visually it reads as one spilled pile while preserving every
+  // item. Single call; iteration of items inside. Host-only path
+  // (level._spawnDestructibleLootSpill gates the call) so the joiner
+  // doesn't spawn duplicates — they mirror via the next loot
+  // snapshot. Wrap-around try blocks defend against malformed loot
+  // rows so a single bad item doesn't lose the rest.
+  window.__spawnGroundLootBundle = (pos, items) => {
+    if (!items || !items.length) return;
+    const cx = pos?.x || 0;
+    const cz = pos?.z || 0;
+    const cy = pos?.y ?? 0.4;
+    const RING = 0.4;
+    for (let i = 0; i < items.length; i++) {
+      const it = items[i];
+      if (!it) continue;
+      // Cluster offsets — first item at center, rest in a ring so
+      // pickup hitboxes don't fully overlap and the player can see
+      // multiple distinct drops under the visual "pile."
+      let ox = 0, oz = 0;
+      if (i > 0) {
+        const a = (i / Math.max(1, items.length - 1)) * Math.PI * 2;
+        ox = Math.cos(a) * RING;
+        oz = Math.sin(a) * RING;
+      }
+      try {
+        loot.spawnItem({ x: cx + ox, y: cy, z: cz + oz }, it);
+      } catch (err) {
+        console.warn('[prop] spill item spawn failed', err, it);
+      }
+    }
+  };
 }
 const loot = new LootManager(scene);
 const level = new Level(scene, { ground });
@@ -9703,6 +9744,29 @@ function fireOneShot(playerInfo, weapon, aimPoint, isADS, aimOwner, aimZone) {
         const _isJoiner = _wt && _wt.isOpen && !_wt.isHost;
         if (!_isJoiner) applyWindowDamage(ud.windowState, 1, hit.point);
       }
+      // Phase J — destructible prop. Same host-authoritative model
+      // as windows: only the host (or single-player) decrements hp
+      // and calls destroyProp(). The joiner mirrors via the next
+      // snapshot's `dp` apply path, so ignoring the hit here on
+      // joiner is intentional. Bullets always burn a damage charge —
+      // we use eff.damage (the same number applied to enemies) so
+      // a sniper one-taps a vase the way you'd expect, falling back
+      // to 10 if eff is missing for any reason.
+      if (ud && ud.maxHp != null && !ud.destroyed) {
+        const _wt2 = (typeof getCoopTransport === 'function') ? getCoopTransport() : null;
+        const _isJoiner2 = _wt2 && _wt2.isOpen && !_wt2.isHost;
+        if (!_isJoiner2) {
+          const propDmg = (eff && eff.damage > 0) ? eff.damage : 10;
+          ud.hp -= propDmg;
+          // Mirror to the visible group so any reader can see hp.
+          const _vg = ud.propGroup;
+          if (_vg && _vg.userData) _vg.userData.hp = ud.hp;
+          if (ud.hp <= 0) {
+            try { level.destroyProp(hit.mesh); }
+            catch (err) { console.warn('[prop] destroyProp threw', err); }
+          }
+        }
+      }
       combat.spawnImpact(hit.point);
     }
   }
@@ -10971,6 +11035,10 @@ function _tickCoop(dt) {
     // interp; the latest frame's index list is the truth.
     if (dpair && dpair.b && level) {
       applyWindowsSnapshot(level, dpair.b);
+      // Phase J — destructible-prop apply. Same monotonic /
+      // idempotent shape as windows: ids in `dp` get destroyProp()
+      // called locally if the joiner hasn't already broken them.
+      applyDestroyedPropsSnapshot(level, dpair.b);
     }
   }
   // Sync ghost meshes — create/update per-peer, prune disconnected.
