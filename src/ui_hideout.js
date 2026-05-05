@@ -122,6 +122,23 @@ const TAB_DEFS = [
   { id: 'mailbox',      label: 'MAILBOX'       },
 ];
 
+// First-visit greeting per tab. Fires once via `window.__hudMsg` the
+// first time the player clicks into a newly-revealed tab. Cleared
+// permanently by markOnboardSeen at click-time, so repeat visits
+// stay quiet. Mood-matched to the noir aesthetic — a single
+// in-character line per system. No greeting on `contractor` since
+// it's the always-on entry point.
+const ONBOARD_GREETINGS = {
+  recruiter:  '"You came back. Spend what you brought, make next time hurt less."',
+  stash:      '"Anything on this rack stays. What you carry, you lose."',
+  quartermaster: '"Chips for weapons. Permanent. Pick wisely."',
+  tailor:     '"Codename, callsign, look — change them whenever."',
+  vendors:    '"Tell me what to keep more of. Costs go up, returns go up."',
+  mailbox:    '"Rewards from past contracts pile up. Claim what you\'ve earned."',
+  vault:      '"Items here survive death. Reach in, plan ahead."',
+  blackmarket:'"Sigils only. Permits unlock relics. Keystones bend the run."',
+};
+
 // Black Market — sigil-spend vendor. Permits unlock locked relics in
 // the relic-merchant rotation; keystones apply run-modifier perks.
 // Content can grow without schema changes — main.js reads
@@ -936,6 +953,16 @@ export class HideoutUI {
       btn.addEventListener('click', () => {
         const fromTab = this.tab;
         this.tab = t.id;
+        // First-visit dialogue. Fire BEFORE markOnboardSeen — the
+        // not-yet-seen check below decides whether to play the line.
+        // Toast routes through the existing __hudMsg surface so the
+        // styling matches every other game-side notification.
+        if (t.id !== 'contractor' && !isOnboardSeen(t.id)) {
+          const line = ONBOARD_GREETINGS[t.id];
+          if (line && typeof window !== 'undefined' && window.__hudMsg) {
+            try { window.__hudMsg(line, 5.0); } catch (_) {}
+          }
+        }
         // Mark seen on first interaction so the NEW glow clears next
         // render. Contractor is always-seen by design.
         if (t.id !== 'contractor') markOnboardSeen(t.id);
