@@ -393,6 +393,10 @@ const crossShape = {
 };
 
 // ----- gallery — long hall, narrowed in one axis ------------------------
+// The hall's "long" axis must be the axis where doorways live; pinching
+// the perpendicular axis is what creates the hall feel. If doorways
+// exist on BOTH axes we can't pinch without orphaning a door, so the
+// shape degrades to rect.
 const gallery = {
   id: 'gallery',
   allowedTypes: ['combat', 'subBoss'],
@@ -400,22 +404,22 @@ const gallery = {
   build(level, room) {
     const d = _dims(room);
     const doors = _doorCenters(level, room);
-    // Pick the narrow axis — choose whichever has no doorways on
-    // either of its perpendicular sides (so we can pinch it without
-    // cutting a doorway). Default to X (narrow east/west).
-    const eastWestHasDoors = doors.east != null || doors.west != null;
-    const narrowZ = eastWestHasDoors;  // narrow Z if E/W has doors
+    const ewDoors = doors.east != null || doors.west != null;
+    const nsDoors = doors.north != null || doors.south != null;
+    // If both axes have doors we can't pinch either without sealing a
+    // door. Fall back to rect so doorway invariants stay intact.
+    if (ewDoors && nsDoors) return rectShape.build(level, room);
+    // Default: hall runs E-W (long X axis) when doors are on E/W only.
+    // Pinch in Z (north/south walls move inward).
+    const narrowZ = ewDoors;
     _addRectPerimeter(level, room);
-    // Pinch walls — two long interior walls that narrow the hall.
     const halfWidth = 4;   // 8m wide hall
     if (narrowZ) {
-      // Hall runs E-W; pinch in Z.
       level._addObstacle(d.cx, WALL_HEIGHT / 2, d.cz - halfWidth,
         d.w - 2.0, WALL_HEIGHT, WALL_THICK, level._outerWallColor());
       level._addObstacle(d.cx, WALL_HEIGHT / 2, d.cz + halfWidth,
         d.w - 2.0, WALL_HEIGHT, WALL_THICK, level._outerWallColor());
     } else {
-      // Hall runs N-S; pinch in X.
       level._addObstacle(d.cx - halfWidth, WALL_HEIGHT / 2, d.cz,
         WALL_THICK, WALL_HEIGHT, d.d - 2.0, level._outerWallColor());
       level._addObstacle(d.cx + halfWidth, WALL_HEIGHT / 2, d.cz,

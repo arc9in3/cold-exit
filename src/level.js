@@ -4265,6 +4265,45 @@ export class Level {
         }
       }
     }
+    // Stamp doorway gap regions as walkable so the flood-fill can
+    // cross from one room's bounds set into a neighbor's. Without
+    // this, two rooms' walkable boxes touch at a wall plane but no
+    // grid cell straddles the wall, so BFS can't traverse rooms.
+    // Per door, paint a (DOOR_WIDTH+1) wide × (WALL_THICK+2*STEP)
+    // deep strip centered on the doorway.
+    const halfDoorPad = DOOR_WIDTH / 2 + STEP;
+    const wallSpan    = WALL_THICK + STEP * 2;
+    const seenDoors = new Set();
+    for (const room of this.rooms) {
+      if (!room.neighbors) continue;
+      const b = room.bounds;
+      for (const n of room.neighbors) {
+        const other = this.rooms[n.otherId];
+        if (!other) continue;
+        const k = [Math.min(room.id, n.otherId), Math.max(room.id, n.otherId)].join('-');
+        if (seenDoors.has(k)) continue;
+        seenDoors.add(k);
+        let cxw, czw, dW, dD;
+        if (n.dir === 'north' || n.dir === 'south') {
+          cxw = other.cx;
+          czw = (n.dir === 'north') ? b.minZ : b.maxZ;
+          dW = halfDoorPad; dD = wallSpan;
+        } else {
+          cxw = (n.dir === 'east') ? b.maxX : b.minX;
+          czw = other.cz;
+          dW = wallSpan; dD = halfDoorPad;
+        }
+        const ix0 = Math.ceil((cxw - dW) / STEP);
+        const ix1 = Math.floor((cxw + dW) / STEP);
+        const iz0 = Math.ceil((czw - dD) / STEP);
+        const iz1 = Math.floor((czw + dD) / STEP);
+        for (let ix = ix0; ix <= ix1; ix++) {
+          for (let iz = iz0; iz <= iz1; iz++) {
+            walkable.add(cellKey(ix, iz));
+          }
+        }
+      }
+    }
 
     // Seed BFS from the player spawn cell. If the spawn cell isn't in
     // walkable (rare — happens if start room shape orphans the spawn),
