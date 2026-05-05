@@ -17026,6 +17026,11 @@ function tryBossEntrySeal(room) {
   if (!_bossInsideBossRoom(room)) return;
   level.lockDoorsForRoom(room.id);
   room._sealed = true;
+  // Phase M step 7 — stamp seal-start so the 90s timeout failsafe
+  // in updateBossSealRelease can detect a wedged boss room.
+  room._bossSealStartT = (typeof performance !== 'undefined'
+    ? performance.now() : Date.now()) / 1000;
+  room._bossGoneSinceT = null;
   _ejectPlayerFromSealedDoors(room);
   transientHudMsg('DOORS SEALED — BOSS FIGHT', 2.2);
 }
@@ -17033,12 +17038,58 @@ function tryBossEntrySeal(room) {
 // Watch sealed boss rooms each frame: if the boss leaves its bounds
 // (chase, dash through a door, etc.) drop the seal so the player isn't
 // trapped inside while the boss is loose. Also drops if the boss dies.
+//
+// Phase M step 7 — adds two failsafes on top:
+//   a) 90s sealed-too-long timeout. If a boss room stays sealed for
+//      90 seconds straight (boss is bugged, despawned, or stuck off-
+//      mesh) force the unseal so the player isn't trapped.
+//   b) "Boss is gone" check. If the room is sealed AND no boss /
+//      megaboss is alive in the level for 5 seconds straight, force
+//      both the unseal AND revealExit() so the run can extract.
 function updateBossSealRelease() {
+  const now = (typeof performance !== 'undefined' ? performance.now() : Date.now()) / 1000;
   for (const r of level.rooms) {
     if (r.type !== 'boss' || !r._sealed || r._sealReleased) continue;
-    if (_bossInsideBossRoom(r)) continue;
-    level.unlockDoorsForRoom(r.id);
-    r._sealReleased = true;
+    if (r._bossSealStartT == null) r._bossSealStartT = now;
+    // Normal release — boss left the room.
+    if (!_bossInsideBossRoom(r)) {
+      level.unlockDoorsForRoom(r.id);
+      r._sealReleased = true;
+      continue;
+    }
+    // 90s timeout failsafe — boss is bugged or stuck. Force unseal.
+    if (now - r._bossSealStartT > 90) {
+      console.warn('[boss-seal] 90s timeout — force-unsealing room', r.id);
+      level.unlockDoorsForRoom(r.id);
+      r._sealReleased = true;
+      try { transientHudMsg?.('Boss seal timed out — doors unlocked', 2.0); } catch (_) {}
+      continue;
+    }
+    // "Boss is gone" — no living boss anywhere in level.gunmen /
+    // level.megaboss. Track a contiguous-gone timestamp; once it
+    // exceeds 5s, force both the unseal AND the extraction reveal.
+    let bossAnywhere = false;
+    for (const g of gunmen.gunmen) {
+      if (g.alive && (g.tier === 'boss' || g.majorBoss)) { bossAnywhere = true; break; }
+    }
+    if (!bossAnywhere) {
+      for (const m of melees.enemies) {
+        if (m.alive && (m.tier === 'boss' || m.majorBoss)) { bossAnywhere = true; break; }
+      }
+    }
+    if (!bossAnywhere && megaBoss && megaBoss.alive !== false) bossAnywhere = true;
+    if (bossAnywhere) {
+      r._bossGoneSinceT = null;
+    } else {
+      if (r._bossGoneSinceT == null) r._bossGoneSinceT = now;
+      if (now - r._bossGoneSinceT > 5) {
+        console.warn('[boss-seal] boss gone for >5s — force-unsealing + revealing exit, room', r.id);
+        level.unlockDoorsForRoom(r.id);
+        r._sealReleased = true;
+        try { level.revealExit?.(); } catch (_) {}
+        try { transientHudMsg?.('Boss missing — extraction opened', 2.0); } catch (_) {}
+      }
+    }
   }
 }
 
