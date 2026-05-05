@@ -5088,11 +5088,17 @@ export class Level {
     if (!this.obstacles || !this.obstacles.length) {
       return { ok: true, failures };
     }
-    // Collect wall proxies. Cap at 10 so the smoke check stays cheap
+    // Collect wall proxies. Cap at 60 so the smoke check stays cheap
     // even on a 500-wall level.
+    //
+    // Only VISIBLE proxies are eligible — _clearDoorCorridors flips
+    // visible=false on the slabs that overlap a doorway so bullets +
+    // bodies pass through them. Their raycast() early-outs on the
+    // hidden flag, which would (correctly) return 0 hits and read as
+    // a bug here. Filter them out at sample time.
     const proxies = [];
     for (const m of this.obstacles) {
-      if (m && m.isWallProxy) proxies.push(m);
+      if (m && m.isWallProxy && m.visible) proxies.push(m);
       if (proxies.length >= 60) break;     // sample pool, picked-down below
     }
     if (proxies.length === 0) {
