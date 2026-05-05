@@ -13937,8 +13937,15 @@ const _CAM_CAST_OFFSETS = [
   { x:  0.00, y: 0.30, z:  0.00 },   // shins
 ];
 const _nextFaded = new Set();
+// Phase M step 8 — walls flagged for AGGRO-fade get a stronger
+// transparency (0.18 vs 0.30) so an aware enemy hiding behind cover
+// is still trackable through the wall. Cleared + repopulated each
+// frame in updateWallOcclusion.
+const _aggroFaded = new Set();
+const _prevAggroFaded = new Set();
 function updateWallOcclusion() {
   _nextFaded.clear();
+  _aggroFaded.clear();
   const nextFaded = _nextFaded;
   if (level.obstacles && level.obstacles.length && !playerDead) {
     const px = player.mesh.position.x;
@@ -14016,6 +14023,64 @@ function updateWallOcclusion() {
       }
     }
 
+    // 2a. AGGRO TRACKING THROUGH WALLS — aggro'd enemies stay
+    //     visually trackable when they duck behind cover. For each
+    //     aware (g.aware === true) enemy that's within the visible
+    //     range, walk obstacles within 2m of the enemy; any wall
+    //     between camera and the enemy gets added to `nextFaded`
+    //     AND tagged for the stronger 0.18 fade so the player can
+    //     tell at a glance the enemy is still active behind cover.
+    if (qualityFlags.wallOcclusionForEnemies) {
+      const AGGRO_PROBE_R = 2.0;        // wall must be within 2m of enemy
+      const AGGRO_PROBE_R2 = AGGRO_PROBE_R * AGGRO_PROBE_R;
+      const aggroIdleRangeSq = OCCL_ENEMY_RANGE * OCCL_ENEMY_RANGE;
+      const list1 = gunmen.gunmen, list2 = melees.enemies;
+      for (let i = 0, total = list1.length + list2.length; i < total; i++) {
+        const e = i < list1.length ? list1[i] : list2[i - list1.length];
+        if (!e.alive || e.hidden) continue;
+        // "Aware" = aggro state. The state machine doesn't expose
+        // a single `e.aware` flag, so we infer from state: anything
+        // that isn't idle / sleep / patrol counts as aggro'd. Falls
+        // back to a literal e.aware boolean if the actor exposes one
+        // (megaboss minions etc.).
+        const s = e.state;
+        const aggro = !!e.aware
+          || (s && s !== 'idle' && s !== 'sleep' && s !== 'patrol' && s !== 'dead');
+        if (!aggro) continue;
+        const ex = e.group.position.x, ez = e.group.position.z;
+        const dxe = ex - px, dze = ez - pz;
+        const d2 = dxe * dxe + dze * dze;
+        if (d2 > aggroIdleRangeSq) continue;
+        // Cheap pre-pass: only consider obstacles whose centre is
+        // within AGGRO_PROBE_R of the enemy. Then ray-test camera→
+        // enemy and add any hit to nextFaded + _aggroFaded.
+        for (const o of blockers) {
+          if (!o.userData || o.userData.isDoor) continue;
+          if (o.userData.isProp) continue;
+          const b = o.userData.collisionXZ;
+          if (!b) continue;
+          const ocx = (b.minX + b.maxX) * 0.5;
+          const ocz = (b.minZ + b.maxZ) * 0.5;
+          const dxw = ocx - ex, dzw = ocz - ez;
+          if (dxw * dxw + dzw * dzw > AGGRO_PROBE_R2) continue;
+          // Aim the cam→enemy raycast through this neighborhood; the
+          // existing _addOcclusionHits would already add this wall to
+          // nextFaded if it's between cam and enemy, but we need to
+          // tag it for the stronger fade. Do a lightweight pip — if
+          // the wall's AABB centre lies within the cam→enemy frustum
+          // AND _addOcclusionHits accepted it this frame, mark it
+          // aggro-faded.
+          if (nextFaded.has(o)) _aggroFaded.add(o);
+        }
+        // If the cam→enemy chest cast hasn't already run for this
+        // enemy (active-bypass path skipped some staggered idle
+        // enemies), do a one-shot probe so we still capture the
+        // wall(s) between camera and aggro'd enemy.
+        _occlTargetPt.set(ex, 1.10, ez);
+        _addOcclusionHits(camera.position, _occlTargetPt, blockers, nextFaded, _aggroFaded);
+      }
+    }
+
     // 2b. Walls between camera and the CURRENT AIM POINT — if the
     //     player is pointing their cursor at a spot across a wall,
     //     reveal the obstruction so they understand why the shot
@@ -14046,8 +14111,46 @@ function updateWallOcclusion() {
   for (const m of nextFaded) {
     if (!_occlFaded.has(m)) _fadeWall(m);
   }
+  // Phase M step 8 — apply / revert the stronger aggro-fade. We
+  // run AFTER the normal fade pass so opacity ends at the aggro
+  // value (0.18) for any wall the aggro pass flagged this frame,
+  // and back at the regular fade value (0.30) for walls that were
+  // aggro-faded last frame but aren't this frame.
+  for (const m of _aggroFaded) {
+    _fadeWallAggro(m);
+  }
+  for (const m of _prevAggroFaded) {
+    if (!_aggroFaded.has(m) && nextFaded.has(m)) {
+      // Drop back to the standard fade level — wall is still
+      // occluding but the enemy isn't aware any more.
+      _fadeWall(m);
+    }
+  }
+  _prevAggroFaded.clear();
+  for (const m of _aggroFaded) _prevAggroFaded.add(m);
   _occlFaded.clear();
   for (const m of nextFaded) _occlFaded.add(m);
+}
+
+// Phase M step 8 — stronger fade variant for aggro tracking. Same
+// state stash as _fadeWall but lands at opacity 0.18 instead of 0.30.
+function _fadeWallAggro(m) {
+  if (!m || !m.material) return;
+  if (m.userData?.isProp) return;
+  if (m.material.opacity === 0 && m.userData?._origOpacity === undefined) return;
+  const ud = m.userData;
+  if (ud._origOpacity === undefined) {
+    ud._origOpacity = m.material.opacity;
+    ud._origDepthWrite = m.material.depthWrite !== false;
+    ud._origCastShadow = !!m.castShadow;
+    if (!m.material.transparent) {
+      m.material.transparent = true;
+      m.material.needsUpdate = true;
+    }
+  }
+  m.material.opacity = 0.18;
+  m.material.depthWrite = false;
+  m.castShadow = false;
 }
 
 // Bottom-right weapon panel — current weapon name, class label, and a
