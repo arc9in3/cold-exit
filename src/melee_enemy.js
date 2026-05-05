@@ -3,6 +3,7 @@ import { tunables } from './tunables.js';
 import { buildRig, initAnim, updateAnim, pokeHit, pokeDeath } from './actor_rig.js';
 import { _nextNetId } from './gunman.js';
 import { spawnSpeechBubble } from './hud.js';
+import { aiSpatial } from './ai_spatial.js';
 
 // Melee rusher: idle → chase → windup → recovery. Stockier than the
 // gunman so they read as distinct at a glance. No defensive system —
@@ -1302,6 +1303,30 @@ export class MeleeEnemyManager {
       // don't allocate per tick.
       let approach = dir2d;
       let usePathDoor = false;
+      // Flow-field bias — when the player is far enough that the
+      // straight-line approach would smash into geometry, sample
+      // the spatial flow field for the next walkable direction.
+      // Same fail-soft pattern as gunman.js: if the field can't
+      // reach this cell (e.g. melee on a ledge), fall back to dir2d.
+      // We only sample when the player is more than 3m away; close-
+      // quarters chase wants the direct vector so the actor doesn't
+      // snap to grid axes during the strike.
+      if (aiSpatial?.flowFieldTo && ctx.level && dist > 3.0) {
+        const flow = aiSpatial.flowFieldTo(ctx.playerPos.x, ctx.playerPos.z);
+        if (flow && typeof flow.sample === 'function') {
+          const dir = flow.sample(e.group.position.x, e.group.position.z);
+          if (dir && (dir.dx !== 0 || dir.dz !== 0)) {
+            // 70/30 blend, same as the gunman branch — pure flow
+            // produces visible grid-snap; the bleed smooths it.
+            const fx = dir.dx * 0.7 + dir2d.x * 0.3;
+            const fz = dir.dz * 0.7 + dir2d.z * 0.3;
+            const fl = Math.hypot(fx, fz);
+            if (fl > 0.001) {
+              approach = _m_approach.set(fx / fl, 0, fz / fl);
+            }
+          }
+        }
+      }
       // Assassin retreating: flip the approach direction so the
       // chase branch below moves them away instead of toward. Skip
       // door-graph lookup — just run.
