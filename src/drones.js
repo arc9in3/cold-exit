@@ -12,6 +12,7 @@
 
 import * as THREE from 'three';
 import { _nextNetId } from './gunman.js';
+import { aiSpatial } from './ai_spatial.js';
 
 const DRONE_HP            = 24;       // ~2 pistol shots, 1 SMG burst
 const DRONE_SPEED         = 3.4;      // m/s — slower than player sprint, faster than walk
@@ -23,6 +24,14 @@ const DRONE_AOE_RADIUS    = 2.4;
 const DRONE_AOE_DAMAGE    = 22;
 const DRONE_AOE_SHAKE     = 0.32;
 const POOL_SIZE           = 16;       // covers a Hivemaster swarm (2-3/summon × 5 summons)
+// Pass 2 — strafing approach. Drone aims at a point on a circle
+// around the player, with the angle rotating at STRAFE_ANG_RATE rad/s
+// and the radius held at STRAFE_RADIUS. Sample the flow field toward
+// that point so the drone respects walls; fall back to the direct
+// vector when the flow-field cell is unreachable. Result: strafing
+// approach instead of straight-line chase + detonate.
+const STRAFE_RADIUS       = 5.0;      // m — held offset from player
+const STRAFE_ANG_RATE     = 0.5;      // rad/s — orbital rate of the angle
 
 // Shared geometry + materials. The Hivemaster swarm previously paid a
 // fresh OctahedronGeometry + SphereGeometry + MeshStandardMaterial +
@@ -186,33 +195,58 @@ export class DroneManager {
         continue;
       }
       if (!coopJoiner) {
-        // Track player at constant speed. Drones float — no gravity,
-        // no collision with low cover (they fly over). They DO try to
-        // avoid running through walls by clamping motion against
-        // level.resolveCollision so they don't phase through doors.
+        // Pass 2 strafing approach. Each drone holds an orbital angle
+        // that rotates at STRAFE_ANG_RATE; the strafe target sits at
+        // STRAFE_RADIUS from the player along that angle. Movement
+        // toward the strafe target is flow-field-aware so the drone
+        // routes around walls instead of pinning against them.
         const gx = d.group.position.x;
         const gz = d.group.position.z;
-        const dx = px - gx;
-        const dz = pz - gz;
-        const dist = Math.hypot(dx, dz);
-        if (dist > 0.001) {
-          _DIR_TMP.set(dx / dist, 0, dz / dist);
-          const step = DRONE_SPEED * dt;
-          const nx = gx + _DIR_TMP.x * step;
-          const nz = gz + _DIR_TMP.z * step;
-          if (ctx.level) {
-            // Drone-specific collision — only walls + doors block, props
-            // are flown over. ~80% reduction in obstacle iterations vs
-            // level.resolveCollision in a typical late-game room.
-            const r = _droneResolveCollision(ctx.level, gx, gz, nx, nz, 0.25);
-            d.group.position.x = r.x;
-            d.group.position.z = r.z;
-          } else {
-            d.group.position.x = nx;
-            d.group.position.z = nz;
+        d._strafeAngle = (d._strafeAngle || (Math.random() * Math.PI * 2))
+          + STRAFE_ANG_RATE * dt;
+        const sx = px + Math.cos(d._strafeAngle) * STRAFE_RADIUS;
+        const sz = pz + Math.sin(d._strafeAngle) * STRAFE_RADIUS;
+        // Sample flow field toward the strafe target. Falls back to
+        // the direct vector when the cell is unreachable (e.g. drone
+        // is in a corner the flow-field cache hasn't grown into).
+        let dirX = sx - gx, dirZ = sz - gz;
+        const ll = Math.hypot(dirX, dirZ);
+        if (ll > 0.001) {
+          let used = null;
+          if (aiSpatial && typeof aiSpatial.flowFieldTo === 'function') {
+            try {
+              const flow = aiSpatial.flowFieldTo(sx, sz);
+              const samp = flow && flow.sample ? flow.sample(gx, gz) : null;
+              if (samp) used = samp;
+            } catch (e) { /* fail-soft */ }
           }
+          if (used) { dirX = used.dx; dirZ = used.dz; }
+          else { dirX /= ll; dirZ /= ll; }
+        } else {
+          dirX = 0; dirZ = 0;
         }
-        // Contact check — close enough → detonate.
+        _DIR_TMP.set(dirX, 0, dirZ);
+        const step = DRONE_SPEED * dt;
+        const nx = gx + _DIR_TMP.x * step;
+        const nz = gz + _DIR_TMP.z * step;
+        if (ctx.level) {
+          // Drone-specific collision — only walls + doors block, props
+          // are flown over. ~80% reduction in obstacle iterations vs
+          // level.resolveCollision in a typical late-game room.
+          const r = _droneResolveCollision(ctx.level, gx, gz, nx, nz, 0.25);
+          d.group.position.x = r.x;
+          d.group.position.z = r.z;
+        } else {
+          d.group.position.x = nx;
+          d.group.position.z = nz;
+        }
+        // Distance to player (post-move) for contact + fire path.
+        const pdx = px - d.group.position.x;
+        const pdz = pz - d.group.position.z;
+        const dist = Math.hypot(pdx, pdz);
+        // Contact check — close enough → detonate. Drones still detonate
+        // on contact even though they no longer chase straight in,
+        // because the strafe orbit can incidentally clip the player.
         if (dist < DRONE_CONTACT_RADIUS) {
           this._detonate(d, ctx);
           continue;
