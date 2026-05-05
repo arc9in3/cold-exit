@@ -13908,8 +13908,12 @@ function updateLootPrompt() {
   // prompts.
   const bodies = !near ? nearbyBodies(player.mesh.position, 2.2) : [];
   const body = !near ? nearestBody(player.mesh.position, 2.2) : null;
-  const containerHit = (!near && !body) ? level.nearestContainer(player.mesh.position, 1.8) : null;
-  const npc = (!near && !body && !containerHit) ? level.nearestNPC(player.mesh.position, 2.5) : null;
+  // A boss corpse landing on top of a chest used to lock the prompt
+  // forever on `(body looted)`. Treat already-looted bodies as
+  // transparent for the container / NPC fall-through (#12).
+  const _bodyBlocks = body && !body.looted;
+  const containerHit = (!near && !_bodyBlocks) ? level.nearestContainer(player.mesh.position, 1.8) : null;
+  const npc = (!near && !_bodyBlocks && !containerHit) ? level.nearestNPC(player.mesh.position, 2.5) : null;
   if (promptEl) {
     // Resolve to a single (display, text, hint) tuple, then write once
     // through the cache check at the bottom. Was thrashing
@@ -13934,8 +13938,6 @@ function updateLootPrompt() {
     } else if (body && !body.looted && body.loot && body.loot.length) {
       txt = `[${_eKey}] search body`;
       hint = 'searchBody';
-    } else if (body && body.looted) {
-      txt = `(body looted)`;
     } else if (containerHit) {
       txt = `[${_eKey}] open ${containerHit.container.name}`;
       hint = 'openContainer';
@@ -13974,6 +13976,10 @@ function updateLootPrompt() {
       if (enc && enc.def) {
         const name = enc.def.name || enc.def.id || 'this';
         txt = `[${_eKey}] interact with ${name}`;
+      } else if (body && body.looted) {
+        // Lowest-priority hint — keeps the original "you've already
+        // searched here" feedback when there's nothing else to do.
+        txt = `(body looted)`;
       }
     }
     const wantDisplay = txt ? 'block' : 'none';
