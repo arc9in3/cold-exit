@@ -82,30 +82,35 @@ export const qualityFlags = {
   // Off in low / potato — the extra render targets + composite cost
   // double GPU time on integrated cards.
   postFx: true,
-  // ----- POTATO-tier additions (off only when tier === 'potato') -----
-  // When false: muzzle-flash sprite meshes don't render either. On
-  // 'low' the lights are off but flash sprite still draws (~3-5
-  // additive draws per shot). On 'potato' the sprites are also cut.
+  // ----- Sub-high cuts (off on 'low' AND 'potato') -----
+  // Non-essential combat fluff: brass eject + muzzle smoke puff.
+  // Pure visual juice, no gameplay information. Off on low+potato
+  // since per-shot particle pool churn isn't free even when
+  // pooled — material updates, draw calls, GC pressure.
+  combatVfx: true,
+  // ----- POTATO-only cuts (off only when tier === 'potato') -----
+  // Muzzle-flash sprite mesh. Kept on 'low' because it's a
+  // gameplay-readability cue (shooter direction). Off on potato
+  // where every per-shot draw counts more than the cue.
   muzzleFlashSprites: true,
-  // When false: tracer particles for hitscan weapons are skipped.
-  // The damage still applies; only the visual line is cut. Saves a
-  // line-strip draw + per-frame buffer update per active tracer.
+  // Tracer particles for hitscan weapons. Damage still applies; only
+  // the visual line is cut. Off on potato. Kept on low because
+  // tracers are core readability for hitscan vs slug weapons.
   tracerParticles: true,
-  // When false: scene fog uniform is bypassed entirely. Fog is per-
-  // fragment and on TBDR mobile GPUs each shader does the math even
-  // when the camera is past `fog.far`. Killing it is a fragment win.
+  // Scene fog uniform. Fog is per-fragment and on TBDR mobile GPUs
+  // each shader does the math even past fog.far. Killing it is a
+  // fragment win. Low keeps it (it shrinks fog.far).
   sceneFog: true,
-  // When false: ambient/positional sound is muted. Saves audio mixer
-  // CPU + GC pressure from per-frame distance attenuation.
+  // Ambient/positional sound. Off on potato; low keeps it.
   ambientAudio: true,
-  // Multiplier applied to the render-target backing buffer size. 1.0
-  // = full canvas resolution; 0.7 = render at 70% then upscale via
-  // CSS. Biggest single fillrate save on mobile GPUs (which are
-  // bandwidth-limited far before they're shader-limited).
+  // Backing-buffer scale. 1.0 = full canvas; 0.7 = render at 70%
+  // then upscale via CSS. Biggest single fillrate save on mobile
+  // GPUs (bandwidth-limited far before shader-limited).
   renderScale: 1.0,
-  // Hard cap on simultaneously-rendered enemies. Above this, spawn
-  // is throttled / older enemies are reaped. Default = unlimited
-  // for high; mobile clamps so phone GPUs don't choke on 30+ rigs.
+  // Hard cap on simultaneously-spawned enemies. Sub-bosses,
+  // bosses, tutorial dummies, and key-holders bypass the cap.
+  // High = unlimited; low = 24 (eases integrated GPU + weak laptop);
+  // potato = 8 (phone-class).
   maxConcurrentEnemies: Infinity,
 };
 
@@ -122,18 +127,21 @@ export function applyQuality(mode, ctx = {}) {
   qualityFlags.muzzleLights = !low;
   qualityFlags.sideLights = !low;
   qualityFlags.postFx = !low;
-  // POTATO-only additions — visual identity sacrificed for fillrate.
+  // Off on low + potato: pure visual fluff with no gameplay signal.
+  qualityFlags.combatVfx = !low;
+  // POTATO-only: cuts that hurt visual identity / readability and
+  // are only justified by phone-class fillrate budgets.
   qualityFlags.muzzleFlashSprites = !potato;
   qualityFlags.tracerParticles = !potato;
   qualityFlags.sceneFog = !potato;
   qualityFlags.ambientAudio = !potato;
   qualityFlags.renderScale = potato ? 0.7 : 1.0;
-  // Concurrent-enemy clamp. Profiling at 14 gunmen on 6× CPU throttle
-  // (≈ A11 single-thread) showed ~16 FPS — half the idle rate. Real
-  // A11 GPU is also weaker, so 8 is the playability ceiling for now.
-  // Sub-bosses + bosses + tutorial dummies + key-holders bypass the
-  // cap (objective-bearing — see spawn loop in main.js).
-  qualityFlags.maxConcurrentEnemies = potato ? 8 : Infinity;
+  // Concurrent-enemy clamp progression: high = unlimited; low = 24
+  // (covers any realistic floor density on integrated GPU); potato
+  // = 8 (phone-class). Throttled-CPU profiling showed potato wave
+  // FPS roughly halves between 8 and 14 enemies; 8 is the
+  // playability ceiling on a 6× CPU throttle ≈ A11 single-thread.
+  qualityFlags.maxConcurrentEnemies = potato ? 8 : (low ? 24 : Infinity);
 
   if (ctx.renderer) {
     ctx.renderer.shadowMap.enabled = !low;
