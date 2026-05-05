@@ -245,7 +245,11 @@ class RigInstancer {
     for (const rig of this._actors) {
       if (rig.group) rig.group.updateMatrixWorld(false);
     }
-    const dirty = new Set();
+    // Reuse one Set per instancer instance for per-frame dirty
+    // tracking — `new Set()` per call was a steady GC trickle,
+    // ~one Set/frame from this method alone.
+    const dirty = (this._dirtyScratch || (this._dirtyScratch = new Set()));
+    dirty.clear();
     for (const rig of this._actors) {
       const slots = rig._instSlots;
       if (!slots) continue;
@@ -271,7 +275,10 @@ class RigInstancer {
   setActorFlash(rig, k) {
     if (!rig || !rig._instSlots) return;
     const kk = Math.max(0, Math.min(1, k));
-    const dirty = new Set();
+    // Reused Set — flash can fire several times per second per enemy
+    // when bullets land in rapid succession.
+    const dirty = (this._flashDirtyScratch || (this._flashDirtyScratch = new Set()));
+    dirty.clear();
     for (const e of rig._instSlots) {
       // Match old flash semantics: only body + head got tinted.
       if (e.role !== 'body' && e.role !== 'head') continue;
