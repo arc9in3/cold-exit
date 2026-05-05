@@ -263,6 +263,11 @@ export class CoopLobbyUI {
           // Active-buff bit — drives the cyan ground ring under
           // the ally rig (adrenaline / stim / energy drink / etc.).
           buffActive: !!body.bf,
+          // On-ledge bit (Phase H step 2). main.js's per-frame ghost
+          // sync lifts the ghost mesh by 1m when set so a mantled
+          // peer reads as standing on the ledge instead of clipping
+          // into the wall. Mirrors local player.onLedge state.
+          onLedge: !!body.oL,
           name: this.transport.peers.get(from)?.name || 'peer',
           ts: performance.now(),
           // Sticky death flag survives pos refreshes — once a peer's

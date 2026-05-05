@@ -10891,6 +10891,13 @@ function _tickCoop(dt) {
         a: +(pi?.adsAmount ?? 0).toFixed(2),
         d: (pi?.mode === 'dash' || pi?.mode === 'slide') ? 1 : 0,
         wc: wpn?.class || 'pistol',
+        // On-ledge bit (Phase H step 2). When set, the receiving
+        // peer lifts our ghost mesh by 1m so we visually stand on
+        // the ledge instead of clipping into the wall. ledges.js's
+        // applyMantle stamps player.onLedge with the ledge record;
+        // dropOff() clears it. Sent as 0/1 to keep the typical
+        // packet small.
+        oL: player.onLedge ? 1 : 0,
         // Dual-opt-in extract — peer is standing in the exit zone
         // and ready to advance. Host gates advanceFloor on this
         // being true for every joiner ghost. Cheap (single bit on
@@ -11122,7 +11129,15 @@ function _tickCoop(dt) {
     const prevX = m.lastX, prevZ = m.lastZ;
     m.lastX += (ghost.x - m.lastX) * k;
     m.lastZ += (ghost.z - m.lastZ) * k;
-    m.group.position.set(m.lastX, 0, m.lastZ);
+    // On-ledge Y lift (Phase H step 2). Ledge top sits at sillHeight
+    // (default 1.0m) + slab thickness; we apply a flat 1m offset so
+    // the ghost rig reads as standing on the ledge instead of
+    // floating-in-wall at floor level. Lerped toward target so the
+    // mantle/drop transitions don't snap.
+    const targetY = ghost.onLedge ? 1.0 : 0.0;
+    if (typeof m.lastY !== 'number') m.lastY = targetY;
+    m.lastY += (targetY - m.lastY) * Math.min(1, dt / 0.12);
+    m.group.position.set(m.lastX, m.lastY, m.lastZ);
     // Rig animation — derive speed from position delta, face the
     // movement heading. updateAnim drives the walk / idle blend
     // identically to gunmen, so the ally reads as a real player
