@@ -7,6 +7,10 @@ import { StaticObstacleGrid2D } from './obstacle_grid.js';
 import { pickTemplateForRoom, applyTemplate } from './room_templates.js';
 import { buildExtractionRoom } from './extraction_room.js';
 import { SHAPE_REGISTRY, pickShapeForRoom } from './level_shapes.js';
+import { assignBuildings, connectorEdgesFor } from './buildings.js';
+import { buildWindow } from './windows.js';
+import { buildSkybridge } from './skybridges.js';
+import { addLedge } from './ledges.js';
 
 // Shopkeeper palette per kind — body / head / pants / gear tint so
 // each shop's NPC reads as a distinct role in the world. Exported so
@@ -152,6 +156,11 @@ export class Level {
     this._visionDirty = true;
     this._projectileObstacleGrid = null;
     this._projectileObstacleSource = null;
+    // Pass 1C state — windows / connectors / ledges. Cleared every
+    // regen so previous-floor refs don't leak into the new floor.
+    this._windows = [];
+    this._connectors = [];
+    this.ledges = [];
   }
 
   generate() {
@@ -507,6 +516,33 @@ export class Level {
       }
     }
 
+    // --- Pass 1C — buildings + connectors + windows + ledges -----------
+    // Tag every room with a building identity (default 'A'; level
+    // index >= 3 may split into A/B). Then for each cross-building
+    // edge, build a skybridge / connector. Then walk exterior walls
+    // and replace 1-2 segments with windows + ledges so players can
+    // shoot through and mantle around.
+    try {
+      assignBuildings(this);
+      const connectorEdges = connectorEdgesFor(this);
+      this._connectors = [];
+      for (const edge of connectorEdges) {
+        const conn = buildSkybridge(this, edge.fromRoom, edge.toRoom, edge.kind);
+        if (conn) {
+          this.rooms.push(conn);
+          this._connectors.push(conn);
+        }
+      }
+      // Windows + ledges along exterior walls.
+      this._windows = [];
+      this._addExteriorWindowsAndLedges();
+      this._dirtySolid();
+    } catch (err) {
+      // Non-fatal — Pass 1C is purely additive on top of the cell
+      // graph; if anything throws, fall back to vanilla rooms.
+      console.warn('[level] Pass 1C wiring threw:', err);
+    }
+
     // Interior variants (split walls, narrowing hallways) go up before the
     // cover scatter so that cover can avoid placing inside interior walls.
     //
@@ -743,6 +779,15 @@ export class Level {
     // informational for the dev console / probe HTML / future smoke
     // harness. Wrapped in try/catch so a bad shape doesn't break
     // generate(); the warn surfaces the problem either way.
+    try {
+      const outdoor = this.runOutdoorInvariants();
+      if (typeof window !== 'undefined') window.__lastOutdoorInvariantCheck = outdoor;
+      if (!outdoor.ok) {
+        console.warn('[level] Pass 1C outdoor-invariants FAIL:', outdoor.failures);
+      }
+    } catch (err) {
+      console.warn('[level] runOutdoorInvariants threw:', err);
+    }
     try {
       const inv = this.checkPathwayInvariants();
       if (typeof window !== 'undefined') window.__lastInvariantCheck = inv;
@@ -1323,6 +1368,223 @@ export class Level {
     if (west) addSegmentsVert(b.minX, west.cz);
     else this._addObstacle(b.minX, WALL_HEIGHT / 2, (b.minZ + b.maxZ) / 2,
       WALL_THICK, WALL_HEIGHT, (b.maxZ - b.minZ), OUTER_WALL_COLOR);
+  }
+
+  // Pass 1C — walk exterior walls of every room and replace 1-2
+  // sections of solid wall per side with windows + ledges. A side is
+  // "exterior" if there's no neighbor on that side. Windows are built
+  // via buildWindow() (windows.js) and added as a collision proxy +
+  // visible group; ledges sit just below each window inside the room.
+  //
+  // The function is idempotent in spirit — it walks each room once
+  // per generate() and stamps level._windows / level.ledges.
+  //
+  // Skips: connectors (their walls are owned by the bridge generator)
+  // and synthetic rooms (extraction).
+  _addExteriorWindowsAndLedges() {
+    if (!this._windows) this._windows = [];
+    for (const room of this.rooms) {
+      if (!room || room.id < 0) continue;
+      if (room.type === 'connector') continue;
+      if (!room.bounds || !room.neighbors) continue;
+      const used = new Set(room.neighbors.map(n => n.dir));
+      const sides = ['north', 'south', 'east', 'west'].filter(s => !used.has(s));
+      // 1-2 windows per exterior side, weighted toward "1". Skip
+      // start rooms entirely (predictable spawn) and shop rooms (the
+      // shop UI doesn't yet support windowed walls).
+      if (room.type === 'start' || room.type === 'shop') continue;
+      // Allow a bias so larger rooms get 2 windows. Use room footprint
+      // as a heuristic.
+      for (const side of sides) {
+        if (Math.random() > 0.6) continue;        // ~60% per exterior side
+        const count = (Math.random() < 0.3) ? 2 : 1;
+        for (let i = 0; i < count; i++) {
+          this._placeWindowOnSide(room, side, i, count);
+        }
+      }
+    }
+  }
+
+  // Place a single window + ledge on the given exterior side of a
+  // room. `i` and `count` distribute the windows evenly along the
+  // wall (0 of 1 = midpoint; 0 of 2 = 1/3, 1 of 2 = 2/3, etc).
+  _placeWindowOnSide(room, side, i, count) {
+    const b = room.bounds;
+    const winW = 4.0;
+    const winH = 2.0;
+    const sillH = 1.0;
+    let wx, wz, isHorizWall;
+    let wallSegMin, wallSegMax;
+    if (side === 'north' || side === 'south') {
+      isHorizWall = true;
+      wz = (side === 'north') ? b.minZ : b.maxZ;
+      const wallLen = b.maxX - b.minX;
+      // Avoid the 4m at each end (outer-wall corners) so the window
+      // doesn't span past the room.
+      const margin = 3.0;
+      const span = wallLen - margin * 2;
+      if (span < winW + 1) return;
+      const offset = (span / (count + 1)) * (i + 1);
+      wx = b.minX + margin + offset;
+      wallSegMin = wx - winW / 2;
+      wallSegMax = wx + winW / 2;
+      // If a doorway falls inside this window's span, abort — we
+      // don't want to overlap a door.
+      for (const n of room.neighbors || []) {
+        if (n.dir !== side) continue;
+        const other = this.rooms[n.otherId];
+        if (!other) continue;
+        const doorCenter = other.cx;
+        if (Math.abs(doorCenter - wx) < winW / 2 + DOOR_WIDTH / 2 + 0.5) return;
+      }
+    } else {
+      isHorizWall = false;
+      wx = (side === 'east') ? b.maxX : b.minX;
+      const wallLen = b.maxZ - b.minZ;
+      const margin = 3.0;
+      const span = wallLen - margin * 2;
+      if (span < winW + 1) return;
+      const offset = (span / (count + 1)) * (i + 1);
+      wz = b.minZ + margin + offset;
+      wallSegMin = wz - winW / 2;
+      wallSegMax = wz + winW / 2;
+      for (const n of room.neighbors || []) {
+        if (n.dir !== side) continue;
+        const other = this.rooms[n.otherId];
+        if (!other) continue;
+        const doorCenter = other.cz;
+        if (Math.abs(doorCenter - wz) < winW / 2 + DOOR_WIDTH / 2 + 0.5) return;
+      }
+    }
+    // Build the window. The visible group is positioned on the wall
+    // plane; the collision proxy mirrors the window's solid AABB.
+    const built = buildWindow({ width: winW, height: winH, sillHeight: sillH });
+    if (!built || !built.group) return;
+    built.group.position.set(wx, 0, wz);
+    if (!isHorizWall) built.group.rotation.y = Math.PI / 2;
+    this.scene.add(built.group);
+    this.decorations.push(built.group);
+    // Collision proxy — invisible mesh that the projectile system +
+    // movement collision can intersect. Width matches the window
+    // aperture; depth is wall-thin.
+    const proxyW = isHorizWall ? winW : WALL_THICK;
+    const proxyD = isHorizWall ? WALL_THICK : winW;
+    const proxyMat = new THREE.MeshBasicMaterial({
+      transparent: true, opacity: 0, depthWrite: false,
+    });
+    const proxy = new THREE.Mesh(
+      new THREE.BoxGeometry(proxyW, WALL_HEIGHT, proxyD),
+      proxyMat,
+    );
+    proxy.position.set(wx, WALL_HEIGHT / 2, wz);
+    proxy.userData.collisionXZ = {
+      minX: wx - proxyW / 2, maxX: wx + proxyW / 2,
+      minZ: wz - proxyD / 2, maxZ: wz + proxyD / 2,
+    };
+    proxy.userData.kind = 'window';
+    proxy.userData.windowState = built.state;
+    proxy.userData.isWindowProxy = true;
+    proxy.matrixAutoUpdate = false;
+    proxy.updateMatrix();
+    this.scene.add(proxy);
+    this.obstacles.push(proxy);
+    built.state.collisionProxy = proxy;
+    this._windows.push({ window: built, room, side, x: wx, z: wz });
+    // Null any existing wall obstacle that overlaps the window's
+    // aperture so the wall doesn't double-block the bullet path.
+    // We look for outer-color walls on the same side line whose AABB
+    // intersects the window's aperture and split / shrink them.
+    this._cutWallForWindow(room, side, wx, wz, winW, isHorizWall);
+    // Ledge — sits inside the room just below the window. Only add
+    // for windows on rect / shape rooms whose interior side is clear.
+    const lengthAlongWall = winW - 0.4;
+    let lx1, lz1, lx2, lz2;
+    if (isHorizWall) {
+      lx1 = wx - lengthAlongWall / 2;
+      lx2 = wx + lengthAlongWall / 2;
+      // Ledge sits on the inside face of the wall (one ledge depth in)
+      const inset = (side === 'north') ? 0.5 : -0.5;
+      lz1 = wz + inset;
+      lz2 = wz + inset;
+    } else {
+      lz1 = wz - lengthAlongWall / 2;
+      lz2 = wz + lengthAlongWall / 2;
+      const inset = (side === 'west') ? 0.5 : -0.5;
+      lx1 = wx + inset;
+      lx2 = wx + inset;
+    }
+    addLedge(this, lx1, lz1, lx2, lz2, sillH, {
+      room,
+      windowState: built.state,
+    });
+  }
+
+  // Walk the obstacles list and split / null any outer-color wall
+  // segment that overlaps a window's aperture, so the wall + window
+  // don't both block the bullet path. We only operate on solid outer
+  // walls (color === OUTER_WALL_COLOR). Doors are explicitly skipped.
+  _cutWallForWindow(room, side, wx, wz, winW, isHorizWall) {
+    const half = winW / 2;
+    const tolerance = 0.4;
+    for (let i = this.obstacles.length - 1; i >= 0; i--) {
+      const m = this.obstacles[i];
+      const ud = m.userData;
+      if (!ud || ud.isDoor || ud.kind === 'window' || ud.isExtractionWall) continue;
+      if (!ud.collisionXZ) continue;
+      const cb = ud.collisionXZ;
+      if (isHorizWall) {
+        // Wall lies on the wz line — check Z proximity + X overlap.
+        if (Math.abs((cb.minZ + cb.maxZ) / 2 - wz) > tolerance) continue;
+        if (cb.maxX <= wx - half + 0.05 || cb.minX >= wx + half - 0.05) continue;
+        // Found an overlapping wall segment. Replace it with two
+        // shorter segments on either side of the aperture, OR null
+        // its collision if it sits entirely inside the window span.
+        const wallMinX = cb.minX, wallMaxX = cb.maxX;
+        const cutMinX = Math.max(wallMinX, wx - half);
+        const cutMaxX = Math.min(wallMaxX, wx + half);
+        // Left stub
+        const leftFrom = wallMinX, leftTo = cutMinX;
+        // Right stub
+        const rightFrom = cutMaxX, rightTo = wallMaxX;
+        // Remove original.
+        this.scene.remove(m);
+        m.geometry?.dispose?.();
+        m.material?.dispose?.();
+        this.obstacles.splice(i, 1);
+        if (leftTo > leftFrom + 0.1) {
+          this._addObstacle((leftFrom + leftTo) / 2, WALL_HEIGHT / 2, wz,
+            leftTo - leftFrom, WALL_HEIGHT, WALL_THICK, OUTER_WALL_COLOR);
+        }
+        if (rightTo > rightFrom + 0.1) {
+          this._addObstacle((rightFrom + rightTo) / 2, WALL_HEIGHT / 2, wz,
+            rightTo - rightFrom, WALL_HEIGHT, WALL_THICK, OUTER_WALL_COLOR);
+        }
+      } else {
+        if (Math.abs((cb.minX + cb.maxX) / 2 - wx) > tolerance) continue;
+        if (cb.maxZ <= wz - half + 0.05 || cb.minZ >= wz + half - 0.05) continue;
+        const wallMinZ = cb.minZ, wallMaxZ = cb.maxZ;
+        const cutMinZ = Math.max(wallMinZ, wz - half);
+        const cutMaxZ = Math.min(wallMaxZ, wz + half);
+        const topFrom = wallMinZ, topTo = cutMinZ;
+        const botFrom = cutMaxZ, botTo = wallMaxZ;
+        this.scene.remove(m);
+        m.geometry?.dispose?.();
+        m.material?.dispose?.();
+        this.obstacles.splice(i, 1);
+        if (topTo > topFrom + 0.1) {
+          this._addObstacle(wx, WALL_HEIGHT / 2, (topFrom + topTo) / 2,
+            WALL_THICK, WALL_HEIGHT, topTo - topFrom, OUTER_WALL_COLOR);
+        }
+        if (botTo > botFrom + 0.1) {
+          this._addObstacle(wx, WALL_HEIGHT / 2, (botFrom + botTo) / 2,
+            WALL_THICK, WALL_HEIGHT, botTo - botFrom, OUTER_WALL_COLOR);
+        }
+      }
+      this._dirtySolid();
+      // We've split the overlapping wall — only one wall segment
+      // typically covers a given span, so we can stop here.
+      return;
+    }
   }
 
   // Build the door (initially a blocking wall) between two rooms. The door
@@ -4372,6 +4634,99 @@ export class Level {
 
     const result = { ok: failures.length === 0, failures };
     if (typeof window !== 'undefined') window.__lastInvariantCheck = result;
+    return result;
+  }
+
+  // Pass 1C invariants — outdoor / window / connector / ledge sanity.
+  // Asserts on top of checkPathwayInvariants():
+  //   a) Every room reachable from spawn via DOORS only — windows are
+  //      treated as walls. Connectors are reachable via their two ends
+  //      (the rewired neighbor edges from buildSkybridge ensure this).
+  //   b) Every connector room has exactly two neighbors and both
+  //      endpoints reach it through their own neighbor list.
+  //   c) For each ledge: at least one mantle-up cell on the inside.
+  //   d) skybridge-open connectors have non-empty railing decoration.
+  //   e) Building partitions are convex — every chain room of building
+  //      X has all its same-building chain neighbors form a contiguous
+  //      segment of the chain (no inset L-shapes at the building level).
+  runOutdoorInvariants() {
+    const failures = [];
+    if (!this.rooms || !this.rooms.length) return { ok: true, failures };
+    // (a) Every room reachable via doors only — uses the existing
+    // pathway invariant. Windows already aren't part of the door set,
+    // so checkPathwayInvariants() naturally excludes them.
+    const path = this.checkPathwayInvariants();
+    if (!path.ok) {
+      for (const f of path.failures) failures.push({ kind: 'pathway', ...f });
+    }
+    // (b) Every connector has 2 neighbors, both endpoints back-link.
+    const conns = (this._connectors || []);
+    for (const c of conns) {
+      if (!c.neighbors || c.neighbors.length !== 2) {
+        failures.push({ kind: 'connector', id: c.id, reason: 'wrong neighbor count' });
+        continue;
+      }
+      for (const n of c.neighbors) {
+        const other = this.rooms[n.otherId];
+        if (!other || !(other.neighbors || []).some(nn => nn.otherId === c.id)) {
+          failures.push({ kind: 'connector', id: c.id, reason: `endpoint ${n.otherId} doesn't back-link` });
+        }
+      }
+    }
+    // (c) Ledges — each has a defined inside drop-off + the slab
+    // exists. We don't check walkability of the inside cell because
+    // the ledge is anchored by the wall it hangs on; if the room's
+    // walkableBounds covers the inside drop, that's enough.
+    const ledges = this.ledges || [];
+    for (const lg of ledges) {
+      if (!lg.slab || !lg.room) {
+        failures.push({ kind: 'ledge', reason: 'missing slab or room ref' });
+        continue;
+      }
+      const b = lg.room.bounds;
+      if (lg.insideX < b.minX - 0.5 || lg.insideX > b.maxX + 0.5
+          || lg.insideZ < b.minZ - 0.5 || lg.insideZ > b.maxZ + 0.5) {
+        failures.push({ kind: 'ledge', reason: 'inside drop outside room', room: lg.room.id });
+      }
+    }
+    // (d) skybridge-open variants need railings — we count level
+    // obstacles tagged isRailing whose AABB sits inside the connector
+    // bounds. At least 2 expected (one per long side).
+    for (const c of conns) {
+      if (c.connectorKind !== 'skybridge-open') continue;
+      let railCount = 0;
+      for (const m of this.obstacles) {
+        if (!m.userData?.isRailing) continue;
+        const cb = m.userData.collisionXZ;
+        if (!cb) continue;
+        const cmx = (cb.minX + cb.maxX) / 2;
+        const cmz = (cb.minZ + cb.maxZ) / 2;
+        if (cmx >= c.bounds.minX - 0.2 && cmx <= c.bounds.maxX + 0.2
+            && cmz >= c.bounds.minZ - 0.2 && cmz <= c.bounds.maxZ + 0.2) {
+          railCount++;
+        }
+      }
+      if (railCount < 2) {
+        failures.push({ kind: 'connector', id: c.id, reason: 'skybridge-open missing railings', count: railCount });
+      }
+    }
+    // (e) Building convexity — for the chain rooms (start..boss in
+    // ascending id order), the building tag should change at most
+    // ONCE along the chain. If it flips A→B→A we have an inset.
+    const chain = this.rooms
+      .filter(r => r && r.id >= 0
+        && (r.type === 'start' || r.type === 'combat'
+            || r.type === 'boss' || r.type === 'encounter'))
+      .sort((a, b) => a.id - b.id);
+    let flips = 0;
+    for (let i = 1; i < chain.length; i++) {
+      if (chain[i].building !== chain[i - 1].building) flips++;
+    }
+    if (flips > 1) {
+      failures.push({ kind: 'building-convex', reason: 'chain building tag flips > 1', flips });
+    }
+    const result = { ok: failures.length === 0, failures };
+    if (typeof window !== 'undefined') window.__lastOutdoorInvariantCheck = result;
     return result;
   }
 
