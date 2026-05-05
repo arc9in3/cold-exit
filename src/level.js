@@ -4950,6 +4950,171 @@ export class Level {
     return result;
   }
 
+  // HARD walkability gate (Phase M) — flood-fills the same _collidesAt
+  // surface the player physics checks at runtime, so any "stuck on
+  // level 1" repro is caught at gen-time. Independent of
+  // checkPathwayInvariants which only inspects topology / walkableBounds
+  // unions; this one tests the actual physics geometry the player will
+  // walk on.
+  //
+  // Doors are treated as virtually open while the flood runs (their
+  // collisionXZ is stashed and nulled, then restored). Without this,
+  // locked doors would partition the level and report every gated room
+  // as unreachable, but those rooms are reachable once unlocked at
+  // runtime via the existing room-clear flow.
+  //
+  // For each room (including connectors + extraction): the flood must
+  // reach the room centre OR any sample in a 3×3 grid around the centre
+  // (covers cases where a centroid sits in a chamfered corner / on top
+  // of a dais).
+  //
+  // Returns { ok, unreachable: [{id, type, shape}], visitedCells, totalCells }.
+  checkRealWalkability() {
+    const STEP = 0.5;
+    const RAD  = 0.4;        // matches player collision radius @ 0.40m
+    if (!this.rooms.length) {
+      return { ok: true, unreachable: [], visitedCells: 0, totalCells: 0 };
+    }
+
+    // 1. Stash door collisions. Includes both locked + unlocked doors —
+    //    locked doors have a non-null collisionXZ that would otherwise
+    //    block the flood.
+    const stashed = [];
+    for (const o of this.obstacles) {
+      if (o.userData?.isDoor) {
+        stashed.push({ mesh: o, prev: o.userData.collisionXZ });
+        o.userData.collisionXZ = null;
+      }
+    }
+
+    let unreachable = [];
+    let visitedCells = 0;
+    let totalCells = 0;
+    try {
+      // 2. Build an aggregate level bbox covering every room (including
+      //    synthetic id < 0 connectors + extraction).
+      let minX = Infinity, maxX = -Infinity, minZ = Infinity, maxZ = -Infinity;
+      for (const r of this.rooms) {
+        if (!r.bounds) continue;
+        if (r.bounds.minX < minX) minX = r.bounds.minX;
+        if (r.bounds.maxX > maxX) maxX = r.bounds.maxX;
+        if (r.bounds.minZ < minZ) minZ = r.bounds.minZ;
+        if (r.bounds.maxZ > maxZ) maxZ = r.bounds.maxZ;
+      }
+      if (!isFinite(minX)) {
+        return { ok: true, unreachable: [], visitedCells: 0, totalCells: 0 };
+      }
+      // Pad so doorway corridors at edges fall inside the grid.
+      minX -= STEP; maxX += STEP; minZ -= STEP; maxZ += STEP;
+      const w = Math.ceil((maxX - minX) / STEP);
+      const d = Math.ceil((maxZ - minZ) / STEP);
+      totalCells = w * d;
+      const idx = (i, j) => i * d + j;
+      const visited = new Uint8Array(totalCells);
+
+      // 3. Seed BFS at the player spawn. If the spawn cell itself is
+      //    blocked (rare — e.g. spawn lands inside an elevator panel
+      //    geometry that's reset later), nudge one cell in the +Z
+      //    direction so BFS starts from a walkable seed.
+      const sp = this.playerSpawn;
+      let si = Math.max(0, Math.min(w - 1, Math.floor((sp.x - minX) / STEP)));
+      let sj = Math.max(0, Math.min(d - 1, Math.floor((sp.z - minZ) / STEP)));
+      const seedAt = (i, j) => {
+        const cx = minX + (i + 0.5) * STEP;
+        const cz = minZ + (j + 0.5) * STEP;
+        return !this._collidesAt(cx, cz, RAD);
+      };
+      if (!seedAt(si, sj)) {
+        // Try a 5×5 window around the spawn for an open seed.
+        let found = false;
+        for (let oi = -2; oi <= 2 && !found; oi++) {
+          for (let oj = -2; oj <= 2 && !found; oj++) {
+            const i = si + oi, j = sj + oj;
+            if (i < 0 || i >= w || j < 0 || j >= d) continue;
+            if (seedAt(i, j)) { si = i; sj = j; found = true; }
+          }
+        }
+      }
+
+      const queue = [[si, sj]];
+      visited[idx(si, sj)] = 1;
+      visitedCells = 1;
+      while (queue.length) {
+        const [i, j] = queue.shift();
+        const dirs = [[1,0],[-1,0],[0,1],[0,-1]];
+        for (const [di, dj] of dirs) {
+          const ni = i + di, nj = j + dj;
+          if (ni < 0 || ni >= w || nj < 0 || nj >= d) continue;
+          if (visited[idx(ni, nj)]) continue;
+          const cx = minX + (ni + 0.5) * STEP;
+          const cz = minZ + (nj + 0.5) * STEP;
+          if (this._collidesAt(cx, cz, RAD)) continue;
+          visited[idx(ni, nj)] = 1;
+          visitedCells++;
+          queue.push([ni, nj]);
+        }
+      }
+
+      // 4. Check every room — centre + 3×3 sample around centre.
+      const sampleReached = (room) => {
+        const samples = [
+          [room.cx, room.cz],
+          [room.cx - 1.5, room.cz],
+          [room.cx + 1.5, room.cz],
+          [room.cx, room.cz - 1.5],
+          [room.cx, room.cz + 1.5],
+          [room.cx - 1.5, room.cz - 1.5],
+          [room.cx + 1.5, room.cz - 1.5],
+          [room.cx - 1.5, room.cz + 1.5],
+          [room.cx + 1.5, room.cz + 1.5],
+        ];
+        for (const [sx, sz] of samples) {
+          const ci = Math.floor((sx - minX) / STEP);
+          const cj = Math.floor((sz - minZ) / STEP);
+          if (ci < 0 || ci >= w || cj < 0 || cj >= d) continue;
+          if (visited[idx(ci, cj)]) return true;
+        }
+        return false;
+      };
+      for (const r of this.rooms) {
+        if (!r.bounds) continue;
+        if (!sampleReached(r)) {
+          unreachable.push({ id: r.id, type: r.type, shape: r.shape || 'rect' });
+        }
+      }
+
+      // 5. Encounter spawns.
+      for (const r of this.rooms) {
+        const esp = r._encounterSpawn;
+        if (!esp) continue;
+        const ci = Math.floor((esp.x - minX) / STEP);
+        const cj = Math.floor((esp.z - minZ) / STEP);
+        let ok = false;
+        for (let oi = -1; oi <= 1 && !ok; oi++) {
+          for (let oj = -1; oj <= 1 && !ok; oj++) {
+            const i = ci + oi, j = cj + oj;
+            if (i < 0 || i >= w || j < 0 || j >= d) continue;
+            if (visited[idx(i, j)]) ok = true;
+          }
+        }
+        if (!ok) {
+          unreachable.push({ id: r.id, type: 'encounter-spawn', shape: r.shape || 'rect' });
+        }
+      }
+    } finally {
+      // 6. Restore door collisions.
+      for (const s of stashed) s.mesh.userData.collisionXZ = s.prev;
+      this._dirtySolid();
+    }
+
+    return {
+      ok: unreachable.length === 0,
+      unreachable,
+      visitedCells,
+      totalCells,
+    };
+  }
+
   // Pass 1C invariants — outdoor / window / connector / ledge sanity.
   // Asserts on top of checkPathwayInvariants():
   //   a) Every room reachable from spawn via DOORS only — windows are
