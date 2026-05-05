@@ -2603,8 +2603,14 @@ export class HideoutUI {
       const confirm = document.createElement('button');
       confirm.className = 'loadout-confirm';
       confirm.type = 'button';
-      confirm.textContent = 'DEPLOY';
-      confirm.disabled = !selected;
+      // Surface the gating reason next to DEPLOY when disabled — a
+      // greyed-out button with no label change leaves the player
+      // wondering what's missing. Currently only gates on weapon
+      // pick; if/when more requirements (relics, class, etc.) get
+      // added, extend the reason chain here.
+      const deployReason = !selected ? 'PICK A WEAPON' : null;
+      confirm.textContent = deployReason ? `DEPLOY · ${deployReason}` : 'DEPLOY';
+      confirm.disabled = !!deployReason;
       confirm.addEventListener('click', () => {
         if (!getSelectedStarterWeapon()) return;
         this.close();
