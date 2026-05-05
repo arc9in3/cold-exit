@@ -5436,6 +5436,22 @@ function _regenerateLevelImpl() {
       if (extras.length) level.enemySpawns.push(...extras);
     }
   }
+  // Potato-tier concurrent-enemy clamp. Drops surplus spawns from the
+  // floor (sub-bosses + tutorial dummies + key-holders are protected
+  // — they're objective-bearing and can't be cut). Lower the visible
+  // density so the GPU + AI tick budget hold on phone-class hardware.
+  if (qualityFlags.maxConcurrentEnemies !== Infinity) {
+    const cap = qualityFlags.maxConcurrentEnemies | 0;
+    const protectedSpawns = level.enemySpawns.filter(s =>
+      s.tier === 'subBoss' || s.majorBoss || s.tutorialDummy
+      || s.stealthTarget || keyAssignments.has(s));
+    const droppable = level.enemySpawns.filter(s =>
+      !(s.tier === 'subBoss' || s.majorBoss || s.tutorialDummy
+        || s.stealthTarget || keyAssignments.has(s)));
+    const slack = Math.max(0, cap - protectedSpawns.length);
+    const kept = droppable.slice(0, slack);
+    level.enemySpawns = protectedSpawns.concat(kept);
+  }
   for (const s of level.enemySpawns) {
     // Early-floor sub-boss damage softener — at low levels sub-bosses
     // were oppressive: same weapon pool as grunts, but with 20% faster
@@ -9163,7 +9179,11 @@ function fireOneShot(playerInfo, weapon, aimPoint, isADS, aimOwner, aimZone) {
   // lights at the same position) for a Dragonbreath trigger pull,
   // which dropped frames hard. The tracer per pellet is fine — they
   // diverge, so the visual still reads as multiple shots.
-  combat.spawnFlash(tracerFrom, eff.tracerColor, qualityFlags.muzzleLights);
+  // Potato tier: skip the flash sprite entirely (saves a draw + a
+  // pool churn per shot). Low tier: sprite renders, light is cut.
+  if (qualityFlags.muzzleFlashSprites) {
+    combat.spawnFlash(tracerFrom, eff.tracerColor, qualityFlags.muzzleLights);
+  }
   // Combat juice — eject brass + puff muzzle smoke. Both pooled. Skip
   // for melee weapons. _tmpDir is the normalized fire direction, set
   // up above for the spread / raycast loop.
@@ -9229,9 +9249,13 @@ function fireOneShot(playerInfo, weapon, aimPoint, isADS, aimOwner, aimZone) {
       });
     }
     // Tracer per pellet (each diverges), flash was already spawned
-    // once before the loop so we pass flash:false here.
-    combat.spawnShot(tracerFrom, endPoint, eff.tracerColor,
-      { light: qualityFlags.muzzleLights, flash: false });
+    // once before the loop so we pass flash:false here. Potato cuts
+    // the tracer particle entirely — damage still applies, just no
+    // line-strip draw / per-frame buffer update.
+    if (qualityFlags.tracerParticles) {
+      combat.spawnShot(tracerFrom, endPoint, eff.tracerColor,
+        { light: qualityFlags.muzzleLights, flash: false });
+    }
     // Coop: broadcast the tracer so remote allies see our gunfire.
     // Reuse the same fx-tracer kind the AI already uses; receivers
     // spawn a local tracer + flash via combat.spawnShot. Per-pellet
