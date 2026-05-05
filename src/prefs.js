@@ -918,6 +918,21 @@ export function markOnboardSeen(id) {
   _writeSet(ONBOARD_SEEN_KEY, set);
 }
 
+// Coop / squad mode preference. Two values: 'solo' (default) or
+// 'squad'. Persisted across sessions so a player who chose Squad on
+// the title once doesn't have to re-pick every launch. The squad
+// branch wires up the lobby flow when set; solo skips straight to
+// the hideout. Visible on the title screen as a paired mode pick.
+const COOP_MODE_KEY = 'tacticalrogue:coopMode:v1';
+export function getCoopMode() {
+  try { return localStorage.getItem(COOP_MODE_KEY) || 'solo'; }
+  catch (_) { return 'solo'; }
+}
+export function setCoopMode(v) {
+  try { localStorage.setItem(COOP_MODE_KEY, v === 'squad' ? 'squad' : 'solo'); }
+  catch (_) {}
+}
+
 // Resolve the reveal state of every hideout tab. Pure function — call
 // from the UI layer (tab strip render, command-deck side buttons) and
 // hide tabs whose id isn't in the returned Set. The contractor tab is

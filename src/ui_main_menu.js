@@ -14,7 +14,8 @@ export class MainMenuUI {
                 getMusicEnabled, setMusicEnabled,
                 getPlayerName, setPlayerName,
                 getCharacterStyle, setCharacterStyle,
-                onGrantAllCurrencies, onClearSaveData }) {
+                onGrantAllCurrencies, onClearSaveData,
+                onOpenSquadLobby, getCoopMode, setCoopMode }) {
     this.onPlay = onPlay;
     this.onQuickStart = onQuickStart;
     this.onTutorial = onTutorial;
@@ -37,6 +38,9 @@ export class MainMenuUI {
     // section is hidden so production builds don't ship the buttons.
     this.onGrantAllCurrencies = onGrantAllCurrencies || null;
     this.onClearSaveData = onClearSaveData || null;
+    this.onOpenSquadLobby = onOpenSquadLobby || null;
+    this.getCoopMode = getCoopMode || (() => 'solo');
+    this.setCoopMode = setCoopMode || (() => {});
 
     this.visible = false;
     this.view = 'root';   // 'root' | 'settings' | 'leaderboard'
@@ -101,15 +105,50 @@ export class MainMenuUI {
     nameInput.addEventListener('input', () => this.setPlayerName(nameInput.value));
     this.bodyEl.appendChild(nameWrap);
 
-    // Collapsed main-menu — the Hideout is the lobby now. Play opens
-    // the Hideout (default landing on Contracts). Run-start happens
-    // from inside the Hideout's stash via the Take-a-Weapon flow.
-    // Tutorial / Leaderboard / Options stay on the title screen so
-    // they remain reachable without entering the loop.
-    this.bodyEl.appendChild(this._btn('Hideout', () => {
+    // Mode pick — primary surface of the title screen. SOLO leads
+    // (default + always available); SQUAD is the secondary mode and
+    // routes to the lobby branch when wired. The selected value
+    // persists to localStorage('coop:mode') so the title remembers
+    // the player's last choice.
+    const curMode = this.getCoopMode() || 'solo';
+    const modeWrap = document.createElement('div');
+    modeWrap.className = 'main-menu-modes';
+    modeWrap.innerHTML = `
+      <div class="mode-pick-label">CHOOSE A MODE</div>
+    `;
+    const soloBtn = this._btn('▶ SOLO', () => {
+      this.setCoopMode('solo');
       this.hide();
       this.onOpenHideout?.();
-    }, ' primary'));
+    }, ' primary mode-solo');
+    const squadBtn = this._btn('SQUAD', () => {
+      this.setCoopMode('squad');
+      // Squad lobby is wired separately. Until the lobby ships, fall
+      // back to opening the hideout with a small "coming soon" toast
+      // so the title isn't a dead end.
+      if (this.onOpenSquadLobby) {
+        this.hide();
+        this.onOpenSquadLobby();
+      } else {
+        try { window.__hudMsg?.('Squad lobby — coming soon. Drop into Solo for now.', 3.5); } catch (_) {}
+        this.setCoopMode('solo');
+        this.hide();
+        this.onOpenHideout?.();
+      }
+    }, ' mode-squad');
+    if (curMode === 'squad') {
+      // Last-chosen-was-squad — flip the visual emphasis so the player
+      // sees their previous pick highlighted but can still re-choose.
+      soloBtn.classList.remove('primary');
+      squadBtn.classList.add('primary');
+      squadBtn.firstChild.textContent = '▶ SQUAD';
+      soloBtn.firstChild.textContent = 'SOLO';
+    }
+    modeWrap.appendChild(soloBtn);
+    modeWrap.appendChild(squadBtn);
+    this.bodyEl.appendChild(modeWrap);
+
+    // Secondary actions kept reachable without leaving the title.
     this.bodyEl.appendChild(this._btn('Tutorial', () => {
       this.hide();
       this.onTutorial?.();

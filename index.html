@@ -680,6 +680,28 @@
       color: #ffbaba;
       background: rgba(255, 58, 58, 0.10);
     }
+    /* Title-screen mode pick — paired SOLO / SQUAD buttons sit
+       above the secondary actions. Label sits just above so the
+       choice reads as the primary CTA, not just another menu row. */
+    .main-menu-modes {
+      display: flex; flex-direction: column; gap: 8px;
+      margin-bottom: 12px;
+      padding-bottom: 12px;
+      border-bottom: 1px solid rgba(155, 139, 106, 0.18);
+    }
+    .mode-pick-label {
+      font-size: 10px; letter-spacing: 2.5px; color: #6f6754;
+      margin-bottom: 4px; text-transform: uppercase;
+    }
+    .menu-btn.mode-solo, .menu-btn.mode-squad {
+      font-size: 18px; letter-spacing: 2px; padding: 14px 18px;
+    }
+    .menu-btn.mode-squad {
+      color: #6f6754;
+    }
+    .menu-btn.mode-squad:hover {
+      color: #c9a87a;
+    }
     /* Keybind list — three columns: action label, current keyboard
        binding, current gamepad binding. Each binding is a button so
        click-to-rebind works without a separate "edit" affordance. */

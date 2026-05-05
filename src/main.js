@@ -95,6 +95,7 @@ import {
   getPersistentChips, setPersistentChips,
   getMusicEnabled, setMusicEnabled,
   applyOnboardTriggers, getRunCount,
+  getCoopMode, setCoopMode,
 } from './prefs.js';
 
 // Onboarding tab → human label for the reveal-toast. Kept in main.js
@@ -4107,7 +4108,17 @@ const mainMenuUI = new MainMenuUI({
     persistentChips = 0;
     return `wiped ${removed} keys — reload to fully reset state`;
   },
+  // Title-screen mode pick. Solo routes to the existing hideout
+  // entry (onOpenHideout above). Squad is currently UI-stubbed —
+  // the lobby branch lands in a follow-up, so onOpenSquadLobby is
+  // intentionally left null here; the menu falls back to a "coming
+  // soon" toast + Solo entry when null.
+  getCoopMode, setCoopMode,
+  onOpenSquadLobby: null,
 });
+// Expose for the perf / onboarding harnesses + first-run inspection
+// from the browser console. No runtime cost; just a pointer.
+if (typeof window !== 'undefined') window.mainMenuUI = mainMenuUI;
 
 // Hideout — between-runs panel. Opens from the main menu's Hideout
 // button, on death (replaces the default "back to main menu" screen),
