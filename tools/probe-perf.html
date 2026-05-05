@@ -1,0 +1,269 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<title>cold exit · level perf probe</title>
+<style>
+  :root { color-scheme: dark; }
+  html, body { margin: 0; padding: 0; background: #0c0c10; color: #cbd2dc;
+    font-family: system-ui, -apple-system, Segoe UI, sans-serif; }
+  header { padding: 8px 14px; border-bottom: 1px solid #2a2f3a;
+    display: flex; gap: 12px; align-items: center; flex-wrap: wrap; }
+  header h1 { margin: 0; font-size: 14px; color: #c9a87a; flex: 1; }
+  header button {
+    background: #1f2a18; color: #a8d68a; border: 1px solid #3e5a2e;
+    padding: 4px 10px; border-radius: 3px; cursor: pointer; font-size: 12px;
+  }
+  header button:hover { background: #2a3a20; }
+  header label { font-size: 12px; color: #8a9aa8; }
+  header input { background: #1a1d24; color: #cbd2dc; border: 1px solid #2a2f3a;
+    padding: 3px 6px; font-size: 12px; width: 80px; }
+  table { border-collapse: collapse; margin: 14px; font-size: 12px; }
+  th, td { padding: 4px 8px; text-align: right; border-bottom: 1px solid #2a2f3a; }
+  th:first-child, td:first-child { text-align: left; }
+  th { color: #c9a87a; background: #14171c; }
+  .num { font-variant-numeric: tabular-nums; }
+  pre { padding: 14px; background: #14171c; color: #a8d68a; font-size: 11px;
+    margin: 0 14px 14px; border: 1px solid #2a2f3a; border-radius: 3px;
+    white-space: pre-wrap; word-break: break-word; }
+  .delta-good { color: #6fd896; }
+  .delta-bad { color: #d8703a; }
+  .delta-neutral { color: #8a9aa8; }
+</style>
+<script type="importmap">
+{
+  "imports": {
+    "three": "https://unpkg.com/three@0.161.0/build/three.module.js",
+    "three/addons/": "https://unpkg.com/three@0.161.0/examples/jsm/"
+  }
+}
+</script>
+</head>
+<body>
+<header>
+  <h1>perf probe — InstancedMesh wins on level-gen Pass 1A/B/C</h1>
+  <label>seed
+    <input type="number" id="seed" value="1">
+  </label>
+  <button id="run">run bench (levels 1, 5, 10, 15, 25)</button>
+  <button id="save-baseline">save as baseline JSON</button>
+  <button id="vs-baseline">compare vs committed baseline</button>
+</header>
+
+<div id="out"></div>
+<pre id="json-out">[run the bench]</pre>
+
+<script type="module">
+import * as THREE from 'three';
+import { Level } from '../src/level.js';
+
+// Stub scene used by the probe. We DO want a working `traverse` and
+// `add` because some Level paths add nested groups and we want to count
+// every mesh that would actually be rendered.
+function makeStubScene() {
+  const scene = new THREE.Scene();
+  return scene;
+}
+
+function makeStubGround() {
+  return {
+    material: { color: { setHex: () => {} } },
+  };
+}
+
+function seededRandom(seed) {
+  let t = seed >>> 0;
+  return function() {
+    t |= 0; t = (t + 0x6D2B79F5) | 0;
+    let r = Math.imul(t ^ t >>> 15, 1 | t);
+    r = (r + Math.imul(r ^ r >>> 7, 61 | r)) ^ r;
+    return ((r ^ r >>> 14) >>> 0) / 4294967296;
+  };
+}
+
+function generateLevel(seed, lvIdx) {
+  const origRandom = Math.random;
+  Math.random = seededRandom(seed);
+  try {
+    const scene = makeStubScene();
+    const ground = makeStubGround();
+    const level = new Level(scene, { ground });
+    level.index = lvIdx - 1;
+    if (typeof window !== 'undefined') window.__tutorialMode = () => false;
+    level.generate();
+    return level;
+  } finally {
+    Math.random = origRandom;
+  }
+}
+
+// Walk the scene graph, count mesh / draw / vertex / light stats. An
+// InstancedMesh is one draw call regardless of count; its visible
+// instances contribute "instances" but not extra mesh count toward
+// drawCalls (we still report mesh count separately).
+function statsFor(level) {
+  const scene = level.scene;
+  let meshes = 0;
+  let instancedMeshes = 0;
+  let liveInstances = 0;
+  let drawCalls = 0;       // ~mesh count, but each InstancedMesh = 1
+  let verts = 0;
+  let lights = 0;
+  const byKind = new Map();
+  scene.traverse((o) => {
+    if (o.isLight) {
+      lights += 1;
+    }
+    if (o.isInstancedMesh) {
+      instancedMeshes += 1;
+      drawCalls += 1;
+      meshes += 1;
+      // count live instances (count attribute is the live cap)
+      liveInstances += (o.count || 0);
+      const g = o.geometry;
+      if (g && g.attributes && g.attributes.position) {
+        verts += g.attributes.position.count * (o.count || 0);
+      }
+    } else if (o.isMesh) {
+      meshes += 1;
+      drawCalls += 1;
+      const g = o.geometry;
+      if (g && g.attributes && g.attributes.position) {
+        verts += g.attributes.position.count;
+      }
+      const kind = (o.userData && o.userData.kind) ||
+                   (o.parent && o.parent.userData && o.parent.userData.kind) ||
+                   'ANONYMOUS';
+      byKind.set(kind, (byKind.get(kind) || 0) + 1);
+    }
+  });
+  // Registered ambient lights (stealth-system entries) — not Three.Light objects.
+  const registeredLights = (level.lights || []).length;
+  return {
+    rooms: (level.rooms || []).length,
+    obstacles: (level.obstacles || []).length,
+    decorations: (level.decorations || []).length,
+    windows: (level._windows || []).length,
+    ledges: (level.ledges || []).length,
+    meshes,
+    instancedMeshes,
+    liveInstances,
+    drawCalls,
+    verts,
+    lights,
+    registeredLights,
+    byKind: Object.fromEntries(
+      [...byKind.entries()].sort((a, b) => b[1] - a[1])
+    ),
+  };
+}
+
+const LEVELS = [1, 5, 10, 15, 25];
+
+function runBench(seed) {
+  const out = {};
+  for (const lv of LEVELS) {
+    out[lv] = statsFor(generateLevel(seed, lv));
+  }
+  return out;
+}
+
+function fmtNum(n) {
+  if (n >= 1000) return (n / 1000).toFixed(1) + 'K';
+  return String(n);
+}
+
+function tableHTML(results, baseline) {
+  const cols = ['rooms', 'meshes', 'drawCalls', 'verts', 'obstacles',
+    'decorations', 'windows', 'ledges', 'lights', 'registeredLights',
+    'instancedMeshes'];
+  let html = '<table><thead><tr><th>level</th>';
+  for (const c of cols) html += `<th>${c}</th>`;
+  html += '</tr></thead><tbody>';
+  for (const lv of LEVELS) {
+    const r = results[lv];
+    if (!r) continue;
+    html += `<tr><td>${lv}</td>`;
+    for (const c of cols) {
+      let cell = `<span class="num">${fmtNum(r[c])}</span>`;
+      if (baseline && baseline[lv]) {
+        const before = baseline[lv][c];
+        const after = r[c];
+        if (typeof before === 'number' && typeof after === 'number' && before !== 0) {
+          const pct = ((after - before) / before) * 100;
+          const cls = pct < -5 ? 'delta-good' : (pct > 5 ? 'delta-bad' : 'delta-neutral');
+          cell += ` <span class="${cls}">(${pct >= 0 ? '+' : ''}${pct.toFixed(0)}%)</span>`;
+        }
+      }
+      html += `<td>${cell}</td>`;
+    }
+    html += '</tr>';
+  }
+  html += '</tbody></table>';
+  return html;
+}
+
+const seedInput = document.getElementById('seed');
+const runBtn = document.getElementById('run');
+const saveBtn = document.getElementById('save-baseline');
+const vsBtn = document.getElementById('vs-baseline');
+const outDiv = document.getElementById('out');
+const jsonOut = document.getElementById('json-out');
+
+let lastResults = null;
+
+runBtn.onclick = () => {
+  const seed = parseInt(seedInput.value, 10) || 1;
+  const results = runBench(seed);
+  lastResults = results;
+  outDiv.innerHTML = tableHTML(results, null);
+  jsonOut.textContent = JSON.stringify(results, null, 2);
+};
+
+saveBtn.onclick = () => {
+  if (!lastResults) { alert('run bench first'); return; }
+  const blob = new Blob([JSON.stringify(lastResults, null, 2)], { type: 'application/json' });
+  const a = document.createElement('a');
+  a.href = URL.createObjectURL(blob);
+  a.download = 'perf-baseline.json';
+  a.click();
+};
+
+vsBtn.onclick = async () => {
+  if (!lastResults) {
+    runBtn.click();
+  }
+  try {
+    const res = await fetch('../audits/perf-baseline-2026-05-05.json');
+    if (!res.ok) throw new Error('no baseline file at audits/perf-baseline-2026-05-05.json');
+    const baseline = await res.json();
+    outDiv.innerHTML = tableHTML(lastResults, baseline);
+    // Also output a markdown table for sticking in audits/.
+    const cols = ['meshes', 'drawCalls', 'lights'];
+    let md = '\n| Level |';
+    for (const c of cols) md += ` ${c} (before → after) |`;
+    md += '\n|---|';
+    for (const c of cols) md += '---|';
+    md += '\n';
+    for (const lv of LEVELS) {
+      const b = baseline[lv]; const a = lastResults[lv];
+      if (!b || !a) continue;
+      md += `| ${lv} |`;
+      for (const c of cols) {
+        const pct = b[c] ? ((a[c] - b[c]) / b[c] * 100).toFixed(0) : '?';
+        md += ` ${b[c]} → ${a[c]} (${pct}%) |`;
+      }
+      md += '\n';
+    }
+    jsonOut.textContent = md + '\n\n--- raw json ---\n' + JSON.stringify(lastResults, null, 2);
+  } catch (e) {
+    jsonOut.textContent = 'baseline compare failed: ' + e.message + '\n\n' +
+      JSON.stringify(lastResults, null, 2);
+  }
+};
+
+// Auto-run on load
+runBtn.click();
+</script>
+</body>
+</html>
