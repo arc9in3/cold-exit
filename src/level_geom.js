@@ -190,13 +190,14 @@ export function addPlatform(level, bbox, height) {
   level.scene.add(mesh);
   level.obstacles.push(mesh);
   level._dirtySolid();
-  // Phase M step 6 — invisible fall guards along every platform
-  // edge. Defends against clip-onto-top scenarios so the player
-  // can't slip off the raised surface into the void.
-  addFallGuard(level, minX, minZ, maxX, minZ);   // north edge
-  addFallGuard(level, minX, maxZ, maxX, maxZ);   // south edge
-  addFallGuard(level, minX, minZ, minX, maxZ);   // west edge
-  addFallGuard(level, maxX, minZ, maxX, maxZ);   // east edge
+  // Phase M step 6 — fall guards on raised platforms only. The
+  // current addPlatform models the whole platform as a solid box
+  // (collision AABB == full footprint), so the player can't walk
+  // ON the top in regular play and a perimeter-edge guard would
+  // just inflate the side bumpers. We skip guards on tall opaque
+  // platforms; only callers that produce walkable raised surfaces
+  // (catwalks via Pass 2 walkability) need to call addFallGuard
+  // explicitly along their edges.
   return mesh;
 }
 
