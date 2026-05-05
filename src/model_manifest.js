@@ -326,11 +326,29 @@ const IN_HAND_MIRROR_PACK_PREFIXES = [
   'lowpolyguns/',
   'lowpolyguns_accessories/',
 ];
+// Per-weapon overrides for icon mirroring. The pack-prefix rule above
+// works for in-hand mesh display, but the inventory icon is a separate
+// hand-authored PNG that may already be drawn left-facing — mirroring
+// it again flips it to point right while every other gun stays left.
+// Names listed here force the mirror OFF for the icon path. (#45)
+const ICON_MIRROR_OVERRIDE = new Set([
+  'Remington 700',
+  'Remington 700 Tactical',
+]);
 export function shouldMirrorInHand(item) {
   if (!item) return false;
   const path = MODEL_BY_WEAPON_NAME[item.baseName || item.name];
   if (!path) return false;
   return IN_HAND_MIRROR_PACK_PREFIXES.some(p => path.startsWith(p));
+}
+// Separate predicate for the inventory / customize icon path. Default
+// matches in-hand, but ICON_MIRROR_OVERRIDE forces off for weapons whose
+// authored PNG is already correct unmirrored.
+export function shouldMirrorIcon(item) {
+  if (!item) return false;
+  const name = item.baseName || item.name;
+  if (ICON_MIRROR_OVERRIDE.has(name)) return false;
+  return shouldMirrorInHand(item);
 }
 
 export function gripOffsetForModelPath(fullPath) {

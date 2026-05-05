@@ -4,7 +4,8 @@ import { GridContainer, stampItemDims, deriveGridLayout } from './grid_container
 import { invalidateEffectiveWeapon } from './attachments.js';
 import { renderForWeaponName as _renderForWeaponName,
          shouldMirrorWeapon as _shouldMirrorWeapon,
-         shouldMirrorInHand as _shouldMirrorInHand } from './model_manifest.js';
+         shouldMirrorInHand as _shouldMirrorInHand,
+         shouldMirrorIcon as _shouldMirrorIcon } from './model_manifest.js';
 export { _shouldMirrorWeapon as shouldMirrorWeapon };
 // PNG / image mirror by source pack. Inspecting raw renders:
 //   Desert_Eagle_50.png (weapons/*)   muzzle LEFT (correct)
@@ -15,8 +16,12 @@ export { _shouldMirrorWeapon as shouldMirrorWeapon };
 // only to the lowpoly pack (same condition as the in-hand mirror)
 // flips them to muzzle-LEFT in every UI surface without
 // double-mirroring the animpic ones.
+//
+// Per-weapon overrides (e.g. Remington 700, whose hand-authored PNG is
+// already left-facing) live in model_manifest's ICON_MIRROR_OVERRIDE
+// and are read via shouldMirrorIcon — bug #45.
 export function weaponImageMirrorStyle(item) {
-  return _shouldMirrorInHand(item) ? 'transform: scaleX(-1);' : '';
+  return _shouldMirrorIcon(item) ? 'transform: scaleX(-1);' : '';
 }
 
 // Slot-based inventory aligned to a body silhouette. Each item carries a
