@@ -1657,7 +1657,13 @@ export class HideoutUI {
         buyGrid.appendChild(this._buildArmoryMiniTile(w, 'buyable', cost, () => {
           if (!this.ctx.spendChips || !this.ctx.spendChips(cost)) return;
           unlockWeapon(w.name);
-          this.ctx.notifyUnlock?.(w.name);
+          // notifyUnlock plays the SFX cue + an "UNLOCKED:" toast
+          // without cost. Skip its toast and own the messaging here
+          // so we can include the chip cost. Still fire SFX via the
+          // ctx hook so the audio cue isn't lost.
+          this.ctx.playUnlockSfx?.();
+          const wpnLabel = (w.displayName ?? w.name ?? '').replace(/<[^>]+>/g, '');
+          this._toast(`Armory: ${wpnLabel} unlocked · -${cost}c`);
           this.render();
         }));
       }

@@ -4203,14 +4203,10 @@ const hideoutUI = new HideoutUI({
   // WebGLRenderer so we don't spin up a second GL context. main.js
   // tick swaps which scene is being rendered based on hideoutUI.visible.
   getRenderer: () => renderer,
-  // Toast bridge — armory tile + mission-prep tile call this when the
-  // player chip-buys a weapon unlock. Surfaces the unlock through the
-  // existing in-game HUD pipeline so the menu and run share one feel.
-  notifyUnlock: (weaponName) => {
-    if (!weaponName) return;
-    transientHudMsg(`UNLOCKED: ${String(weaponName).toUpperCase()}`, 2.5);
-    sfx.uiAccept?.();
-  },
+  // SFX-only hook for weapon unlocks — the toast is owned by
+  // ui_hideout's _toast helper now (so cost can be included). This
+  // just plays the audio cue.
+  playUnlockSfx: () => { sfx.uiAccept?.(); },
   // Leaderboard accessor — hideout's contractor leaderboard block
   // + full-screen leaderboards step read top entries via this.
   getLeaderboard: () => Leaderboard,
