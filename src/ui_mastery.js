@@ -29,8 +29,16 @@ export class MasteryPickUI {
     this.subEl.textContent = 'Pick an ability — two from this class, one from another.';
     this.optionsEl.innerHTML = '';
     this.root.style.display = 'flex';
+    // Filter out options that became maxed since the offer was generated
+    // (queued offers can stack: picking node X in offer #1 leaves it stale
+    // in offer #2's options list, allowing a "Lv 2/1" double-pick).
+    const liveOptions = offer.options.filter((n) => !this.tree.isAtMax(n.id));
+    if (liveOptions.length === 0) {
+      this.root.style.display = 'none';
+      return null;
+    }
     return new Promise((resolve) => {
-      for (const node of offer.options) {
+      for (const node of liveOptions) {
         const curLv = this.tree.level(node.id);
         const nextLv = curLv + 1;
         const tier = node.levels[curLv];
