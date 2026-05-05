@@ -601,6 +601,31 @@ export class Level {
     // wall, or off the playable map.
     this._pickAndMarkEncounterRoom();
 
+    // Build the extraction chamber BEFORE the outer perimeter so the
+    // bounding walls wrap both the chain rooms AND the extraction
+    // room. Walls + door + props are added to obstacles immediately
+    // (so AI can't path through them) but kept invisible until the
+    // boss dies and revealExit() flips them on. The connecting door
+    // stays LOCKED (collision intact) until reveal.
+    try {
+      const bossRoom = rooms[this.bossRoomId];
+      if (bossRoom) {
+        const exit = buildExtractionRoom(this, bossRoom);
+        if (exit) {
+          this.exitRoom = exit;
+          // Register the extraction room in this.rooms so roomAt()
+          // finds the player after they walk inside. id stays at -1
+          // to mark it as synthetic (not part of the chain graph).
+          this.rooms.push(exit.room);
+          this._dirtySolid();
+        }
+      }
+    } catch (err) {
+      // Defensive — extraction-room build is purely additive; if it
+      // throws, log and fall back to the legacy ring marker.
+      console.warn('[level] extraction-room build failed; falling back to legacy ring:', err);
+    }
+
     // Outer bounding wall — a ring of tall outer-colour walls just
     // past the aggregate room bounds so the player can't escape to
     // the void when a boss room (or any edge room) fails to seal
@@ -616,9 +641,17 @@ export class Level {
     // "wall cutting across the map" (the sealer ends up plugging an
     // interior edge of one room inside another room's play space).
     // Surface it in the console so it's noticed even without F2.
+    //
+    // SKIP synthetic rooms (id < 0 — currently the extraction room).
+    // The extraction chamber sits flush against the boss-room outer
+    // wall and the bounds-touch heuristic treats them as overlapping
+    // even though there's a wall between them. Real chain-room
+    // overlaps still surface here.
     const rs = this.rooms;
     for (let i = 0; i < rs.length; i++) {
+      if (rs[i].id < 0) continue;
       for (let j = i + 1; j < rs.length; j++) {
+        if (rs[j].id < 0) continue;
         const a = rs[i].bounds, b = rs[j].bounds;
         if (!a || !b) continue;
         if (a.minX < b.maxX && a.maxX > b.minX && a.minZ < b.maxZ && a.maxZ > b.minZ) {
@@ -633,10 +666,17 @@ export class Level {
     // the offending ids so the level can be inspected. Doesn't attempt
     // to repair — the generator topology always produces a tree, so a
     // failure here points at a code bug, not a random gen unlucky.
+    //
+    // The extraction room is intentionally NOT reachable until the
+    // boss is cleared (its door is locked), so we skip the synthetic
+    // id=-1 entry from the unreachable list.
     const conn = this.validateConnectivity();
     if (!conn.ok && conn.unreachable.length) {
-      console.warn('[level] unreachable rooms:', conn.unreachable.map(r => r.id),
-        '— this is a generator bug, not bad luck');
+      const real = conn.unreachable.filter(r => r.id >= 0);
+      if (real.length) {
+        console.warn('[level] unreachable rooms:', real.map(r => r.id),
+          '— this is a generator bug, not bad luck');
+      }
     }
 
     // --- Populate with enemies -------------------------------------------
@@ -651,6 +691,10 @@ export class Level {
     }
 
     // --- Exit: hidden until boss is killed -------------------------------
+    // Legacy ring marker — kept as an emergency fallback ONLY if the
+    // extraction-room construction failed (boss room had every wall
+    // taken by neighbours). revealExit() prefers the extraction room
+    // when this.exitRoom is set.
     const boss = rooms[this.bossRoomId];
     this._exitPendingBounds = { cx: boss.cx, cz: boss.cz, r: 2.2 };
 
@@ -661,8 +705,14 @@ export class Level {
     // see _assignKeycards below. The assigned doors stay locked with
     // a coloured tint until the player interacts with them holding
     // a matching key token.
+    //
+    // Extraction-room doors are EXPLICITLY excluded from this default
+    // unlock — the boss-clear flow opens them via revealExit() so the
+    // player can't reach the extraction zone before killing the boss.
     for (const mesh of this.obstacles) {
-      if (mesh.userData.isDoor) this._openDoor(mesh);
+      if (mesh.userData.isDoor && !mesh.userData.isExtractionDoor) {
+        this._openDoor(mesh);
+      }
     }
     this._assignKeycards();
   }
@@ -910,8 +960,17 @@ export class Level {
     // non-shop neighbour stays on the open graph.
     const keyable = this.obstacles.filter((o) => {
       if (!o.userData.isDoor) return false;
-      const [aId, bId] = o.userData.connects;
+      // Extraction-room doors are owned by the boss-clear flow; they
+      // must NEVER be keycard-locked (the player has no way to acquire
+      // a colour-keyed token for them). Filter them out by tag.
+      if (o.userData.isExtractionDoor) return false;
+      // Defensive — if any door lacks a connects array (shouldn't
+      // happen for chain doors, but extraction doors do), skip it.
+      const connects = o.userData.connects;
+      if (!connects || connects.length !== 2) return false;
+      const [aId, bId] = connects;
       const a = rooms[aId], b = rooms[bId];
+      if (!a || !b) return false;
       const aIsShop = shopTypes.has(a.type);
       const bIsShop = shopTypes.has(b.type);
       return (aIsShop !== bIsShop)
@@ -4085,16 +4144,29 @@ export class Level {
   }
 
   revealExit() {
-    if (this.exitGroup || !this._exitPendingBounds) return;
+    // Idempotent — exit was already revealed. Cheap guard for the
+    // double-fire case where main.js calls revealExit on boss death
+    // AND from the room-clear hook.
+    if (this.exitBounds) return;
+
+    // Primary path — the extraction room exists (boss room had a
+    // free wall). Reveal its walls + props + unlock the connecting
+    // door via the locked-door pattern. Set this.exitBounds to the
+    // room's interior so isPlayerInExit() triggers on walk-in.
+    if (this.exitRoom && typeof this.exitRoom.reveal === 'function') {
+      this.exitRoom.reveal();
+      this.exitBounds = this.exitRoom.exitBounds;
+      this._dirtySolid();
+      return;
+    }
+
+    // Fallback path — extraction-room build failed earlier; drop the
+    // legacy ring marker in the boss room. Same code as before the
+    // overhaul so any save / level the new builder couldn't handle
+    // still gets a working exit.
+    if (!this._exitPendingBounds) return;
     const { cx, cz, r } = this._exitPendingBounds;
     const group = new THREE.Group();
-    // Exit visual is emissive-only — no PointLight. Adding a live
-    // point light here triggered a per-material shader recompile
-    // (lighting uniform changed) for every nearby surface, which
-    // showed up as a noticeable hitch the moment the boss died.
-    // Bloom on the bright unlit material in postfx gives us the
-    // glow effect without the lighting-pipeline cost. Ring segment
-    // count dropped 40 → 24, still reads round at iso distance.
     const ring = new THREE.Mesh(
       new THREE.RingGeometry(r * 0.7, r, 24),
       new THREE.MeshBasicMaterial({
@@ -4114,9 +4186,6 @@ export class Level {
     this.scene.add(group);
     this.exitGroup = group;
     this.exitBounds = { cx, cz, r };
-    // Stamp kind so the harness's "no anonymous decorations" check
-    // passes. Legacy ring + pillar are kept as a fallback path; the
-    // primary exit visual is now the extraction room.
     ring.userData.kind = 'exit-ring-legacy';
     pillar.userData.kind = 'exit-pillar-legacy';
     this.decorations.push(ring, pillar);
