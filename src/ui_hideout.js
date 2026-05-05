@@ -1298,13 +1298,25 @@ export class HideoutUI {
     wrap.className = 'hideout-tab-body';
     const head = document.createElement('div');
     head.className = 'hideout-section-head';
+    // Count currently-queued vault pulls so the header can show a
+    // "Clear queued (N)" affordance without forcing the player to
+    // click each tile to un-take. Hidden when nothing is queued.
+    const queuedTakes = getStarterInventory().filter(q => q && q.__vaultItem).length;
     head.innerHTML = `
       <div class="hideout-section-portrait" data-npc="vault"></div>
       <div class="hideout-section-text">
         <div class="hideout-section-title">VAULT</div>
-        <div class="hideout-section-sub">Persistent item storage between runs. Items here survive death and can be loaded into your loadout for the next run.</div>
+        <div class="hideout-section-sub">Persistent item storage between runs. Tap "Take" on a tile to queue it for next run.${queuedTakes ? ` <b style="color:#6abf78">${queuedTakes} queued</b>.` : ''}</div>
       </div>
+      ${queuedTakes ? `<button type="button" class="hideout-btn vault-clear-takes">Clear queued (${queuedTakes})</button>` : ''}
     `;
+    if (queuedTakes) {
+      head.querySelector('.vault-clear-takes')?.addEventListener('click', () => {
+        const next = getStarterInventory().filter(q => !(q && q.__vaultItem));
+        setStarterInventory(next);
+        this.render();
+      });
+    }
     wrap.appendChild(head);
     wrap.appendChild(this._renderBankSection());
     return wrap;
@@ -2130,7 +2142,7 @@ export class HideoutUI {
     wrap.className = 'loadout-summary';
     const head = document.createElement('div');
     head.className = 'loadout-summary-head';
-    head.innerHTML = `TAKING INTO RUN <span class="lsum-hint">(click any slot to manage in Pre-Mission Store)</span>`;
+    head.innerHTML = `TAKING INTO RUN <span class="lsum-hint">(click any slot to manage)</span>`;
     wrap.appendChild(head);
     const grid = document.createElement('div');
     grid.className = 'loadout-summary-grid';
