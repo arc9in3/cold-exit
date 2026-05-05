@@ -25,13 +25,16 @@
 //     depthWrite) MUST be in the cache key — they're non-trivial to
 //     toggle on a shared instance.
 //
-// Three material types supported. Default to 'standard' which matches
+// Four material types supported. Default to 'standard' which matches
 // the renderer's PBR pipeline used by walls / props elsewhere:
 //   - 'standard' — MeshStandardMaterial (PBR, lit). Default.
 //   - 'basic'    — MeshBasicMaterial (unlit). Use for emissive things
 //                  (lamps, glass, signage) where lighting would dim them.
 //   - 'lambert'  — MeshLambertMaterial (cheap diffuse). Reserved for
 //                  call sites that explicitly want it.
+//   - 'toon'     — MeshToonMaterial. props.js uses this for furniture
+//                  bodies; opts.gradientMap is identity-keyed (the
+//                  caller provides a singleton texture).
 
 import * as THREE from 'three';
 
@@ -64,6 +67,15 @@ function _key(opts) {
 // other way around.
 function _build(opts) {
   const t = opts.type || 'standard';
+  if (t === 'toon') {
+    const args = { color: opts.color };
+    if (opts.gradientMap) args.gradientMap = opts.gradientMap;
+    if (opts.transparent) args.transparent = true;
+    if (opts.opacity != null) args.opacity = opts.opacity;
+    if (opts.side != null) args.side = opts.side;
+    if (opts.depthWrite === false) args.depthWrite = false;
+    return new THREE.MeshToonMaterial(args);
+  }
   if (t === 'basic') {
     const args = { color: opts.color };
     if (opts.transparent) args.transparent = true;
@@ -113,7 +125,7 @@ export function sharedMaterial(opts = {}) {
 
 // Public — pool stats for the perf probe. Returns { size, byType }.
 export function poolStats() {
-  const byType = { standard: 0, basic: 0, lambert: 0 };
+  const byType = { standard: 0, basic: 0, lambert: 0, toon: 0 };
   for (const k of _pool.keys()) {
     const t = k.split('|')[0];
     if (byType[t] != null) byType[t] += 1;
@@ -129,4 +141,30 @@ export function clearPool() {
     try { m.dispose?.(); } catch (_) { /* ignore */ }
   }
   _pool.clear();
+}
+
+// Public — dispose-skipping helper. Use everywhere a level/encounter
+// teardown previously did `mat.dispose()`. Pooled materials (those
+// stamped userData.shared = true by sharedMaterial()) survive — they're
+// owned by the pool and shared across many meshes, so disposing one
+// would corrupt every other consumer.
+//
+// Returns true if the material was disposed, false if it was kept.
+export function disposeIfNotShared(material) {
+  if (!material) return false;
+  if (material.userData && material.userData.shared) return false;
+  try { material.dispose?.(); } catch (_) { /* ignore */ }
+  return true;
+}
+
+// Convenience — handle the common "material may be array or single"
+// shape that Three.js exposes on Mesh.material. Walks each entry and
+// disposes only the non-shared ones.
+export function disposeMaterialIfNotShared(material) {
+  if (!material) return;
+  if (Array.isArray(material)) {
+    for (const m of material) disposeIfNotShared(m);
+  } else {
+    disposeIfNotShared(material);
+  }
 }

@@ -12,6 +12,7 @@ import { buildWindow } from './windows.js';
 import { buildSkybridge } from './skybridges.js';
 import { addLedge } from './ledges.js';
 import { initWallInstancer, wallInstancer } from './wall_instancer.js';
+import { sharedMaterial, disposeIfNotShared, disposeMaterialIfNotShared } from './material_pool.js';
 
 // Shopkeeper palette per kind — body / head / pants / gear tint so
 // each shop's NPC reads as a distinct role in the world. Exported so
@@ -133,13 +134,15 @@ export class Level {
       if (m.isWallProxy) continue;     // owned by wall_instancer.teardown()
       this.scene.remove(m);
       m.geometry.dispose();
-      m.material.dispose();
+      // Pooled materials live across levels — disposeIfNotShared keeps
+      // them alive while still freeing per-instance allocations.
+      disposeIfNotShared(m.material);
     }
     if (wallInstancer()) wallInstancer().teardown();
     for (const m of this.decorations) {
       this.scene.remove(m);
       if (m.geometry) m.geometry.dispose();
-      if (m.material) m.material.dispose();
+      if (m.material) disposeIfNotShared(m.material);
     }
     for (const npc of this.npcs) this.scene.remove(npc.group);
     for (const c of this.containers) this.scene.remove(c.group);
@@ -837,10 +840,7 @@ export class Level {
         if (v.parent) v.parent.remove(v);
         v.traverse?.((obj) => {
           if (obj.geometry?.dispose) obj.geometry.dispose();
-          if (obj.material) {
-            if (Array.isArray(obj.material)) obj.material.forEach(m => m?.dispose?.());
-            else obj.material.dispose?.();
-          }
+          if (obj.material) disposeMaterialIfNotShared(obj.material);
         });
       } catch (_) { /* defensive — keep tearing down siblings */ }
     };
@@ -922,10 +922,7 @@ export class Level {
       if (ud.isColumn) {
         this.scene.remove(m);
         m.geometry?.dispose?.();
-        if (m.material) {
-          if (Array.isArray(m.material)) m.material.forEach(mat => mat?.dispose?.());
-          else m.material.dispose?.();
-        }
+        if (m.material) disposeMaterialIfNotShared(m.material);
         continue;
       }
       const isWall = !ud.isProp && !ud.containerRef && m.position.y >= 1.0;
@@ -933,10 +930,7 @@ export class Level {
       // Prop / cover / container — tear down.
       this.scene.remove(m);
       m.geometry?.dispose?.();
-      if (m.material) {
-        if (Array.isArray(m.material)) m.material.forEach(mat => mat?.dispose?.());
-        else m.material.dispose?.();
-      }
+      if (m.material) disposeMaterialIfNotShared(m.material);
       // Visible prop group lives separate from the proxy when it was
       // registered via _registerProp.
       const grp = ud.propGroup;
@@ -944,10 +938,7 @@ export class Level {
         this.scene.remove(grp);
         grp.traverse?.((obj) => {
           if (obj.geometry?.dispose) obj.geometry.dispose();
-          if (obj.material) {
-            if (Array.isArray(obj.material)) obj.material.forEach(mat => mat?.dispose?.());
-            else obj.material.dispose?.();
-          }
+          if (obj.material) disposeMaterialIfNotShared(obj.material);
         });
       }
     }
@@ -961,10 +952,7 @@ export class Level {
           this.scene.remove(c.group);
           c.group?.traverse?.((obj) => {
             if (obj.geometry?.dispose) obj.geometry.dispose();
-            if (obj.material) {
-              if (Array.isArray(obj.material)) obj.material.forEach(mat => mat?.dispose?.());
-              else obj.material.dispose?.();
-            }
+            if (obj.material) disposeMaterialIfNotShared(obj.material);
           });
         } else {
           keptContainers.push(c);
@@ -981,10 +969,7 @@ export class Level {
         if (typeof px === 'number' && inRoom(px, pz)) {
           this.scene.remove(d);
           d.geometry?.dispose?.();
-          if (d.material) {
-            if (Array.isArray(d.material)) d.material.forEach(mat => mat?.dispose?.());
-            else d.material.dispose?.();
-          }
+          if (d.material) disposeMaterialIfNotShared(d.material);
         } else {
           keptDecor.push(d);
         }
@@ -1492,7 +1477,8 @@ export class Level {
     // aperture; depth is wall-thin.
     const proxyW = isHorizWall ? winW : WALL_THICK;
     const proxyD = isHorizWall ? WALL_THICK : winW;
-    const proxyMat = new THREE.MeshBasicMaterial({
+    const proxyMat = sharedMaterial({
+      type: 'basic', color: 0xffffff,
       transparent: true, opacity: 0, depthWrite: false,
     });
     const proxy = new THREE.Mesh(
@@ -1572,7 +1558,7 @@ export class Level {
         // Remove original.
         this.scene.remove(m);
         m.geometry?.dispose?.();
-        m.material?.dispose?.();
+        if (m.material) disposeMaterialIfNotShared(m.material);
         this.obstacles.splice(i, 1);
         if (leftTo > leftFrom + 0.1) {
           this._addObstacle((leftFrom + leftTo) / 2, WALL_HEIGHT / 2, wz,
@@ -1592,7 +1578,7 @@ export class Level {
         const botFrom = cutMaxZ, botTo = wallMaxZ;
         this.scene.remove(m);
         m.geometry?.dispose?.();
-        m.material?.dispose?.();
+        if (m.material) disposeMaterialIfNotShared(m.material);
         this.obstacles.splice(i, 1);
         if (topTo > topFrom + 0.1) {
           this._addObstacle(wx, WALL_HEIGHT / 2, (topFrom + topTo) / 2,
@@ -1700,7 +1686,7 @@ export class Level {
       const { w, h, d } = container.geo;
       const proxy = new THREE.Mesh(
         new THREE.BoxGeometry(w, h, d),
-        new THREE.MeshBasicMaterial({ transparent: true, opacity: 0, depthWrite: false }),
+        sharedMaterial({ type: 'basic', color: 0xffffff, transparent: true, opacity: 0, depthWrite: false }),
       );
       proxy.position.set(cx2, h / 2, cz2);
       proxy.userData.collisionXZ = {
@@ -1834,7 +1820,7 @@ export class Level {
         const { w, d } = container.geo;
         const proxy = new THREE.Mesh(
           new THREE.BoxGeometry(w, container.geo.h, d),
-          new THREE.MeshBasicMaterial({ transparent: true, opacity: 0, depthWrite: false }),
+          sharedMaterial({ type: 'basic', color: 0xffffff, transparent: true, opacity: 0, depthWrite: false }),
         );
         proxy.position.set(x, container.geo.h / 2, z);
         proxy.userData.collisionXZ = {
@@ -2688,7 +2674,7 @@ export class Level {
     // comfortable. Shadow casting OFF — walls already don't cast
     // shadows in this project (see _addObstacle), and shadow-map
     // updates per SpotLight × per room would dwarf the win.
-    const fixtureMat = new THREE.MeshStandardMaterial({
+    const fixtureMat = sharedMaterial({
       color: 0xffcf80,
       emissive: 0xffcf80,
       emissiveIntensity: 1.6,
@@ -2815,7 +2801,8 @@ export class Level {
     const propH = Math.max(0.15, worldBbox.max.y - worldBbox.min.y);
     const propMidY = (worldBbox.min.y + worldBbox.max.y) * 0.5;
     const proxyGeom = new THREE.BoxGeometry(w, propH, d);
-    const proxyMat = new THREE.MeshBasicMaterial({
+    const proxyMat = sharedMaterial({
+      type: 'basic', color: 0xffffff,
       transparent: true, opacity: 0, depthWrite: false,
     });
     const proxy = new THREE.Mesh(proxyGeom, proxyMat);
@@ -2863,7 +2850,8 @@ export class Level {
   addEncounterCollider(x, z, w, d, h = 1.6) {
     const proxy = new THREE.Mesh(
       new THREE.BoxGeometry(w, h, d),
-      new THREE.MeshBasicMaterial({
+      sharedMaterial({
+        type: 'basic', color: 0xffffff,
         transparent: true, opacity: 0, depthWrite: false,
       }),
     );
@@ -2892,10 +2880,7 @@ export class Level {
     if (idx >= 0) this.obstacles.splice(idx, 1);
     if (proxy.parent) this.scene.remove(proxy);
     proxy.geometry?.dispose?.();
-    if (proxy.material) {
-      if (Array.isArray(proxy.material)) proxy.material.forEach(m => m?.dispose?.());
-      else proxy.material.dispose?.();
-    }
+    if (proxy.material) disposeMaterialIfNotShared(proxy.material);
     if (typeof this._dirtySolid === 'function') this._dirtySolid();
   }
 
@@ -2934,7 +2919,7 @@ export class Level {
   // LoS. Used by the symmetric "columns" decorator.
   _addColumn(x, z, radius) {
     const geom = new THREE.CylinderGeometry(radius, radius, WALL_HEIGHT, 12);
-    const mat = new THREE.MeshStandardMaterial({ color: 0x2e3240, roughness: 0.7, metalness: 0.1 });
+    const mat = sharedMaterial({ color: 0x2e3240, roughness: 0.7, metalness: 0.1 });
     const mesh = new THREE.Mesh(geom, mat);
     mesh.position.set(x, WALL_HEIGHT / 2, z);
     mesh.castShadow = false;     // see _addObstacle — walls don't cast
@@ -3354,7 +3339,7 @@ export class Level {
         }
         if (tooClose) continue;
         const geom = new THREE.CylinderGeometry(pillarRadius, pillarRadius, WALL_HEIGHT, 10);
-        const mat = new THREE.MeshStandardMaterial({ color: 0x2a2e38, roughness: 0.7, metalness: 0.1 });
+        const mat = sharedMaterial({ color: 0x2a2e38, roughness: 0.7, metalness: 0.1 });
         const mesh = new THREE.Mesh(geom, mat);
         mesh.position.set(x, WALL_HEIGHT / 2, z);
         mesh.castShadow = false;
@@ -3386,7 +3371,7 @@ export class Level {
         // off the edge by clipping over). Standard collision proxy
         // used so bullets / movement treat it as a low solid block.
         const geom = new THREE.BoxGeometry(pick.w, platformH, pick.d);
-        const mat = new THREE.MeshStandardMaterial({ color: 0x3a3a34, roughness: 0.85 });
+        const mat = sharedMaterial({ color: 0x3a3a34, roughness: 0.85 });
         const mesh = new THREE.Mesh(geom, mat);
         mesh.position.set(pick.cx, platformH / 2, pick.cz);
         mesh.userData.collisionXZ = {
@@ -3720,14 +3705,14 @@ export class Level {
     group.add(person);
 
     // Kiosk: low counter + vertical back panel with a sign.
-    const counterMat = new THREE.MeshStandardMaterial({ color: 0x3a2a1e, roughness: 0.85 });
+    const counterMat = sharedMaterial({ color: 0x3a2a1e, roughness: 0.85 });
     const counter = new THREE.Mesh(new THREE.BoxGeometry(2.4, 0.8, 1.0), counterMat);
     counter.position.set(0, 0.4, 0.7);
     counter.castShadow = true;
     counter.receiveShadow = true;
     group.add(counter);
 
-    const panelMat = new THREE.MeshStandardMaterial({ color: 0x24221a, roughness: 0.9 });
+    const panelMat = sharedMaterial({ color: 0x24221a, roughness: 0.9 });
     const panel = new THREE.Mesh(new THREE.BoxGeometry(2.4, 1.6, 0.1), panelMat);
     panel.position.set(0, 1.5, -0.6);
     panel.castShadow = true;
@@ -3736,7 +3721,7 @@ export class Level {
     // Sign on the back panel (a glowing colored rectangle).
     const sign = new THREE.Mesh(
       new THREE.BoxGeometry(1.4, 0.45, 0.04),
-      new THREE.MeshBasicMaterial({ color: accent }),
+      sharedMaterial({ type: 'basic', color: accent }),
     );
     sign.position.set(0, 1.8, -0.54);
     group.add(sign);
@@ -3746,7 +3731,7 @@ export class Level {
     style.displays.forEach((c, i) => {
       const m = new THREE.Mesh(
         new THREE.BoxGeometry(0.24, 0.24, 0.24),
-        new THREE.MeshBasicMaterial({ color: c }),
+        sharedMaterial({ type: 'basic', color: c }),
       );
       m.position.set(-0.7 + i * 0.7, 0.96, 0.7);
       group.add(m);
@@ -3830,7 +3815,7 @@ export class Level {
     // Healer wears a medical cross on the chest — only kind-specific
     // decoration we keep from the old prim-NPC code.
     if (kind === 'healer') {
-      const whiteMat = new THREE.MeshBasicMaterial({ color: 0xffffff });
+      const whiteMat = sharedMaterial({ type: 'basic', color: 0xffffff });
       const cross1 = new THREE.Mesh(new THREE.BoxGeometry(0.22, 0.06, 0.01), whiteMat);
       cross1.position.set(0, 1.25, 0.19);
       rig.group.add(cross1);
@@ -3852,9 +3837,9 @@ export class Level {
     // Off-white fur — pure 0xffffff blew out the bloom threshold and
     // the bear glowed like a star. Slight warm tint reads as "holy"
     // without triggering the post-fx bloom.
-    const mat = new THREE.MeshBasicMaterial({ color: 0xb8b4a8 });
-    const accent = new THREE.MeshBasicMaterial({ color: 0xa89878 });
-    const dark = new THREE.MeshBasicMaterial({ color: 0x1a1a1a });
+    const mat = sharedMaterial({ type: 'basic', color: 0xb8b4a8 });
+    const accent = sharedMaterial({ type: 'basic', color: 0xa89878 });
+    const dark = sharedMaterial({ type: 'basic', color: 0x1a1a1a });
 
     const body = new THREE.Mesh(new THREE.SphereGeometry(1.5, 22, 16), mat);
     body.position.y = 1.6;
@@ -3905,7 +3890,7 @@ export class Level {
     eyeR.position.set(0.55, 3.85, 1.55);
     group.add(eyeR);
     // Catchlights — small bright dots offset from the eye centre.
-    const catchMat = new THREE.MeshBasicMaterial({ color: 0xffffff });
+    const catchMat = sharedMaterial({ type: 'basic', color: 0xffffff });
     const catchGeom = new THREE.SphereGeometry(0.06, 8, 6);
     const catchL = new THREE.Mesh(catchGeom, catchMat);
     catchL.position.set(-0.50, 3.93, 1.72);
@@ -3914,7 +3899,7 @@ export class Level {
     catchR.position.set(0.60, 3.93, 1.72);
     group.add(catchR);
     // Cheek blush — small warm-tan circles for the mascot warmth.
-    const blushMat = new THREE.MeshBasicMaterial({ color: 0xd09080, transparent: true, opacity: 0.55 });
+    const blushMat = sharedMaterial({ type: 'basic', color: 0xd09080, transparent: true, opacity: 0.55 });
     const blushGeom = new THREE.SphereGeometry(0.18, 10, 8);
     const blushL = new THREE.Mesh(blushGeom, blushMat);
     blushL.position.set(-0.72, 3.45, 1.45);
@@ -3934,7 +3919,7 @@ export class Level {
 
     const glow = new THREE.Mesh(
       new THREE.SphereGeometry(2.7, 18, 14),
-      new THREE.MeshBasicMaterial({ color: 0xa89878, transparent: true, opacity: 0.06 }),
+      sharedMaterial({ type: 'basic', color: 0xa89878, transparent: true, opacity: 0.06 }),
     );
     glow.position.y = 2.3;
     group.add(glow);
@@ -3947,7 +3932,7 @@ export class Level {
     // the bloom pass doesn't over-amp it either.
     const halo = new THREE.Mesh(
       new THREE.TorusGeometry(0.8, 0.06, 10, 24),
-      new THREE.MeshBasicMaterial({ color: 0xd0b07a }),
+      sharedMaterial({ type: 'basic', color: 0xd0b07a }),
     );
     halo.position.y = 5.4;
     halo.rotation.x = Math.PI / 2;
@@ -4033,7 +4018,7 @@ export class Level {
         // already fired inside the instancer.
       }
     }
-    const mat = new THREE.MeshStandardMaterial({ color, roughness: 0.85 });
+    const mat = sharedMaterial({ color, roughness: 0.85 });
     const mesh = new THREE.Mesh(new THREE.BoxGeometry(w, h, d), mat);
     mesh.position.set(x, y, z);
     // Walls don't cast shadows. Iso camera angle + room boundaries
@@ -4926,8 +4911,8 @@ export class Level {
     const group = new THREE.Group();
     const ring = new THREE.Mesh(
       new THREE.RingGeometry(r * 0.7, r, 24),
-      new THREE.MeshBasicMaterial({
-        color: EXIT_COLOR, transparent: true, opacity: 0.85, side: THREE.DoubleSide,
+      sharedMaterial({
+        type: 'basic', color: EXIT_COLOR, transparent: true, opacity: 0.85, side: THREE.DoubleSide,
       }),
     );
     ring.rotation.x = -Math.PI / 2;
@@ -4935,7 +4920,7 @@ export class Level {
     group.add(ring);
     const pillar = new THREE.Mesh(
       new THREE.CylinderGeometry(0.1, 0.1, 2.5, 8),
-      new THREE.MeshBasicMaterial({ color: EXIT_COLOR, transparent: true, opacity: 0.55 }),
+      sharedMaterial({ type: 'basic', color: EXIT_COLOR, transparent: true, opacity: 0.55 }),
     );
     pillar.position.y = 1.25;
     group.add(pillar);

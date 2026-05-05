@@ -20,6 +20,7 @@
 
 import * as THREE from 'three';
 import { buildProp } from './props.js';
+import { sharedMaterial } from './material_pool.js';
 
 // Same constants as level.js — kept in sync. If level.js ever tweaks
 // these, this file needs to follow. They're const there too, so this
@@ -135,7 +136,7 @@ export function buildExtractionRoom(level, bossRoom, opts = {}) {
   // control over visibility (initially false) and the kind tag.
   const addWall = (x, y, z, w, h, d, isOuter, kind = 'extraction-wall') => {
     const color = isOuter ? OUTER_WALL_COLOR : FULL_WALL_COLOR;
-    const matObj = new THREE.MeshStandardMaterial({ color, roughness: 0.85 });
+    const matObj = sharedMaterial({ color, roughness: 0.85 });
     const mesh = new THREE.Mesh(new THREE.BoxGeometry(w, h, d), matObj);
     mesh.position.set(x, y, z);
     mesh.castShadow = false;
@@ -221,7 +222,7 @@ export function buildExtractionRoom(level, bossRoom, opts = {}) {
   else if (dir === 'north'){ doorX = cx; doorZ = b.minZ - WALL_THICK / 2; doorW = DOOR_WIDTH; doorD = WALL_THICK; }
   else                     { doorX = cx; doorZ = b.maxZ + WALL_THICK / 2; doorW = DOOR_WIDTH; doorD = WALL_THICK; }
 
-  const doorMat = new THREE.MeshStandardMaterial({ color: DOOR_COLOR, roughness: 0.85 });
+  const doorMat = sharedMaterial({ color: DOOR_COLOR, roughness: 0.85 });
   const doorMesh = new THREE.Mesh(
     new THREE.BoxGeometry(doorW, WALL_HEIGHT, doorD),
     doorMat,
@@ -295,7 +296,8 @@ export function buildExtractionRoom(level, bossRoom, opts = {}) {
     // the extraction prop as solid.
     if (built.collision) {
       const w = built.collision.w, d = built.collision.d;
-      const proxyMat = new THREE.MeshBasicMaterial({
+      const proxyMat = sharedMaterial({
+        type: 'basic', color: 0xffffff,
         transparent: true, opacity: 0, depthWrite: false,
       });
       const proxy = new THREE.Mesh(new THREE.BoxGeometry(w, 1.6, d), proxyMat);
@@ -351,7 +353,8 @@ export function buildExtractionRoom(level, bossRoom, opts = {}) {
       sup.group.userData.kind = sup.kind || s.kind;
       if (sup.collision) {
         const w = sup.collision.w, d = sup.collision.d;
-        const proxyMat = new THREE.MeshBasicMaterial({
+        const proxyMat = sharedMaterial({
+          type: 'basic', color: 0xffffff,
           transparent: true, opacity: 0, depthWrite: false,
         });
         const proxy = new THREE.Mesh(new THREE.BoxGeometry(w, 1.0, d), proxyMat);
