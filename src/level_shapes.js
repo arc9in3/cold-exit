@@ -412,7 +412,7 @@ const gallery = {
   id: 'gallery',
   allowedTypes: ['combat', 'subBoss'],
   pickFootprint: (cellX, cellZ, pitch) => 1,
-  build(level, room) {
+  build(level, room, opts = {}) {
     const d = _dims(room);
     const doors = _doorCenters(level, room);
     const ewDoors = doors.east != null || doors.west != null;
@@ -424,7 +424,12 @@ const gallery = {
     // Pinch in Z (north/south walls move inward).
     const narrowZ = ewDoors;
     _addRectPerimeter(level, room);
-    const halfWidth = 4;   // 8m wide hall
+    // Phase M step 5 — main-path rooms must keep the corridor
+    // width >= 3m end-to-end; branches keep the original 8m hall.
+    // Both currently land well above the 3m hard floor (>=3m means
+    // halfWidth >= 1.5), but stamp the flag explicitly so future
+    // narrowings can't silently regress below the floor.
+    const halfWidth = opts.isMainPath ? Math.max(4, 1.5) : 4;   // 8m wide hall
     if (narrowZ) {
       level._addObstacle(d.cx, WALL_HEIGHT / 2, d.cz - halfWidth,
         d.w - 2.0, WALL_HEIGHT, WALL_THICK, level._outerWallColor());

@@ -1413,8 +1413,17 @@ export class Level {
           // shape template seals off a doorway. We snapshot the
           // obstacles length before the build then walk the new
           // tail afterwards.
+          //
+          // Phase M step 5 — flag main-path rooms so shape templates
+          // can widen any internal corridor segments to >= 3m.
+          // start / combat / boss rooms are on the main path; subBoss
+          // / shop / encounter rooms are branches and keep narrower
+          // widths.
           const _shapeStart = this.obstacles.length;
-          const out = tpl.build(this, room);
+          const isMainPath = (room.type === 'start'
+                            || room.type === 'combat'
+                            || room.type === 'boss');
+          const out = tpl.build(this, room, { isMainPath });
           for (let i = _shapeStart; i < this.obstacles.length; i++) {
             const m = this.obstacles[i];
             if (m && m.userData && !m.userData.kind) {
