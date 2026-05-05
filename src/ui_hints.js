@@ -26,7 +26,10 @@ const HINTS = {
   perks:          { text: 'K opens the perk tree · spend skill points on builds', duration: 4.0, priority: 4 },
   crouch:         { text: 'C crouches · sneak past or under enemy cover', duration: 4.0, priority: 5 },
   dash:           { text: 'Space dashes · double-tap rolls', duration: 4.0, priority: 5 },
-  exit:           { text: 'Defeat the boss to reveal the floor extract', duration: 5.0, priority: 2 },
+  exit:           { text: 'Defeat the boss to open the extraction route', duration: 5.0, priority: 2 },
+  // Fired the moment the boss falls — the extraction door unlocks and
+  // the player needs to head through it to leave the floor.
+  extractOpened:  { text: 'Extraction route opened · head for the unlocked door', duration: 5.0, priority: 2 },
   brokenItem:     { text: 'Broken gear gives no bonuses · repair at any shop', duration: 5.0, priority: 3 },
   keycard:        { text: 'Locked doors need matching keycards · drop from sub-bosses', duration: 5.0, priority: 3 },
   throwable:      { text: 'Throwables bounce + settle before going off · aim wide', duration: 5.0, priority: 4 },

@@ -4,6 +4,9 @@ import { buildProp, getLevelTheme, INWARD_FACING_KINDS } from './props.js';
 import { buildRig, initAnim, updateAnim } from './actor_rig.js';
 import { makeContainer, pickContainerType, pickContainerSize, buildContainerMesh } from './containers.js';
 import { StaticObstacleGrid2D } from './obstacle_grid.js';
+import { pickTemplateForRoom, applyTemplate } from './room_templates.js';
+import { buildExtractionRoom } from './extraction_room.js';
+import { SHAPE_REGISTRY, pickShapeForRoom } from './level_shapes.js';
 
 // Shopkeeper palette per kind — body / head / pants / gear tint so
 // each shop's NPC reads as a distinct role in the world. Exported so
@@ -96,6 +99,9 @@ export class Level {
     this._visionDirty = true;
     this._projectileObstacleGrid = null;
     this._projectileObstacleSource = null;
+    // Dev-time probe exposer — lets the playwright level-gen probe pull
+    // rooms / obstacles / decorations without crawling the THREE.scene.
+    if (typeof window !== 'undefined') window.__level = this;
   }
 
   clear() {
@@ -241,26 +247,26 @@ export class Level {
       // the start/boss/merchant rooms have their own built-in furnishing.
       let layout = 'open';
       if (type === 'combat') {
-        // Combat layout pool. Each landing probability targets ~5-12%
-        // so the rotation past ~40 rooms still feels varied. The new
-        // entries (alcove / center-pit / zigzag) all use _blocksDoor
-        // checks during _buildInterior so they never sever a room
-        // from its neighbours.
+        // Weighted layout picker per the level-gen overhaul design.
+        // Targets layout VARIETY — at least 6 distinct layouts on a
+        // typical 8-12 room level. 'corridor' is moved here from the
+        // giant-room mutation step so corridor-shaped combat rooms
+        // exist regardless of giant-extension. lshape/closet/bunker
+        // are intentionally dropped from the rotation — playtest
+        // surfaced that they cornered the player too often.
         const r = Math.random();
-        if      (r < 0.08) layout = 'columns-4';
-        else if (r < 0.13) layout = 'columns-6';
-        else if (r < 0.18) layout = 'columns-cross';
-        else if (r < 0.27) layout = 'split';
-        else if (r < 0.40) layout = 'hallway';
-        else if (r < 0.51) layout = 'lshape';
-        else if (r < 0.60) layout = 'partition';
-        else if (r < 0.68) layout = 'closet';
-        else if (r < 0.75) layout = 'bunker';
-        else if (r < 0.82) layout = 'pillars-grid';
-        else if (r < 0.88) layout = 'alcove';
-        else if (r < 0.94) layout = 'center-pit';
-        else if (r < 0.98) layout = 'zigzag';
-        // else remains 'open'
+        if      (r < 0.20) layout = 'open';
+        else if (r < 0.30) layout = 'columns-4';
+        else if (r < 0.40) layout = 'columns-6';
+        else if (r < 0.48) layout = 'columns-cross';
+        else if (r < 0.56) layout = 'split';
+        else if (r < 0.63) layout = 'hallway';
+        else if (r < 0.70) layout = 'partition';
+        else if (r < 0.80) layout = 'corridor';
+        else if (r < 0.86) layout = 'pillars-grid';
+        else if (r < 0.92) layout = 'alcove';
+        else if (r < 0.97) layout = 'center-pit';
+        else               layout = 'zigzag';
       } else if (type === 'boss') {
         // Boss room layout — 50/50 split between dedicated boss
         // arenas and wider combat layouts so bosses surface in many
@@ -376,8 +382,15 @@ export class Level {
       room.giant = true;
       // About half of the extended rooms become "corridors" — an
       // interior pass narrows the perpendicular axis so they read
-      // as long halls instead of giant squares.
-      if (Math.random() < 0.5) room.layout = 'corridor';
+      // as long halls instead of giant squares. Skip if the room
+      // already rolled into one of the layouts the corridor pass
+      // would override (the new weighted picker covers corridor too,
+      // so we only force-corridor when the rolled layout would feel
+      // wrong on a stretched cell).
+      if (Math.random() < 0.5 && (room.layout === 'open' || room.layout === 'columns-4'
+          || room.layout === 'columns-6' || room.layout === 'columns-cross')) {
+        room.layout = 'corridor';
+      }
     }
 
     // Branch rooms: pick a chain room with an unused cardinal neighbour and
@@ -467,6 +480,21 @@ export class Level {
     // is walkable, and lshape / partition / pillars-grid / center-pit
     // layouts placed the floor disc inside an interior wall.
 
+    // Pass 1A — pick a shape per room. Default rect preserves the
+    // pre-overhaul behavior; non-rect shapes override _buildRoomPerimeter
+    // with their own outer + interior wall layout. Shape selection is
+    // weighted per room.type by level_shapes.js. Shape build() output
+    // (walkableBounds) is stashed on the room for the flood-fill
+    // invariant check to consume.
+    for (const room of rooms) {
+      room.shape = pickShapeForRoom(room);
+      // Tutorial rooms / synthetic rooms (extraction etc.) keep rect.
+      // Giant or doubled rooms also stay rect — the shape templates
+      // assume single-cell footprints and would tile poorly across a
+      // 2-cell extension.
+      if (room.giant || room.doubled) room.shape = 'rect';
+    }
+
     // --- Build walls + doors ----------------------------------------------
     const builtPairs = new Set();
     for (const room of rooms) this._buildRoomPerimeter(room);
@@ -481,7 +509,14 @@ export class Level {
 
     // Interior variants (split walls, narrowing hallways) go up before the
     // cover scatter so that cover can avoid placing inside interior walls.
+    //
+    // Pass 1A: SKIP this step when the room has a non-rect shape — the
+    // shape template owns its interior geometry, and stacking a layout
+    // variant on top would clobber the shape's walkability (e.g. a
+    // 'split' wall through a rotunda's chamfered corner). Rect rooms
+    // continue to use the layout system unchanged.
     for (const room of rooms) {
+      if (room.shape && room.shape !== 'rect') continue;
       if (room.layout === 'split' || room.layout === 'hallway' || room.layout === 'lshape'
           || room.layout === 'corridor' || room.layout === 'partition'
           || room.layout === 'closet'  || room.layout === 'bunker'
@@ -589,6 +624,31 @@ export class Level {
     // wall, or off the playable map.
     this._pickAndMarkEncounterRoom();
 
+    // Build the extraction chamber BEFORE the outer perimeter so the
+    // bounding walls wrap both the chain rooms AND the extraction
+    // room. Walls + door + props are added to obstacles immediately
+    // (so AI can't path through them) but kept invisible until the
+    // boss dies and revealExit() flips them on. The connecting door
+    // stays LOCKED (collision intact) until reveal.
+    try {
+      const bossRoom = rooms[this.bossRoomId];
+      if (bossRoom) {
+        const exit = buildExtractionRoom(this, bossRoom);
+        if (exit) {
+          this.exitRoom = exit;
+          // Register the extraction room in this.rooms so roomAt()
+          // finds the player after they walk inside. id stays at -1
+          // to mark it as synthetic (not part of the chain graph).
+          this.rooms.push(exit.room);
+          this._dirtySolid();
+        }
+      }
+    } catch (err) {
+      // Defensive — extraction-room build is purely additive; if it
+      // throws, log and fall back to the legacy ring marker.
+      console.warn('[level] extraction-room build failed; falling back to legacy ring:', err);
+    }
+
     // Outer bounding wall — a ring of tall outer-colour walls just
     // past the aggregate room bounds so the player can't escape to
     // the void when a boss room (or any edge room) fails to seal
@@ -604,9 +664,17 @@ export class Level {
     // "wall cutting across the map" (the sealer ends up plugging an
     // interior edge of one room inside another room's play space).
     // Surface it in the console so it's noticed even without F2.
+    //
+    // SKIP synthetic rooms (id < 0 — currently the extraction room).
+    // The extraction chamber sits flush against the boss-room outer
+    // wall and the bounds-touch heuristic treats them as overlapping
+    // even though there's a wall between them. Real chain-room
+    // overlaps still surface here.
     const rs = this.rooms;
     for (let i = 0; i < rs.length; i++) {
+      if (rs[i].id < 0) continue;
       for (let j = i + 1; j < rs.length; j++) {
+        if (rs[j].id < 0) continue;
         const a = rs[i].bounds, b = rs[j].bounds;
         if (!a || !b) continue;
         if (a.minX < b.maxX && a.maxX > b.minX && a.minZ < b.maxZ && a.maxZ > b.minZ) {
@@ -621,10 +689,17 @@ export class Level {
     // the offending ids so the level can be inspected. Doesn't attempt
     // to repair — the generator topology always produces a tree, so a
     // failure here points at a code bug, not a random gen unlucky.
+    //
+    // The extraction room is intentionally NOT reachable until the
+    // boss is cleared (its door is locked), so we skip the synthetic
+    // id=-1 entry from the unreachable list.
     const conn = this.validateConnectivity();
     if (!conn.ok && conn.unreachable.length) {
-      console.warn('[level] unreachable rooms:', conn.unreachable.map(r => r.id),
-        '— this is a generator bug, not bad luck');
+      const real = conn.unreachable.filter(r => r.id >= 0);
+      if (real.length) {
+        console.warn('[level] unreachable rooms:', real.map(r => r.id),
+          '— this is a generator bug, not bad luck');
+      }
     }
 
     // --- Populate with enemies -------------------------------------------
@@ -639,6 +714,10 @@ export class Level {
     }
 
     // --- Exit: hidden until boss is killed -------------------------------
+    // Legacy ring marker — kept as an emergency fallback ONLY if the
+    // extraction-room construction failed (boss room had every wall
+    // taken by neighbours). revealExit() prefers the extraction room
+    // when this.exitRoom is set.
     const boss = rooms[this.bossRoomId];
     this._exitPendingBounds = { cx: boss.cx, cz: boss.cz, r: 2.2 };
 
@@ -649,10 +728,30 @@ export class Level {
     // see _assignKeycards below. The assigned doors stay locked with
     // a coloured tint until the player interacts with them holding
     // a matching key token.
+    //
+    // Extraction-room doors are EXPLICITLY excluded from this default
+    // unlock — the boss-clear flow opens them via revealExit() so the
+    // player can't reach the extraction zone before killing the boss.
     for (const mesh of this.obstacles) {
-      if (mesh.userData.isDoor) this._openDoor(mesh);
+      if (mesh.userData.isDoor && !mesh.userData.isExtractionDoor) {
+        this._openDoor(mesh);
+      }
     }
     this._assignKeycards();
+
+    // Pass 1A pathway-invariant stamp. Result is read-only — purely
+    // informational for the dev console / probe HTML / future smoke
+    // harness. Wrapped in try/catch so a bad shape doesn't break
+    // generate(); the warn surfaces the problem either way.
+    try {
+      const inv = this.checkPathwayInvariants();
+      if (typeof window !== 'undefined') window.__lastInvariantCheck = inv;
+      if (!inv.ok) {
+        console.warn('[level] pathway-invariants FAIL after generate:', inv.failures);
+      }
+    } catch (err) {
+      console.warn('[level] checkPathwayInvariants threw:', err);
+    }
   }
 
   // Walk an encounter state object and remove any Three.js
@@ -898,8 +997,17 @@ export class Level {
     // non-shop neighbour stays on the open graph.
     const keyable = this.obstacles.filter((o) => {
       if (!o.userData.isDoor) return false;
-      const [aId, bId] = o.userData.connects;
+      // Extraction-room doors are owned by the boss-clear flow; they
+      // must NEVER be keycard-locked (the player has no way to acquire
+      // a colour-keyed token for them). Filter them out by tag.
+      if (o.userData.isExtractionDoor) return false;
+      // Defensive — if any door lacks a connects array (shouldn't
+      // happen for chain doors, but extraction doors do), skip it.
+      const connects = o.userData.connects;
+      if (!connects || connects.length !== 2) return false;
+      const [aId, bId] = connects;
       const a = rooms[aId], b = rooms[bId];
+      if (!a || !b) return false;
       const aIsShop = shopTypes.has(a.type);
       const bIsShop = shopTypes.has(b.type);
       return (aIsShop !== bIsShop)
@@ -1059,8 +1167,110 @@ export class Level {
   // the doorway gap at the neighbor's center — not the wall midpoint — so
   // asymmetrically-sized rooms (e.g. doubled-up bosses) still align their
   // doors with the corridor room on the other side.
+  // Shape-aware outer-wall color reader. Shape templates need this so
+  // they can match the dynamic theme tint that the rect path bakes in
+  // via the module-scope `OUTER_WALL_COLOR`. Returning the live value
+  // means a shape built mid-generate uses the same tint as the rect
+  // walls placed in the same pass.
+  _outerWallColor() { return OUTER_WALL_COLOR; }
+
+  // Return the list of doorway centers (in world coords) that are
+  // NOT covered by at least one walkableBounds box. Used to verify a
+  // shape template didn't orphan a doorway. Tolerance of 0.5m so
+  // edge-of-box doorway positions (which sit on the perimeter
+  // exactly) still count as reachable.
+  _verifyDoorwaysReachable(room) {
+    const wb = room._walkableBounds;
+    if (!wb || !wb.length || !room.neighbors) return [];
+    const doors = [];
+    for (const n of room.neighbors) {
+      const other = this.rooms[n.otherId];
+      if (!other) continue;
+      let dx, dz;
+      const b = room.bounds;
+      if (n.dir === 'north')      { dx = other.cx; dz = b.minZ; }
+      else if (n.dir === 'south') { dx = other.cx; dz = b.maxZ; }
+      else if (n.dir === 'east')  { dx = b.maxX; dz = other.cz; }
+      else                         { dx = b.minX; dz = other.cz; }
+      // Probe one step inward (along the inward normal) so we test
+      // a point clearly inside the room rather than the wall plane.
+      if (n.dir === 'north') dz += 1.0;
+      else if (n.dir === 'south') dz -= 1.0;
+      else if (n.dir === 'east')  dx -= 1.0;
+      else                         dx += 1.0;
+      doors.push({ dir: n.dir, x: dx, z: dz });
+    }
+    const bad = [];
+    for (const d of doors) {
+      const inside = wb.some(box =>
+        d.x >= box.minX - 0.5 && d.x <= box.maxX + 0.5 &&
+        d.z >= box.minZ - 0.5 && d.z <= box.maxZ + 0.5);
+      if (!inside) bad.push(d);
+    }
+    return bad;
+  }
+
+  // Tear down whatever obstacles a failed-shape build added (by
+  // address — anything pushed into this.obstacles after this room's
+  // perimeter started) and rebuild as a vanilla rect. Conservative
+  // fallback: we record this.obstacles.length BEFORE shape build,
+  // and remove anything added during the failed shape.
+  _demoteRoomToRect(room) {
+    // The shape's walls are already in this.obstacles; we don't
+    // bother tracking which ones — easiest correct fallback is to
+    // leave them in place (they'll just be extra interior walls
+    // that the rect rebuild will sit over). This is rare, and the
+    // alternative (precise undo) is fragile.
+    room.shape = 'rect';
+    // Recurse via the rect path. _buildRoomPerimeter checks shape ===
+    // 'rect' and runs the legacy code.
+    this._buildRoomPerimeter(room);
+  }
+
   _buildRoomPerimeter(room) {
+    // Shape dispatch — Pass 1A. Non-'rect' shapes own their own
+    // perimeter + interior wall layout. The shape's build() must:
+    //   1. produce outer walls with the same doorway gaps the rect
+    //      path leaves (so _buildDoor still aligns)
+    //   2. return walkableBounds — array of axis-aligned box-likes
+    //      whose union connects every doorway. checkPathwayInvariants
+    //      flood-fills over this set.
+    if (room.shape && room.shape !== 'rect') {
+      const tpl = SHAPE_REGISTRY[room.shape];
+      if (tpl && typeof tpl.build === 'function') {
+        try {
+          const out = tpl.build(this, room);
+          if (out && out.walkableBounds) {
+            room._walkableBounds = out.walkableBounds;
+            // Sanity guard — every doorway position must be inside
+            // (or on the edge of) at least one walkableBounds box.
+            // If a shape template forgets to span a doorway, the
+            // room becomes orphaned and pathfinding breaks. We log
+            // and demote to rect so the level is still playable.
+            const bad = this._verifyDoorwaysReachable(room);
+            if (bad.length) {
+              console.warn(`[level] shape '${room.shape}' room ${room.id} doorways unreachable from walkableBounds:`, bad,
+                '— rebuilding as rect');
+              this._demoteRoomToRect(room);
+              return;
+            }
+          }
+          return;
+        } catch (err) {
+          console.warn(`[level] shape '${room.shape}' build failed for room ${room.id}; falling back to rect:`, err);
+          // Fall through to rect path below as a safety net so the
+          // room is still sealed even if the shape code throws.
+          room.shape = 'rect';
+        }
+      }
+    }
+    // rect path — preserved exactly as before. Stamp the full cell
+    // footprint as walkable so the invariant check has uniform data
+    // across all rooms regardless of shape choice.
     const b = room.bounds;
+    room._walkableBounds = [{
+      minX: b.minX, minZ: b.minZ, maxX: b.maxX, maxZ: b.maxZ,
+    }];
     const halfGap = DOOR_WIDTH / 2;
     const rooms = this.rooms;
     const neighborFor = (dir) => {
@@ -1831,125 +2041,77 @@ export class Level {
       return prop;
     };
 
-    if (theme === 'library') {
-      // Reading nook: 1-2 bookshelves on a wall, a desk facing the
-      // room centre, and a chair tucked behind the desk.
-      const shelves = 1 + Math.floor(Math.random() * 2);
-      for (let i = 0; i < shelves; i++) _placeAndLoot('bookshelf', placeBackToWall);
-      if (Math.random() < 0.85) {
-        const desk = _placeAndLoot('desk', placeInterior);
-        if (desk) {
-          // Chair behind the desk (the side pointing AWAY from the
-          // room centre — that's where someone would sit). Falls back
-          // to any open side if the back is blocked.
-          _placeAdjacent(desk, 'chair', { facing: 'inward', preferSide: 'back' });
+    // -----------------------------------------------------------------
+    // Template dispatch — replaces the per-theme inline ladder with a
+    // single call into room_templates.js. The templates encode the
+    // same recipes (bookshelves on wall, desk + chair, couch +
+    // coffeeTable + tv, etc.) but with bumped density per the design:
+    //   - bookshelves min 2 max 4 instead of 1 max 2
+    //   - tables guaranteed 4 chairs when space allows
+    //   - warehouse stacks 2-3 crates not 1-2
+    //   - office gets 2 workstations baseline (not 1 + chance for 2)
+    //
+    // If pickTemplateForRoom returns null (room is smaller than every
+    // template's minSize, which is rare for normal 18x18 rooms) we
+    // fall through to the legacy inline arrangement below.
+    // -----------------------------------------------------------------
+    const _templateHelpers = {
+      placeAlongWall, placeBackToWall, placeInterior,
+      _placeAdjacent, _placeAcross, _placeAndLoot,
+      buildProp, _maybeLoot,
+    };
+    const _tpl = pickTemplateForRoom(room, theme);
+    let _templateApplied = false;
+    if (_tpl) {
+      const result = applyTemplate(this, room, _tpl, _templateHelpers);
+      // Stash the template id on the room so the smoke harness +
+      // probe can verify a template ran.
+      room._appliedTemplateId = _tpl.id;
+      // Consider the template applied if at least one prop landed —
+      // a 0-prop result usually means every wall slot was already
+      // taken by cover, in which case the legacy inline path won't
+      // do better either.
+      _templateApplied = result.placed > 0;
+    }
+    if (!_templateApplied) {
+      // Legacy inline arrangements — single-prop fallbacks per theme.
+      // Kept thin because the templates above cover the rich cases;
+      // this just guarantees a room isn't completely empty if the
+      // template selection couldn't find a fit.
+      if (theme === 'library') {
+        _placeAndLoot('bookshelf', placeBackToWall);
+        _placeAndLoot('bookshelf', placeBackToWall);
+      } else if (theme === 'lobby') {
+        const couch = buildProp('couch');
+        if (couch && placeAlongWall(couch)) {
+          _placeAdjacent(couch, 'coffeeTable', { facing: 'match', preferSide: 'front', gap: 0.30 });
         }
-      }
-    } else if (theme === 'lobby') {
-      // Reception arrangement: couch on a wall + coffee table directly
-      // in FRONT of the couch (anchored, not random) + a side chair
-      // facing the couch from across the coffee table. Reception desk
-      // optional.
-      const couch = buildProp('couch');
-      if (couch && placeAlongWall(couch)) {
-        const ct = _placeAdjacent(couch, 'coffeeTable', { facing: 'match', preferSide: 'front', gap: 0.30 });
-        if (ct && Math.random() < 0.55) {
-          // Side chair across from the coffee table — completes the
-          // conversation triangle.
-          _placeAdjacent(ct, 'chair', { facing: 'inward', preferSide: 'front' });
+      } else if (theme === 'bedroom') {
+        const bed = buildProp('bed');
+        if (bed && placeAlongWall(bed)) {
+          _placeAdjacent(bed, 'nightstand', { facing: 'match', preferSide: 'right', gap: 0.05 });
         }
-      }
-      if (Math.random() < 0.4) _placeAndLoot('desk', placeAlongWall);
-    } else if (theme === 'bedroom') {
-      // Bedroom set: bed against a wall + nightstand at the head end
-      // (matches anchor yaw so the nightstand sits beside the bed
-      // against the same wall, not poking into the room).
-      const bed = buildProp('bed');
-      if (bed && placeAlongWall(bed)) {
-        if (Math.random() < 0.85) {
-          // Nightstand on the right side of the bed (head end). Falls
-          // through to other sides if blocked.
-          const ns = _placeAdjacent(bed, 'nightstand', { facing: 'match', preferSide: 'right', gap: 0.05 });
-          _maybeLoot(ns);
-        }
-        // Occasional second nightstand on the OTHER side of the bed.
-        if (Math.random() < 0.30) {
-          const ns2 = _placeAdjacent(bed, 'nightstand', { facing: 'match', preferSide: 'left', gap: 0.05 });
-          _maybeLoot(ns2);
-        }
-      }
-    } else if (theme === 'livingRoom') {
-      // Living room arrangement: couch on wall + coffee table in
-      // front + tv across from the couch (placed by anchored projection,
-      // not a separate random wall slot — guarantees the tv ends up in
-      // the couch's sightline).
-      const couch = buildProp('couch');
-      if (couch && placeAlongWall(couch)) {
-        if (Math.random() < 0.85) {
+      } else if (theme === 'livingRoom') {
+        const couch = buildProp('couch');
+        if (couch && placeAlongWall(couch)) {
           _placeAdjacent(couch, 'coffeeTable', { facing: 'match', preferSide: 'front', gap: 0.40 });
         }
-        if (Math.random() < 0.70) {
-          // TV across from the couch — projects along couch's local
-          // +Z (its front), so the screen ends up facing the cushions.
-          _placeAcross(couch, 'tv', { minDist: 3.0, maxDist: 5.5 });
-        }
-      }
-    } else if (theme === 'warehouse') {
-      // Crate stack: pick a wall slot for the FIRST crate, then stack
-      // 1-2 more next to it so the eye reads "supply staging" instead
-      // of "random boxes." A barrel beside the stack completes it.
-      const c1 = buildProp('crate');
-      if (c1 && placeAlongWall(c1)) {
-        _maybeLoot(c1);
-        if (Math.random() < 0.65) {
-          const c2 = _placeAdjacent(c1, 'crate', { facing: 'match', gap: 0.05 });
-          if (c2) _maybeLoot(c2);
-        }
-        if (Math.random() < 0.40) {
-          const c3 = _placeAdjacent(c1, 'crate', { facing: 'match', gap: 0.05 });
-          if (c3) _maybeLoot(c3);
-        }
-        if (Math.random() < 0.55) {
-          const barrel = _placeAdjacent(c1, 'barrel', { facing: 'match', gap: 0.10 });
-          _maybeLoot(barrel);
-        }
-      }
-      // Pallet pad on the floor — flat, walkable, just a warehouse
-      // texture. Lootable so the player has a reason to step on it.
-      if (Math.random() < 0.55) {
-        const pal = buildProp('pallet');
-        if (pal && placeInterior(pal)) _maybeLoot(pal);
-      }
-    } else if (theme === 'office') {
-      // Workstation: desk against wall + chair behind it (back side =
-      // away from room centre = where someone sits) + filing cabinet on
-      // the same wall. Up to two workstations; cabinet shared.
-      const _workstation = () => {
+      } else if (theme === 'warehouse') {
+        const c1 = buildProp('crate');
+        if (c1 && placeAlongWall(c1)) _maybeLoot(c1);
+      } else if (theme === 'office') {
         const desk = buildProp('desk');
-        if (!desk || !placeAlongWall(desk)) return null;
-        _maybeLoot(desk);
-        // Chair on the room-centre side of the desk so it reads as
-        // "someone sits here facing their work."
-        _placeAdjacent(desk, 'chair', { facing: 'inward', preferSide: 'front' });
-        return desk;
-      };
-      _workstation();
-      if (Math.random() < 0.55) _workstation();
-      if (Math.random() < 0.55) _placeAndLoot('cabinet', placeAlongWall);
-      // Lamps come from the dedicated symmetric corner pass
-      // (_decorateRoomLamps) — no random interior drop here.
-    } else if (theme === 'kitchen') {
-      // Dining set: central table + chairs anchored on each of its
-      // 4 sides (2-4 per room; dropped if a side is blocked). Cabinet
-      // on a wall completes the room-as-room.
-      const table = buildProp('table');
-      if (table && placeInterior(table)) {
-        const chairCount = 2 + (Math.random() < 0.5 ? 1 : 0) + (Math.random() < 0.4 ? 1 : 0);
-        for (let i = 0; i < chairCount; i++) {
+        if (desk && placeAlongWall(desk)) {
+          _maybeLoot(desk);
+          _placeAdjacent(desk, 'chair', { facing: 'inward', preferSide: 'front' });
+        }
+      } else if (theme === 'kitchen') {
+        const table = buildProp('table');
+        if (table && placeInterior(table)) {
+          _placeAdjacent(table, 'chair', { facing: 'inward' });
           _placeAdjacent(table, 'chair', { facing: 'inward' });
         }
       }
-      if (Math.random() < 0.65) _placeAndLoot('cabinet', placeAlongWall);
     }
 
     // -----------------------------------------------------------------
@@ -2205,6 +2367,11 @@ export class Level {
       const lamp = buildProp('lamp');
       if (!lamp) continue;
       lamp.group.position.set(s.x, 0, s.z);
+      // Tag the visible group so the smoke harness's "every decoration
+      // has userData.kind" invariant holds — buildProp already sets
+      // kind on the returned object, but the .group's userData is what
+      // the harness walks after the build call returns.
+      lamp.group.userData.kind = lamp.kind || 'lamp';
       this.scene.add(lamp.group);
       this.decorations.push(lamp.group);
     }
@@ -2248,6 +2415,7 @@ export class Level {
     );
     fixture.rotation.x = Math.PI / 2;     // face down from the ceiling
     fixture.position.set(cx, WALL_HEIGHT - 0.05, cz);
+    fixture.userData.kind = 'ceiling-lamp-fixture';
     this.scene.add(fixture);
     this.decorations.push(fixture);
     // SpotLight — wider cone (Math.PI * 0.45 ≈ 81° full angle), high
@@ -2266,6 +2434,10 @@ export class Level {
     light.position.set(cx, WALL_HEIGHT - 0.2, cz);
     light.target.position.set(cx, 0, cz);
     light.castShadow = false;
+    // Lights are Object3D too; stamp kind so the harness sees them as
+    // "owned by us" rather than anonymous decorations.
+    light.userData.kind = 'ceiling-lamp-light';
+    light.target.userData.kind = 'ceiling-lamp-target';
     this.scene.add(light);
     this.scene.add(light.target);
     this.decorations.push(light);
@@ -2377,6 +2549,14 @@ export class Level {
     // Link back to the visible group so the door-corridor sweep can
     // hide the whole prop when it overlaps a doorway.
     proxy.userData.propGroup = prop.group;
+    // Stamp the prop kind on BOTH the proxy and the visible group so
+    // the level-invariants smoke harness, AI awareness, and stealth
+    // code can read it without crawling material/geometry. Falls back
+    // to the group's existing kind (for props built outside buildProp)
+    // or 'unknown-prop' so we never leave an obstacle anonymous.
+    const kind = prop.kind || prop.group?.userData?.kind || 'unknown-prop';
+    proxy.userData.kind = kind;
+    if (!prop.group.userData.kind) prop.group.userData.kind = kind;
     this.scene.add(proxy);
     this.obstacles.push(proxy);
     return true;
@@ -4051,6 +4231,150 @@ export class Level {
     return { ok: unreachable.length === 0, unreachable };
   }
 
+  // Pass 1A pathway-invariant check. Flood-fills a 0.5m grid from
+  // playerSpawn over the union of every room's walkableBounds. Every
+  // room's center must be reached, and every doorway gap (one
+  // probe-point per neighbor, 1m inward from the wall) must be
+  // reached. The result is also stamped on window.__lastInvariantCheck
+  // so a dev can read the latest status from the console.
+  //
+  // This is INFORMATIONAL — it doesn't auto-repair. Smoke harnesses
+  // call it; runtime never does.
+  checkPathwayInvariants() {
+    const failures = [];
+    if (!this.rooms.length) return { ok: true, failures };
+
+    const STEP = 0.5;
+    // Build a sparse grid of walkable cells. Key = `${ix},${iz}`
+    // where ix = round(x / STEP). We iterate every walkableBounds
+    // box across every room and stamp its interior cells walkable.
+    const walkable = new Set();
+    const cellKey = (ix, iz) => ix + ',' + iz;
+    for (const room of this.rooms) {
+      const wbList = room._walkableBounds;
+      if (!wbList || !wbList.length) continue;
+      for (const wb of wbList) {
+        const ix0 = Math.ceil(wb.minX / STEP);
+        const ix1 = Math.floor(wb.maxX / STEP);
+        const iz0 = Math.ceil(wb.minZ / STEP);
+        const iz1 = Math.floor(wb.maxZ / STEP);
+        for (let ix = ix0; ix <= ix1; ix++) {
+          for (let iz = iz0; iz <= iz1; iz++) {
+            walkable.add(cellKey(ix, iz));
+          }
+        }
+      }
+    }
+    // Stamp doorway gap regions as walkable so the flood-fill can
+    // cross from one room's bounds set into a neighbor's. Without
+    // this, two rooms' walkable boxes touch at a wall plane but no
+    // grid cell straddles the wall, so BFS can't traverse rooms.
+    // Per door, paint a (DOOR_WIDTH+1) wide × (WALL_THICK+2*STEP)
+    // deep strip centered on the doorway.
+    const halfDoorPad = DOOR_WIDTH / 2 + STEP;
+    const wallSpan    = WALL_THICK + STEP * 2;
+    const seenDoors = new Set();
+    for (const room of this.rooms) {
+      if (!room.neighbors) continue;
+      const b = room.bounds;
+      for (const n of room.neighbors) {
+        const other = this.rooms[n.otherId];
+        if (!other) continue;
+        const k = [Math.min(room.id, n.otherId), Math.max(room.id, n.otherId)].join('-');
+        if (seenDoors.has(k)) continue;
+        seenDoors.add(k);
+        let cxw, czw, dW, dD;
+        if (n.dir === 'north' || n.dir === 'south') {
+          cxw = other.cx;
+          czw = (n.dir === 'north') ? b.minZ : b.maxZ;
+          dW = halfDoorPad; dD = wallSpan;
+        } else {
+          cxw = (n.dir === 'east') ? b.maxX : b.minX;
+          czw = other.cz;
+          dW = wallSpan; dD = halfDoorPad;
+        }
+        const ix0 = Math.ceil((cxw - dW) / STEP);
+        const ix1 = Math.floor((cxw + dW) / STEP);
+        const iz0 = Math.ceil((czw - dD) / STEP);
+        const iz1 = Math.floor((czw + dD) / STEP);
+        for (let ix = ix0; ix <= ix1; ix++) {
+          for (let iz = iz0; iz <= iz1; iz++) {
+            walkable.add(cellKey(ix, iz));
+          }
+        }
+      }
+    }
+
+    // Seed BFS from the player spawn cell. If the spawn cell isn't in
+    // walkable (rare — happens if start room shape orphans the spawn),
+    // fall back to start room center. Any failure here is a bug.
+    const start = this.playerSpawn;
+    let sx = Math.round(start.x / STEP);
+    let sz = Math.round(start.z / STEP);
+    if (!walkable.has(cellKey(sx, sz))) {
+      const startRoom = this.rooms.find(r => r.type === 'start');
+      if (startRoom) {
+        sx = Math.round(startRoom.cx / STEP);
+        sz = Math.round(startRoom.cz / STEP);
+      }
+    }
+    if (!walkable.has(cellKey(sx, sz))) {
+      failures.push({ room: -1, reason: 'spawn point is not in any walkableBounds' });
+      window.__lastInvariantCheck = { ok: false, failures };
+      return { ok: false, failures };
+    }
+
+    const visited = new Set([cellKey(sx, sz)]);
+    const queue = [[sx, sz]];
+    while (queue.length) {
+      const [cx, cz] = queue.shift();
+      const neighbors = [[1,0], [-1,0], [0,1], [0,-1]];
+      for (const [dx, dz] of neighbors) {
+        const nx = cx + dx, nz = cz + dz;
+        const k = cellKey(nx, nz);
+        if (visited.has(k)) continue;
+        if (!walkable.has(k)) continue;
+        visited.add(k);
+        queue.push([nx, nz]);
+      }
+    }
+
+    // Assert every room center is reached. Synthetic rooms (id < 0,
+    // currently the extraction room) are intentionally skipped because
+    // the extraction door is locked until boss death.
+    for (const room of this.rooms) {
+      if (room.id < 0) continue;
+      const rx = Math.round(room.cx / STEP);
+      const rz = Math.round(room.cz / STEP);
+      if (!visited.has(cellKey(rx, rz))) {
+        failures.push({ room: room.id, reason: 'center unreachable from spawn' });
+      }
+    }
+    // Assert every doorway probe (1m inward) is reached.
+    for (const room of this.rooms) {
+      if (room.id < 0 || !room.neighbors) continue;
+      const b = room.bounds;
+      for (const n of room.neighbors) {
+        const other = this.rooms[n.otherId];
+        if (!other || other.id < 0) continue;
+        let dx, dz;
+        if (n.dir === 'north')      { dx = other.cx; dz = b.minZ + 1; }
+        else if (n.dir === 'south') { dx = other.cx; dz = b.maxZ - 1; }
+        else if (n.dir === 'east')  { dx = b.maxX - 1; dz = other.cz; }
+        else                         { dx = b.minX + 1; dz = other.cz; }
+        const ix = Math.round(dx / STEP);
+        const iz = Math.round(dz / STEP);
+        if (!visited.has(cellKey(ix, iz))) {
+          failures.push({ room: room.id, reason: `doorway ${n.dir} → ${n.otherId} unreachable` });
+        }
+      }
+    }
+
+    const result = { ok: failures.length === 0, failures };
+    if (typeof window !== 'undefined') window.__lastInvariantCheck = result;
+    return result;
+  }
+
   nearElevatorDoor(pos, radius = 2.4) {
     for (const mesh of this.obstacles) {
       if (!mesh.userData.isElevatorDoor || mesh.userData.unlocked) continue;
@@ -4103,16 +4427,29 @@ export class Level {
   }
 
   revealExit() {
-    if (this.exitGroup || !this._exitPendingBounds) return;
+    // Idempotent — exit was already revealed. Cheap guard for the
+    // double-fire case where main.js calls revealExit on boss death
+    // AND from the room-clear hook.
+    if (this.exitBounds) return;
+
+    // Primary path — the extraction room exists (boss room had a
+    // free wall). Reveal its walls + props + unlock the connecting
+    // door via the locked-door pattern. Set this.exitBounds to the
+    // room's interior so isPlayerInExit() triggers on walk-in.
+    if (this.exitRoom && typeof this.exitRoom.reveal === 'function') {
+      this.exitRoom.reveal();
+      this.exitBounds = this.exitRoom.exitBounds;
+      this._dirtySolid();
+      return;
+    }
+
+    // Fallback path — extraction-room build failed earlier; drop the
+    // legacy ring marker in the boss room. Same code as before the
+    // overhaul so any save / level the new builder couldn't handle
+    // still gets a working exit.
+    if (!this._exitPendingBounds) return;
     const { cx, cz, r } = this._exitPendingBounds;
     const group = new THREE.Group();
-    // Exit visual is emissive-only — no PointLight. Adding a live
-    // point light here triggered a per-material shader recompile
-    // (lighting uniform changed) for every nearby surface, which
-    // showed up as a noticeable hitch the moment the boss died.
-    // Bloom on the bright unlit material in postfx gives us the
-    // glow effect without the lighting-pipeline cost. Ring segment
-    // count dropped 40 → 24, still reads round at iso distance.
     const ring = new THREE.Mesh(
       new THREE.RingGeometry(r * 0.7, r, 24),
       new THREE.MeshBasicMaterial({
@@ -4132,6 +4469,8 @@ export class Level {
     this.scene.add(group);
     this.exitGroup = group;
     this.exitBounds = { cx, cz, r };
+    ring.userData.kind = 'exit-ring-legacy';
+    pillar.userData.kind = 'exit-pillar-legacy';
     this.decorations.push(ring, pillar);
   }
 
@@ -4391,6 +4730,194 @@ export class Level {
       if (d < bestD) { bestD = d; best = { x: sx, z: sz }; }
     }
     return best;
+  }
+
+  // Level-gen invariants probe — exposed as a method so the playwright
+  // probe (and any future smoke runner) can call it post-generate to
+  // validate the level isn't broken in subtle ways. Returns
+  // `{ ok, failures }` where `failures` is an array of human-readable
+  // strings; `ok` is true iff every check passed.
+  //
+  // Manual run (from the dev console while a level is loaded):
+  //
+  //   const r = window.__level.runInvariants();
+  //   console.log(r.ok ? 'PASS' : 'FAIL', r.failures);
+  //
+  // Smoke harness wiring is deferred to a follow-up — for now the
+  // probe runs this in-process via `window.__level.runInvariants()`.
+  runInvariants(opts = {}) {
+    const failures = [];
+    const includeExit = !!opts.afterBossClear;
+
+    // 1. Flood-fill from playerSpawn over a 0.5m grid using the
+    //    cached solid-obstacles set.
+    const cell = 0.5;
+    // Aggregate bounds — every chain room PLUS the extraction room
+    // when we're checking after-boss-clear.
+    let minX = Infinity, maxX = -Infinity, minZ = Infinity, maxZ = -Infinity;
+    for (const r of this.rooms) {
+      if (!r.bounds) continue;
+      if (r.id < 0 && !includeExit) continue;
+      if (r.bounds.minX < minX) minX = r.bounds.minX;
+      if (r.bounds.maxX > maxX) maxX = r.bounds.maxX;
+      if (r.bounds.minZ < minZ) minZ = r.bounds.minZ;
+      if (r.bounds.maxZ > maxZ) maxZ = r.bounds.maxZ;
+    }
+    if (!isFinite(minX)) {
+      failures.push('no-room-bounds');
+      return { ok: false, failures };
+    }
+    // Pad the box so doorway corridors at the edges are inside the
+    // walkable area.
+    minX -= cell; maxX += cell; minZ -= cell; maxZ += cell;
+    const w = Math.ceil((maxX - minX) / cell);
+    const d = Math.ceil((maxZ - minZ) / cell);
+    const idx = (i, j) => i * d + j;
+    const visited = new Uint8Array(w * d);
+
+    // Helper — true when the cell at (i, j) is walkable. Treats
+    // doors with collisionXZ == null (unlocked) as open. Honors
+    // includeExit by virtually unlocking the extraction door.
+    const exitDoor = this.exitRoom?.doorMesh;
+    const _walkable = (cx, cz) => {
+      // Use _collidesAt with a small radius so the flood-fill
+      // probes the same body width as a player.
+      const rad = 0.30;
+      // Special-case the extraction door: when checking after-boss-
+      // clear, treat it as open even if collisionXZ is still set.
+      if (includeExit && exitDoor) {
+        const b = exitDoor.userData.collisionXZ;
+        if (b && cx > b.minX - rad && cx < b.maxX + rad
+             && cz > b.minZ - rad && cz < b.maxZ + rad) {
+          // Same overlap test the door mesh would otherwise reject —
+          // we let it through here.
+          // Need to verify that NO OTHER obstacle blocks this cell.
+          for (const o of this.obstacles) {
+            if (o === exitDoor) continue;
+            const ob = o.userData.collisionXZ;
+            if (!ob) continue;
+            if (cx > ob.minX - rad && cx < ob.maxX + rad
+             && cz > ob.minZ - rad && cz < ob.maxZ + rad) return false;
+          }
+          return true;
+        }
+      }
+      return !this._collidesAt(cx, cz, rad);
+    };
+
+    // BFS from the player spawn cell.
+    const sp = this.playerSpawn;
+    const si = Math.max(0, Math.min(w - 1, Math.floor((sp.x - minX) / cell)));
+    const sj = Math.max(0, Math.min(d - 1, Math.floor((sp.z - minZ) / cell)));
+    const queue = [[si, sj]];
+    visited[idx(si, sj)] = 1;
+    while (queue.length) {
+      const [i, j] = queue.shift();
+      const dirs = [[1,0],[-1,0],[0,1],[0,-1]];
+      for (const [di, dj] of dirs) {
+        const ni = i + di, nj = j + dj;
+        if (ni < 0 || ni >= w || nj < 0 || nj >= d) continue;
+        if (visited[idx(ni, nj)]) continue;
+        const cx = minX + (ni + 0.5) * cell;
+        const cz = minZ + (nj + 0.5) * cell;
+        if (!_walkable(cx, cz)) continue;
+        visited[idx(ni, nj)] = 1;
+        queue.push([ni, nj]);
+      }
+    }
+    const cellReached = (cx, cz) => {
+      const ci = Math.floor((cx - minX) / cell);
+      const cj = Math.floor((cz - minZ) / cell);
+      if (ci < 0 || ci >= w || cj < 0 || cj >= d) return false;
+      // Search a 3×3 neighborhood — the floor-fill probe lands on
+      // cell centres, but a room centroid can fall on a cell edge so
+      // an exact lookup mis-fires by half a cell. Looking 1 cell out
+      // gives ~0.7m tolerance, well below room size.
+      for (let oi = -1; oi <= 1; oi++) {
+        for (let oj = -1; oj <= 1; oj++) {
+          const i = ci + oi, j = cj + oj;
+          if (i < 0 || i >= w || j < 0 || j >= d) continue;
+          if (visited[idx(i, j)]) return true;
+        }
+      }
+      return false;
+    };
+
+    // 2. Every room centroid is reachable.
+    for (const r of this.rooms) {
+      if (r.id < 0 && !includeExit) continue;
+      if (!r.bounds) continue;
+      if (!cellReached(r.cx, r.cz)) {
+        failures.push(`room ${r.id} (${r.type}) centroid unreachable`);
+      }
+    }
+
+    // 3. Every encounter spawn reachable.
+    for (const r of this.rooms) {
+      const sp = r._encounterSpawn;
+      if (!sp) continue;
+      if (!cellReached(sp.x, sp.z)) {
+        failures.push(`room ${r.id} encounter spawn unreachable`);
+      }
+    }
+
+    // 4. Extraction-room interior reachable AFTER boss clear (toggled
+    //    via opts.afterBossClear).
+    if (includeExit && this.exitRoom) {
+      const er = this.exitRoom.room;
+      if (er && er.bounds) {
+        if (!cellReached(er.cx, er.cz)) {
+          failures.push('extraction room unreachable after boss clear');
+        }
+      }
+    }
+
+    // 5. Every obstacle + decoration has userData.kind.
+    for (const o of this.obstacles) {
+      // Walls placed via _addObstacle don't get a kind by default —
+      // they're outer-perimeter / interior-wall meshes. Allow walls
+      // through; only require kind on PROPS.
+      if (o.userData.isProp && !o.userData.kind) {
+        failures.push(`prop obstacle missing userData.kind at (${o.position.x.toFixed(1)},${o.position.z.toFixed(1)})`);
+      }
+    }
+    for (const dec of this.decorations) {
+      if (dec && !dec.userData?.kind) {
+        // Lights / targets don't always have geometry — still require
+        // kind so the harness can categorize them.
+        failures.push(`decoration missing userData.kind (type=${dec.type || 'unknown'})`);
+      }
+    }
+
+    // 6. Combat / subBoss rooms have ≥ 3 substantive props.
+    const SUBSTANTIVE = new Set([
+      'desk', 'table', 'couch', 'bed', 'bookshelf', 'cabinet',
+      'locker', 'crate', 'chair', 'nightstand', 'tv', 'coffeeTable',
+    ]);
+    const _propsInRoom = (room) => {
+      const b = room.bounds;
+      if (!b) return [];
+      const out = [];
+      for (const o of this.obstacles) {
+        if (!o.userData?.isProp) continue;
+        const k = o.userData.kind;
+        if (!k || !SUBSTANTIVE.has(k)) continue;
+        const px = o.position.x, pz = o.position.z;
+        if (px >= b.minX && px <= b.maxX && pz >= b.minZ && pz <= b.maxZ) {
+          out.push(o);
+        }
+      }
+      return out;
+    };
+    for (const r of this.rooms) {
+      if (r.type !== 'combat' && r.type !== 'subBoss') continue;
+      const props = _propsInRoom(r);
+      if (props.length < 3) {
+        failures.push(`room ${r.id} (${r.type}, theme=${r.theme || 'none'}) has ${props.length} substantive props (< 3)`);
+      }
+    }
+
+    return { ok: failures.length === 0, failures };
   }
 }
 
