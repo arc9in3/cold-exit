@@ -393,7 +393,12 @@ export function buildLamp(opts = {}) {
   shade.position.y = h - 0.14;
   shade.castShadow = true;
   group.add(shade);
-  return { group, collision: null };
+  // Floor lamp has a stem + base — the player shouldn't walk through
+  // it. Footprint matches the visible base radius (~0.16m). Tagged as
+  // low cover so AI fire skips it for cover-seek but movement is
+  // blocked. Without this, lamps sit invisible to placement overlap
+  // and other props stack on top of them.
+  return { group, collision: { w: 0.32, d: 0.32 }, kind: 'lamp' };
 }
 
 export function buildCrate(opts = {}) {
@@ -657,7 +662,10 @@ export function buildNeonStick(opts = {}) {
   const mount = box(w * 1.5, 0.04, d * 1.5, COL.metalDark);
   mount.position.y = 0.02;
   group.add(mount);
-  return { group, collision: null };
+  // TV is a real piece of furniture — block movement. Footprint matches
+  // the mount-bracket extent, slightly inset from the visible screen so
+  // the cabinet feels passable around its edges.
+  return { group, collision: { w: w * 1.2, d: d * 1.2 }, kind: 'tv' };
 }
 
 // Wall window — frame + translucent glass + faint emissive glow on

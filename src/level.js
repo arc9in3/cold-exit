@@ -93,6 +93,13 @@ export class Level {
     // (NPC podiums, ritual centers). Each entry: { x, z, r }. Cleared
     // every regenerate.
     this._keepouts = [];
+    // Visible-footprint registry — every placed prop pushes its world-
+    // space AABB here regardless of whether it has a collision proxy.
+    // Used by `_propFootprintFree` to prevent overlap between decoration-
+    // only props (rugs, lamps, vases, TVs) which the obstacle list
+    // doesn't track. Without this, two rugs can stack, a bookshelf can
+    // land on a rug, etc. Each entry: { minX, maxX, minZ, maxZ }.
+    this._propFootprints = [];
     this.index = 0;
     this.bossRoomId = -1;
     // Registered ambient light sources (ceiling lamps, prop lamps,
@@ -151,6 +158,7 @@ export class Level {
     this.npcs = [];
     this.containers = [];
     this._keepouts = [];
+    this._propFootprints = [];
     if (this.exitGroup) {
       this.scene.remove(this.exitGroup);
       this.exitGroup = null;
@@ -2012,6 +2020,21 @@ export class Level {
         if (z - halfD >= ob.maxZ) continue;
         return false;
       }
+      // Also check decoration-only footprints (rugs, lamps, vases, TVs).
+      // These don't have collision proxies in `obstacles`, so without
+      // this pass two decoration props can stack and a substantive prop
+      // can land on top of one.
+      const fps = this._propFootprints;
+      if (fps && fps.length) {
+        for (let i = 0; i < fps.length; i++) {
+          const fp = fps[i];
+          if (x + halfW <= fp.minX) continue;
+          if (x - halfW >= fp.maxX) continue;
+          if (z + halfD <= fp.minZ) continue;
+          if (z - halfD >= fp.maxZ) continue;
+          return false;
+        }
+      }
       return true;
     };
 
@@ -2770,6 +2793,43 @@ export class Level {
         });
       }
     });
+    // Record a visible-footprint AABB for every placed prop, even when
+    // collision is null — this stops the next prop's overlap test from
+    // ignoring decoration-only props (rug, lamp, vase, TV) that aren't
+    // in `obstacles`. We prefer prop.collision, then prop.footprint,
+    // then fall back to the rendered mesh bbox so something is always
+    // recorded. If a future code path explicitly opts out of the
+    // footprint registration, set prop._noFootprint = true.
+    if (!prop._noFootprint) {
+      let fpW = null, fpD = null;
+      const src = prop.collision || prop.footprint;
+      if (src) { fpW = src.w; fpD = src.d; }
+      else {
+        try {
+          prop.group.updateMatrixWorld(true);
+          const bb = new THREE.Box3().setFromObject(prop.group);
+          if (Number.isFinite(bb.min.x) && Number.isFinite(bb.max.x)) {
+            fpW = Math.max(0.3, bb.max.x - bb.min.x);
+            fpD = Math.max(0.3, bb.max.z - bb.min.z);
+          }
+        } catch (_) {}
+      }
+      if (fpW && fpD) {
+        // Rotate dims to match the prop's actual yaw — same convention
+        // as the collision-proxy path below.
+        const yawAbs = Math.abs(prop.group.rotation.y || 0) % Math.PI;
+        let aw = fpW, ad = fpD;
+        const axisAligned = yawAbs < 0.05 || Math.abs(yawAbs - Math.PI / 2) < 0.05;
+        if (!axisAligned) { const b = Math.max(aw, ad); aw = b; ad = b; }
+        else if (Math.abs(yawAbs - Math.PI / 2) < 0.05) { const t = aw; aw = ad; ad = t; }
+        const px = prop.group.position.x, pz = prop.group.position.z;
+        if (!this._propFootprints) this._propFootprints = [];
+        this._propFootprints.push({
+          minX: px - aw / 2, maxX: px + aw / 2,
+          minZ: pz - ad / 2, maxZ: pz + ad / 2,
+        });
+      }
+    }
     if (!prop.collision) return true;
 
     // Rotate the collision footprint by the prop's yaw — axis-aligned
