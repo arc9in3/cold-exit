@@ -17019,7 +17019,9 @@ async function runLevelUp() {
   // visual cue that the threshold crossed. The PICKER is deferred
   // to a clickable HUD pill so an in-fight level-up doesn't
   // interrupt or steal a panicked click.
-  input.clearMouseState();
+  // NOTE: do NOT clearMouseState here — the picker is deferred,
+  // so the player is still in the firefight. Resetting the held
+  // mouse state cancels their auto-fire mid-trigger (#20).
   _pickBannerShowing = true;
   try { await _showLevelUpBanner(1800); }
   finally { _pickBannerShowing = false; }
@@ -17030,7 +17032,8 @@ async function runLevelUp() {
 async function runMasteryOffer() {
   const offer = pendingMasteryOffers.shift();
   if (!offer) return;
-  input.clearMouseState();
+  // Same reasoning as runLevelUp — picker is deferred, don't break
+  // the player's trigger hold (#20).
   _pickBannerShowing = true;
   try { await _showClassLevelUpBanner(1800); }
   finally { _pickBannerShowing = false; }
