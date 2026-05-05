@@ -105,7 +105,7 @@ const ONBOARD_LABELS = {
   recruiter: 'TRAINER UNLOCKED',
   stash: 'STASH UNLOCKED',
   store: 'PRE-MISSION STORE UNLOCKED',
-  quartermaster: 'ARMORER UNLOCKED',
+  quartermaster: 'ARMORY UNLOCKED',
   tailor: 'TAILOR UNLOCKED',
   vendors: 'VENDORS UNLOCKED',
   mailbox: 'MAILBOX UNLOCKED',

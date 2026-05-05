@@ -115,7 +115,11 @@ const TAB_DEFS = [
   { id: 'contractor',   label: 'CONTRACTOR'    },
   { id: 'stash',        label: 'STASH'         },
   { id: 'vault',        label: 'VAULT'         },
-  { id: 'quartermaster',label: 'ARMORER'       },
+  // Armory — the collection / progression screen. Persistent unlocks
+  // browsed here; loadout picks are a separate surface on the
+  // mission-prep step. (Was 'ARMORER' — relabeled 2026-05-05 for the
+  // Armory↔Loadout split.)
+  { id: 'quartermaster',label: 'ARMORY'        },
   { id: 'vendors',      label: 'VENDORS'       },
   { id: 'blackmarket',  label: 'BLACK MARKET'  },
   { id: 'recruiter',    label: 'TRAINER'       },
@@ -132,7 +136,7 @@ const TAB_DEFS = [
 const ONBOARD_GREETINGS = {
   recruiter:  '"You came back. Spend what you brought, make next time hurt less."',
   stash:      '"Anything on this rack stays. What you carry, you lose."',
-  quartermaster: '"Chips for weapons. Permanent. Pick wisely."',
+  quartermaster: '"Chips buy weapons into your collection. Pick what to bring on the Loadout screen."',
   tailor:     '"Codename, callsign, look — change them whenever."',
   vendors:    '"Tell me what to keep more of. Costs go up, returns go up."',
   mailbox:    '"Rewards from past contracts pile up. Claim what you\'ve earned."',
@@ -151,7 +155,7 @@ const ONBOARD_ANNOUNCEMENTS = {
   recruiter:    '★ TRAINER UNLOCKED — Spend marks here to permanently level your stats.',
   stash:        '★ STASH UNLOCKED — Items you stow before deploying carry over runs.',
   store:        '★ PRE-MISSION STORE UNLOCKED — Spend chips on starting gear before deploy.',
-  quartermaster:'★ ARMORER UNLOCKED — Permanently add weapons to your starting rotation.',
+  quartermaster:'★ ARMORY UNLOCKED — Spend chips to permanently add weapons to your collection. Pick from the collection on the Loadout screen.',
   tailor:       '★ TAILOR UNLOCKED — Customize codename, callsign, and character look.',
   vendors:      '★ VENDORS UNLOCKED — Upgrade in-run merchant stock and rerolls.',
   mailbox:      '★ MAILBOX UNLOCKED — Claim rewards from past contracts.',
@@ -1688,8 +1692,8 @@ export class HideoutUI {
     head.innerHTML = `
       <div class="hideout-section-portrait" data-npc="armorer"></div>
       <div class="hideout-section-text">
-        <div class="hideout-section-title">ARMORER</div>
-        <div class="hideout-section-sub">Rank <b>${rank}</b> · <b>${unlocked.size}</b> / ${totalUnlockable} weapons unlocked. Spend chips to permanently add a weapon to your stash.</div>
+        <div class="hideout-section-title">ARMORY</div>
+        <div class="hideout-section-sub">Your permanent weapon collection · Rank <b>${rank}</b> · <b>${unlocked.size}</b> / ${totalUnlockable} unlocked. Spend chips to add to the collection. Pick which weapons to bring on the LOADOUT screen before deploy.</div>
       </div>
     `;
     wrap.appendChild(head);
@@ -2125,7 +2129,7 @@ export class HideoutUI {
     // revealed (mid-late game).
     const _nextUnlock = (() => {
       const thresholds = [
-        { rank: 2,  label: 'ARMORER' },
+        { rank: 2,  label: 'ARMORY' },
         { rank: 4,  label: 'TAILOR' },
         { rank: 5,  label: 'VENDORS' },
         { rank: 8,  label: 'MAILBOX' },
@@ -2167,7 +2171,7 @@ export class HideoutUI {
       const banner = document.createElement('div');
       banner.className = 'prep-banner';
       banner.innerHTML = `
-        <div class="prep-eyebrow">MISSION PREP</div>
+        <div class="prep-eyebrow">LOADOUT</div>
         <div class="prep-title">${def ? def.label.toUpperCase() : 'NO CONTRACT ACTIVE'}</div>
         ${def ? `<div class="prep-sub">${def.targetCount} × ${this._targetLabel(def.targetType, def.targetCount)}</div>` : ''}
       `;
@@ -2308,15 +2312,16 @@ export class HideoutUI {
 
     // ----- Middle: ARMORY — the player's owned weapons, click to
     // pick a starter. The chip-buy unlock list lives on its own
-    // ARMORER tab now, so this column is purely "what I own".
+    // ARMORY tab now manages permanent unlocks; this column is the
+    // LOADOUT picker — pulls from the unlocked collection, no buying.
     const armoryCol = document.createElement('div');
     armoryCol.className = 'loadout-armorycol loadout-panel';
     const rank = getContractRank();
     armoryCol.innerHTML = `
       <div class="armory-head">
-        <div class="armory-eyebrow">YOUR ARMORY</div>
-        <div class="armory-title">UNLOCKED COLLECTION</div>
-        <div class="armory-count"><b>${available.length}</b> weapons · Rank <b>${rank}</b></div>
+        <div class="armory-eyebrow">LOADOUT · WEAPON</div>
+        <div class="armory-title">PICK A WEAPON</div>
+        <div class="armory-count"><b>${available.length}</b> available · from your Armory</div>
       </div>
     `;
 
