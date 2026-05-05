@@ -470,6 +470,28 @@ export class LootUI {
           // applies; weapons / armor / ammo go through the direct
           // swap as before.
           const item = d.item;
+          // Bug #53: dragging an attachment from the backpack onto an
+          // equipped weapon's paperdoll slot used to no-op (canSlotHold
+          // returned false because the attachment doesn't match the
+          // weapon slot type). Intercept that gesture here so the
+          // attachment slots into the weapon and the source grid clears
+          // — mirrors the body-side and inventory-page handlers.
+          if (item.type === 'attachment') {
+            const equipped = this.inventory.equipment[slot];
+            if (equipped
+                && (equipped.type === 'ranged' || equipped.type === 'melee')
+                && equipped.attachments && (item.slot in equipped.attachments)) {
+              const srcGrid = this.inventory.gridOf(item);
+              if (srcGrid) srcGrid.remove(item);
+              if (!this.inventory.attachToWeapon(equipped, item.slot, item)) {
+                this.inventory.add(item);
+              }
+              this.inventory._bump();
+              this.render();
+              this._drag = null;
+              return;
+            }
+          }
           if (this.inventory.canSlotHold(slot, item)) {
             if (slot === 'backpack' || slot === 'belt') {
               const ok = this.inventory.equipBackpack(item);
@@ -1630,6 +1652,25 @@ export class LootUI {
     const playerSlot = this._closestLoot(target, '.inv-slot.loot-slot-player');
     if (playerSlot) {
       const slotId = playerSlot.dataset.slot;
+      // Bug #53: same attachment-on-equipped-weapon intercept as the
+      // dragstart-side handler above. Without this, dropping an
+      // attachment from the backpack onto the weapon slot returned
+      // early at canSlotHold and the source cell sometimes failed to
+      // refresh on the next render pass, leaving a phantom thumbnail.
+      if (item.type === 'attachment') {
+        const equipped = this.inventory.equipment[slotId];
+        if (equipped
+            && (equipped.type === 'ranged' || equipped.type === 'melee')
+            && equipped.attachments && (item.slot in equipped.attachments)) {
+          srcGrid.remove(item);
+          if (!this.inventory.attachToWeapon(equipped, item.slot, item)) {
+            this.inventory.add(item);
+          }
+          this.inventory._bump();
+          this.render();
+          return;
+        }
+      }
       if (!this.inventory.canSlotHold(slotId, item)) return;
       const prev = this.inventory.equipment[slotId];
       srcGrid.remove(item);
