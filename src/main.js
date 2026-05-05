@@ -14118,6 +14118,19 @@ function tryInteract({ nearItem, body, bodies, npc, container }) {
             sfx.pickup();
           }
         },
+        // Items pushed into a MERGED target.loot during the session
+        // (right-click swap-into-pile, drag from inventory) had no
+        // backing source — closing the menu discarded them (#3). Call
+        // this on close to spawn each unbacked item back to the ground
+        // so they persist between sessions.
+        _persistLeftovers: () => {
+          const refsSet = new Set(target._groundRefs.map(r => r.item));
+          const p = player.mesh.position;
+          for (const it of target.loot) {
+            if (!it || refsSet.has(it)) continue;
+            loot.spawnItem(p, it);
+          }
+        },
         looted: false,
       };
       lootUI.open(target);
@@ -14175,6 +14188,17 @@ function tryInteract({ nearItem, body, bodies, npc, container }) {
           const i = srcBody.loot.indexOf(item);
           if (i >= 0) srcBody.loot.splice(i, 1);
           if (srcBody.loot.length === 0) srcBody.looted = true;
+        },
+        // Persist items dragged INTO this merged body-pile but not
+        // backed by any source body — without this they evaporate on
+        // close (#3).
+        _persistLeftovers: () => {
+          const refsSet = new Set(target._groundRefs.map(r => r.item));
+          const p = player.mesh.position;
+          for (const it of target.loot) {
+            if (!it || refsSet.has(it)) continue;
+            loot.spawnItem(p, it);
+          }
         },
         looted: false,
       };

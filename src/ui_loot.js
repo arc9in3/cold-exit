@@ -371,7 +371,16 @@ export class LootUI {
     // again when the loot UI isn't open.
     if (this.inventory) this.inventory._overflowSink = null;
     this.root.style.display = 'none';
-    if (this.target) this.target.looted = _isAllPeerSlicesEmpty(this.target);
+    if (this.target) {
+      // Merged Loot Area / Ground Pile targets carry a private
+      // `_persistLeftovers` hook — items pushed into target.loot
+      // mid-session that aren't backed by a real body or ground entry
+      // need to be spawned to ground here, otherwise they vanish (#3).
+      if (typeof this.target._persistLeftovers === 'function') {
+        try { this.target._persistLeftovers(); } catch (_) {}
+      }
+      this.target.looted = _isAllPeerSlicesEmpty(this.target);
+    }
     this.target = null;
     if (this.onClose) this.onClose();
   }
