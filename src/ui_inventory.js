@@ -664,6 +664,14 @@ export class InventoryUI {
       }
       const ok = this.inventory.equipBackpack(entry.item);
       if (ok) {
+        // Right-click swap moves the previously-equipped item INTO this
+        // cell. Without clearing the hover ref, pressing J/K next would
+        // mark the now-equipped item (the old _hoveredItem) instead of
+        // whatever the cursor is hovering over — bug #54. Clearing
+        // forces the player to nudge the mouse so hover resolves
+        // against the new cell contents.
+        this._hoveredItem = null;
+        this._hoverSource = null;
         this.render();
       } else {
         const err = this.inventory.lastEquipError;
