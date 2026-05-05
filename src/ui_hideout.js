@@ -1066,16 +1066,18 @@ export class HideoutUI {
   // Right column: paperdoll showing the next-run loadout (selected
   // weapon + queued starter inventory + auto-equip preview).
   _renderStashTab() {
-    // Stash IS the loadout view — paperdoll + armory + pre-run store —
-    // matching the contractor-stage's mission-prep step. The contract
-    // banner, confirm-loadout cta, and back-to-contracts buttons all
-    // belong to the contractor flow, so the standalone Stash tab
-    // suppresses them. The bottom-right Start Run cluster remains
-    // visible and handles run launches from here.
+    // The Pre-Mission Store tab (internal id still 'stash' for save-
+    // file compat) is the chip-buy surface: paperdoll preview of
+    // what's currently queued + the Pre-Mission Boost column. The
+    // weapon picker moved to the Loadout step alone — having it on
+    // both tabs caused the "I'm not sure where things land" friction
+    // the player flagged. No banner / confirm / back-button (those
+    // are contractor-flow chrome).
     return this._renderMissionPrepSection({
       withBanner: false,
       withConfirm: false,
       withBackButton: false,
+      withWeaponPicker: false,
     });
   }
 
@@ -2251,11 +2253,14 @@ export class HideoutUI {
   // opts.withBackButton — show the "Back to contracts" button
   // Stash tab calls this with all three off; contractor stage with all on.
   _renderMissionPrepSection(opts = {}) {
-    // withStore — show the Pre-Mission Boost column. True from the
-    // Stash tab where players manage chip-buys; false from the
-    // contractor-flow Loadout step so DEPLOY is "pick from your
-    // collection," not "buy + pick" in the same view.
-    const { withBanner = true, withConfirm = true, withBackButton = true, withStore = true } = opts;
+    // withStore         — show the Pre-Mission Boost column.
+    //                      True from the Stash tab; false on Loadout.
+    // withWeaponPicker  — show the LOADOUT weapon-pick column.
+    //                      True on Loadout (contractor flow); false on
+    //                      the Pre-Mission Store tab so the same
+    //                      picker isn't on two screens.
+    const { withBanner = true, withConfirm = true, withBackButton = true,
+            withStore = true, withWeaponPicker = true } = opts;
     const wrap = document.createElement('div');
     wrap.className = 'contractor-loadout';
 
@@ -2404,10 +2409,17 @@ export class HideoutUI {
     `;
     wrap.appendChild(charCol);
 
-    // ----- Middle: ARMORY — the player's owned weapons, click to
-    // pick a starter. The chip-buy unlock list lives on its own
-    // ARMORY tab now manages permanent unlocks; this column is the
-    // LOADOUT picker — pulls from the unlocked collection, no buying.
+    // ----- Middle: LOADOUT weapon picker. Hidden on the Pre-Mission
+    // Store tab (withWeaponPicker false) so the same picker isn't on
+    // two screens — that was the source of the "I don't know where
+    // to set things" friction. The Pre-Mission Store tab still shows
+    // a passive paperdoll (weapon1 slot reads the currently-selected
+    // starter) so the player can SEE what they have queued, just
+    // can't change it from here. Manage from the Loadout step.
+    if (!withWeaponPicker) {
+      // Skip the armoryCol render entirely. Same scope-fence pattern
+      // as the storeCol gate below.
+    } else {
     const armoryCol = document.createElement('div');
     armoryCol.className = 'loadout-armorycol loadout-panel';
     const rank = getContractRank();
@@ -2450,6 +2462,7 @@ export class HideoutUI {
     }
     armoryCol.appendChild(availGrid);
     wrap.appendChild(armoryCol);
+    } // end of `if (withWeaponPicker)` gate
 
     // ----- Right: Pre-Run Store (upgrades top · stock middle ·
     //        refresh button bottom · timer below) per the wireframe.
