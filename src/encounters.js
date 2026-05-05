@@ -4109,7 +4109,10 @@ export const ENCOUNTER_DEFS = {
         return { consume: false };
       }
       const currentPockets = (item.pockets | 0) || 0;
-      const bigger = ctx.pickBiggerBackpack && ctx.pickBiggerBackpack(currentPockets);
+      // Pass the source item so the picker can preserve affixes / rolled
+      // stats and bump the rarity tier — otherwise the Crow returns a
+      // bare def with the base rarity and no rolls (bugs #32, #33, #34).
+      const bigger = ctx.pickBiggerBackpack && ctx.pickBiggerBackpack(currentPockets, item);
       if (!bigger) {
         ctx.spawnSpeech(s.bird.position.clone().setY(1.6),
           'Caw! Bring me something smaller.', 4.0);

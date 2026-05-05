@@ -5904,14 +5904,59 @@ function _regenerateLevelImpl() {
         // The Crow — pick a random backpack with strictly more pockets
         // than the offered one, excluding encounter-only packs (e.g.
         // the Small Magical Pack from Travel Buddy).
-        pickBiggerBackpack: (currentPockets) => {
+        // The Crow is a *trade-up*, so the result must be a strict
+        // improvement: more pockets AND at least one rarity tier higher
+        // than the source. Source affixes carry over (so a rare ranger
+        // with rolled stats stays "with stats") and we re-stamp dims so
+        // the new pack lays out correctly in the grid. Falls back to a
+        // freshly rolled pack via withAffixes() when the source had no
+        // affixes — covers vendor-stocked packs, starter packs, etc.
+        pickBiggerBackpack: (currentPockets, sourceItem) => {
           const cur = currentPockets | 0;
-          const candidates = Object.values(ARMOR_DEFS).filter(d =>
+          const srcRarity = (sourceItem && sourceItem.rarity) || 'common';
+          const srcIdx = RARITY_LADDER.indexOf(srcRarity);
+          const targetIdx = Math.min(RARITY_LADDER.length - 1, (srcIdx >= 0 ? srcIdx : 0) + 1);
+          const targetRarity = RARITY_LADDER[targetIdx];
+          // First pass: candidates whose base rarity already meets the
+          // upgraded floor (e.g. epic Expedition Frame for a rare in).
+          // This keeps the "one tier up" promise honest when possible.
+          const allBigger = Object.values(ARMOR_DEFS).filter(d =>
             d && d.type === 'backpack' && !d._encounter && (d.pockets | 0) > cur);
-          if (!candidates.length) return null;
-          const pick = candidates[(Math.random() * candidates.length) | 0];
+          if (!allBigger.length) return null;
+          const tierMatching = allBigger.filter(d =>
+            RARITY_LADDER.indexOf(d.rarity || 'common') >= targetIdx);
+          const pool = tierMatching.length ? tierMatching : allBigger;
+          const pick = pool[(Math.random() * pool.length) | 0];
           const item = { ...pick };
           if (pick.durability) item.durability = { ...pick.durability };
+          // Force the upgraded rarity even when we had to fall back to
+          // the lower-tier pool — the Crow promised an upgrade.
+          item.rarity = RARITY_LADDER[Math.max(
+            targetIdx,
+            RARITY_LADDER.indexOf(pick.rarity || 'common'),
+          )] || targetRarity;
+          // Roll fresh affixes/perks at the upgraded rarity (this also
+          // stamps grid dims). If the source already carried rolled
+          // affixes, overlay them on top so the player never *loses*
+          // anything by trading up — at worst the result equals the
+          // source's stat budget at a higher rarity tier.
+          withAffixes(item);
+          if (sourceItem && Array.isArray(sourceItem.affixes) && sourceItem.affixes.length) {
+            const fresh = item.affixes || [];
+            const carried = sourceItem.affixes.map(a => ({ ...a }));
+            // Merge: keep both sets, dedupe by `kind` preferring the
+            // higher-magnitude entry. Cheap proxy for "preserve stats".
+            const byKind = new Map();
+            for (const a of [...fresh, ...carried]) {
+              if (!a || !a.kind) continue;
+              const prev = byKind.get(a.kind);
+              const mag = Math.abs(a.value || a.amount || 0);
+              const prevMag = prev ? Math.abs(prev.value || prev.amount || 0) : -Infinity;
+              if (mag >= prevMag) byKind.set(a.kind, a);
+            }
+            item.affixes = Array.from(byKind.values());
+            if (sourceItem.mastercraft) item.mastercraft = true;
+          }
           return item;
         },
         // Live in-flight projectile list. Hoop Dreams reads this each
