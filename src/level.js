@@ -194,7 +194,98 @@ export class Level {
     this.ledges = [];
   }
 
+  // Phase M — wraps _generateBody with a hard walkability gate. After
+  // each build, checkRealWalkability() floods from the player spawn
+  // through the actual collision geometry. If any room is unreachable
+  // we retry up to 3 times with a remixed seed; if all retries fail,
+  // we degrade each unreachable room's shape to 'rect' and rebuild.
+  // Final fallback (rare): accept the broken level + log critical so
+  // the player can file a bug. Never crash gen.
   generate() {
+    const MAX_RETRIES = 3;
+    for (let attempt = 0; attempt <= MAX_RETRIES; attempt++) {
+      // Mix the seed for retries by perturbing Math.random() — we're
+      // inside main.js's _withRunSeed wrapper so re-seeding the same
+      // mulberry32 stream with a per-attempt salt produces a fresh
+      // deterministic layout. attempt=0 keeps the original seed so
+      // the common case (no retry) is byte-for-byte identical.
+      let restoreRand = null;
+      if (attempt > 0) {
+        const orig = Math.random;
+        const SALT = (0x9E3779B1 * attempt) >>> 0;
+        let s = SALT;
+        Math.random = () => {
+          s = (s + 0x6D2B79F5) >>> 0;
+          let t = s;
+          t = Math.imul(t ^ (t >>> 15), t | 1);
+          t ^= t + Math.imul(t ^ (t >>> 7), t | 61);
+          return ((t ^ (t >>> 14)) >>> 0) / 4294967296;
+        };
+        restoreRand = () => { Math.random = orig; };
+      }
+      try {
+        this._generateBody();
+      } finally {
+        if (restoreRand) restoreRand();
+      }
+      // Tutorial / mega-arena paths bypass the chain generator; they
+      // build their own room layout via _generateBody → generateTutorial
+      // / generateMegaArena and don't need the walkability retry.
+      if (typeof window !== 'undefined' && window.__tutorialMode && window.__tutorialMode()) {
+        return;
+      }
+      let result = null;
+      try {
+        result = this.checkRealWalkability();
+        if (typeof window !== 'undefined') window.__lastWalkabilityCheck = result;
+      } catch (err) {
+        console.warn('[level] checkRealWalkability threw:', err);
+        return;   // accept whatever was built; don't loop on a probe bug
+      }
+      if (result.ok) {
+        if (attempt > 0) {
+          console.log(`[level] walkability OK after ${attempt} retr${attempt === 1 ? 'y' : 'ies'}`);
+        }
+        return;
+      }
+      console.warn(`[level] checkRealWalkability FAIL (attempt ${attempt + 1}/${MAX_RETRIES + 1}):`,
+        result.unreachable);
+      if (attempt < MAX_RETRIES) {
+        // Roll back so the next pass starts from a clean state. clear()
+        // disposes scene objects, re-zeros obstacles, and the index
+        // bump in _generateBody is what we want to undo (each retry
+        // counts as the same floor). Decrement here so the next
+        // _generateBody++ lands us back on this floor's index.
+        this.clear();
+        this.index -= 1;
+        continue;
+      }
+      // Degrade: every unreachable chain room → rect. Run one final
+      // _generateBody with a flag the body checks. Only degrade real
+      // rooms (id >= 0); synthetic ones (extraction id=-1) can't be
+      // degraded.
+      const ids = result.unreachable.map(u => u.id).filter(id => id >= 0);
+      console.warn('[level] degrading unreachable rooms to rect:', ids);
+      this.clear();
+      this.index -= 1;
+      this._forceRectIds = new Set(ids);
+      this._generateBody();
+      this._forceRectIds = null;
+      try {
+        const final = this.checkRealWalkability();
+        if (final.ok) {
+          console.log('[level] walkability OK after degrade');
+        } else {
+          console.error('[level] CRITICAL: walkability still failing after degrade — accepting broken level',
+            final.unreachable);
+        }
+        if (typeof window !== 'undefined') window.__lastWalkabilityCheck = final;
+      } catch (_) { /* defensive */ }
+      return;
+    }
+  }
+
+  _generateBody() {
     this.clear();
     this.index += 1;
     // Wall instancer — fresh per generate() so per-color pools start
@@ -537,6 +628,11 @@ export class Level {
       // assume single-cell footprints and would tile poorly across a
       // 2-cell extension.
       if (room.giant || room.doubled) room.shape = 'rect';
+      // Phase M degrade pass — generate() retry-on-fail forces these
+      // ids back to 'rect' to recover from a wedged shape combination.
+      if (this._forceRectIds && this._forceRectIds.has(room.id)) {
+        room.shape = 'rect';
+      }
     }
 
     // --- Build walls + doors ----------------------------------------------
