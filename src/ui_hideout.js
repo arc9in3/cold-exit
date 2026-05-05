@@ -1937,7 +1937,12 @@ export class HideoutUI {
 
     // Side rails — visible on home + cards. Hidden on weapon and
     // leaderboard steps where they'd compete with the focal content.
-    if (this.contractorStep === 'cards') {
+    // For first-run players (contract rank 0, no deaths), suppress
+    // the rails entirely so the screen is just `pick a contract +
+    // pick a weapon`. The clutter surfaces later when the player
+    // has actually banked some progress to compare against.
+    const _firstRunPlayer = (getContractRank() | 0) === 0 && !isOnboardSeen('stash');
+    if (this.contractorStep === 'cards' && !_firstRunPlayer) {
       const feed = document.createElement('div');
       feed.className = 'contractor-feed';
       feed.innerHTML = `<div class="feed-head">LIVE CONTRACT FEED</div>${this._renderLiveFeedHTML()}`;
@@ -1970,11 +1975,10 @@ export class HideoutUI {
       this._stopFeedPulse();
     }
 
-    // Host portrait + speech (home + cards only — hidden on weapon).
-    // Both steps now pull from the rotating greeting pool — moved off
-    // the start screen onto the contracts surface so the dialogue
-    // changes whenever the player opens the cards view.
-    if (this.contractorStep !== 'weapon') {
+    // Host portrait + speech (home + cards only — hidden on weapon,
+    // and hidden for first-run players so the cards screen reads as
+    // a pure choice between the available contracts).
+    if (this.contractorStep !== 'weapon' && !_firstRunPlayer) {
       const greeting = this._pickHostGreeting();
       const host = document.createElement('div');
       host.className = 'contractor-host';
@@ -2261,6 +2265,17 @@ export class HideoutUI {
 
     // ----- Right: Pre-Run Store (upgrades top · stock middle ·
     //        refresh button bottom · timer below) per the wireframe.
+    // Onboarding gate — first-run players don't see the store column
+    // yet; it reveals when applyOnboardTriggers fires `store` (chips
+    // ≥ 20 + first death). Pre-mission boosts are a layered system,
+    // not a Run-0 concept.
+    const _storeRevealed = isOnboardSeen('store') || (typeof getRevealedHideoutTabs === 'function'
+      && getRevealedHideoutTabs().has('store'));
+    if (!_storeRevealed) {
+      // Skip the storeCol render entirely — early return out of this
+      // section. The DEPLOY button + back button still wire up below
+      // because they live outside the storeCol block.
+    } else {
     const storeCol = document.createElement('div');
     storeCol.className = 'loadout-storecol loadout-panel';
     const storeState = this._getOrRefreshStore();
@@ -2369,6 +2384,7 @@ export class HideoutUI {
 
     storeCol.appendChild(footer);
     wrap.appendChild(storeCol);
+    } // end of `if (_storeRevealed)` gate from the onboarding flow
 
     if (withConfirm) {
       const confirm = document.createElement('button');
