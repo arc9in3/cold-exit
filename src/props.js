@@ -774,6 +774,283 @@ export function buildDoorFrame(opts = {}) {
   return { group, collision: null };
 }
 
+// --- Extraction props ------------------------------------------------
+// Centerpieces for the post-boss extraction room (see
+// src/extraction_room.js). Each one is the "way out" — a van you walk
+// into, a helo on a pad, an elevator panel, a sewer grate, an LZ.
+// Built from the same composition primitives as everything above so
+// they read as one cohesive prop kit.
+
+// Wall sconce — small wall-mounted lamp for library reading nooks +
+// hotel hallways. Pure decoration; collision: null. Doesn't register a
+// dynamic light by default — emissive material gives the lit feel
+// without the per-frame fragment cost. Caller may opt-in via
+// opts.withLight to attach a tiny PointLight (e.g. for the boss exit
+// reveal).
+export function buildWallSconce(opts = {}) {
+  const color = opts.color ?? 0xffcf60;
+  const group = new THREE.Group();
+  // Backplate.
+  const back = box(0.18, 0.32, 0.04, COL.metalDark);
+  back.position.set(0, 1.6, 0);
+  group.add(back);
+  // Shade — small upward-flared cone.
+  const shade = new THREE.Mesh(
+    new THREE.ConeGeometry(0.10, 0.20, 12, 1, true),
+    new THREE.MeshBasicMaterial({
+      color, transparent: true, opacity: 0.85,
+      side: THREE.DoubleSide,
+    }),
+  );
+  shade.position.set(0, 1.78, 0.05);
+  group.add(shade);
+  // Tiny emissive bulb inside the shade.
+  const bulb = new THREE.Mesh(
+    new THREE.SphereGeometry(0.05, 8, 6),
+    new THREE.MeshBasicMaterial({ color }),
+  );
+  bulb.position.set(0, 1.74, 0.06);
+  group.add(bulb);
+  return { group, collision: null };
+}
+
+// Crate row — three small crates lined up. Quick "supply staging" prop
+// for the extraction room without needing 3 separate placements. Reads
+// as a row, not a stack.
+export function buildCrateRow(opts = {}) {
+  const s = opts.s ?? 0.7;
+  const group = new THREE.Group();
+  for (let i = 0; i < 3; i++) {
+    const body = box(s, s, s, COL.woodMid);
+    body.position.set((i - 1) * (s + 0.05), s / 2, 0);
+    group.add(body);
+    // Slats.
+    const band = box(s + 0.01, 0.05, s + 0.01, COL.woodDark);
+    band.position.set((i - 1) * (s + 0.05), s * 0.55, 0);
+    group.add(band);
+  }
+  const w = 3 * s + 2 * 0.05;
+  return { group, collision: { w, d: s } };
+}
+
+// Evac van — a stylized van blocking ~60% of one wall, side door open.
+// Player walks INTO the open side to extract. Built side-on (long axis
+// along X), faces +Z by default; caller rotates to face the door wall.
+export function buildEvacVan(opts = {}) {
+  const w = opts.w ?? 4.4;
+  const d = opts.d ?? 1.8;
+  const h = opts.h ?? 2.0;
+  const bodyColor = opts.color ?? 0x3a4a36;     // olive
+  const group = new THREE.Group();
+  // Main body.
+  const body = roundedBox(w, h * 0.85, d, bodyColor, { radius: 0.10 });
+  body.position.y = h * 0.45 + 0.25;
+  group.add(body);
+  // Cab roof — slight ridge.
+  const cab = roundedBox(w * 0.35, 0.12, d, bodyColor, { radius: 0.05 });
+  cab.position.set(-w * 0.30, h * 0.85 + 0.22, 0);
+  group.add(cab);
+  // Side door opening — a darker rectangular inset on +Z face. Reads
+  // as "door slid open, walk in here."
+  const opening = new THREE.Mesh(
+    new THREE.PlaneGeometry(w * 0.30, h * 0.55),
+    new THREE.MeshBasicMaterial({ color: 0x080808, side: THREE.DoubleSide }),
+  );
+  opening.position.set(w * 0.10, h * 0.45 + 0.05, d / 2 + 0.01);
+  group.add(opening);
+  // Wheels.
+  const wheelR = 0.30;
+  for (const sx of [-w * 0.32, w * 0.30]) {
+    for (const sz of [-d / 2 - 0.04, d / 2 + 0.04]) {
+      const wheel = new THREE.Mesh(
+        new THREE.CylinderGeometry(wheelR, wheelR, 0.18, 14),
+        mat(0x151515),
+      );
+      wheel.rotation.z = Math.PI / 2;
+      wheel.position.set(sx, wheelR, sz);
+      group.add(wheel);
+    }
+  }
+  // Headlight panels.
+  for (const sz of [-d * 0.32, d * 0.32]) {
+    const hl = new THREE.Mesh(
+      new THREE.BoxGeometry(0.05, 0.18, 0.20),
+      new THREE.MeshBasicMaterial({ color: 0xffe6a0 }),
+    );
+    hl.position.set(-w / 2 - 0.01, h * 0.45, sz);
+    group.add(hl);
+  }
+  return { group, collision: { w, d } };
+}
+
+// Helo pad — circular landing zone with painted "H" + a low
+// silhouetted helicopter shape on top. Player steps onto the pad to
+// extract. Centerpiece for rooftop floors.
+export function buildHeloPad(opts = {}) {
+  const r = opts.r ?? 3.2;
+  const group = new THREE.Group();
+  // Pad disc.
+  const pad = new THREE.Mesh(
+    new THREE.CylinderGeometry(r, r, 0.05, 28),
+    mat(0x1f221c),
+  );
+  pad.position.y = 0.025;
+  group.add(pad);
+  // Painted ring.
+  const ring = new THREE.Mesh(
+    new THREE.RingGeometry(r * 0.85, r * 0.95, 32),
+    new THREE.MeshBasicMaterial({ color: 0xfff2a0, side: THREE.DoubleSide }),
+  );
+  ring.rotation.x = -Math.PI / 2;
+  ring.position.y = 0.06;
+  group.add(ring);
+  // Painted "H" — three boxes forming the letter.
+  const hBar = box(r * 0.5, 0.02, 0.18, 0xfff2a0, false);
+  hBar.position.set(0, 0.07, 0);
+  group.add(hBar);
+  for (const sx of [-r * 0.22, r * 0.22]) {
+    const post = box(0.18, 0.02, r * 0.7, 0xfff2a0, false);
+    post.position.set(sx, 0.07, 0);
+    group.add(post);
+  }
+  // Helo silhouette — a dark fuselage bar suggesting "the chopper is
+  // here." Shorter than a real helo so it doesn't block the camera.
+  const fuselage = roundedBox(r * 1.2, 0.4, 0.5, 0x1a1d20, { radius: 0.12 });
+  fuselage.position.set(0, 0.5, 0);
+  group.add(fuselage);
+  // Tail boom.
+  const tail = box(r * 0.7, 0.12, 0.10, 0x1a1d20);
+  tail.position.set(r * 0.7, 0.55, 0);
+  group.add(tail);
+  // Rotor — a thin disc cue.
+  const rotor = new THREE.Mesh(
+    new THREE.CylinderGeometry(r * 1.0, r * 1.0, 0.03, 28),
+    new THREE.MeshBasicMaterial({ color: 0x2a2a30, transparent: true, opacity: 0.4 }),
+  );
+  rotor.position.set(0, 0.92, 0);
+  group.add(rotor);
+  return { group, collision: { w: r * 2, d: r * 2 } };
+}
+
+// Service elevator — recessed double-door + control panel. Player
+// walks up to it to extract. Square footprint, narrow depth.
+export function buildServiceElevator(opts = {}) {
+  const w = opts.w ?? 2.4;
+  const d = opts.d ?? 0.6;
+  const h = opts.h ?? 2.6;
+  const group = new THREE.Group();
+  // Recessed back panel.
+  const back = box(w, h, 0.08, COL.metalDark);
+  back.position.set(0, h / 2, -d / 2 + 0.04);
+  group.add(back);
+  // Two doors that meet in the middle.
+  for (const sx of [-w / 4, w / 4]) {
+    const door = roundedBox(w / 2 - 0.04, h - 0.10, 0.08, COL.metal, { radius: 0.02 });
+    door.position.set(sx, h / 2, -d / 2 + 0.12);
+    group.add(door);
+  }
+  // Frame — thicker outline.
+  const frameT = 0.10;
+  const fTop = box(w + frameT, frameT, d, COL.metalDark);
+  fTop.position.set(0, h + frameT / 2 - 0.05, 0);
+  group.add(fTop);
+  for (const sx of [-w / 2 - frameT / 2, w / 2 + frameT / 2]) {
+    const fSide = box(frameT, h, d, COL.metalDark);
+    fSide.position.set(sx, h / 2, 0);
+    group.add(fSide);
+  }
+  // Control panel beside the door (right side).
+  const panel = box(0.18, 0.30, 0.06, COL.metalDark);
+  panel.position.set(w / 2 + 0.20, 1.30, d / 2 - 0.04);
+  group.add(panel);
+  // Tiny call button — emissive green.
+  const btn = new THREE.Mesh(
+    new THREE.CircleGeometry(0.04, 12),
+    new THREE.MeshBasicMaterial({ color: 0x80ff80 }),
+  );
+  btn.position.set(w / 2 + 0.20, 1.30, d / 2 + 0.001);
+  group.add(btn);
+  return { group, collision: { w, d } };
+}
+
+// Sewer grate — floor-set metal grate. Player walks onto it to drop
+// through (the falling itself is handled by gameplay code, not here;
+// the grate's job is to read as "this is the way down").
+export function buildSewerGrate(opts = {}) {
+  const w = opts.w ?? 1.8;
+  const d = opts.d ?? 1.8;
+  const group = new THREE.Group();
+  // Frame.
+  const frame = box(w + 0.10, 0.06, d + 0.10, COL.metalDark);
+  frame.position.y = 0.03;
+  group.add(frame);
+  // Grate bars — 5 horizontal rods.
+  for (let i = 0; i < 5; i++) {
+    const t = (i / 4 - 0.5);
+    const bar = box(w, 0.04, 0.08, COL.metal);
+    bar.position.set(0, 0.06, t * d * 0.85);
+    group.add(bar);
+  }
+  // Light beam from below — a faint emissive disc under the grate
+  // gives the "something glowing in the sewer" cue.
+  const beam = new THREE.Mesh(
+    new THREE.CircleGeometry(Math.min(w, d) * 0.4, 16),
+    new THREE.MeshBasicMaterial({ color: 0x80c0ff, transparent: true, opacity: 0.4 }),
+  );
+  beam.rotation.x = -Math.PI / 2;
+  beam.position.y = 0.005;
+  group.add(beam);
+  // Footprint blocks AI but is low cover (player can step over).
+  return { group, collision: null, footprint: { w, d } };
+}
+
+// Chopper LZ — variant of helo-pad with railings on three sides + a
+// painted hazard chevron strip on the fourth (the open approach).
+// Faster pickup vibe than the calm helo-pad.
+export function buildChopperLz(opts = {}) {
+  const r = opts.r ?? 3.0;
+  const group = new THREE.Group();
+  // Pad — slightly raised so the railings have something to mount to.
+  const pad = new THREE.Mesh(
+    new THREE.CylinderGeometry(r, r, 0.10, 28),
+    mat(0x202020),
+  );
+  pad.position.y = 0.05;
+  group.add(pad);
+  // Hazard stripe on +Z side (the open approach).
+  const stripeCount = 6;
+  for (let i = 0; i < stripeCount; i++) {
+    const t = (i / (stripeCount - 1) - 0.5) * (r * 1.6);
+    const color = (i % 2) ? 0xffd040 : 0x202020;
+    const stripe = box(r * 1.6 / stripeCount, 0.02, 0.4, color, false);
+    stripe.position.set(t, 0.11, r - 0.3);
+    group.add(stripe);
+  }
+  // Three short railings on the other three sides.
+  for (const ang of [Math.PI, -Math.PI / 2, Math.PI / 2]) {
+    for (let post = 0; post < 3; post++) {
+      const t = (post - 1) * 0.8;
+      const px = Math.cos(ang) * r + Math.sin(ang) * t;
+      const pz = Math.sin(ang) * r - Math.cos(ang) * t;
+      const p = box(0.06, 1.0, 0.06, COL.metal);
+      p.position.set(px, 0.55, pz);
+      group.add(p);
+    }
+    // Top rail bar (axis-aligned per side).
+    const ax = Math.cos(ang) * r;
+    const az = Math.sin(ang) * r;
+    const bar = box(Math.abs(Math.sin(ang)) > 0.5 ? 1.6 : 0.06, 0.06,
+      Math.abs(Math.sin(ang)) > 0.5 ? 0.06 : 1.6, COL.metal);
+    bar.position.set(ax, 1.05, az);
+    group.add(bar);
+  }
+  // Helo silhouette like buildHeloPad (lighter version).
+  const fuselage = roundedBox(r * 1.0, 0.3, 0.4, 0x1a1d20, { radius: 0.10 });
+  fuselage.position.set(0, 0.45, 0);
+  group.add(fuselage);
+  return { group, collision: { w: r * 2, d: r * 2 } };
+}
+
 // --- Catalog ---------------------------------------------------------
 // Convenience: look up a builder by key. Themed-room code will pick
 // from a curated list per theme instead of hardcoding factory names.
@@ -803,6 +1080,15 @@ export const PROP_BUILDERS = {
   planter: buildPlanter,
   railing: buildRailing,
   doorFrame: buildDoorFrame,
+  // Level-gen overhaul additions — extraction-room set + ambient
+  // wall fixtures + grouped-prop helpers.
+  evacVan: buildEvacVan,
+  heloPad: buildHeloPad,
+  serviceElevator: buildServiceElevator,
+  sewerGrate: buildSewerGrate,
+  chopperLz: buildChopperLz,
+  wallSconce: buildWallSconce,
+  crateRow: buildCrateRow,
 };
 
 // --- Theme palettes --------------------------------------------------
