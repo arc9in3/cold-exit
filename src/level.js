@@ -11,6 +11,7 @@ import { assignBuildings, connectorEdgesFor } from './buildings.js';
 import { buildWindow } from './windows.js';
 import { buildSkybridge } from './skybridges.js';
 import { addLedge } from './ledges.js';
+import { initWallInstancer, wallInstancer } from './wall_instancer.js';
 
 // Shopkeeper palette per kind — body / head / pants / gear tint so
 // each shop's NPC reads as a distinct role in the world. Exported so
@@ -122,11 +123,19 @@ export class Level {
       r._encounterPlaceholder = false;
       r._encounterSpawn = null;
     }
+    // Wall proxies (added by the wall instancer) live in obstacles[]
+    // but are NOT real scene-graph members — their visual is rendered
+    // via per-color InstancedMesh objects owned by the instancer. The
+    // teardown() below tears down the InstancedMeshes; per-proxy
+    // dispose() is a no-op so the loop can run uniformly across real
+    // meshes + proxies without a branch.
     for (const m of this.obstacles) {
+      if (m.isWallProxy) continue;     // owned by wall_instancer.teardown()
       this.scene.remove(m);
       m.geometry.dispose();
       m.material.dispose();
     }
+    if (wallInstancer()) wallInstancer().teardown();
     for (const m of this.decorations) {
       this.scene.remove(m);
       if (m.geometry) m.geometry.dispose();
@@ -166,6 +175,10 @@ export class Level {
   generate() {
     this.clear();
     this.index += 1;
+    // Wall instancer — fresh per generate() so per-color pools start
+    // empty. clear() tore down the previous instancer; this re-init
+    // creates a new one bound to the same scene.
+    initWallInstancer(this.scene);
     // Tutorial mode override — build the practice room layout
     // instead of random-walking a normal chain.
     if (typeof window !== 'undefined' && window.__tutorialMode && window.__tutorialMode()) {
@@ -3981,6 +3994,35 @@ export class Level {
   }
 
   _addObstacle(x, y, z, w, h, d, color) {
+    // Doors animate (scale.y on open, color flip on lock/unlock,
+    // material.opacity tweaks). They MUST stay as real THREE.Mesh
+    // objects — the wall instancer's static-bake model can't represent
+    // per-frame matrix mutations cleanly. Branch by color so DOOR_*
+    // and EXIT_COLOR route to the legacy mesh path; everything else
+    // (outer walls, inner walls, low cover, columns, platforms,
+    // elevator solid panels) goes through the instancer.
+    const isDynamicColor = (color === DOOR_COLOR
+                          || color === DOOR_OPEN_COLOR
+                          || color === EXIT_COLOR);
+    if (!isDynamicColor) {
+      const inst = wallInstancer();
+      if (inst) {
+        const proxy = inst.addWall(x, y, z, w, h, d, color);
+        if (proxy) {
+          proxy.userData.collisionXZ = {
+            minX: x - w / 2, maxX: x + w / 2,
+            minZ: z - d / 2, maxZ: z + d / 2,
+          };
+          if (y + h / 2 < WALL_HEIGHT / 2) proxy.userData.isLowCover = true;
+          this.obstacles.push(proxy);
+          this._dirtySolid();
+          return proxy;
+        }
+        // Pool overflow — fall through to legacy path so the wall is
+        // still rendered (just not via instancing). One-shot warning
+        // already fired inside the instancer.
+      }
+    }
     const mat = new THREE.MeshStandardMaterial({ color, roughness: 0.85 });
     const mesh = new THREE.Mesh(new THREE.BoxGeometry(w, h, d), mat);
     mesh.position.set(x, y, z);

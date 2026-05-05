@@ -103,6 +103,22 @@ function generateLevel(seed, lvIdx) {
 // drawCalls (we still report mesh count separately).
 function statsFor(level) {
   const scene = level.scene;
+  // Invariant gates — runOutdoorInvariants includes checkPathwayInvariants.
+  let invariantOK = true;
+  let invariantNote = 'ok';
+  try {
+    const out = level.runOutdoorInvariants
+      ? level.runOutdoorInvariants()
+      : (level.checkPathwayInvariants ? level.checkPathwayInvariants() : null);
+    if (out && out.ok === false) {
+      invariantOK = false;
+      try { invariantNote = JSON.stringify(out).slice(0, 200); }
+      catch (_) { invariantNote = 'failed'; }
+    }
+  } catch (e) {
+    invariantOK = false;
+    invariantNote = 'threw: ' + (e && e.message);
+  }
   let meshes = 0;
   let instancedMeshes = 0;
   let liveInstances = 0;
@@ -152,6 +168,8 @@ function statsFor(level) {
     verts,
     lights,
     registeredLights,
+    invariantOK,
+    invariantNote,
     byKind: Object.fromEntries(
       [...byKind.entries()].sort((a, b) => b[1] - a[1])
     ),
