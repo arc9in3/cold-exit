@@ -9215,11 +9215,9 @@ function fireOneShot(playerInfo, weapon, aimPoint, isADS, aimOwner, aimZone) {
     combat.spawnFlash(tracerFrom, eff.tracerColor, qualityFlags.muzzleLights);
   }
   // Combat juice — eject brass + puff muzzle smoke. Both pooled. Skip
-  // for melee weapons AND on potato (the muzzleFlashSprites flag
-  // doubles as the shorthand for "all per-shot fluff visuals," since
-  // potato is the only tier where any of these are cut and the gate
-  // is binary).
-  if (eff?.class && eff.class !== 'melee' && qualityFlags.muzzleFlashSprites) {
+  // for melee weapons AND on tiers where combatVfx is gated (low +
+  // potato). Pure visual fluff with no gameplay information.
+  if (eff?.class && eff.class !== 'melee' && qualityFlags.combatVfx) {
     combat.spawnBrass(tracerFrom, _tmpDir);
     combat.spawnMuzzleSmoke(tracerFrom, _tmpDir);
   }
@@ -12771,7 +12769,7 @@ function aiFire(origin, dir, weapon, damageMult = 1, source = null) {
   // off-screen volleys don't pay the particle cost. Potato cuts these
   // entirely (every shot from 14+ enemies × ~5/s = a particle storm).
   if (_afDist < 30 && weapon.class && weapon.class !== 'melee'
-      && qualityFlags.muzzleFlashSprites) {
+      && qualityFlags.combatVfx) {
     combat.spawnBrass(origin, dir);
     combat.spawnMuzzleSmoke(origin, dir);
   }
