@@ -34,7 +34,15 @@ import { MegaBossGeneral, buildGeneralLoot } from './megaboss_general.js';
 import { ProjectileManager } from './projectiles.js';
 // Pass 1C — windows + ledges. Hitscan bullets vs windows; mantle
 // input handler.
-import { applyWindowDamage } from './windows.js';
+import { applyWindowDamage, shatter as shatterWindow } from './windows.js';
+// Expose the windows-shatter function on globalThis so the coop
+// snapshot apply path (snapshot.js) can call it without forming a
+// static cycle. snapshot.js is imported by main.js; main.js owns
+// windows.js, so the lib reference must flow main→snapshot via the
+// global rather than back-edge through imports.
+if (typeof window !== 'undefined') {
+  window.__windowsLib = { shatter: shatterWindow };
+}
 import { mantleableAt, applyMantle, isOnLedge, dropOff } from './ledges.js';
 import { spawnDamageNumber } from './hud.js';
 import { initDebugPanel, setDebugPanelVisible } from './debug.js';
@@ -130,13 +138,19 @@ import { DroneManager } from './drones.js';
 import { CoopLobbyUI, isCoopEnabled } from './coop/lobby.js';
 import { getCoopTransport } from './coop/transport.js';
 import { buildRig as _buildAllyRig, initAnim as _initAllyAnim, updateAnim as _updateAllyAnim } from './actor_rig.js';
-import {
+import * as _coopSnapshotModule from './coop/snapshot.js';
+const {
   encodeEnemySnapshot, encodeSnapshotsPerPeer,
   applyLootSnapshot, applyDroneSnapshot,
   applyMegaBossSnapshot,
+  applyWindowsSnapshot,
   pushSnapshotForInterp, pickInterpSnapshots, applyInterpolated,
   clearSnapshotBuffer,
-} from './coop/snapshot.js';
+} = _coopSnapshotModule;
+// Dev-time probe exposer — paired with __level / __gunmen so a
+// playwright probe can read the latest applied snapshot directly
+// (e.g. for asserting bw/oL bits without ferrying logs).
+if (typeof window !== 'undefined') window.__coopSnapshot = _coopSnapshotModule;
 import { resetNetIds } from './gunman.js';
 window.__resetHints = resetHints;
 
@@ -3188,6 +3202,10 @@ function _ensureCoopLobby() {
   const _publishHostFlag = () => {
     if (typeof window !== 'undefined') {
       window.__coopIsHost = transport.isOpen && transport.isHost;
+      // Mirror as __coopIsJoiner so dependency-free modules
+      // (projectiles.js) can gate host-authoritative mutations
+      // without importing transport.js. False in single-player.
+      window.__coopIsJoiner = transport.isOpen && !transport.isHost;
       window.__coopLocalPeerId = transport.isOpen ? (transport.peerId || null) : null;
     }
   };
@@ -9677,7 +9695,13 @@ function fireOneShot(playerInfo, weapon, aimPoint, isADS, aimOwner, aimZone) {
       // either way; subsequent shots will fly through cleanly).
       const ud = hit.mesh && hit.mesh.userData;
       if (ud && ud.kind === 'window' && ud.windowState && !ud.windowState.broken) {
-        applyWindowDamage(ud.windowState, 1, hit.point);
+        // Host-only: window damage is authoritative. The joiner
+        // never decrements hp locally; their broken-state is driven
+        // exclusively by the snapshot apply path (applyWindowsSnapshot).
+        // Single-player (transport not open) falls through.
+        const _wt = (typeof getCoopTransport === 'function') ? getCoopTransport() : null;
+        const _isJoiner = _wt && _wt.isOpen && !_wt.isHost;
+        if (!_isJoiner) applyWindowDamage(ud.windowState, 1, hit.point);
       }
       combat.spawnImpact(hit.point);
     }
@@ -10867,6 +10891,13 @@ function _tickCoop(dt) {
         a: +(pi?.adsAmount ?? 0).toFixed(2),
         d: (pi?.mode === 'dash' || pi?.mode === 'slide') ? 1 : 0,
         wc: wpn?.class || 'pistol',
+        // On-ledge bit (Phase H step 2). When set, the receiving
+        // peer lifts our ghost mesh by 1m so we visually stand on
+        // the ledge instead of clipping into the wall. ledges.js's
+        // applyMantle stamps player.onLedge with the ledge record;
+        // dropOff() clears it. Sent as 0/1 to keep the typical
+        // packet small.
+        oL: player.onLedge ? 1 : 0,
         // Dual-opt-in extract — peer is standing in the exit zone
         // and ready to advance. Host gates advanceFloor on this
         // being true for every joiner ghost. Cheap (single bit on
@@ -10910,7 +10941,7 @@ function _tickCoop(dt) {
       } else {
         const perPeer = encodeSnapshotsPerPeer(
           gunmen, melees, _coopSnapshotSeq, performance.now() | 0,
-          loot, peerIds, drones, megaBoss,
+          loot, peerIds, drones, megaBoss, level,
         );
         for (const [peerId, snap] of perPeer) {
           transport.send('snapshot', snap, peerId);
@@ -10933,6 +10964,13 @@ function _tickCoop(dt) {
         try { return drones.spawn(x, y, z); }
         catch (_) { return null; }
       }, dpair.alpha);
+    }
+    // Windows — apply broken-state from the latest snapshot. Window
+    // transitions are monotonic (intact → broken, never reverse
+    // mid-floor) and idempotent on apply, so we don't need a/b
+    // interp; the latest frame's index list is the truth.
+    if (dpair && dpair.b && level) {
+      applyWindowsSnapshot(level, dpair.b);
     }
   }
   // Sync ghost meshes — create/update per-peer, prune disconnected.
@@ -11091,7 +11129,15 @@ function _tickCoop(dt) {
     const prevX = m.lastX, prevZ = m.lastZ;
     m.lastX += (ghost.x - m.lastX) * k;
     m.lastZ += (ghost.z - m.lastZ) * k;
-    m.group.position.set(m.lastX, 0, m.lastZ);
+    // On-ledge Y lift (Phase H step 2). Ledge top sits at sillHeight
+    // (default 1.0m) + slab thickness; we apply a flat 1m offset so
+    // the ghost rig reads as standing on the ledge instead of
+    // floating-in-wall at floor level. Lerped toward target so the
+    // mantle/drop transitions don't snap.
+    const targetY = ghost.onLedge ? 1.0 : 0.0;
+    if (typeof m.lastY !== 'number') m.lastY = targetY;
+    m.lastY += (targetY - m.lastY) * Math.min(1, dt / 0.12);
+    m.group.position.set(m.lastX, m.lastY, m.lastZ);
     // Rig animation — derive speed from position delta, face the
     // movement heading. updateAnim drives the walk / idle blend
     // identically to gunmen, so the ally reads as a real player

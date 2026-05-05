@@ -24,7 +24,56 @@
 // drop out-of-order packets and a future tick can do interpolation
 // between two snapshots.
 
-const _scratch = { gunmen: [], melees: [], drones: [], loot: [], corpses: [] };
+const _scratch = { gunmen: [], melees: [], drones: [], loot: [], corpses: [], brokenWindows: [] };
+
+// Windows snapshot — Phase H. Both peers regenerate the level from
+// the same _runSeed (see main.js:_runSeed + level-seed broadcast), so
+// `level._windows` is the same array (same length, same order) on
+// host + joiner. The wire format is just a list of indices — every
+// entry in _windows whose `state.broken === true`. Mutations are
+// monotonic (a window can only break, never un-break within a level),
+// so the joiner-side apply is idempotent: walk indices, call shatter()
+// on entries that aren't already broken, ignore the rest.
+//
+// Why indices not netIds: windows have no spawn-order dependency on
+// AI, so threading a netId field through level.js purely for coop
+// would cost more than the index lookup it saves. If the seeded gen
+// ever becomes order-unstable for windows we revisit.
+function _encodeWindows(level) {
+  _scratch.brokenWindows.length = 0;
+  if (!level || !level._windows) return _scratch.brokenWindows.slice();
+  for (let i = 0; i < level._windows.length; i++) {
+    const entry = level._windows[i];
+    const st = entry?.window?.state;
+    if (st && st.broken) _scratch.brokenWindows.push(i);
+  }
+  return _scratch.brokenWindows.slice();
+}
+
+// Joiner-side window apply. snapshot.bw is an index list; for each
+// index, call shatter() on the corresponding entry's state if the
+// joiner's local mirror isn't already broken. Idempotent — a window
+// that's already broken locally is skipped without side effects.
+// Single-player + host both bypass this (the apply path is gated by
+// the caller).
+export function applyWindowsSnapshot(level, snapshot) {
+  if (!level || !level._windows || !snapshot) return;
+  const indices = snapshot.bw;
+  if (!indices || !indices.length) return;
+  // Lazy-import shatter to dodge a module cycle: snapshot.js is
+  // imported by main.js which also imports windows.js. Static import
+  // here would still resolve, but keeping snapshot.js dependency-free
+  // matches how applyLootSnapshot handles its spawn closure.
+  const winLib = (typeof window !== 'undefined') ? window.__windowsLib : null;
+  if (!winLib || typeof winLib.shatter !== 'function') return;
+  for (const idx of indices) {
+    const entry = level._windows[idx | 0];
+    const st = entry?.window?.state;
+    if (!st || st.broken) continue;
+    try { winLib.shatter(st); }
+    catch (e) { console.warn('[coop] window shatter apply failed', e); }
+  }
+}
 
 // Megaboss snapshot — single optional object since at most one
 // megaboss exists per arena. Mirrors position + yaw + hp so the
@@ -166,11 +215,11 @@ function _encodeLootForPeer(loot, forPeerId) {
 // Build the snapshot once per peer (loot section is per-recipient).
 // Returns a Map<peerId, snapshot>. Caller iterates and sends targeted.
 // Enemy section is the same across recipients so we build it once.
-export function encodeSnapshotsPerPeer(gunmen, melees, seq, t, loot, peerIds, droneMgr = null, megaBoss = null) {
+export function encodeSnapshotsPerPeer(gunmen, melees, seq, t, loot, peerIds, droneMgr = null, megaBoss = null, level = null) {
   // Build the truly-shared enemy section once; rebuild loot + corpses
   // per-peer so each recipient sees only their own instanced ground
   // drops AND only their own slice of body loot.
-  const enemyPart = encodeEnemySnapshot(gunmen, melees, seq, t, null, droneMgr, megaBoss);
+  const enemyPart = encodeEnemySnapshot(gunmen, melees, seq, t, null, droneMgr, megaBoss, level);
   const out = new Map();
   if (!peerIds || !peerIds.length) return out;
   for (const peerId of peerIds) {
@@ -183,7 +232,7 @@ export function encodeSnapshotsPerPeer(gunmen, melees, seq, t, loot, peerIds, dr
   return out;
 }
 
-export function encodeEnemySnapshot(gunmen, melees, seq, t, loot = null, droneMgr = null, megaBoss = null) {
+export function encodeEnemySnapshot(gunmen, melees, seq, t, loot = null, droneMgr = null, megaBoss = null, level = null) {
   // Reuse scratch arrays so a 20Hz publish doesn't allocate a fresh
   // outer object each frame; per-entity payloads are still per-call.
   _scratch.gunmen.length = 0;
@@ -238,6 +287,11 @@ export function encodeEnemySnapshot(gunmen, melees, seq, t, loot = null, droneMg
     // fallback below covers single-player + legacy callers.
     loot: [],
     corpses: _encodeCorpses(gunmen, melees, null),
+    // bw = broken-window indices (Phase H). Empty array when no
+    // window has been damaged yet on this floor; cheap to keep on
+    // every packet so the joiner doesn't need a separate "windows
+    // changed" event channel.
+    bw: _encodeWindows(level),
   };
 }
 

@@ -316,11 +316,23 @@ export class ProjectileManager {
         // from this hit; either way the projectile registers as
         // wall-contact (the round hit a window). Subsequent hits
         // accumulate via the same path.
+        //
+        // Coop: window damage is host-authoritative (Phase H). The
+        // joiner skips the hp decrement + broken-flip and waits for
+        // the next snapshot to mirror the host's state. The visual
+        // wall-stop still happens locally so the grenade doesn't
+        // visibly fly through an intact pane on the joiner's screen
+        // — they'll see it pop a frame or two before the host's
+        // snapshot catches up. Single-player + host fall through to
+        // the mutation path.
         try {
-          // Lazy-import to avoid a static cycle with windows.js (this
-          // file is otherwise dependency-free).
-          if (!this._winDmg) this._winDmg = (s) => { s.hp -= 1; if (s.hp <= 0) { s.broken = true; if (s.collisionProxy) s.collisionProxy.userData.collisionXZ = null; } };
-          this._winDmg(ud.windowState);
+          const _isJoiner = (typeof window !== 'undefined' && window.__coopIsJoiner === true);
+          if (!_isJoiner) {
+            // Lazy-init once. Inline so this file stays import-free
+            // of windows.js (matches the pre-coop pattern).
+            if (!this._winDmg) this._winDmg = (s) => { s.hp -= 1; if (s.hp <= 0) { s.broken = true; if (s.collisionProxy) s.collisionProxy.userData.collisionXZ = null; } };
+            this._winDmg(ud.windowState);
+          }
         } catch (_) { /* defensive */ }
         const r = 0.1;
         if (x > b.minX - r && x < b.maxX + r && z > b.minZ - r && z < b.maxZ + r) {
