@@ -298,6 +298,9 @@ export function encodeEnemySnapshot(gunmen, melees, seq, t, loot = null, droneMg
       y: +(g.group.rotation.y.toFixed(3)),    // yaw
       h: Math.round(g.hp),
       m: Math.round(g.maxHp),
+      // Pass 2 added STATE.RETREAT + STATE.SUPPRESS — the field is
+      // still a free-form string so encode/decode is unchanged. The
+      // value space is what shifted; joiner mirrors via animation cue.
       s: g.state || 'idle',
       // Tier + variant so the joiner's late-arrival spawn fallback
       // can mint a mirror that matches host's archetype (tank /
@@ -309,6 +312,12 @@ export function encodeEnemySnapshot(gunmen, melees, seq, t, loot = null, droneMg
       // snapshot stays small. Joiner reads this in _applyInterp to
       // pose flame particles on the right enemy.
       ...(g.burnT > 0 ? { bt: +g.burnT.toFixed(2), bs: g.burnStacks | 0 } : {}),
+      // Pass 2 — on-ledge bit. Mirrors the player on-ledge sync:
+      // joiner reads `oL` and lifts the ghost rig by ledge.height
+      // (1 m default) so the silhouette matches the host's authoritative
+      // position. Decision logic (mantle / dwell / dropoff) is host-
+      // only; this is a pure visual cue.
+      ...(g._mountedLedge ? { oL: 1 } : {}),
     });
   }
   for (const e of melees.enemies) {
@@ -654,6 +663,13 @@ function _applyInterp(entity, a, b, alpha) {
   // in the next snapshot when the host clears burnT.
   entity.burnT = +b.bt || 0;
   entity.burnStacks = b.bs | 0;
+  // Pass 2 — on-ledge ghost lift. When the host marks `oL: 1`, the
+  // joiner-side mesh sits 1 m higher so the silhouette matches the
+  // gunman's true world position. No decision data flows through —
+  // role / mantle / dwell are all host-only. Mirror of the player
+  // on-ledge sync. When the bit clears, the rig falls back to floor.
+  entity._coopOnLedge = !!b.oL;
+  entity.group.position.y = entity._coopOnLedge ? 1.0 : 0;
 }
 
 // Per-list netId → entity cache. Rebuilt when the list length
