@@ -28,7 +28,13 @@ const _zero = new THREE.Matrix4().makeScale(0, 0, 0);
 const _baseColor = new THREE.Color();
 const _outColor  = new THREE.Color();
 const _flashColor = new THREE.Color(0xff4a4a);
-const INITIAL_CAP = 96;
+// Per-pool instance cap. Each (geometry, role) pair gets its own
+// InstancedMesh of this size. 96 was tight — perf profile at 30
+// concurrent gunmen + a boss exhausted the gear-role pool and fell
+// back to direct render. 256 covers any realistic wave; memory
+// cost is ~115 KB per pool (256 × 64-byte mat4 + small color/usage
+// metadata), trivial vs the geometry/material data already loaded.
+const INITIAL_CAP = 256;
 
 // Inject a fresnel rim term into a MeshToonMaterial via onBeforeCompile.
 // The rim brightens edges that face away from the camera, which makes
