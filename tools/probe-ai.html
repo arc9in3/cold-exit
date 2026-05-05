@@ -2,7 +2,7 @@
 <html lang="en">
 <head>
 <meta charset="utf-8">
-<title>cold exit · AI behaviour probe (Pass 1)</title>
+<title>cold exit · AI behaviour probe (Pass 1 + Pass 2)</title>
 <style>
   :root { color-scheme: dark; }
   html, body { margin: 0; padding: 0; background: #0c0c10; color: #cbd2dc;
@@ -31,7 +31,7 @@
 </head>
 <body>
 <header>
-  <h1>AI probe — spatial hash + flow field + cover scoring (Pass 1)</h1>
+  <h1>AI probe — Pass 1 (spatial hash / flow field / cover) + Pass 2 (squad / retreat / suppress / ledges)</h1>
   <label>enemies <input type="number" id="enemy-count" value="8" min="1" max="20"></label>
   <label>duration s <input type="number" id="duration-s" value="10" min="2" max="60"></label>
   <button id="spawn-record">spawn + record</button>
@@ -146,6 +146,12 @@ async function runProbe() {
   let frameCount = 0, framesAnyCover = 0;
   // Per-gunman flow-field-reachable counter.
   let flowReachable = 0, flowSamples = 0;
+  // Pass 2 metrics — role distribution accumulator + retreat /
+  // suppress / ledge counters. Roles tally per-frame so we report
+  // "average count of each role over the capture window".
+  const roleHist = { anchor: 0, rusher: 0, flanker: 0, support: 0 };
+  let framesAnyRetreat = 0, framesAnySuppress = 0;
+  let ledgeMountedSamples = 0, ledgeMountedSum = 0;
   // Sampling tick.
   const sampleInterval = 1000 / 30;
   let nextSample = startSample + sampleInterval;
@@ -158,8 +164,18 @@ async function runProbe() {
     nextSample += sampleInterval;
     const gunmen = gm.gunmen || [];
     let anyCover = false;
+    let anyRetreat = false;
+    let anySuppress = false;
+    let ledgeNow = 0;
     for (const g of gunmen) {
       if (!g) continue;
+      // Pass 2 — role tally + state buckets.
+      if (g.alive && g.role && roleHist[g.role] !== undefined) {
+        roleHist[g.role]++;
+      }
+      if (g.alive && g.state === 'retreat') anyRetreat = true;
+      if (g.alive && g.state === 'suppress') anySuppress = true;
+      if (g.alive && g._mountedLedge) ledgeNow++;
       const k = g.netId || g._netId || g;
       const pos = g.group?.position;
       if (!pos) continue;
@@ -203,6 +219,10 @@ async function runProbe() {
       }
     }
     if (anyCover) framesAnyCover++;
+    if (anyRetreat) framesAnyRetreat++;
+    if (anySuppress) framesAnySuppress++;
+    ledgeMountedSamples++;
+    ledgeMountedSum += ledgeNow;
     frameCount++;
   }
   // Restore the original update() so the game keeps running cleanly.
@@ -223,6 +243,29 @@ async function runProbe() {
   log(`state histogram: idle=${stateHist.idle} alerted=${stateHist.alerted} firing=${stateHist.firing} dead=${stateHist.dead} sleep=${stateHist.sleep}`);
   log(`LoS bucket: clear=${losBucket.clear} fullBlock=${losBucket.fullBlock} throughBroken=${losBucket.throughBroken} blockedIntact=${losBucket.blockedIntact}`);
   log(`flow-field reachability: ${flowSamples > 0 ? ((flowReachable / flowSamples) * 100).toFixed(1) : '0.0'}% of samples on field`);
+  // -------- Pass 2 metrics --------
+  log('--- Pass 2 squad metrics ---', 'ok');
+  // Average number of gunmen in each role across the capture window.
+  const fc = Math.max(1, frameCount);
+  const avgAnchor = roleHist.anchor / fc;
+  const avgRusher = roleHist.rusher / fc;
+  const avgFlanker = roleHist.flanker / fc;
+  const avgSupport = roleHist.support / fc;
+  log(`role distribution (avg per frame): anchor=${avgAnchor.toFixed(2)} rusher=${avgRusher.toFixed(2)} flanker=${avgFlanker.toFixed(2)} support=${avgSupport.toFixed(2)}`);
+  const retreatPct = (framesAnyRetreat / fc) * 100;
+  const suppressPct = (framesAnySuppress / fc) * 100;
+  log(`retreat trigger rate: ${retreatPct.toFixed(1)}% of frames had ≥1 gunman in RETREAT`,
+    retreatPct > 0 ? 'ok' : 'warn');
+  log(`suppress active time: ${suppressPct.toFixed(1)}% of frames had ≥1 anchor in SUPPRESS`,
+    suppressPct > 0 ? 'ok' : 'warn');
+  const avgLedge = ledgeMountedSamples > 0 ? ledgeMountedSum / ledgeMountedSamples : 0;
+  log(`ledge mount avg: ${avgLedge.toFixed(2)} gunmen on ledges per frame (max sampled: ${ledgeMountedSum})`);
+  // Live snapshot of squad assignment from window.__aiSquad if present.
+  if (w.__aiSquad) {
+    log(`window.__aiSquad latest: rooms=${w.__aiSquad.rooms} anchor=${w.__aiSquad.anchor} rusher=${w.__aiSquad.rusher} flanker=${w.__aiSquad.flanker} support=${w.__aiSquad.support}`);
+  } else {
+    log('window.__aiSquad not exposed — squad module may not have run yet', 'warn');
+  }
   // Frame-time stats.
   if (updateTimings.length) {
     updateTimings.sort((a, b) => a - b);
@@ -245,6 +288,22 @@ async function runProbe() {
     log(`runOutdoorInvariants: ${out2.ok ? 'PASS' : 'FAIL'}`, out2.ok ? 'ok' : 'bad');
   } catch (e) {
     log('runOutdoorInvariants threw: ' + e.message, 'bad');
+  }
+  try {
+    const rc = w.__level.runRaycastInvariants();
+    log(`runRaycastInvariants: ${rc.ok ? 'PASS' : 'FAIL'} (${rc.passed || 0}/${rc.sampled || 0} samples)`, rc.ok ? 'ok' : 'bad');
+    // Pass 2 squad invariant warnings (kind: 'squad') surface as
+    // non-fatal — runOutdoorInvariants emits them but never fails on
+    // them. Print any that are present so the operator sees them.
+    if (out2 && out2.failures) {
+      const sw = out2.failures.filter(f => f && f.kind === 'squad');
+      if (sw.length) {
+        log(`squad warnings: ${sw.length}`, 'warn');
+        for (const f of sw) log('  · ' + JSON.stringify(f), 'warn');
+      }
+    }
+  } catch (e) {
+    log('runRaycastInvariants threw: ' + e.message, 'bad');
   }
   log('--- done ---', 'ok');
 }
