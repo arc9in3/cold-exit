@@ -844,7 +844,15 @@ export class MegaBoss {
     const pz = this.ctx.getPlayerPos?.()?.z ?? (this.boss.position.z + 8);
     const dx = px - this.boss.position.x;
     const dz = pz - this.boss.position.z;
-    const dist = Math.max(4, Math.hypot(dx, dz) + 4);
+    // Bug #10: damage volume tracks the boss for the full 1.1s × 28
+    // m/s = 30.8m of travel, but the visual corridor was sized to the
+    // *initial* boss-to-player distance (+4m), so a player ahead of
+    // the visible band still ate the charge hit when the boss caught
+    // up. Lock the visual length to the maximum travel envelope so
+    // the indicator covers everywhere the boss can actually reach.
+    const MAX_CHARGE_TRAVEL = 28 * 1.1;
+    const dist = Math.max(4, Math.min(MAX_CHARGE_TRAVEL, Math.hypot(dx, dz) + 4));
+    const visualLen = MAX_CHARGE_TRAVEL;
     const ang = Math.atan2(dx, dz);
     this._chargeTargetAng = ang;
     this._chargeDistance = dist;
@@ -852,15 +860,17 @@ export class MegaBoss {
     // corridor was narrower than the 2.4-radius damage circle, so
     // players standing JUST outside the visible band still ate the
     // hit (#11). Geometry width matches the actual hit volume now.
-    const geom = new THREE.PlaneGeometry(4.8, dist);
+    // Length uses the max-travel envelope so the indicator covers the
+    // entire path the boss can sweep through during the attack.
+    const geom = new THREE.PlaneGeometry(4.8, visualLen);
     const mat = _telegraphMat.clone();
     mat.opacity = 0;
     const m = new THREE.Mesh(geom, mat);
     m.rotation.x = -Math.PI / 2;
     m.position.set(
-      this.boss.position.x + Math.sin(ang) * (dist * 0.5),
+      this.boss.position.x + Math.sin(ang) * (visualLen * 0.5),
       0.05,
-      this.boss.position.z + Math.cos(ang) * (dist * 0.5),
+      this.boss.position.z + Math.cos(ang) * (visualLen * 0.5),
     );
     m.rotation.z = ang;
     this.scene.add(m);
