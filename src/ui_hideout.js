@@ -113,7 +113,13 @@ const RARITY_INDEX = { common: 0, uncommon: 1, rare: 2, epic: 3, legendary: 4 };
 
 const TAB_DEFS = [
   { id: 'contractor',   label: 'CONTRACTOR'    },
-  { id: 'stash',        label: 'STASH'         },
+  // Stash is the chip-buy queue surface (Pre-Mission Store + paperdoll
+  // preview + armory rotation). Renamed 2026-05-05 to match its actual
+  // purpose — old "STASH" label collided with "what I bring in" which
+  // is now strictly the Loadout step. Internal id 'stash' kept for
+  // save-file + station-camera compat; only the user-visible label
+  // changed.
+  { id: 'stash',        label: 'PRE-MISSION STORE' },
   { id: 'vault',        label: 'VAULT'         },
   // Armory — the collection / progression screen. Persistent unlocks
   // browsed here; loadout picks are a separate surface on the
@@ -135,7 +141,7 @@ const TAB_DEFS = [
 // it's the always-on entry point.
 const ONBOARD_GREETINGS = {
   recruiter:  '"You came back. Spend what you brought, make next time hurt less."',
-  stash:      '"Anything on this rack stays. What you carry, you lose."',
+  stash:      '"Spend chips here on starting gear before you deploy. Stock rotates — refresh on a timer or buy upgrades."',
   quartermaster: '"Chips buy weapons into your collection. Pick what to bring on the Loadout screen."',
   tailor:     '"Codename, callsign, look — change them whenever."',
   vendors:    '"Tell me what to keep more of. Costs go up, returns go up."',
@@ -153,7 +159,7 @@ const ONBOARD_GREETINGS = {
 // fire on the same hideout entry.
 const ONBOARD_ANNOUNCEMENTS = {
   recruiter:    '★ TRAINER UNLOCKED — Spend marks here to permanently level your stats.',
-  stash:        '★ STASH UNLOCKED — Items you stow before deploying carry over runs.',
+  stash:        '★ PRE-MISSION STORE UNLOCKED — Spend chips here on starting gear before deploy. Pick what to bring on the Loadout screen.',
   store:        '★ PRE-MISSION STORE UNLOCKED — Spend chips on starting gear before deploy.',
   quartermaster:'★ ARMORY UNLOCKED — Spend chips to permanently add weapons to your collection. Pick from the collection on the Loadout screen.',
   tailor:       '★ TAILOR UNLOCKED — Customize codename, callsign, and character look.',
@@ -2203,16 +2209,36 @@ export class HideoutUI {
 
     const wrap = document.createElement('div');
     wrap.className = 'loadout-summary';
-    wrap.innerHTML = `
-      <div class="loadout-summary-head">TAKING INTO RUN</div>
-      <div class="loadout-summary-grid">
-        <div class="lsum-row"><span class="lsum-lbl">WEAPON</span><span class="lsum-val">${wpnLabel}</span></div>
-        ${chestLbl ? `<div class="lsum-row"><span class="lsum-lbl">CHEST</span><span class="lsum-val">${chestLbl}</span></div>` : ''}
-        ${pantsLbl ? `<div class="lsum-row"><span class="lsum-lbl">PANTS</span><span class="lsum-val">${pantsLbl}</span></div>` : ''}
-        ${packLbl ? `<div class="lsum-row"><span class="lsum-lbl">PACK</span><span class="lsum-val">${packLbl}</span></div>` : ''}
-        <div class="lsum-row"><span class="lsum-lbl">POCKETS</span><span class="lsum-val">${consLbl}</span></div>
-      </div>
-    `;
+    const head = document.createElement('div');
+    head.className = 'loadout-summary-head';
+    head.innerHTML = `TAKING INTO RUN <span class="lsum-hint">(click any slot to manage in Pre-Mission Store)</span>`;
+    wrap.appendChild(head);
+    const grid = document.createElement('div');
+    grid.className = 'loadout-summary-grid';
+    // Builder for one row. WEAPON routes to nothing — it's already
+    // managed on the same screen. Other slots open the Stash tab
+    // (Pre-Mission Store) where the player can buy / change the
+    // queued item for that slot.
+    const _row = (label, val, jumpToStash) => {
+      const btn = document.createElement('button');
+      btn.type = 'button';
+      btn.className = `lsum-row${jumpToStash ? ' lsum-clickable' : ''}`;
+      btn.innerHTML = `<span class="lsum-lbl">${label}</span><span class="lsum-val">${val}</span>`;
+      if (jumpToStash) {
+        btn.addEventListener('click', () => {
+          this.tab = 'stash';
+          if (this._scene) this._scene.gotoStation('stash');
+          this.render();
+        });
+      }
+      return btn;
+    };
+    grid.appendChild(_row('WEAPON', wpnLabel, false));
+    if (chestLbl) grid.appendChild(_row('CHEST', chestLbl, true));
+    if (pantsLbl) grid.appendChild(_row('PANTS', pantsLbl, true));
+    if (packLbl)  grid.appendChild(_row('PACK',  packLbl,  true));
+    grid.appendChild(_row('POCKETS', consLbl, true));
+    wrap.appendChild(grid);
     return wrap;
   }
 
@@ -4425,16 +4451,36 @@ export class HideoutUI {
       .loadout-summary-grid {
         display: flex; flex-wrap: wrap; gap: 4px 14px;
       }
+      .lsum-hint {
+        color: #6f6754; font-weight: 400;
+        font-size: 8px; letter-spacing: 1px;
+        text-transform: none;
+        margin-left: 6px;
+      }
       .lsum-row {
         display: inline-flex; align-items: baseline; gap: 6px;
         font-size: 11px; line-height: 1.4;
+        background: transparent; border: 0;
+        padding: 2px 6px; border-radius: 3px;
+        font: inherit; color: inherit;
       }
+      .lsum-row.lsum-clickable {
+        cursor: pointer; transition: background 0.15s;
+      }
+      .lsum-row.lsum-clickable:hover {
+        background: rgba(155, 139, 106, 0.12);
+      }
+      .lsum-row:not(.lsum-clickable) { cursor: default; }
       .lsum-lbl {
         color: #6f6754; letter-spacing: 1.2px;
         font-size: 9px; font-weight: 700;
       }
       .lsum-val {
         color: #e8dfc8; font-weight: 700;
+      }
+      .lsum-clickable .lsum-val {
+        text-decoration: underline; text-decoration-color: rgba(201, 168, 122, 0.35);
+        text-underline-offset: 2px;
       }
       .loadout-confirm {
         position: absolute; left: 50%; bottom: 44px;

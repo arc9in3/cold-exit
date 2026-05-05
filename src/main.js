@@ -103,7 +103,7 @@ import {
 // rather than prefs.js so the prefs module stays UI-agnostic.
 const ONBOARD_LABELS = {
   recruiter: 'TRAINER UNLOCKED',
-  stash: 'STASH UNLOCKED',
+  stash: 'PRE-MISSION STORE UNLOCKED',
   store: 'PRE-MISSION STORE UNLOCKED',
   quartermaster: 'ARMORY UNLOCKED',
   tailor: 'TAILOR UNLOCKED',
