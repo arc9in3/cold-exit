@@ -96,6 +96,7 @@ import {
   getMusicEnabled, setMusicEnabled,
   applyOnboardTriggers, getRunCount,
   getCoopMode, setCoopMode,
+  isOnboardSeen, markOnboardSeen,
 } from './prefs.js';
 
 // Onboarding tab → human label for the reveal-toast. Kept in main.js
@@ -18290,6 +18291,26 @@ function tick() {
         }
       }
     } catch (e) { console.warn('[death] rewards panel failed', e); }
+    // First-death marks tutorial — getRunCount has already been
+    // bumped above, so deathCount === 1 means this is the player's
+    // very first death-return. Fire a 6s toast 1.5s after the death
+    // screen shows so the player has time to read the rewards panel
+    // first, then sees the explainer underneath. Idempotent —
+    // tracked under prefs:onboardSeen so subsequent deaths stay quiet.
+    try {
+      const isFirstDeath = (getRunCount() | 0) === 1;
+      if (isFirstDeath && !isOnboardSeen('marksEconomy')) {
+        markOnboardSeen('marksEconomy');
+        setTimeout(() => {
+          try {
+            transientHudMsg(
+              `MARKS earned (${runStats.marksEarned | 0}) level your stats permanently — spend them at the Trainer next visit.`,
+              7.0,
+            );
+          } catch (_) {}
+        }, 1500);
+      }
+    } catch (_) {}
     // Mortician flavor line — picks contextual copy based on what
     // killed the player. Reads top-attacker name + zone + tier from
     // the recap data assembled above.
