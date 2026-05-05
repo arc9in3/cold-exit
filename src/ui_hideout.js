@@ -1103,6 +1103,26 @@ export class HideoutUI {
       withBackButton: false,
       withWeaponPicker: false,
     }));
+    // One-shot focus scroll. _storeFocus is set when the player
+    // clicked a Loadout summary slot to land here. After scrolling
+    // the first matching tile into view, we clear the flag so the
+    // next render doesn't keep dimming non-matching tiles. requestAF
+    // because the DOM isn't laid out yet at this point in render.
+    if (this._storeFocus) {
+      const focusKind = this._storeFocus;
+      this._storeFocus = null;
+      requestAnimationFrame(() => {
+        const focused = wrap.querySelector('.store-tile-focused');
+        if (focused) focused.scrollIntoView({ behavior: 'smooth', block: 'center' });
+        // Strip the dim class from siblings on a 2s timer so the
+        // player can browse the rest of the stock once they've seen
+        // what we routed them to.
+        setTimeout(() => {
+          for (const t of wrap.querySelectorAll('.store-tile-dim')) t.classList.remove('store-tile-dim');
+          for (const t of wrap.querySelectorAll('.store-tile-focused')) t.classList.remove('store-tile-focused');
+        }, 2000);
+      });
+    }
     return wrap;
   }
 
@@ -2079,27 +2099,30 @@ export class HideoutUI {
     // Builder for one row. WEAPON routes to nothing — it's already
     // managed on the same screen. Other slots open the Stash tab
     // (Pre-Mission Store) where the player can buy / change the
-    // queued item for that slot.
-    const _row = (label, val, jumpToStash) => {
+    // queued item for that slot. `focusKind` lets the store filter
+    // and scroll to relevant stock so the click → manage loop is
+    // one tap instead of "land in store, scan grid for chest items".
+    const _row = (label, val, focusKind) => {
       const btn = document.createElement('button');
       btn.type = 'button';
-      btn.className = `lsum-row${jumpToStash ? ' lsum-clickable' : ''}`;
+      btn.className = `lsum-row${focusKind ? ' lsum-clickable' : ''}`;
       btn.innerHTML = `<span class="lsum-lbl">${label}</span><span class="lsum-val">${val}</span>`;
-      if (jumpToStash) {
+      if (focusKind) {
         btn.addEventListener('click', () => {
           this.tab = 'stash';
+          this._storeFocus = focusKind;
           if (this._scene) this._scene.gotoStation('stash');
           this.render();
         });
       }
       return btn;
     };
-    grid.appendChild(_row('WEAPON', wpnLabel, false));
-    if (chestLbl) grid.appendChild(_row('CHEST', chestLbl, true));
-    if (pantsLbl) grid.appendChild(_row('PANTS', pantsLbl, true));
-    if (packLbl)  grid.appendChild(_row('PACK',  packLbl,  true));
-    grid.appendChild(_row('POCKETS', consLbl, true));
-    if (buffLbl)  grid.appendChild(_row('BOOSTS', buffLbl, true));
+    grid.appendChild(_row('WEAPON', wpnLabel, null));
+    if (chestLbl) grid.appendChild(_row('CHEST',   chestLbl, 'armor:chest'));
+    if (pantsLbl) grid.appendChild(_row('PANTS',   pantsLbl, 'armor:pants'));
+    if (packLbl)  grid.appendChild(_row('PACK',    packLbl,  'armor:backpack'));
+    grid.appendChild(_row('POCKETS',               consLbl,  'consumable'));
+    if (buffLbl)  grid.appendChild(_row('BOOSTS',  buffLbl,  'buff'));
     wrap.appendChild(grid);
     return wrap;
   }
@@ -2677,6 +2700,17 @@ export class HideoutUI {
       tile.classList.add('sold');
       tile.innerHTML = `<div class="lt-name">${slot.label}</div><div class="lt-sold">SOLD</div>`;
       return tile;
+    }
+    // Focus highlight — when the player clicked a Loadout summary
+    // slot to land here, dim non-matching tiles and gold-border the
+    // ones for the requested kind. `_storeFocus` is one-shot per
+    // jump and cleared in _renderStashTab after first render.
+    if (this._storeFocus) {
+      const m = /^armor:(.+)$/.exec(this._storeFocus);
+      const matches = m
+        ? (slot.kind === 'armor' && slot.armorSlot === m[1])
+        : (slot.kind === this._storeFocus);
+      tile.classList.add(matches ? 'store-tile-focused' : 'store-tile-dim');
     }
     tile.style.borderColor = rarityColor({ rarity: slot.rarity });
     // iconForItem dispatches on id + slot (armor) and id (consumable);
@@ -4169,6 +4203,26 @@ export class HideoutUI {
         align-items: center; justify-content: center; min-height: 80px;
       }
       .loadout-tile.sold { opacity: 0.55; }
+      /* Focus / dim states — applied for ~2s when the player jumps
+         here from a Loadout summary slot. Focus tiles get a gold
+         outline pulse; non-matching tiles fade so the eye lands on
+         what was clicked. Both classes are stripped on a timer
+         (see _renderStashTab) so the player can browse the rest. */
+      .store-tile-focused {
+        animation: store-focus-pulse 1.6s ease-out 1;
+        outline: 2px solid #f2c060;
+        outline-offset: 2px;
+      }
+      .store-tile-dim {
+        opacity: 0.35;
+        filter: saturate(0.5);
+        transition: opacity 240ms ease, filter 240ms ease;
+      }
+      @keyframes store-focus-pulse {
+        0%   { box-shadow: 0 0 0 0 rgba(242, 192, 96, 0.7); }
+        70%  { box-shadow: 0 0 0 10px rgba(242, 192, 96, 0); }
+        100% { box-shadow: 0 0 0 0 rgba(242, 192, 96, 0); }
+      }
       .lt-icon {
         height: 56px;
         display: flex; align-items: center; justify-content: center;
