@@ -246,26 +246,26 @@ export class Level {
       // the start/boss/merchant rooms have their own built-in furnishing.
       let layout = 'open';
       if (type === 'combat') {
-        // Combat layout pool. Each landing probability targets ~5-12%
-        // so the rotation past ~40 rooms still feels varied. The new
-        // entries (alcove / center-pit / zigzag) all use _blocksDoor
-        // checks during _buildInterior so they never sever a room
-        // from its neighbours.
+        // Weighted layout picker per the level-gen overhaul design.
+        // Targets layout VARIETY — at least 6 distinct layouts on a
+        // typical 8-12 room level. 'corridor' is moved here from the
+        // giant-room mutation step so corridor-shaped combat rooms
+        // exist regardless of giant-extension. lshape/closet/bunker
+        // are intentionally dropped from the rotation — playtest
+        // surfaced that they cornered the player too often.
         const r = Math.random();
-        if      (r < 0.08) layout = 'columns-4';
-        else if (r < 0.13) layout = 'columns-6';
-        else if (r < 0.18) layout = 'columns-cross';
-        else if (r < 0.27) layout = 'split';
-        else if (r < 0.40) layout = 'hallway';
-        else if (r < 0.51) layout = 'lshape';
-        else if (r < 0.60) layout = 'partition';
-        else if (r < 0.68) layout = 'closet';
-        else if (r < 0.75) layout = 'bunker';
-        else if (r < 0.82) layout = 'pillars-grid';
-        else if (r < 0.88) layout = 'alcove';
-        else if (r < 0.94) layout = 'center-pit';
-        else if (r < 0.98) layout = 'zigzag';
-        // else remains 'open'
+        if      (r < 0.20) layout = 'open';
+        else if (r < 0.30) layout = 'columns-4';
+        else if (r < 0.40) layout = 'columns-6';
+        else if (r < 0.48) layout = 'columns-cross';
+        else if (r < 0.56) layout = 'split';
+        else if (r < 0.63) layout = 'hallway';
+        else if (r < 0.70) layout = 'partition';
+        else if (r < 0.80) layout = 'corridor';
+        else if (r < 0.86) layout = 'pillars-grid';
+        else if (r < 0.92) layout = 'alcove';
+        else if (r < 0.97) layout = 'center-pit';
+        else               layout = 'zigzag';
       } else if (type === 'boss') {
         // Boss room layout — 50/50 split between dedicated boss
         // arenas and wider combat layouts so bosses surface in many
@@ -381,8 +381,15 @@ export class Level {
       room.giant = true;
       // About half of the extended rooms become "corridors" — an
       // interior pass narrows the perpendicular axis so they read
-      // as long halls instead of giant squares.
-      if (Math.random() < 0.5) room.layout = 'corridor';
+      // as long halls instead of giant squares. Skip if the room
+      // already rolled into one of the layouts the corridor pass
+      // would override (the new weighted picker covers corridor too,
+      // so we only force-corridor when the rolled layout would feel
+      // wrong on a stretched cell).
+      if (Math.random() < 0.5 && (room.layout === 'open' || room.layout === 'columns-4'
+          || room.layout === 'columns-6' || room.layout === 'columns-cross')) {
+        room.layout = 'corridor';
+      }
     }
 
     // Branch rooms: pick a chain room with an unused cardinal neighbour and
