@@ -22,19 +22,32 @@ const PUSH_FACTOR = 0.5;
 // wall) — the axis-separated movement resolver can't push out an
 // already-overlapping point on its own, so this is the only way stuck
 // enemies get freed.
+// Reused per-frame entry buffer. Each slot is `{ pos, r }`; we grow
+// the pool lazily and reset entry references in-place each call so
+// the function allocates 0 objects in steady-state.
+const _entriesPool = [];
+let _entriesCount = 0;
+function _entryAt(i) {
+  while (_entriesPool.length <= i) _entriesPool.push({ pos: null, r: 0 });
+  return _entriesPool[i];
+}
+
 export function separateEnemies(groups, resolveCollision, unstick) {
-  const entries = [];
+  _entriesCount = 0;
   for (const { list, radius } of groups) {
     for (const e of list) {
       if (!e.alive) continue;
-      entries.push({ pos: e.group.position, r: radius });
+      const slot = _entryAt(_entriesCount++);
+      slot.pos = e.group.position;
+      slot.r = radius;
     }
   }
-  const n = entries.length;
+  const n = _entriesCount;
   if (n < 1) return;
 
   if (unstick) {
-    for (const e of entries) {
+    for (let k = 0; k < n; k++) {
+      const e = _entriesPool[k];
       const u = unstick(e.pos.x, e.pos.z, e.r);
       if (u.x !== e.pos.x || u.z !== e.pos.z) {
         e.pos.x = u.x; e.pos.z = u.z;
@@ -44,9 +57,9 @@ export function separateEnemies(groups, resolveCollision, unstick) {
   if (n < 2) return;
 
   for (let i = 0; i < n; i++) {
-    const a = entries[i];
+    const a = _entriesPool[i];
     for (let j = i + 1; j < n; j++) {
-      const b = entries[j];
+      const b = _entriesPool[j];
       const dx = b.pos.x - a.pos.x;
       const dz = b.pos.z - a.pos.z;
       const minDist = a.r + b.r;
