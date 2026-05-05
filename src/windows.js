@@ -15,6 +15,7 @@
 // either the visual or the collision proxy.
 
 import * as THREE from 'three';
+import { mergeGeometries } from 'three/addons/utils/BufferGeometryUtils.js';
 
 // Hits to break a window. Tuned low so single-shot weapons can
 // shatter in 1-2 rounds (sniper one-shots; pistol two-shots). Buffed
@@ -25,6 +26,58 @@ const FRAME_COLOR = 0x3a3a44;
 const GLASS_COLOR = 0x8ec5d8;
 const FRAME_THICK = 0.18;       // mullion / sill thickness
 const GLASS_THICK = 0.12;       // visible glass slab depth (matches WALL_THICK / 10)
+
+// Cache of merged frame geometries keyed by `${width}|${height}|${sillHeight}`.
+// Pass 1C originally built four separate sub-meshes per window (sill,
+// lintel, left mullion, right mullion); a level with 20 windows paid
+// 80 draw calls just for frames. We now merge those four boxes into
+// one BufferGeometry per (width, height, sillHeight) tuple. The
+// returned mesh is a single draw call. `levels1.png`-style window
+// proportions are repeated heavily, so this cache is hit on every
+// subsequent window after the first.
+const _frameGeomCache = new Map();
+function _frameGeometry(width, height, sillHeight) {
+  const key = `${width}|${height}|${sillHeight}`;
+  let g = _frameGeomCache.get(key);
+  if (g) return g;
+  const parts = [];
+  // Each frame piece — translate the unit BoxGeometry into the right
+  // local position, then mergeGeometries collapses them into one buffer.
+  if (sillHeight > 0) {
+    const sill = new THREE.BoxGeometry(width + FRAME_THICK * 2, FRAME_THICK, GLASS_THICK + FRAME_THICK);
+    sill.translate(0, sillHeight - FRAME_THICK / 2, 0);
+    parts.push(sill);
+  }
+  const lintel = new THREE.BoxGeometry(width + FRAME_THICK * 2, FRAME_THICK, GLASS_THICK + FRAME_THICK);
+  lintel.translate(0, sillHeight + height + FRAME_THICK / 2, 0);
+  parts.push(lintel);
+  const mLeft = new THREE.BoxGeometry(FRAME_THICK, height, GLASS_THICK + FRAME_THICK);
+  mLeft.translate(-(width / 2 + FRAME_THICK / 2), sillHeight + height / 2, 0);
+  parts.push(mLeft);
+  const mRight = new THREE.BoxGeometry(FRAME_THICK, height, GLASS_THICK + FRAME_THICK);
+  mRight.translate(width / 2 + FRAME_THICK / 2, sillHeight + height / 2, 0);
+  parts.push(mRight);
+  const merged = mergeGeometries(parts, false);
+  // Stamp shared so any traversal-based dispose loop skips it.
+  merged.userData = merged.userData || {};
+  merged.userData.sharedRigGeom = true;
+  // Source geometries are no longer needed after the merge.
+  for (const p of parts) p.dispose?.();
+  _frameGeomCache.set(key, merged);
+  return merged;
+}
+
+// Shared frame material — every window's frame is the same matte dark
+// metal, so one material instance saves N material allocations and lets
+// downstream renderers batch material uniforms.
+let _frameMat = null;
+function frameMaterial() {
+  if (_frameMat) return _frameMat;
+  _frameMat = new THREE.MeshStandardMaterial({ color: FRAME_COLOR, roughness: 0.7 });
+  _frameMat.userData = _frameMat.userData || {};
+  _frameMat.userData.sharedRigGeom = true;     // skip dispose (cached)
+  return _frameMat;
+}
 
 // Build a window. Returns {group, collision, kind, breakable, state}.
 // width / height are the visible aperture; sillHeight is how far up
@@ -38,52 +91,18 @@ const GLASS_THICK = 0.12;       // visible glass slab depth (matches WALL_THICK 
 export function buildWindow({ width = 4, height = 2.4, sillHeight = 1.0 } = {}) {
   const group = new THREE.Group();
 
-  // Frame — sill (bottom) + lintel (top) + 2 mullions (sides).
-  // Each frame piece is a small box; together they form a window
-  // shape around the central glass pane.
-  const frameMat = new THREE.MeshStandardMaterial({
-    color: FRAME_COLOR, roughness: 0.7,
-  });
-
-  // Sill (bottom rail) — sits at sillHeight, full width, thick enough
-  // to stand on once the glass is broken (low-sill vault).
-  if (sillHeight > 0) {
-    const sill = new THREE.Mesh(
-      new THREE.BoxGeometry(width + FRAME_THICK * 2, FRAME_THICK, GLASS_THICK + FRAME_THICK),
-      frameMat,
-    );
-    sill.position.set(0, sillHeight - FRAME_THICK / 2, 0);
-    sill.castShadow = false;
-    sill.receiveShadow = true;
-    group.add(sill);
-  }
-  // Lintel (top)
-  const lintel = new THREE.Mesh(
-    new THREE.BoxGeometry(width + FRAME_THICK * 2, FRAME_THICK, GLASS_THICK + FRAME_THICK),
-    frameMat,
+  // Frame — sill (bottom) + lintel (top) + 2 mullions (sides) merged
+  // into a single BufferGeometry per (width, height, sillHeight) tuple.
+  // Pre-merge each window paid 4 draw calls just for frame pieces;
+  // post-merge it's 1. Geometry + material are both cached, so the
+  // second window of the same dims allocates zero buffers.
+  const frame = new THREE.Mesh(
+    _frameGeometry(width, height, sillHeight),
+    frameMaterial(),
   );
-  lintel.position.set(0, sillHeight + height + FRAME_THICK / 2, 0);
-  lintel.castShadow = false;
-  lintel.receiveShadow = true;
-  group.add(lintel);
-  // Left mullion
-  const mLeft = new THREE.Mesh(
-    new THREE.BoxGeometry(FRAME_THICK, height, GLASS_THICK + FRAME_THICK),
-    frameMat,
-  );
-  mLeft.position.set(-(width / 2 + FRAME_THICK / 2), sillHeight + height / 2, 0);
-  mLeft.castShadow = false;
-  mLeft.receiveShadow = true;
-  group.add(mLeft);
-  // Right mullion
-  const mRight = new THREE.Mesh(
-    new THREE.BoxGeometry(FRAME_THICK, height, GLASS_THICK + FRAME_THICK),
-    frameMat,
-  );
-  mRight.position.set(width / 2 + FRAME_THICK / 2, sillHeight + height / 2, 0);
-  mRight.castShadow = false;
-  mRight.receiveShadow = true;
-  group.add(mRight);
+  frame.castShadow = false;
+  frame.receiveShadow = true;
+  group.add(frame);
 
   // Glass pane — translucent slab that the player can see through.
   // Stamped with userData.kind = 'window' so the projectile system's
@@ -115,7 +134,10 @@ export function buildWindow({ width = 4, height = 2.4, sillHeight = 1.0 } = {}) 
     width,
     height,
     glassMesh: glass,
-    framePieces: group.children.filter(c => c !== glass),
+    // framePieces: legacy was an array of 4 sub-meshes; post-merge it's
+    // the single merged frame mesh. Anything that walked this list now
+    // sees one entry instead of four.
+    framePieces: [frame],
     group,
     collisionProxy: null,    // set by buildWindow caller after wiring
   };
