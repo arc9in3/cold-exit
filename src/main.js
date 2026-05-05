@@ -4824,6 +4824,10 @@ let lastPlayerInfo = null;
 // per-frame trail segments end-to-end. Reset to null when the combo
 // returns to idle / window so the next swing starts a fresh trail.
 let _playerMeleeTrailPrev = null;
+// Last frame on which tickFlame fired a cone — encounters (Path of Fire)
+// poll this to detect flamethrower hits, since the flamer applies damage
+// directly without spawning a projectile they can scan.
+let _lastFlameAim = null; // {originX, originZ, dirX, dirZ, range, halfCos, t}
 function berserkMult() {
   const pi = lastPlayerInfo;
   if (!pi || !derivedStats.berserkBonus) return 1;
@@ -5793,6 +5797,11 @@ function _regenerateLevelImpl() {
         // Active projectile list — Wishing Well + Path of Fire scan
         // this each tick to detect throwables landing in their volume.
         getProjectiles: () => projectiles.projectiles,
+        // Last-fire snapshot of the player's flamethrower cone, or null.
+        // Path of Fire reads this to accept a flamer stream as an
+        // alternative to a molotov. Stale entries (>500ms old) are
+        // ignored by callers.
+        getFlameAim: () => _lastFlameAim,
         // Tome encounter — hand the player a skill point.
         grantSkillPoint: (n = 1) => {
           const add = Math.max(1, n | 0);
@@ -8306,6 +8315,15 @@ function tickFlame(dt, playerInfo, weapon, inputState, aimInfo) {
   alertEnemiesFromShot(origin);
 
   combat.spawnFlameParticles(origin, dir, range, angleRad);
+
+  // Snapshot the flame cone so encounters can detect "fire reached me"
+  // without parsing projectiles. Path of Fire uses this to accept a
+  // flamethrower stream as an alternative to molotovs.
+  _lastFlameAim = {
+    originX: origin.x, originZ: origin.z,
+    dirX: dir.x, dirZ: dir.z,
+    range, halfCos, t: performance.now(),
+  };
 }
 
 function tryReload(weapon) {

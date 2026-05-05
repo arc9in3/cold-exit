@@ -2805,19 +2805,9 @@ export const ENCOUNTER_DEFS = {
         s.flame.scale.y = 1 + Math.sin(s.wobbleT * 5) * 0.15;
         s.flame.material.opacity = 0.78 + Math.sin(s.wobbleT * 7) * 0.12;
       }
-      if (s.complete || !ctx.getProjectiles) return;
-      const list = ctx.getProjectiles();
-      if (!list || !list.length) return;
+      if (s.complete) return;
       const RADIUS = 0.6;
-      for (const p of list) {
-        if (p.dead || p.owner !== 'player') continue;
-        if (p.throwKind !== 'molotov') continue;
-        const dx = p.pos.x - s.disc.cx;
-        const dz = p.pos.z - s.disc.cz;
-        if (dx * dx + dz * dz > RADIUS * RADIUS) continue;
-        p.dead = true;
-        if (p.body) ctx.scene.remove(p.body);
-        if (p.trail) ctx.scene.remove(p.trail);
+      const _lightBowl = () => {
         s.lit = true;
         s.complete = true;
         s.flame.visible = true;
@@ -2827,7 +2817,43 @@ export const ENCOUNTER_DEFS = {
         const relic = ctx.relicFor && ctx.relicFor('undying_embers');
         if (relic) ctx.spawnLoot(s.disc.cx, s.disc.cz + 1.6, relic);
         if (ctx.markEncounterComplete) ctx.markEncounterComplete('path_of_fire');
-        return;
+      };
+      // 1) Molotov projectiles — original lighting condition.
+      if (ctx.getProjectiles) {
+        const list = ctx.getProjectiles();
+        if (list && list.length) {
+          for (const p of list) {
+            if (p.dead || p.owner !== 'player') continue;
+            if (p.throwKind !== 'molotov') continue;
+            const dx = p.pos.x - s.disc.cx;
+            const dz = p.pos.z - s.disc.cz;
+            if (dx * dx + dz * dz > RADIUS * RADIUS) continue;
+            p.dead = true;
+            if (p.body) ctx.scene.remove(p.body);
+            if (p.trail) ctx.scene.remove(p.trail);
+            _lightBowl();
+            return;
+          }
+        }
+      }
+      // 2) Flamethrower stream — accept any fresh cone whose direction
+      // and range cover the brazier disc. Players reasonably expect a
+      // flamer to light the bowl just like a molotov does.
+      if (ctx.getFlameAim) {
+        const fa = ctx.getFlameAim();
+        if (fa && (performance.now() - fa.t) < 200) {
+          const dx = s.disc.cx - fa.originX;
+          const dz = s.disc.cz - fa.originZ;
+          const d = Math.hypot(dx, dz);
+          if (d <= fa.range + RADIUS) {
+            const nx = dx / Math.max(0.0001, d);
+            const nz = dz / Math.max(0.0001, d);
+            if (nx * fa.dirX + nz * fa.dirZ >= fa.halfCos) {
+              _lightBowl();
+              return;
+            }
+          }
+        }
       }
     },
     onItemDropped(_item, _ctx) { return { consume: false }; },
