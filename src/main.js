@@ -16360,16 +16360,43 @@ function _showMidRunContractOffer() {
         btn.onmouseleave = () => { btn.style.background = 'rgba(40,30,16,0.55)'; btn.style.borderColor = '#6a4a2a'; };
         const name = document.createElement('div');
         Object.assign(name.style, { fontWeight: '700', fontSize: '13px', color: '#ffd070' });
-        name.textContent = def.title || def.id;
+        // CONTRACT_DEFS use `label` (not `title`) and have no
+        // `description`. Falling back to `def.id` and the literal '—'
+        // was rendering the raw ids and dashes the player saw as
+        // placeholder text (#19, #51). Build a target-count line from
+        // the same fields the hideout banner uses.
+        name.textContent = def.label || def.title || def.id;
         const desc = document.createElement('div');
         Object.assign(desc.style, { fontSize: '11px', color: '#b8a890', marginTop: '4px', lineHeight: '1.4' });
-        desc.textContent = def.description || '—';
+        const _tCount = def.targetCount | 0;
+        const _tType = def.targetType || 'any';
+        const _plural = _tCount === 1 ? '' : 's';
+        const _tLabel =
+          _tType === 'dasher'   ? `dasher${_plural}` :
+          _tType === 'tank'     ? `tank${_plural}` :
+          _tType === 'gunman'   ? (_tCount === 1 ? 'gunman' : 'gunmen') :
+          _tType === 'melee'    ? (_tCount === 1 ? 'melee enemy' : 'melee enemies') :
+          _tType === 'sniper'   ? `sniper${_plural}` :
+          _tType === 'boss'     ? `boss${_tCount === 1 ? '' : 'es'}` :
+          _tType === 'megaboss' ? `megaboss${_tCount === 1 ? '' : 'es'}` :
+          (_tCount === 1 ? 'enemy' : 'enemies');
+        desc.textContent = def.description
+          || def.flavor
+          || def.rule
+          || (_tCount > 0 ? `Eliminate ${_tCount} × ${_tLabel}` : '');
         const reward = document.createElement('div');
         Object.assign(reward.style, { fontSize: '10px', color: '#80c0e0', marginTop: '4px', letterSpacing: '1px', textTransform: 'uppercase' });
         const r = [];
-        if (def.chipReward)  r.push(`${def.chipReward} chips`);
-        if (def.markReward)  r.push(`${def.markReward} marks`);
-        if (def.sigilReward) r.push(`${def.sigilReward} sigils`);
+        // CONTRACT_DEFS expose `reward` (chips), `marksReward` and
+        // `perKillReward`. Old keys (chipReward / markReward /
+        // sigilReward) never existed so the line was permanently
+        // empty — that's the "no indication of rewards" symptom (#52).
+        if (def.reward)        r.push(`${def.reward} chips`);
+        if (def.perKillReward) r.push(`+${def.perKillReward}/kill`);
+        if (def.marksReward)   r.push(`${def.marksReward} marks`);
+        if (def.chipReward)    r.push(`${def.chipReward} chips`);  // legacy fallback
+        if (def.markReward)    r.push(`${def.markReward} marks`);  // legacy fallback
+        if (def.sigilReward)   r.push(`${def.sigilReward} sigils`);
         reward.textContent = r.length ? r.join(' · ') : '';
         btn.appendChild(name);
         btn.appendChild(desc);
