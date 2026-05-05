@@ -2872,6 +2872,15 @@ export function createPlayer(scene) {
     const isMarine = style === 'marine';
     const p = STYLE_PALETTE[style] || OPERATOR_COLORS;
     _styleBase = p;
+    // FBX rig has its own per-mesh MeshStandardMaterials baked into
+    // the loaded asset — no rig.materials.{bodyMat, ...} to poke.
+    // Cache the palette so a later FBX-material-swap pipeline can
+    // pick it up; bail early to avoid a TypeError from the writes
+    // below (regression caught 2026-05-04 by the perf harness).
+    if (!rig.materials) {
+      marineDecor.setVisible?.(isMarine);
+      return;
+    }
     rig.materials.bodyMat.color.setHex(p.body);
     rig.materials.headMat.color.setHex(p.head);
     rig.materials.legMat.color.setHex(p.leg);
