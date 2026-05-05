@@ -94,7 +94,22 @@ import {
   getMarks, setMarks,
   getPersistentChips, setPersistentChips,
   getMusicEnabled, setMusicEnabled,
+  applyOnboardTriggers, getRunCount,
 } from './prefs.js';
+
+// Onboarding tab → human label for the reveal-toast. Kept in main.js
+// rather than prefs.js so the prefs module stays UI-agnostic.
+const ONBOARD_LABELS = {
+  recruiter: 'TRAINER UNLOCKED',
+  stash: 'STASH UNLOCKED',
+  store: 'PRE-MISSION STORE UNLOCKED',
+  quartermaster: 'ARMORER UNLOCKED',
+  tailor: 'TAILOR UNLOCKED',
+  vendors: 'VENDORS UNLOCKED',
+  mailbox: 'MAILBOX UNLOCKED',
+  vault: 'VAULT UNLOCKED',
+  blackmarket: 'BLACK MARKET UNLOCKED',
+};
 import { StoreUpgradeUI, StoreRollUI, rollRarityForTier } from './ui_starting_store.js';
 import { getQualityPref, setQualityPref, applyQuality, qualityFlags } from './quality.js';
 import { DetailsUI } from './ui_details.js';
@@ -16335,6 +16350,21 @@ async function advanceFloor() {
   // run and still satisfy "extract from floor X" if they extracted
   // earlier). peakLevel is monotonic via runStats.setLevel.
   runStats.noteExtracted();
+  // Mid-run reveal trigger — chip-earn / rank-up that crossed a
+  // threshold during this floor unlocks the matching tab. Same
+  // toast surface as the death-time call.
+  try {
+    const newReveals = applyOnboardTriggers({
+      deathCount: getRunCount(),
+      chips: getPersistentChips(),
+      contractRank: getContractRank(),
+    });
+    if (newReveals && newReveals.length) {
+      for (const id of newReveals) {
+        transientHudMsg(`★ NEW: ${ONBOARD_LABELS[id] || id.toUpperCase()}`, 4.0);
+      }
+    }
+  } catch (_) {}
   // Note: contract claim used to live here. Moved to
   // _applyContractPerKillReward — contracts now complete the
   // moment the kill counter hits targetCount, not on floor
@@ -18137,6 +18167,24 @@ function tick() {
     // and the cooldownRuns timer. Bumped here on death; extract path
     // bumps separately at advanceFloor().
     try { bumpRunCount(); } catch (_) {}
+    // Hades-style progressive reveal — first death unlocks Trainer +
+    // Stash, chip thresholds open the Pre-mission Store, contract
+    // rank ramp opens vendors / black market / mailbox. Each newly-
+    // revealed id pops a transient HUD toast so the player notices
+    // the new tab on their next hideout visit. Idempotent — re-firing
+    // with the same trigger conditions is a no-op once a flag is set.
+    try {
+      const newReveals = applyOnboardTriggers({
+        deathCount: getRunCount(),
+        chips: getPersistentChips(),
+        contractRank: getContractRank(),
+      });
+      if (newReveals && newReveals.length) {
+        for (const id of newReveals) {
+          transientHudMsg(`★ NEW: ${ONBOARD_LABELS[id] || id.toUpperCase()}`, 4.0);
+        }
+      }
+    } catch (e) { console.warn('[onboard] reveal-trigger failed', e); }
     // Populate the death-screen run-summary panel with the freshly-
     // sealed stats. Mirrors the leaderboard fields so the player gets
     // immediate feedback about how the run went without having to

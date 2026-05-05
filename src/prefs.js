@@ -866,3 +866,98 @@ export function setRecruiterUnlocked(id) {
 export function hasRecruiterUnlock(id) {
   return getRecruiterUnlocks().has(id);
 }
+
+// ─── Onboarding reveal flags ──────────────────────────────────────
+// Hades-style progressive unlock. Each tab/feature on the hideout
+// stays hidden until the player triggers its reveal condition. Once
+// revealed, the flag stays set for life — the UI button stays
+// visible permanently, and a one-shot `NEW` glow + tutorial toast
+// fire on the very first visit (cleared via `markOnboardSeen`).
+//
+// Lookup chain:
+//   isOnboardRevealed('trainer')      → true once the reveal trigger fires
+//   isOnboardSeen('trainer')          → true once the player has clicked into it
+//   markOnboardRevealed('trainer')    → set on death/chip/rank events
+//   markOnboardSeen('trainer')        → set on first interaction
+//
+// Storage: one stringified Set per slot, both behind the same
+// localStorage namespace so a "wipe save data" flow clears both.
+const ONBOARD_REVEALED_KEY = 'tacticalrogue:onboardRevealed:v1';
+const ONBOARD_SEEN_KEY     = 'tacticalrogue:onboardSeen:v1';
+
+function _readSet(key) {
+  const arr = _read(key, []);
+  return Array.isArray(arr) ? new Set(arr) : new Set();
+}
+function _writeSet(key, set) {
+  _write(key, [...set].sort());
+}
+
+export function isOnboardRevealed(id) {
+  if (!id) return false;
+  return _readSet(ONBOARD_REVEALED_KEY).has(id);
+}
+export function markOnboardRevealed(id) {
+  if (!id) return false;
+  const set = _readSet(ONBOARD_REVEALED_KEY);
+  if (set.has(id)) return false;
+  set.add(id);
+  _writeSet(ONBOARD_REVEALED_KEY, set);
+  return true;   // caller can fire toast / NEW glow when this returns true
+}
+
+export function isOnboardSeen(id) {
+  if (!id) return false;
+  return _readSet(ONBOARD_SEEN_KEY).has(id);
+}
+export function markOnboardSeen(id) {
+  if (!id) return;
+  const set = _readSet(ONBOARD_SEEN_KEY);
+  if (set.has(id)) return;
+  set.add(id);
+  _writeSet(ONBOARD_SEEN_KEY, set);
+}
+
+// Resolve the reveal state of every hideout tab. Pure function — call
+// from the UI layer (tab strip render, command-deck side buttons) and
+// hide tabs whose id isn't in the returned Set. The contractor tab is
+// always visible by design (it's the spine of the entry flow).
+export function getRevealedHideoutTabs() {
+  const set = _readSet(ONBOARD_REVEALED_KEY);
+  const out = new Set(['contractor']);   // always-on
+  for (const id of set) out.add(id);
+  return out;
+}
+
+// Reveal-trigger wrapper. Called from main.js on death / chip-earn /
+// rank-up. Each call is idempotent (markOnboardRevealed checks the
+// set first), so it's safe to call every event tick.
+//
+// Triggers (extend by adding cases here):
+//   first death           → trainer + stash
+//   chips earned ≥ 20     → store
+//   contract rank ≥ 3     → tier2-contracts (UI hint, no new tab)
+//   contract rank ≥ 5     → vendors
+//   contract rank ≥ 8     → mailbox
+//   contract rank ≥ 10    → vault
+//   contract rank ≥ 12    → blackmarket
+//   contract rank ≥ 4     → tailor
+//
+// Returns array of newly-revealed ids so the caller can fire toasts
+// for each. Empty array means "no new reveals this call".
+export function applyOnboardTriggers({ deathCount, chips, contractRank }) {
+  const newly = [];
+  const fire = (id, cond) => {
+    if (cond && !isOnboardRevealed(id) && markOnboardRevealed(id)) newly.push(id);
+  };
+  fire('recruiter',  deathCount >= 1);
+  fire('stash',      deathCount >= 1);
+  fire('store',      (chips | 0) >= 20 && deathCount >= 1);
+  fire('quartermaster', contractRank >= 2);
+  fire('tailor',     contractRank >= 4);
+  fire('vendors',    contractRank >= 5);
+  fire('mailbox',    contractRank >= 8);
+  fire('vault',      contractRank >= 10);
+  fire('blackmarket',contractRank >= 12);
+  return newly;
+}

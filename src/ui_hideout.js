@@ -35,6 +35,7 @@ import {
   getStartingStoreState, setStartingStoreState,
   getMerchantUpgrades, setMerchantUpgrade, merchantUpgradeNextCost, MERCHANT_KINDS, MERCHANT_UPGRADE_MAX,
   getRerollUnlocked, setRerollUnlocked, REROLL_UNLOCK_COST,
+  getRevealedHideoutTabs, isOnboardSeen, markOnboardSeen,
 } from './prefs.js';
 import { tunables } from './tunables.js';
 import { BALANCE } from './balance.js';
@@ -920,14 +921,24 @@ export class HideoutUI {
       tailor: 'tailor',
       mailbox: 'mailbox',
     };
+    // Onboarding: only render tabs the player has unlocked. Contractor
+    // is always-on; the rest reveal as triggers fire (first death,
+    // chip-earn, rank-up). New-since-last-visit tabs get a `is-new`
+    // class for the NEW-glow animation; class clears on click.
+    const revealedTabs = getRevealedHideoutTabs();
     for (const t of TAB_DEFS) {
+      if (!revealedTabs.has(t.id)) continue;
+      const isNew = !isOnboardSeen(t.id) && t.id !== 'contractor';
       const btn = document.createElement('button');
       btn.type = 'button';
-      btn.className = `hideout-tab${this.tab === t.id ? ' active' : ''}`;
+      btn.className = `hideout-tab${this.tab === t.id ? ' active' : ''}${isNew ? ' is-new' : ''}`;
       btn.textContent = t.label;
       btn.addEventListener('click', () => {
         const fromTab = this.tab;
         this.tab = t.id;
+        // Mark seen on first interaction so the NEW glow clears next
+        // render. Contractor is always-seen by design.
+        if (t.id !== 'contractor') markOnboardSeen(t.id);
         if (t.id === 'contractor') {
           this.contractorStep = 'cards';
           // Re-roll the opening line whenever the player walks back
@@ -4505,6 +4516,24 @@ export class HideoutUI {
       .hideout-tab.active {
         color: #e8dfc8; border-color: #5a8acf;
         background: linear-gradient(180deg, #1a2230, #131820);
+      }
+      /* NEW glow on freshly-revealed onboarding tabs. Cleared on
+         click via markOnboardSeen → next render drops .is-new. */
+      .hideout-tab.is-new {
+        color: #f2c060;
+        text-shadow: 0 0 6px rgba(242, 192, 96, 0.55);
+        animation: tab-new-pulse 2200ms ease-in-out infinite;
+      }
+      .hideout-tab.is-new::after {
+        content: 'NEW';
+        margin-left: 6px; font-size: 8px; letter-spacing: 1px;
+        color: #f2c060; padding: 1px 4px;
+        border: 1px solid #f2c060; border-radius: 2px;
+        opacity: 0.85;
+      }
+      @keyframes tab-new-pulse {
+        0%, 100% { text-shadow: 0 0 6px rgba(242, 192, 96, 0.55); }
+        50%      { text-shadow: 0 0 14px rgba(242, 192, 96, 0.95); }
       }
 
       #hideout-body { flex: 1; overflow-y: auto; padding: 22px; }
