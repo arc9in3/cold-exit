@@ -302,6 +302,32 @@ export class ProjectileManager {
       const b = o.userData.collisionXZ;
       if (!b) continue;
       const ud = o.userData;
+      // Pass 1C — windows. A pristine window is solid (matches a wall),
+      // but the projectile collision applies window damage on contact
+      // and lets the round through if the pane shatters. We don't want
+      // every grenade arc bouncing off a window — once shattered, the
+      // grenade flies through cleanly. Pre-shatter the projectile pops
+      // (registers as a wall hit, applies 1 hit of damage, and
+      // detonates per the existing wall-contact branch below).
+      if (ud.kind === 'window' && ud.windowState) {
+        // If already broken, treat as walk-through.
+        if (ud.windowState.broken) continue;
+        // Apply 1 hit of damage. The window may or may not shatter
+        // from this hit; either way the projectile registers as
+        // wall-contact (the round hit a window). Subsequent hits
+        // accumulate via the same path.
+        try {
+          // Lazy-import to avoid a static cycle with windows.js (this
+          // file is otherwise dependency-free).
+          if (!this._winDmg) this._winDmg = (s) => { s.hp -= 1; if (s.hp <= 0) { s.broken = true; if (s.collisionProxy) s.collisionProxy.userData.collisionXZ = null; } };
+          this._winDmg(ud.windowState);
+        } catch (_) { /* defensive */ }
+        const r = 0.1;
+        if (x > b.minX - r && x < b.maxX + r && z > b.minZ - r && z < b.maxZ + r) {
+          return true;
+        }
+        continue;
+      }
       const isShort = !!(ud.isProp || ud.containerRef);
       if (isShort && y > PROP_TOP) continue;
       // For short props, give the rising / falling arc the benefit of

@@ -57,6 +57,7 @@
   </label>
   <button id="regen">regenerate</button>
   <button id="probe-all">probe 10 seeds</button>
+  <button id="show-outdoor">show outdoor + windows</button>
 </header>
 <div class="legend">
   <span style="background:#5a6a72"></span>outer wall
@@ -124,6 +125,12 @@ function generateLevel(seed, lvIdx) {
   }
 }
 
+// Pass 1C — when true, drawRoom tints the room background by
+// building tag (A=blue, B=green, C=orange), draws windows as bright
+// cyan dashes on exterior walls, draws connectors with a dotted
+// outline, and draws ledges as pale lines along exterior walls.
+let _showOutdoor = false;
+
 function drawRoom(canvas, level, room) {
   const ctx = canvas.getContext('2d');
   const W = canvas.width, H = canvas.height;
@@ -145,15 +152,30 @@ function drawRoom(canvas, level, room) {
   const wx = (x) => ox + x * scale;
   const wz = (z) => oz + z * scale;
 
-  // Walkable bounds (background highlight)
+  // Walkable bounds (background highlight). Tinted by building tag
+  // when outdoor mode is enabled.
   if (room._walkableBounds) {
-    ctx.fillStyle = '#1a3a4a';
+    if (_showOutdoor && room.building) {
+      const tints = { A: '#2a3a5a', B: '#2a4a3a', C: '#4a3a2a', connector: '#5a4a5a' };
+      ctx.fillStyle = tints[room.building] || '#1a3a4a';
+    } else {
+      ctx.fillStyle = '#1a3a4a';
+    }
     ctx.globalAlpha = 0.35;
     for (const wb of room._walkableBounds) {
       ctx.fillRect(wx(wb.minX), wz(wb.minZ),
         (wb.maxX - wb.minX) * scale, (wb.maxZ - wb.minZ) * scale);
     }
     ctx.globalAlpha = 1.0;
+  }
+  // Connector room — dotted outline.
+  if (_showOutdoor && room.type === 'connector') {
+    ctx.strokeStyle = '#c39066';
+    ctx.lineWidth = 1.2;
+    ctx.setLineDash([3, 2]);
+    ctx.strokeRect(wx(b.minX), wz(b.minZ),
+      (b.maxX - b.minX) * scale, (b.maxZ - b.minZ) * scale);
+    ctx.setLineDash([]);
   }
 
   // Walls + doors — draw every obstacle whose AABB intersects the
@@ -182,6 +204,42 @@ function drawRoom(canvas, level, room) {
   ctx.lineWidth = 1;
   ctx.strokeRect(wx(b.minX), wz(b.minZ),
     (b.maxX - b.minX) * scale, (b.maxZ - b.minZ) * scale);
+
+  // Pass 1C overlays — windows + ledges within this room.
+  if (_showOutdoor) {
+    // Windows on exterior walls — bright cyan dashes.
+    if (level._windows) {
+      ctx.strokeStyle = '#5fd8e8';
+      ctx.lineWidth = 2;
+      ctx.setLineDash([4, 2]);
+      for (const w of level._windows) {
+        if (w.room !== room) continue;
+        const isHoriz = (w.side === 'north' || w.side === 'south');
+        ctx.beginPath();
+        if (isHoriz) {
+          ctx.moveTo(wx(w.x - 2), wz(w.z));
+          ctx.lineTo(wx(w.x + 2), wz(w.z));
+        } else {
+          ctx.moveTo(wx(w.x), wz(w.z - 2));
+          ctx.lineTo(wx(w.x), wz(w.z + 2));
+        }
+        ctx.stroke();
+      }
+      ctx.setLineDash([]);
+    }
+    // Ledges — pale lines along the inside of exterior walls.
+    if (level.ledges) {
+      ctx.strokeStyle = '#a8b8c0';
+      ctx.lineWidth = 1.2;
+      for (const lg of level.ledges) {
+        if (lg.room !== room) continue;
+        ctx.beginPath();
+        ctx.moveTo(wx(lg.x1), wz(lg.z1));
+        ctx.lineTo(wx(lg.x2), wz(lg.z2));
+        ctx.stroke();
+      }
+    }
+  }
 
   // Doorway probe markers
   if (room.neighbors) {
@@ -232,18 +290,36 @@ function render(level) {
       drawRoom(c, level, r);
     }
   }
-  // Run + display invariants
+  // Run + display invariants. checkPathwayInvariants() runs the
+  // door-only flood-fill; runOutdoorInvariants() layers Pass 1C
+  // checks (connector back-links, ledge inside-drops, building
+  // convexity) on top.
   if (typeof level.checkPathwayInvariants === 'function') {
     const result = level.checkPathwayInvariants();
+    const outdoor = (typeof level.runOutdoorInvariants === 'function')
+      ? level.runOutdoorInvariants() : null;
     const el = document.getElementById('invariant-out');
-    el.classList.toggle('bad', !result.ok);
-    const lines = [`invariant check: ${result.ok ? 'OK' : 'FAIL'}`];
+    const overallOk = result.ok && (!outdoor || outdoor.ok);
+    el.classList.toggle('bad', !overallOk);
+    const lines = [`pathway: ${result.ok ? 'OK' : 'FAIL'}`,
+                   `outdoor: ${outdoor ? (outdoor.ok ? 'OK' : 'FAIL') : 'n/a'}`];
     if (result.failures && result.failures.length) {
       for (const f of result.failures) {
-        lines.push(`  · ${JSON.stringify(f)}`);
+        lines.push(`  · path: ${JSON.stringify(f)}`);
+      }
+    }
+    if (outdoor && outdoor.failures && outdoor.failures.length) {
+      for (const f of outdoor.failures) {
+        lines.push(`  · outdoor: ${JSON.stringify(f)}`);
       }
     }
     lines.push(`shape distribution: ${[...byShape.keys()].map(k => `${k}=${byShape.get(k).length}`).join(' ')}`);
+    if (level._connectors && level._connectors.length) {
+      lines.push(`connectors: ${level._connectors.map(c => `${c.connectorKind}@${c.id}`).join(' ')}`);
+    }
+    if (level._windows && level._windows.length) {
+      lines.push(`windows: ${level._windows.length} · ledges: ${(level.ledges || []).length}`);
+    }
     el.textContent = lines.join('\n');
   }
 }
@@ -262,20 +338,49 @@ function regen() {
 }
 
 document.getElementById('regen').addEventListener('click', regen);
+document.getElementById('show-outdoor').addEventListener('click', () => {
+  _showOutdoor = !_showOutdoor;
+  const btn = document.getElementById('show-outdoor');
+  btn.textContent = _showOutdoor ? 'hide outdoor + windows' : 'show outdoor + windows';
+  regen();
+});
 document.getElementById('probe-all').addEventListener('click', () => {
-  const lvIdx = parseInt(document.getElementById('lvIdx').value, 10) || 1;
+  // Pass 1C smoke — sweep across the design-doc tiers (1, 5, 10, 15,
+  // 22) × 5 seeds each. Both pathway and outdoor invariants must
+  // pass on every generated level. Single failure → readout flips to
+  // .bad so the operator sees the problem at a glance.
+  const tiers = [1, 5, 10, 15, 22];
   const out = [];
-  for (let s = 1; s <= 10; s++) {
-    try {
-      const level = generateLevel(s, lvIdx);
-      const shapes = level.rooms.map(r => r.shape || 'rect');
-      const inv = level.checkPathwayInvariants ? level.checkPathwayInvariants() : null;
-      out.push(`seed ${s}: ${shapes.length} rooms · shapes: ${shapes.join(',')} · invariants: ${inv ? (inv.ok ? 'OK' : 'FAIL ' + JSON.stringify(inv.failures)) : 'n/a'}`);
-    } catch (err) {
-      out.push(`seed ${s}: ERROR ${err.message}`);
+  let okCount = 0, failCount = 0;
+  for (const lvIdx of tiers) {
+    for (let s = 1; s <= 5; s++) {
+      try {
+        const level = generateLevel(s, lvIdx);
+        const inv  = level.checkPathwayInvariants?.() || { ok: true };
+        const odi  = level.runOutdoorInvariants?.() || { ok: true };
+        const allOk = inv.ok && odi.ok;
+        if (allOk) okCount++; else failCount++;
+        const buildings = new Set(level.rooms.map(r => r.building).filter(Boolean));
+        const conns = (level._connectors || []).length;
+        const wins = (level._windows || []).length;
+        const led = (level.ledges || []).length;
+        out.push(
+          `tier ${lvIdx} seed ${s}: ${allOk ? 'OK' : 'FAIL'} · ` +
+          `rooms=${level.rooms.length} buildings=${[...buildings].join(',')} ` +
+          `connectors=${conns} windows=${wins} ledges=${led}` +
+          (inv.ok ? '' : ` PATH: ${JSON.stringify(inv.failures)}`) +
+          (odi.ok ? '' : ` OUT: ${JSON.stringify(odi.failures)}`)
+        );
+      } catch (err) {
+        failCount++;
+        out.push(`tier ${lvIdx} seed ${s}: ERROR ${err.message}`);
+      }
     }
   }
-  document.getElementById('invariant-out').textContent = out.join('\n');
+  out.unshift(`smoke result: ${okCount} OK, ${failCount} FAIL across ${tiers.length}×5 = ${tiers.length * 5}`);
+  const el = document.getElementById('invariant-out');
+  el.classList.toggle('bad', failCount > 0);
+  el.textContent = out.join('\n');
 });
 
 regen();

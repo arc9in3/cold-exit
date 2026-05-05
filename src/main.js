@@ -32,6 +32,10 @@ import {
 import { MegaBossEcho, buildEchoLoot } from './megaboss_echo.js';
 import { MegaBossGeneral, buildGeneralLoot } from './megaboss_general.js';
 import { ProjectileManager } from './projectiles.js';
+// Pass 1C — windows + ledges. Hitscan bullets vs windows; mantle
+// input handler.
+import { applyWindowDamage } from './windows.js';
+import { mantleableAt, applyMantle, isOnLedge, dropOff } from './ledges.js';
 import { spawnDamageNumber } from './hud.js';
 import { initDebugPanel, setDebugPanelVisible } from './debug.js';
 import { getDevToolsEnabled, setDevToolsEnabled, getPlayerName, setPlayerName,
@@ -4000,6 +4004,27 @@ window.addEventListener('keydown', (e) => {
       setDebugPanelVisible(debugGui, next !== 'none');
     }
     e.preventDefault();
+  }
+});
+
+// Pass 1C — mantle / drop-off key. KeyV is currently unbound in the
+// default keymap (keybinds.js doesn't register V for any action).
+// We attach a direct listener instead of refactoring the action
+// registry: the brief calls out "if mantle conflicts with another
+// binding, ship a simpler degraded version" — KeyV ships clean and
+// avoids touching the keybind serializer. Edge-fired into a single
+// boolean the per-frame tick consumes after the player.update pass.
+let _mantleActionPressed = false;
+let _ledgeCamScratch = null;       // reused Vector3 for camera-lift
+window.addEventListener('keydown', (e) => {
+  if (e.repeat) return;
+  // Don't eat keys while typing in a form element (matches the
+  // input.js guard so a player typing "vault" in a search box
+  // doesn't mantle).
+  const ae = document.activeElement;
+  if (ae && (ae.tagName === 'INPUT' || ae.tagName === 'TEXTAREA' || ae.isContentEditable)) return;
+  if (e.code === 'KeyV') {
+    _mantleActionPressed = true;
   }
 });
 window.addEventListener('keydown', (e) => {
@@ -9640,6 +9665,15 @@ function fireOneShot(playerInfo, weapon, aimPoint, isADS, aimOwner, aimZone) {
         }
       }
     } else if (hit) {
+      // Pass 1C — bullet hit a wall / window. If the surface is a
+      // window, apply window damage; if the pane shatters this hit,
+      // the bullet continues past (no early exit needed — we only
+      // run the impact effect once and the round visually ends here
+      // either way; subsequent shots will fly through cleanly).
+      const ud = hit.mesh && hit.mesh.userData;
+      if (ud && ud.kind === 'window' && ud.windowState && !ud.windowState.broken) {
+        applyWindowDamage(ud.windowState, 1, hit.point);
+      }
       combat.spawnImpact(hit.point);
     }
   }
@@ -17680,6 +17714,32 @@ function tick() {
   // sees the player's actual mouse state. _tickAkimbo will be
   // called later in this tick and needs the real RMB value.
   if (_akimboActive) inputState.adsHeld = _origAdsHeld;
+
+  // Pass 1C — mantle / drop-off tick. Reads the global mantlePressed
+  // edge flag set by the KeyV listener below. While ON ledge, the
+  // press drops back into the room; while OFF ledge, it mantles up
+  // to the nearest reachable ledge within 1.5m forward. The camera
+  // gets a +1m lift while on a ledge so the player isn't visually
+  // blocked by their own ledge mesh.
+  if (level && player && player.mesh) {
+    if (_mantleActionPressed) {
+      _mantleActionPressed = false;
+      if (isOnLedge(player)) {
+        dropOff(player, 'inside');
+      } else {
+        // Derive yaw from the player's facing — player.mesh.rotation.y
+        // is the actor's body yaw. Fallback: aim direction.
+        let yaw = 0;
+        if (player.mesh.rotation && typeof player.mesh.rotation.y === 'number') {
+          yaw = player.mesh.rotation.y;
+        }
+        const lookup = mantleableAt(level, player.mesh.position, yaw);
+        if (lookup && lookup.ledge) {
+          applyMantle(player, lookup.ledge);
+        }
+      }
+    }
+  }
   _tickDjinnOrb(dt);
   if (playerInfo && playerInfo.maxHealth > 0) {
     lastHpRatio = Math.max(0, Math.min(1, playerInfo.health / playerInfo.maxHealth));
@@ -18258,8 +18318,19 @@ function tick() {
                         : _wcls === 'pistol'  ?  6.0
                         : _wcls === 'flame'   ?  3.0
                         : effWeapon?.adsPeekDistance ?? 5.0;
+  // Pass 1C — when the player is on a ledge, raise the camera target
+  // by 1m so the player isn't visually blocked by their own ledge
+  // mesh. We use a small scratch vector to avoid allocating a new
+  // Vector3 every frame.
+  let _camTarget = playerInfo.position;
+  if (isOnLedge(player)) {
+    if (!_ledgeCamScratch) _ledgeCamScratch = new THREE.Vector3();
+    _ledgeCamScratch.copy(playerInfo.position);
+    _ledgeCamScratch.y += 1.0;
+    _camTarget = _ledgeCamScratch;
+  }
   updateCamera(dt, {
-    target: playerInfo.position,
+    target: _camTarget,
     aim: aimInfo.point,
     adsAmount: playerInfo.adsAmount,
     adsZoom: effWeapon?.adsZoom,
