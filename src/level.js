@@ -96,6 +96,9 @@ export class Level {
     this._visionDirty = true;
     this._projectileObstacleGrid = null;
     this._projectileObstacleSource = null;
+    // Dev-time probe exposer — lets the playwright level-gen probe pull
+    // rooms / obstacles / decorations without crawling the THREE.scene.
+    if (typeof window !== 'undefined') window.__level = this;
   }
 
   clear() {
@@ -2205,6 +2208,11 @@ export class Level {
       const lamp = buildProp('lamp');
       if (!lamp) continue;
       lamp.group.position.set(s.x, 0, s.z);
+      // Tag the visible group so the smoke harness's "every decoration
+      // has userData.kind" invariant holds — buildProp already sets
+      // kind on the returned object, but the .group's userData is what
+      // the harness walks after the build call returns.
+      lamp.group.userData.kind = lamp.kind || 'lamp';
       this.scene.add(lamp.group);
       this.decorations.push(lamp.group);
     }
@@ -2248,6 +2256,7 @@ export class Level {
     );
     fixture.rotation.x = Math.PI / 2;     // face down from the ceiling
     fixture.position.set(cx, WALL_HEIGHT - 0.05, cz);
+    fixture.userData.kind = 'ceiling-lamp-fixture';
     this.scene.add(fixture);
     this.decorations.push(fixture);
     // SpotLight — wider cone (Math.PI * 0.45 ≈ 81° full angle), high
@@ -2266,6 +2275,10 @@ export class Level {
     light.position.set(cx, WALL_HEIGHT - 0.2, cz);
     light.target.position.set(cx, 0, cz);
     light.castShadow = false;
+    // Lights are Object3D too; stamp kind so the harness sees them as
+    // "owned by us" rather than anonymous decorations.
+    light.userData.kind = 'ceiling-lamp-light';
+    light.target.userData.kind = 'ceiling-lamp-target';
     this.scene.add(light);
     this.scene.add(light.target);
     this.decorations.push(light);
@@ -2377,6 +2390,14 @@ export class Level {
     // Link back to the visible group so the door-corridor sweep can
     // hide the whole prop when it overlaps a doorway.
     proxy.userData.propGroup = prop.group;
+    // Stamp the prop kind on BOTH the proxy and the visible group so
+    // the level-invariants smoke harness, AI awareness, and stealth
+    // code can read it without crawling material/geometry. Falls back
+    // to the group's existing kind (for props built outside buildProp)
+    // or 'unknown-prop' so we never leave an obstacle anonymous.
+    const kind = prop.kind || prop.group?.userData?.kind || 'unknown-prop';
+    proxy.userData.kind = kind;
+    if (!prop.group.userData.kind) prop.group.userData.kind = kind;
     this.scene.add(proxy);
     this.obstacles.push(proxy);
     return true;
@@ -4132,6 +4153,11 @@ export class Level {
     this.scene.add(group);
     this.exitGroup = group;
     this.exitBounds = { cx, cz, r };
+    // Stamp kind so the harness's "no anonymous decorations" check
+    // passes. Legacy ring + pillar are kept as a fallback path; the
+    // primary exit visual is now the extraction room.
+    ring.userData.kind = 'exit-ring-legacy';
+    pillar.userData.kind = 'exit-pillar-legacy';
     this.decorations.push(ring, pillar);
   }
 
