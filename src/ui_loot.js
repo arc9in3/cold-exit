@@ -1124,10 +1124,18 @@ export class LootUI {
     }
     // Body loot pile — footprint grid. Rebuild grid from target.loot
     // each render so the layout reflects current ownership. Items
-    // auto-place in row-major order; anything that doesn't fit (rare
-    // with 4×6) is silently dropped for now (caller-visible via the
-    // loot-all button).
+    // auto-place in row-major order; for merged Loot Area / Ground
+    // Pile views the count can exceed the default 4×6 = 24 cells, so
+    // we grow the grid by row-multiples until everything fits (#43).
     this.bodyGrid.clear();
+    if (this.bodyGrid.w !== BODY_GRID_W || this.bodyGrid.h !== BODY_GRID_H) {
+      this.bodyGrid.resize(BODY_GRID_W, BODY_GRID_H);
+    }
+    const _miscCount = miscIdxs.length;
+    if (_miscCount > BODY_GRID_W * BODY_GRID_H) {
+      const neededRows = Math.ceil(_miscCount / BODY_GRID_W);
+      this.bodyGrid.resize(BODY_GRID_W, neededRows);
+    }
     this._bodyLootIdx = new Map();
     for (const idx of miscIdxs) {
       const item = items[idx];
