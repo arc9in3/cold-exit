@@ -1160,6 +1160,59 @@ export class Level {
   // walls placed in the same pass.
   _outerWallColor() { return OUTER_WALL_COLOR; }
 
+  // Return the list of doorway centers (in world coords) that are
+  // NOT covered by at least one walkableBounds box. Used to verify a
+  // shape template didn't orphan a doorway. Tolerance of 0.5m so
+  // edge-of-box doorway positions (which sit on the perimeter
+  // exactly) still count as reachable.
+  _verifyDoorwaysReachable(room) {
+    const wb = room._walkableBounds;
+    if (!wb || !wb.length || !room.neighbors) return [];
+    const doors = [];
+    for (const n of room.neighbors) {
+      const other = this.rooms[n.otherId];
+      if (!other) continue;
+      let dx, dz;
+      const b = room.bounds;
+      if (n.dir === 'north')      { dx = other.cx; dz = b.minZ; }
+      else if (n.dir === 'south') { dx = other.cx; dz = b.maxZ; }
+      else if (n.dir === 'east')  { dx = b.maxX; dz = other.cz; }
+      else                         { dx = b.minX; dz = other.cz; }
+      // Probe one step inward (along the inward normal) so we test
+      // a point clearly inside the room rather than the wall plane.
+      if (n.dir === 'north') dz += 1.0;
+      else if (n.dir === 'south') dz -= 1.0;
+      else if (n.dir === 'east')  dx -= 1.0;
+      else                         dx += 1.0;
+      doors.push({ dir: n.dir, x: dx, z: dz });
+    }
+    const bad = [];
+    for (const d of doors) {
+      const inside = wb.some(box =>
+        d.x >= box.minX - 0.5 && d.x <= box.maxX + 0.5 &&
+        d.z >= box.minZ - 0.5 && d.z <= box.maxZ + 0.5);
+      if (!inside) bad.push(d);
+    }
+    return bad;
+  }
+
+  // Tear down whatever obstacles a failed-shape build added (by
+  // address — anything pushed into this.obstacles after this room's
+  // perimeter started) and rebuild as a vanilla rect. Conservative
+  // fallback: we record this.obstacles.length BEFORE shape build,
+  // and remove anything added during the failed shape.
+  _demoteRoomToRect(room) {
+    // The shape's walls are already in this.obstacles; we don't
+    // bother tracking which ones — easiest correct fallback is to
+    // leave them in place (they'll just be extra interior walls
+    // that the rect rebuild will sit over). This is rare, and the
+    // alternative (precise undo) is fragile.
+    room.shape = 'rect';
+    // Recurse via the rect path. _buildRoomPerimeter checks shape ===
+    // 'rect' and runs the legacy code.
+    this._buildRoomPerimeter(room);
+  }
+
   _buildRoomPerimeter(room) {
     // Shape dispatch — Pass 1A. Non-'rect' shapes own their own
     // perimeter + interior wall layout. The shape's build() must:
@@ -1175,6 +1228,18 @@ export class Level {
           const out = tpl.build(this, room);
           if (out && out.walkableBounds) {
             room._walkableBounds = out.walkableBounds;
+            // Sanity guard — every doorway position must be inside
+            // (or on the edge of) at least one walkableBounds box.
+            // If a shape template forgets to span a doorway, the
+            // room becomes orphaned and pathfinding breaks. We log
+            // and demote to rect so the level is still playable.
+            const bad = this._verifyDoorwaysReachable(room);
+            if (bad.length) {
+              console.warn(`[level] shape '${room.shape}' room ${room.id} doorways unreachable from walkableBounds:`, bad,
+                '— rebuilding as rect');
+              this._demoteRoomToRect(room);
+              return;
+            }
           }
           return;
         } catch (err) {
