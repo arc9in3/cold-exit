@@ -788,6 +788,16 @@ export class Level {
     }
     this._assignKeycards();
 
+    // Decoration LOD — push every decoration that isn't already a
+    // _cullableProps entry into the cullable set so the per-frame
+    // proximity sweep (`updateDecorationCulling`) can hide it when
+    // the player is far away. Lights are explicitly skipped — light
+    // culling lives in `_roomLamps` + main.js's `updateRoomLightCulling`
+    // which uses different radii. Window groups and ceiling-lamp
+    // fixtures otherwise sit in the renderer's per-frame visit list
+    // even when the player is in a room two cells away.
+    this._registerDecorationsAsCullable();
+
     // Pass 1A pathway-invariant stamp. Result is read-only — purely
     // informational for the dev console / probe HTML / future smoke
     // harness. Wrapped in try/catch so a bad shape doesn't break
@@ -4955,6 +4965,34 @@ export class Level {
         L.light.visible = inRange;
         if (L.fixture) L.fixture.visible = inRange;
       }
+    }
+  }
+
+  // End-of-generate sweep — push every decoration that isn't already
+  // tracked by the cullable set into it. Lights + light targets are
+  // skipped (their visibility is owned by `_roomLamps` + the per-frame
+  // light-cull sweep, which uses a 28m radius vs the 35m here). Wires
+  // ceiling-lamp fixtures, window groups, encounter visuals into the
+  // proximity-cull pipeline so the renderer skips far-room decorations
+  // entirely instead of paying the per-mesh frustum + matrixWorld
+  // walks every frame.
+  _registerDecorationsAsCullable() {
+    if (!this._cullableProps) this._cullableProps = [];
+    // O(N) lookup of already-registered objects — cullable arrays
+    // hold the .obj reference, so a Set of those is sufficient. The
+    // typical level has 80-150 decorations + 200+ cullable props
+    // already, so the constant cost is irrelevant.
+    const seen = new Set(this._cullableProps.map(p => p.obj));
+    for (const m of this.decorations) {
+      if (!m) continue;
+      if (m.isLight) continue;          // owned by _roomLamps cull
+      // light.target is an Object3D, not a Light. Skip explicitly.
+      if (m.userData && m.userData.kind === 'ceiling-lamp-target') continue;
+      if (seen.has(m)) continue;
+      const wp = m.position
+        ? { x: m.position.x, z: m.position.z }
+        : { x: 0, z: 0 };
+      this._cullableProps.push({ obj: m, x: wp.x, z: wp.z });
     }
   }
 
