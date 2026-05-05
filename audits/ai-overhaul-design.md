@@ -109,6 +109,110 @@ straight at player" complaint:
 - Currently drones barely path. Rebuild with same spatial+flow field
   primitives. Drones do strafing runs, not direct approach.
 
+## Pass 2 — implementation contract (2026-05-05, locked)
+
+### Coop-first ground rules (apply to every step)
+
+- **Host-authoritative.** All Pass 2 decision logic gates on
+  `!ctx.coopJoiner`. The joiner mirrors host state via the existing
+  `coop/snapshot.js` 20Hz packet — Pass 2 should NOT introduce a new
+  snapshot kind unless absolutely necessary. Squad role + retreat
+  state can ride on existing per-enemy fields (already encoded:
+  position, hp, state-string).
+- If a new field is required (e.g. a new `state` value like `RETREAT`
+  or `SUPPRESS`), extend the STATE enum and let the snapshot's
+  existing `state` string carry it. Joiner reads it and picks the
+  right animation cue without running its own decision logic.
+- **No new world-state mutations** (the windows/destructibles/ledges
+  patterns) — Pass 2 is enemy-internal behavior, not environment.
+  Coop sync gap is therefore minimal.
+
+### D — Squad coordination (`src/ai_squad.js`)
+
+- New module. Exports `assignRoles(level, gunmen, player)` called once
+  per AI tick (host-only).
+- Walk gunmen filtered by "alive AND aware AND in same room as
+  player". Group by room. Per group:
+  - Pick the gunman closest to player → `role: 'rusher'` (closes
+    distance)
+  - Pick the gunman in best-scoring cover via `ai_cover.findCoverFor`
+    on player's known position → `role: 'anchor'` (suppresses)
+  - 1-2 of the rest → `role: 'flanker'` (move to a cover position
+    on the opposite hemisphere of player relative to anchor's
+    position; uses `ai_cover` with a `directionHint` arg)
+  - Remaining → `role: 'support'` (existing behavior)
+- Roles stamped on `gunman.role` (overrides existing `'rusher'`/
+  `'flanker'` runtime tags). Re-assignment runs on a 1Hz cron AND on
+  any role-bearing gunman taking damage > 20% maxHp in one hit.
+- Anchor-vs-flanker rotation: if the anchor takes hp damage,
+  swap with the closest flanker on the next tick.
+
+### E — Ledge / skybridge awareness
+
+- Patrol behavior: 30% chance per patrol leg, gunman tries
+  `ledges.mantleableAt(level, g.position, g.facing)`. If a ledge is
+  available AND no other gunman occupies it, mantle. Stay 4-8s,
+  scan, drop off via `ledges.dropOff`.
+- Combat: when scoring cover via `ai_cover.findCoverFor`, weight
+  ledge positions in the same room or adjacent room +0.3 (elevated
+  fire angles are valuable). Cap at 1 gunman per ledge per room.
+- Skybridge connectors: count as a high-value cover/scan position.
+  `ai_squad` can route an anchor onto a skybridge if one exists in
+  the same building chain as the engagement room.
+- The position offset for elevated AI must reach the ghost-rendering
+  path so the joiner sees the gunman lifted by the same amount.
+  Existing player-on-ledge sync is the template; mirror for AI by
+  adding a `g.onLedge` flag to the existing `state` string in the
+  snapshot (or a separate `oL` bit on the gunman entry).
+
+### F — Retreat / regroup
+
+- New STATE: `RETREAT`. Triggered when gunman's hp drops below 25%
+  AND a cover position with score ≥ 0.6 exists within 8m.
+- During RETREAT: the gunman moves to that cover via flow-field, does
+  NOT fire, ticks a 5s self-heal timer. After 5s heals 30% hp,
+  returns to ALERTED state.
+- Triggered re-entry to combat: if hp drops below 10% during retreat
+  OR an enemy (player) is within 4m, abandon retreat and fight.
+- Healer NPCs deferred (no medic kind exists yet); pure self-heal
+  per cover.
+- Joiner-side: the `state` snapshot field carries RETREAT; the
+  ghost rig plays the existing wounded-jog animation cue.
+
+### G — Suppressing fire (anchor only)
+
+- New STATE: `SUPPRESS`. The anchor enters this when its squad has
+  ≥ 1 flanker AND the flanker is currently moving toward a flank
+  cover position.
+- During SUPPRESS: gunman fires at a 2x spread multiplier toward the
+  player's LAST KNOWN cell (not aim-at-player), pins the player
+  into cover. Fire rate is normal; accuracy is intentionally bad.
+  The point isn't to hit, it's to make the player keep their head
+  down while the flanker repositions.
+- Exits SUPPRESS when the flanker reaches their flank cover (within
+  1m of the target position) OR after 6s elapsed.
+
+### H — Drone AI overhaul
+
+- Existing `src/drones.js` is 303 LOC and barely paths.
+- Replace the chase loop with: pick a strafing path = circle around
+  the player at 5m radius, sampling the flow field per step to
+  avoid walls. Fire on cooldown while traversing; no straight-line
+  approach.
+- Drones do NOT use the squad system (different scale, different
+  movement). They use spatial hash + flow field for navigation only.
+- Coop sync: drones already serialize position + hp via existing
+  drone snapshot. No changes needed.
+
+### I — Probe + invariant
+
+- Extend `tools/probe-ai.html` to record squad-role distribution +
+  retreat-trigger rate + suppress-fire-active-time per 10-second
+  capture.
+- Add invariant: in any room with ≥ 3 alive gunmen aware of player,
+  the squad role distribution must include at least 1 of each of
+  {anchor, rusher, flanker} (no all-rushers, no all-anchors).
+
 ## Implementation order — Pass 1
 
 1. `src/ai_spatial.js` — grid hash + flow field. NO behavior changes
