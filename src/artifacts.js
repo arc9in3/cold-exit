@@ -398,6 +398,11 @@ export const ARTIFACT_DEFS = {
     price: 90000,
     apply(s) { s.weaponDurabilityMult = (s.weaponDurabilityMult || 1) * 0.5; },
   },
+  // Synthetic — auto-granted when both Patcher and Charlene are owned.
+  // Never appears in shop pools (synthetic flag) and isn't manually
+  // acquireable; the synth-chain in ArtifactCollection.acquire is the
+  // only path. Flips both indestructible flags so durability drain is
+  // skipped at every site.
   covetous: {
     id: 'covetous', name: 'Covetous',
     lore: 'He knew how to take care of his things.',

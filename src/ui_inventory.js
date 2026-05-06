@@ -853,9 +853,11 @@ export class InventoryUI {
           return;
         }
       }
-      // Repair kit dropped on a grid cell containing a compatible
-      // armor / gear / weapon → consume the kit + bump the target's
-      // durability. applyRepairKit handles full validation.
+      // === REPAIR KIT intercept ===
+      // Drop a repair kit onto a grid cell containing a compatible
+      // armor / gear / weapon → consume the kit, bump the target's
+      // durability. applyRepairKit handles validation (kit.target vs
+      // target.type, durability presence, full-HP no-op).
       if (item.type === 'repairkit') {
         const targetEntry = blk.grid.at(x, y);
         const targetItem = targetEntry?.item;
@@ -896,8 +898,10 @@ export class InventoryUI {
           return;
         }
       }
-      // Repair kit dropped on an equipped paperdoll item → consume +
-      // repair the worn piece. Same intercept as the grid path above.
+      // Repair kit dropped onto an equipped armor / gear / weapon
+      // paperdoll slot → consume the kit + bump the slot item's
+      // durability. Same intercept as the grid-cell path above; covers
+      // the common case of repairing the chest plate you're wearing.
       if (item.type === 'repairkit') {
         const equippedItem = this.inventory.equipment[slotId];
         if (equippedItem && this.inventory.applyRepairKit(item, equippedItem)) {

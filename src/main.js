@@ -66,7 +66,7 @@ import {
   GEAR_DEFS, JUNK_DEFS, TOY_DEFS,
   wrapWeapon, withAffixes, randomArmor, randomGear, randomConsumable, randomJunk, randomToy, setLootLevel,
   randomThrowable, THROWABLE_DEFS, makeThrowable, forceMastercraft,
-  randomEitherRepairKit, randomRepairKit,
+  randomRepairKit, randomEitherRepairKit,
 } from './inventory.js';
 import { ALL_ATTACHMENTS, ATTACHMENT_DEFS, effectiveWeapon, randomAttachment, rollAttachmentRarity } from './attachments.js';
 import { CustomizeUI } from './ui_customize.js';
@@ -4922,6 +4922,11 @@ const inventoryUI = new InventoryUI({
   getDragState, setDragState,
 });
 
+// Left-edge durability column — shows orange / red glyphs for any
+// equipped armor / gear / weapon whose durability is below 20% (or
+// broken). Throttled 5Hz internally; we just call tick() each frame.
+const durabilityHud = new DurabilityHud(inventory);
+
 const debugGui = initDebugPanel({
   onGiveAll: () => {
     for (const w of tunables.weapons) inventory.add(wrapWeapon(w));
@@ -7658,6 +7663,10 @@ function recomputeStats() {
   // Expose level depth so ui_shop's relic price ramp can read it
   // without threading level through every priceFor call site.
   if (typeof window !== 'undefined') window.__levelIndex = (level && level.index) | 0;
+  // Expose to window so external systems (Inventory.applyRepairKit
+  // reads .repairKitPotency, the durability HUD reads thresholds)
+  // don't need to thread the bag through every call site.
+  if (typeof window !== 'undefined') window.__derivedStats = derivedStats;
   skills.applyTo(derivedStats);
   inventory.applyTo(derivedStats, currentWeapon());
   specialPerks.applyTo(derivedStats);           // legacy (kept for compat)
@@ -9106,6 +9115,13 @@ function fireOneShot(playerInfo, weapon, aimPoint, isADS, aimOwner, aimZone) {
   const crouched = inputStateCrouchHeld();
   const crouchSpreadK = crouched ? (derivedStats.crouchSpreadMult ?? 1) : 1;
   let spread = baseSpread * derivedStats.rangedSpreadMult * crouchSpreadK;
+  // Broken ranged weapon — barrel / sights / action degrade accuracy.
+  // 5× the post-skill cone before bloom + pixel-aim multipliers fold
+  // in, so a broken pistol still resembles a panic-fire (vs the prior
+  // hard-stop that locked the player out of shooting entirely).
+  if (weapon.durability && weapon.durability.current <= 0) {
+    spread *= 5;
+  }
   // Per-shot bloom — sustained fire inflates spread; disciplined
   // bursts let it decay. First shot from a cold trigger gets a small
   // tighten. Shotguns / sniper are heavy-cost-per-shot; SMG / LMG
@@ -10005,21 +10021,19 @@ function tickShooting(dt, playerInfo, inputState, aimInfo) {
   const weapon = currentWeapon();
   if (!weapon) return;
   if (weapon.type === 'melee') return;
-  // Broken weapons no longer hard-stop the trigger. Per the
-  // durability overhaul, a broken ranged weapon still fires but
-  // with massively inflated spread (5× via tunables.durability.
-  // brokenSpreadMult, applied in fireOneShot). Surface a one-shot
-  // toast on the first broken-trigger pull so the player knows
-  // why their grouping just exploded.
+  // Broken ranged weapons still fire, but accuracy is wrecked (5×
+  // spread, applied below at the spread-compute site). Throttled HUD
+  // msg so a held trigger doesn't spam the toast.
   if (weapon.durability && weapon.durability.current <= 0) {
     const wasFiring = inputState.attackHeld || inputState.attackPressed;
     if (wasFiring) {
       const now = performance.now();
-      if (!_brokenToastT || now - _brokenToastT > 4000) {
-        transientHudMsg('Weapon broken — spread × 5 until repaired', 1.6);
+      if (!_brokenToastT || now - _brokenToastT > 1500) {
+        transientHudMsg('Weapon broken — accuracy degraded', 1.2);
         _brokenToastT = now;
       }
     }
+    // Fall through — keep firing; spread multiplier handles the penalty.
   }
   if (weapon.fireMode === 'flame') { tickFlame(dt, playerInfo, weapon, inputState, aimInfo); return; }
   playerFireCooldown = Math.max(0, playerFireCooldown - dt);
@@ -11653,6 +11667,8 @@ function damagePlayer(amount, damageType = 'generic', srcCtx = null) {
   // alongside it but the chest's higher reduction made it the
   // visible-failure piece). Now any equipped item with durability
   // (armor OR gear — straps and packs wear too) is eligible.
+  // Scaled by armorDurabilityMult (Patcher relic + Armor Maintenance
+  // skill push it below 1.0).
   const ratio = tunables.durability.armorDamageRatio;
   const _aMult = derivedStats.armorDurabilityMult || 1;
   if (!derivedStats.indestructibleGear) {
@@ -17963,8 +17979,8 @@ function tick() {
     // recomputation (LoS mask raycasts, bloom mip chain, finisher
     // chroma/grain) is wasted work. Cut to a direct render and
     // suppress the LoS update for the rest of the pause.
-    // Durability HUD still ticks so a repaired item flips state
-    // while inventory is open.
+    // Still tick the durability HUD so a freshly-equipped or
+    // repaired item flips its glyph state while the inventory is open.
     try { durabilityHud.tick(rawDt); } catch (_) {}
     _safeRender(rawDt, /* paused */ true);
     _perf.end('frame');

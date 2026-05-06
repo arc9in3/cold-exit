@@ -274,6 +274,17 @@ export const BASE_STATS = () => ({
   secondWindCharges: 0,    // revives with partial HP on fatal damage
   fatalToFullHealMissing: 0, // heal missing HP on kill (%)
   adrenalOnLowHp: 0,       // fire rate boost below 35% HP
+  // Durability multipliers — main.js fire / armor-drain sites multiply
+  // their per-tick decay by these. <1 = drains slower.
+  armorDurabilityMult: 1,
+  weaponDurabilityMult: 1,
+  // Hard-skip flags. When true, the corresponding drain loop is bypassed
+  // entirely (relics like Covetous set these).
+  indestructibleGear: false,
+  indestructibleWeapons: false,
+  // Repair-kit potency multiplier — read by Inventory.applyRepairKit
+  // when computing the heal amount. Skill-tree perks raise this.
+  repairKitPotency: 1,
 });
 
 export class SkillLoadout {

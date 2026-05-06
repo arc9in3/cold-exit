@@ -53,12 +53,12 @@ const TYPE_TO_SLOT = {
   melee: 'melee',
 };
 
-// Body-side repair-kit application. The kit lives in body.loot (not
-// in any inventory grid), so Inventory.applyRepairKit can't decrement
-// the stack itself. Mirrors the validation + durability bump portion
-// of that method, returning true when the caller should consume one
-// charge from the body-side stack. Pulls repairKitPotency from
-// window.__derivedStats when present.
+// Repair-kit application from the body-loot side. The kit lives in
+// `target.loot` (not in any inventory grid), so Inventory.applyRepairKit
+// can't decrement the stack itself. Mirrors the validation +
+// durability-bump portion of that method, returning true if the
+// caller should consume one charge from the body-side stack. Pulls the
+// repairKitPotency from window.__derivedStats when present.
 const _BODY_REPAIR_PCT_BY_RARITY = {
   common: 0.15, uncommon: 0.25, rare: 0.40,
   epic: 0.55, legendary: 0.65, mythic: 0.75,
@@ -1945,11 +1945,13 @@ export class LootUI {
           return;
         }
       }
-      // Repair kit dragged out of the body onto an inventory cell
-      // holding an armor / gear / weapon → repair the target. Body-
-      // side path is special-cased: kit lives in target.loot, not in
-      // any inventory grid, so we manually mirror the durability bump
-      // applyRepairKit performs and remove the kit (or decrement count).
+      // Repair kit dragged out of the body onto an inventory-side
+      // grid cell holding an armor / gear / weapon → repair the
+      // target. Body-side path is special-cased: the kit lives in
+      // body.loot, not in any inventory grid, so we manually mirror
+      // the durability bump applyRepairKit performs and remove the
+      // kit from the body pile when consumed (or decrement count
+      // for partial stacks).
       if (item.type === 'repairkit') {
         const cellEntry = blk.grid.at(x, y);
         const cellItem = cellEntry?.item;
@@ -1990,9 +1992,9 @@ export class LootUI {
           return;
         }
       }
-      // Repair kit dragged out of the body onto an equipped paperdoll
-      // slot → repair the equipped item. Same body-side consumption
-      // path as the grid-cell branch above.
+      // Repair kit dragged out of the body onto a paperdoll slot →
+      // repair the equipped item. Same body-side consumption path as
+      // the grid-cell branch above.
       if (item.type === 'repairkit') {
         const equipped = this.inventory.equipment[slotId];
         if (equipped) {
