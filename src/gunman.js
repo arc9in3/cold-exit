@@ -1946,6 +1946,37 @@ export class GunmanManager {
         g.state = STATE.ALERTED;
         g.reactionT = reactionT;
         ctx.onAlert?.(g);
+        // Squad propagation — when one gunman crests to ALERTED,
+        // teammates within 15m receive a suspicion bump scaled by
+        // distance. Killing a guard in room A no longer leaves the
+        // squad next door oblivious; they get a "did you hear that?"
+        // signal proportional to how close they were. Same player
+        // pos is stamped on their lastKnown so when they ramp into
+        // INVESTIGATE / ALERTED they head toward where the
+        // detection actually happened.
+        const sx = g.group.position.x, sz = g.group.position.z;
+        const SQUAD_R = 15.0;
+        const SQUAD_R2 = SQUAD_R * SQUAD_R;
+        for (const other of this.gunmen) {
+          if (other === g) continue;
+          if (!other.alive) continue;
+          if (other.state !== STATE.IDLE) continue;     // already engaged
+          const ox = other.group.position.x, oz = other.group.position.z;
+          const dx = ox - sx, dz = oz - sz;
+          const d2 = dx * dx + dz * dz;
+          if (d2 > SQUAD_R2) continue;
+          // Scale 0..0.7 across 0..15m so close teammates jump
+          // straight to INVESTIGATE (>=0.7) and far ones land in
+          // SUSPICIOUS. Crest to ALERTED still requires their own
+          // LoS / cone read so a propagated alert doesn't auto-fire.
+          const dl = Math.sqrt(d2);
+          const bump = 0.7 * (1 - dl / SQUAD_R);
+          if (bump > (other.suspicion || 0)) {
+            other.suspicion = bump;
+            other.lastKnownX = ctx.playerPos?.x;
+            other.lastKnownZ = ctx.playerPos?.z;
+          }
+        }
       }
       g.loseTargetT = tunables.ai.loseTargetTime;
     } else if (g.state === STATE.IDLE) {
