@@ -5236,6 +5236,9 @@ function _regenerateLevelImpl() {
   // Tear down any prior boss instance — previous-floor leftovers
   // would dangle their HUD bar + scene meshes otherwise.
   if (megaBoss) { megaBoss.destroy(); megaBoss = null; }
+  // Reset the per-level "exit auto-opened" latch so the new floor's
+  // extraction door starts locked again.
+  _bossExitAutoOpenLatch = false;
   if (isMegaFloor) {
     level.generateMegaArena();
   } else {
@@ -17453,6 +17456,49 @@ function tickAmbushDrops(dt) {
   for (const m of melees.enemies) fall(m);
 }
 
+// Passive boss-exit auto-open. User request: "if the boss isn't
+// detected anymore on the level, have it open automatically."
+//
+// Decoupled from the room-seal flow (updateBossSealRelease, which
+// only fires for sealed boss rooms after the player walks in) AND
+// from updateRoomClearance's room-clear path (which only fires when
+// the entered boss room hits zero living enemies). This catches
+// every "no boss anywhere" condition — boss killed before sealing,
+// boss despawned for any reason, save/load with no boss restored,
+// etc.
+//
+// revealExit is idempotent (early-returns if exitBounds is set), so
+// calling it every frame is safe — costs a Set lookup. The
+// extraction door visual treatment (gold tint, emissive) makes it
+// clear at a glance which door is THE exit.
+let _bossExitAutoOpenLatch = false;     // reset on level regen via clear()
+function updateBossExitAutoOpen() {
+  if (_bossExitAutoOpenLatch) return;
+  if (!level.exitRoom && !level._exitPendingBounds) return;
+  if (level.exitBounds) { _bossExitAutoOpenLatch = true; return; }
+  let bossAlive = false;
+  for (const g of gunmen.gunmen) {
+    if (g.alive && (g.tier === 'boss' || g.majorBoss)) { bossAlive = true; break; }
+  }
+  if (!bossAlive) {
+    for (const m of melees.enemies) {
+      if (m.alive && (m.tier === 'boss' || m.majorBoss)) { bossAlive = true; break; }
+    }
+  }
+  if (!bossAlive && megaBoss && megaBoss.alive !== false) bossAlive = true;
+  // Extra guard — if a boss SPAWN is queued but not yet instantiated
+  // (mid-level-load, async asset still resolving), don't pop the door
+  // open before the boss appears. enemySpawns is populated by gen.
+  if (!bossAlive && level.enemySpawns) {
+    for (const s of level.enemySpawns) {
+      if (s.tier === 'boss' || s.majorBoss) { bossAlive = true; break; }
+    }
+  }
+  if (bossAlive) return;
+  try { level.revealExit?.(); } catch (_) {}
+  _bossExitAutoOpenLatch = true;
+}
+
 function updateRoomClearance(playerPos) {
   const here = level.roomAt(playerPos.x, playerPos.z);
   if (here && !here.entered) {
@@ -17460,6 +17506,7 @@ function updateRoomClearance(playerPos) {
     onRoomFirstEntered(here);
   }
   updateBossSealRelease();
+  updateBossExitAutoOpen();
   for (const r of level.rooms) {
     if (r.cleared || !r.entered) continue;
     let alive = 0;

@@ -259,11 +259,24 @@ export function buildExtractionRoom(level, bossRoom, opts = {}) {
   else if (dir === 'north'){ doorX = cx; doorZ = b.minZ - WALL_THICK / 2; doorW = DOOR_WIDTH; doorD = WALL_THICK; }
   else                     { doorX = cx; doorZ = b.maxZ + WALL_THICK / 2; doorW = DOOR_WIDTH; doorD = WALL_THICK; }
 
-  // Own-material clone — _openDoor mutates color/opacity/transparent
-  // when revealExit() flips this door open. Sharing the material with
-  // other doors leaks the open-tint everywhere (mirrors the keycard
-  // colour-bleed bug fix in _buildDoor).
-  const doorMat = sharedMaterial({ color: DOOR_COLOR, roughness: 0.85 }).clone();
+  // Boss-exit doors look + behave like the keycard system's doors —
+  // user request: "for the boss door just use the same door as the
+  // colored keycard doors". Distinct exit-gold tint with a soft
+  // emissive glow so it reads as THE boss exit at a glance, not a
+  // regular locked door. Auto-opens when no boss is alive on the
+  // floor (see updateBossSealRelease in main.js).
+  //
+  // Own-material clone is critical (same reason as _buildDoor in
+  // level.js): _openDoor mutates color + opacity, and a shared
+  // material would leak that across every door in the level.
+  const EXIT_DOOR_COLOR = 0xe8b22a;       // keycard-yellow family, slightly warmer
+  const doorMat = sharedMaterial({
+    color: EXIT_DOOR_COLOR,
+    roughness: 0.55,
+    metalness: 0.20,
+    emissive: 0x6a3d05,
+    emissiveIntensity: 0.45,
+  }).clone();
   const doorMesh = new THREE.Mesh(
     new THREE.BoxGeometry(doorW, WALL_HEIGHT, doorD),
     doorMat,

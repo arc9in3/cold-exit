@@ -5379,9 +5379,18 @@ export class Level {
         { fixed: 'x', fxv: b.maxX, stepAxis: 'z', from: b.minZ, to: b.maxZ },
       ];
       for (const side of sides) {
-        for (let s = side.from + HALF_STEP; s < side.to; s += STEP) {
-          const x = side.fixed === 'x' ? side.fxv : s;
-          const z = side.fixed === 'z' ? side.fxv : s;
+        // Range now goes from `from` to `to` inclusive (was
+        // `from + HALF_STEP` to `< to`), so the corner endpoints
+        // are sampled. Old version skipped the first/last 0.5m of
+        // every side, leaving four corners-per-room unverified —
+        // shape-room chamfers + neighbour-room misalignments
+        // produced visible gaps + odd geometry there. checkRadius
+        // already suppresses redundant plugs next to existing
+        // walls, so re-sampling the corners is safe.
+        for (let s = side.from; s <= side.to + 0.001; s += STEP) {
+          const sc = Math.min(s, side.to);    // clamp final sample
+          const x = side.fixed === 'x' ? side.fxv : sc;
+          const z = side.fixed === 'z' ? side.fxv : sc;
           if (inDoorKeepout(x, z)) continue;
           if (hasWallAt(x, z)) continue;
           if (side.fixed === 'x') {
@@ -5392,6 +5401,25 @@ export class Level {
               PLUG_LEN, WALL_HEIGHT, WALL_THICK, OUTER_WALL_COLOR);
           }
         }
+      }
+      // Explicit 4-corner caps. After the side sweep, the corner
+      // CELL (b.minX/maxX × b.minZ/maxZ) is the most failure-prone
+      // spot: shape templates often end their perimeter walls just
+      // short of the corner, and adjacent rooms with different
+      // shapes can leave a tiny diagonal gap at the meeting cell.
+      // Drop a WALL_THICK × WALL_THICK pillar block at each corner
+      // unless something else is already there.
+      const corners = [
+        { x: b.minX, z: b.minZ },
+        { x: b.maxX, z: b.minZ },
+        { x: b.minX, z: b.maxZ },
+        { x: b.maxX, z: b.maxZ },
+      ];
+      for (const c of corners) {
+        if (inDoorKeepout(c.x, c.z)) continue;
+        if (hasWallAt(c.x, c.z)) continue;
+        this._addObstacle(c.x, WALL_HEIGHT / 2, c.z,
+          WALL_THICK, WALL_HEIGHT, WALL_THICK, OUTER_WALL_COLOR);
       }
     }
   }
