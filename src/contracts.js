@@ -230,40 +230,57 @@ export const CONTRACT_DEFS = {
 
   // ============= UNCOMMON — unlock at rank 3, basic mechanics scaled up + first =======
   // archetype-specific kill goals. Still no modifiers.
-  uncommon_search_15: _kill({
-    id: 'uncommon_search_15',
+  // Targets retuned 2026-05-06 v2 — every contract must be
+  // completable in a single 3-5 floor run, no multi-run carry-over.
+  // User: "the bigger score contract seems a little difficult
+  // without another accompanying contract running?" Original counts
+  // (15 / 15 / 900 / 4) assumed companion kill drips that the
+  // single-active-contract model doesn't support.
+  //
+  // Reasoning per row, from the post-retune loot/empty rates:
+  //   • containers ~25% non-empty, ~5/floor → ~5 searchable across
+  //     a 4-floor run; pull from 15 → 8 (achievable with effort)
+  //   • normal grunts 88% empty + sub-bosses always drop → ~8-12
+  //     lootable bodies in a deep run; pull from 15 → 8
+  //   • per-kill credit ramp 1.5×→2.0× × +12%/floor → ~600-1000c
+  //     in a 4-floor extract; pull from 900 → 500
+  //   • 4 successive extracts is a hard run; pull to 3 (the floor
+  //     where the boss-flank starts pressuring) and gate behind
+  //     a few contracts so it isn't the player's first uncommon
+  uncommon_search_8: _kill({
+    id: 'uncommon_search_8',
     label: 'Toss the Block',
     rarity: 'uncommon',
     portrait: 'any',
-    objective: 'containers_searched', targetCount: 15,
-    perKillReward: 0, reward: 140,
+    objective: 'containers_searched', targetCount: 8,
+    perKillReward: 0, reward: 100,
     unlockedAt: { contractsCompleted: 3 },
   }),
-  uncommon_loot_15: _kill({
-    id: 'uncommon_loot_15',
+  uncommon_loot_8: _kill({
+    id: 'uncommon_loot_8',
     label: 'Body Bagger',
     rarity: 'uncommon',
     portrait: 'any',
-    objective: 'bodies_looted', targetCount: 15,
-    perKillReward: 0, reward: 140,
+    objective: 'bodies_looted', targetCount: 8,
+    perKillReward: 0, reward: 100,
     unlockedAt: { contractsCompleted: 3 },
   }),
-  uncommon_credits_900: _kill({
-    id: 'uncommon_credits_900',
+  uncommon_credits_500: _kill({
+    id: 'uncommon_credits_500',
     label: 'Bigger Score',
     rarity: 'uncommon',
     portrait: 'any',
-    objective: 'credits_banked', targetCount: 900,
-    perKillReward: 0, reward: 160,
+    objective: 'credits_banked', targetCount: 500,
+    perKillReward: 0, reward: 130,
     unlockedAt: { contractsCompleted: 3 },
   }),
-  uncommon_levels_4: _kill({
-    id: 'uncommon_levels_4',
+  uncommon_levels_3: _kill({
+    id: 'uncommon_levels_3',
     label: 'Deep Dive',
     rarity: 'uncommon',
     portrait: 'any',
-    objective: 'levels_extracted', targetCount: 4,
-    perKillReward: 0, reward: 180,
+    objective: 'levels_extracted', targetCount: 3,
+    perKillReward: 0, reward: 150,
     unlockedAt: { contractsCompleted: 5 },
   }),
   uncommon_dashers_8: _kill({
