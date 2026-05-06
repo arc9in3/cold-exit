@@ -118,6 +118,15 @@ export class Level {
     this._visionDirty = true;
     this._projectileObstacleGrid = null;
     this._projectileObstacleSource = null;
+    // Spatial hash for _collidesAt — lazily (re)built whenever
+    // _dirtySolid() flips the flag. Cuts level-gen pickOpen() from
+    // O(spawns × walls) to O(spawns × bucket-size). Profiling on
+    // L10/15/20 showed ~200k _collidesAt calls per generate; without
+    // the grid 90% of gen time was a linear scan of ~400 obstacles
+    // per call.
+    this._collidesGrid = null;
+    this._collidesDirty = true;
+    this._collidesScratch = [];
     // Dev-time probe exposer — lets the playwright level-gen probe pull
     // rooms / obstacles / decorations without crawling the THREE.scene.
     if (typeof window !== 'undefined') window.__level = this;
@@ -203,6 +212,15 @@ export class Level {
     this._visionDirty = true;
     this._projectileObstacleGrid = null;
     this._projectileObstacleSource = null;
+    // Spatial hash for _collidesAt — lazily (re)built whenever
+    // _dirtySolid() flips the flag. Cuts level-gen pickOpen() from
+    // O(spawns × walls) to O(spawns × bucket-size). Profiling on
+    // L10/15/20 showed ~200k _collidesAt calls per generate; without
+    // the grid 90% of gen time was a linear scan of ~400 obstacles
+    // per call.
+    this._collidesGrid = null;
+    this._collidesDirty = true;
+    this._collidesScratch = [];
     // Pass 1C state — windows / connectors / ledges. Cleared every
     // regen so previous-floor refs don't leak into the new floor.
     this._windows = [];
@@ -4979,6 +4997,9 @@ export class Level {
     this._visionDirty = true;
     this._projectileObstacleGrid = null;
     this._projectileObstacleSource = null;
+    // Spatial-hash collision grid is now stale too. Rebuilt lazily on
+    // the next _collidesAt query.
+    this._collidesDirty = true;
   }
 
   projectileObstacleGrid() {
@@ -6527,8 +6548,32 @@ export class Level {
   }
 
   _collidesAt(x, z, radius) {
-    for (const o of this.obstacles) {
-      const b = o.userData.collisionXZ;
+    // Spatial-hash fast path. Profiling showed ~200k _collidesAt
+    // calls per generate at level 15-20; the linear scan of ~400
+    // obstacles ate ~900ms per gen on L20. The grid query reduces
+    // this to bucket-size (~5-15 obstacles per cell) per call.
+    if (this._collidesDirty || !this._collidesGrid) {
+      if (!this._collidesGrid) this._collidesGrid = new StaticObstacleGrid2D(5);
+      // Filter to obstacles with non-null collisionXZ ahead of the
+      // rebuild — _clearDoorCorridors / _repairDoorOverlaps null
+      // collisionXZ on cleared walls and we don't want them in the
+      // grid AT ALL (otherwise lookups still scan over them).
+      const arr = [];
+      for (let i = 0; i < this.obstacles.length; i++) {
+        const o = this.obstacles[i];
+        if (o.userData.collisionXZ) arr.push(o);
+      }
+      this._collidesGrid.rebuild(arr, (o) => o.userData.collisionXZ);
+      this._collidesDirty = false;
+    }
+    const out = this._collidesScratch;
+    this._collidesGrid.queryAabb(
+      x - radius, x + radius, z - radius, z + radius, out,
+    );
+    for (let i = 0; i < out.length; i++) {
+      const b = out[i].userData.collisionXZ;
+      // Belt-and-braces — collisionXZ may have been nulled after the
+      // grid rebuild but before this query.
       if (!b) continue;
       if (x > b.minX - radius && x < b.maxX + radius
        && z > b.minZ - radius && z < b.maxZ + radius) return true;
