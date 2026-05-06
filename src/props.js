@@ -1125,6 +1125,13 @@ export const PROP_BUILDERS = {
 // couches and bookshelves.
 //
 // Higher weight = more frequent in the sprinkle.
+// `roomThemePool` is the biome's bias for per-room themes. _themeRoom
+// in level.js prefers this pool over its size-based default when set,
+// so a 'factory' level rolls garage / warehouse / server rooms across
+// the whole floor instead of bedroom / library / lobby. Weights are
+// relative — higher = more frequent. Themes named here MUST also be
+// named in ROOM_TEMPLATES; unknown themes silently fall through to
+// the rect / fallback prop scatter.
 export const LEVEL_THEMES = {
   continental: {
     name: 'The Continental',
@@ -1138,6 +1145,12 @@ export const LEVEL_THEMES = {
       // looked silly — only deliberate placement now).
       pillar: 0.6, planter: 1.0, doorFrame: 0.4,
     },
+    // A hotel — bedrooms, lobbies, lounges, the occasional library or
+    // back-of-house security desk.
+    roomThemePool: {
+      bedroom: 1.5, lobby: 1.5, livingRoom: 1.2, library: 0.9,
+      office: 0.6, kitchen: 0.5, security: 0.4, infirmary: 0.3,
+    },
   },
   nightclub: {
     name: 'Nightclub',
@@ -1149,6 +1162,12 @@ export const LEVEL_THEMES = {
       neonStick: 1.4, locker: 0.5, barrel: 0.5,
       doorFrame: 0.4, planter: 0.3,
     },
+    // Nightclub — public lobby + back-of-house mailroom (manager's
+    // office) + security + the occasional storage warehouse / kitchen.
+    roomThemePool: {
+      lobby: 1.6, livingRoom: 1.0, security: 0.9, warehouse: 0.8,
+      kitchen: 0.6, office: 0.4, mailroom: 0.3,
+    },
   },
   garage: {
     name: 'Parking Garage',
@@ -1159,6 +1178,12 @@ export const LEVEL_THEMES = {
     propWeights: {
       pillar: 1.6, locker: 0.9, crate: 0.8, barrel: 0.7,
       pallet: 0.6, neonStick: 0.4, doorFrame: 0.2,
+    },
+    // Industrial parking — heavy on garage / warehouse / mailroom
+    // with a security booth + a server room for the building.
+    roomThemePool: {
+      garage: 1.8, warehouse: 1.4, mailroom: 0.9, security: 0.8,
+      server: 0.6, office: 0.5,
     },
   },
   penthouse: {
@@ -1172,6 +1197,11 @@ export const LEVEL_THEMES = {
       // vases / lamps / rugs.
       planter: 1.2, window: 0.8, doorFrame: 0.4, pillar: 0.3,
     },
+    // Top-floor luxury residence + executive offices + library.
+    roomThemePool: {
+      livingRoom: 1.5, bedroom: 1.2, library: 1.2, lobby: 0.9,
+      office: 0.7, kitchen: 0.5,
+    },
   },
   rooftop: {
     name: 'Rooftop',
@@ -1183,14 +1213,55 @@ export const LEVEL_THEMES = {
       railing: 1.5, crate: 0.8, barrel: 0.5, pallet: 0.5,
       neonStick: 0.6, pillar: 0.7, doorFrame: 0.3,
     },
+    // Rooftop service zone — utility / storage / surveillance.
+    roomThemePool: {
+      warehouse: 1.4, server: 1.0, security: 0.9, garage: 0.7,
+      mailroom: 0.5, office: 0.4,
+    },
+  },
+  factory: {
+    name: 'Factory',
+    floor: 0x2a2820,
+    wall: 0x4a4438,
+    accent: 0xd07a30,
+    ambientHex: 0xc8b890,
+    propWeights: {
+      // Heavy industrial dressing — pallets / barrels / crates /
+      // pillars (load-bearing columns). NeonStick reads as floor-
+      // strip safety lighting on a factory line.
+      pillar: 1.4, pallet: 1.2, crate: 1.0, barrel: 0.9,
+      locker: 0.6, neonStick: 0.7, railing: 0.5, doorFrame: 0.2,
+    },
+    roomThemePool: {
+      garage: 1.8, warehouse: 1.8, server: 0.8, security: 0.7,
+      mailroom: 0.6, office: 0.5,
+    },
+  },
+  lab: {
+    name: 'Research Lab',
+    floor: 0xc4cad0,
+    wall: 0x9aa3ad,
+    accent: 0x4ac8d0,
+    ambientHex: 0xe8f0f4,
+    propWeights: {
+      // Clinical clean — neonStick (overhead strip), lockers (med
+      // cabinets), pillars (clean-room columns). Low pallet/barrel
+      // because heavy industrial doesn't fit lab aesthetic.
+      neonStick: 1.4, locker: 1.0, pillar: 0.8, doorFrame: 0.5,
+      planter: 0.3, crate: 0.4, barrel: 0.3,
+    },
+    roomThemePool: {
+      lab: 2.0, infirmary: 1.5, server: 1.0, archive: 0.9,
+      security: 0.6, office: 0.5, mailroom: 0.3,
+    },
   },
 };
 
-// Pick a theme based on level index. 1-3 hotel, 4-6 nightclub, 7-9
-// garage, 10-12 penthouse, 13+ rooftop. Wraps around so a 30-floor
-// run keeps cycling through the five themes.
+// Pick a theme based on level index. 7 biomes cycle every 3 levels;
+// players see all of them in a 21-floor run.
 export function getLevelTheme(levelIndex) {
-  const slots = ['continental', 'nightclub', 'garage', 'penthouse', 'rooftop'];
+  const slots = ['continental', 'nightclub', 'garage', 'penthouse',
+    'rooftop', 'factory', 'lab'];
   const idx = Math.max(0, ((levelIndex - 1) | 0));
   const slot = slots[Math.floor(idx / 3) % slots.length];
   return LEVEL_THEMES[slot];

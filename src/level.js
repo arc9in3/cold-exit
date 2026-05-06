@@ -2056,6 +2056,27 @@ export class Level {
     const SHOP_TYPES = new Set(['merchant', 'healer', 'gunsmith', 'armorer',
       'tailor', 'relicSeller', 'blackMarket']);
     let themes;
+    // Biome bias — when the level theme defines a roomThemePool,
+    // every non-shop / non-utility / non-tiny room picks from it as
+    // a weighted sample. This is what gives a level its cohesion:
+    // a 'factory' floor rolls garage / warehouse / server rooms
+    // across the chain, not bedroom + library + warehouse jumbled
+    // together. The size + utility filters below still apply as
+    // overrides — a room too small to hold a factory floor falls
+    // back to the cozy pool, and shop rooms always read as shops.
+    const biomePool = (this.theme && this.theme.roomThemePool) || null;
+    const _pickWeighted = (pool) => {
+      const keys = Object.keys(pool);
+      if (!keys.length) return null;
+      let total = 0;
+      for (const k of keys) total += pool[k];
+      let r = Math.random() * total;
+      for (const k of keys) {
+        r -= pool[k];
+        if (r <= 0) return k;
+      }
+      return keys[keys.length - 1];
+    };
     if (SHOP_TYPES.has(room.type)) {
       // Vendor rooms get a single dedicated theme so they read as
       // a furnished storefront. The kiosk built by _spawnNPC sits on
@@ -2094,7 +2115,38 @@ export class Level {
         'server', 'archive', 'gym', 'lab', 'infirmary', 'security',
         'mailroom'];
     }
-    const theme = themes[Math.floor(Math.random() * themes.length)];
+    // Prefer the biome pool when it exists. The biome designer is
+    // explicitly stating "rooms on this floor read as the same kind
+    // of building" — trust their pick over the area-based size pool
+    // even when the size pool would otherwise exclude a theme.
+    //
+    // Utility-shape layouts (hallways, corridors, partitions) get
+    // a constrained slice of the biome pool: themes whose templates
+    // read fine in a long thin space. A corridor full of beds is
+    // broken regardless of biome intent, so we intersect the biome
+    // pool with the utility-friendly set. If the intersection is
+    // empty (the biome's pool has no utility-shaped themes — rare),
+    // fall back to the legacy utility list. Shop rooms keep their
+    // forced 'shop' theme.
+    const UTILITY_FRIENDLY = new Set(['warehouse', 'office', 'archive',
+      'mailroom', 'server', 'garage', 'security']);
+    let theme;
+    if (SHOP_TYPES.has(room.type)) {
+      theme = 'shop';
+    } else if (biomePool && isUtility) {
+      const filtered = {};
+      for (const [k, w] of Object.entries(biomePool)) {
+        if (UTILITY_FRIENDLY.has(k)) filtered[k] = w;
+      }
+      theme = Object.keys(filtered).length
+        ? _pickWeighted(filtered)
+        : themes[Math.floor(Math.random() * themes.length)];
+    } else if (biomePool) {
+      theme = _pickWeighted(biomePool)
+        || themes[Math.floor(Math.random() * themes.length)];
+    } else {
+      theme = themes[Math.floor(Math.random() * themes.length)];
+    }
     room.theme = theme;
 
     // Helpers — `placeAlongWall` hugs an outer wall; `placeInterior`
