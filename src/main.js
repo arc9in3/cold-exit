@@ -13881,6 +13881,17 @@ function _fadeWall(m) {
   // circuit here so any caller that ends up handing us a proxy is
   // a no-op.
   if (m.userData?.isProp) return;
+  // Wall-instancer proxies — their .material is a stub object so the
+  // opacity write below is a no-op. Best we can do is hide the slot
+  // entirely. setOcclHidden is independent from `visible` so the
+  // wall still raycasts (so we re-detect occlusion next frame and
+  // don't flicker). Almost every wall in a level routes through the
+  // instancer so without this, fade-on-occlusion was silently
+  // broken across the whole codebase.
+  if (m.isWallProxy) {
+    if (typeof m.setOcclHidden === 'function') m.setOcclHidden(true);
+    return;
+  }
   if (m.material && m.material.opacity === 0 && m.userData?._origOpacity === undefined) return;
   const ud = m.userData;
   // First fade for this wall — stash original state AND flip
@@ -13907,6 +13918,10 @@ function _fadeWall(m) {
 }
 function _restoreWall(m) {
   if (m.userData?.isProp) return;
+  if (m.isWallProxy) {
+    if (typeof m.setOcclHidden === 'function') m.setOcclHidden(false);
+    return;
+  }
   if (m.userData?._origOpacity === undefined) return;
   const ud = m.userData;
   // Leave `material.transparent` true permanently — flipping it back
@@ -14170,6 +14185,15 @@ function updateWallOcclusion() {
 function _fadeWallAggro(m) {
   if (!m || !m.material) return;
   if (m.userData?.isProp) return;
+  // Same instancer-proxy path as _fadeWall — stub material can't
+  // hold an opacity, so we hide the slot. The aggro-vs-normal
+  // distinction collapses to "just hide it" for proxies, which is
+  // fine: if the wall's already gone, the player can read whatever's
+  // behind it regardless of aggro state.
+  if (m.isWallProxy) {
+    if (typeof m.setOcclHidden === 'function') m.setOcclHidden(true);
+    return;
+  }
   if (m.material.opacity === 0 && m.userData?._origOpacity === undefined) return;
   const ud = m.userData;
   if (ud._origOpacity === undefined) {

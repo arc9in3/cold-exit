@@ -135,13 +135,15 @@ class WallInstancer {
     return proxy;
   }
 
-  // Update the slot's matrix when proxy.visible flips. Visible→false
-  // zero-scales the slot; visible→true restores the baked transform.
-  _setVisible(proxy, v) {
+  // Recompute the slot's matrix from the proxy's effective visibility.
+  // Effective = gameplay-visible (proxy._visible) AND NOT occlusion-
+  // faded (proxy._occlHidden). Either flag flipping recomputes here.
+  _refreshSlot(proxy) {
     const pool = proxy._pool;
     if (!pool) return;
     const slot = proxy._slot;
-    if (v) {
+    const effective = proxy._visible && !proxy._occlHidden;
+    if (effective) {
       _scratchPos.set(proxy.position.x, proxy.position.y, proxy.position.z);
       _scratchQuat.identity();
       _scratchScale.set(proxy._w, proxy._h, proxy._d);
@@ -151,6 +153,12 @@ class WallInstancer {
       pool.inst.setMatrixAt(slot, _zero);
     }
     pool.inst.instanceMatrix.needsUpdate = true;
+  }
+
+  // Old name kept for back-compat with the visible-setter call site
+  // below — same as _refreshSlot.
+  _setVisible(proxy /* , _v unused */) {
+    this._refreshSlot(proxy);
   }
 
   // Tear down every pool and dispose its InstancedMesh + material. The
@@ -189,6 +197,14 @@ function makeProxy(instancer, pool, slot, x, y, z, w, h, d, color) {
     _slot: slot,
     _w: w, _h: h, _d: d,
     _visible: true,
+    // Independent occlusion-fade flag. main.js's wall-occlusion pass
+    // uses setOcclHidden(true) to make a wall visually disappear when
+    // it sits between the camera and the player/enemy, without
+    // touching `_visible` (which gameplay code uses for "this wall
+    // doesn't exist any more"). Keeping these orthogonal means
+    // raycasts still hit faded walls — without that, the next frame
+    // wouldn't see the wall as occluding and we'd flicker on/off.
+    _occlHidden: false,
     position: { x, y, z, set(nx, ny, nz) { this.x = nx; this.y = ny; this.z = nz; } },
     rotation: { x: 0, y: 0, z: 0 },
     // Three.js Raycaster.intersectObject calls `object.layers.test(...)`
@@ -276,6 +292,16 @@ function makeProxy(instancer, pool, slot, x, y, z, w, h, d, color) {
     matrixAutoUpdate: false,
     updateMatrix() {},               // no-op; matrix lives in the InstancedMesh
     updateMatrixWorld() {},
+    // Occlusion-fade entry. Pass true to visually hide the slot for
+    // the camera→target line; false to restore. Independent from
+    // `visible` so raycasts (LoS, AI, fade-detection itself) still
+    // see the wall.
+    setOcclHidden(hidden) {
+      const next = !!hidden;
+      if (this._occlHidden === next) return;
+      this._occlHidden = next;
+      instancer._refreshSlot(this);
+    },
   };
   Object.defineProperty(proxy, 'visible', {
     get() { return this._visible; },
@@ -283,7 +309,7 @@ function makeProxy(instancer, pool, slot, x, y, z, w, h, d, color) {
       const next = !!v;
       if (this._visible === next) return;
       this._visible = next;
-      instancer._setVisible(this, next);
+      instancer._refreshSlot(this);
     },
     enumerable: true, configurable: false,
   });
