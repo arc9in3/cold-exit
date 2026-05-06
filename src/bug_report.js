@@ -32,9 +32,10 @@ function _capturePayload() {
         z: +player.mesh.position.z.toFixed(2) }
     : null;
 
-  const playerRoomId = (level && playerPos)
-    ? (level.roomAt?.(playerPos.x, playerPos.z)?.id ?? null)
+  const currentRoom = (level && playerPos)
+    ? (level.roomAt?.(playerPos.x, playerPos.z) || null)
     : null;
+  const playerRoomId = currentRoom?.id ?? null;
 
   // Compact rooms: id + type + shape only. No bounds, no neighbors —
   // those can be re-derived from the seed.
@@ -42,6 +43,61 @@ function _capturePayload() {
     id: r.id, type: r.type || null, shape: r.shape || r.layout || null,
     cleared: !!r.cleared, sealed: !!r._sealed,
   }));
+
+  // Per-room obstacle detail for the room the player is standing in.
+  // Killer for "I feel an invisible wall" reports — pins the
+  // exact obstacle list the player is colliding against.
+  let currentRoomDetail = null;
+  if (currentRoom && currentRoom.bounds) {
+    const b = currentRoom.bounds;
+    const inBox = (x, z) => x >= b.minX && x <= b.maxX && z >= b.minZ && z <= b.maxZ;
+    const obstaclesInRoom = (level.obstacles || []).filter(o =>
+      o.position && inBox(o.position.x, o.position.z),
+    );
+    const summarize = (o) => {
+      const p = o.position || {};
+      const g = o.geometry?.parameters || {};
+      const ud = o.userData || {};
+      const cb = ud.collisionXZ;
+      const y = +(p.y ?? 0).toFixed(2);
+      const tags = [];
+      if (ud.isDoor) tags.push('door');
+      if (ud.isProp) tags.push('prop');
+      if (ud.isColumn) tags.push('column');
+      if (ud.isElevatorWall) tags.push('elev');
+      if (ud.isExtractionWall) tags.push('extract');
+      if (ud.isRailing) tags.push('rail');
+      if (ud.isOuter) tags.push('outer');
+      if (o.isWallProxy) tags.push('proxy');
+      if (ud.kind) tags.push(`kind:${ud.kind}`);
+      if (o.visible === false) tags.push('!visible');
+      if (cb && (y < 0.5 || y > 2.5)) tags.push(`Y_MISMATCH:y=${y}`);
+      if (cb && o.visible === false) tags.push('INVIS_SOLID');
+      return {
+        pos: { x: +(p.x ?? 0).toFixed(2), y, z: +(p.z ?? 0).toFixed(2) },
+        size: { w: +(g.width || 0).toFixed(2), h: +(g.height || 0).toFixed(2), d: +(g.depth || 0).toFixed(2) },
+        col: cb ? `${cb.minX.toFixed(1)},${cb.minZ.toFixed(1)} → ${cb.maxX.toFixed(1)},${cb.maxZ.toFixed(1)}` : null,
+        t: tags.join(','),
+      };
+    };
+    currentRoomDetail = {
+      bounds: {
+        minX: +b.minX.toFixed(2), maxX: +b.maxX.toFixed(2),
+        minZ: +b.minZ.toFixed(2), maxZ: +b.maxZ.toFixed(2),
+      },
+      walkable: (currentRoom._walkableBounds || []).map(w => ({
+        minX: +w.minX.toFixed(2), maxX: +w.maxX.toFixed(2),
+        minZ: +w.minZ.toFixed(2), maxZ: +w.maxZ.toFixed(2),
+      })),
+      neighbors: (currentRoom.neighbors || []).map(n => ({
+        dir: n.dir, otherId: n.otherId,
+      })),
+      encounterSpawn: currentRoom._encounterSpawn || null,
+      walls: obstaclesInRoom.filter(o => !o.userData?.isDoor && !o.userData?.isProp).map(summarize),
+      doors: obstaclesInRoom.filter(o => o.userData?.isDoor).map(summarize),
+      props: obstaclesInRoom.filter(o => o.userData?.isProp).map(summarize),
+    };
+  }
 
   const aliveGunmen = (gunmen?.gunmen || []).filter(g => g.alive).length;
   const aliveMelees = (melees?.enemies || []).filter(m => m.alive).length;
@@ -67,6 +123,7 @@ function _capturePayload() {
     playerRoomId,
     walkability,
     rooms,
+    currentRoomDetail,
     aliveGunmen,
     aliveMelees,
     notes: '',     // user can edit this in the message before sending
