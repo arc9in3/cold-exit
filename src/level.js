@@ -1145,11 +1145,24 @@ export class Level {
     }
     // Decorations (purely visual props w/ no collision) inside the
     // room — drop those too so the floor reads clean.
+    //
+    // EXCEPT the per-room floor patch — without it the dark base
+    // ground shows through and the encounter room reads as a pitch-
+    // black hole on the level map. The patch is still wanted; the
+    // encounter visuals (disc, NPC, prop) sit on top of it. Same
+    // for the ceiling lamp fixture — encounters need their ambient
+    // light pool.
     if (this.decorations && this.decorations.length) {
       const keptDecor = [];
       for (const d of this.decorations) {
         const px = d.position?.x, pz = d.position?.z;
         if (typeof px === 'number' && inRoom(px, pz)) {
+          const k = d.userData?.kind;
+          if (k === 'room-floor' || k === 'ceiling-lamp-fixture'
+              || k === 'ceiling-lamp-light' || k === 'ceiling-lamp-target') {
+            keptDecor.push(d);
+            continue;
+          }
           this.scene.remove(d);
           d.geometry?.dispose?.();
           if (d.material) disposeMaterialIfNotShared(d.material);
@@ -1934,6 +1947,15 @@ export class Level {
 
   _scatterCover(room) {
     const b = room.bounds;
+    const wbList = room._walkableBounds;
+    const outsideWalkable = (x, z) => {
+      if (!wbList || !wbList.length) return false;
+      for (const wb of wbList) {
+        if (x >= wb.minX - 0.4 && x <= wb.maxX + 0.4
+            && z >= wb.minZ - 0.4 && z <= wb.maxZ + 0.4) return false;
+      }
+      return true;
+    };
     const count = 1 + Math.floor(Math.random() * 2);
     for (let i = 0; i < count; i++) {
       for (let attempt = 0; attempt < 30; attempt++) {
@@ -1950,6 +1972,7 @@ export class Level {
         if (usableW <= 0 || usableD <= 0) break;
         const x = b.minX + inset + Math.random() * usableW;
         const z = b.minZ + inset + Math.random() * usableD;
+        if (outsideWalkable(x, z)) continue;
         if (this._collidesAt(x, z, 2.0)) continue;
         // Honor keep-outs (boss exit ring, encounter spawn discs) so
         // a low-cover block doesn't sit on top of the future exit
@@ -1977,6 +2000,15 @@ export class Level {
   _scatterContainers(room) {
     const b = room.bounds;
     const area = (b.maxX - b.minX) * (b.maxZ - b.minZ);
+    const wbList = room._walkableBounds;
+    const outsideWalkable = (x, z) => {
+      if (!wbList || !wbList.length) return false;
+      for (const wb of wbList) {
+        if (x >= wb.minX - 0.4 && x <= wb.maxX + 0.4
+            && z >= wb.minZ - 0.4 && z <= wb.maxZ + 0.4) return false;
+      }
+      return true;
+    };
     // Per-room roll. Boss rooms still favour a real chest (boss room
     // furniture tends toward sparse warehouse/lobby props), but combat
     // / sub-boss rates are cut roughly in half because lootable props
@@ -2007,6 +2039,7 @@ export class Level {
         if (usableW <= 0 || usableD <= 0) break;
         const x = b.minX + inset + Math.random() * usableW;
         const z = b.minZ + inset + Math.random() * usableD;
+        if (outsideWalkable(x, z)) continue;
         if (this._collidesAt(x, z, 1.6)) continue;
         // Honor keep-outs (boss exit, encounter spawn) so the chest
         // doesn't materialise where the exit ring will appear.
@@ -2230,6 +2263,23 @@ export class Level {
       return false;
     };
 
+    // Reject candidates that fall outside the shape template's
+    // walkableBounds (e.g. lShape's cut quadrant, plaza's dais ring,
+    // multiTier's platform footprint). placeAlongWall / _propFitsInBounds
+    // only knew about room.bounds, so a planter / chair / cover block
+    // could land in the sealed corner the player can't actually reach.
+    // 0.4 m tolerance lets a wall-hugging prop straddle the seam between
+    // walkable boxes that meet at an inside corner (lShape's elbow).
+    const wbList = room._walkableBounds;
+    const outsideWalkable = (x, z) => {
+      if (!wbList || !wbList.length) return false;     // rect rooms — no constraint
+      for (const wb of wbList) {
+        if (x >= wb.minX - 0.4 && x <= wb.maxX + 0.4
+            && z >= wb.minZ - 0.4 && z <= wb.maxZ + 0.4) return false;
+      }
+      return true;
+    };
+
     // True when a prop's full footprint fits inside the room's bbox
     // — accounts for axis-aligned vs rotated yaw via the same
     // square-bound rule _registerProp uses for collision proxies.
@@ -2423,6 +2473,7 @@ export class Level {
         if (tooCloseToElev(x, z)) continue;
         if (inKeepOut(x, z)) continue;
         if (inCorner(x, z)) continue;
+        if (outsideWalkable(x, z)) continue;
         const finalYaw = yaw ?? facing;
         if (!_propFitsInBounds(prop, x, z, finalYaw)) continue;
         if (col && !_wallPropOverlap(x, z, col.w, col.d, finalYaw)) continue;
@@ -2462,6 +2513,7 @@ export class Level {
         if (tooCloseToElev(x, z)) continue;
         if (inKeepOut(x, z)) continue;
         if (inCorner(x, z)) continue;
+        if (outsideWalkable(x, z)) continue;
         const finalYaw = yaw ?? facing;
         if (!_propFitsInBounds(prop, x, z, finalYaw)) continue;
         if (!_wallPropOverlap(x, z, col.w, col.d, finalYaw)) continue;
@@ -2505,6 +2557,7 @@ export class Level {
         if (tooCloseToElev(x, z)) continue;
         if (inKeepOut(x, z)) continue;
         if (inCorner(x, z)) continue;
+        if (outsideWalkable(x, z)) continue;
         if (this._collidesAt(x, z, radius)) continue;
         const yaw = facesInward
           ? yawTowardCenter(x, z)
@@ -2612,6 +2665,7 @@ export class Level {
         const x = ax + s.dx, z = az + s.dz;
         if (tooCloseToElev(x, z)) continue;
         if (inKeepOut(x, z)) continue;
+        if (outsideWalkable(x, z)) continue;
         const radius = Math.max(pw, pd) * 0.7 + 0.4;
         if (this._collidesAt(x, z, radius)) continue;
         const yaw = yawFor(s.dir);
@@ -2649,6 +2703,7 @@ export class Level {
         const x = ax + fx * t, z = az + fz * t;
         if (tooCloseToElev(x, z)) continue;
         if (inKeepOut(x, z)) continue;
+        if (outsideWalkable(x, z)) continue;
         const radius = Math.max(pw, pd) * 0.7 + 0.4;
         if (this._collidesAt(x, z, radius)) continue;
         const yaw = aYaw + Math.PI;
@@ -2918,6 +2973,7 @@ export class Level {
             if (!prop) continue;
             if (tooCloseToElev(s.x, s.z)) continue;
             if (inKeepOut(s.x, s.z)) continue;
+            if (outsideWalkable(s.x, s.z)) continue;
             const radius = Math.max(prop.collision.w, prop.collision.d) * 0.7 + 0.4;
             if (this._collidesAt(s.x, s.z, radius)) continue;
             if (!_propFitsInBounds(prop, s.x, s.z, 0)) continue;
@@ -2945,6 +3001,7 @@ export class Level {
             if (!prop) continue;
             if (tooCloseToElev(c.x, c.z)) continue;
             if (inKeepOut(c.x, c.z)) continue;
+            if (outsideWalkable(c.x, c.z)) continue;
             const radius = Math.max(prop.collision.w, prop.collision.d) * 0.7 + 0.4;
             if (this._collidesAt(c.x, c.z, radius)) continue;
             if (!_propFitsInBounds(prop, c.x, c.z, 0)) continue;
@@ -3110,16 +3167,14 @@ export class Level {
   // shared MeshStandardMaterial keyed on the final tint color.
   _addRoomFloorPatch(room) {
     if (!room || !room.bounds) return;
-    const b = room.bounds;
-    // Inset 0.3m so the patch doesn't poke under the perimeter wall
-    // (walls span bounds±0.6 in z; staying clear avoids z-fighting
-    // with wall bases).
-    const INSET = 0.3;
-    const w = (b.maxX - b.minX) - INSET * 2;
-    const d = (b.maxZ - b.minZ) - INSET * 2;
-    if (w <= 0 || d <= 0) return;
-    const cx = (b.minX + b.maxX) / 2;
-    const cz = (b.minZ + b.maxZ) / 2;
+    // Use walkableBounds when the shape template emitted them so
+    // sealed-off areas (lShape's cut corner, plaza's dais ring,
+    // multiTier's platform footprint) read as void instead of as
+    // floor the player can't reach. Falls back to room.bounds for
+    // rect rooms without a shape's walkableBounds set.
+    const boxes = (room._walkableBounds && room._walkableBounds.length)
+      ? room._walkableBounds
+      : [room.bounds];
     // Base color: biome's floor; per-room theme nudges a subtle
     // emissive accent so different rooms read as distinct moods
     // even on the same floor.
@@ -3150,16 +3205,27 @@ export class Level {
       roughness: 0.85,
       metalness: 0.05,
     });
-    const mesh = new THREE.Mesh(new THREE.PlaneGeometry(w, d), mat);
-    mesh.rotation.x = -Math.PI / 2;
-    mesh.position.set(cx, 0.01, cz);
-    mesh.receiveShadow = true;
-    mesh.userData.kind = 'room-floor';
-    mesh.userData.roomId = room.id;
-    mesh.matrixAutoUpdate = false;
-    mesh.updateMatrix();
-    this.scene.add(mesh);
-    this.decorations.push(mesh);
+    // Inset 0.3m so each patch doesn't poke under the perimeter wall
+    // (walls span bounds±0.6 in z; staying clear avoids z-fighting
+    // with wall bases).
+    const INSET = 0.3;
+    for (const box of boxes) {
+      const w = (box.maxX - box.minX) - INSET * 2;
+      const d = (box.maxZ - box.minZ) - INSET * 2;
+      if (w <= 0 || d <= 0) continue;
+      const cx = (box.minX + box.maxX) / 2;
+      const cz = (box.minZ + box.maxZ) / 2;
+      const mesh = new THREE.Mesh(new THREE.PlaneGeometry(w, d), mat);
+      mesh.rotation.x = -Math.PI / 2;
+      mesh.position.set(cx, 0.01, cz);
+      mesh.receiveShadow = true;
+      mesh.userData.kind = 'room-floor';
+      mesh.userData.roomId = room.id;
+      mesh.matrixAutoUpdate = false;
+      mesh.updateMatrix();
+      this.scene.add(mesh);
+      this.decorations.push(mesh);
+    }
   }
 
   _addCeilingLamp(room) {
