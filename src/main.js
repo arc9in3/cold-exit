@@ -1548,45 +1548,371 @@ function _applyContractPerKillReward(arch) {
   // Fire the completion claim the moment the counter reaches the
   // target. Mid-run, no floor-transition wait.
   if (counted === (def.targetCount | 0)) {
-    try {
-      const snapshot = runStats.snapshot();
-      const rankBefore = getContractRank();
-      const result = tryClaimContract(
-        ac, snapshot,
-        setActiveContract,
-        (n) => awardPersistentChips(n),
-        (n) => awardMarks(n),
-        () => awardRankPoints(rankRewardFor(def)),
-        (n) => awardSigils(n),
-      );
-      const parts = [];
-      if (result.chips > 0)  parts.push(`+${result.chips} chips`);
-      if (result.marks > 0)  parts.push(`+${result.marks} marks`);
-      if (result.sigils > 0) parts.push(`+${result.sigils} sigils`);
-      const completionRank = rankRewardFor(def);
-      if (completionRank > 0) parts.push(`+${completionRank} rank pts`);
-      if (parts.length) {
-        transientHudMsg(`Contract complete: ${parts.join(' · ')}`, 3.0);
+    try { _completeContractWithCelebration(def, ac); }
+    catch (e) { console.warn('[contract-mid-run-claim]', e); }
+  }
+}
+
+// Shared completion flow used by both the per-kill claim path
+// (archetype-kill contracts) and the objective-contract checker
+// (containers / bodies / credits / extracts). Single home for the
+// claim → celebrate → flag-pending-offer → rank-up sequence so the
+// two trigger sites can't drift.
+function _completeContractWithCelebration(def, ac) {
+  const snapshot = runStats.snapshot();
+  const rankBefore = getContractRank();
+  const completionRank = rankRewardFor(def);
+  const balanceBefore = getPersistentChips();
+  const result = tryClaimContract(
+    ac, snapshot,
+    setActiveContract,
+    (n) => awardPersistentChips(n),
+    (n) => awardMarks(n),
+    () => awardRankPoints(completionRank),
+    (n) => awardSigils(n),
+  );
+  // Only celebrate if the claim actually paid something — guards
+  // against the vanishingly rare case of a 0/0/0/0 def slipping
+  // through (e.g., a future content tweak that pays only via the
+  // per-kill drip). Falls back to the legacy toast.
+  const paidAnything = result.chips > 0 || result.marks > 0
+    || result.sigils > 0 || completionRank > 0;
+  if (paidAnything) {
+    _showContractCompletionPresentation(def, result, completionRank, balanceBefore);
+  } else {
+    transientHudMsg(`Contract complete`, 2.0);
+  }
+  _runStartContractCompletions = (_runStartContractCompletions | 0) + 1;
+  _pendingContractOfferOnExtract = true;
+  const rankAfter = getContractRank();
+  if (rankAfter > rankBefore) {
+    const named = _newlyBuyableNames(rankBefore, rankAfter);
+    const tiers = _newlyBuyableTiers(rankBefore, rankAfter);
+    const parts = [];
+    if (named.length) parts.push(named.join(' + '));
+    if (tiers.length) parts.push(`${tiers.join(' + ')} tier`);
+    const tail = parts.length ? ` · ${parts.join(' · ')} now buyable` : '';
+    // Stagger the rank-up after the celebration finishes so they
+    // don't fight for attention. Presentation runs ~4.5s.
+    setTimeout(() => transientHudMsg(`RANK UP — Rank ${rankAfter}${tail}`, 3.5), 4800);
+  }
+}
+
+// Mid-run check for objective-style contracts (containers searched,
+// bodies looted, credits banked, levels extracted). Called from the
+// loot-search hook + credits-bank + level-extract sites. No-op when
+// no contract is active, when the active contract is already
+// claimed, or when the active def doesn't use the objective field.
+function _checkObjectiveContractClaim() {
+  const ac = getActiveContract();
+  if (!ac || (ac.claimedAt | 0) > 0) return;
+  const def = defForId(ac.activeContractId);
+  if (!def || !def.objective) return;
+  try {
+    if (def.evaluate(runStats.snapshot())) {
+      _completeContractWithCelebration(def, ac);
+    }
+  } catch (e) { console.warn('[contract-objective-claim]', e); }
+}
+
+// Full-screen contract-completion presentation. Renders the wanted-
+// card the player accepted, then walks through:
+//   1. Card slides in
+//   2. "OBJECTIVE COMPLETE" check stamp
+//   3. Reward chips count up (chips / marks / sigils / rank pts)
+//   4. "REWARDS WIRED TO YOUR ACCOUNT" tagline
+//   5. New balance flashes
+//   6. Auto-dismiss + fade
+//
+// Non-blocking — fires-and-forgets. Game keeps running underneath
+// (extraction shooter — pausing mid-run is hostile + breaks coop).
+// Auto-dismisses after ~4.5s; clicking the overlay dismisses early.
+function _showContractCompletionPresentation(def, result, completionRank, balanceBefore) {
+  try {
+    if (!document.getElementById('contract-celebration-styles')) {
+      const ss = document.createElement('style');
+      ss.id = 'contract-celebration-styles';
+      ss.textContent = `
+        #contract-celebration-overlay {
+          position: fixed; inset: 0; z-index: 130;
+          display: flex; align-items: center; justify-content: center;
+          font: 13px 'Inter', system-ui, sans-serif;
+          pointer-events: none;
+          animation: cc-overlay-in 280ms ease-out both;
+        }
+        #contract-celebration-overlay.dismissing {
+          animation: cc-overlay-out 360ms ease-in both;
+        }
+        @keyframes cc-overlay-in {
+          from { background: rgba(8,12,16,0); }
+          to   { background: rgba(8,12,16,0.55); }
+        }
+        @keyframes cc-overlay-out {
+          from { background: rgba(8,12,16,0.55); opacity: 1; }
+          to   { background: rgba(8,12,16,0);    opacity: 0; }
+        }
+        #contract-celebration-frame {
+          background: linear-gradient(180deg, #1a2228, #0c1014);
+          border: 2px solid #f2c060; border-radius: 8px;
+          padding: 22px 26px;
+          width: 480px; max-width: 92%;
+          color: #f2e7c9;
+          box-shadow: 0 0 64px rgba(242, 192, 96, 0.5),
+                      0 14px 40px rgba(0,0,0,0.7);
+          pointer-events: auto;
+          animation: cc-frame-in 460ms cubic-bezier(0.22, 1.2, 0.36, 1) both;
+          position: relative;
+        }
+        @keyframes cc-frame-in {
+          0%   { transform: translateY(40px) scale(0.85); opacity: 0; }
+          60%  { transform: translateY(0) scale(1.02); opacity: 1; }
+          100% { transform: translateY(0) scale(1); opacity: 1; }
+        }
+        #contract-celebration-overlay.dismissing #contract-celebration-frame {
+          animation: cc-frame-out 360ms ease-in both;
+        }
+        @keyframes cc-frame-out {
+          to { transform: translateY(-12px) scale(0.95); opacity: 0; }
+        }
+        .cc-eyebrow {
+          color: #f2c060; font-weight: 800;
+          font-size: 11px; letter-spacing: 4px;
+          text-align: center; margin-bottom: 10px;
+          text-transform: uppercase;
+          text-shadow: 0 0 12px rgba(242, 192, 96, 0.55);
+        }
+        .cc-card-host { margin-bottom: 14px; position: relative; }
+        .cc-card-host .wanted-card {
+          width: 100%; box-sizing: border-box;
+          animation: none;       /* parent frame already animated */
+        }
+        .cc-stamp {
+          position: absolute; top: 10px; right: 10px;
+          padding: 4px 10px;
+          background: rgba(106, 191, 120, 0.9);
+          color: #0c1014;
+          font-size: 11px; font-weight: 800; letter-spacing: 2px;
+          border-radius: 3px; transform: rotate(8deg);
+          box-shadow: 0 0 16px rgba(106, 191, 120, 0.6);
+          opacity: 0;
+          animation: cc-stamp-in 320ms cubic-bezier(0.22, 1.4, 0.36, 1) 380ms both;
+        }
+        @keyframes cc-stamp-in {
+          0%   { opacity: 0; transform: rotate(20deg) scale(2); }
+          100% { opacity: 1; transform: rotate(8deg) scale(1); }
+        }
+        .cc-rewards {
+          display: grid; grid-template-columns: 1fr auto;
+          gap: 6px 14px;
+          padding: 12px 14px;
+          background: rgba(15, 17, 22, 0.6);
+          border: 1px solid rgba(242, 192, 96, 0.25);
+          border-radius: 4px;
+          margin-bottom: 12px;
+        }
+        .cc-row {
+          display: contents;
+        }
+        .cc-row .cc-row-label {
+          color: #c9a87a; font-size: 12px; letter-spacing: 1px;
+          text-transform: uppercase;
+        }
+        .cc-row .cc-row-value {
+          font-weight: 800; letter-spacing: 0.4px;
+          font-variant-numeric: tabular-nums;
+        }
+        .cc-row.chips  .cc-row-value { color: #f2c060; }
+        .cc-row.rank   .cc-row-value { color: #5a8acf; }
+        .cc-row.marks  .cc-row-value { color: #6abf78; }
+        .cc-row.sigils .cc-row-value { color: #b870e0; }
+        .cc-tagline {
+          text-align: center;
+          font-size: 12px; letter-spacing: 3px;
+          font-weight: 700;
+          color: #f2c060;
+          padding: 10px 0 4px;
+          opacity: 0;
+          animation: cc-tag-in 320ms ease-out 2400ms both;
+          text-shadow: 0 0 14px rgba(242, 192, 96, 0.5);
+        }
+        @keyframes cc-tag-in {
+          from { opacity: 0; transform: translateY(6px); }
+          to   { opacity: 1; transform: translateY(0); }
+        }
+        .cc-balance {
+          text-align: center;
+          font-size: 18px; font-weight: 900;
+          letter-spacing: 1.6px;
+          color: #ffd070;
+          padding: 6px 0 0;
+          opacity: 0;
+          animation: cc-balance-in 360ms cubic-bezier(0.22, 1.2, 0.36, 1) 2700ms both;
+          text-shadow: 0 0 18px rgba(255, 208, 112, 0.55);
+          font-variant-numeric: tabular-nums;
+        }
+        @keyframes cc-balance-in {
+          0%   { opacity: 0; transform: scale(0.85); }
+          60%  { opacity: 1; transform: scale(1.08); }
+          100% { opacity: 1; transform: scale(1); }
+        }
+      `;
+      document.head.appendChild(ss);
+    }
+
+    const overlay = document.createElement('div');
+    overlay.id = 'contract-celebration-overlay';
+    const frame = document.createElement('div');
+    frame.id = 'contract-celebration-frame';
+
+    const eyebrow = document.createElement('div');
+    eyebrow.className = 'cc-eyebrow';
+    eyebrow.textContent = 'Contract Complete';
+    frame.appendChild(eyebrow);
+
+    // The contract card the player accepted — same wanted-card layout
+    // as the hideout + mid-run picker so this reads as a callback to
+    // the artifact they chose.
+    const cardHost = document.createElement('div');
+    cardHost.className = 'cc-card-host';
+    const portraitGlyph = (p) => {
+      switch (p) {
+        case 'dasher':   return '»';
+        case 'tank':     return '■';
+        case 'gunman':   return '⨯';
+        case 'melee':    return '✕';
+        case 'sniper':   return '◎';
+        case 'boss':     return '★';
+        case 'megaboss': return '✪';
+        default:         return '◇';
       }
-      // Mark this run as eligible for a "pick a new contract" choice
-      // at the next floor extract. Counter accumulates across multi-
-      // contract runs so the player gets repeated offers.
-      _runStartContractCompletions = (_runStartContractCompletions | 0) + 1;
-      _pendingContractOfferOnExtract = true;
-      // Rank-up beat — fires after the contract toast so the
-      // player sees the progression land. Each rank-up may also
-      // open new weapons for purchase at the Stash Armory.
-      const rankAfter = getContractRank();
-      if (rankAfter > rankBefore) {
-        const named = _newlyBuyableNames(rankBefore, rankAfter);
-        const tiers = _newlyBuyableTiers(rankBefore, rankAfter);
-        const parts = [];
-        if (named.length) parts.push(named.join(' + '));
-        if (tiers.length) parts.push(`${tiers.join(' + ')} tier`);
-        const tail = parts.length ? ` · ${parts.join(' · ')} now buyable` : '';
-        setTimeout(() => transientHudMsg(`RANK UP — Rank ${rankAfter}${tail}`, 3.5), 350);
-      }
-    } catch (e) { console.warn('[contract-mid-run-claim]', e); }
+    };
+    const totalCap = (def.perKillReward | 0) * (def.targetCount | 0) + (def.reward | 0);
+    const card = document.createElement('div');
+    card.className = `wanted-card rarity-${def.rarity || 'common'}`;
+    card.innerHTML = `
+      <div class="wanted-portrait" data-portrait="${def.portrait || 'any'}">${portraitGlyph(def.portrait)}</div>
+      <div class="wanted-head">
+        <div class="wanted-name">${(def.label || def.id).toUpperCase()}</div>
+        <div class="wanted-conds">${objectiveSubtitle(def)}</div>
+      </div>
+      <div class="wanted-rewards">
+        <span class="rwd chips">${totalCap}c</span>
+      </div>
+    `;
+    cardHost.appendChild(card);
+    const stamp = document.createElement('div');
+    stamp.className = 'cc-stamp';
+    stamp.textContent = '✓ COMPLETE';
+    cardHost.appendChild(stamp);
+    frame.appendChild(cardHost);
+
+    // Reward rows — each row counts up over ~600ms staggered by
+    // 220ms so the values land sequentially. Skipped rows (zero
+    // reward) just don't render at all.
+    const rewardsBox = document.createElement('div');
+    rewardsBox.className = 'cc-rewards';
+    const rewardSpecs = [];
+    if (result.chips > 0)         rewardSpecs.push({ cls: 'chips',  label: 'Chips',      value: result.chips,  suffix: 'c' });
+    if (completionRank > 0)       rewardSpecs.push({ cls: 'rank',   label: 'Rank Pts',   value: completionRank, suffix: '' });
+    if (result.marks > 0)         rewardSpecs.push({ cls: 'marks',  label: 'Marks',      value: result.marks,  suffix: '' });
+    if (result.sigils > 0)        rewardSpecs.push({ cls: 'sigils', label: 'Sigils',     value: result.sigils, suffix: '' });
+    const rowValueEls = [];
+    for (const r of rewardSpecs) {
+      const row = document.createElement('div');
+      row.className = `cc-row ${r.cls}`;
+      row.innerHTML = `
+        <span class="cc-row-label">${r.label}</span>
+        <span class="cc-row-value">+0${r.suffix}</span>
+      `;
+      rewardsBox.appendChild(row);
+      rowValueEls.push({ el: row.querySelector('.cc-row-value'), spec: r });
+    }
+    frame.appendChild(rewardsBox);
+
+    // "REWARDS WIRED TO YOUR ACCOUNT" → balance flash. Both anchored
+    // via CSS animation-delay; nothing to schedule here beyond the
+    // initial paint.
+    const tagline = document.createElement('div');
+    tagline.className = 'cc-tagline';
+    tagline.textContent = '— REWARDS WIRED TO YOUR ACCOUNT —';
+    frame.appendChild(tagline);
+    const balanceLine = document.createElement('div');
+    balanceLine.className = 'cc-balance';
+    balanceLine.textContent = `BALANCE  ${(balanceBefore | 0).toLocaleString()}c`;
+    frame.appendChild(balanceLine);
+
+    overlay.appendChild(frame);
+    document.body.appendChild(overlay);
+
+    // Click anywhere on the frame dismisses the celebration early.
+    const dismiss = () => {
+      if (overlay.classList.contains('dismissing')) return;
+      overlay.classList.add('dismissing');
+      setTimeout(() => { try { document.body.removeChild(overlay); } catch (_) {} }, 380);
+    };
+    overlay.addEventListener('click', dismiss);
+
+    // Reward count-up animations — staggered by 220ms after the
+    // stamp lands at 700ms. Each value tweens 0 → final over 520ms
+    // with an ease-out curve.
+    const start = performance.now();
+    const COUNT_DUR = 520;
+    const STAGGER  = 220;
+    const STAMP_END = 700;
+    const balanceFinalAt = 2700 + 360; // CSS-driven balance entrance lands here
+    const tickRow = (entry, idx) => {
+      const t0 = STAMP_END + idx * STAGGER;
+      const tick = (now) => {
+        const dt = now - start;
+        if (dt < t0) {
+          requestAnimationFrame(tick);
+          return;
+        }
+        const k = Math.min(1, (dt - t0) / COUNT_DUR);
+        const eased = 1 - (1 - k) * (1 - k);
+        const v = Math.round(entry.spec.value * eased);
+        entry.el.textContent = `+${v.toLocaleString()}${entry.spec.suffix}`;
+        if (k < 1) requestAnimationFrame(tick);
+      };
+      requestAnimationFrame(tick);
+    };
+    rowValueEls.forEach(tickRow);
+
+    // Balance count-up — starts as the balance line animates in,
+    // walks from balanceBefore → balanceBefore + result.chips. Marks
+    // / sigils / rank-pts aren't chips so they don't fold into the
+    // BALANCE line; only the chip delta does.
+    const finalBalance = (balanceBefore | 0) + (result.chips | 0);
+    if (result.chips > 0) {
+      const balDur = 480;
+      const tickBal = (now) => {
+        const dt = now - start;
+        if (dt < balanceFinalAt) {
+          requestAnimationFrame(tickBal);
+          return;
+        }
+        const k = Math.min(1, (dt - balanceFinalAt) / balDur);
+        const eased = 1 - (1 - k) * (1 - k);
+        const v = Math.round(balanceBefore + (finalBalance - balanceBefore) * eased);
+        balanceLine.textContent = `BALANCE  ${v.toLocaleString()}c`;
+        if (k < 1) requestAnimationFrame(tickBal);
+      };
+      requestAnimationFrame(tickBal);
+    }
+
+    // Auto-dismiss after the balance flash finishes + a beat.
+    setTimeout(dismiss, 4500);
+    try { sfx?.uiAccept?.(); } catch (_) {}
+  } catch (e) {
+    console.warn('[contract-celebration]', e);
+    // Fall back to the legacy toast so the player at least sees
+    // something happened.
+    const parts = [];
+    if (result.chips > 0)  parts.push(`+${result.chips} chips`);
+    if (result.marks > 0)  parts.push(`+${result.marks} marks`);
+    if (result.sigils > 0) parts.push(`+${result.sigils} sigils`);
+    if (completionRank > 0) parts.push(`+${completionRank} rank pts`);
+    if (parts.length) transientHudMsg(`Contract complete: ${parts.join(' · ')}`, 3.0);
   }
 }
 
@@ -1963,6 +2289,20 @@ const skillPickUI = new SkillPickUI(skills);
 // Live per-run stats — reset at every new-run start, submitted to the
 // local leaderboard when the player dies. Tainted by any save/load.
 const runStats = new RunStats();
+// Wrap addCredits to probe the active contract for completion after
+// each award. Cheaper than scattering _checkObjectiveContractClaim()
+// across the 5+ credit-award sites and keeps them from drifting.
+// The check itself short-circuits in <1µs when no objective contract
+// is live, so this is safe to call on every credit drip.
+{
+  const _origAddCredits = runStats.addCredits.bind(runStats);
+  runStats.addCredits = (n) => {
+    _origAddCredits(n);
+    if (typeof _checkObjectiveContractClaim === 'function') {
+      _checkObjectiveContractClaim();
+    }
+  };
+}
 window.__leaderboard = Leaderboard;   // exposes top() / all() to the UI
 const specialPerks = new SpecialPerkLoadout();  // legacy — kept for save-file compat
 const buffs = new BuffState();
@@ -4542,10 +4882,13 @@ const lootUI = new LootUI({
   // Bumps contract-tracking counters on a real un-looted → looted
   // transition. Containers (props with `kind: 'container'`) feed the
   // "search N containers" contract; bodies feed "loot N bodies".
+  // Also probes the active contract for completion so objective
+  // contracts fire mid-run instead of waiting for floor extract.
   onSearchedTarget: (target) => {
     if (!target) return;
     if (target.kind === 'container') runStats.noteContainerSearched();
     else                              runStats.noteBodyLooted();
+    _checkObjectiveContractClaim();
   },
 });
 
@@ -17141,6 +17484,7 @@ async function advanceFloor() {
   // run and still satisfy "extract from floor X" if they extracted
   // earlier). peakLevel is monotonic via runStats.setLevel.
   runStats.noteExtracted();
+  _checkObjectiveContractClaim();
   // Mid-run reveal trigger — chip-earn / rank-up that crossed a
   // threshold during this floor unlocks the matching tab. Same
   // toast surface as the death-time call.
