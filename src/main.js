@@ -4922,11 +4922,6 @@ const inventoryUI = new InventoryUI({
   getDragState, setDragState,
 });
 
-// Left-edge durability column — shows orange / red glyphs for any
-// equipped armor / gear / weapon whose durability is below 20% (or
-// broken). Throttled 5Hz internally; we just call tick() each frame.
-const durabilityHud = new DurabilityHud(inventory);
-
 const debugGui = initDebugPanel({
   onGiveAll: () => {
     for (const w of tunables.weapons) inventory.add(wrapWeapon(w));

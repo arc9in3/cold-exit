@@ -1727,63 +1727,6 @@ export function randomEitherRepairKit() {
 // as long as charges < max. Share `type: 'throwable'` so the
 // inventory / action-bar flow can special-case them (different icon,
 // separate use path from heal consumables). Each defines a
-// ---------------------------------------------------------------------
-// Repair kits — drag onto an armor / gear / weapon (paperdoll slot OR
-// grid cell OR body loot pile) to restore a percentage of its max
-// durability. Two flavors: armor kit covers all gear+armor slots,
-// weapon kit covers ranged + melee weapons. Stack of 5; per-instance
-// rolled rarity drives repair %.
-//
-//   repair % by rarity:
-//     common 15% / uncommon 25% / rare 40% / epic 55% / legendary 65%
-//     mythic 75% (bossdrop tier; not in normal pool)
-//
-// Drop tables: ~7% on grunt, 18% on subBoss, 45% on boss bodies (see
-// buildBodyLoot in main.js). Only the def lives here; spawn instances
-// via randomRepairKit / randomEitherRepairKit which stamp rarity +
-// repairPct on each instance.
-// ---------------------------------------------------------------------
-export const REPAIRKIT_DEFS = {
-  armor_repair_kit: {
-    id: 'armor_repair_kit', name: 'Armor Repair Kit',
-    type: 'repairkit', target: 'armor',
-    stackMax: 5, tint: 0x80c8a0,
-    description: 'Drag onto any armor / gear piece to repair durability',
-  },
-  weapon_repair_kit: {
-    id: 'weapon_repair_kit', name: 'Weapon Repair Kit',
-    type: 'repairkit', target: 'weapon',
-    stackMax: 5, tint: 0xa88060,
-    description: 'Drag onto any weapon to repair durability',
-  },
-};
-export const ALL_REPAIRKITS = Object.values(REPAIRKIT_DEFS);
-
-const REPAIRKIT_PCT_BY_RARITY = {
-  common: 0.15, uncommon: 0.25, rare: 0.40,
-  epic: 0.55, legendary: 0.65, mythic: 0.75,
-};
-
-// Spawn a fresh repair-kit instance with a rolled rarity. Common is
-// the floor (~50% weight); legendary tail is rare. `targetType` is
-// 'armor' or 'weapon'.
-export function randomRepairKit(targetType) {
-  const def = targetType === 'weapon'
-    ? REPAIRKIT_DEFS.weapon_repair_kit
-    : REPAIRKIT_DEFS.armor_repair_kit;
-  const r = Math.random();
-  let rarity = 'common';
-  if (r < 0.005)      rarity = 'legendary';
-  else if (r < 0.04)  rarity = 'epic';
-  else if (r < 0.18)  rarity = 'rare';
-  else if (r < 0.50)  rarity = 'uncommon';
-  const repairPct = REPAIRKIT_PCT_BY_RARITY[rarity] || REPAIRKIT_PCT_BY_RARITY.common;
-  return stampItemDims({ ...def, rarity, repairPct, count: 1 });
-}
-export function randomEitherRepairKit() {
-  return randomRepairKit(Math.random() < 0.5 ? 'armor' : 'weapon');
-}
-
 // `throwKind` that main.js dispatches at throw time to produce the
 // correct on-landing effect.
 //
