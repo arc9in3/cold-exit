@@ -127,7 +127,23 @@ export function applyQuality(mode, ctx = {}) {
   qualityFlags.highPixelRatio = !low;
   qualityFlags.muzzleLights = !low;
   qualityFlags.sideLights = !low;
-  qualityFlags.postFx = !low;
+  // Post-FX chain (Kawase bloom + ASC-CDL grade + Sobel outline +
+  // vignette + LoS darken) used to be the high-tier flagship. Playtest
+  // call: "currently the low performance mode looks superior to the
+  // high. whatever post effects are happening in high … does not look
+  // good." Sobel outline at 0.78 strength was the loudest contributor,
+  // adding fuzzy dark edges across every cel-band cliff. Bloom + grade
+  // on top combined into "muddier than the raw render."
+  //
+  // Flipped to OFF on every tier so high == low visually for the post
+  // chain; the rest of the high-tier upgrades (shadows, side lights,
+  // higher pixel ratio, muzzle lights) still apply. Re-enable per-
+  // session via `localStorage.coldExitPostFx = '1'` once the chain is
+  // re-tuned (planned: outline → 0.30, grade → 0.15, bloom → 0.20).
+  let _postFxOptIn = false;
+  try { _postFxOptIn = localStorage.getItem('coldExitPostFx') === '1'; }
+  catch (_) {}
+  qualityFlags.postFx = _postFxOptIn && !low;
   // Off on low + potato: pure visual fluff with no gameplay signal.
   qualityFlags.combatVfx = !low;
   // muzzleFlashSprites + tracerParticles stay TRUE on every tier
