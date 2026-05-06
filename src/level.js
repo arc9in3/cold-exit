@@ -723,22 +723,45 @@ export class Level {
     // Interior variants (split walls, narrowing hallways) go up before the
     // cover scatter so that cover can avoid placing inside interior walls.
     //
-    // Pass 1A: SKIP this step when the room has a non-rect shape — the
-    // shape template owns its interior geometry, and stacking a layout
-    // variant on top would clobber the shape's walkability (e.g. a
-    // 'split' wall through a rotunda's chamfered corner). Rect rooms
-    // continue to use the layout system unchanged.
+    // Pass 1A: SHAPE rooms (lShape, rotunda, gallery, courtyard, ...)
+    // skip the WALL-building interior layouts because the shape
+    // template owns its perimeter + walkable polygon and a divider
+    // wall could clobber its walkability (e.g. a 'split' wall
+    // through a rotunda's chamfered corner). But COLUMN decorations
+    // are point obstacles, not walls, so they're safe to layer on
+    // top of any shape — `_decorateColumns` validates each candidate
+    // against walkable bounds before placing.
+    //
+    // Earlier this whole block was `continue`-ed for shape rooms,
+    // which silently dropped columns whenever a shape room got a
+    // column-* layout — playtest noticed many levels had no pillars.
+    // Layout buckets:
+    //   WALL_LAYOUTS — build long interior walls (split's divider,
+    //     hallway pinch, alcove L). UNSAFE for shape rooms — would
+    //     clip the shape's own perimeter / cut-out.
+    //   PILLAR_LAYOUTS — pure point obstacles (pillar grids, kill-box
+    //     cover blocks, central cover). SAFE for shape rooms because
+    //     each placement validates via _blocksDoor + _collidesAt; the
+    //     `_buildInterior` post-pass also gets a walkable-bounds
+    //     filter at the inner level via `_collidesAt` catching shape
+    //     walls. The remaining risk is a pillar landing in a shape
+    //     cut-out (lShape's empty quadrant) — accepted as a rare edge
+    //     case; the pillar is solid+visible but inside the void, so
+    //     it doesn't block gameplay.
+    const WALL_LAYOUTS = new Set([
+      'split', 'hallway', 'lshape', 'corridor', 'partition',
+      'closet', 'bunker', 'alcove', 'center-pit', 'zigzag', 'boss-arena',
+    ]);
+    const PILLAR_LAYOUTS = new Set([
+      'pillars-grid', 'boss-pillars', 'boss-perch',
+      'pillar-ring', 'kill-box', 'central-cover', 'flank-pockets',
+    ]);
     for (const room of rooms) {
-      if (room.shape && room.shape !== 'rect') continue;
-      if (room.layout === 'split' || room.layout === 'hallway' || room.layout === 'lshape'
-          || room.layout === 'corridor' || room.layout === 'partition'
-          || room.layout === 'closet'  || room.layout === 'bunker'
-          || room.layout === 'pillars-grid'
-          || room.layout === 'alcove'   || room.layout === 'center-pit'
-          || room.layout === 'zigzag'   || room.layout === 'boss-arena'
-          || room.layout === 'boss-pillars' || room.layout === 'boss-perch'
-          || room.layout === 'pillar-ring' || room.layout === 'kill-box'
-          || room.layout === 'central-cover' || room.layout === 'flank-pockets') {
+      const isShape = !!(room.shape && room.shape !== 'rect');
+      if (WALL_LAYOUTS.has(room.layout) && !isShape) {
+        this._buildInterior(room);
+      } else if (PILLAR_LAYOUTS.has(room.layout)) {
+        // Pillar-only layouts run for both rect AND shape rooms.
         this._buildInterior(room);
       }
       if (room.layout === 'columns-4') this._decorateColumns(room, '4-corner');
@@ -3748,12 +3771,30 @@ export class Level {
 
   // Symmetric column decorations. `style` picks the pattern. Columns never
   // block the doorway corridors because they sit ≥2m from the walls.
+  // Shape rooms (lShape, rotunda, ...) only place columns inside their
+  // walkableBounds polygon — the cut-out corners of an L are off-limits.
   _decorateColumns(room, style) {
     const b = room.bounds;
     const cx = (b.minX + b.maxX) / 2;
     const cz = (b.minZ + b.maxZ) / 2;
+    const walkBounds = room._walkableBounds;
+    const inWalkable = (x, z) => {
+      if (!walkBounds || walkBounds.length === 0) return true;
+      for (let i = 0; i < walkBounds.length; i++) {
+        const w = walkBounds[i];
+        // 0.6m margin so a column doesn't sit half-in a cut-out.
+        if (x >= w.minX + 0.6 && x <= w.maxX - 0.6
+         && z >= w.minZ + 0.6 && z <= w.maxZ - 0.6) return true;
+      }
+      return false;
+    };
     const place = (x, z, r) => {
       if (this._blocksDoor(room, x, z)) return;
+      if (!inWalkable(x, z)) return;
+      // Don't drop a column on top of an existing wall / prop. Shape
+      // templates may have built interior partitions and we don't want
+      // to clip a pillar through one.
+      if (this._collidesAt(x, z, r + 0.2)) return;
       this._addColumn(x, z, r);
     };
     if (style === '4-corner') {
