@@ -452,6 +452,67 @@ export const CONTRACT_DEFS = {
   }),
 };
 
+// Per-rarity roll weight as a function of the player's completed-
+// contracts count. Lower rarities dominate early; higher rarities
+// take over as the player builds a track record. Used by the
+// hideout contract board AND the mid-run "pick another" picker so
+// both surfaces grow harder together.
+//
+// Curve goals:
+//   • At 0 completions: only common (and a sliver of uncommon).
+//   • At ~10: rare starts showing up regularly.
+//   • At ~20: epic enters the rotation.
+//   • At ~30+: legendary surfaces; commons fade to background floor.
+//
+// Each rarity returns a non-negative weight. The pickWeightedDef
+// roll below normalises across all candidate defs.
+export function rarityWeightForCompletions(rarity, completions) {
+  const c = Math.max(0, completions | 0);
+  switch (rarity) {
+    case 'common':
+      // Stays meaningful early but trails to a 0.25 floor so the
+      // pool always has SOMETHING easy in case the player just
+      // wants a quick warm-up contract.
+      return Math.max(0.25, 1.0 - c * 0.025);
+    case 'uncommon':
+      // Rises from 0.4 base, peaks around c=30 at ~1.0.
+      return 0.4 + Math.min(0.6, c * 0.02);
+    case 'rare':
+      // Available from completion 1, ramps to 1.5 by c=37.
+      return Math.min(1.5, c * 0.04);
+    case 'epic':
+      // Off-pool until ~10 completions; reaches 2.0 by c=50.
+      return Math.max(0, Math.min(2.0, (c - 10) * 0.05));
+    case 'legendary':
+      // Reserved for late-game pulls. Off until c=25, max 2.5 by c=67.
+      return Math.max(0, Math.min(2.5, (c - 25) * 0.06));
+    default:
+      return 0.5;
+  }
+}
+
+// Weighted random pick over a candidate pool. Each def's weight is
+// rarityWeightForCompletions(def.rarity, completions). When every
+// candidate weights to zero (shouldn't happen because common has a
+// 0.25 floor) we fall back to a flat random pick so the surface
+// never silently fails.
+export function pickWeightedContractDef(candidates, completions) {
+  if (!Array.isArray(candidates) || candidates.length === 0) return null;
+  const weights = candidates.map(d =>
+    rarityWeightForCompletions(d?.rarity || 'common', completions));
+  let total = 0;
+  for (const w of weights) total += w;
+  if (total <= 0) {
+    return candidates[Math.floor(Math.random() * candidates.length)];
+  }
+  let r = Math.random() * total;
+  for (let i = 0; i < candidates.length; i++) {
+    r -= weights[i];
+    if (r <= 0) return candidates[i];
+  }
+  return candidates[candidates.length - 1];
+}
+
 // Returns true if `def` is unlocked given current persistent state.
 // `state` shape: { contractsCompleted, megabossKills, marks }. Missing
 // fields default to 0 (i.e. unmet).

@@ -90,7 +90,9 @@ import { StartUI } from './ui_start.js';
 import { MainMenuUI } from './ui_main_menu.js';
 import { HideoutUI } from './ui_hideout.js';
 import { tryClaimContract, defForId, buildModifiers, evaluateContract,
-         rankRewardFor, rankPerKillFor, CONTRACT_DEFS, objectiveSubtitle } from './contracts.js';
+         rankRewardFor, rankPerKillFor, CONTRACT_DEFS, objectiveSubtitle,
+         pickWeightedContractDef, isContractUnlocked as _isContractDefUnlocked }
+         from './contracts.js';
 import {
   getActiveContract, setActiveContract, awardMarks, bumpContractRank, bumpMegabossKills,
   bumpRunCount, queueEncounterFollowup,
@@ -17508,15 +17510,33 @@ function _showMidRunContractOffer() {
       const allContracts = Object.values(CONTRACT_DEFS).filter(c => c && c.id);
       const cur = getActiveContract();
       const curId = cur?.activeContractId || null;
-      const pool = allContracts.filter(c => c.id !== curId && c.kind !== 'weekly');
+      // Honor unlock-by-completion gates so the mid-run picker can't
+      // offer contracts the player hasn't earned access to yet at the
+      // hideout board. Uses the same predicate _refreshCardSlots reads.
+      const _unlockState = {
+        contractsCompleted: getContractRank(),
+        megabossKills: 0,
+        marks: getMarks ? (typeof getMarks === 'function' ? getMarks() : 0) : 0,
+      };
+      const pool = allContracts.filter(c =>
+        c.id !== curId
+        && c.kind !== 'weekly'
+        && _isContractDefUnlocked(c, _unlockState));
       if (pool.length === 0) { resolve(null); return; }
-      // 3 unique picks (or fewer if the pool is small).
+      // 3 unique picks weighted by rarity × completions, mirroring
+      // the hideout board so the offered set hardens together with
+      // contract progression. (User: "as the player completes more
+      // and more contracts, they should be offered higher rarity
+      // and harder contracts and modifiers.")
+      const completions = getContractRank();
       const picks = [];
       const used = new Set();
-      while (picks.length < 3 && picks.length < pool.length) {
-        const idx = Math.floor(Math.random() * pool.length);
-        const def = pool[idx];
-        if (used.has(def.id)) continue;
+      let safety = 60;
+      while (picks.length < 3 && picks.length < pool.length && safety-- > 0) {
+        const remaining = pool.filter(d => !used.has(d.id));
+        if (!remaining.length) break;
+        const def = pickWeightedContractDef(remaining, completions);
+        if (!def) break;
         used.add(def.id);
         picks.push(def);
       }

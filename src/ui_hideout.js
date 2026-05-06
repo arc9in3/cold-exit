@@ -49,7 +49,7 @@ import {
   CONTRACT_DEFS, defForId, contractExpired,
   pickDailyContract, pickWeeklyContract, utcDayIndex, utcWeekIndex,
   liveProgressFor, tryClaimContract, isContractUnlocked, buildModifiers, difficultyScore,
-  rankRewardFor, rankPerKillFor, objectiveSubtitle,
+  rankRewardFor, rankPerKillFor, objectiveSubtitle, pickWeightedContractDef,
 } from './contracts.js';
 import { iconForItem, inferRarity, rarityColor, weaponImageMirrorStyle, CONSUMABLE_DEFS, ARMOR_DEFS } from './inventory.js';
 
@@ -2818,10 +2818,17 @@ export class HideoutUI {
       id && id !== activeId && CONTRACT_DEFS[id]);
     const seen = new Set(this._cardSlots);
     if (activeId) seen.add(activeId);
+    // Weighted pick — rarer contracts surface more as the player
+    // racks up completions. (User: "as the player completes more
+    // and more contracts, they should be offered higher rarity and
+    // harder contracts and modifiers.") See rarityWeightForCompletions
+    // in contracts.js for the curve.
+    const completions = getContractRank();
     while (this._cardSlots.length < cap) {
       const candidates = allDefs.filter(d => !seen.has(d.id));
       if (!candidates.length) break;
-      const pick = candidates[Math.floor(Math.random() * candidates.length)];
+      const pick = pickWeightedContractDef(candidates, completions);
+      if (!pick) break;
       this._cardSlots.push(pick.id);
       seen.add(pick.id);
     }
