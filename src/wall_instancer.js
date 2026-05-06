@@ -67,40 +67,56 @@ class WallInstancer {
   _poolFor(color, roughness = 0.85) {
     let pool = this._pools.get(color);
     if (!pool) {
-      const mat = new THREE.MeshStandardMaterial({ color, roughness });
-      const inst = new THREE.InstancedMesh(unitCubeGeometry(), mat, INITIAL_CAP);
-      inst.instanceMatrix.setUsage(THREE.DynamicDrawUsage);
-      inst.castShadow = false;             // walls don't cast (per _addObstacle comment)
-      inst.receiveShadow = true;
-      // Per-instance color attribute. setColorAt(slot, c) writes RGB
-      // per-instance which the renderer multiplies against the
-      // material's base color. We use it for occlusion-fade —
-      // setting (k, k, k) for k < 1 darkens the slot toward black,
-      // mimicking transparency by losing brightness rather than
-      // hiding the wall entirely. Initial fill = (1,1,1) so every
-      // newly-added wall renders at full brightness.
-      inst.instanceColor = new THREE.InstancedBufferAttribute(
-        new Float32Array(INITIAL_CAP * 3).fill(1), 3,
-      );
-      inst.instanceColor.setUsage(THREE.DynamicDrawUsage);
-      // Frustum culling on InstancedMesh tests the LOCAL bounding sphere
-      // against the camera. Walls span the entire level, so the local
-      // sphere of one unit cube doesn't represent the world bounds.
-      // Three.js would otherwise cull the whole instanced wall set
-      // whenever the camera doesn't include world-origin. Per-instance
-      // visibility is handled via zero-scale matrices.
-      inst.frustumCulled = false;
-      // Park every slot zero-scaled. setMatrixAt copies, so _zero is reusable.
-      for (let i = 0; i < INITIAL_CAP; i++) inst.setMatrixAt(i, _zero);
-      this.scene.add(inst);
+      // OPAQUE twin — every wall renders here by default. Standard
+      // settings: writes depth, no alpha blend.
+      const opaqueMat = new THREE.MeshStandardMaterial({ color, roughness });
+      const opaqueInst = new THREE.InstancedMesh(unitCubeGeometry(), opaqueMat, INITIAL_CAP);
+      opaqueInst.instanceMatrix.setUsage(THREE.DynamicDrawUsage);
+      opaqueInst.castShadow = false;
+      opaqueInst.receiveShadow = true;
+      opaqueInst.frustumCulled = false;
+      // GHOST twin — same geometry pool, alpha-blended material with
+      // depthWrite OFF. Faded walls swap to this mesh so:
+      //   * the slot in the opaque mesh zero-scales (no occluder)
+      //   * the slot in the ghost mesh full-scales (faded silhouette)
+      // The ghost pool's depthWrite=false means anything behind the
+      // wall (the enemy the player wants to see) renders without
+      // being occluded; transparent=true + opacity=0.45 keeps a
+      // visible silhouette so the wall has presence.
+      //
+      // Per-instance color (instanceColor) was tried first but it
+      // only changes the surface RGB — the wall still wrote to
+      // depth and blocked everything behind it. Real alpha blending
+      // requires transparent=true on the material, which is a per-
+      // pool flag, hence the twin pool.
+      const ghostMat = new THREE.MeshStandardMaterial({
+        color, roughness,
+        transparent: true,
+        opacity: 0.45,
+        depthWrite: false,
+      });
+      const ghostInst = new THREE.InstancedMesh(unitCubeGeometry(), ghostMat, INITIAL_CAP);
+      ghostInst.instanceMatrix.setUsage(THREE.DynamicDrawUsage);
+      ghostInst.castShadow = false;
+      ghostInst.receiveShadow = true;
+      ghostInst.frustumCulled = false;
+      ghostInst.renderOrder = 1;          // render after opaque pass
+      // Park every slot zero-scaled in BOTH twins. setMatrixAt
+      // copies, so _zero is reusable.
+      for (let i = 0; i < INITIAL_CAP; i++) {
+        opaqueInst.setMatrixAt(i, _zero);
+        ghostInst.setMatrixAt(i, _zero);
+      }
+      this.scene.add(opaqueInst);
+      this.scene.add(ghostInst);
       pool = {
-        inst,
+        inst: opaqueInst,
+        ghostInst,
         free: [],
         sources: new Array(INITIAL_CAP).fill(null),
         cap: INITIAL_CAP,
         color,
       };
-      // Slot 0 first when popping.
       for (let i = INITIAL_CAP - 1; i >= 0; i--) pool.free.push(i);
       this._pools.set(color, pool);
     }
@@ -146,38 +162,32 @@ class WallInstancer {
     return proxy;
   }
 
-  // Recompute the slot's matrix + per-instance color from the proxy's
-  // current state. Two independent flags drive the visual:
-  //   _visible    — gameplay hide. False → zero-scale slot completely.
-  //   _occlHidden — occlusion fade. True → multiply per-instance
-  //                 colour by FADE so the wall darkens but stays
-  //                 rendered (user request: "they need to have a
-  //                 bit of opacity still").
+  // Recompute the slot's matrix in BOTH twin meshes. Three states:
+  //   gameplay-hidden (!_visible)            → zero-scale both
+  //   occlusion-faded (_occlHidden, visible) → opaque zero, ghost full
+  //   normal          (visible, !occlHidden) → opaque full, ghost zero
   _refreshSlot(proxy) {
     const pool = proxy._pool;
     if (!pool) return;
     const slot = proxy._slot;
-    if (!proxy._visible) {
-      pool.inst.setMatrixAt(slot, _zero);
-    } else {
+    let opaqueMat = _zero;
+    let ghostMat = _zero;
+    if (proxy._visible) {
       _scratchPos.set(proxy.position.x, proxy.position.y, proxy.position.z);
       _scratchQuat.identity();
       _scratchScale.set(proxy._w, proxy._h, proxy._d);
       _scratchMat4.compose(_scratchPos, _scratchQuat, _scratchScale);
-      pool.inst.setMatrixAt(slot, _scratchMat4);
+      if (proxy._occlHidden) {
+        ghostMat = _scratchMat4;
+      } else {
+        opaqueMat = _scratchMat4;
+      }
     }
+    pool.inst.setMatrixAt(slot, opaqueMat);
     pool.inst.instanceMatrix.needsUpdate = true;
-    // Per-instance color tint for occlusion fade. (k, k, k)
-    // multiplies the material's base color → wall darkens while
-    // remaining visible. 0.32 picks a value where the wall reads
-    // as a translucent shape but the enemy / target behind still
-    // pops as the focal element.
-    const k = proxy._occlHidden ? 0.32 : 1.0;
-    if (pool.inst.instanceColor) {
-      const arr = pool.inst.instanceColor.array;
-      const o = slot * 3;
-      arr[o] = k; arr[o + 1] = k; arr[o + 2] = k;
-      pool.inst.instanceColor.needsUpdate = true;
+    if (pool.ghostInst) {
+      pool.ghostInst.setMatrixAt(slot, ghostMat);
+      pool.ghostInst.instanceMatrix.needsUpdate = true;
     }
   }
 
@@ -195,6 +205,11 @@ class WallInstancer {
       this.scene.remove(pool.inst);
       pool.inst.dispose?.();
       pool.inst.material?.dispose?.();
+      if (pool.ghostInst) {
+        this.scene.remove(pool.ghostInst);
+        pool.ghostInst.dispose?.();
+        pool.ghostInst.material?.dispose?.();
+      }
     }
     this._pools.clear();
   }
