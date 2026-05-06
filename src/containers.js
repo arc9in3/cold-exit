@@ -13,6 +13,7 @@ import {
   ALL_GEAR, ALL_ARMOR, ALL_CONSUMABLES, CONSUMABLE_DEFS,
   randomArmor, randomGear, randomConsumable, randomJunk, randomThrowable,
   withAffixes, wrapWeapon, forceMastercraft,
+  getLootLevel,
 } from './inventory.js';
 import { ALL_ATTACHMENTS, randomAttachment } from './attachments.js';
 import { tunables } from './tunables.js';
@@ -36,12 +37,43 @@ function _worldDropPool() {
 // rarity weights ramp common→legendary (1, 0.6, 0.35, 0.18, 0.08)
 // with the mult applied to non-common picks.
 const _RARITY_WEIGHTS = { common: 1.0, uncommon: 0.6, rare: 0.35, epic: 0.18, legendary: 0.08, mythic: 0 };
+// Per-rarity level scalar — playtest call: "the quality of the items
+// aren't getting better with level, ... further levels should have
+// higher chance of loot dropping of higher rarity." Higher tiers ramp
+// faster; common-tier weight stays at 1.0 so it doesn't INCREASE in
+// raw probability (only relative share shifts toward rares as the
+// non-common weights climb).
+//
+//   uncommon:    +6%  per floor past 1  (cap ~3.4× at L40)
+//   rare:        +9%  per floor          (cap ~4.6× at L40)
+//   epic:        +12% per floor          (cap ~5.7× at L40)
+//   legendary:   +15% per floor          (cap ~6.85× at L40)
+//
+// Caps via Math.min keep late-game from collapsing the table to
+// pure-legendary; common still wins outright at L40 due to its
+// 1.0 base vs ~0.55 effective legendary share.
+function _levelRarityMult(rarity) {
+  const lv = Math.max(1, getLootLevel());
+  const dl = lv - 1;
+  switch (rarity) {
+    case 'uncommon':  return Math.min(3.5, 1 + 0.06 * dl);
+    case 'rare':      return Math.min(4.7, 1 + 0.09 * dl);
+    case 'epic':      return Math.min(5.8, 1 + 0.12 * dl);
+    case 'legendary': return Math.min(7.0, 1 + 0.15 * dl);
+    default: return 1.0;
+  }
+}
 function _pickWeightedFromPool(pool) {
   const mult = window.__activeModifiers?.()?.lootQualityMult || 1;
   let total = 0;
   const weights = pool.map(w => {
-    const base = _RARITY_WEIGHTS[w.rarity || 'common'] ?? 1;
-    const wt = (w.rarity && w.rarity !== 'common') ? base * mult : base;
+    const r = w.rarity || 'common';
+    const base = _RARITY_WEIGHTS[r] ?? 1;
+    // Common stays at base; non-common scales by both the contract-
+    // modifier mult AND the level scalar.
+    const wt = (r !== 'common')
+      ? base * mult * _levelRarityMult(r)
+      : base;
     total += wt;
     return wt;
   });
@@ -85,19 +117,30 @@ const TYPE_NAMES = {
   masterwork: ['Masterwork Chest'],
 };
 
-// Size profile — number of *real* items rolled per open. Every
-// container also carries a guaranteed piece of junk on top of this
-// (added in makeContainer below), so the totals players see are this
-// + 1. Counts are intentionally lean — a typical small box hands the
-// player one or two things, large boxes lean toward a single nicer
-// roll rather than a pile of common filler.
+// Size profile — number of *real* items rolled per open. Counts
+// dropped in 2026-05-06 retune after playtest: "lots of items are
+// dropping in general - lots of stuff spawning in boxes and
+// containers." Goal is "find a thing every few boxes, not stuff a
+// backpack full from one room."
+//
+//   s: 80% empty / 20% one item   (was 65% empty / 35% one)
+//   m: 50% empty / 45% one / 5% two   (was always 1, +1 at 35%)
+//   l: 35% one / 50% two / 15% three   (was 1 or 2-3)
+//
+// Junk-floor is now ROLLED per container rather than guaranteed
+// (see makeContainer below) so a small empty box stays empty
+// instead of always coughing up a pen / bottle / mug.
 const SIZE_PROFILES = {
-  s: { items: () => Math.random() < 0.65 ? 0 : 1,       geo: { w: 0.7, h: 0.55, d: 0.5 } },
-  m: { items: () => 1 + (Math.random() < 0.35 ? 1 : 0), geo: { w: 1.0, h: 0.75, d: 0.7 } },
-  l: { items: () => Math.random() < 0.55
-                       ? 1
-                       : 2 + Math.floor(Math.random() * 2),  // 2..3
-        geo: { w: 1.4, h: 1.0, d: 0.95 } },
+  s: { items: () => (Math.random() < 0.80 ? 0 : 1),
+       geo: { w: 0.7, h: 0.55, d: 0.5 } },
+  m: { items: () => {
+        const r = Math.random();
+        return r < 0.50 ? 0 : (r < 0.95 ? 1 : 2);
+      }, geo: { w: 1.0, h: 0.75, d: 0.7 } },
+  l: { items: () => {
+        const r = Math.random();
+        return r < 0.35 ? 1 : (r < 0.85 ? 2 : 3);
+      }, geo: { w: 1.4, h: 1.0, d: 0.95 } },
 };
 
 // Per-type roll function. Keeps the loot tables aligned with their
@@ -189,10 +232,12 @@ export function makeContainer(type, size, levelIdx = 1) {
     const it = rollItemForType(type, levelIdx);
     if (it) loot.push(it);
   }
-  // Junk floor — every non-masterwork container coughs up at least
-  // one piece of junk so opening it always feels worth the prompt.
-  // Masterwork chests stay pristine — single mythic item, no filler.
-  if (type !== 'masterwork') {
+  // Junk floor — used to be guaranteed on every non-masterwork
+  // container. Playtest: "lots of items are dropping in general."
+  // Now rolled at 30% so a typical box CAN come up empty (or near
+  // it) and finding a stash feels rewarding. Masterwork stays
+  // pristine — single mythic item, no filler.
+  if (type !== 'masterwork' && Math.random() < 0.30) {
     const j = randomJunk();
     if (j) loot.push(j);
   }
