@@ -30,14 +30,18 @@ share the same rig builder for visual consistency.
 - **One change per commit.** Easier to revert + review.
 - **Co-author every commit:** add `Co-Authored-By: <AI Name> <noreply@anthropic.com>`
   (or the equivalent for your tool) so we can see who did what later.
-- **Deploy after every meaningful commit:** `git push origin main`. The
-  Cloudflare Pages project is git-connected to `arc9in3/cold-exit` —
-  pushing to `main` triggers an auto-build + deploy. The wrangler CLI
-  fallback (`npx wrangler pages deploy . --project-name=cold-exit
-  --commit-dirty=true`) does NOT honor `.assetsignore` /
-  `.wranglerignore` for `pages deploy` in wrangler 4.x and chokes on
-  the local `profiling/` traces (~4 GiB), so prefer git push. Active
-  session is pre-authorized to push to main; don't ask first.
+- **Deploy after every meaningful commit:**
+  ```
+  node tools/deploy.mjs
+  ```
+  Wraps `npx wrangler pages deploy . --project-name=cold-exit
+  --commit-dirty=true` with a temporary rename of every top-level
+  path in `.assetsignore` (profiling traces, source FBX archives,
+  `node_modules`, etc.) so wrangler 4.x's `pages deploy` — which
+  ignores `.assetsignore` for Pages projects — doesn't trip the
+  25 MiB-per-file Pages cap. Restored unconditionally via try/finally
+  so an interrupted run can't leave the tree in a half-renamed state.
+  The user is pre-authorized; don't ask before deploying.
 
 ## Repo conventions
 
