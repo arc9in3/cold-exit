@@ -259,7 +259,11 @@ export function buildExtractionRoom(level, bossRoom, opts = {}) {
   else if (dir === 'north'){ doorX = cx; doorZ = b.minZ - WALL_THICK / 2; doorW = DOOR_WIDTH; doorD = WALL_THICK; }
   else                     { doorX = cx; doorZ = b.maxZ + WALL_THICK / 2; doorW = DOOR_WIDTH; doorD = WALL_THICK; }
 
-  const doorMat = sharedMaterial({ color: DOOR_COLOR, roughness: 0.85 });
+  // Own-material clone — _openDoor mutates color/opacity/transparent
+  // when revealExit() flips this door open. Sharing the material with
+  // other doors leaks the open-tint everywhere (mirrors the keycard
+  // colour-bleed bug fix in _buildDoor).
+  const doorMat = sharedMaterial({ color: DOOR_COLOR, roughness: 0.85 }).clone();
   const doorMesh = new THREE.Mesh(
     new THREE.BoxGeometry(doorW, WALL_HEIGHT, doorD),
     doorMat,

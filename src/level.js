@@ -1875,11 +1875,22 @@ export class Level {
       sx = DOOR_WIDTH; sz = WALL_THICK;
     }
     const mesh = this._addObstacle(cx, WALL_HEIGHT / 2, cz, sx, WALL_HEIGHT, sz, DOOR_COLOR);
+    // CRITICAL: doors share their initial material via sharedMaterial(),
+    // but we mutate `mesh.material.color` per-door (keycard tints in
+    // _assignKeycards, open/locked tint in _openDoor). Without an
+    // own-material clone, each setHex on one door re-tints EVERY door
+    // sharing the material. Result: keycard doors all show the LAST
+    // assigned colour while their userData.keyRequired keeps the real
+    // (different) colour — the "approached green door, game asked for
+    // red" playtest report. Cost is negligible: ~10 doors per level,
+    // each material is a small MeshStandardMaterial instance.
+    if (mesh.material && typeof mesh.material.clone === 'function') {
+      mesh.material = mesh.material.clone();
+    }
     mesh.userData.isDoor = true;
     mesh.userData.connects = [a.id, b.id];
     mesh.userData.cx = cx;
     mesh.userData.cz = cz;
-
   }
 
   // Build the tutorial level — a single 30×30 practice room with an
@@ -6358,6 +6369,12 @@ export class Level {
         mesh.userData.isElevatorDoor = true;
         mesh.userData.cx = x;
         mesh.userData.cz = z;
+        // Own-material clone (see _buildDoor for the rationale).
+        // _openDoor mutates color/opacity here and we don't want
+        // those changes leaking into other doors via shared mat.
+        if (mesh.material && typeof mesh.material.clone === 'function') {
+          mesh.material = mesh.material.clone();
+        }
       }
     };
     // Four walls around the elevator. The one matching `doorSide` becomes
