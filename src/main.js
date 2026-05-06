@@ -702,6 +702,11 @@ import('./anim/registry.js').then(m => m.Registry.create('Assets/anim_data/'))
 //   __useFbx(null)   // revert to procgen
 window.__player = player;
 window.__scene = scene;
+// Dev-time refs — used by perf probes, the level-screenshot tool,
+// and the cutscene onCamera callback. Pure handles; not consumed by
+// gameplay code.
+window.__camera = camera;
+window.__renderer = renderer;
 // Phase M step 9 — bug-report tool needs transientHudMsg + the
 // in-game key listener. initBugReport binds `]` to file a stuck-state
 // repro POST to the Mission Control dashboard.
