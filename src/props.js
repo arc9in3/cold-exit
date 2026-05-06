@@ -1067,6 +1067,224 @@ export function buildChopperLz(opts = {}) {
   return { group, collision: { w: r * 2, d: r * 2 } };
 }
 
+// =====================================================================
+// Theme-specialised props — added to support the lab / server / factory
+// / infirmary / lobby / shop themes with silhouettes that read as the
+// thing instead of repurposing pillars or nightstands.
+// =====================================================================
+
+// Server rack — tall thin cabinet with LED dots. Reads as IT gear at
+// iso distance because of the row of bright pinpoints on the front.
+export function buildServerRack(opts = {}) {
+  const w = opts.w ?? 0.7;
+  const d = opts.d ?? 0.85;
+  const h = opts.h ?? 1.95;
+  const group = new THREE.Group();
+  // Body — matte black with a thin metal frame.
+  const body = roundedBox(w, h, d, 0x16181c, { radius: 0.04 });
+  body.position.y = h / 2;
+  group.add(body);
+  // Vertical seam down the front.
+  const seam = box(0.02, h - 0.18, 0.02, 0x2a2f36);
+  seam.position.set(0, h / 2, d / 2 + 0.005);
+  group.add(seam);
+  // Three rows of LED panels — emissive so they pop in the iso view.
+  const ledColors = [0x4ad6ff, 0x70ff9a, 0xffa040];
+  for (let row = 0; row < 5; row++) {
+    const cy = 0.32 + row * 0.32;
+    for (let col = 0; col < 4; col++) {
+      const led = new THREE.Mesh(
+        new THREE.BoxGeometry(0.04, 0.04, 0.02),
+        sharedMaterial({ type: 'basic', color: ledColors[(row + col) % 3] }),
+      );
+      led.position.set(-w * 0.32 + col * 0.18, cy, d / 2 + 0.012);
+      group.add(led);
+    }
+  }
+  // Cooling vent slats at the top.
+  for (let i = 0; i < 3; i++) {
+    const vent = box(w * 0.65, 0.025, 0.02, 0x2a2f36);
+    vent.position.set(0, h - 0.10 - i * 0.05, d / 2 + 0.012);
+    group.add(vent);
+  }
+  return { group, collision: { w, d }, kind: 'serverRack' };
+}
+
+// Med cart — small rolling cart with a tray, drawer, and red cross
+// accent. Distinct from the nightstand silhouette because of the
+// taller wheeled-cabinet shape + accent cross.
+export function buildMedCart(opts = {}) {
+  const w = opts.w ?? 0.6;
+  const d = opts.d ?? 0.45;
+  const h = opts.h ?? 0.95;
+  const group = new THREE.Group();
+  // Body — clinical white.
+  const body = roundedBox(w, h * 0.85, d, 0xe6ece8, { radius: 0.045 });
+  body.position.y = h * 0.50;
+  group.add(body);
+  // Drawer line.
+  const drawer = box(w * 0.85, 0.02, 0.02, 0x9aa3a6);
+  drawer.position.set(0, h * 0.55, d / 2 + 0.005);
+  group.add(drawer);
+  // Tray on top — slightly recessed lip.
+  const tray = roundedBox(w + 0.04, 0.04, d + 0.04, 0xc8d6cf, { radius: 0.02 });
+  tray.position.y = h * 0.92;
+  group.add(tray);
+  // Red cross — emissive so it reads at distance.
+  const crossH = box(0.18, 0.04, 0.02,  0xc02828);
+  crossH.position.set(0, h * 0.50, d / 2 + 0.012);
+  group.add(crossH);
+  const crossV = box(0.04, 0.18, 0.02, 0xc02828);
+  crossV.position.set(0, h * 0.50, d / 2 + 0.012);
+  group.add(crossV);
+  // Four little wheels.
+  const wheelColor = 0x1a1d22;
+  const wOff = 0.02;
+  const wheels = [
+    [w / 2 - 0.06,  d / 2 - 0.06],
+    [-(w / 2 - 0.06),  d / 2 - 0.06],
+    [w / 2 - 0.06, -(d / 2 - 0.06)],
+    [-(w / 2 - 0.06), -(d / 2 - 0.06)],
+  ];
+  for (const [wx, wz] of wheels) {
+    const wheel = cyl(0.04, 0.04, wheelColor, 8);
+    wheel.rotation.z = Math.PI / 2;
+    wheel.position.set(wx, 0.04 + wOff, wz);
+    group.add(wheel);
+  }
+  return { group, collision: { w, d }, kind: 'medCart' };
+}
+
+// Vending machine — tall colored cabinet with a black glass front
+// showing rows of items. Lobby / break-room ambience.
+export function buildVendingMachine(opts = {}) {
+  const w = opts.w ?? 0.95;
+  const d = opts.d ?? 0.7;
+  const h = opts.h ?? 1.95;
+  const accent = opts.accent ?? 0xc92840;       // candy-machine red
+  const group = new THREE.Group();
+  // Body.
+  const body = roundedBox(w, h, d, accent, { radius: 0.05 });
+  body.position.y = h / 2;
+  group.add(body);
+  // Glass front — dark, slight emissive sheen to read as illuminated.
+  const glass = new THREE.Mesh(
+    new THREE.BoxGeometry(w * 0.78, h * 0.62, 0.02),
+    sharedMaterial({ type: 'basic', color: 0x14181c }),
+  );
+  glass.position.set(0, h * 0.62, d / 2 + 0.012);
+  group.add(glass);
+  // Four product slots — small bright squares on the glass.
+  const productColors = [0xff8030, 0x40c060, 0x4080ff, 0xffc040, 0xffffff, 0xff4090];
+  for (let r = 0; r < 3; r++) {
+    for (let c = 0; c < 2; c++) {
+      const item = new THREE.Mesh(
+        new THREE.BoxGeometry(0.10, 0.14, 0.01),
+        sharedMaterial({ type: 'basic',
+          color: productColors[(r * 2 + c) % productColors.length] }),
+      );
+      item.position.set(-w * 0.18 + c * w * 0.36, h * 0.42 + r * 0.20, d / 2 + 0.022);
+      group.add(item);
+    }
+  }
+  // Dispense slot at bottom + brand stripe at top.
+  const slot = box(w * 0.4, 0.05, 0.02, 0x1a1d22);
+  slot.position.set(0, h * 0.20, d / 2 + 0.012);
+  group.add(slot);
+  const brand = box(w * 0.86, 0.10, 0.01, 0xffffff);
+  brand.position.set(0, h * 0.94, d / 2 + 0.012);
+  group.add(brand);
+  return { group, collision: { w, d }, kind: 'vendingMachine' };
+}
+
+// Display case — glass cabinet with three pedestal items inside.
+// Reads as a vendor showcase — distinct from a filing cabinet.
+export function buildDisplayCase(opts = {}) {
+  const w = opts.w ?? 1.3;
+  const d = opts.d ?? 0.6;
+  const h = opts.h ?? 1.35;
+  const accent = opts.accent ?? 0xc9a464;       // brass
+  const group = new THREE.Group();
+  // Base — solid wood / metal pedestal.
+  const base = roundedBox(w, h * 0.30, d, COL.woodDark, { radius: 0.04 });
+  base.position.y = h * 0.15;
+  group.add(base);
+  // Brass band along the base top.
+  const band = box(w + 0.02, 0.04, d + 0.02, accent);
+  band.position.y = h * 0.30;
+  group.add(band);
+  // Glass case — translucent.
+  const glass = new THREE.Mesh(
+    new THREE.BoxGeometry(w * 0.95, h * 0.65, d * 0.92),
+    sharedMaterial({
+      type: 'basic', color: 0xa0c8d8,
+      transparent: true, opacity: 0.18, depthWrite: false,
+    }),
+  );
+  glass.position.y = h * 0.30 + h * 0.65 / 2;
+  group.add(glass);
+  // Frame edges — thin brass strips on each vertical edge.
+  const frameH = h * 0.65;
+  const corners = [[w * 0.475, d * 0.46], [-w * 0.475, d * 0.46],
+                   [w * 0.475, -d * 0.46], [-w * 0.475, -d * 0.46]];
+  for (const [cx, cz] of corners) {
+    const post = box(0.025, frameH, 0.025, accent);
+    post.position.set(cx, h * 0.30 + frameH / 2, cz);
+    group.add(post);
+  }
+  // Three displayed items on a low shelf inside.
+  const displayColors = opts.displayColors ?? [0x6aaedc, 0xffd27a, 0x70d0a0];
+  const shelfY = h * 0.30 + 0.04;
+  for (let i = 0; i < 3; i++) {
+    const item = new THREE.Mesh(
+      new THREE.BoxGeometry(0.16, 0.16, 0.16),
+      sharedMaterial({ type: 'basic', color: displayColors[i % 3] }),
+    );
+    item.position.set(-w * 0.30 + i * w * 0.30, shelfY + 0.10, 0);
+    group.add(item);
+  }
+  return { group, collision: { w, d }, kind: 'displayCase' };
+}
+
+// Conveyor belt — long flat unit with rollers + side rails. Reads as
+// a factory line; non-walkable since it's chest-height with drives.
+export function buildConveyorBelt(opts = {}) {
+  const w = opts.w ?? 3.2;        // long axis
+  const d = opts.d ?? 0.85;       // belt width
+  const h = opts.h ?? 0.65;       // top of belt
+  const group = new THREE.Group();
+  // Belt deck — dark grey rubber.
+  const deck = box(w, 0.06, d, 0x202428);
+  deck.position.y = h;
+  group.add(deck);
+  // Side rails — orange safety strip.
+  const railColor = 0xc06028;
+  const railL = box(w + 0.05, 0.05, 0.06, railColor);
+  railL.position.set(0, h + 0.04, d / 2 + 0.04);
+  group.add(railL);
+  const railR = box(w + 0.05, 0.05, 0.06, railColor);
+  railR.position.set(0, h + 0.04, -(d / 2 + 0.04));
+  group.add(railR);
+  // Frame — boxy underside.
+  const frame = roundedBox(w, h - 0.1, d * 0.85, 0x4a4a4e, { radius: 0.04 });
+  frame.position.y = (h - 0.1) / 2;
+  group.add(frame);
+  // Rollers — visible cylinders peeking out the ends.
+  for (const xSign of [-1, 1]) {
+    const roller = cyl(0.10, d * 0.92, 0xa0a0a4, 10);
+    roller.rotation.x = Math.PI / 2;
+    roller.position.set(xSign * (w / 2 - 0.04), h - 0.08, 0);
+    group.add(roller);
+  }
+  // A couple of crates riding the belt for ambience.
+  for (const xSign of [-1, 1]) {
+    const crate = roundedBox(0.45, 0.40, 0.45, COL.woodMid, { radius: 0.03 });
+    crate.position.set(xSign * w * 0.22, h + 0.20, 0);
+    group.add(crate);
+  }
+  return { group, collision: { w, d }, kind: 'conveyorBelt' };
+}
+
 // --- Catalog ---------------------------------------------------------
 // Convenience: look up a builder by key. Themed-room code will pick
 // from a curated list per theme instead of hardcoding factory names.
@@ -1105,6 +1323,15 @@ export const PROP_BUILDERS = {
   chopperLz: buildChopperLz,
   wallSconce: buildWallSconce,
   crateRow: buildCrateRow,
+  // Theme-specialised props (lab / server / factory / infirmary /
+  // lobby / shop). Wired into ROOM_TEMPLATES per theme, not into the
+  // ambient sprinkle (their silhouettes are distinctive enough that
+  // scattering them randomly across rooms would feel arbitrary).
+  serverRack: buildServerRack,
+  medCart: buildMedCart,
+  vendingMachine: buildVendingMachine,
+  displayCase: buildDisplayCase,
+  conveyorBelt: buildConveyorBelt,
 };
 
 // --- Theme palettes --------------------------------------------------
@@ -1275,6 +1502,8 @@ export function getLevelTheme(levelIndex) {
 export const INWARD_FACING_KINDS = new Set([
   'chair', 'couch', 'bed', 'desk', 'tv', 'nightstand', 'cabinet',
   'bookshelf', 'locker',
+  // Theme-specialised props with a clear front face.
+  'serverRack', 'medCart', 'vendingMachine', 'displayCase',
 ]);
 
 // Destructible-prop HP table (Phase J). Kinds in this table take

@@ -148,6 +148,23 @@ export const ROOM_TEMPLATES = [
         side: 'front', facing: 'match', gap: 0.30 },
       // A desk/kiosk somewhere on the perimeter.
       { kind: 'desk', placer: 'wall', chance: 0.4, lootable: true },
+      // Vending machine for ambience — reads as a corporate/transit
+      // waiting area.
+      { kind: 'vendingMachine', placer: 'wall', back: true, chance: 0.55 },
+    ],
+  },
+  {
+    id: 'lobby-vending',
+    themes: ['lobby'],
+    weight: 0.55,
+    minSize: { w: 12, d: 12 },
+    props: [
+      // Two-three vending machines side by side reads as a transit /
+      // hospital / office break-area lobby.
+      { kind: 'vendingMachine', placer: 'wall', back: true,
+        count: { min: 2, max: 3 } },
+      { kind: 'bench', placer: 'wall', chance: 0.85 },
+      { kind: 'planter', placer: 'wall', chance: 0.5 },
     ],
   },
 
@@ -463,6 +480,24 @@ export const ROOM_TEMPLATES = [
       { kind: 'cabinet', placer: 'wall', chance: 0.6, lootable: true },
     ],
   },
+  {
+    id: 'garage-conveyor',
+    themes: ['garage'],
+    weight: 0.7,
+    minSize: { w: 14, d: 12 },
+    props: [
+      // Long conveyor belt across the room — factory-line silhouette
+      // pinned to a wall side. Lockers + a cabinet round out the
+      // workstation.
+      { kind: 'conveyorBelt', placer: 'interior', name: 'line',
+        chance: 0.9 },
+      { kind: 'pallet', placer: 'wall', count: { min: 1, max: 2 },
+        chance: 0.85 },
+      { kind: 'locker', placer: 'wall', count: { min: 1, max: 2 },
+        lootable: true },
+      { kind: 'crate', placer: 'wall', chance: 0.7, lootable: true },
+    ],
+  },
 
   // ============= GYM =================================================
   // Bench reads as weight bench; lockers = changing-room lockers.
@@ -504,6 +539,9 @@ export const ROOM_TEMPLATES = [
       { kind: 'desk', placer: 'interior', name: 'exam', lootable: true },
       { kind: 'chair', placer: 'adjacent', anchor: 'exam',
         side: 'right', facing: 'inward' },
+      // Med cart sits by the exam table — hospital silhouette cue.
+      { kind: 'medCart', placer: 'adjacent', anchor: 'exam',
+        side: 'left', facing: 'inward', chance: 0.85 },
       { kind: 'cabinet', placer: 'wall', count: { min: 2, max: 3 },
         lootable: true },
       { kind: 'locker', placer: 'wall', chance: 0.7, lootable: true },
@@ -517,27 +555,32 @@ export const ROOM_TEMPLATES = [
     minSize: { w: 13, d: 11 },
     props: [
       // Long counter against a wall: table + chair pairs read as bench
-      // stations.
+      // stations. A server rack tucked against another wall reads as
+      // the lab's data station.
       { kind: 'table', placer: 'wall', name: 'counter' },
       { kind: 'chair', placer: 'adjacent', anchor: 'counter',
         side: 'front', facing: 'inward' },
       { kind: 'cabinet', placer: 'wall', count: { min: 2, max: 3 },
         lootable: true },
-      { kind: 'barrel', placer: 'wall', chance: 0.5 },
+      { kind: 'serverRack', placer: 'wall', back: true, chance: 0.7 },
+      { kind: 'medCart', placer: 'wall', chance: 0.6 },
       { kind: 'neonStick', placer: 'wall', chance: 0.8 },
     ],
   },
 
   // ============= SERVER ROOM / IT CLOSET =============================
-  // Pillar reads as a server rack here; cabinet = networking gear;
-  // crateRow = cable-tray bundle.
+  // serverRack is the signature prop — black panels with LED rows
+  // that read as IT gear at iso distance. Mix with cabinet
+  // (networking shelf) + crateRow (cable trays) + neonStick
+  // (overhead strip).
   {
     id: 'server-rack-rows',
     themes: ['server'],
     weight: 1.0,
     minSize: { w: 12, d: 12 },
     props: [
-      { kind: 'pillar', placer: 'wall', count: { min: 3, max: 5 } },
+      { kind: 'serverRack', placer: 'wall', back: true,
+        count: { min: 3, max: 5 } },
       { kind: 'cabinet', placer: 'wall', count: { min: 1, max: 2 },
         lootable: true },
       { kind: 'crateRow', placer: 'interior', chance: 0.6 },
@@ -550,12 +593,13 @@ export const ROOM_TEMPLATES = [
     weight: 0.85,
     minSize: { w: 13, d: 12 },
     props: [
-      // Operator desk + monitor wall.
+      // Operator desk + monitor wall, racks lining one wall.
       { kind: 'desk', placer: 'wall', name: 'opsDesk', lootable: true },
       { kind: 'chair', placer: 'adjacent', anchor: 'opsDesk',
         side: 'front', facing: 'inward' },
       { kind: 'tv', placer: 'wall', count: { min: 1, max: 2 } },
-      { kind: 'pillar', placer: 'wall', count: { min: 2, max: 3 } },
+      { kind: 'serverRack', placer: 'wall', back: true,
+        count: { min: 2, max: 3 } },
       { kind: 'neonStick', placer: 'wall', chance: 0.8 },
     ],
   },
@@ -596,9 +640,9 @@ export const ROOM_TEMPLATES = [
   },
 
   // ============= INFIRMARY / SICK BAY ================================
-  // Bed = patient cot; nightstand stays as nightstand; cabinet = med
-  // supply cabinet. Distinct from bedroom by the locker + cabinet
-  // emphasis (vs. dressers / vanity in bedroom).
+  // Bed = patient cot; medCart = wheeled hospital cart (signature
+  // prop, the red-cross silhouette tells the player this is a
+  // medical room at first glance); cabinet = med supply cabinet.
   {
     id: 'infirmary-bay',
     themes: ['infirmary'],
@@ -607,8 +651,8 @@ export const ROOM_TEMPLATES = [
     props: [
       { kind: 'bed', placer: 'wall', count: { min: 2, max: 3 },
         name: 'cot' },
-      { kind: 'nightstand', placer: 'adjacent', anchor: 'cot',
-        side: 'right', facing: 'match', chance: 0.85 },
+      { kind: 'medCart', placer: 'adjacent', anchor: 'cot',
+        side: 'right', facing: 'match', chance: 0.9 },
       { kind: 'cabinet', placer: 'wall', count: { min: 1, max: 2 },
         lootable: true },
       { kind: 'locker', placer: 'wall', chance: 0.7, lootable: true },
@@ -620,8 +664,11 @@ export const ROOM_TEMPLATES = [
     weight: 0.85,
     minSize: { w: 12, d: 11 },
     props: [
-      // One cot, doctor's desk, supply cabinets.
+      // One cot, doctor's desk, supply cabinets, a med cart parked
+      // bedside.
       { kind: 'bed', placer: 'wall', name: 'cot' },
+      { kind: 'medCart', placer: 'adjacent', anchor: 'cot',
+        side: 'right', facing: 'match', chance: 0.85 },
       { kind: 'desk', placer: 'wall', name: 'docDesk', lootable: true },
       { kind: 'chair', placer: 'adjacent', anchor: 'docDesk',
         side: 'front', facing: 'inward' },
@@ -709,13 +756,14 @@ export const ROOM_TEMPLATES = [
     weight: 1.0,
     minSize: { w: 12, d: 12 },
     props: [
-      // Display cabinets along the perimeter — these are the "wares".
-      { kind: 'cabinet', placer: 'wall', count: { min: 2, max: 4 },
+      // Glass display cases — the signature shop silhouette. Mix in
+      // a few filing cabinets for variety + stock shelves behind.
+      { kind: 'displayCase', placer: 'wall', back: true,
+        count: { min: 2, max: 3 } },
+      { kind: 'cabinet', placer: 'wall', count: { min: 1, max: 2 },
         lootable: true },
-      // Stock shelves behind the counter feel.
       { kind: 'bookshelf', placer: 'wall', back: true,
         count: { min: 1, max: 2 }, lootable: true },
-      // Browsing rug + planter to mark the customer area.
       { kind: 'rug', placer: 'interior', chance: 0.5 },
       { kind: 'planter', placer: 'wall', chance: 0.6 },
     ],
