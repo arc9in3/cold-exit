@@ -1135,28 +1135,49 @@ export class Level {
     const b = room.bounds;
     const inRoom = (x, z) =>
       x >= b.minX && x <= b.maxX && z >= b.minZ && z <= b.maxZ;
-    // Obstacles: keep doors + tall walls (y >= 1.0). Drop everything
-    // else whose center sits inside the room — props (isProp), low
-    // cover (y < 1.0), container proxies (containerRef).
+    // PERIMETER walls only — interior walls (split's divider,
+    // alcove's L, center-pit's ring, partition, hallway pinch,
+    // pillars-grid stubs, kill-box flank cubes, etc.) all sit
+    // INSIDE the room and have to go too. The encounter UI relies
+    // on a clean floor so the player can read the disc / NPC /
+    // ritual prop without competing geometry.
+    //
+    // Heuristic: a perimeter wall sits within ~1.5m of the room
+    // bounds edge. Anything more than 1.5m inside is interior.
+    // Tolerance leaves room for WALL_THICK (1.2m) plus a tiny
+    // buffer for sealRoomPerimeters plugs that overhang slightly.
+    const PERIM_TOL = 1.5;
+    const isPerimeterPos = (x, z) =>
+         Math.abs(x - b.minX) < PERIM_TOL || Math.abs(x - b.maxX) < PERIM_TOL
+      || Math.abs(z - b.minZ) < PERIM_TOL || Math.abs(z - b.maxZ) < PERIM_TOL;
     const keptObstacles = [];
     for (const m of this.obstacles) {
       const px = m.position.x, pz = m.position.z;
       if (!inRoom(px, pz)) { keptObstacles.push(m); continue; }
       const ud = m.userData || {};
       if (ud.isDoor) { keptObstacles.push(m); continue; }
-      // Columns / pillars — explicitly stripped from encounter rooms.
-      // The encounter visuals (disc, NPC, prop) need open floor so a
-      // pillar at the centre would block the player's approach to the
-      // ritual / interact target. Tagged via _addColumn.
+      // Elevator panels — tagged isElevatorWall — never strip.
+      // Encounters never get assigned to an elevator room, but
+      // belt-and-braces.
+      if (ud.isElevatorWall) { keptObstacles.push(m); continue; }
+      // Columns / pillars — explicitly stripped (any layout that
+      // produced columns now leaves the encounter floor clean).
       if (ud.isColumn) {
         this.scene.remove(m);
         m.geometry?.dispose?.();
         if (m.material) disposeMaterialIfNotShared(m.material);
         continue;
       }
-      const isWall = !ud.isProp && !ud.containerRef && m.position.y >= 1.0;
-      if (isWall) { keptObstacles.push(m); continue; }
-      // Prop / cover / container — tear down.
+      // Wall vs interior obstacle — the prior heuristic was just
+      // "y >= 1.0" which kept interior split / partition / alcove
+      // walls. Now a wall must ALSO be on the room perimeter to
+      // survive. Anything tall in the interior gets torn down.
+      const isTall = !ud.isProp && !ud.containerRef && m.position.y >= 1.0;
+      if (isTall && isPerimeterPos(px, pz)) {
+        keptObstacles.push(m);
+        continue;
+      }
+      // Interior wall / prop / cover / container — tear down.
       this.scene.remove(m);
       m.geometry?.dispose?.();
       if (m.material) disposeMaterialIfNotShared(m.material);
@@ -5431,90 +5452,111 @@ export class Level {
     const horizDoor = (geo.width || 0) > (geo.depth || 0);
     const halfDoorGap = DOOR_WIDTH / 2;
     const b = bossRoom.bounds;
-    // Find the perimeter wall on the boss-side edge facing the
-    // chamber. dir is the direction the chamber sits relative to
-    // the boss, so the boss's facing wall is along that side.
     const dir = exit.dir;
-    let target = null;
-    let bestScore = Infinity;
+
+    // Collect EVERY perimeter wall on the chamber-facing edge that
+    // intersects (or sits within) the door's full gap span. We then
+    // hide all of them — necessary because shape boss rooms (lShape,
+    // gallery, rotunda, ...) build the perimeter as MULTIPLE
+    // segments via SHAPE_REGISTRY.build, not a single full-edge
+    // wall. Earlier this code only found ONE wall, so multi-segment
+    // shape perimeters would leave 1+ visual walls in the doorway
+    // even after the corridor-clearer ran (the corridor-clearer
+    // preserves segments that don't span the gap, so each segment
+    // individually survived).
+    //
+    // Tolerance bumped to 1.6m for the on-edge axis match so
+    // chamfered shape walls (rotunda's outer arc, lShape's interior
+    // corner) still register. For each hidden wall we also build
+    // two flanking re-builds outside the door gap (capped to the
+    // door's flanks plus a 0.5m overlap so adjacent segments meet
+    // cleanly without z-fighting).
+    const hits = [];
     for (const o of this.obstacles) {
       if (o.userData.isDoor) continue;
       if (o.userData.isProp) continue;
       if (!o.userData?.collisionXZ) continue;
-      // Filter out interior cover / columns — perimeter walls run
-      // along the room edge; we match by axis position + length.
+      if (o.visible === false) continue;       // already hidden
       const cb = o.userData.collisionXZ;
       const wMidX = (cb.minX + cb.maxX) / 2;
       const wMidZ = (cb.minZ + cb.maxZ) / 2;
       const wW = cb.maxX - cb.minX;
       const wD = cb.maxZ - cb.minZ;
+      // On-edge — wall sits on the chamber-facing side of the boss.
       let onEdge = false;
-      let score = Infinity;
-      if (dir === 'east' && Math.abs(wMidX - b.maxX) < 1.0 && wD > wW) {
-        onEdge = true;
-        score = Math.abs(wMidX - b.maxX) + Math.abs(wMidZ - dz);
-      } else if (dir === 'west' && Math.abs(wMidX - b.minX) < 1.0 && wD > wW) {
-        onEdge = true;
-        score = Math.abs(wMidX - b.minX) + Math.abs(wMidZ - dz);
-      } else if (dir === 'north' && Math.abs(wMidZ - b.minZ) < 1.0 && wW > wD) {
-        onEdge = true;
-        score = Math.abs(wMidZ - b.minZ) + Math.abs(wMidX - dx);
-      } else if (dir === 'south' && Math.abs(wMidZ - b.maxZ) < 1.0 && wW > wD) {
-        onEdge = true;
-        score = Math.abs(wMidZ - b.maxZ) + Math.abs(wMidX - dx);
-      }
+      if (dir === 'east'  && Math.abs(wMidX - b.maxX) < 1.6 && wD >= wW) onEdge = true;
+      else if (dir === 'west'  && Math.abs(wMidX - b.minX) < 1.6 && wD >= wW) onEdge = true;
+      else if (dir === 'north' && Math.abs(wMidZ - b.minZ) < 1.6 && wW >= wD) onEdge = true;
+      else if (dir === 'south' && Math.abs(wMidZ - b.maxZ) < 1.6 && wW >= wD) onEdge = true;
       if (!onEdge) continue;
-      // The wall must actually intersect the door's gap span;
-      // otherwise it's already a flanking segment that we should
-      // leave alone.
-      const spans = horizDoor
-        ? (cb.minX <= dx - halfDoorGap + 0.1 && cb.maxX >= dx + halfDoorGap - 0.1)
-        : (cb.minZ <= dz - halfDoorGap + 0.1 && cb.maxZ >= dz + halfDoorGap - 0.1);
-      if (!spans) continue;
-      if (score < bestScore) {
-        bestScore = score;
-        target = o;
+      // Overlap the door's FULL gap (not the shrunken passable strip
+      // — we want segments that visually clip the doorway too,
+      // including ones whose AABB ends precisely at the gap edge).
+      const overlapsGap = horizDoor
+        ? (cb.minX < dx + halfDoorGap && cb.maxX > dx - halfDoorGap)
+        : (cb.minZ < dz + halfDoorGap && cb.maxZ > dz - halfDoorGap);
+      if (!overlapsGap) continue;
+      hits.push(o);
+    }
+    if (hits.length === 0) return;
+
+    // Track the OUTER perpendicular extent of every hidden segment
+    // so we can rebuild flanks that span ALL of it. For a single
+    // full-edge wall this collapses to that wall's bounds; for a
+    // multi-segment shape perimeter this captures the union.
+    let unionFrom = Infinity, unionTo = -Infinity;
+    let unionAxisMid = null;
+    let perpThick = WALL_THICK;
+    for (const o of hits) {
+      const cb = o.userData.collisionXZ;
+      o.userData.collisionXZ = null;
+      o.visible = false;
+      if (horizDoor) {
+        if (cb.minX < unionFrom) unionFrom = cb.minX;
+        if (cb.maxX > unionTo)   unionTo = cb.maxX;
+        unionAxisMid = (cb.minZ + cb.maxZ) / 2;
+        perpThick = cb.maxZ - cb.minZ;
+      } else {
+        if (cb.minZ < unionFrom) unionFrom = cb.minZ;
+        if (cb.maxZ > unionTo)   unionTo = cb.maxZ;
+        unionAxisMid = (cb.minX + cb.maxX) / 2;
+        perpThick = cb.maxX - cb.minX;
       }
     }
-    if (!target) return;
-    // Hide the original wall (zero-scale via instancer if applicable;
-    // .visible setter handles both proxy + real-mesh paths).
-    const old = target.userData.collisionXZ;
-    target.userData.collisionXZ = null;
-    target.visible = false;
-    // Build two flanking segments. Use the original wall's outer
-    // axis + length minus the door gap.
+
+    // Build flanking segments. They cover the union span minus the
+    // door gap. A 0.5m extension past each edge reads as the
+    // flanking wall butting INTO the door frame rather than ending
+    // a half-metre short.
+    const FLANK_GROW = 0.5;
     if (horizDoor) {
-      // Wall runs along X (perpendicular axis = Z). Wall midZ
-      // matches old wall, X span gets carved around the door.
-      const wMidZ = (old.minZ + old.maxZ) / 2;
-      const wD = old.maxZ - old.minZ;
-      const leftFrom = old.minX, leftTo = dx - halfDoorGap;
-      const rightFrom = dx + halfDoorGap, rightTo = old.maxX;
+      const leftTo  = dx - halfDoorGap + FLANK_GROW;
+      const rightFrom = dx + halfDoorGap - FLANK_GROW;
+      const leftFrom = unionFrom;
+      const rightTo  = unionTo;
       if (leftTo > leftFrom + 0.05) {
-        const m = this._addObstacle((leftFrom + leftTo) / 2, WALL_HEIGHT / 2, wMidZ,
-          leftTo - leftFrom, WALL_HEIGHT, wD, OUTER_WALL_COLOR);
+        const m = this._addObstacle((leftFrom + leftTo) / 2, WALL_HEIGHT / 2, unionAxisMid,
+          leftTo - leftFrom, WALL_HEIGHT, perpThick, OUTER_WALL_COLOR);
         if (m) m.userData.kind = m.userData.kind || 'boss-flank';
       }
       if (rightTo > rightFrom + 0.05) {
-        const m = this._addObstacle((rightFrom + rightTo) / 2, WALL_HEIGHT / 2, wMidZ,
-          rightTo - rightFrom, WALL_HEIGHT, wD, OUTER_WALL_COLOR);
+        const m = this._addObstacle((rightFrom + rightTo) / 2, WALL_HEIGHT / 2, unionAxisMid,
+          rightTo - rightFrom, WALL_HEIGHT, perpThick, OUTER_WALL_COLOR);
         if (m) m.userData.kind = m.userData.kind || 'boss-flank';
       }
     } else {
-      // Wall runs along Z. Carve Z span around the door.
-      const wMidX = (old.minX + old.maxX) / 2;
-      const wW = old.maxX - old.minX;
-      const topFrom = old.minZ, topTo = dz - halfDoorGap;
-      const botFrom = dz + halfDoorGap, botTo = old.maxZ;
+      const topTo    = dz - halfDoorGap + FLANK_GROW;
+      const botFrom  = dz + halfDoorGap - FLANK_GROW;
+      const topFrom  = unionFrom;
+      const botTo    = unionTo;
       if (topTo > topFrom + 0.05) {
-        const m = this._addObstacle(wMidX, WALL_HEIGHT / 2, (topFrom + topTo) / 2,
-          wW, WALL_HEIGHT, topTo - topFrom, OUTER_WALL_COLOR);
+        const m = this._addObstacle(unionAxisMid, WALL_HEIGHT / 2, (topFrom + topTo) / 2,
+          perpThick, WALL_HEIGHT, topTo - topFrom, OUTER_WALL_COLOR);
         if (m) m.userData.kind = m.userData.kind || 'boss-flank';
       }
       if (botFrom < botTo - 0.05) {
-        const m = this._addObstacle(wMidX, WALL_HEIGHT / 2, (botFrom + botTo) / 2,
-          wW, WALL_HEIGHT, botTo - botFrom, OUTER_WALL_COLOR);
+        const m = this._addObstacle(unionAxisMid, WALL_HEIGHT / 2, (botFrom + botTo) / 2,
+          perpThick, WALL_HEIGHT, botTo - botFrom, OUTER_WALL_COLOR);
         if (m) m.userData.kind = m.userData.kind || 'boss-flank';
       }
     }
