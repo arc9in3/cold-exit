@@ -227,8 +227,13 @@ export function createScene() {
   ground.receiveShadow = true;
   scene.add(ground);
 
+  // Grid helper draws across the entire 300×300 base plane, which
+  // fights the new "out-of-bounds = void" look from per-room floor
+  // patches. Kept as a hidden reference (visible=false) in case a
+  // future debug overlay wants it back; level rendering ignores it.
   const grid = new THREE.GridHelper(300, 150, 0x1a1c24, 0x0e1014);
   grid.position.y = 0.01;
+  grid.visible = false;
   scene.add(grid);
 
   const groundPlane = new THREE.Plane(new THREE.Vector3(0, 1, 0), 0);

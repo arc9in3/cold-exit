@@ -298,16 +298,20 @@ export class Level {
       return this.generateTutorial();
     }
     // Pick + apply this floor's visual theme. Tints walls, outer
-    // walls, low cover, and the ground mesh. Subsequent code that
-    // reads FULL_WALL_COLOR / OUTER_WALL_COLOR / LOW_COVER_COLOR
-    // gets the theme-tinted values for the rest of generate().
+    // walls, and low cover. The base 300×300 ground stays dark so
+    // out-of-bounds (anywhere not under a per-room floor patch)
+    // reads as void; per-room patches added later in _addRoomFloorPatch
+    // take over the visible floor with the biome's color.
     this.theme = getLevelTheme(this.index);
     if (this.theme) {
       FULL_WALL_COLOR  = this.theme.wall;
       OUTER_WALL_COLOR = _darkenHex(this.theme.wall, 0.55);
       LOW_COVER_COLOR  = _darkenHex(this.theme.wall, 0.30);
       if (this.ground && this.ground.material && this.ground.material.color) {
-        this.ground.material.color.setHex(this.theme.floor);
+        // Hold the ground at near-black regardless of biome — the
+        // void underneath the level. Per-room patches paint the
+        // playable area on top.
+        this.ground.material.color.setHex(0x05060a);
       }
     }
 
@@ -756,6 +760,18 @@ export class Level {
       this._scatterContainers(room);
     }
 
+    // Per-room floor patches — biome-tinted plane covering each
+    // room's interior. Hides the dark base ground; serves as cheap
+    // per-room mood lighting via the patch's emissive tint without
+    // adding more real lights to the shader. Out-of-bounds (any
+    // area not under a patch) shows the dark base ground = void.
+    // Skip synthetic rooms (id < 0) — extraction room is hidden
+    // until boss death and adds its own floor as part of the reveal,
+    // and skybridge connectors render their own walkway geometry.
+    for (const room of rooms) {
+      if (room.id < 0) continue;
+      this._addRoomFloorPatch(room);
+    }
     // Ambient lighting pass — every themed / combat room gets a
     // ceiling lamp roughly at its centre. Adds both a visible mesh
     // (small recessed spot) and a registered entry in this.lights
@@ -3067,6 +3083,69 @@ export class Level {
   // the stealth system. Placed near room centre and offset a bit
   // away from the elevator so the first lamp never overlaps the
   // spawn capsule.
+  // Per-room floor patch. The base ground is held at near-black so
+  // out-of-bounds (anywhere not under a patch) reads as void; the
+  // patch paints the room's playable area in the biome color.
+  //
+  // Doubles as cheap "per-room lighting" — the patch's emissive
+  // tint gives every room a visible mood (lab cools to teal, shop
+  // warms to gold, factory leans amber) without adding real lights
+  // to the shader. Free of per-frame cost; one mesh per room with a
+  // shared MeshStandardMaterial keyed on the final tint color.
+  _addRoomFloorPatch(room) {
+    if (!room || !room.bounds) return;
+    const b = room.bounds;
+    // Inset 0.3m so the patch doesn't poke under the perimeter wall
+    // (walls span bounds±0.6 in z; staying clear avoids z-fighting
+    // with wall bases).
+    const INSET = 0.3;
+    const w = (b.maxX - b.minX) - INSET * 2;
+    const d = (b.maxZ - b.minZ) - INSET * 2;
+    if (w <= 0 || d <= 0) return;
+    const cx = (b.minX + b.maxX) / 2;
+    const cz = (b.minZ + b.maxZ) / 2;
+    // Base color: biome's floor; per-room theme nudges a subtle
+    // emissive accent so different rooms read as distinct moods
+    // even on the same floor.
+    const baseHex = this.theme?.floor ?? 0x2a2a2e;
+    const accents = {
+      lab:        { tint: 0x60c8d8, emi: 0.18 },     // cool teal
+      infirmary:  { tint: 0x80d8b0, emi: 0.14 },     // soft green
+      server:     { tint: 0x6080d0, emi: 0.20 },     // cold blue
+      security:   { tint: 0xd06060, emi: 0.10 },     // alarm red dim
+      garage:     { tint: 0xe09040, emi: 0.10 },     // sodium amber
+      shop:       { tint: 0xe6c060, emi: 0.18 },     // warm gold
+      bedroom:    { tint: 0xb89070, emi: 0.10 },     // warm peach
+      livingRoom: { tint: 0xb8a080, emi: 0.12 },     // hearth warm
+      lobby:      { tint: 0xd0c890, emi: 0.14 },     // brass warm
+      kitchen:    { tint: 0xd8b070, emi: 0.10 },     // warm tan
+      library:    { tint: 0xa8804a, emi: 0.10 },     // wood warm
+      office:     { tint: 0x8aa0c0, emi: 0.06 },     // fluorescent neutral
+      archive:    { tint: 0x8a7a60, emi: 0.06 },     // dim warm
+      mailroom:   { tint: 0x9aa080, emi: 0.06 },     // dim utility
+      gym:        { tint: 0x60a0d0, emi: 0.10 },     // cool gym
+      warehouse:  { tint: 0x808088, emi: 0.06 },     // neutral
+    };
+    const accent = accents[room.theme] || { tint: baseHex, emi: 0.0 };
+    const mat = sharedMaterial({
+      color: baseHex,
+      emissive: accent.tint,
+      emissiveIntensity: accent.emi,
+      roughness: 0.85,
+      metalness: 0.05,
+    });
+    const mesh = new THREE.Mesh(new THREE.PlaneGeometry(w, d), mat);
+    mesh.rotation.x = -Math.PI / 2;
+    mesh.position.set(cx, 0.01, cz);
+    mesh.receiveShadow = true;
+    mesh.userData.kind = 'room-floor';
+    mesh.userData.roomId = room.id;
+    mesh.matrixAutoUpdate = false;
+    mesh.updateMatrix();
+    this.scene.add(mesh);
+    this.decorations.push(mesh);
+  }
+
   _addCeilingLamp(room) {
     const b = room.bounds;
     let cx = (b.minX + b.maxX) * 0.5;
