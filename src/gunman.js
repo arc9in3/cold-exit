@@ -2413,9 +2413,13 @@ export class GunmanManager {
       // recently-hit fallback is the practical signal.
       const playerShooting = !!ctx.playerFiring;
       const isDefender = g.role === 'defender';
-      const shouldSeekCover = (isDefender || hpFrac < 0.5 || recentlyHit || playerShooting)
-        // Skip during specific overrides — the existing tuck / suppress
-        // logic already places the gunman somewhere safe.
+      // Hunker-down — at low HP every role behaves like a defender.
+      // <50%: force cover seeking. <25%: ALSO extend hold time so
+      // they're parked and peeking, never repositioning. Stamp
+      // g.hunkered for the smoke harness / future cower pose.
+      g.hunkered = hpFrac < 0.5;
+      const deepHunker = hpFrac < 0.25;
+      const shouldSeekCover = (isDefender || g.hunkered || recentlyHit || playerShooting)
         && !tuckTarget
         && !escortTarget;
       if (shouldSeekCover) {
@@ -2429,9 +2433,12 @@ export class GunmanManager {
           if (spots.length) {
             const best = spots[0];
             g._coverPos = { x: best.x, z: best.z, peekDir: best.peekDir };
-            // Defenders hold a chosen anchor much longer than other
-            // roles — the design wants them parked, not orbiting.
-            g._coverHoldT = isDefender ? 10.0 : 3.0;
+            // Defenders hold longer than other roles. Hunkered
+            // gunmen extend further; deeply-hunkered ones park.
+            g._coverHoldT = deepHunker ? 20.0
+              : (g.hunkered ? 14.0
+              : (isDefender ? 10.0
+              : 3.0));
           }
         }
         if (g._coverPos) {
@@ -2462,8 +2469,10 @@ export class GunmanManager {
       const coverDelay = crouchedHiding ? 0.6 : 1.2;
       // Defenders hold their cover anchor and never flank — even on
       // a lost LoS they peek-and-wait instead of sweeping around the
-      // wall. Flankers + rushers keep the existing detour.
-      const isDefender = g.role === 'defender';
+      // wall. Hunkered gunmen (HP < 50%) of any role behave like
+      // defenders for the same reason: low-HP enemies shouldn't be
+      // sweeping around for the player.
+      const isDefender = g.role === 'defender' || g.hunkered;
       const coverFlanking = !isDefender
         && (g.noLosT || 0) > coverDelay
         && typeof g.lastKnownX === 'number';
