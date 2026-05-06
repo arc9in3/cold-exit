@@ -10455,19 +10455,23 @@ function buildBodyLoot(enemy) {
     items.push({ ...JUNK_DEFS.spicyNoodles });
   }
 
-  // Drop economy is intentionally lean — containers + lootable props
-  // carry the bulk of the items, so bodies are mostly weapon + maybe
-  // a single extra. Most grunts come up entirely empty: late-game
-  // rooms used to leave a graveyard of corpses each carrying a single
-  // common melee, which made looting a tedious slog. 70% empty means
-  // the 30% that DO drop feel meaningful again, and those are the
-  // bodies that get auto-rolled into the "Loot Area" pile prompt.
-  const isEmptyBody = tier === 'normal' && Math.random() < 0.70;
+  // Drop economy retuned 2026-05-06 v2 — playtest call: "in
+  // general we definitely need to reduce the amount of loot that
+  // is dropping from containers and even enemies." Empty rate
+  // bumped 70% → 88% on normal grunts, AND when a non-empty grunt
+  // surfaces the weapon-drop is now a chance roll (60%) instead
+  // of a guarantee. Net: most grunts surface 0 items, the rest
+  // surface a single meaningful drop.
+  const isEmptyBody = tier === 'normal' && Math.random() < 0.88;
 
   if (!isEmptyBody) {
-    // Weapons: most enemies drop what they were using. Some grunts
-    // come up gun-only (no melee fallback).
-    if (enemy.weapon) {
+    // Weapon drop: 60% chance for normal grunts, 90% for sub-bosses,
+    // always for bosses. The "always" was leaving every cleared
+    // room with a pile of common pistols — most weren't worth
+    // picking up but cluttered the modal.
+    const weaponDropChance = tier === 'boss' ? 1.0
+      : tier === 'subBoss' ? 0.90 : 0.60;
+    if (enemy.weapon && Math.random() < weaponDropChance) {
       // Disarmed enemies who re-arm by picking up a dropped (already-
       // wrapped) item end up with `g.weapon` already carrying a rolled
       // rarity prefix. Wrapping again double-prefixes ("Refined Refined
@@ -10598,21 +10602,18 @@ function buildBodyLoot(enemy) {
       if (heals.length) items.push({ ...heals[Math.floor(Math.random() * heals.length)] });
     }
   } else if (!isEmptyBody) {
-    // Grunt drop only fires on the 30% non-empty roll. Bumped slightly
-    // since the surviving 30% needs to feel like the right corpse to
-    // walk over to.
-    if (Math.random() < 0.04) items.push(randomAttachment());
-    if (Math.random() < 0.18) items.push(randomJunk());
-    if (Math.random() < 0.05) items.push(randomThrowable());
+    // Grunt drop only fires on the 12% non-empty roll. Extras
+    // dialled WAY down since most grunt non-empties should hand
+    // the player exactly one thing.
+    if (Math.random() < 0.02) items.push(randomAttachment());
+    if (Math.random() < 0.08) items.push(randomJunk());
+    if (Math.random() < 0.02) items.push(randomThrowable());
   }
-  // Repair-kit drop — independent of the empty-body roll so a clean
-  // grunt corpse can still surface a kit. Chance scales with tier:
-  //   boss     45% (almost always)
-  //   subBoss  18%
-  //   normal    7% (skipped on empty bodies)
+  // Repair-kit drop — chance scales with tier. Cut grunt rate
+  // 7% → 3% to match the broader "fewer items" pass.
   const repairKitChance = tier === 'boss' ? 0.45
     : tier === 'subBoss' ? 0.18
-    : (isEmptyBody ? 0 : 0.07);
+    : (isEmptyBody ? 0 : 0.03);
   if (Math.random() < repairKitChance) items.push(randomEitherRepairKit());
   return items;
 }

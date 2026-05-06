@@ -117,29 +117,31 @@ const TYPE_NAMES = {
   masterwork: ['Masterwork Chest'],
 };
 
-// Size profile — number of *real* items rolled per open. Counts
-// dropped in 2026-05-06 retune after playtest: "lots of items are
-// dropping in general - lots of stuff spawning in boxes and
-// containers." Goal is "find a thing every few boxes, not stuff a
-// backpack full from one room."
+// Size profile — number of *real* items rolled per open.
+// 2026-05-06 retune v2 (after v1 still left "more props = more
+// loot" feel — user: "in general we definitely need to reduce
+// the amount of loot that is dropping from containers and even
+// enemies"). Goal: typical level should reward the player with
+// 3-6 meaningful items, not 15-20.
 //
-//   s: 80% empty / 20% one item   (was 65% empty / 35% one)
-//   m: 50% empty / 45% one / 5% two   (was always 1, +1 at 35%)
-//   l: 35% one / 50% two / 15% three   (was 1 or 2-3)
+//                    v0          v1          v2 (now)
+//   s:  35% one    → 20% one  → 10% one
+//   m:  always 1+  → 50% any  → 35% any  (35% one / 65% empty)
+//   l:  always 2-3 → 65% 2+   → 30% 2 / 65% 1 / 5% empty
 //
-// Junk-floor is now ROLLED per container rather than guaranteed
-// (see makeContainer below) so a small empty box stays empty
-// instead of always coughing up a pen / bottle / mug.
+// Junk-floor halved again to 15% (was 30%, originally guaranteed)
+// so most boxes that DO have something hand the player exactly
+// one thing — the rolled item, no filler.
 const SIZE_PROFILES = {
-  s: { items: () => (Math.random() < 0.80 ? 0 : 1),
+  s: { items: () => (Math.random() < 0.90 ? 0 : 1),
        geo: { w: 0.7, h: 0.55, d: 0.5 } },
   m: { items: () => {
         const r = Math.random();
-        return r < 0.50 ? 0 : (r < 0.95 ? 1 : 2);
+        return r < 0.65 ? 0 : 1;
       }, geo: { w: 1.0, h: 0.75, d: 0.7 } },
   l: { items: () => {
         const r = Math.random();
-        return r < 0.35 ? 1 : (r < 0.85 ? 2 : 3);
+        return r < 0.05 ? 0 : (r < 0.70 ? 1 : 2);
       }, geo: { w: 1.4, h: 1.0, d: 0.95 } },
 };
 
@@ -232,12 +234,10 @@ export function makeContainer(type, size, levelIdx = 1) {
     const it = rollItemForType(type, levelIdx);
     if (it) loot.push(it);
   }
-  // Junk floor — used to be guaranteed on every non-masterwork
-  // container. Playtest: "lots of items are dropping in general."
-  // Now rolled at 30% so a typical box CAN come up empty (or near
-  // it) and finding a stash feels rewarding. Masterwork stays
-  // pristine — single mythic item, no filler.
-  if (type !== 'masterwork' && Math.random() < 0.30) {
+  // Junk floor — used to be guaranteed; v1 dropped it to 30%; v2
+  // halves again to 15%. With size profiles also 1-2-tier leaner,
+  // total junk-per-level should sit around half of v1's level.
+  if (type !== 'masterwork' && Math.random() < 0.15) {
     const j = randomJunk();
     if (j) loot.push(j);
   }

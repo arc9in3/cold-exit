@@ -2150,20 +2150,22 @@ export class Level {
       }
       return true;
     };
-    // Per-room roll. Boss rooms still favour a real chest (boss room
-    // furniture tends toward sparse warehouse/lobby props), but combat
-    // / sub-boss rates are cut roughly in half because lootable props
-    // (desks, lockers, cabinets) now cover the same loot-discovery
-    // role inside themed rooms. Net loot density stays roughly even.
-    const spawnChance = room.type === 'boss' ? 0.50
-      : room.type === 'subBoss' ? 0.25
-      : 0.16;
+    // Per-room spawn chance dropped 2026-05-06 v2 retune. Lootable
+    // themed props (desks, lockers) already cover the loot-discovery
+    // beat in most rooms; the dedicated chest is now an occasional
+    // bonus rather than expected per-room furniture.
+    //   boss:    0.50 → 0.35
+    //   subBoss: 0.25 → 0.18
+    //   other:   0.16 → 0.08
+    const spawnChance = room.type === 'boss' ? 0.35
+      : room.type === 'subBoss' ? 0.18
+      : 0.08;
     if (Math.random() > spawnChance) return;
-    // When a box does spawn, almost always exactly one. Big rooms +
-    // boss/sub-boss tier occasionally roll a second.
+    // When a box DOES spawn, almost always exactly one. Big rooms +
+    // boss/sub-boss tier rarely roll a second (cut from 20% → 10%).
     let count = 1;
-    if (area > 60 && Math.random() < 0.20) count += 1;
-    if ((room.type === 'boss' || room.type === 'subBoss') && Math.random() < 0.20) count += 1;
+    if (area > 60 && Math.random() < 0.10) count += 1;
+    if ((room.type === 'boss' || room.type === 'subBoss') && Math.random() < 0.10) count += 1;
     for (let i = 0; i < count; i++) {
       for (let attempt = 0; attempt < 30; attempt++) {
         const type = pickContainerType();
