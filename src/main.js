@@ -7068,6 +7068,114 @@ window.addEventListener('keydown', (ev) => {
   }
 });
 
+// Dev key — F3 dumps a focused snapshot of the room the player is
+// currently in: player position, room metadata, every obstacle the
+// room contains, every door connecting it, and any prop / cover /
+// container slot inside it. Use this to pin down "this specific
+// room has wonky geometry" reports without scrolling through the
+// whole-level F2 dump.
+window.addEventListener('keydown', (ev) => {
+  if (ev.code !== 'F3') return;
+  ev.preventDefault();
+  try {
+    const px = player?.mesh?.position?.x ?? 0;
+    const pz = player?.mesh?.position?.z ?? 0;
+    const room = level.roomAt?.(px, pz) || null;
+    const inRoom = (x, z, b) => x >= b.minX && x <= b.maxX && z >= b.minZ && z <= b.maxZ;
+    let rid = room?.id ?? null;
+    const roomBounds = room?.bounds || null;
+    const roomObs = roomBounds ? (level.obstacles || []).filter(o => {
+      const p = o.position;
+      return p && inRoom(p.x, p.z, roomBounds);
+    }) : [];
+    const summarize = (o) => {
+      const p = o.position || {};
+      const g = o.geometry?.parameters || {};
+      const ud = o.userData || {};
+      const cb = ud.collisionXZ;
+      return {
+        pos: { x: +(p.x ?? 0).toFixed(2), y: +(p.y ?? 0).toFixed(2), z: +(p.z ?? 0).toFixed(2) },
+        size: { w: +(g.width || 0).toFixed(2), h: +(g.height || 0).toFixed(2), d: +(g.depth || 0).toFixed(2) },
+        collision: cb ? {
+          minX: +cb.minX.toFixed(2), maxX: +cb.maxX.toFixed(2),
+          minZ: +cb.minZ.toFixed(2), maxZ: +cb.maxZ.toFixed(2),
+        } : null,
+        // Y mismatch flag — if the visible mesh sits well above
+        // ground but collisionXZ would be enforced as infinite-tall,
+        // the player gets phantom blocking. Stamp the offset for
+        // quick visual scan.
+        yMismatch: (cb && p && (p.y < 0.5 || p.y > 2.5))
+          ? { meshY: +p.y.toFixed(2), expected: 'WALL_HEIGHT/2 = 1.5' }
+          : null,
+        kind: ud.kind || null,
+        flags: {
+          isDoor: !!ud.isDoor, isProp: !!ud.isProp, isColumn: !!ud.isColumn,
+          isElevatorWall: !!ud.isElevatorWall, isElevatorDoor: !!ud.isElevatorDoor,
+          isExtractionWall: !!ud.isExtractionWall, isExtractionDoor: !!ud.isExtractionDoor,
+          isRailing: !!ud.isRailing, isOuter: !!ud.isOuter,
+          unlocked: !!ud.unlocked,
+          keyRequired: ud.keyRequired || null,
+          isWallProxy: !!o.isWallProxy,
+        },
+        visible: o.visible !== false,
+      };
+    };
+    const dump = {
+      timestamp: new Date().toISOString(),
+      hotkey: 'F3',
+      level: level.index ?? null,
+      player: { x: +px.toFixed(2), z: +pz.toFixed(2) },
+      currentRoom: room ? {
+        id: rid,
+        type: room.type || null,
+        shape: room.shape || 'rect',
+        layout: room.layout || null,
+        cleared: !!room.cleared,
+        sealed: !!room._sealed,
+        sealReleased: !!room._sealReleased,
+        bounds: roomBounds ? {
+          minX: +roomBounds.minX.toFixed(2), maxX: +roomBounds.maxX.toFixed(2),
+          minZ: +roomBounds.minZ.toFixed(2), maxZ: +roomBounds.maxZ.toFixed(2),
+        } : null,
+        cx: room.cx, cz: room.cz,
+        walkableBounds: (room._walkableBounds || []).map(w => ({
+          minX: +w.minX.toFixed(2), maxX: +w.maxX.toFixed(2),
+          minZ: +w.minZ.toFixed(2), maxZ: +w.maxZ.toFixed(2),
+        })),
+        neighbors: (room.neighbors || []).map(n => ({ dir: n.dir, otherId: n.otherId })),
+        encounterSpawn: room._encounterSpawn || null,
+      } : { error: 'player not in any room', playerPos: { x: +px.toFixed(2), z: +pz.toFixed(2) } },
+      obstacleCount: roomObs.length,
+      walls: roomObs.filter(o => !o.userData?.isDoor && !o.userData?.isProp).map(summarize),
+      doors: roomObs.filter(o => o.userData?.isDoor).map(summarize),
+      props: roomObs.filter(o => o.userData?.isProp).map(summarize),
+      enemies: [
+        ...(window.__gunmen?.gunmen || [])
+          .filter(g => g.alive && roomBounds && inRoom(g.group.position.x, g.group.position.z, roomBounds))
+          .map(g => ({
+            kind: 'gunman', variant: g.variant, role: g.role, state: g.state,
+            pos: { x: +g.group.position.x.toFixed(2), z: +g.group.position.z.toFixed(2) },
+            hp: g.hp, suspicion: +(g.suspicion || 0).toFixed(2),
+          })),
+        ...(window.__melees?.enemies || [])
+          .filter(m => m.alive && roomBounds && inRoom(m.group.position.x, m.group.position.z, roomBounds))
+          .map(m => ({
+            kind: 'melee', variant: m.variant, state: m.state,
+            pos: { x: +m.group.position.x.toFixed(2), z: +m.group.position.z.toFixed(2) },
+            hp: m.hp,
+          })),
+      ],
+    };
+    console.log('=== ROOM DUMP (F3) — player at', dump.player, '===');
+    console.log(JSON.stringify(dump, null, 2));
+    console.log('=== END ROOM DUMP ===');
+    if (typeof window !== 'undefined') window.__lastRoomDump = dump;
+    transientHudMsg?.(`room ${rid != null ? '#' + rid : '?'} dump → console`, 1.4);
+  } catch (e) {
+    console.warn('F3 room dump failed:', e);
+  }
+});
+
 // Controls overlay toggle — `?` or `/` flips the visibility of the
 // `#hud` block. The accompanying `#controls-hint` prompt is auto-
 // hidden while the overlay is up. Window-level listener so the
@@ -14032,26 +14140,34 @@ function updateWallOcclusion() {
     //    raycast time, mostly from this fn).
     if (qualityFlags.wallOcclusionForEnemies) {
       const idleRangeSq = OCCL_ENEMY_RANGE * OCCL_ENEMY_RANGE;
+      // Active (alerted / firing) enemies still skip the stagger to
+      // keep "wall fades the moment an enemy starts shooting through
+      // it" feedback instant, BUT they DO respect a distance gate
+      // now. Without it, an alerted enemy three rooms away would cast
+      // a camera→enemy ray crossing every wall in between, and with
+      // the wall-instancer proxies actually fading (commits 2cfd12f /
+      // fecf5cc), the cumulative effect was "all walls go translucent
+      // the moment combat starts" — playtest report: "once you enter
+      // the room all walls become transparent." 32m covers the active-
+      // engagement bubble while keeping cross-level cascades out.
+      const activeRangeSq = 32 * 32;
       const farFanRangeSq = 12 * 12;
       const gunmenList = gunmen.gunmen;
       const meleesList = melees.enemies;
-      // Active enemies (firing/swinging) bypass the stagger so the
-      // "wall fades when an enemy starts shooting through it" feedback
-      // stays instant; only patrolling / idle enemies get the every-
-      // other-frame cadence.
       const phase = frameCounter & 1;
       for (let i = 0, total = gunmenList.length + meleesList.length; i < total; i++) {
         const e = i < gunmenList.length ? gunmenList[i] : meleesList[i - gunmenList.length];
         if (!e.alive) continue;
-        // Hidden ambush bosses + minions skip occlusion fans —
-        // they're invisible by design until reveal.
         if (e.hidden) continue;
         const ex = e.group.position.x, ez = e.group.position.z;
         const dxe = ex - px, dze = ez - pz;
         const d2 = dxe * dxe + dze * dze;
         const s = e.state;
         const active = !!s && s !== 'idle' && s !== 'sleep' && s !== 'dead';
+        // Distance gates per state. Idle: 24m (existing). Active:
+        // 32m (new — was: unconditional, regardless of distance).
         if (!active && d2 > idleRangeSq) continue;
+        if (active  && d2 > activeRangeSq) continue;
         // Stagger non-active enemies. Re-add last frame's walls so the
         // fade doesn't pop on the held frame.
         if (!active && (i & 1) !== phase) {

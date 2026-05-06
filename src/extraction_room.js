@@ -136,7 +136,14 @@ export function buildExtractionRoom(level, bossRoom, opts = {}) {
   // control over visibility (initially false) and the kind tag.
   const addWall = (x, y, z, w, h, d, isOuter, kind = 'extraction-wall') => {
     const color = isOuter ? OUTER_WALL_COLOR : FULL_WALL_COLOR;
-    const matObj = sharedMaterial({ color, roughness: 0.85 });
+    // Per-mesh material clone — each chamber wall mutates its own
+    // material when the wall-occlusion fade hits (main.js _fadeWall
+    // writes opacity + transparent on m.material). Sharing the
+    // material across walls means the moment ONE wall fades, every
+    // wall using the same color goes translucent — including walls
+    // outside the chamber. Mirrors the door-material clone
+    // (commit da74988) for the same reason.
+    const matObj = sharedMaterial({ color, roughness: 0.85 }).clone();
     const mesh = new THREE.Mesh(new THREE.BoxGeometry(w, h, d), matObj);
     mesh.position.set(x, y, z);
     mesh.castShadow = false;
