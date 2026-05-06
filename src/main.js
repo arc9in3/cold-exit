@@ -14007,6 +14007,13 @@ function _fadeWall(m) {
   // circuit here so any caller that ends up handing us a proxy is
   // a no-op.
   if (m.userData?.isProp) return;
+  // Extraction-chamber walls/decorations are GAMEPLAY-HIDDEN until
+  // revealExit fires (visible=false). Belt-and-braces — even if a
+  // raycaster hands them to us (some Three.js paths don't strictly
+  // honour `visible`), we never want to flip transparent on the
+  // chamber's own materials. Once they DO render (post-reveal) the
+  // standard fade path takes over.
+  if (m.userData?.isExtractionWall && m.visible === false) return;
   // Wall-instancer proxies — their .material is a stub object so the
   // opacity write below is a no-op. Best we can do is hide the slot
   // entirely. setOcclHidden is independent from `visible` so the
@@ -14082,6 +14089,11 @@ function _addOcclusionHits(from, target, blockers, outSet, alsoOutSet = null) {
     // tracking set makes the prior-frame restore path trigger and
     // reveal the default-white proxy material.
     if (h.object.userData?.isProp) continue;
+    // Extraction-chamber walls pre-reveal — never enter the fade set
+    // even if the raycaster picked them up. Otherwise the fade
+    // pass mutates their material to transparent and the player
+    // sees translucent chamber walls before the boss is dead.
+    if (h.object.userData?.isExtractionWall && h.object.visible === false) continue;
     // Meshes at opacity 0 are invisible by design (hidden fills,
     // collision placeholders). Same risk of accidental reveal.
     if (h.object.material && h.object.material.opacity === 0
