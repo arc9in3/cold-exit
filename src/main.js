@@ -14515,7 +14515,14 @@ function updateLootPrompt() {
       txt = `[${_eKey}] search body`;
       hint = 'searchBody';
     } else if (containerHit) {
-      txt = `[${_eKey}] open ${containerHit.container.name}`;
+      // Already-looted re-opens get a different prompt so the player
+      // doesn't expect more loot. The interact still fires (opens an
+      // empty modal so they can confirm "I searched this").
+      const looted = !!containerHit.container.looted;
+      const name = containerHit.container.name;
+      txt = looted
+        ? `[${_eKey}] re-open ${name} (empty)`
+        : `[${_eKey}] open ${name}`;
       hint = 'openContainer';
     } else if (npc && npc.kind === 'merchant') {
       txt = `[${_eKey}] trade with merchant`;
@@ -14792,11 +14799,13 @@ function tryInteract({ nearItem, body, bodies, npc, container }) {
     lootUI.open(body);
     return;
   }
-  if (container && !container.container.looted) {
+  if (container) {
     // Cursed chest from The Lamp encounter — auto-applies the relic
     // the moment the chest is "opened" so the player can't peek + bail.
-    // The chest is then marked looted (no loot UI, no pickup).
-    if (container.container.autoCurseRelic) {
+    // The chest is then marked looted (no loot UI, no pickup). Skip
+    // the auto-curse path on already-looted re-opens (would re-fire
+    // the relic acquisition).
+    if (!container.container.looted && container.container.autoCurseRelic) {
       const relic = { type: 'relic', artifactId: container.container.autoCurseRelic };
       _tryAcquireRelic(relic);
       container.container.looted = true;
@@ -14805,9 +14814,13 @@ function tryInteract({ nearItem, body, bodies, npc, container }) {
       return;
     }
     // Containers reuse the body-loot UI flow — same {loot, looted}
-    // shape — and stay visually present after looting (just no
-    // longer interactable). Items inside auto-load the same way
-    // body items do via lootUI.open.
+    // shape — and stay visually present after looting. Re-opens
+    // ARE allowed now (user request: "if they previously contained
+    // loot they should be reopenable") — lootUI.open handles the
+    // looted={true,loot:[]} case by showing the empty modal so the
+    // player can confirm they've already searched here. The
+    // initially-empty containers were filtered out at the
+    // nearestContainer level so they never reach this code.
     lootUI.open(container.container);
     sfx.uiAccept?.();
     if (tutorialMode) tutorialUI.markStep('container');

@@ -2263,7 +2263,19 @@ export class Level {
     let best = null;
     let bestD = Infinity;
     for (const c of this.containers) {
-      if (c.container.looted) continue;
+      // Initially-empty containers (rolled empty by SIZE_PROFILES,
+      // never opened) are NOT lootable — they're decoration. Without
+      // this skip the player got "Search Locker" prompts on every
+      // small box just to get an empty modal. User: "empty containers
+      // should not be lootable - however if they previously contained
+      // loot they should be reopenable."
+      //
+      // Discriminator: loot.length === 0 && !looted = never had loot.
+      // looted=true means the player DID search and took everything,
+      // so the container stays interactable (re-opens to an empty
+      // modal — confirms "I already searched here").
+      const ct = c.container;
+      if (!ct.looted && (!ct.loot || ct.loot.length === 0)) continue;
       // Lootable props hidden by the door-corridor sweep should not
       // surface a "Search ___" prompt for an empty patch of floor.
       if (c.group && c.group.visible === false) continue;
