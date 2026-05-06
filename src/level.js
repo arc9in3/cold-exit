@@ -2314,10 +2314,69 @@ export class Level {
       return true;
     };
 
+    // Custom prop-vs-prop overlap check that skips perimeter walls.
+    // Used by both placeAlongWall and placeBackToWall (the latter
+    // duplicates this body inline for clarity, but the rules are
+    // identical — they both want to avoid OTHER props + door
+    // approaches without the perimeter wall counting as a
+    // collision). PROP_GAP at 0.30 instead of the standard 0.45
+    // because wall-hugging rows of props (e.g. lockers, server
+    // racks) can sit close together along the same wall without
+    // pathing problems.
+    const _wallPropOverlap = (px, pz, pw, pd, pyaw) => {
+      const yawAbs = Math.abs(pyaw || 0) % Math.PI;
+      let aw = pw, ad = pd;
+      const axisAligned = yawAbs < 0.05 || Math.abs(yawAbs - Math.PI / 2) < 0.05;
+      if (!axisAligned) { const m = Math.max(aw, ad); aw = m; ad = m; }
+      else if (Math.abs(yawAbs - Math.PI / 2) < 0.05) { const t = aw; aw = ad; ad = t; }
+      const PG = 0.30;
+      const halfW = aw / 2 + PG;
+      const halfD = ad / 2 + PG;
+      for (let i = 0; i < _doorBands.length; i++) {
+        const db = _doorBands[i];
+        if (px + halfW <= db.minX) continue;
+        if (px - halfW >= db.maxX) continue;
+        if (pz + halfD <= db.minZ) continue;
+        if (pz - halfD >= db.maxZ) continue;
+        return false;
+      }
+      for (const o of this.obstacles) {
+        const ud = o.userData;
+        if (!ud || !ud.collisionXZ) continue;
+        if (!ud.isProp && !ud.containerRef) continue;
+        const ob = ud.collisionXZ;
+        if (px + halfW <= ob.minX) continue;
+        if (px - halfW >= ob.maxX) continue;
+        if (pz + halfD <= ob.minZ) continue;
+        if (pz - halfD >= ob.maxZ) continue;
+        return false;
+      }
+      const fps = this._propFootprints;
+      if (fps && fps.length) {
+        for (let i = 0; i < fps.length; i++) {
+          const fp = fps[i];
+          if (px + halfW <= fp.minX) continue;
+          if (px - halfW >= fp.maxX) continue;
+          if (pz + halfD <= fp.minZ) continue;
+          if (pz - halfD >= fp.maxZ) continue;
+          return false;
+        }
+      }
+      return true;
+    };
+
     const placeAlongWall = (prop, opts = {}) => {
       const yaw = opts.yaw;       // if provided, override rotation
       const col = prop.collision;
-      const radius = col ? Math.max(col.w, col.d) * 0.7 + 0.6 : 1.2;
+      // The coarse _collidesAt pass below was rejecting large props
+      // (bed d=2.0, couch d=1.9) against the perimeter wall — the
+      // radius ended up bigger than the prop's clearance to the
+      // wall, so every wall-side candidate failed. _wallPropOverlap
+      // does the fine-grained AABB pass with walls excluded; PROP_GAP
+      // there enforces 0.30m prop-to-prop spacing without the
+      // perimeter wall poisoning it. Bedroom / livingRoom / lobby
+      // themes were averaging 1.9-2.9 props per room before this
+      // fix because beds + couches kept failing.
       for (let tries = 0; tries < 25; tries++) {
         const side = Math.floor(Math.random() * 4);
         // Bias t away from corners (0.22 → 0.78 instead of 0.15 → 0.85)
@@ -2332,10 +2391,9 @@ export class Level {
         if (tooCloseToElev(x, z)) continue;
         if (inKeepOut(x, z)) continue;
         if (inCorner(x, z)) continue;
-        if (this._collidesAt(x, z, radius)) continue;
         const finalYaw = yaw ?? facing;
         if (!_propFitsInBounds(prop, x, z, finalYaw)) continue;
-        if (!_propFootprintFree(x, z, prop, finalYaw)) continue;
+        if (col && !_wallPropOverlap(x, z, col.w, col.d, finalYaw)) continue;
         prop.group.position.set(x, 0, z);
         prop.group.rotation.y = finalYaw;
         return this._registerProp(prop);
@@ -2357,68 +2415,10 @@ export class Level {
       // The room's bounds.minX/Z mark the CENTRE of the perimeter
       // wall (thickness WALL_THICK = 1.2m, so the wall spans
       // bounds±0.6). wallGap puts the prop's back flush against
-      // the wall's INTERIOR face. Earlier the gap was col.d/2+0.05
-      // which put the prop's back INSIDE the wall and
-      // _propFitsInBounds rejected every candidate.
+      // the wall's INTERIOR face. Same wall-collision avoidance as
+      // placeAlongWall via _wallPropOverlap.
       const HALF_WALL = 0.6;
       const wallGap = col.d / 2 + HALF_WALL + 0.05;
-      // Custom prop-vs-prop overlap check that EXCLUDES walls + door
-      // gaps + cover blocks the placeAlongWall variant would reject
-      // via radius. We need this because the standard
-      // _propFootprintFree adds a 0.45m PROP_GAP buffer which catches
-      // the perimeter wall the prop is intentionally hugging, and
-      // the standard _collidesAt radius catches the same wall. The
-      // result was that placeBackToWall failed every candidate —
-      // bookshelves, server racks, display cases, vending machines
-      // never placed.
-      const PG = 0.30;     // tighter buffer; back-to-wall rows can sit closer
-      const checkPropOverlap = (px, pz, pw, pd, pyaw) => {
-        const yawAbs = Math.abs(pyaw || 0) % Math.PI;
-        let aw = pw, ad = pd;
-        const axisAligned = yawAbs < 0.05 || Math.abs(yawAbs - Math.PI / 2) < 0.05;
-        if (!axisAligned) { const m = Math.max(aw, ad); aw = m; ad = m; }
-        else if (Math.abs(yawAbs - Math.PI / 2) < 0.05) { const t = aw; aw = ad; ad = t; }
-        const halfW = aw / 2 + PG;
-        const halfD = ad / 2 + PG;
-        // Door bands — reject any candidate inside a doorway approach.
-        for (let i = 0; i < _doorBands.length; i++) {
-          const db = _doorBands[i];
-          if (px + halfW <= db.minX) continue;
-          if (px - halfW >= db.maxX) continue;
-          if (pz + halfD <= db.minZ) continue;
-          if (pz - halfD >= db.maxZ) continue;
-          return false;
-        }
-        // Other props + containers ONLY (skip walls + doors). The
-        // perimeter wall the prop is hugging is invisible to this
-        // pass; placement vs. that wall is governed by wallGap +
-        // _propFitsInBounds above.
-        for (const o of this.obstacles) {
-          const ud = o.userData;
-          if (!ud || !ud.collisionXZ) continue;
-          if (!ud.isProp && !ud.containerRef) continue;
-          const ob = ud.collisionXZ;
-          if (px + halfW <= ob.minX) continue;
-          if (px - halfW >= ob.maxX) continue;
-          if (pz + halfD <= ob.minZ) continue;
-          if (pz - halfD >= ob.maxZ) continue;
-          return false;
-        }
-        // Decoration footprints (rugs, lamps, vases) — same as the
-        // generic _propFootprintFree.
-        const fps = this._propFootprints;
-        if (fps && fps.length) {
-          for (let i = 0; i < fps.length; i++) {
-            const fp = fps[i];
-            if (px + halfW <= fp.minX) continue;
-            if (px - halfW >= fp.maxX) continue;
-            if (pz + halfD <= fp.minZ) continue;
-            if (pz - halfD >= fp.maxZ) continue;
-            return false;
-          }
-        }
-        return true;
-      };
       for (let tries = 0; tries < 25; tries++) {
         const side = Math.floor(Math.random() * 4);
         const t = 0.22 + Math.random() * 0.56;
@@ -2432,7 +2432,7 @@ export class Level {
         if (inCorner(x, z)) continue;
         const finalYaw = yaw ?? facing;
         if (!_propFitsInBounds(prop, x, z, finalYaw)) continue;
-        if (!checkPropOverlap(x, z, col.w, col.d, finalYaw)) continue;
+        if (!_wallPropOverlap(x, z, col.w, col.d, finalYaw)) continue;
         prop.group.position.set(x, 0, z);
         prop.group.rotation.y = finalYaw;
         return this._registerProp(prop);
