@@ -1162,10 +1162,18 @@ export class Level {
       if (ud.isElevatorWall) { keptObstacles.push(m); continue; }
       // Columns / pillars — explicitly stripped (any layout that
       // produced columns now leaves the encounter floor clean).
+      // _addColumn uses real meshes, but `pillars-grid` etc.
+      // route their stub pillars through _addObstacle (which goes
+      // through the instancer) and tag them isColumn — those are
+      // wall-instancer proxies, where scene.remove is a no-op.
       if (ud.isColumn) {
-        this.scene.remove(m);
-        m.geometry?.dispose?.();
-        if (m.material) disposeMaterialIfNotShared(m.material);
+        if (m.isWallProxy) {
+          m.visible = false;
+        } else {
+          this.scene.remove(m);
+          m.geometry?.dispose?.();
+          if (m.material) disposeMaterialIfNotShared(m.material);
+        }
         continue;
       }
       // Wall vs interior obstacle — the prior heuristic was just
@@ -1178,9 +1186,24 @@ export class Level {
         continue;
       }
       // Interior wall / prop / cover / container — tear down.
-      this.scene.remove(m);
-      m.geometry?.dispose?.();
-      if (m.material) disposeMaterialIfNotShared(m.material);
+      // Wall-instancer proxies aren't in the scene graph (the
+      // pool's InstancedMesh is), so scene.remove() on the proxy
+      // is a no-op. We have to flip `visible = false` to reach
+      // the proxy's setter, which zero-scales the slot in the
+      // InstancedMesh — without this, every "stripped" interior
+      // wall stayed visually present even after we dropped it
+      // from this.obstacles. Same shape applies to the
+      // disposeMaterialIfNotShared call (proxy.material is a stub
+      // with a no-op dispose, so it does nothing harmful but
+      // also nothing useful — the real material lives on the
+      // pool).
+      if (m.isWallProxy) {
+        m.visible = false;
+      } else {
+        this.scene.remove(m);
+        m.geometry?.dispose?.();
+        if (m.material) disposeMaterialIfNotShared(m.material);
+      }
       // Visible prop group lives separate from the proxy when it was
       // registered via _registerProp.
       const grp = ud.propGroup;
