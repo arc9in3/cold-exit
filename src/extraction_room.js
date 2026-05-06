@@ -169,6 +169,36 @@ export function buildExtractionRoom(level, bossRoom, opts = {}) {
   const OPP = { east: 'west', west: 'east', north: 'south', south: 'north' };
   const doorWallSide = OPP[dir];
   const halfGap = DOOR_WIDTH / 2;
+
+  // ---- Floor patch --------------------------------------------------
+  // Distinct EXIT-green accent so the chamber reads as the goal once
+  // it reveals. Hidden until revealExit flips it visible alongside
+  // the walls + prop. Inset 0.3m so the patch doesn't poke under the
+  // perimeter walls; sized to the chamber's interior.
+  {
+    const baseHex = level.theme?.floor ?? 0x2a2a2e;
+    const fpW = ROOM_SIZE - 0.6;
+    const fpD = ROOM_SIZE - 0.6;
+    const fpMat = sharedMaterial({
+      color: baseHex,
+      emissive: 0x00ff88,            // EXIT_COLOR — pops against any biome
+      emissiveIntensity: 0.22,
+      roughness: 0.85,
+      metalness: 0.05,
+    });
+    const fpMesh = new THREE.Mesh(new THREE.PlaneGeometry(fpW, fpD), fpMat);
+    fpMesh.rotation.x = -Math.PI / 2;
+    fpMesh.position.set(cx, 0.012, cz);     // slightly above the per-room patches
+    fpMesh.receiveShadow = true;
+    fpMesh.userData.kind = 'room-floor';
+    fpMesh.userData.roomId = -1;
+    fpMesh.matrixAutoUpdate = false;
+    fpMesh.updateMatrix();
+    fpMesh.visible = false;                 // revealed by reveal()
+    level.scene.add(fpMesh);
+    level.decorations.push(fpMesh);
+    ownedVisuals.push(fpMesh);
+  }
   // North wall (minZ).
   if (doorWallSide !== 'north') {
     addWall(cx, WALL_HEIGHT / 2, bounds.minZ,
