@@ -1622,10 +1622,63 @@ export class GunmanManager {
         : (facingDot >= cosHalfCone ? 1 : 0);
       signal = Math.min(1, distK * coneK);
     }
+    // Body-sight bump: a patrolling gunman who spots a teammate's
+    // corpse in their cone jumps straight to INVESTIGATE. Throttled
+    // to once every 0.7s per gunman so the O(N) scan is amortised.
+    // Only applies to IDLE gunmen below the alert crest — already-
+    // engaged AI doesn't need extra triggers, and the cost is the
+    // patrol that should react to "something happened here."
+    let corpseSignal = 0;
+    if (g.state === STATE.IDLE && (g.suspicion || 0) < 0.9) {
+      g._corpseScanT = (g._corpseScanT || 0) - dt;
+      if (g._corpseScanT <= 0) {
+        g._corpseScanT = 0.7;
+        const ex = g.group.position.x, ez = g.group.position.z;
+        const SCAN_R = 12.0;
+        const SCAN_R2 = SCAN_R * SCAN_R;
+        for (const other of this.gunmen) {
+          if (other === g) continue;
+          if (other.alive) continue;
+          const ox = other.group.position.x, oz = other.group.position.z;
+          const dx = ox - ex, dz = oz - ez;
+          const d2 = dx * dx + dz * dz;
+          if (d2 > SCAN_R2) continue;
+          // Cone test — corpse must be in roughly forward 90° to be
+          // "noticed". Behind-the-back corpses don't aggro until
+          // patrol rotation brings them into view.
+          const dl = Math.sqrt(d2) || 1;
+          const cdx = dx / dl, cdz = dz / dl;
+          const dot = fwd.x * cdx + fwd.z * cdz;
+          if (dot < 0.3) continue;     // ~70° half-cone
+          // LoS check — wall between gunman and corpse blocks the
+          // sighting. Use the same segmentClear helper the LoS path
+          // uses if available; otherwise accept based on cone alone.
+          if (ctx.level && typeof ctx.level._segmentClear === 'function') {
+            if (!ctx.level._segmentClear(ex, ez, ox, oz, 0.4)) continue;
+          }
+          // Hit. Stash the corpse pos as the lastKnown so the
+          // INVESTIGATE walk routes there, and feed a strong signal
+          // (0.9) into the ramp — enough to skip SUSPICIOUS and go
+          // straight to INVESTIGATE. ALERT crest (1.0) still requires
+          // actual player LoS or the player firing nearby.
+          g.lastKnownX = ox;
+          g.lastKnownZ = oz;
+          corpseSignal = 0.9;
+          break;
+        }
+      } else if (g._lastCorpseSignal) {
+        // Persist the prior bump until the next scan tick so suspicion
+        // doesn't immediately decay between scans while we still have
+        // a fresh sighting in mind.
+        corpseSignal = g._lastCorpseSignal;
+      }
+      g._lastCorpseSignal = corpseSignal;
+    }
     // Alerted enemies keep saturating suspicion so they don't relax
-    // while they still have LoS; idle enemies accept the raw signal.
+    // while they still have LoS; idle enemies accept the raw signal
+    // OR the corpse-sight signal, whichever is higher.
     const suspTarget = g.state !== STATE.IDLE && hasLos && !inRearBlindspot
-      ? 1 : signal;
+      ? 1 : Math.max(signal, corpseSignal);
     const rampRate = suspTarget > g.suspicion ? 1.8 : 0.35;  // up fast, down slow
     g.suspicion += Math.sign(suspTarget - g.suspicion)
       * Math.min(Math.abs(suspTarget - g.suspicion), rampRate * dt);
@@ -1896,35 +1949,81 @@ export class GunmanManager {
       }
       g.loseTargetT = tunables.ai.loseTargetTime;
     } else if (g.state === STATE.IDLE) {
-      // Patrol: wander within a small radius of the spawn point,
-      // OR (25% of rolls) drift into an adjacent room so the squad
-      // doesn't feel rooted to its spawn. Between-room drift uses
-      // the neighbor's centre as the goal, and the door-seek pass
-      // below picks the actual waypoint to get there.
-      g.patrolT -= dt;
-      if (g.patrolT <= 0) {
-        g.patrolT = 2 + Math.random() * 3;
+      // Patrol stages — driven by g.suspicion (0..1+). Three layers
+      // before crest-to-ALERTED so the player has tactile feedback
+      // that the AI is registering them in stages, not a binary
+      // unaware/aware flip.
+      //
+      //   suspicion < 0.3  → PATROL  : wander home area (default)
+      //   0.3..0.7         → SUSPICIOUS : freeze wander, head turns to
+      //                      track the suspicion source (existing
+      //                      head-rotate code above handles the look).
+      //                      Already rendered as the yellow "?" tell.
+      //   0.7..1.0         → INVESTIGATE : walk slowly toward the
+      //                      suspicion source (last LoS-flash position
+      //                      tracked via g.lastKnownX/Z OR the player
+      //                      pos when in cone). Doesn't fire — that
+      //                      starts at 1.0 crest in the canSee branch.
+      //
+      // Stamp the stage onto g.idleStage so the smoke harness + HUD
+      // overlay can read it. It's a derived value (not a state) so
+      // the existing IDLE/ALERTED state machine stays unchanged.
+      const susp = g.suspicion || 0;
+      if (susp >= 0.7 && ctx.playerPos) {
+        g.idleStage = 'investigate';
+        // Walk slowly toward the player's current pos OR the last
+        // known position if LoS broken. moveSpeed * 0.55 — half pace,
+        // weapon down, no fire.
+        const targetX = (typeof g.lastKnownX === 'number') ? g.lastKnownX : ctx.playerPos.x;
+        const targetZ = (typeof g.lastKnownZ === 'number') ? g.lastKnownZ : ctx.playerPos.z;
+        const tx = targetX - g.group.position.x;
+        const tz = targetZ - g.group.position.z;
+        const td = Math.hypot(tx, tz);
+        if (td > 0.6) {
+          const pdir = { x: tx / td, z: tz / td };
+          g.group.rotation.y = Math.atan2(pdir.x, pdir.z);
+          const step = tunables.ai.moveSpeed * 0.55 * dt;
+          const nx = g.group.position.x + pdir.x * step;
+          const nz = g.group.position.z + pdir.z * step;
+          const res = ctx.resolveCollision(g.group.position.x, g.group.position.z, nx, nz,
+            tunables.ai.collisionRadius);
+          g.group.position.x = res.x;
+          g.group.position.z = res.z;
+        }
+      } else if (susp >= 0.3) {
+        // SUSPICIOUS — freeze in place. Head-rotate code above (gated
+        // on susp > 0.25) does the visible "wait, did I see something?"
+        // turn. We just suppress the wander tick so they don't drift
+        // away from their post while alerted-but-not-engaged.
+        g.idleStage = 'suspicious';
+      } else {
+        g.idleStage = 'patrol';
+        // PATROL — wander within a small radius of the spawn point.
         // Idle enemies stay in their spawn room. The previous between-
         // room drift (25% chance to wander to a neighbour's centre with
         // no door-aware pathing) made everyone pile up at the first
         // choke point on level start. Cross-room movement happens when
         // they're *alerted* — door-graph pathing lives in that path.
-        g.patrolTargetX = g.homeX + (Math.random() - 0.5) * 6;
-        g.patrolTargetZ = g.homeZ + (Math.random() - 0.5) * 6;
-      }
-      const tx = g.patrolTargetX - g.group.position.x;
-      const tz = g.patrolTargetZ - g.group.position.z;
-      const td = Math.hypot(tx, tz);
-      if (td > 0.4) {
-        const pdir = { x: tx / td, z: tz / td };
-        g.group.rotation.y = Math.atan2(pdir.x, pdir.z);
-        const step = tunables.ai.moveSpeed * 0.35 * dt;
-        const nx = g.group.position.x + pdir.x * step;
-        const nz = g.group.position.z + pdir.z * step;
-        const res = ctx.resolveCollision(g.group.position.x, g.group.position.z, nx, nz,
-          tunables.ai.collisionRadius);
-        g.group.position.x = res.x;
-        g.group.position.z = res.z;
+        g.patrolT -= dt;
+        if (g.patrolT <= 0) {
+          g.patrolT = 2 + Math.random() * 3;
+          g.patrolTargetX = g.homeX + (Math.random() - 0.5) * 6;
+          g.patrolTargetZ = g.homeZ + (Math.random() - 0.5) * 6;
+        }
+        const tx = g.patrolTargetX - g.group.position.x;
+        const tz = g.patrolTargetZ - g.group.position.z;
+        const td = Math.hypot(tx, tz);
+        if (td > 0.4) {
+          const pdir = { x: tx / td, z: tz / td };
+          g.group.rotation.y = Math.atan2(pdir.x, pdir.z);
+          const step = tunables.ai.moveSpeed * 0.35 * dt;
+          const nx = g.group.position.x + pdir.x * step;
+          const nz = g.group.position.z + pdir.z * step;
+          const res = ctx.resolveCollision(g.group.position.x, g.group.position.z, nx, nz,
+            tunables.ai.collisionRadius);
+          g.group.position.x = res.x;
+          g.group.position.z = res.z;
+        }
       }
     }
 
