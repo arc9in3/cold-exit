@@ -646,6 +646,18 @@ export class Level {
     tryShop('tailor', 0.25);
     tryShop('relicSeller', 0.18);
     tryShop('blackMarket', 0.12);
+    // Treasure room — competes in the same roll as shops. Always
+    // locked behind a keycard (see _assignKeycards prioritisation
+    // below), filled with chests + lootable props that always
+    // contain loot, with a slight rarity bias on top of the level
+    // scalar. User: "stores are spawning almost every single level.
+    // i think some of these should be replaced with loot/treasure
+    // rooms locked behind the keycard doors. ... compete in the
+    // same roll - it should just take the current chests and props
+    // and fill the room with them, however these containers in
+    // the treasure room should always have loot in them. slightly
+    // higher chance of better items and gear."
+    tryShop('treasure', 0.32);
     // Rare bear merchant branch — 25% per level. Doesn't satisfy the
     // shop guarantee (it's a bonus, not the regular merchant rotation).
     if (Math.random() < 0.25) addBranch('bearMerchant');
@@ -1338,38 +1350,46 @@ export class Level {
     const nKeys = Math.min(4, baseN, holderCount);
     if (nKeys === 0) return;
 
-    // Candidate doors — ONLY shop / service rooms so the critical
-    // path can never be gated behind a key. Sub-boss doors are
-    // explicitly excluded because key holders are sub-bosses
+    // Candidate doors — shop, service, AND treasure rooms so the
+    // critical path can never be gated behind a key. Sub-boss doors
+    // are explicitly excluded because key holders are sub-bosses
     // themselves; gating a sub-boss behind a key risks a softlock
     // if that sub-boss is the one holding the key you'd need.
     const shopTypes = new Set(['merchant', 'healer', 'gunsmith', 'armorer',
       'tailor', 'relicSeller', 'blackMarket', 'bearMerchant']);
-    // Candidate doors must have EXACTLY one shop side. Locking a
-    // shop-to-shop door used to risk isolating both sides — a chain
-    // of two shop rooms whose only connection was the locked door
-    // would be unreachable from spawn whether the player had the key
-    // or not. Requiring exactly one shop side guarantees the door's
-    // non-shop neighbour stays on the open graph.
-    const keyable = this.obstacles.filter((o) => {
-      if (!o.userData.isDoor) return false;
-      // Extraction-room doors are owned by the boss-clear flow; they
-      // must NEVER be keycard-locked (the player has no way to acquire
-      // a colour-keyed token for them). Filter them out by tag.
-      if (o.userData.isExtractionDoor) return false;
-      // Defensive — if any door lacks a connects array (shouldn't
-      // happen for chain doors, but extraction doors do), skip it.
+    // Treasure rooms are gated by THEIR door (treasure-only side) —
+    // bagged separately so we can prioritise locking THOSE first.
+    // User intent: treasure rooms always read as "you need the key
+    // to get in here." Shops are gated only if there's still keys
+    // left after every treasure door is locked.
+    const treasureTypes = new Set(['treasure']);
+    const _doorClassify = (o) => {
+      if (!o.userData.isDoor) return null;
+      if (o.userData.isExtractionDoor) return null;
       const connects = o.userData.connects;
-      if (!connects || connects.length !== 2) return false;
+      if (!connects || connects.length !== 2) return null;
       const [aId, bId] = connects;
       const a = rooms[aId], b = rooms[bId];
-      if (!a || !b) return false;
+      if (!a || !b) return null;
+      if (a.type === 'boss' || b.type === 'boss') return null;
+      if (a.type === 'subBoss' || b.type === 'subBoss') return null;
+      const aIsTreasure = treasureTypes.has(a.type);
+      const bIsTreasure = treasureTypes.has(b.type);
+      if (aIsTreasure !== bIsTreasure) return 'treasure';
       const aIsShop = shopTypes.has(a.type);
       const bIsShop = shopTypes.has(b.type);
-      return (aIsShop !== bIsShop)
-          && a.type !== 'boss' && b.type !== 'boss'
-          && a.type !== 'subBoss' && b.type !== 'subBoss';
-    });
+      if (aIsShop !== bIsShop) return 'shop';
+      return null;
+    };
+    const treasureDoors = [];
+    const shopDoors = [];
+    for (const o of this.obstacles) {
+      const cls = _doorClassify(o);
+      if (cls === 'treasure') treasureDoors.push(o);
+      else if (cls === 'shop') shopDoors.push(o);
+    }
+    // Treasure first, then shops, in the candidate list.
+    const keyable = treasureDoors.concat(shopDoors);
     if (keyable.length === 0) return;
 
     // Reachability check from spawn (rooms[0]) over only-currently-
@@ -1414,10 +1434,14 @@ export class Level {
     for (let i = 0; i < nKeys && keyable.length; i++) {
       // Try candidates until one passes the reachability check, or
       // we run out (in which case the level just gets fewer keys).
+      // Treasure doors are at the FRONT of keyable (see prioritisation
+      // above), so iterate front-to-back rather than picking randomly
+      // — guarantees every treasure door gets locked before any shop
+      // is touched.
       let door = null;
       let chosenIdx = -1;
       for (let attempt = 0; attempt < keyable.length; attempt++) {
-        const tryIdx = Math.floor(Math.random() * keyable.length);
+        const tryIdx = attempt;
         const tryDoor = keyable[tryIdx];
         const trial = new Set(blockedDoors);
         trial.add(tryDoor);
@@ -2157,27 +2181,32 @@ export class Level {
       }
       return true;
     };
-    // Per-room spawn chance dropped 2026-05-06 v2 retune. Lootable
-    // themed props (desks, lockers) already cover the loot-discovery
-    // beat in most rooms; the dedicated chest is now an occasional
-    // bonus rather than expected per-room furniture.
-    //   boss:    0.50 → 0.35
-    //   subBoss: 0.25 → 0.18
-    //   other:   0.16 → 0.08
-    const spawnChance = room.type === 'boss' ? 0.35
+    // Treasure rooms — guaranteed dense container spawn (4-6 chests),
+    // and each chest is built with forceFull + rarityBias. Other
+    // room types use the v2 lean rates.
+    const isTreasure = room.type === 'treasure';
+    const spawnChance = isTreasure ? 1.0
+      : room.type === 'boss' ? 0.35
       : room.type === 'subBoss' ? 0.18
       : 0.08;
     if (Math.random() > spawnChance) return;
-    // When a box DOES spawn, almost always exactly one. Big rooms +
-    // boss/sub-boss tier rarely roll a second (cut from 20% → 10%).
-    let count = 1;
-    if (area > 60 && Math.random() < 0.10) count += 1;
-    if ((room.type === 'boss' || room.type === 'subBoss') && Math.random() < 0.10) count += 1;
+    let count;
+    if (isTreasure) {
+      count = 4 + Math.floor(Math.random() * 3);   // 4..6
+    } else {
+      count = 1;
+      if (area > 60 && Math.random() < 0.10) count += 1;
+      if ((room.type === 'boss' || room.type === 'subBoss') && Math.random() < 0.10) count += 1;
+    }
     for (let i = 0; i < count; i++) {
       for (let attempt = 0; attempt < 30; attempt++) {
         const type = pickContainerType();
         const size = pickContainerSize(type);
-        const container = makeContainer(type, size, this.index);
+        // Treasure rooms always emit at least one item per container
+        // and bias the rarity weights up by 1.4× (compounds with
+        // contract + level scalars). Other rooms use defaults.
+        const container = makeContainer(type, size, this.index,
+          isTreasure ? { forceFull: true, rarityBias: 1.4 } : undefined);
         // Same in-bounds clamp as _scatterCover — container.geo gives
         // the actual width/depth of the lid AABB, so we know exactly
         // how much margin to require from the room walls.
@@ -2894,11 +2923,20 @@ export class Level {
     // anchor lootable per LOOT_PROP_CONFIG. Wraps the common pattern
     // of "place X, roll loot chance" so each composed arrangement
     // reads as a recipe instead of a 4-line dance.
+    // Treasure rooms force every lootable prop to surface loot (bypass
+    // the per-prop probability gate) and pass forceFull+rarityBias
+    // through _markPropLootable's container build. Same effect as
+    // _scatterContainers's treasure branch but for the themed-prop
+    // path (desks, lockers, cabinets, ...).
+    const _isTreasureRoom = room.type === 'treasure';
     const _maybeLoot = (prop) => {
       if (!prop || !prop.kind) return prop;
       const cfg = LOOT_PROP_CONFIG[prop.kind];
-      if (cfg && Math.random() < cfg.p) {
-        this._markPropLootable(prop, cfg.type(), cfg.size);
+      if (!cfg) return prop;
+      const fire = _isTreasureRoom || (Math.random() < cfg.p);
+      if (fire) {
+        this._markPropLootable(prop, cfg.type(), cfg.size,
+          _isTreasureRoom ? { forceFull: true, rarityBias: 1.4 } : undefined);
       }
       return prop;
     };
@@ -3831,9 +3869,9 @@ export class Level {
   // of "Open chest." Helps eliminate redundant chest clutter — a
   // bookshelf / desk / locker reads as a place loot would live, so we
   // skip dropping a separate box on top of it.
-  _markPropLootable(prop, type, size) {
+  _markPropLootable(prop, type, size, opts) {
     if (!prop || !prop.group) return false;
-    const container = makeContainer(type, size, this.index);
+    const container = makeContainer(type, size, this.index, opts);
     // Override the default container name with one that matches the prop.
     const PROP_LOOT_NAMES = {
       desk:        'Desk Drawers',
@@ -4474,6 +4512,10 @@ export class Level {
       this._spawnNPC(room);
       return;
     }
+    // Treasure rooms — no enemy spawns. Contents (chests + lootable
+    // props) are handled by _scatterContainers's treasure-room
+    // boost branch + the _maybeLoot override on themed props.
+    if (room.type === 'treasure') return;
     if (room.type === 'bearMerchant') {
       this._spawnBearMerchant(room);
       return;

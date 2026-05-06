@@ -37,6 +37,12 @@ function _worldDropPool() {
 // rarity weights ramp common→legendary (1, 0.6, 0.35, 0.18, 0.08)
 // with the mult applied to non-common picks.
 const _RARITY_WEIGHTS = { common: 1.0, uncommon: 0.6, rare: 0.35, epic: 0.18, legendary: 0.08, mythic: 0 };
+// Module-scoped because rollItemForType pulls weapons via
+// _pickWeightedFromPool deep inside the call chain — passing a bias
+// arg through every signature is more disruptive than this short-lived
+// global. Treasure-room makeContainer() sets it before iteration and
+// restores it in finally{} so it never leaks out of the call.
+let _treasureRarityBias = 0;
 // Per-rarity level scalar — playtest call: "the quality of the items
 // aren't getting better with level, ... further levels should have
 // higher chance of loot dropping of higher rarity." Higher tiers ramp
@@ -65,14 +71,17 @@ function _levelRarityMult(rarity) {
 }
 function _pickWeightedFromPool(pool) {
   const mult = window.__activeModifiers?.()?.lootQualityMult || 1;
+  // Treasure-room rarity bias (set by makeContainer for treasure
+  // rooms). Multiplies on top of the contract + level scalars; >0 only
+  // inside a treasure-room makeContainer call.
+  const treasureMult = _treasureRarityBias > 0 ? _treasureRarityBias : 1;
   let total = 0;
   const weights = pool.map(w => {
     const r = w.rarity || 'common';
     const base = _RARITY_WEIGHTS[r] ?? 1;
-    // Common stays at base; non-common scales by both the contract-
-    // modifier mult AND the level scalar.
+    // Common stays at base; non-common scales by all three multipliers.
     const wt = (r !== 'common')
-      ? base * mult * _levelRarityMult(r)
+      ? base * mult * _levelRarityMult(r) * treasureMult
       : base;
     total += wt;
     return wt;
@@ -226,18 +235,34 @@ function rollItemForType(type, levelIdx) {
 // label, type metadata). Every container — except the masterwork
 // chest — carries a piece of junk on top of its rolled items so even
 // a "low" roll is never completely dry.
-export function makeContainer(type, size, levelIdx = 1) {
+// opts.forceFull   — bypass SIZE_PROFILES.items()'s empty rolls.
+//                    Guarantees at least one item per non-masterwork
+//                    container. Used by treasure rooms.
+// opts.rarityBias  — multiplier applied on top of the existing level
+//                    + contract rarity scalars. Treasure rooms pass
+//                    1.4 so the contents are noticeably better than
+//                    a roadside chest's roll.
+export function makeContainer(type, size, levelIdx = 1, opts = {}) {
   const sizeProfile = SIZE_PROFILES[size] || SIZE_PROFILES.m;
-  const itemCount = type === 'masterwork' ? 1 : sizeProfile.items();
+  let itemCount = type === 'masterwork' ? 1 : sizeProfile.items();
+  if (opts.forceFull && type !== 'masterwork' && itemCount < 1) itemCount = 1;
+  const _prevBias = _treasureRarityBias;
+  if (opts.rarityBias && opts.rarityBias > 0) _treasureRarityBias = opts.rarityBias;
   const loot = [];
-  for (let i = 0; i < itemCount; i++) {
-    const it = rollItemForType(type, levelIdx);
-    if (it) loot.push(it);
+  try {
+    for (let i = 0; i < itemCount; i++) {
+      const it = rollItemForType(type, levelIdx);
+      if (it) loot.push(it);
+    }
+  } finally {
+    _treasureRarityBias = _prevBias;
   }
   // Junk floor — used to be guaranteed; v1 dropped it to 30%; v2
   // halves again to 15%. With size profiles also 1-2-tier leaner,
   // total junk-per-level should sit around half of v1's level.
-  if (type !== 'masterwork' && Math.random() < 0.15) {
+  // Treasure-room forceFull skips the junk floor — those rooms
+  // should hand out the rolled items, not pad with pens / mugs.
+  if (!opts.forceFull && type !== 'masterwork' && Math.random() < 0.15) {
     const j = randomJunk();
     if (j) loot.push(j);
   }
