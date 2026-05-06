@@ -808,6 +808,20 @@ export class Level {
           // to mark it as synthetic (not part of the chain graph).
           this.rooms.push(exit.room);
           this._dirtySolid();
+          // The extraction door drops INTO the boss room's existing
+          // perimeter wall — the boss's perimeter (rect or shape) was
+          // already built without knowing this door would be added.
+          // Re-run the corridor clearer so the wall sections that
+          // straddle the door's gap get their collision nulled. The
+          // earlier _clearDoorCorridors at line ~776 ran before the
+          // extraction door existed, so it didn't know to clear
+          // around it. Without this pass the boss-side wall stays
+          // solid across the doorway and the player can't enter the
+          // extraction chamber even after revealExit() unlocks the
+          // door, which the walkability gate flagged as an
+          // "unreachable extraction" room every level.
+          this._clearDoorCorridors();
+          this._repairDoorOverlaps();
         }
       }
     } catch (err) {
@@ -5042,11 +5056,37 @@ export class Level {
     // Assert every room center is reached. Synthetic rooms (id < 0,
     // currently the extraction room) are intentionally skipped because
     // the extraction door is locked until boss death.
+    //
+    // For rooms with shape templates (lShape, rotunda, plaza-with-dais
+    // etc.), the geometric center room.cx/cz can fall on an impassable
+    // feature (the plaza dais, the rotunda's centerpiece column, the
+    // notch carved by lShape) even when the donut around the feature
+    // is fully connected to the spawn. Probe a fan of points sampled
+    // from the room's _walkableBounds before declaring it unreachable —
+    // the conceptual contract is "is there ANY walkable cell of this
+    // room reachable from spawn", not "is room.cx/cz specifically
+    // reachable".
     for (const room of this.rooms) {
       if (room.id < 0) continue;
-      const rx = Math.round(room.cx / STEP);
-      const rz = Math.round(room.cz / STEP);
-      if (!visited.has(cellKey(rx, rz))) {
+      const probes = [[room.cx, room.cz]];
+      const wb = room._walkableBounds;
+      if (wb && wb.length) {
+        for (const box of wb) {
+          probes.push([(box.minX + box.maxX) / 2, (box.minZ + box.maxZ) / 2]);
+          // Inset corners — avoid landing exactly on the box edge
+          // where wall expanded-AABB cells could leave the cell
+          // unsampled.
+          probes.push([box.minX + 0.6, box.minZ + 0.6]);
+          probes.push([box.maxX - 0.6, box.maxZ - 0.6]);
+        }
+      }
+      let reached = false;
+      for (const [px, pz] of probes) {
+        const ix = Math.round(px / STEP);
+        const iz = Math.round(pz / STEP);
+        if (visited.has(cellKey(ix, iz))) { reached = true; break; }
+      }
+      if (!reached) {
         failures.push({ room: room.id, reason: 'center unreachable from spawn' });
       }
     }
@@ -5149,10 +5189,18 @@ export class Level {
 
     // 1. Stash door collisions. Includes both locked + unlocked doors —
     //    locked doors have a non-null collisionXZ that would otherwise
-    //    block the flood.
+    //    block the flood. The elevator door (`isElevatorDoor`) is the
+    //    sealed panel of the start-room elevator box where the player
+    //    spawns — at runtime the player taps E to open it, so during
+    //    a generation-time walkability probe we MUST pretend it's open
+    //    or BFS can't escape the 5.2m elevator interior. Without this
+    //    every level fails the gate and ships through the
+    //    "degrade-to-rect → accept-broken" branch with all shape
+    //    variety stripped and console error 'CRITICAL: walkability
+    //    still failing after degrade'.
     const stashed = [];
     for (const o of this.obstacles) {
-      if (o.userData?.isDoor) {
+      if (o.userData?.isDoor || o.userData?.isElevatorDoor) {
         stashed.push({ mesh: o, prev: o.userData.collisionXZ });
         o.userData.collisionXZ = null;
       }
@@ -5226,24 +5274,51 @@ export class Level {
         }
       }
 
-      // 4. Check every room — centre + 3×3 sample around centre.
+      // 4. Check every room. The room is "reached" iff at least one
+      //    cell of the BFS visited set falls inside the room's known
+      //    walkable region.
+      //
+      //    Strategy: enumerate sample points along an inset 3×3 grid
+      //    of every walkable bounds box the shape template emitted
+      //    (room._walkableBounds). For shapes like plaza-with-dais or
+      //    extraction-with-centerprop, room.cx/cz lands on top of
+      //    the impassable centerpiece; sampling room.cx alone produces
+      //    a false negative even when the donut around the prop is
+      //    entirely connected to the BFS frontier. Falling back to
+      //    room.bounds (or room center) when no walkableBounds exist
+      //    keeps legacy paths working.
+      //
+      //    Inset by 0.4m so the sample point is at least one player
+      //    radius away from the box edge — otherwise a corner sample
+      //    can land on a wall expanded-AABB cell that BFS skipped.
       const sampleReached = (room) => {
-        const samples = [
-          [room.cx, room.cz],
-          [room.cx - 1.5, room.cz],
-          [room.cx + 1.5, room.cz],
-          [room.cx, room.cz - 1.5],
-          [room.cx, room.cz + 1.5],
-          [room.cx - 1.5, room.cz - 1.5],
-          [room.cx + 1.5, room.cz - 1.5],
-          [room.cx - 1.5, room.cz + 1.5],
-          [room.cx + 1.5, room.cz + 1.5],
-        ];
-        for (const [sx, sz] of samples) {
-          const ci = Math.floor((sx - minX) / STEP);
-          const cj = Math.floor((sz - minZ) / STEP);
-          if (ci < 0 || ci >= w || cj < 0 || cj >= d) continue;
-          if (visited[idx(ci, cj)]) return true;
+        const boxes = (room._walkableBounds && room._walkableBounds.length)
+          ? room._walkableBounds
+          : (room.bounds ? [room.bounds] : []);
+        const INSET = 0.6;
+        for (const box of boxes) {
+          const bw = box.maxX - box.minX;
+          const bd = box.maxZ - box.minZ;
+          if (bw < INSET * 2 || bd < INSET * 2) {
+            // Tiny box — single sample at its center.
+            const sx = (box.minX + box.maxX) / 2;
+            const sz = (box.minZ + box.maxZ) / 2;
+            const ci = Math.floor((sx - minX) / STEP);
+            const cj = Math.floor((sz - minZ) / STEP);
+            if (ci >= 0 && ci < w && cj >= 0 && cj < d && visited[idx(ci, cj)]) return true;
+            continue;
+          }
+          // 3×3 sample inset from the box edges.
+          const xs = [box.minX + INSET, (box.minX + box.maxX) / 2, box.maxX - INSET];
+          const zs = [box.minZ + INSET, (box.minZ + box.maxZ) / 2, box.maxZ - INSET];
+          for (const sx of xs) {
+            for (const sz of zs) {
+              const ci = Math.floor((sx - minX) / STEP);
+              const cj = Math.floor((sz - minZ) / STEP);
+              if (ci < 0 || ci >= w || cj < 0 || cj >= d) continue;
+              if (visited[idx(ci, cj)]) return true;
+            }
+          }
         }
         return false;
       };
