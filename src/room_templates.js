@@ -498,6 +498,21 @@ export const ROOM_TEMPLATES = [
       { kind: 'crate', placer: 'wall', chance: 0.7, lootable: true },
     ],
   },
+  {
+    id: 'garage-loading-dock',
+    themes: ['garage'],
+    weight: 0.65,
+    minSize: { w: 12, d: 12 },
+    props: [
+      // Pallet stacks line one wall (delivered cargo); barrels in the
+      // open; a single toolbox / locker tucked at the perimeter.
+      { kind: 'pallet', placer: 'wall', count: { min: 2, max: 4 } },
+      { kind: 'barrel', placer: 'interior', count: { min: 1, max: 3 } },
+      { kind: 'crate', placer: 'wall', count: { min: 1, max: 2 },
+        lootable: true },
+      { kind: 'locker', placer: 'wall', chance: 0.6, lootable: true },
+    ],
+  },
 
   // ============= GYM =================================================
   // Bench reads as weight bench; lockers = changing-room lockers.
@@ -523,6 +538,20 @@ export const ROOM_TEMPLATES = [
       { kind: 'locker', placer: 'wall', count: { min: 1, max: 2 },
         lootable: true },
       { kind: 'rug', placer: 'interior', chance: 0.5 },
+    ],
+  },
+  {
+    id: 'gym-cardio-row',
+    themes: ['gym'],
+    weight: 0.6,
+    minSize: { w: 12, d: 12 },
+    props: [
+      // A bench row + tv (instructor screen) — feels like a class
+      // room.
+      { kind: 'bench', placer: 'wall', back: true,
+        count: { min: 3, max: 4 } },
+      { kind: 'tv', placer: 'wall', count: { min: 1, max: 2 } },
+      { kind: 'locker', placer: 'wall', chance: 0.6, lootable: true },
     ],
   },
 
@@ -567,6 +596,21 @@ export const ROOM_TEMPLATES = [
       { kind: 'neonStick', placer: 'wall', chance: 0.8 },
     ],
   },
+  {
+    id: 'lab-cleanroom',
+    themes: ['lab'],
+    weight: 0.65,
+    minSize: { w: 12, d: 12 },
+    props: [
+      // Multiple medCarts + storage cabinets reads as a sterile
+      // prep / cleanroom suite.
+      { kind: 'medCart', placer: 'wall', count: { min: 2, max: 3 } },
+      { kind: 'cabinet', placer: 'wall', count: { min: 2, max: 4 },
+        lootable: true },
+      { kind: 'locker', placer: 'wall', chance: 0.7, lootable: true },
+      { kind: 'neonStick', placer: 'wall', count: { min: 1, max: 2 } },
+    ],
+  },
 
   // ============= SERVER ROOM / IT CLOSET =============================
   // serverRack is the signature prop — black panels with LED rows
@@ -603,6 +647,21 @@ export const ROOM_TEMPLATES = [
       { kind: 'neonStick', placer: 'wall', chance: 0.8 },
     ],
   },
+  {
+    id: 'server-cabinet-grid',
+    themes: ['server'],
+    weight: 0.6,
+    minSize: { w: 12, d: 12 },
+    props: [
+      // Wall-to-wall server racks + a pair of crateRow cable bundles.
+      // Reads as a dense colocation cage.
+      { kind: 'serverRack', placer: 'wall', back: true,
+        count: { min: 4, max: 6 } },
+      { kind: 'crateRow', placer: 'interior', count: { min: 1, max: 2 } },
+      { kind: 'cabinet', placer: 'wall', chance: 0.6, lootable: true },
+      { kind: 'neonStick', placer: 'wall', count: { min: 1, max: 2 } },
+    ],
+  },
 
   // ============= ARCHIVE / RECORDS ===================================
   // Bookshelf = filing shelf; cabinet = filing cabinet; crate = box of
@@ -636,6 +695,20 @@ export const ROOM_TEMPLATES = [
         lootable: true },
       { kind: 'bookshelf', placer: 'wall', back: true,
         chance: 0.7, lootable: true },
+    ],
+  },
+  {
+    id: 'archive-vault',
+    themes: ['archive'],
+    weight: 0.55,
+    minSize: { w: 12, d: 12 },
+    props: [
+      // Lockers + cabinets stacked along walls — secure storage.
+      { kind: 'locker', placer: 'wall', back: true,
+        count: { min: 3, max: 5 }, lootable: true },
+      { kind: 'cabinet', placer: 'wall', count: { min: 2, max: 3 },
+        lootable: true },
+      { kind: 'crate', placer: 'interior', chance: 0.8, lootable: true },
     ],
   },
 
@@ -676,6 +749,22 @@ export const ROOM_TEMPLATES = [
         lootable: true },
     ],
   },
+  {
+    id: 'infirmary-supply',
+    themes: ['infirmary'],
+    weight: 0.55,
+    minSize: { w: 12, d: 12 },
+    props: [
+      // Pure supply room — no cot, just cabinets + medCarts +
+      // lockers (medicine cabinets).
+      { kind: 'medCart', placer: 'wall', count: { min: 1, max: 2 } },
+      { kind: 'cabinet', placer: 'wall', count: { min: 3, max: 4 },
+        lootable: true },
+      { kind: 'locker', placer: 'wall', count: { min: 1, max: 2 },
+        lootable: true },
+      { kind: 'neonStick', placer: 'wall', chance: 0.7 },
+    ],
+  },
 
   // ============= SECURITY / GUARD POST ===============================
   // Desk = guard desk, tv = CCTV monitor, locker = gun rack.
@@ -710,6 +799,21 @@ export const ROOM_TEMPLATES = [
       { kind: 'cabinet', placer: 'wall', chance: 0.6, lootable: true },
     ],
   },
+  {
+    id: 'security-armory',
+    themes: ['security'],
+    weight: 0.55,
+    minSize: { w: 12, d: 12 },
+    props: [
+      // Heavy on lockers + lockers + cabinets — guard equipment cage.
+      { kind: 'locker', placer: 'wall', back: true,
+        count: { min: 3, max: 5 }, lootable: true },
+      { kind: 'cabinet', placer: 'wall', count: { min: 1, max: 2 },
+        lootable: true },
+      { kind: 'crate', placer: 'wall', chance: 0.7, lootable: true },
+      { kind: 'bench', placer: 'interior', chance: 0.5 },
+    ],
+  },
 
   // ============= MAILROOM / SORTING ==================================
   // Locker = PO box wall, table = sorting bench, crate = mail bin.
@@ -737,6 +841,21 @@ export const ROOM_TEMPLATES = [
         lootable: true },
       { kind: 'bench', placer: 'wall', chance: 0.85 },
       { kind: 'crate', placer: 'interior', chance: 0.7, lootable: true },
+    ],
+  },
+  {
+    id: 'mailroom-staging',
+    themes: ['mailroom'],
+    weight: 0.55,
+    minSize: { w: 12, d: 12 },
+    props: [
+      // Pallets + crates as outgoing parcels staged for pickup, plus
+      // a clerk desk on the perimeter.
+      { kind: 'pallet', placer: 'interior', count: { min: 2, max: 3 } },
+      { kind: 'crate', placer: 'wall', count: { min: 2, max: 3 },
+        lootable: true },
+      { kind: 'desk', placer: 'wall', chance: 0.7, lootable: true },
+      { kind: 'locker', placer: 'wall', chance: 0.6, lootable: true },
     ],
   },
 
