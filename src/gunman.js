@@ -713,7 +713,23 @@ export class GunmanManager {
 
     this.scene.add(group);
 
-    const role = Math.random() < tunables.ai.flankChance ? 'flanker' : 'rusher';
+    // Roles. Earlier the pool was binary flanker / rusher and every
+    // gunman charged the player. Defenders are the new default — they
+    // pick a cover anchor in their room at spawn, hold it on engage,
+    // peek-and-return instead of pursuing. Flankers still circle for
+    // crossfire angles; rushers still close distance. A handful of
+    // defenders per room now means the player has to read each one's
+    // line and clear them deliberately instead of brawling them as
+    // they all rush forward.
+    //
+    // Distribution: ~55% defender, ~25% flanker, ~20% rusher. Rolled
+    // independently of the legacy flankChance so existing tunings
+    // around flank density still apply.
+    let role;
+    const rRoll = Math.random();
+    if (rRoll < 0.55)                         role = 'defender';
+    else if (rRoll < 0.55 + 0.25)             role = 'flanker';
+    else                                       role = 'rusher';
     // Flankers pick a signed angular offset so some circle left, some right.
     const flankAngle = role === 'flanker'
       ? (Math.random() < 0.5 ? -1 : 1) * (Math.PI / 180) * (45 + Math.random() * 35)
@@ -2283,11 +2299,12 @@ export class GunmanManager {
 
     // All-variants cover use — Pass 1 design: when health < 50% OR
     // the player was firing within the last 1.5s, EVERY variant
-    // (not just coverSeeker) should head for the closest scored
-    // cover. Refresh once a second so we don't burn cycles on the
-    // O(obstacles) scan inside ai_cover. Cover persists for ~3s
-    // before we re-evaluate so the AI doesn't oscillate between two
-    // equally-good spots.
+    // should head for the closest scored cover. Defenders extend
+    // this — they seek cover the MOMENT they're alerted, not only
+    // under HP/fire pressure, so they hold their room defensively
+    // instead of charging out. Refresh once a second; defenders
+    // hold their pick for 10s (regular roles 3s) so they don't
+    // oscillate between two near-equal spots while peeking.
     let coverTarget = null;
     if (g.state !== STATE.IDLE && ctx.level && ctx.playerPos) {
       const hpFrac = g.maxHp > 0 ? g.hp / g.maxHp : 1;
@@ -2296,7 +2313,8 @@ export class GunmanManager {
       // Honour ctx.playerFiring if main.js provides it; otherwise the
       // recently-hit fallback is the practical signal.
       const playerShooting = !!ctx.playerFiring;
-      const shouldSeekCover = (hpFrac < 0.5 || recentlyHit || playerShooting)
+      const isDefender = g.role === 'defender';
+      const shouldSeekCover = (isDefender || hpFrac < 0.5 || recentlyHit || playerShooting)
         // Skip during specific overrides — the existing tuck / suppress
         // logic already places the gunman somewhere safe.
         && !tuckTarget
@@ -2312,7 +2330,9 @@ export class GunmanManager {
           if (spots.length) {
             const best = spots[0];
             g._coverPos = { x: best.x, z: best.z, peekDir: best.peekDir };
-            g._coverHoldT = 3.0;
+            // Defenders hold a chosen anchor much longer than other
+            // roles — the design wants them parked, not orbiting.
+            g._coverHoldT = isDefender ? 10.0 : 3.0;
           }
         }
         if (g._coverPos) {
@@ -2341,7 +2361,13 @@ export class GunmanManager {
       const approachDir = _g_approachDir.copy(dir2d);
       const crouchedHiding = !!ctx.playerCrouched;
       const coverDelay = crouchedHiding ? 0.6 : 1.2;
-      const coverFlanking = (g.noLosT || 0) > coverDelay && typeof g.lastKnownX === 'number';
+      // Defenders hold their cover anchor and never flank — even on
+      // a lost LoS they peek-and-wait instead of sweeping around the
+      // wall. Flankers + rushers keep the existing detour.
+      const isDefender = g.role === 'defender';
+      const coverFlanking = !isDefender
+        && (g.noLosT || 0) > coverDelay
+        && typeof g.lastKnownX === 'number';
       const crouchAngleBoost = crouchedHiding ? 1.35 : 1.0;
       const flankAng = g.role === 'flanker'
         ? (coverFlanking ? g.flankAngle * 1.5 * crouchAngleBoost : g.flankAngle)
