@@ -82,6 +82,16 @@ export class RunStats {
     // Marks awarded on death — populated by main.js when the run
     // ends. Surfaces on the death recap UI.
     this.marksEarned = 0;
+    // Basic-mechanic counters consumed by early-tier contracts.
+    // Bumped in ui_loot.js's close path on a false→true `looted`
+    // transition, discriminated by `target.kind === 'container'`.
+    this.containersSearched = 0;
+    this.bodiesLooted = 0;
+    // Levels that ended in extract (count of completed-then-extracted
+    // floors — different from `levels` which is highest-reached). The
+    // "complete N levels" contracts read this so partial progress
+    // (entered floor 5 but died) doesn't satisfy "extract from 3".
+    this.levelsExtracted = 0;
   }
 
   markTainted() { this.tainted = true; }
@@ -121,7 +131,9 @@ export class RunStats {
   noteMeleeLanded()        { this.noMelee = false; }
   noteCritHeadshot()       { this.critHeadshots += 1; }
   noteThrowableKill()      { this.throwableKills += 1; }
-  noteExtracted()          { this.extracted = true; }
+  noteExtracted()          { this.extracted = true; this.levelsExtracted += 1; }
+  noteContainerSearched()  { this.containersSearched += 1; }
+  noteBodyLooted()         { this.bodiesLooted += 1; }
 
   snapshot() {
     return {
@@ -150,6 +162,9 @@ export class RunStats {
       megabossKillsThisRun: this.megabossKillsThisRun,
       marksEarned: this.marksEarned,
       archetypeKills: { ...this.archetypeKills },
+      containersSearched: this.containersSearched | 0,
+      bodiesLooted: this.bodiesLooted | 0,
+      levelsExtracted: this.levelsExtracted | 0,
     };
   }
 }

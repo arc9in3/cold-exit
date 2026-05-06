@@ -143,7 +143,7 @@ function bodySilhouetteSvg() {
 }
 
 export class LootUI {
-  constructor({ inventory, onClose, onDrop, onOpenCustomize, onAcquireArtifact }) {
+  constructor({ inventory, onClose, onDrop, onOpenCustomize, onAcquireArtifact, onSearchedTarget }) {
     this.inventory = inventory;
     this.onClose = onClose;
     this.onDrop = onDrop;
@@ -152,8 +152,14 @@ export class LootUI {
     // and it returns true, the item is treated as "placed" (acquired)
     // and never enters the inventory grids.
     this.onAcquireArtifact = onAcquireArtifact || (() => false);
+    // Fired when a target transitions un-looted → looted (i.e. the
+    // player actually emptied it). Receives the target so the caller
+    // can discriminate body vs container. Used by contracts for
+    // "search N containers" / "loot N bodies" objectives.
+    this.onSearchedTarget = onSearchedTarget || (() => {});
     this.target = null;
     this.bodyHidden = false;
+    this._wasLootedAtOpen = false;
 
     this.root = document.createElement('div');
     this.root.id = 'loot-root';
@@ -259,6 +265,9 @@ export class LootUI {
   open(target) {
     this.target = target;
     this.bodyHidden = false;
+    // Snapshot the looted-state at open so close() can detect a real
+    // transition (un-looted → looted) and fire onSearchedTarget once.
+    this._wasLootedAtOpen = !!target?.looted;
     // Coop body-loot — when a synced enemy corpse is opened, wrap
     // its loot array so each splice fires window.__coopOnBodyTake.
     // The hook routes through main.js to send rpc-body-take; host
@@ -380,8 +389,15 @@ export class LootUI {
         try { this.target._persistLeftovers(); } catch (_) {}
       }
       this.target.looted = _isAllPeerSlicesEmpty(this.target);
+      // Fire the contract-tracking hook on a real transition.
+      // Re-opening an already-looted container/body should not
+      // re-bump the counter.
+      if (!this._wasLootedAtOpen && this.target.looted) {
+        try { this.onSearchedTarget(this.target); } catch (_) {}
+      }
     }
     this.target = null;
+    this._wasLootedAtOpen = false;
     if (this.onClose) this.onClose();
   }
   isOpen() { return this.target !== null; }

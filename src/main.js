@@ -90,7 +90,7 @@ import { StartUI } from './ui_start.js';
 import { MainMenuUI } from './ui_main_menu.js';
 import { HideoutUI } from './ui_hideout.js';
 import { tryClaimContract, defForId, buildModifiers, evaluateContract,
-         rankRewardFor, rankPerKillFor, CONTRACT_DEFS } from './contracts.js';
+         rankRewardFor, rankPerKillFor, CONTRACT_DEFS, objectiveSubtitle } from './contracts.js';
 import {
   getActiveContract, setActiveContract, awardMarks, bumpContractRank, bumpMegabossKills,
   bumpRunCount, queueEncounterFollowup,
@@ -4539,6 +4539,14 @@ const lootUI = new LootUI({
     _coopDropOrLocal(p.clone(), item);
   },
   onAcquireArtifact: _tryAcquireRelic,
+  // Bumps contract-tracking counters on a real un-looted → looted
+  // transition. Containers (props with `kind: 'container'`) feed the
+  // "search N containers" contract; bodies feed "loot N bodies".
+  onSearchedTarget: (target) => {
+    if (!target) return;
+    if (target.kind === 'container') runStats.noteContainerSearched();
+    else                              runStats.noteBodyLooted();
+  },
 });
 
 const perkUI = new PerkUI({
@@ -9226,7 +9234,13 @@ function fireOneShot(playerInfo, weapon, aimPoint, isADS, aimOwner, aimZone) {
     ? eff.adsSpread * (derivedStats.adsSpreadOnlyMult || 1)
     : eff.hipSpread * (derivedStats.hipSpreadOnlyMult || 1);
   const crouched = inputStateCrouchHeld();
-  const crouchSpreadK = crouched ? (derivedStats.crouchSpreadMult ?? 1) : 1;
+  // Base crouch tightening — applies on top of any skill-tree
+  // crouchSpreadMult. 0.5 = halved spread cone while crouched
+  // (user request 2026-05-06). Skill-tree mults compound so a
+  // crouchSpread skill stacks multiplicatively with this base.
+  const crouchSpreadK = crouched
+    ? 0.5 * (derivedStats.crouchSpreadMult ?? 1)
+    : 1;
   let spread = baseSpread * derivedStats.rangedSpreadMult * crouchSpreadK;
   // Broken ranged weapon — barrel / sights / action degrade accuracy.
   // 5× the post-skill cone before bloom + pixel-aim multipliers fold
@@ -16913,11 +16927,16 @@ window.__renderWeaponBar = renderWeaponBar;
 // one → it becomes the active contract for the rest of the run.
 // Skipping is allowed via the close button. Resolves when the user
 // makes a choice or skips.
+//
+// Visually mirrors the hideout's wanted-card layout so the in-game
+// pick-up reads as the same artifact the player saw at the contract
+// board pre-deploy. Reuses the global wanted-card / rwd / row-mod
+// classes injected by HideoutUI._injectStyles at boot, plus a small
+// modal-frame stylesheet injected on-demand.
 function _showMidRunContractOffer() {
   return new Promise((resolve) => {
     try {
       const allContracts = Object.values(CONTRACT_DEFS).filter(c => c && c.id);
-      // Filter out current contract + already-completed/claimed ones.
       const cur = getActiveContract();
       const curId = cur?.activeContractId || null;
       const pool = allContracts.filter(c => c.id !== curId && c.kind !== 'weekly');
@@ -16932,94 +16951,156 @@ function _showMidRunContractOffer() {
         used.add(def.id);
         picks.push(def);
       }
+
+      // One-shot stylesheet for the modal frame. The wanted-card
+      // styles themselves are already in the document (hideout-styles).
+      if (!document.getElementById('mid-run-contract-styles')) {
+        const ss = document.createElement('style');
+        ss.id = 'mid-run-contract-styles';
+        ss.textContent = `
+          #mid-run-contract-overlay {
+            position: fixed; inset: 0; z-index: 120;
+            background: rgba(8,12,16,0.85);
+            display: flex; align-items: center; justify-content: center;
+            font: 13px 'Inter', system-ui, sans-serif;
+          }
+          #mid-run-contract-card {
+            background: linear-gradient(180deg, #1a2228, #0c1014);
+            border: 1px solid #f2c060; border-radius: 6px;
+            padding: 24px 28px 18px;
+            max-width: 880px; width: 92%;
+            box-shadow: 0 0 48px rgba(242, 192, 96, 0.35);
+            color: #f2e7c9;
+          }
+          #mid-run-contract-title {
+            color: #f2c060; font-weight: 700; font-size: 14px;
+            letter-spacing: 3px; text-transform: uppercase;
+            text-align: center; margin-bottom: 4px;
+          }
+          #mid-run-contract-sub {
+            color: #a89070; font-size: 11px; text-align: center;
+            margin-bottom: 18px; letter-spacing: 1.5px;
+          }
+          #mid-run-contract-cards {
+            display: grid; grid-template-columns: repeat(3, minmax(0, 1fr));
+            gap: 12px; margin-bottom: 14px;
+          }
+          @media (max-width: 720px) {
+            #mid-run-contract-cards { grid-template-columns: 1fr; }
+          }
+          #mid-run-contract-skip {
+            display: block; width: 100%; padding: 9px;
+            background: transparent; border: 1px solid #4a3a2a;
+            border-radius: 3px; color: #a89070; font: inherit;
+            cursor: pointer; letter-spacing: 1.5px;
+            text-transform: uppercase; font-size: 11px;
+          }
+          #mid-run-contract-skip:hover {
+            border-color: #6a4a2a; color: #c9a87a;
+          }
+        `;
+        document.head.appendChild(ss);
+      }
+
       const root = document.createElement('div');
-      Object.assign(root.style, {
-        position: 'fixed', inset: '0', zIndex: '120',
-        background: 'rgba(8,12,16,0.85)',
-        display: 'flex', alignItems: 'center', justifyContent: 'center',
-        font: '13px ui-monospace, Menlo, Consolas, monospace',
-      });
+      root.id = 'mid-run-contract-overlay';
       const card = document.createElement('div');
-      Object.assign(card.style, {
-        background: 'linear-gradient(180deg, #1a2228, #0c1014)',
-        border: '1px solid #f2c060', borderRadius: '6px',
-        padding: '24px 28px', maxWidth: '560px', width: '90%',
-        boxShadow: '0 0 48px rgba(255,200,80,0.35)',
-        color: '#f2e7c9',
-      });
+      card.id = 'mid-run-contract-card';
       const title = document.createElement('div');
-      Object.assign(title.style, {
-        color: '#f2c060', fontWeight: '700', fontSize: '14px',
-        letterSpacing: '3px', textTransform: 'uppercase',
-        textAlign: 'center', marginBottom: '6px',
-      });
+      title.id = 'mid-run-contract-title';
       title.textContent = 'CONTRACT COMPLETE';
       card.appendChild(title);
       const sub = document.createElement('div');
-      Object.assign(sub.style, {
-        color: '#a89070', fontSize: '11px', textAlign: 'center',
-        marginBottom: '18px', letterSpacing: '1.5px',
-      });
+      sub.id = 'mid-run-contract-sub';
       sub.textContent = 'Pick another to take on for the rest of the run';
       card.appendChild(sub);
+
       const close = (chosen) => {
         try { document.body.removeChild(root); } catch (_) {}
         resolve(chosen || null);
       };
+
+      const cardsRow = document.createElement('div');
+      cardsRow.id = 'mid-run-contract-cards';
+      const portraitGlyph = (p) => {
+        switch (p) {
+          case 'dasher':   return '»';
+          case 'tank':     return '■';
+          case 'gunman':   return '⨯';
+          case 'melee':    return '✕';
+          case 'sniper':   return '◎';
+          case 'boss':     return '★';
+          case 'megaboss': return '✪';
+          default:         return '◇';
+        }
+      };
+      const modChips = (def) => {
+        const m = def.modifiers || {};
+        const out = [];
+        const push = (cls, glyph, label, full) =>
+          out.push(`<span class="row-mod ${cls}" title="${full}">${glyph} ${label}</span>`);
+        if (m.weaponClass === 'pistol') push('restrict', '⚲', 'Pistols only', 'Restricted to pistol-class weapons');
+        if (m.weaponClass === 'melee')  push('restrict', '⚔', 'Melee only',   'Restricted to melee weapons');
+        if (m.noConsumables)            push('restrict', '⊘', 'No items',      'Consumables disabled this run');
+        if ((m.enemyHpMult || 1) > 1) {
+          const p = Math.round((m.enemyHpMult - 1) * 100);
+          push('threat', '♥', `+${p}% HP`, `Enemy HP +${p}%`);
+        }
+        if ((m.enemyDamageMult || 1) > 1) {
+          const p = Math.round((m.enemyDamageMult - 1) * 100);
+          push('threat', '⚡', `+${p}% dmg`, `Enemy damage +${p}%`);
+        }
+        if ((m.spawnDensityMult || 1) > 1) {
+          const p = Math.round((m.spawnDensityMult - 1) * 100);
+          push('threat', '⚏', `+${p}% spawns`, `Spawn density +${p}%`);
+        }
+        if ((m.eliteChanceMult || 1) > 1) {
+          push('threat', '★', `Elites ×${m.eliteChanceMult.toFixed(1)}`, `Elite chance ×${m.eliteChanceMult.toFixed(2)}`);
+        }
+        if ((m.playerDamageTakenMult || 1) > 1) {
+          const p = Math.round((m.playerDamageTakenMult - 1) * 100);
+          push('penalty', '⊕', `+${p}% taken`, `You take +${p}% damage`);
+        }
+        if ((m.playerDamageDealtMult || 1) !== 1) {
+          const p = Math.round((m.playerDamageDealtMult - 1) * 100);
+          const sign = p >= 0 ? '+' : '';
+          push(p >= 0 ? 'buff' : 'penalty', '⊖', `${sign}${p}% out`, `You deal ${sign}${p}% damage`);
+        }
+        return out.length ? `<div class="row-mods">${out.join('')}</div>` : '';
+      };
+
       for (const def of picks) {
+        const totalCap = (def.perKillReward | 0) * (def.targetCount | 0) + (def.reward | 0);
+        const rankReward = rankRewardFor(def);
+        const rankPerKill = rankPerKillFor(def);
+        const rewardChips = [];
+        rewardChips.push(`<span class="rwd chips" title="Bounty">${totalCap}c</span>`);
+        if (rankReward > 0 || rankPerKill > 0) {
+          const rTip = rankPerKill > 0 ? `Rank +${rankReward} (+${rankPerKill}/kill)` : `Rank +${rankReward}`;
+          rewardChips.push(`<span class="rwd rank" title="${rTip}">+${rankReward} rp</span>`);
+        }
+        if ((def.perKillReward | 0) > 0) {
+          rewardChips.push(`<span class="rwd chips small" title="Per kill chip bonus">+${def.perKillReward}c/kill</span>`);
+        }
+        if ((def.marksReward | 0) > 0) {
+          rewardChips.push(`<span class="rwd marks" title="Marks reward">+${def.marksReward} m</span>`);
+        }
+        if ((def.sigilsReward | 0) > 0) {
+          rewardChips.push(`<span class="rwd sigils" title="Sigils reward">+${def.sigilsReward} s</span>`);
+        }
+
         const btn = document.createElement('button');
-        Object.assign(btn.style, {
-          display: 'block', width: '100%', textAlign: 'left',
-          padding: '12px 14px', marginBottom: '8px',
-          background: 'rgba(40,30,16,0.55)',
-          border: '1px solid #6a4a2a', borderRadius: '4px',
-          color: '#f2e7c9', font: 'inherit', cursor: 'pointer',
-        });
-        btn.onmouseenter = () => { btn.style.background = 'rgba(80,60,30,0.75)'; btn.style.borderColor = '#f2c060'; };
-        btn.onmouseleave = () => { btn.style.background = 'rgba(40,30,16,0.55)'; btn.style.borderColor = '#6a4a2a'; };
-        const name = document.createElement('div');
-        Object.assign(name.style, { fontWeight: '700', fontSize: '13px', color: '#ffd070' });
-        // CONTRACT_DEFS use `label` (not `title`) and have no
-        // `description`. Falling back to `def.id` and the literal '—'
-        // was rendering the raw ids and dashes the player saw as
-        // placeholder text (#19, #51). Build a target-count line from
-        // the same fields the hideout banner uses.
-        name.textContent = def.label || def.title || def.id;
-        const desc = document.createElement('div');
-        Object.assign(desc.style, { fontSize: '11px', color: '#b8a890', marginTop: '4px', lineHeight: '1.4' });
-        const _tCount = def.targetCount | 0;
-        const _tType = def.targetType || 'any';
-        const _plural = _tCount === 1 ? '' : 's';
-        const _tLabel =
-          _tType === 'dasher'   ? `dasher${_plural}` :
-          _tType === 'tank'     ? `tank${_plural}` :
-          _tType === 'gunman'   ? (_tCount === 1 ? 'gunman' : 'gunmen') :
-          _tType === 'melee'    ? (_tCount === 1 ? 'melee enemy' : 'melee enemies') :
-          _tType === 'sniper'   ? `sniper${_plural}` :
-          _tType === 'boss'     ? `boss${_tCount === 1 ? '' : 'es'}` :
-          _tType === 'megaboss' ? `megaboss${_tCount === 1 ? '' : 'es'}` :
-          (_tCount === 1 ? 'enemy' : 'enemies');
-        desc.textContent = def.description
-          || def.flavor
-          || def.rule
-          || (_tCount > 0 ? `Eliminate ${_tCount} × ${_tLabel}` : '');
-        const reward = document.createElement('div');
-        Object.assign(reward.style, { fontSize: '10px', color: '#80c0e0', marginTop: '4px', letterSpacing: '1px', textTransform: 'uppercase' });
-        const r = [];
-        // CONTRACT_DEFS expose `reward` (chips), `marksReward` and
-        // `perKillReward`. Old keys (chipReward / markReward /
-        // sigilReward) never existed so the line was permanently
-        // empty — that's the "no indication of rewards" symptom (#52).
-        if (def.reward)        r.push(`${def.reward} chips`);
-        if (def.perKillReward) r.push(`+${def.perKillReward}/kill`);
-        if (def.marksReward)   r.push(`${def.marksReward} marks`);
-        if (def.chipReward)    r.push(`${def.chipReward} chips`);  // legacy fallback
-        if (def.markReward)    r.push(`${def.markReward} marks`);  // legacy fallback
-        if (def.sigilReward)   r.push(`${def.sigilReward} sigils`);
-        reward.textContent = r.length ? r.join(' · ') : '';
-        btn.appendChild(name);
-        btn.appendChild(desc);
-        if (r.length) btn.appendChild(reward);
+        btn.type = 'button';
+        btn.className = `wanted-card rarity-${def.rarity || 'common'}`;
+        btn.innerHTML = `
+          <div class="wanted-portrait" data-portrait="${def.portrait || 'any'}">${portraitGlyph(def.portrait)}</div>
+          <div class="wanted-head">
+            <div class="wanted-name">${(def.label || def.id).toUpperCase()}</div>
+            <div class="wanted-conds">${objectiveSubtitle(def)}</div>
+          </div>
+          ${modChips(def)}
+          <div class="wanted-rewards">${rewardChips.join('')}</div>
+        `;
         btn.addEventListener('click', () => {
           setActiveContract({
             activeContractId: def.id,
@@ -17030,19 +17111,17 @@ function _showMidRunContractOffer() {
           _refreshActiveModifiers();
           close(def);
         });
-        card.appendChild(btn);
+        cardsRow.appendChild(btn);
       }
+      card.appendChild(cardsRow);
+
       const skipBtn = document.createElement('button');
-      Object.assign(skipBtn.style, {
-        display: 'block', width: '100%', marginTop: '6px', padding: '8px',
-        background: 'transparent', border: '1px solid #4a3a2a',
-        borderRadius: '3px', color: '#a89070', font: 'inherit',
-        cursor: 'pointer', letterSpacing: '1.5px', textTransform: 'uppercase',
-        fontSize: '11px',
-      });
+      skipBtn.type = 'button';
+      skipBtn.id = 'mid-run-contract-skip';
       skipBtn.textContent = 'Skip';
       skipBtn.addEventListener('click', () => close(null));
       card.appendChild(skipBtn);
+
       root.appendChild(card);
       document.body.appendChild(root);
     } catch (e) {
@@ -18430,9 +18509,12 @@ function tick() {
     }
     // Bloom decay — runs every frame regardless of weapon class. The
     // per-shot bump in fireOneShot adds; this drains. Linear decay
-    // (constant per-second rate) so the math is predictable.
+    // (constant per-second rate) so the math is predictable. Crouch
+    // bumps the rate 1.5× (user request 2026-05-06) so a crouched
+    // burst recovers in 0.55s vs the 0.83s standing baseline.
     if (_shotBloom > 0) {
-      _shotBloom = Math.max(0, _shotBloom - BLOOM_DECAY_PER_SEC * dt);
+      const crouchBloomK = inputStateCrouchHeld() ? 1.5 : 1;
+      _shotBloom = Math.max(0, _shotBloom - BLOOM_DECAY_PER_SEC * crouchBloomK * dt);
     }
     // Push the bloom value to the cursor reticle. Hide entirely when
     // the player has no ranged weapon equipped, is dead, or the game

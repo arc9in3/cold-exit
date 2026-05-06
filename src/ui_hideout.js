@@ -45,7 +45,7 @@ import {
   CONTRACT_DEFS, defForId, contractExpired,
   pickDailyContract, pickWeeklyContract, utcDayIndex, utcWeekIndex,
   liveProgressFor, tryClaimContract, isContractUnlocked, buildModifiers, difficultyScore,
-  rankRewardFor, rankPerKillFor,
+  rankRewardFor, rankPerKillFor, objectiveSubtitle,
 } from './contracts.js';
 import { iconForItem, inferRarity, rarityColor, weaponImageMirrorStyle, CONSUMABLE_DEFS, ARMOR_DEFS } from './inventory.js';
 
@@ -1606,7 +1606,12 @@ export class HideoutUI {
       && (w.worldDrop === false || (w.unlockRank | 0) > 0)
       && !unlocked.has(w.name));
 
-    const RARITY_COSTS = { common: 150, uncommon: 350, rare: 800, epic: 2000, legendary: 5000 };
+    // 2026-05-06: bumped ~2.4× to match the new credit-per-kill ramp.
+    // Old values (150 / 350 / 800 / 2000 / 5000) let a strong run buy
+    // out a legendary outright; the new tier should feel like a real
+    // milestone — the kind of purchase a player rolls toward across
+    // multiple runs, not a one-shot transaction.
+    const RARITY_COSTS = { common: 350, uncommon: 800, rare: 1900, epic: 4500, legendary: 12000 };
     const BUYABLE_RANK = { common: 0, uncommon: 2, rare: 5, epic: 10, legendary: 18 };
     const RARITY_RANK = { legendary: 0, epic: 1, rare: 2, uncommon: 3, common: 4 };
     const reqRankFor = (w) => (w.unlockRank | 0) > 0
@@ -2317,7 +2322,7 @@ export class HideoutUI {
       banner.innerHTML = `
         <div class="prep-eyebrow">LOADOUT${def?.rarity ? ` · <span style="color:${rarityHex}">${def.rarity.toUpperCase()}</span>` : ''}</div>
         <div class="prep-title">${def ? def.label.toUpperCase() : 'NO CONTRACT ACTIVE'}</div>
-        ${def ? `<div class="prep-sub">${def.targetCount} × ${this._targetLabel(def.targetType, def.targetCount)}${rewardBits.length ? ` · ${rewardBits.join(' · ')}` : ''}</div>` : ''}
+        ${def ? `<div class="prep-sub">${this._objectiveSubtitle(def)}${rewardBits.length ? ` · ${rewardBits.join(' · ')}` : ''}</div>` : ''}
       `;
       wrap.appendChild(banner);
     }
@@ -2747,7 +2752,7 @@ export class HideoutUI {
     card.className = 'wanted-card'
       + ` rarity-${def.rarity || 'common'}`
       + (isClaimed ? ' claimed' : '');
-    const targetLabel = this._targetLabel(def.targetType, def.targetCount);
+    const subtitle = this._objectiveSubtitle(def);
     const totalCap = (def.perKillReward | 0) * (def.targetCount | 0) + (def.reward | 0);
     // Rank-points payout: completion bonus + per-kill bonus. Surface
     // both numbers so the player sees exactly what each contract is
@@ -2780,7 +2785,7 @@ export class HideoutUI {
       <div class="wanted-portrait" data-portrait="${def.portrait || 'any'}">${this._portraitGlyph(def.portrait)}</div>
       <div class="wanted-head">
         <div class="wanted-name">${def.label.toUpperCase()}</div>
-        <div class="wanted-conds">${def.targetCount} × ${targetLabel}</div>
+        <div class="wanted-conds">${subtitle}</div>
       </div>
       ${this._renderModifierList(def)}
       <div class="wanted-rewards">${rewardChips.join('')}</div>
@@ -3303,6 +3308,13 @@ export class HideoutUI {
       case 'megaboss': return `megaboss${n === 1 ? '' : 'es'}`;
       default:         return `enem${n === 1 ? 'y' : 'ies'}`;
     }
+  }
+
+  // Subtitle line for a contract — delegates to the shared
+  // objectiveSubtitle helper in contracts.js so the hideout cards
+  // and the mid-run picker stay in lockstep.
+  _objectiveSubtitle(def) {
+    return objectiveSubtitle(def);
   }
 
   // Lightweight glyph for the portrait box — emoji-free, single

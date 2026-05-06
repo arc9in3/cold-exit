@@ -127,8 +127,14 @@ export const MERCHANT_KINDS = [
 ];
 export const MERCHANT_UPGRADE_MAX = 4;
 // Cost to buy level N from level N-1 (index 0 = buy level 1).
-export const MERCHANT_UPGRADE_COSTS = [40, 80, 160, 280];
-export const REROLL_UNLOCK_COST = 220;
+// 2026-05-06: bumped 3× from [40,80,160,280] now that per-kill chips
+// scale with floor (a single mid-level run banks ~500 chips). Old
+// values let a player buy out every vendor in one or two runs; the
+// new ramp keeps each upgrade as an actual chip-budget decision.
+export const MERCHANT_UPGRADE_COSTS = [120, 240, 480, 840];
+// 2026-05-06: bumped 2× from 220 — reroll unlock is a high-impact
+// permanent that cuts shop variance, deserves to feel like saving.
+export const REROLL_UNLOCK_COST = 450;
 
 export function getMerchantUpgrades() {
   const raw = _read(MERCHANT_UPGRADES_KEY, null);

@@ -60,10 +60,17 @@ export const CONTRACT_EVENT_FIELDS = {
 //   portrait    string id — visual icon for the contract card. Maps
 //               to a glyph in the UI: 'dasher' | 'tank' | 'gunman' |
 //               'melee' | 'sniper' | 'boss' | 'megaboss' | 'any'
+//   objective   (optional) basic-mechanic goal. When set, takes
+//               precedence over targetType. One of:
+//                 'kills_total'         — any-archetype kill count
+//                 'containers_searched' — boxes / chests / props emptied
+//                 'bodies_looted'       — corpses fully looted
+//                 'credits_banked'      — chips earned this run
+//                 'levels_extracted'    — floors completed via extract
 //   targetType  'any' | 'dasher' | 'tank' | 'gunman' | 'melee' |
 //               'sniper' | 'boss' | 'megaboss' — what to kill
-//   targetCount number of kills required. Tracked via
-//               runStats.archetypeKills[targetType].
+//   targetCount number required (kills, searches, credits, etc.)
+//               Tracked via the matching RunStats counter.
 //   perKillReward chips paid per qualifying kill (capped at
 //               targetCount). Surfaces in the UI so the player
 //               sees "+15c per kill" alongside the total.
@@ -86,6 +93,19 @@ function _autoEval(def) {
   return (s) => {
     const need = def.targetCount | 0;
     if (!need) return false;
+    // Basic-mechanic contracts read `objective` instead of
+    // `targetType` — they're not bound to an enemy archetype.
+    // Early-rank contracts use these so first-time players see
+    // simple "do the thing the game already teaches" goals
+    // (open boxes, pick up bodies, hit a chip threshold, finish
+    // floors) before being asked to discriminate enemy types.
+    switch (def.objective) {
+      case 'containers_searched':  return (s.containersSearched | 0) >= need;
+      case 'bodies_looted':        return (s.bodiesLooted | 0) >= need;
+      case 'credits_banked':       return (s.credits | 0) >= need;
+      case 'levels_extracted':     return (s.levelsExtracted | 0) >= need;
+      case 'kills_total':          return (s.kills | 0) >= need;
+    }
     if (def.targetType === 'any' || !def.targetType) {
       return (s.kills | 0) >= need;
     }
@@ -151,49 +171,101 @@ function _kill(def) {
 }
 
 export const CONTRACT_DEFS = {
-  // ============= COMMON — always unlocked, no modifiers, plain kill goals =============
+  // ============= COMMON — always unlocked. Basic-mechanic objectives only. =============
+  // Day-one players get goals that exercise what the game already
+  // teaches in the first 5 minutes: kill stuff, search boxes, loot
+  // bodies, earn chips, finish floors. No archetype discrimination
+  // (a new player can't tell a dasher from a gunman yet) and no
+  // weapon-class restrictions. (2026-05-06: dropped common_melee_8
+  // — melee-only contracts pushed brand-new players into a loadout
+  // they hadn't unlocked options for.)
   common_clear_5: _kill({
     id: 'common_clear_5',
     label: 'Sweep the Block',
     rarity: 'common',
     portrait: 'any',
-    targetType: 'any', targetCount: 5,
+    objective: 'kills_total', targetCount: 5,
     perKillReward: 8, reward: 30,
   }),
-  common_dashers_3: _kill({
-    id: 'common_dashers_3',
-    label: 'Outrun the Runners',
+  common_search_5: _kill({
+    id: 'common_search_5',
+    label: 'Inventory Check',
     rarity: 'common',
-    portrait: 'dasher',
-    targetType: 'dasher', targetCount: 3,
-    perKillReward: 18, reward: 50,
+    portrait: 'any',
+    objective: 'containers_searched', targetCount: 5,
+    perKillReward: 0, reward: 50,
   }),
-  common_gunmen_5: _kill({
-    id: 'common_gunmen_5',
-    label: 'Suppress the Riflemen',
+  common_loot_5: _kill({
+    id: 'common_loot_5',
+    label: 'Pat Them Down',
     rarity: 'common',
-    portrait: 'gunman',
-    targetType: 'gunman', targetCount: 5,
-    perKillReward: 14, reward: 40,
+    portrait: 'any',
+    objective: 'bodies_looted', targetCount: 5,
+    perKillReward: 0, reward: 50,
   }),
-  common_melee_8: _kill({
-    id: 'common_melee_8',
-    label: 'Hand to Hand',
+  common_credits_300: _kill({
+    id: 'common_credits_300',
+    label: 'Make Bank',
     rarity: 'common',
-    portrait: 'melee',
-    targetType: 'melee', targetCount: 8,
-    perKillReward: 10, reward: 40,
+    portrait: 'any',
+    objective: 'credits_banked', targetCount: 300,
+    perKillReward: 0, reward: 60,
+  }),
+  common_levels_2: _kill({
+    id: 'common_levels_2',
+    label: 'Two and Out',
+    rarity: 'common',
+    portrait: 'any',
+    objective: 'levels_extracted', targetCount: 2,
+    perKillReward: 0, reward: 70,
   }),
   common_clear_15: _kill({
     id: 'common_clear_15',
     label: 'Make Some Noise',
     rarity: 'common',
     portrait: 'any',
-    targetType: 'any', targetCount: 15,
+    objective: 'kills_total', targetCount: 15,
     perKillReward: 8, reward: 70,
   }),
 
-  // ============= UNCOMMON — unlock at rank 3, bigger numbers, still no modifiers =====
+  // ============= UNCOMMON — unlock at rank 3, basic mechanics scaled up + first =======
+  // archetype-specific kill goals. Still no modifiers.
+  uncommon_search_15: _kill({
+    id: 'uncommon_search_15',
+    label: 'Toss the Block',
+    rarity: 'uncommon',
+    portrait: 'any',
+    objective: 'containers_searched', targetCount: 15,
+    perKillReward: 0, reward: 140,
+    unlockedAt: { contractsCompleted: 3 },
+  }),
+  uncommon_loot_15: _kill({
+    id: 'uncommon_loot_15',
+    label: 'Body Bagger',
+    rarity: 'uncommon',
+    portrait: 'any',
+    objective: 'bodies_looted', targetCount: 15,
+    perKillReward: 0, reward: 140,
+    unlockedAt: { contractsCompleted: 3 },
+  }),
+  uncommon_credits_900: _kill({
+    id: 'uncommon_credits_900',
+    label: 'Bigger Score',
+    rarity: 'uncommon',
+    portrait: 'any',
+    objective: 'credits_banked', targetCount: 900,
+    perKillReward: 0, reward: 160,
+    unlockedAt: { contractsCompleted: 3 },
+  }),
+  uncommon_levels_4: _kill({
+    id: 'uncommon_levels_4',
+    label: 'Deep Dive',
+    rarity: 'uncommon',
+    portrait: 'any',
+    objective: 'levels_extracted', targetCount: 4,
+    perKillReward: 0, reward: 180,
+    unlockedAt: { contractsCompleted: 5 },
+  }),
   uncommon_dashers_8: _kill({
     id: 'uncommon_dashers_8',
     label: 'Faster Than They Look',
@@ -217,7 +289,7 @@ export const CONTRACT_DEFS = {
     label: 'Body Count',
     rarity: 'uncommon',
     portrait: 'any',
-    targetType: 'any', targetCount: 30,
+    objective: 'kills_total', targetCount: 30,
     perKillReward: 10, reward: 150,
     unlockedAt: { contractsCompleted: 3 },
   }),
@@ -488,6 +560,40 @@ export function defForId(id) {
   return id ? (CONTRACT_DEFS[id] || null) : null;
 }
 
+// Plain-English target-archetype label for legacy archetype-kill
+// contracts. Pluralizes against `count`.
+function _archetypeLabel(type, count) {
+  const n = count | 0;
+  const plural = n === 1 ? '' : 's';
+  switch (type) {
+    case 'dasher':   return `dasher${plural}`;
+    case 'tank':     return `tank${plural}`;
+    case 'gunman':   return n === 1 ? 'gunman' : 'gunmen';
+    case 'melee':    return n === 1 ? 'melee enemy' : 'melee enemies';
+    case 'sniper':   return `sniper${plural}`;
+    case 'boss':     return `boss${n === 1 ? '' : 'es'}`;
+    case 'megaboss': return `megaboss${n === 1 ? '' : 'es'}`;
+    default:         return `enem${n === 1 ? 'y' : 'ies'}`;
+  }
+}
+
+// One-line subtitle describing what a contract requires. Handles
+// both the basic-mechanic objectives ('credits_banked', etc.) and
+// the legacy archetype-kill format. Used by hideout cards AND the
+// mid-run contract picker so both surfaces read consistently.
+export function objectiveSubtitle(def) {
+  if (!def) return '';
+  const n = def.targetCount | 0;
+  switch (def.objective) {
+    case 'kills_total':         return `${n} × ${n === 1 ? 'kill' : 'kills'}`;
+    case 'containers_searched': return `${n} × containers searched`;
+    case 'bodies_looted':       return `${n} × bodies looted`;
+    case 'credits_banked':      return `Bank ${n} chips`;
+    case 'levels_extracted':    return `Extract from ${n} ${n === 1 ? 'floor' : 'floors'}`;
+  }
+  return `${n} × ${_archetypeLabel(def.targetType, n)}`;
+}
+
 // Evaluate a contract against an end-of-run snapshot. Returns
 // { def, passed, alreadyClaimed, reward }. Caller decides whether
 // to award the chips and stamp claimedAt.
@@ -533,6 +639,23 @@ export function tryClaimContract(activeContract, snapshot, setActiveContractFn, 
 export function liveProgressFor(contract, eventsSnapshot) {
   const def = defForId(contract?.activeContractId);
   if (!def || !eventsSnapshot) return { label: '', pct: 0 };
+  // Objective-driven progress takes precedence — the basic-mechanic
+  // contracts read uniform fields off the snapshot. Falls through to
+  // legacy id-keyed cases for the few hand-tuned dailies.
+  const need = def.targetCount | 0;
+  const pct = (have) => need > 0 ? Math.min(1, (have | 0) / need) : 0;
+  switch (def.objective) {
+    case 'kills_total':
+      return { label: `${eventsSnapshot.kills | 0} / ${need} kills`, pct: pct(eventsSnapshot.kills) };
+    case 'containers_searched':
+      return { label: `${eventsSnapshot.containersSearched | 0} / ${need} searched`, pct: pct(eventsSnapshot.containersSearched) };
+    case 'bodies_looted':
+      return { label: `${eventsSnapshot.bodiesLooted | 0} / ${need} looted`, pct: pct(eventsSnapshot.bodiesLooted) };
+    case 'credits_banked':
+      return { label: `${eventsSnapshot.credits | 0} / ${need} chips`, pct: pct(eventsSnapshot.credits) };
+    case 'levels_extracted':
+      return { label: `${eventsSnapshot.levelsExtracted | 0} / ${need} extracts`, pct: pct(eventsSnapshot.levelsExtracted) };
+  }
   switch (def.id) {
     case 'daily_kills_50':
       return { label: `${eventsSnapshot.kills | 0} / 50 kills`, pct: Math.min(1, (eventsSnapshot.kills | 0) / 50) };
