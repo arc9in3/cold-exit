@@ -152,6 +152,22 @@ export class Level {
       disposeIfNotShared(m.material);
     }
     if (wallInstancer()) wallInstancer().teardown();
+    // Visible prop groups — _registerProp adds these to the scene
+    // separately from the collision proxy. Without this loop the
+    // proxies got cleared above but the visible meshes stayed,
+    // accumulating across levels and rendering as orphaned bookshelves
+    // / serverRacks / cabinets sitting in the dark void outside any
+    // room. Tracked in _cullableProps so we can iterate them without
+    // a separate registry.
+    for (const cp of this._cullableProps || []) {
+      const grp = cp.obj;
+      if (!grp) continue;
+      this.scene.remove(grp);
+      grp.traverse?.((obj) => {
+        if (obj.geometry?.dispose) obj.geometry.dispose();
+        if (obj.material) disposeIfNotShared(obj.material);
+      });
+    }
     for (const m of this.decorations) {
       this.scene.remove(m);
       if (m.geometry) m.geometry.dispose();
