@@ -16,18 +16,21 @@
 // leave the tree fragmented. Pure rename across the same volume is
 // O(1) per item; no GiB-of-files copy.
 //
-// Patterns with glob wildcards (`*.fbx`, `**/*.zip`) are NOT handled
-// here — they're already covered by the explicit dir/file entries
-// above them (`Assets/models/animations`, etc.). If a future file
-// matches only a wildcard and exceeds 25 MiB, add an explicit entry
-// to `.assetsignore` for it.
+// Two pattern shapes are honored:
+//   * explicit paths (`Assets/models/animations/gaspfix.zip`) — moved
+//     directly via renameSync.
+//   * simple-extension globs (`*.fbx`, `**/*.zip`) — expanded by
+//     walking the repo tree and listing every matching file.
+// Anything more exotic (character ranges, brace expansion) is NOT
+// supported — kept simple to stay zero-dep. If a future ignore rule
+// needs richer glob, switch to micromatch.
 //
 // Run with: node tools/deploy.mjs [--branch <name>] [extra wrangler args...]
 
 import { spawnSync } from 'node:child_process';
-import { existsSync, mkdirSync, readFileSync, renameSync, rmSync } from 'node:fs';
+import { existsSync, mkdirSync, readFileSync, readdirSync, renameSync, rmSync, statSync } from 'node:fs';
 import { tmpdir } from 'node:os';
-import { resolve, dirname, basename, join } from 'node:path';
+import { resolve, dirname, basename, join, relative, sep } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import process from 'node:process';
 
@@ -47,16 +50,76 @@ if (!existsSync(ignoreFile)) {
   process.exit(1);
 }
 
+// Extension-glob expander. Handles `*.ext` (top-level only) and
+// `**/*.ext` (recursive). Returns POSIX-style relative paths from
+// REPO. Skips dirs that are already covered by an explicit entry
+// (so we don't walk Assets/models/animations/FBX_Pistol_Starter_27A
+// just to glob FBX files inside it — that whole tree is moved as
+// one entry above).
+const SKIP_WALK_DIRS = new Set(['.git', 'node_modules']);
+function expandGlob(pat, alreadyMovedSet) {
+  const out = [];
+  // Rewrite both `*.ext` and `**/*.ext` to a single trailing-extension test.
+  const m = pat.match(/^(?:\*\*\/)?\*\.([A-Za-z0-9]+)$/);
+  if (!m) return out;     // not a shape we support
+  const ext = '.' + m[1].toLowerCase();
+  const recursive = pat.startsWith('**/');
+  const walk = (dirAbs, dirRel) => {
+    let entries;
+    try { entries = readdirSync(dirAbs, { withFileTypes: true }); }
+    catch (_) { return; }
+    for (const ent of entries) {
+      if (SKIP_WALK_DIRS.has(ent.name)) continue;
+      const childAbs = join(dirAbs, ent.name);
+      const childRel = dirRel ? `${dirRel}/${ent.name}` : ent.name;
+      // Skip anything already covered by an explicit/expanded
+      // candidate — its parent will move it.
+      if (alreadyMovedSet.has(childRel)) continue;
+      let prefixCovered = false;
+      for (const moved of alreadyMovedSet) {
+        if (childRel.startsWith(moved + '/')) { prefixCovered = true; break; }
+      }
+      if (prefixCovered) continue;
+      if (ent.isDirectory()) {
+        if (recursive) walk(childAbs, childRel);
+      } else if (ent.isFile()) {
+        if (childRel.toLowerCase().endsWith(ext)) {
+          // Top-level rule (`*.ext`, no `**/`) only matches at depth 0.
+          if (!recursive && dirRel !== '') continue;
+          out.push(childRel);
+        }
+      }
+    }
+  };
+  walk(REPO, '');
+  return out;
+}
+
 const lines = readFileSync(ignoreFile, 'utf8').split(/\r?\n/);
 const candidates = [];
+const candidateSet = new Set();      // prevent dupes between explicit + glob
+const globPatterns = [];
 for (const raw of lines) {
   const s = raw.trim();
   if (!s || s.startsWith('#')) continue;
-  // Skip glob patterns — they're not single-file/dir entries we can rename.
-  if (s.includes('*') || s.includes('?')) continue;
-  // Strip leading `./` if present.
+  if (s.includes('*') || s.includes('?')) {
+    globPatterns.push(s);
+    continue;
+  }
   const path = s.replace(/^\.\//, '');
-  if (existsSync(resolve(REPO, path))) candidates.push(path);
+  if (!existsSync(resolve(REPO, path))) continue;
+  if (candidateSet.has(path)) continue;
+  candidates.push(path);
+  candidateSet.add(path);
+}
+// Expand globs AFTER explicit entries so the cover-by-parent skip in
+// expandGlob can elide files inside an already-moved tree.
+for (const pat of globPatterns) {
+  for (const p of expandGlob(pat, candidateSet)) {
+    if (candidateSet.has(p)) continue;
+    candidates.push(p);
+    candidateSet.add(p);
+  }
 }
 
 const renamed = [];

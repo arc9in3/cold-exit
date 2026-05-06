@@ -23,7 +23,16 @@ Assets/models/Man_Rig_Correct_1.fbx
 Assets/models/Man_Rig_Correct_1_Male_Standing_Pose.fbx
 Assets/models/T-shirt1.fbx
 Assets/models/T-shirt2.fbx
-Assets/models/animations
+# Heavy source bundles — explicit subdirs, NOT the whole
+# `Assets/models/animations/` directory. The runtime GASP rig +
+# clips live at `Assets/models/animations/gasp_glb/` (12 MB total,
+# all GLB, max ~470 KB per file) and MUST ship to production —
+# excluding the parent dir broke player animation on Cloudflare
+# while local dev kept working.
+Assets/models/animations/FBX_Pistol_Starter_27A
+Assets/models/animations/FBX_Pistol_Starter_27A_glb
+Assets/models/animations/Universal Animation Library[Standard]
+Assets/models/animations/gaspfix_extracted
 Assets/proposed
 *.fbx
 **/*.fbx
