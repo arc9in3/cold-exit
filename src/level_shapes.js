@@ -36,19 +36,37 @@ import { sharedMaterial } from './material_pool.js';
 // "Goals (Pass 1B)" goal #11. Per-room-type weights bias subBoss/boss
 // toward dramatic shapes (rotunda, multiTier, plaza) and keep start
 // rooms strictly rectangular for predictable spawns.
+// Per the user's locked architectural rule: "Main path always
+// ground-level walkable. Mantling/ledges/multiTier/plaza-dais are
+// branches only." multiTier drops a 4.5m × room-width solid platform
+// hugging a wall (full-footprint collision); plaza drops a 7m-diameter
+// solid dais at room center. Both block significant portions of the
+// floor and are NEVER allowed in main-path rooms (start, combat, boss).
+//
+// Branches (subBoss, shop, encounter) may roll them — branches aren't
+// part of the player's required path and the impassable geometry there
+// is a deliberate design choice.
 const SHAPE_WEIGHTS = {
   start:   { rect: 1.0 },
   combat:  {
-    rect: 0.30, lShape: 0.15, tJunction: 0.10, cross: 0.05,
-    gallery: 0.10, rotunda: 0.05, multiTier: 0.10,
-    courtyard: 0.10, plaza: 0.05,
+    // Main path. Only shapes whose entire interior is ground-walkable.
+    // Removed: multiTier (platform), plaza (dais). Weight redistributed
+    // toward rect / lShape / courtyard / gallery.
+    rect: 0.35, lShape: 0.20, tJunction: 0.10, cross: 0.05,
+    gallery: 0.15, rotunda: 0.05,
+    courtyard: 0.10,
   },
   subBoss: {
+    // Branch — multiTier + plaza fine here.
     rotunda: 0.30, multiTier: 0.20, gallery: 0.15,
     plaza: 0.20, lShape: 0.15,
   },
   boss: {
-    rotunda: 0.40, plaza: 0.30, multiTier: 0.20, courtyard: 0.10,
+    // Main path — boss arena must be fully ground-walkable so player
+    // and boss can engage anywhere without a platform in the way.
+    // Removed plaza (7m dais blocks center) + multiTier (4.5m platform).
+    // Replaced with weight-balanced open shapes.
+    rotunda: 0.55, courtyard: 0.30, lShape: 0.15,
   },
   shop: { rect: 0.50, rotunda: 0.30, lShape: 0.20 },
   // Catwalk lives as a separate per-cell variant rolled inside combat
@@ -561,6 +579,11 @@ const multiTier = {
       plMinZ = d.minZ + 1.5; plMaxZ = d.maxZ - 1.5;
     }
     addPlatform(level, _box(plMinX, plMinZ, plMaxX, plMaxZ), platformHeight);
+    // Track the platform footprint so walkableBounds below excludes
+    // it. Without this, the verifier thinks the entire cell is
+    // walkable and the doorway-reachability check passes even when
+    // the platform sits between two doorways.
+    const _plFootprint = _box(plMinX, plMinZ, plMaxX, plMaxZ);
     // Ramp at one end of the platform — walkable, lands at floor
     // height. We pick the end nearest the room center on the long
     // axis so it's reachable.
@@ -588,15 +611,31 @@ const multiTier = {
         addRailing(level, plMaxX, plMinZ, plMaxX, plMaxZ);
       }
     }
-    // Walkable bounds — the entire room floor MINUS the platform
-    // footprint is walkable. We approximate as the full cell because
-    // _collidesAt already accounts for the platform's collision proxy,
-    // and the flood-fill just needs doorway reachability.
-    return {
-      walls: [],
-      walkableBounds: [_box(d.minX, d.minZ, d.maxX, d.maxZ)],
-      props: [],
-    };
+    // Walkable bounds — the floor MINUS the platform footprint.
+    // Decompose the L-shape (or strip) of remaining walkable area
+    // into 1-2 axis-aligned boxes so the verifier sees the platform
+    // as impassable. side==='north' platform sits at the top so the
+    // walkable area is everything south of platMaxZ + the strips
+    // on either side. Same logic mirrored for other sides.
+    const wb = [];
+    if (side === 'north') {
+      wb.push(_box(d.minX, plMaxZ, d.maxX, d.maxZ));    // big region south of platform
+      wb.push(_box(d.minX, d.minZ, plMinX, plMaxZ));    // strip west of platform
+      wb.push(_box(plMaxX, d.minZ, d.maxX, plMaxZ));    // strip east of platform
+    } else if (side === 'south') {
+      wb.push(_box(d.minX, d.minZ, d.maxX, plMinZ));
+      wb.push(_box(d.minX, plMinZ, plMinX, d.maxZ));
+      wb.push(_box(plMaxX, plMinZ, d.maxX, d.maxZ));
+    } else if (side === 'east') {
+      wb.push(_box(d.minX, d.minZ, plMinX, d.maxZ));
+      wb.push(_box(plMinX, d.minZ, d.maxX, plMinZ));
+      wb.push(_box(plMinX, plMaxZ, d.maxX, d.maxZ));
+    } else {
+      wb.push(_box(plMaxX, d.minZ, d.maxX, d.maxZ));
+      wb.push(_box(d.minX, d.minZ, plMaxX, plMinZ));
+      wb.push(_box(d.minX, plMaxZ, plMaxX, d.maxZ));
+    }
+    return { walls: [], walkableBounds: wb, props: [] };
   },
 };
 
@@ -702,18 +741,25 @@ const plaza = {
     // No interior walls — plaza is intentionally open. A 1m raised
     // dais at center signals "this is a plaza, not just an empty
     // room", and gives the boss-arena variant a visual anchor.
-    if (room.type === 'boss' || room.type === 'subBoss') {
+    // Plaza now only rolls on subBoss (per the updated SHAPE_WEIGHTS).
+    // Boss rooms got plaza removed because the dais blocks center-of-
+    // room engagement. Keep the dais visual on subBoss for spectacle.
+    let daisFp = null;
+    if (room.type === 'subBoss') {
       const daisR = 3.5;
-      addPlatform(level,
-        _box(d.cx - daisR, d.cz - daisR, d.cx + daisR, d.cz + daisR),
-        0.3,  // low dais — not high enough to obstruct line of sight
-      );
+      daisFp = _box(d.cx - daisR, d.cz - daisR, d.cx + daisR, d.cz + daisR);
+      addPlatform(level, daisFp, 0.3);
     }
-    return {
-      walls: [],
-      walkableBounds: [_box(d.minX, d.minZ, d.maxX, d.maxZ)],
-      props: [],
-    };
+    // Walkable bounds — exclude the dais footprint when present so
+    // the verifier sees it as impassable. Without the dais we just
+    // ship the full cell.
+    const wb = daisFp ? [
+      _box(d.minX, d.minZ, d.maxX, daisFp.minZ),
+      _box(d.minX, daisFp.maxZ, d.maxX, d.maxZ),
+      _box(d.minX, daisFp.minZ, daisFp.minX, daisFp.maxZ),
+      _box(daisFp.maxX, daisFp.minZ, d.maxX, daisFp.maxZ),
+    ] : [_box(d.minX, d.minZ, d.maxX, d.maxZ)];
+    return { walls: [], walkableBounds: wb, props: [] };
   },
 };
 
