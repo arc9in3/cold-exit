@@ -95,6 +95,7 @@ import {
   getActiveContract, setActiveContract, awardMarks, bumpContractRank, bumpMegabossKills,
   bumpRunCount, queueEncounterFollowup,
   getUnlockedWeapons, isWeaponUnlocked, unlockWeapon,
+  effectiveStartingRarity,
   consumeStarterInventory, getStarterInventory,
   stashRemoveAt,
   getSelectedStarterWeapon,
@@ -1559,6 +1560,14 @@ function _applyContractPerKillReward(arch) {
 // claim → celebrate → flag-pending-offer → rank-up sequence so the
 // two trigger sites can't drift.
 function _completeContractWithCelebration(def, ac) {
+  // Defensive — both call sites already gate on `(ac.claimedAt | 0) > 0`
+  // before reaching here, but a regression risk the user flagged from
+  // a previous build was: after a contract completes and the player
+  // hasn't picked a new one yet, re-meeting the requirements re-fires
+  // the toast. Belt-and-braces — bail unconditionally on any already-
+  // claimed contract so a future call site can't accidentally trigger
+  // a duplicate celebration.
+  if (!ac || (ac.claimedAt | 0) > 0) return;
   const snapshot = runStats.snapshot();
   const rankBefore = getContractRank();
   const completionRank = rankRewardFor(def);
@@ -2270,9 +2279,13 @@ function startNewRun(weaponClass) {
   if (top)   { top.rarity   = 'common'; inventory.equipment.chest    = top; }
   if (pack)  { pack.rarity  = 'common'; inventory.equipment.backpack = pack; }
   inventory._recomputeCapacity();
-  // Starter weapon — common rarity, chosen class.
+  // Starter weapon — uses the Armory upgrade rarity if the player has
+  // bought one; falls back to common. effectiveStartingRarity also
+  // floors at the def's base rarity so a weapon that's intrinsically
+  // rare doesn't get downgraded to common when no upgrade is set.
   const weaponDef = _pickStarterWeapon(weaponClass);
-  inventory.add(wrapWeapon(weaponDef, { rarity: 'common' }));
+  const _starterRarity = effectiveStartingRarity(weaponDef?.name, weaponDef?.rarity || 'common');
+  inventory.add(wrapWeapon(weaponDef, { rarity: _starterRarity }));
   _seedStarterKit();
   // Pre-Run Store starter inventory — items the player bought from
   // the rotating stock get added directly to the run inventory now,

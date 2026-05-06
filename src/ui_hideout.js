@@ -26,6 +26,10 @@ import {
   getPlayerName, setPlayerName, getCharacterStyle, setCharacterStyle,
   getCharacterAppearance, setCharacterAppearance, APPEARANCE_DEFAULTS,
   getUnlockedWeapons, unlockWeapon, isWeaponUnlocked,
+  getArmoryTier, setArmoryTier, armoryTierNextCost, armoryMaxUpgradeRarity,
+  ARMORY_TIER_MAX, ARMORY_TIER_MAX_RARITY,
+  getWeaponUpgrade, setWeaponUpgrade, weaponUpgradeNextCost, WEAPON_UPGRADE_STEP_COST,
+  rarityIndex, rarityAtIndex,
   getSelectedStarterWeapon, setSelectedStarterWeapon,
   getStoreState, setStoreState,
   STORE_SLOT_MIN, STORE_SLOT_MAX, STORE_CEILING_MAX,
@@ -1641,16 +1645,72 @@ export class HideoutUI {
     stillLocked.sort(reqRankSort);
 
     const totalUnlockable = unlocked.size + lockedAll.length;
+    const armoryTier = getArmoryTier();
+    const armoryCap = armoryMaxUpgradeRarity();
     const head = document.createElement('div');
     head.className = 'hideout-section-head';
     head.innerHTML = `
       <div class="hideout-section-portrait" data-npc="armorer"></div>
       <div class="hideout-section-text">
-        <div class="hideout-section-title">ARMORY</div>
-        <div class="hideout-section-sub">Your permanent weapon collection · Rank <b>${rank}</b> · <b>${unlocked.size}</b> / ${totalUnlockable} unlocked. Spend chips to add to the collection. Pick which weapons to bring on the LOADOUT screen before deploy.</div>
+        <div class="hideout-section-title">ARMORY · TIER ${armoryTier}</div>
+        <div class="hideout-section-sub">Your permanent weapon collection · Rank <b>${rank}</b> · <b>${unlocked.size}</b> / ${totalUnlockable} unlocked · Starting weapons can be upgraded up to <b style="color:${rarityColor({ rarity: armoryCap })}">${armoryCap.toUpperCase()}</b> at this tier. Pick which weapons to bring on the LOADOUT screen before deploy.</div>
       </div>
     `;
     wrap.appendChild(head);
+
+    // ---- UPGRADE ARMORY ----
+    // Persistent tier purchase. Each tier raises the cap on individual
+    // weapon-rarity upgrades AND visually unlocks more of the Armory.
+    // Steep ramp (2k / 6k / 16k / 40k) — user explicitly asked this
+    // give the game/upgrades "a much longer tail."
+    const armoryUpHead = document.createElement('div');
+    armoryUpHead.className = 'armory-half-head';
+    armoryUpHead.style.cssText = 'margin-top:14px;';
+    armoryUpHead.textContent = 'UPGRADE ARMORY';
+    wrap.appendChild(armoryUpHead);
+    const armoryUpRow = document.createElement('div');
+    armoryUpRow.className = 'armory-upgrade-panel';
+    armoryUpRow.style.cssText = `
+      display: flex; align-items: center; gap: 16px;
+      padding: 14px 18px;
+      background: linear-gradient(180deg, #2a2418 0%, #1a1408 100%);
+      border: 1px solid #c9a87a; border-radius: 6px;
+      box-shadow: 0 0 12px rgba(201, 168, 122, 0.25);
+    `;
+    if (armoryTier >= ARMORY_TIER_MAX) {
+      armoryUpRow.innerHTML = `
+        <div style="flex:1; color:#f2e7c9;">
+          <div style="font-weight:800; color:#f2c060; letter-spacing:1.2px;">ARMORY · TIER ${armoryTier} (MAX)</div>
+          <div style="font-size:11px; color:#a89070; margin-top:4px;">Every weapon can be upgraded up to LEGENDARY. The full Armory has been unlocked.</div>
+        </div>
+      `;
+    } else {
+      const nextCost = armoryTierNextCost();
+      const nextCap = ARMORY_TIER_MAX_RARITY[armoryTier + 1];
+      armoryUpRow.innerHTML = `
+        <div style="flex:1; color:#f2e7c9;">
+          <div style="font-weight:800; color:#f2c060; letter-spacing:1.2px;">UPGRADE TO TIER ${armoryTier + 1}</div>
+          <div style="font-size:11px; color:#c9a87a; margin-top:4px; line-height:1.5;">
+            • Unlocks more weapons in the Armory<br>
+            • Raises starting-weapon rarity cap to <b style="color:${rarityColor({ rarity: nextCap })}">${nextCap.toUpperCase()}</b>
+          </div>
+        </div>
+        <button type="button" class="hideout-buy" style="font-size:13px; padding:10px 18px;">
+          ${nextCost.toLocaleString()} chips
+        </button>
+      `;
+      const armoryUpBtn = armoryUpRow.querySelector('.hideout-buy');
+      const haveChips = getPersistentChips();
+      armoryUpBtn.disabled = haveChips < nextCost;
+      this._gateTitle(armoryUpBtn, haveChips, nextCost);
+      armoryUpBtn.addEventListener('click', () => {
+        if (!this.ctx.spendChips || !this.ctx.spendChips(nextCost)) return;
+        setArmoryTier(armoryTier + 1);
+        this._toast(`Armory: Tier ${armoryTier + 1} · ${nextCap} cap · -${nextCost.toLocaleString()}c`);
+        this.render();
+      });
+    }
+    wrap.appendChild(armoryUpRow);
 
     // ---- BUYABLE NOW ----
     const buyHead = document.createElement('div');
@@ -1699,6 +1759,33 @@ export class HideoutUI {
         lockGrid.appendChild(this._buildArmoryMiniTile(w, 'locked', null, null, reqRankFor(w)));
       }
       wrap.appendChild(lockGrid);
+    }
+
+    // ---- YOUR COLLECTION (upgradable) ----
+    // Owned weapons. Each tile shows the upgraded rarity + a chip-cost
+    // button to advance one step. Cap is the lower of:
+    //   - armoryMaxUpgradeRarity()  (gated by Armory tier)
+    //   - WEAPON_UPGRADE_STEP_COST keys  (legendary is the absolute top)
+    // Weapons whose base rarity already meets/exceeds the cap show a
+    // "MAX" tag — they don't need upgrading because wrapWeapon respects
+    // the def's intrinsic rarity floor.
+    const ownedWeapons = tunables.weapons.filter(w =>
+      !w.mythic && w.rarity !== 'mythic'
+      && !w.artifact && !w.encounterOnly && !w.pactReward
+      && (BASELINE_STARTERS.includes(w.name) || unlocked.has(w.name)));
+    if (ownedWeapons.length) {
+      const ownedHead = document.createElement('div');
+      ownedHead.className = 'armory-half-head';
+      ownedHead.style.cssText = 'margin-top:18px;';
+      ownedHead.textContent = 'YOUR COLLECTION — UPGRADE STARTING RARITY';
+      wrap.appendChild(ownedHead);
+      ownedWeapons.sort(reqRankSort);
+      const upGrid = document.createElement('div');
+      upGrid.className = 'armory-tile-grid';
+      for (const w of ownedWeapons) {
+        upGrid.appendChild(this._buildArmoryUpgradeTile(w));
+      }
+      wrap.appendChild(upGrid);
     }
 
     // ---- Pouch slot upgrades (absorbed from old Upgrades panel) ----
@@ -3014,6 +3101,77 @@ export class HideoutUI {
       if (cta) {
         cta.disabled = getPersistentChips() < cost;
         cta.addEventListener('click', (e) => { e.stopPropagation(); onClick(); });
+      }
+    }
+    return tile;
+  }
+
+  // Owned-weapon upgrade tile — same visual shape as the buyable tile
+  // but the CTA reads "Upgrade · Nc" and steps the weapon's spawn
+  // rarity up by one. Locked above the Armory's tier cap (button shows
+  // why). Maxes out when the weapon's effective rarity reaches the cap.
+  _buildArmoryUpgradeTile(weapon) {
+    const baseRarity = weapon.rarity || 'common';
+    const currentRarity = getWeaponUpgrade(weapon.name) || baseRarity;
+    const armoryCap = armoryMaxUpgradeRarity();
+    const capIdx = rarityIndex(armoryCap);
+    const curIdx = Math.max(rarityIndex(currentRarity), rarityIndex(baseRarity));
+    const atArmoryCap = curIdx >= capIdx;
+    const nextCost = weaponUpgradeNextCost(weapon.name, baseRarity);
+    const nextRarity = nextCost != null ? rarityAtIndex(curIdx + 1) : null;
+
+    const tile = document.createElement('div');
+    tile.className = `armory-mini rarity-${currentRarity} state-upgrade`;
+    tile.style.borderColor = rarityColor({ rarity: currentRarity });
+
+    const icon = iconForItem({
+      name: weapon.name, baseName: weapon.name, type: weapon.type, class: weapon.class,
+    });
+    const dmg = weapon.damage != null ? `<span class="amini-stat">DMG ${weapon.damage}</span>` : '';
+    const rps = weapon.fireRate != null ? `<span class="amini-stat">RPS ${weapon.fireRate}</span>` : '';
+    const range = weapon.range != null ? `<span class="amini-stat">RNG ${weapon.range}</span>` : '';
+    const mirror = weaponImageMirrorStyle({
+      baseName: weapon.name, name: weapon.name, type: weapon.type,
+    });
+    let action;
+    if (nextCost == null) {
+      // Already at the armory cap (or weapon's intrinsic rarity is
+      // already above it). Show the cap state distinctly so the
+      // player knows there's nothing to buy here.
+      const reason = atArmoryCap
+        ? `Armory tier ${getArmoryTier()} cap`
+        : 'Max rarity';
+      action = `<div class="amini-cta locked">${currentRarity.toUpperCase()} · ${reason}</div>`;
+    } else {
+      action = `<button type="button" class="amini-cta buy">→ ${nextRarity.toUpperCase()} · ${nextCost.toLocaleString()}c</button>`;
+    }
+    tile.innerHTML = `
+      <div class="amini-icon">
+        ${icon
+          ? `<img src="${icon}" alt="" style="${mirror}">`
+          : `<div class="amini-icon-fallback">?</div>`}
+      </div>
+      <div class="amini-name">${weapon.displayName ?? weapon.name}</div>
+      <div class="amini-meta">${weapon.class || ''} · <b style="color:${rarityColor({ rarity: currentRarity })}">${currentRarity}</b></div>
+      <div class="amini-stats">${dmg + rps + range}</div>
+      ${action}
+    `;
+    const _wn = weapon.displayName ?? weapon.name;
+    tile.title = nextCost == null
+      ? `${_wn} · ${currentRarity} (capped)`
+      : `Upgrade ${_wn} from ${currentRarity} → ${nextRarity} for ${nextCost.toLocaleString()} chips`;
+    if (nextCost != null) {
+      const cta = tile.querySelector('button.amini-cta');
+      if (cta) {
+        cta.disabled = getPersistentChips() < nextCost;
+        this._gateTitle(cta, getPersistentChips(), nextCost);
+        cta.addEventListener('click', (e) => {
+          e.stopPropagation();
+          if (!this.ctx.spendChips || !this.ctx.spendChips(nextCost)) return;
+          setWeaponUpgrade(weapon.name, nextRarity);
+          this._toast(`${_wn} → ${nextRarity} · -${nextCost.toLocaleString()}c`);
+          this.render();
+        });
       }
     }
     return tile;

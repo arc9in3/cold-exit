@@ -309,6 +309,112 @@ export function isWeaponUnlocked(name) {
   return getUnlockedWeapons().has(name);
 }
 
+// ---------------------------------------------------------------------
+// Armory tier + per-weapon upgrades — long-tail chip sink.
+//
+// The Armory tab in the hideout has two layers of permanent progress:
+//
+//   1. Armory tier (`armoryTier`, 0..4) — global level. Each tier
+//      raises the cap on how far the player can upgrade an individual
+//      starting weapon's rarity, and visually unlocks more weapons /
+//      paths in the Armory.
+//        Tier 0  → cap = common     (no upgrade allowed)
+//        Tier 1  → cap = uncommon
+//        Tier 2  → cap = rare
+//        Tier 3  → cap = epic
+//        Tier 4  → cap = legendary
+//
+//   2. Per-weapon upgrade (`weaponUpgrades`, name → rarity string) —
+//      individual upgrades the player has bought. Applies at run start
+//      via wrapWeapon(def, { rarity: getWeaponUpgrade(name) || 'common' })
+//      so the starter loadout instance spawns at the upgraded rarity
+//      with all the matching RARITY_SCALARS stat bumps.
+//
+// Costs are deliberately steep — the user asked for "a much longer
+// tail." A single legendary requires 16,000 chips of per-weapon spend
+// PLUS reaching armory tier 4 (64,000 chips total to climb the tier
+// ladder). With ~600-1000c per 4-floor extract, that's tens of runs.
+// ---------------------------------------------------------------------
+const ARMORY_TIER_KEY = 'tacticalrogue:armoryTier:v1';
+const WEAPON_UPGRADES_KEY = 'tacticalrogue:weaponUpgrades:v1';
+export const ARMORY_TIER_MAX = 4;
+// Index N = cost to buy tier (N+1) from tier N. So [0..3].
+export const ARMORY_TIER_COSTS = [2000, 6000, 16000, 40000];
+// Index N = max upgrade rarity at armory tier N.
+export const ARMORY_TIER_MAX_RARITY = ['common', 'uncommon', 'rare', 'epic', 'legendary'];
+// Cost to upgrade ONE weapon to the keyed rarity. Step costs sum:
+// common→legendary is 500+1500+4000+10000 = 16,000c per weapon.
+export const WEAPON_UPGRADE_STEP_COST = {
+  uncommon:  500,
+  rare:      1500,
+  epic:      4000,
+  legendary: 10000,
+};
+const RARITY_LADDER = ['common', 'uncommon', 'rare', 'epic', 'legendary'];
+export function rarityIndex(r) {
+  const i = RARITY_LADDER.indexOf(r || 'common');
+  return i < 0 ? 0 : i;
+}
+export function rarityAtIndex(i) {
+  return RARITY_LADDER[Math.max(0, Math.min(RARITY_LADDER.length - 1, i | 0))];
+}
+export function getArmoryTier() {
+  const n = _read(ARMORY_TIER_KEY, 0) | 0;
+  return Math.max(0, Math.min(ARMORY_TIER_MAX, n));
+}
+export function setArmoryTier(n) {
+  _write(ARMORY_TIER_KEY, Math.max(0, Math.min(ARMORY_TIER_MAX, n | 0)));
+}
+// Cost to advance from current tier to the next. Returns null at max.
+export function armoryTierNextCost() {
+  const t = getArmoryTier();
+  if (t >= ARMORY_TIER_MAX) return null;
+  return ARMORY_TIER_COSTS[t];
+}
+export function armoryMaxUpgradeRarity() {
+  return ARMORY_TIER_MAX_RARITY[getArmoryTier()];
+}
+export function getWeaponUpgrades() {
+  const obj = _read(WEAPON_UPGRADES_KEY, null);
+  return (obj && typeof obj === 'object') ? obj : {};
+}
+// Returns the rarity name the weapon is currently upgraded to, or
+// null if no upgrade has been purchased (i.e., spawns as common).
+export function getWeaponUpgrade(name) {
+  if (!name) return null;
+  const all = getWeaponUpgrades();
+  return all[name] || null;
+}
+export function setWeaponUpgrade(name, rarity) {
+  if (!name) return;
+  const all = getWeaponUpgrades();
+  if (!rarity || rarity === 'common') delete all[name];
+  else all[name] = rarity;
+  _write(WEAPON_UPGRADES_KEY, all);
+}
+// Cost to advance one weapon from its current upgrade rarity to the
+// next step. Caps at the armory tier's max rarity. Returns null if
+// already at the cap (or cap is below current).
+export function weaponUpgradeNextCost(name, baseRarity = 'common') {
+  const cap = armoryMaxUpgradeRarity();
+  const capIdx = rarityIndex(cap);
+  const cur = getWeaponUpgrade(name) || baseRarity || 'common';
+  const curIdx = Math.max(rarityIndex(cur), rarityIndex(baseRarity || 'common'));
+  if (curIdx >= capIdx) return null;
+  const next = rarityAtIndex(curIdx + 1);
+  return WEAPON_UPGRADE_STEP_COST[next] ?? null;
+}
+// Resolves the rarity a weapon should spawn at, given its base def
+// rarity and any purchased upgrade. Used by run-start starter pick.
+// Always returns at LEAST the base rarity (a base-rare weapon stays
+// rare even if the player hasn't upgraded it).
+export function effectiveStartingRarity(name, baseRarity = 'common') {
+  const upgrade = getWeaponUpgrade(name);
+  const baseIdx = rarityIndex(baseRarity || 'common');
+  const upIdx = upgrade ? rarityIndex(upgrade) : 0;
+  return rarityAtIndex(Math.max(baseIdx, upIdx));
+}
+
 // Selected starter weapon — the player picks ONE weapon name from
 // their stash (baseline-5 ∪ unlocked) before starting a run. Read by
 // main.js's _pickStarterWeapon at run start. If null, falls back to
