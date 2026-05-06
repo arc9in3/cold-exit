@@ -11191,6 +11191,19 @@ function onEnemyKilled(enemy, opts = {}) {
   }
 }
 function _onEnemyKilledImpl(enemy, opts = {}) {
+  // Drone-summoner death (THE HIVEMASTER): sweep every in-flight
+  // drone owned by this boss so they don't continue homing in on
+  // the player after the boss is down. User report 2026-05-06:
+  // "after hivemaster dies, his drones continue to spawn invisibly
+  // and damage the player." The "spawn" piece was a perception
+  // issue — already-airborne drones reach + explode on the player
+  // one after another, which reads as ongoing summons. Cleaning the
+  // owned-set on summoner death stops both the visible explosions
+  // AND any race where a tick might queue one more drone before
+  // the manager processes the death.
+  if (enemy && enemy.archetype === 'droneSummoner') {
+    try { drones.removeByOwner(enemy); } catch (_) {}
+  }
   // Mirror Encounter — clone drops a guaranteed mastercraft version
   // of the player's currently equipped weapon. We snapshot the
   // weapon NOW (not at clone-spawn time) since the player may have
@@ -16842,12 +16855,35 @@ function spawnerTeleportAndSummon(boss) {
 // and track the player at medium speed; player can shoot them
 // down for 24 HP each, or take a 22-damage AoE blast on contact.
 // See src/drones.js for the per-drone simulation.
-function spawnDronesAt(x, z) {
+//
+// Takes the spawning boss as the only argument so we can:
+//   1. Bail if the boss is mid-death (`!boss.alive`) — defense in
+//      depth on top of the gunman update loop's `!alive` continue.
+//      User report 2026-05-06: drones still spawning post-Hivemaster
+//      death and damaging via invisible explosions; the visual
+//      symptom was lingering in-flight drones, but the guard here
+//      prevents any race where the spawn fires after the kill.
+//   2. Stamp every spawned drone with `ownerId` so a later
+//      drones.removeByOwner(boss) call can sweep them on
+//      summoner death (see the kill hook in gunman.js below).
+//   3. Mark every drone `noXp` + `noDrops` — spawned enemies
+//      never grant XP, credits, or drops. (Drones don't currently
+//      go through the kill-XP/credit pipeline since drones.js
+//      handles its own death path, but the flags are defensive
+//      so any future fan-out doesn't accidentally start paying.)
+function spawnDronesAt(boss) {
+  if (!boss || !boss.alive) return;
+  const x = boss.group?.position?.x ?? 0;
+  const z = boss.group?.position?.z ?? 0;
   const count = 2 + Math.floor(Math.random() * 2);   // 2-3 per summon
   for (let i = 0; i < count; i++) {
     const a = (i / count) * Math.PI * 2 + Math.random() * 0.5;
     const r = 0.8;
-    drones.spawn(x + Math.cos(a) * r, 1.4, z + Math.sin(a) * r);
+    const drone = drones.spawn(x + Math.cos(a) * r, 1.4, z + Math.sin(a) * r, boss);
+    if (drone) {
+      drone.noXp = true;
+      drone.noDrops = true;
+    }
   }
   if (sfx.uiAccept) sfx.uiAccept();
 }
@@ -19286,7 +19322,7 @@ function tick() {
     activeDecoy,                    // decoy beacon target hijack
     spawnAiThrowable: (g, kind) => spawnAiThrowable(g, kind),
     isPlayerCamping: () => playerCampingT > playerCampingThreshold,
-    droneSummonAt: (gx, gz) => spawnDronesAt(gx, gz),
+    droneSummonAt: (boss) => spawnDronesAt(boss),
     spawnerTeleportAndSummon: (g) => spawnerTeleportAndSummon(g),
   });
   melees.update({
@@ -19308,7 +19344,7 @@ function tick() {
     smokeOnSegment,
     randomSmokeAim,
     activeDecoy,
-    droneSummonAt: (gx, gz) => spawnDronesAt(gx, gz),
+    droneSummonAt: (boss) => spawnDronesAt(boss),
     bossTeleport: (e) => bossTeleport(e),
     // SHINIGAMI — drop a ring of small molotov pools around the boss
     // after a melee swing attempt. Each pool seeds a short fire zone

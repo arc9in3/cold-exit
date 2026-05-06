@@ -290,6 +290,27 @@ export class DroneManager {
     this.drones.length = 0;
   }
 
+  // Sweep every drone whose `ownerId` matches the given owner. Used
+  // when a drone-summoner boss dies so its in-flight swarm doesn't
+  // continue tracking + exploding on the player. (User report
+  // 2026-05-06: "after hivemaster dies, his drones continue to spawn
+  // invisibly and damage the player." The visible cause was lingering
+  // in-flight drones; this cleanup hook nukes them on summoner death.)
+  removeByOwner(owner) {
+    if (!owner) return 0;
+    let removed = 0;
+    for (let i = this.drones.length - 1; i >= 0; i--) {
+      const d = this.drones[i];
+      if (d.ownerId === owner) {
+        if (d.alive) d.alive = false;
+        if (d.slot) this._returnSlot(d.slot);
+        this.drones.splice(i, 1);
+        removed++;
+      }
+    }
+    return removed;
+  }
+
   // Hittable mesh list for player aim raycasts. Mirrors the gunman /
   // melee `hittables` shape so allHittables() in main.js can fold
   // these in alongside enemies.

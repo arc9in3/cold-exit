@@ -1445,7 +1445,13 @@ export class GunmanManager {
         if (g.archT <= 0 && ctx.droneSummonAt) {
           const baseCd = 6.5;
           g.archT = Math.max(2.5, baseCd / Math.max(0.5, g.aggression || 1));
-          ctx.droneSummonAt(g.group.position.x, g.group.position.z);
+          // Pass the boss reference (not raw coords) so spawnDronesAt
+          // can re-check `boss.alive` at the call site. Defense in
+          // depth — the `!g.alive` continue at the top of the loop
+          // already guards this branch, but the second check
+          // tolerates any future race where this tick fires while
+          // the kill is being processed.
+          ctx.droneSummonAt(g);
         }
       }
 
