@@ -17047,13 +17047,27 @@ function alertEnemiesFromShot(origin) {
     const dz = e.group.position.z - pz;
     const d2 = dx * dx + dz * dz;
     if (d2 > rSq) return;
-    // LoS always required beyond point-blank so sound doesn't pass
-    // through walls. The tiny 3 m bypass handles a same-room scuffle
-    // where a prop (couch, crate) blocks the raycast between shooter
-    // and listener — still inside the room, so still audible.
-    if (d2 > 9) {
-      _toV.set(e.group.position.x, 1.2, e.group.position.z);
-      if (!combat.hasLineOfSight(_fromV, _toV, blockers)) return;
+    // Within an audible room (same room or adjacent through an open
+    // door), sound passes through interior cover — props, low cover,
+    // even partial walls (the wall-vs-room boundary is already
+    // handled by the audibleRooms gate above). The previous
+    // implementation required LoS beyond 3m, which silently
+    // suppressed alerts whenever a couch / crate / column was
+    // between the player and the listener — playtest report:
+    // "I was also not aggroed the whole time while playing.
+    // Only when I entered the boss room and shot at the boss"
+    // turned out to be the AI literally not hearing through cover
+    // inside their own room. Now any enemy in an audible room
+    // within noise radius is alerted regardless of LoS.
+    //
+    // ENEMIES WITHOUT A ROOMID still get the LoS gate as a
+    // safety net so a stray test enemy doesn't pull aggro from
+    // across the map.
+    if (e.roomId === undefined || e.roomId === -1) {
+      if (d2 > 9) {
+        _toV.set(e.group.position.x, 1.2, e.group.position.z);
+        if (!combat.hasLineOfSight(_fromV, _toV, blockers)) return;
+      }
     }
     e.lastKnownX = px;
     e.lastKnownZ = pz;
@@ -17061,6 +17075,13 @@ function alertEnemiesFromShot(origin) {
       if (melees.enemies.includes(e)) e.state = 'chase';
       else { e.state = 'alerted'; e.reactionT = tunables.ai.reactionTime * 0.6; }
       propagateAggro(e);
+    } else {
+      // Already engaged — refresh the lastKnown so they re-orient
+      // toward the noise even mid-fight. Otherwise enemies stuck
+      // chasing an old lastKnown would ignore the player's new
+      // position when the player fired again.
+      e.lastKnownX = px;
+      e.lastKnownZ = pz;
     }
   };
   for (const g of gunmen.gunmen) alert(g);

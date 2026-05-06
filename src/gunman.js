@@ -2172,15 +2172,35 @@ export class GunmanManager {
           // player sees defenders aimed at the entry instead of
           // staring at a wall. Lerp the yaw at ~0.4 rad/s; doesn't
           // need to be snappy because there's no shot pressure yet.
-          const fx = g._homeCoverFaceX - g.group.position.x;
-          const fz = g._homeCoverFaceZ - g.group.position.z;
-          if (fx * fx + fz * fz > 0.001) {
-            const targetYaw = Math.atan2(fx, fz);
-            let dy = targetYaw - g.group.rotation.y;
-            while (dy > Math.PI) dy -= 2 * Math.PI;
-            while (dy < -Math.PI) dy += 2 * Math.PI;
-            g.group.rotation.y += dy * Math.min(1, dt * 1.4);
+          //
+          // Gaze sweep — defenders pick a new offset within ±70°
+          // of their guard-post bearing every 2.5–4.5s. This
+          // covers a 140° arc instead of staring forever at the
+          // single door their post was anchored to, so a player
+          // entering through a different door (multi-door room)
+          // still has a non-zero chance of getting cone'd.
+          // Anchor bearing is stable; the offset is what varies.
+          if (typeof g._gazeBaseYaw !== 'number') {
+            const bx = g._homeCoverFaceX - g.group.position.x;
+            const bz = g._homeCoverFaceZ - g.group.position.z;
+            g._gazeBaseYaw = Math.atan2(bx, bz);
+            g._gazeOffset = 0;
+            g._gazeT = 0;
           }
+          g._gazeT = (g._gazeT || 0) - dt;
+          if (g._gazeT <= 0) {
+            g._gazeT = 2.5 + Math.random() * 2;
+            // ±70° offset, normal-ish distribution (sum-of-two-randoms
+            // peaks toward the centre so most gaze settles "near
+            // forward" with occasional wider sweeps).
+            const r = (Math.random() + Math.random() - 1);
+            g._gazeOffset = r * (70 * Math.PI / 180);
+          }
+          const targetYaw = g._gazeBaseYaw + (g._gazeOffset || 0);
+          let dy = targetYaw - g.group.rotation.y;
+          while (dy > Math.PI) dy -= 2 * Math.PI;
+          while (dy < -Math.PI) dy += 2 * Math.PI;
+          g.group.rotation.y += dy * Math.min(1, dt * 1.4);
         }
       }
     }
