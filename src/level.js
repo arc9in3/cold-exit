@@ -350,13 +350,20 @@ export class Level {
     }
 
     // --- Layout: random-walk chain so each level bends differently --------
-    // Combat-room count grows with level — L1 picks 2-4, L5 picks 4-6,
-    // L10+ picks 6-8 (capped). Each combat room is ~30 walls + props
-    // post-build, so even L10 layouts come in under ~250 walls + ~80
-    // doors. Comfortable on integrated GPUs.
+    // Combat-room count grows with level. Retuned 2026-05-06 after
+    // playtest: "early levels feel too 'big' now ... we had it at a
+    // pretty sweet spot before we did the level overhaul. ~5 rooms
+    // to start and steadily getting larger as we go felt about
+    // right." Retuned slope is gentler — start lean, grow steadily:
+    //   L1:  1-2 combat → 3-4 main rooms (+ ~1-2 side = 4-6 total)
+    //   L3:  2-3 combat → 4-5 main
+    //   L5:  3-4 combat → 5-6 main
+    //   L10: 5-6 combat → 7-8 main
+    //   L15: 6-7 combat → 8-9 main
+    //   L20+:7-8 combat → 9-10 main (capped)
     const lvIdx = Math.max(1, this.index || 1);
-    const minCombat = 2 + Math.min(4, Math.floor((lvIdx - 1) / 2));
-    const maxCombat = 4 + Math.min(4, Math.floor((lvIdx - 1) / 2));
+    const minCombat = 1 + Math.min(6, Math.floor((lvIdx - 1) / 2));
+    const maxCombat = 2 + Math.min(6, Math.floor((lvIdx - 1) / 2));
     const combatCount = minCombat + Math.floor(Math.random() * (maxCombat - minCombat + 1));
     const totalMain = 1 + combatCount + 1; // start + combats + boss
     const rooms = [];
@@ -5630,12 +5637,18 @@ export class Level {
       if (leftTo > leftFrom + 0.05) {
         const m = this._addObstacle((leftFrom + leftTo) / 2, WALL_HEIGHT / 2, unionAxisMid,
           leftTo - leftFrom, WALL_HEIGHT, perpThick, OUTER_WALL_COLOR);
-        if (m) m.userData.kind = m.userData.kind || 'boss-flank';
+        if (m) {
+          m.userData.kind = m.userData.kind || 'boss-flank';
+          m.userData.isBossFlank = true;
+        }
       }
       if (rightTo > rightFrom + 0.05) {
         const m = this._addObstacle((rightFrom + rightTo) / 2, WALL_HEIGHT / 2, unionAxisMid,
           rightTo - rightFrom, WALL_HEIGHT, perpThick, OUTER_WALL_COLOR);
-        if (m) m.userData.kind = m.userData.kind || 'boss-flank';
+        if (m) {
+          m.userData.kind = m.userData.kind || 'boss-flank';
+          m.userData.isBossFlank = true;
+        }
       }
     } else {
       const topTo    = dz - halfDoorGap + FLANK_GROW;
@@ -5645,12 +5658,18 @@ export class Level {
       if (topTo > topFrom + 0.05) {
         const m = this._addObstacle(unionAxisMid, WALL_HEIGHT / 2, (topFrom + topTo) / 2,
           perpThick, WALL_HEIGHT, topTo - topFrom, OUTER_WALL_COLOR);
-        if (m) m.userData.kind = m.userData.kind || 'boss-flank';
+        if (m) {
+          m.userData.kind = m.userData.kind || 'boss-flank';
+          m.userData.isBossFlank = true;
+        }
       }
       if (botFrom < botTo - 0.05) {
         const m = this._addObstacle(unionAxisMid, WALL_HEIGHT / 2, (botFrom + botTo) / 2,
           perpThick, WALL_HEIGHT, botTo - botFrom, OUTER_WALL_COLOR);
-        if (m) m.userData.kind = m.userData.kind || 'boss-flank';
+        if (m) {
+          m.userData.kind = m.userData.kind || 'boss-flank';
+          m.userData.isBossFlank = true;
+        }
       }
     }
     this._dirtySolid();
@@ -5677,6 +5696,7 @@ export class Level {
       }
       for (const o of this.obstacles) {
         if (o === d || o.userData.isDoor) continue;
+        if (o.userData.isBossFlank) continue;     // explicit gameplay walls — see _repairDoorOverlaps
         // Skip every elevator panel — doors AND the three solid walls —
         // so bullets can't shoot through a hidden side wall when the
         // elevator sits inside a door's corridor strip.
@@ -5775,6 +5795,14 @@ export class Level {
       for (const o of this.obstacles) {
         if (o === d || o.userData.isDoor) continue;
         if (o.userData.isElevatorWall) continue;
+        // Boss-flank walls are explicit gameplay geometry built by
+        // _splitBossWallForExtractionDoor to flank the extraction
+        // door. The 0.5m FLANK_GROW makes them visually butt against
+        // the door panel — without this skip the repair pass saw the
+        // overlap and nulled the flanks. F3 dump confirmed: flanks
+        // showing collision:null, visible:false in the boss room
+        // pre-reveal, leaving the boss arena open on that side.
+        if (o.userData.isBossFlank) continue;
         const b = o.userData.collisionXZ;
         if (!b) continue;   // already non-blocking — nothing to repair
         // Strict AABB intersection with the gap span.

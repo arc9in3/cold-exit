@@ -10626,7 +10626,19 @@ function rollCredits(tier) {
   if (Math.random() > cfg.dropChance) return 0;
   const [lo, hi] = cfg.amounts[tier] || cfg.amounts.normal;
   const base = lo + Math.floor(Math.random() * (hi - lo + 1));
-  return Math.round(base * (derivedStats.creditDropMult || 1));
+  // Per-floor scalar — playtest call: "increase the credits players
+  // get for killing enemies. have it increase with each level as
+  // well." +12% per floor past 1, capped at 5× so floor 35+ doesn't
+  // run away. Tier baseline already pays out scaled (boss > subBoss
+  // > normal); this multiplies on top so a late-game boss still
+  // rewards more than a late-game grunt.
+  const lv = Math.max(1, level?.index || 1);
+  const floorMult = Math.min(5.0, 1 + 0.12 * (lv - 1));
+  // Tier multipliers also bumped on top of the level scalar — grunt
+  // payout x1.5, sub-boss x1.7, boss x2.0 from the v0 baseline so
+  // every kill feels worth picking up the chips for.
+  const tierMult = tier === 'boss' ? 2.0 : tier === 'subBoss' ? 1.7 : 1.5;
+  return Math.round(base * tierMult * floorMult * (derivedStats.creditDropMult || 1));
 }
 
 function onEnemyKilled(enemy, opts = {}) {
