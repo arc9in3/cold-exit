@@ -4345,6 +4345,23 @@ export class Level {
       }
       return false;
     };
+    // Walkable check — shape rooms (lShape, tJunction, gallery, etc.)
+    // have a `_walkableBounds` polygon (array of axis-aligned boxes)
+    // covering only the playable cells. The room's `bounds` AABB is
+    // the FULL cell footprint including the cut-out corners. Without
+    // this gate, a random pick in the cut-out corner of a gallery-
+    // shape sub-boss room would spawn the enemy behind a wall the
+    // player can't reach (probe found ~6-12% of shape-room spawns
+    // landing OOB until this check landed).
+    const walkBounds = room._walkableBounds;
+    const inWalkable = (sx, sz) => {
+      if (!walkBounds || walkBounds.length === 0) return true;
+      for (let i = 0; i < walkBounds.length; i++) {
+        const w = walkBounds[i];
+        if (sx >= w.minX && sx <= w.maxX && sz >= w.minZ && sz <= w.maxZ) return true;
+      }
+      return false;
+    };
     // Exclusion radius around the elevator — otherwise every elevator
     // room tends to spawn mobs crowding the entrance. Only applies inside
     // the actual elevator room (start or boss, whichever the level uses).
@@ -4354,6 +4371,7 @@ export class Level {
       for (let attempt = 0; attempt < 120; attempt++) {
         const x = b.minX + margin + Math.random() * (b.maxX - b.minX - 2 * margin);
         const z = b.minZ + margin + Math.random() * (b.maxZ - b.minZ - 2 * margin);
+        if (!inWalkable(x, z)) continue;
         if (this._collidesAt(x, z, 1.0)) continue;
         if (!reachable(x, z)) continue;
         if (elevC) {
@@ -4370,6 +4388,7 @@ export class Level {
       for (let attempt = 0; attempt < 40; attempt++) {
         const x = b.minX + margin + Math.random() * (b.maxX - b.minX - 2 * margin);
         const z = b.minZ + margin + Math.random() * (b.maxZ - b.minZ - 2 * margin);
+        if (!inWalkable(x, z)) continue;
         if (this._collidesAt(x, z, 1.0)) continue;
         if (elevC) {
           const ex = x - elevC.x, ez = z - elevC.z;
