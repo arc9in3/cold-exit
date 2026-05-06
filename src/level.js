@@ -1812,6 +1812,23 @@ export class Level {
     // We look for outer-color walls on the same side line whose AABB
     // intersects the window's aperture and split / shrink them.
     this._cutWallForWindow(room, side, wx, wz, winW, isHorizWall);
+    // SILL — rebuild the wall section UNDER the window. _cutWallForWindow
+    // strips the full-height wall in front of the aperture, but the
+    // window itself only occupies y = sillHeight..(sillHeight+winH).
+    // Without this block the player can walk through the gap below the
+    // glass — playtest report: "windows are often spawning in walls
+    // with nothing underneath the windows."
+    //
+    // Block width matches the cut width (winW); height is sillHeight
+    // (1.0m); thickness is WALL_THICK. Centered at y=sillHeight/2 so
+    // its top edge sits flush with the window's bottom.
+    const sillBlockH = sillH;
+    if (sillBlockH > 0.05) {
+      let sx, sz, sw, sd;
+      if (isHorizWall) { sx = wx; sz = wz; sw = winW; sd = WALL_THICK; }
+      else             { sx = wx; sz = wz; sw = WALL_THICK; sd = winW; }
+      this._addObstacle(sx, sillBlockH / 2, sz, sw, sillBlockH, sd, OUTER_WALL_COLOR);
+    }
     // Ledge — sits inside the room just below the window. Only add
     // for windows on rect / shape rooms whose interior side is clear.
     const lengthAlongWall = winW - 0.4;
