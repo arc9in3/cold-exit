@@ -64,9 +64,47 @@ function pickExtractionKind(theme) {
 // has the smaller id (id 0 = start). Skips walls already used for a
 // connection because the perimeter builder put a doorway gap there
 // already and we'd be doubling up.
-function pickExitWall(bossRoom) {
+//
+// Also rejects directions whose 12×12 chamber footprint would overlap
+// any *existing* room's bounds (chain, branch, or giant-extension
+// cell). Without this check, the chamber could land on top of a
+// shop/treasure branch room or a combat room that grew into the
+// boss-adjacent cell, producing the "loot room spawning in the same
+// place as the exit" bug. (User report 2026-05-06; F3 dumps showed
+// chamber walls + extraction-prop-proxy embedded inside an unrelated
+// room's footprint — once in a giant combat room, once in a treasure
+// branch — because pickExitWall only excluded directions the boss
+// already had neighbor-doors on.)
+function pickExitWall(bossRoom, level) {
   const used = new Set((bossRoom.neighbors || []).map(n => n.dir));
   const opposite = { east: 'west', west: 'east', north: 'south', south: 'north' };
+
+  // Compute the chamber footprint a given direction would produce.
+  // Mirrors the bounds math at the top of buildExtractionRoom so the
+  // overlap check matches what'll actually get built.
+  const ROOM_SIZE = 12;
+  const half = ROOM_SIZE / 2;
+  const chamberBoundsFor = (dir) => {
+    const b = bossRoom.bounds;
+    let cx, cz;
+    if (dir === 'east')       { cx = b.maxX + WALL_THICK + half; cz = (b.minZ + b.maxZ) / 2; }
+    else if (dir === 'west')  { cx = b.minX - WALL_THICK - half; cz = (b.minZ + b.maxZ) / 2; }
+    else if (dir === 'north') { cx = (b.minX + b.maxX) / 2;      cz = b.minZ - WALL_THICK - half; }
+    else /* south */          { cx = (b.minX + b.maxX) / 2;      cz = b.maxZ + WALL_THICK + half; }
+    return { minX: cx - half, maxX: cx + half, minZ: cz - half, maxZ: cz + half };
+  };
+  const overlapsExistingRoom = (dir) => {
+    if (!level || !level.rooms) return false;
+    const cb = chamberBoundsFor(dir);
+    for (const r of level.rooms) {
+      if (r === bossRoom || !r.bounds) continue;
+      const rb = r.bounds;
+      const disjoint = cb.maxX <= rb.minX || cb.minX >= rb.maxX
+                    || cb.maxZ <= rb.minZ || cb.minZ >= rb.maxZ;
+      if (!disjoint) return true;
+    }
+    return false;
+  };
 
   // Find the entry neighbor (lowest-id neighbour, since the chain
   // builds left-to-right with id increasing).
@@ -79,19 +117,22 @@ function pickExitWall(bossRoom) {
     }
   }
 
-  // Preferred = opposite of entry, if free.
+  // Preferred = opposite of entry, if free AND non-overlapping.
   if (entryDir) {
     const want = opposite[entryDir];
-    if (want && !used.has(want)) return want;
+    if (want && !used.has(want) && !overlapsExistingRoom(want)) return want;
   }
-  // Fallback — any unused cardinal.
+  // Fallback — any unused cardinal that doesn't land on top of
+  // another room.
   for (const d of ['north', 'east', 'south', 'west']) {
-    if (!used.has(d)) return d;
+    if (!used.has(d) && !overlapsExistingRoom(d)) return d;
   }
-  // Worst case — every wall has a door. We bail; caller should skip
-  // creating an extraction room (very rare; boss is always at the
-  // end of the chain so it has 1 entry door, sometimes 1 sub-shop
-  // branch, never all 4).
+  // Worst case — every wall has a door OR every clear wall lands
+  // on top of an existing room. We bail; caller should skip
+  // creating an extraction room. Very rare; boss has at most a
+  // chain-entry + one sub-branch, leaving 2+ free cardinals, and
+  // both adjacent cells being claimed by other rooms is a corner
+  // case the level layout shouldn't normally produce.
   return null;
 }
 
@@ -105,7 +146,7 @@ function pickExitWall(bossRoom) {
 // sight take them into account. Otherwise an enemy could path "through"
 // the back wall while the player can't, breaking sneak/cover gameplay.
 export function buildExtractionRoom(level, bossRoom, opts = {}) {
-  const dir = opts.dir || pickExitWall(bossRoom);
+  const dir = opts.dir || pickExitWall(bossRoom, level);
   if (!dir) return null;
 
   const b = bossRoom.bounds;

@@ -9578,11 +9578,12 @@ function fireOneShot(playerInfo, weapon, aimPoint, isADS, aimOwner, aimZone) {
     : eff.hipSpread * (derivedStats.hipSpreadOnlyMult || 1);
   const crouched = inputStateCrouchHeld();
   // Base crouch tightening — applies on top of any skill-tree
-  // crouchSpreadMult. 0.5 = halved spread cone while crouched
-  // (user request 2026-05-06). Skill-tree mults compound so a
-  // crouchSpread skill stacks multiplicatively with this base.
+  // crouchSpreadMult. 0.7 = -30% spread while crouched. Bumped
+  // from -50% on 2026-05-06 — user: "too strong right now."
+  // Skill-tree mults compound so a crouchSpread skill stacks
+  // multiplicatively with this base.
   const crouchSpreadK = crouched
-    ? 0.5 * (derivedStats.crouchSpreadMult ?? 1)
+    ? 0.7 * (derivedStats.crouchSpreadMult ?? 1)
     : 1;
   let spread = baseSpread * derivedStats.rangedSpreadMult * crouchSpreadK;
   // Broken ranged weapon — barrel / sights / action degrade accuracy.
@@ -18854,10 +18855,11 @@ function tick() {
     // Bloom decay — runs every frame regardless of weapon class. The
     // per-shot bump in fireOneShot adds; this drains. Linear decay
     // (constant per-second rate) so the math is predictable. Crouch
-    // bumps the rate 1.5× (user request 2026-05-06) so a crouched
-    // burst recovers in 0.55s vs the 0.83s standing baseline.
+    // bumps the rate 1.3× (-30% recovery time) — user: "too strong
+    // right now" at the prior 1.5×. Crouched burst now recovers in
+    // ~0.64s vs the 0.83s standing baseline.
     if (_shotBloom > 0) {
-      const crouchBloomK = inputStateCrouchHeld() ? 1.5 : 1;
+      const crouchBloomK = inputStateCrouchHeld() ? 1.3 : 1;
       _shotBloom = Math.max(0, _shotBloom - BLOOM_DECAY_PER_SEC * crouchBloomK * dt);
     }
     // Push the bloom value to the cursor reticle. Hide entirely when
