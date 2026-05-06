@@ -1709,6 +1709,19 @@ export class Level {
   // and synthetic rooms (extraction).
   _addExteriorWindowsAndLedges() {
     if (!this._windows) this._windows = [];
+    // Windows disabled per playtest 2026-05-06: "maybe we just remove
+    // windows all together. seems like you're unable to create windows
+    // that align with wall gaps and walls under the window ledges
+    // consistently." The wall-cut + sill rebuild path was producing
+    // mis-sized cuts on shape rooms and embedding glass panes inside
+    // solid walls. Gating placement off here is the cleanest revert
+    // — window builder + cut-wall + ledge code is preserved for a
+    // future tuning pass. Re-enable per session via
+    // `localStorage.coldExitWindows = '1'`.
+    let _windowsOn = false;
+    try { _windowsOn = localStorage.getItem('coldExitWindows') === '1'; }
+    catch (_) {}
+    if (!_windowsOn) return;
     for (const room of this.rooms) {
       if (!room || room.id < 0) continue;
       if (room.type === 'connector') continue;

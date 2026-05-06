@@ -485,43 +485,73 @@ const rotunda = {
       { x: d.maxX, z: d.maxZ, dx: -1, dz: -1 },// SE
     ];
     for (const c of corners) {
-      // Diagonal wall placed as a rotated thin box. We approximate
-      // collision by the AABB (engine has no rotated collision
-      // shapes for obstacles); visual rotation alone communicates
-      // the chamfer. Length = chamfer * sqrt(2).
+      // Chamfer "wall" was a rotated thin box (length × WALL_THICK)
+      // that VISUALLY rendered as a diagonal accent, but the engine
+      // collision is axis-aligned and the AABB was set to the full
+      // chamfer × chamfer corner quadrant. Result: player saw a thin
+      // diagonal line but felt a solid 4.5×4.5 wall — the playtest
+      // "standing next to an invisible wall" report. The cut-out
+      // CORNER is supposed to be impassable (the rotunda's whole
+      // point is octagonal play space), so we'd rather match the
+      // collision than shrink it.
+      //
+      // New approach: render the corner as a SOLID corner block —
+      // axis-aligned, exactly matching the collision footprint — and
+      // overlay a thin diagonal accent on top so the chamfered shape
+      // still reads visually. The corner block is the gameplay wall;
+      // the diagonal is decoration.
+      const minXc = Math.min(c.x, c.x + c.dx * chamfer);
+      const maxXc = Math.max(c.x, c.x + c.dx * chamfer);
+      const minZc = Math.min(c.z, c.z + c.dz * chamfer);
+      const maxZc = Math.max(c.z, c.z + c.dz * chamfer);
+      const cornerW = maxXc - minXc;
+      const cornerD = maxZc - minZc;
+      const cornerCx = (minXc + maxXc) / 2;
+      const cornerCz = (minZc + maxZc) / 2;
+      const blockMat = sharedMaterial({
+        color: level._outerWallColor(), roughness: 0.85,
+      });
+      const block = new THREE.Mesh(
+        new THREE.BoxGeometry(cornerW, WALL_HEIGHT, cornerD),
+        blockMat,
+      );
+      block.position.set(cornerCx, WALL_HEIGHT / 2, cornerCz);
+      block.castShadow = false;
+      block.receiveShadow = true;
+      block.userData.collisionXZ = {
+        minX: minXc, maxX: maxXc, minZ: minZc, maxZ: maxZc,
+      };
+      block.userData.isRotundaChamfer = true;
+      block.matrixAutoUpdate = false;
+      block.updateMatrix();
+      level.scene.add(block);
+      level.obstacles.push(block);
+      level._dirtySolid();
+
+      // Decorative diagonal accent — slightly darker/lighter tint
+      // so the chamfer reads as a beveled corner rather than a flat
+      // square. No collision (hidden by the solid block behind it).
+      // Inset 0.05m above the floor + outward from the block so it
+      // doesn't z-fight against the corner-block face.
       const length = chamfer * Math.SQRT2;
       const midX = c.x + c.dx * chamfer / 2;
       const midZ = c.z + c.dz * chamfer / 2;
-      const mat = sharedMaterial({
-        color: level._outerWallColor(), roughness: 0.85,
+      const accentMat = sharedMaterial({
+        color: level._outerWallColor(), roughness: 0.6, metalness: 0.05,
       });
-      const mesh = new THREE.Mesh(
-        new THREE.BoxGeometry(length, WALL_HEIGHT, WALL_THICK),
-        mat,
+      const accent = new THREE.Mesh(
+        new THREE.BoxGeometry(length, WALL_HEIGHT - 0.04, 0.18),
+        accentMat,
       );
-      // Rotate so the diagonal points from corner toward room center.
-      // c.dx=1, c.dz=1 (NW corner) → rotation -45deg (-PI/4).
-      // c.dx=1, c.dz=-1 (SW)       → rotation +45deg.
-      const yaw = Math.atan2(-c.dz, c.dx) - Math.PI / 4;
-      mesh.position.set(midX, WALL_HEIGHT / 2, midZ);
-      mesh.rotation.y = yaw;
-      mesh.castShadow = false;
-      mesh.receiveShadow = true;
-      // Bound the AABB conservatively so collision still works for
-      // straight-line movement. Use the full chamfer × chamfer
-      // square as the collisionXZ band.
-      mesh.userData.collisionXZ = {
-        minX: Math.min(c.x, c.x + c.dx * chamfer),
-        maxX: Math.max(c.x, c.x + c.dx * chamfer),
-        minZ: Math.min(c.z, c.z + c.dz * chamfer),
-        maxZ: Math.max(c.z, c.z + c.dz * chamfer),
-      };
-      mesh.userData.isRotundaChamfer = true;
-      mesh.matrixAutoUpdate = false;
-      mesh.updateMatrix();
-      level.scene.add(mesh);
-      level.obstacles.push(mesh);
-      level._dirtySolid();
+      accent.position.set(midX, WALL_HEIGHT / 2, midZ);
+      accent.rotation.y = Math.atan2(-c.dz, c.dx) - Math.PI / 4;
+      accent.castShadow = false;
+      accent.receiveShadow = true;
+      accent.userData.kind = 'rotunda-chamfer-accent';
+      level.scene.add(accent);
+      // Tracked as a decoration so room-clear / level-clear teardown
+      // disposes it cleanly.
+      if (level.decorations) level.decorations.push(accent);
     }
     // Walkable bounds — approximate the octagon as a single inset
     // rectangle (the inscribed square). Doorway corridors extend out

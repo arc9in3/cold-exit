@@ -7166,11 +7166,39 @@ window.addEventListener('keydown', (ev) => {
           })),
       ],
     };
-    console.log('=== ROOM DUMP (F3) — player at', dump.player, '===');
-    console.log(JSON.stringify(dump, null, 2));
-    console.log('=== END ROOM DUMP ===');
+    const text = `=== ROOM DUMP (F3) — player at (${dump.player.x}, ${dump.player.z}) ===
+${JSON.stringify(dump, null, 2)}
+=== END ROOM DUMP ===`;
+    console.log(text);
     if (typeof window !== 'undefined') window.__lastRoomDump = dump;
-    transientHudMsg?.(`room ${rid != null ? '#' + rid : '?'} dump → console`, 1.4);
+    // Clipboard write — F3 is a user gesture so the modern API is
+    // allowed. Falls back to a textarea-select trick for browsers
+    // that gate writeText. User asked: "i hit f3 it creates the
+    // dump but doesn't copy it to my clipboard."
+    let copied = false;
+    try {
+      if (navigator?.clipboard?.writeText) {
+        navigator.clipboard.writeText(text).then(() => {}, () => {});
+        copied = true;
+      }
+    } catch (_) { /* fall through to manual */ }
+    if (!copied) {
+      try {
+        const ta = document.createElement('textarea');
+        ta.value = text;
+        ta.style.position = 'fixed';
+        ta.style.left = '-9999px';
+        document.body.appendChild(ta);
+        ta.select();
+        document.execCommand('copy');
+        document.body.removeChild(ta);
+        copied = true;
+      } catch (_) { /* clipboard genuinely unavailable */ }
+    }
+    transientHudMsg?.(
+      `room ${rid != null ? '#' + rid : '?'} dump${copied ? ' → 📋' : ' → console'}`,
+      1.4,
+    );
   } catch (e) {
     console.warn('F3 room dump failed:', e);
   }
