@@ -428,6 +428,331 @@ export const ROOM_TEMPLATES = [
         chance: 0.85, lootable: true },
     ],
   },
+
+  // ============= GARAGE / WORKSHOP ===================================
+  // Bench = workbench, locker = toolbox cabinet, crate/barrel/pallet =
+  // industrial supply. Reads as "a place that fixes things."
+  {
+    id: 'garage-workbench-row',
+    themes: ['garage'],
+    weight: 1.0,
+    minSize: { w: 12, d: 12 },
+    props: [
+      { kind: 'bench', placer: 'wall', count: { min: 2, max: 3 } },
+      { kind: 'locker', placer: 'wall', count: { min: 1, max: 2 },
+        lootable: true },
+      { kind: 'pallet', placer: 'interior', count: { min: 1, max: 2 },
+        chance: 0.7 },
+      { kind: 'barrel', placer: 'wall', chance: 0.6 },
+    ],
+  },
+  {
+    id: 'garage-repair-pit',
+    themes: ['garage'],
+    weight: 0.85,
+    minSize: { w: 13, d: 12 },
+    props: [
+      // Central workbench, tools laid out, crates flanking.
+      { kind: 'bench', placer: 'interior', name: 'pit' },
+      { kind: 'crate', placer: 'adjacent', anchor: 'pit', side: 'left',
+        lootable: true },
+      { kind: 'crate', placer: 'adjacent', anchor: 'pit', side: 'right',
+        lootable: true },
+      { kind: 'locker', placer: 'wall', count: { min: 2, max: 3 },
+        lootable: true },
+      { kind: 'cabinet', placer: 'wall', chance: 0.6, lootable: true },
+    ],
+  },
+
+  // ============= GYM =================================================
+  // Bench reads as weight bench; lockers = changing-room lockers.
+  // Heavy on benches + lockers, light on everything else.
+  {
+    id: 'gym-locker-row',
+    themes: ['gym'],
+    weight: 1.0,
+    minSize: { w: 12, d: 12 },
+    props: [
+      { kind: 'locker', placer: 'wall', count: { min: 3, max: 5 },
+        lootable: true },
+      { kind: 'bench', placer: 'interior', count: { min: 1, max: 2 } },
+    ],
+  },
+  {
+    id: 'gym-weight-floor',
+    themes: ['gym'],
+    weight: 0.85,
+    minSize: { w: 13, d: 12 },
+    props: [
+      { kind: 'bench', placer: 'wall', count: { min: 2, max: 3 } },
+      { kind: 'locker', placer: 'wall', count: { min: 1, max: 2 },
+        lootable: true },
+      { kind: 'rug', placer: 'interior', chance: 0.5 },
+    ],
+  },
+
+  // ============= LAB / CLINIC ========================================
+  // Desk = exam table, cabinet = supply cabinet, locker = med cabinet.
+  // The neonStick is the cleanroom strip-light cue; cap one per template
+  // so it doesn't read as a bar / nightclub.
+  {
+    id: 'lab-exam',
+    themes: ['lab'],
+    weight: 1.0,
+    minSize: { w: 12, d: 12 },
+    props: [
+      { kind: 'desk', placer: 'interior', name: 'exam', lootable: true },
+      { kind: 'chair', placer: 'adjacent', anchor: 'exam',
+        side: 'right', facing: 'inward' },
+      { kind: 'cabinet', placer: 'wall', count: { min: 2, max: 3 },
+        lootable: true },
+      { kind: 'locker', placer: 'wall', chance: 0.7, lootable: true },
+      { kind: 'neonStick', placer: 'wall', chance: 0.8 },
+    ],
+  },
+  {
+    id: 'lab-counter',
+    themes: ['lab'],
+    weight: 0.85,
+    minSize: { w: 13, d: 11 },
+    props: [
+      // Long counter against a wall: table + chair pairs read as bench
+      // stations.
+      { kind: 'table', placer: 'wall', name: 'counter' },
+      { kind: 'chair', placer: 'adjacent', anchor: 'counter',
+        side: 'front', facing: 'inward' },
+      { kind: 'cabinet', placer: 'wall', count: { min: 2, max: 3 },
+        lootable: true },
+      { kind: 'barrel', placer: 'wall', chance: 0.5 },
+      { kind: 'neonStick', placer: 'wall', chance: 0.8 },
+    ],
+  },
+
+  // ============= SERVER ROOM / IT CLOSET =============================
+  // Pillar reads as a server rack here; cabinet = networking gear;
+  // crateRow = cable-tray bundle.
+  {
+    id: 'server-rack-rows',
+    themes: ['server'],
+    weight: 1.0,
+    minSize: { w: 12, d: 12 },
+    props: [
+      { kind: 'pillar', placer: 'wall', count: { min: 3, max: 5 } },
+      { kind: 'cabinet', placer: 'wall', count: { min: 1, max: 2 },
+        lootable: true },
+      { kind: 'crateRow', placer: 'interior', chance: 0.6 },
+      { kind: 'neonStick', placer: 'wall', chance: 0.85 },
+    ],
+  },
+  {
+    id: 'server-noc',
+    themes: ['server'],
+    weight: 0.85,
+    minSize: { w: 13, d: 12 },
+    props: [
+      // Operator desk + monitor wall.
+      { kind: 'desk', placer: 'wall', name: 'opsDesk', lootable: true },
+      { kind: 'chair', placer: 'adjacent', anchor: 'opsDesk',
+        side: 'front', facing: 'inward' },
+      { kind: 'tv', placer: 'wall', count: { min: 1, max: 2 } },
+      { kind: 'pillar', placer: 'wall', count: { min: 2, max: 3 } },
+      { kind: 'neonStick', placer: 'wall', chance: 0.8 },
+    ],
+  },
+
+  // ============= ARCHIVE / RECORDS ===================================
+  // Bookshelf = filing shelf; cabinet = filing cabinet; crate = box of
+  // overflow records on the floor.
+  {
+    id: 'archive-rows',
+    themes: ['archive'],
+    weight: 1.0,
+    minSize: { w: 12, d: 12 },
+    props: [
+      { kind: 'bookshelf', placer: 'wall', back: true,
+        count: { min: 3, max: 5 }, lootable: true },
+      { kind: 'cabinet', placer: 'wall', count: { min: 1, max: 2 },
+        lootable: true },
+      { kind: 'crate', placer: 'interior', count: { min: 1, max: 2 },
+        chance: 0.7, lootable: true },
+    ],
+  },
+  {
+    id: 'archive-clerk',
+    themes: ['archive'],
+    weight: 0.85,
+    minSize: { w: 12, d: 12 },
+    props: [
+      // Clerk station with a desk + chair, surrounded by filing.
+      { kind: 'desk', placer: 'interior', name: 'clerkDesk',
+        lootable: true },
+      { kind: 'chair', placer: 'adjacent', anchor: 'clerkDesk',
+        side: 'back', facing: 'inward' },
+      { kind: 'cabinet', placer: 'wall', count: { min: 2, max: 4 },
+        lootable: true },
+      { kind: 'bookshelf', placer: 'wall', back: true,
+        chance: 0.7, lootable: true },
+    ],
+  },
+
+  // ============= INFIRMARY / SICK BAY ================================
+  // Bed = patient cot; nightstand stays as nightstand; cabinet = med
+  // supply cabinet. Distinct from bedroom by the locker + cabinet
+  // emphasis (vs. dressers / vanity in bedroom).
+  {
+    id: 'infirmary-bay',
+    themes: ['infirmary'],
+    weight: 1.0,
+    minSize: { w: 12, d: 12 },
+    props: [
+      { kind: 'bed', placer: 'wall', count: { min: 2, max: 3 },
+        name: 'cot' },
+      { kind: 'nightstand', placer: 'adjacent', anchor: 'cot',
+        side: 'right', facing: 'match', chance: 0.85 },
+      { kind: 'cabinet', placer: 'wall', count: { min: 1, max: 2 },
+        lootable: true },
+      { kind: 'locker', placer: 'wall', chance: 0.7, lootable: true },
+    ],
+  },
+  {
+    id: 'infirmary-exam',
+    themes: ['infirmary'],
+    weight: 0.85,
+    minSize: { w: 12, d: 11 },
+    props: [
+      // One cot, doctor's desk, supply cabinets.
+      { kind: 'bed', placer: 'wall', name: 'cot' },
+      { kind: 'desk', placer: 'wall', name: 'docDesk', lootable: true },
+      { kind: 'chair', placer: 'adjacent', anchor: 'docDesk',
+        side: 'front', facing: 'inward' },
+      { kind: 'cabinet', placer: 'wall', count: { min: 2, max: 3 },
+        lootable: true },
+    ],
+  },
+
+  // ============= SECURITY / GUARD POST ===============================
+  // Desk = guard desk, tv = CCTV monitor, locker = gun rack.
+  {
+    id: 'security-post',
+    themes: ['security'],
+    weight: 1.0,
+    minSize: { w: 12, d: 12 },
+    props: [
+      { kind: 'desk', placer: 'wall', name: 'guardDesk',
+        lootable: true },
+      { kind: 'chair', placer: 'adjacent', anchor: 'guardDesk',
+        side: 'front', facing: 'inward' },
+      { kind: 'tv', placer: 'wall', count: { min: 2, max: 3 } },
+      { kind: 'locker', placer: 'wall', count: { min: 1, max: 2 },
+        lootable: true },
+    ],
+  },
+  {
+    id: 'security-checkpoint',
+    themes: ['security'],
+    weight: 0.85,
+    minSize: { w: 12, d: 11 },
+    props: [
+      // Counter + railing reads as a checkpoint stop.
+      { kind: 'table', placer: 'wall', name: 'counter' },
+      { kind: 'chair', placer: 'adjacent', anchor: 'counter',
+        side: 'back', facing: 'inward' },
+      { kind: 'tv', placer: 'wall', chance: 0.85 },
+      { kind: 'locker', placer: 'wall', count: { min: 1, max: 2 },
+        lootable: true },
+      { kind: 'cabinet', placer: 'wall', chance: 0.6, lootable: true },
+    ],
+  },
+
+  // ============= MAILROOM / SORTING ==================================
+  // Locker = PO box wall, table = sorting bench, crate = mail bin.
+  {
+    id: 'mailroom-sort',
+    themes: ['mailroom'],
+    weight: 1.0,
+    minSize: { w: 12, d: 12 },
+    props: [
+      { kind: 'table', placer: 'interior', name: 'sortTable' },
+      { kind: 'locker', placer: 'wall', count: { min: 3, max: 5 },
+        lootable: true },
+      { kind: 'crate', placer: 'interior', count: { min: 1, max: 2 },
+        chance: 0.85, lootable: true },
+    ],
+  },
+  {
+    id: 'mailroom-boxes',
+    themes: ['mailroom'],
+    weight: 0.8,
+    minSize: { w: 12, d: 11 },
+    props: [
+      // Two locker rows + bench + cart (crate).
+      { kind: 'locker', placer: 'wall', count: { min: 4, max: 6 },
+        lootable: true },
+      { kind: 'bench', placer: 'wall', chance: 0.85 },
+      { kind: 'crate', placer: 'interior', chance: 0.7, lootable: true },
+    ],
+  },
+
+  // ============= SHOP (vendor rooms) =================================
+  // Shop rooms always have a vendor kiosk on a perimeter wall (added
+  // by _spawnNPC AFTER theming). Templates here fill the rest of the
+  // floor with stock displays + a browsing setup so the room reads as
+  // a real storefront, not an empty box with a counter.
+  //
+  // Wall placements skip the kiosk's wall slot at runtime via the
+  // existing placeAlongWall collision check (the kiosk's collider is
+  // already in obstacles by the time these props place, so they
+  // naturally avoid it).
+  {
+    id: 'shop-display-cases',
+    themes: ['shop'],
+    weight: 1.0,
+    minSize: { w: 12, d: 12 },
+    props: [
+      // Display cabinets along the perimeter — these are the "wares".
+      { kind: 'cabinet', placer: 'wall', count: { min: 2, max: 4 },
+        lootable: true },
+      // Stock shelves behind the counter feel.
+      { kind: 'bookshelf', placer: 'wall', back: true,
+        count: { min: 1, max: 2 }, lootable: true },
+      // Browsing rug + planter to mark the customer area.
+      { kind: 'rug', placer: 'interior', chance: 0.5 },
+      { kind: 'planter', placer: 'wall', chance: 0.6 },
+    ],
+  },
+  {
+    id: 'shop-stockroom',
+    themes: ['shop'],
+    weight: 0.85,
+    minSize: { w: 12, d: 12 },
+    props: [
+      // Heavier on stock — pallets + crates + shelves. Reads as a
+      // back-room style shop where you ask for what you want.
+      { kind: 'bookshelf', placer: 'wall', back: true,
+        count: { min: 2, max: 3 }, lootable: true },
+      { kind: 'crate', placer: 'wall', count: { min: 1, max: 2 },
+        lootable: true },
+      { kind: 'pallet', placer: 'interior', chance: 0.6 },
+      { kind: 'cabinet', placer: 'wall', chance: 0.7, lootable: true },
+    ],
+  },
+  {
+    id: 'shop-haggle-lounge',
+    themes: ['shop'],
+    weight: 0.7,
+    minSize: { w: 13, d: 12 },
+    props: [
+      // Customer seating + side table — feels like a haggling shop
+      // (gunsmith / armorer back room).
+      { kind: 'couch', placer: 'wall', name: 'haggleCouch',
+        chance: 0.85 },
+      { kind: 'coffeeTable', placer: 'adjacent', anchor: 'haggleCouch',
+        side: 'front', facing: 'match', gap: 0.4 },
+      { kind: 'cabinet', placer: 'wall', count: { min: 1, max: 2 },
+        lootable: true },
+      { kind: 'rug', placer: 'interior', chance: 0.6 },
+    ],
+  },
 ];
 
 // ---------------------------------------------------------------------

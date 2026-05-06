@@ -390,18 +390,26 @@ export class Level {
         // are intentionally dropped from the rotation — playtest
         // surfaced that they cornered the player too often.
         const r = Math.random();
-        if      (r < 0.20) layout = 'open';
-        else if (r < 0.30) layout = 'columns-4';
-        else if (r < 0.40) layout = 'columns-6';
-        else if (r < 0.48) layout = 'columns-cross';
-        else if (r < 0.56) layout = 'split';
-        else if (r < 0.63) layout = 'hallway';
-        else if (r < 0.70) layout = 'partition';
-        else if (r < 0.80) layout = 'corridor';
-        else if (r < 0.86) layout = 'pillars-grid';
-        else if (r < 0.92) layout = 'alcove';
-        else if (r < 0.97) layout = 'center-pit';
-        else               layout = 'zigzag';
+        if      (r < 0.16) layout = 'open';
+        else if (r < 0.24) layout = 'columns-4';
+        else if (r < 0.32) layout = 'columns-6';
+        else if (r < 0.39) layout = 'columns-cross';
+        else if (r < 0.46) layout = 'split';
+        else if (r < 0.52) layout = 'hallway';
+        else if (r < 0.58) layout = 'partition';
+        else if (r < 0.66) layout = 'corridor';
+        else if (r < 0.72) layout = 'pillars-grid';
+        else if (r < 0.77) layout = 'alcove';
+        else if (r < 0.81) layout = 'center-pit';
+        else if (r < 0.84) layout = 'zigzag';
+        // New tactical layouts — emphasize cover + flanking lanes
+        // rather than long divider walls. Together they account for
+        // ~16% of combat rooms so the new geometry surfaces often
+        // enough to feel like part of the rotation.
+        else if (r < 0.88) layout = 'pillar-ring';
+        else if (r < 0.92) layout = 'kill-box';
+        else if (r < 0.96) layout = 'central-cover';
+        else               layout = 'flank-pockets';
       } else if (type === 'boss') {
         // Boss room layout — 50/50 split between dedicated boss
         // arenas and wider combat layouts so bosses surface in many
@@ -690,7 +698,9 @@ export class Level {
           || room.layout === 'pillars-grid'
           || room.layout === 'alcove'   || room.layout === 'center-pit'
           || room.layout === 'zigzag'   || room.layout === 'boss-arena'
-          || room.layout === 'boss-pillars' || room.layout === 'boss-perch') {
+          || room.layout === 'boss-pillars' || room.layout === 'boss-perch'
+          || room.layout === 'pillar-ring' || room.layout === 'kill-box'
+          || room.layout === 'central-cover' || room.layout === 'flank-pockets') {
         this._buildInterior(room);
       }
       if (room.layout === 'columns-4') this._decorateColumns(room, '4-corner');
@@ -728,8 +738,17 @@ export class Level {
     // bedroom, living room, warehouse) and drop matching furniture on
     // top of the cover pass. Added BEFORE clear-door-corridors so any
     // prop that lands in a doorway strip gets its collision nulled.
+    //
+    // Shop rooms are themed too: _themeRoom routes shop room.types
+    // through the dedicated 'shop' theme, which fills the storefront
+    // with display cabinets / stock shelves around the kiosk that
+    // _spawnNPC adds later. Encounter rooms stay intentionally empty
+    // (the encounter NPC + props are placed by main.js after gen).
+    const SHOP_TYPES = new Set(['merchant', 'healer', 'gunsmith',
+      'armorer', 'tailor', 'relicSeller', 'blackMarket']);
     for (const room of rooms) {
-      if (room.type === 'combat' || room.type === 'subBoss' || room.type === 'boss') {
+      if (room.type === 'combat' || room.type === 'subBoss'
+          || room.type === 'boss' || SHOP_TYPES.has(room.type)) {
         this._themeRoom(room);
       }
     }
@@ -2034,24 +2053,46 @@ export class Level {
       'zigzag', 'bunker', 'alcove', 'center-pit',
     ]);
     const isUtility = utilityLayouts.has(room.layout);
+    const SHOP_TYPES = new Set(['merchant', 'healer', 'gunsmith', 'armorer',
+      'tailor', 'relicSeller', 'blackMarket']);
     let themes;
-    if (room.type === 'boss') {
-      themes = ['warehouse', 'lobby', 'office'];
+    if (SHOP_TYPES.has(room.type)) {
+      // Vendor rooms get a single dedicated theme so they read as
+      // a furnished storefront. The kiosk built by _spawnNPC sits on
+      // top of these props on its assigned wall — placeAlongWall
+      // collision rejects any prop that would conflict with the
+      // kiosk's footprint, so the two layers compose without the
+      // need for explicit kiosk-aware logic here.
+      themes = ['shop'];
+    } else if (room.type === 'boss') {
+      // Boss rooms get the bigger industrial / civic pool — feels
+      // like the climax landed in a real space.
+      themes = ['warehouse', 'lobby', 'office', 'garage', 'server'];
     } else if (isUtility) {
       // Hallway-shaped + L-shaped + closet rooms are warehouses /
-      // offices only. No beds, no couches, no library reading nooks
-      // in a corridor.
-      themes = ['warehouse', 'office'];
+      // offices / archive corridors / mailrooms. No beds, no couches,
+      // no library reading nooks in a corridor.
+      themes = ['warehouse', 'office', 'archive', 'mailroom'];
     } else if (area < 30) {
-      // Tiny open rooms — cozy themes only.
-      themes = ['bedroom', 'lobby', 'kitchen'];
+      // Tiny open rooms — cozy / utility themes only.
+      themes = ['bedroom', 'lobby', 'kitchen', 'infirmary', 'security'];
     } else if (area < 60) {
-      // Mid-size open rooms — broader pool, but only those that read
-      // as "a furnished room" in a square shape.
-      themes = ['bedroom', 'livingRoom', 'lobby', 'library', 'office', 'kitchen'];
+      // Mid-size open rooms — broader residential + clinical pool.
+      // (Rare in practice — standard rooms are 324 m² so they fall
+      // through to the "big" branch.)
+      themes = ['bedroom', 'livingRoom', 'lobby', 'library', 'office',
+        'kitchen', 'lab', 'server', 'archive', 'infirmary', 'security',
+        'mailroom', 'gym'];
     } else {
-      // Large open rooms — public / utility themes.
-      themes = ['warehouse', 'library', 'lobby', 'office'];
+      // Large open rooms — most rooms land here. Mix public / utility
+      // / industrial / clinical / records themes so the floor reads
+      // as a varied building. Bedroom / livingRoom / kitchen are
+      // intentionally NOT here — a king bed centred in a 18×18 room
+      // looked silly in early playtests; cozy themes stay gated to
+      // the tiny branch above.
+      themes = ['warehouse', 'library', 'lobby', 'office', 'garage',
+        'server', 'archive', 'gym', 'lab', 'infirmary', 'security',
+        'mailroom'];
     }
     const theme = themes[Math.floor(Math.random() * themes.length)];
     room.theme = theme;
@@ -2585,6 +2626,59 @@ export class Level {
           _placeAdjacent(table, 'chair', { facing: 'inward' });
           _placeAdjacent(table, 'chair', { facing: 'inward' });
         }
+      } else if (theme === 'garage') {
+        const bench = buildProp('bench');
+        if (bench && placeAlongWall(bench)) {
+          _placeAdjacent(bench, 'crate', { facing: 'match', preferSide: 'left' });
+        }
+      } else if (theme === 'gym') {
+        // 1-2 lockers + a bench; minimum viable gym read.
+        _placeAndLoot('locker', placeBackToWall);
+        const bench = buildProp('bench');
+        if (bench) placeInterior(bench);
+      } else if (theme === 'lab') {
+        const desk = buildProp('desk');
+        if (desk && placeInterior(desk)) {
+          _maybeLoot(desk);
+          _placeAdjacent(desk, 'chair', { facing: 'inward', preferSide: 'right' });
+        }
+        _placeAndLoot('cabinet', placeBackToWall);
+      } else if (theme === 'server') {
+        // Two pillars (server racks) + a cabinet.
+        const r1 = buildProp('pillar');
+        if (r1) placeAlongWall(r1);
+        const r2 = buildProp('pillar');
+        if (r2) placeAlongWall(r2);
+        _placeAndLoot('cabinet', placeBackToWall);
+      } else if (theme === 'archive') {
+        _placeAndLoot('bookshelf', placeBackToWall);
+        _placeAndLoot('cabinet', placeBackToWall);
+      } else if (theme === 'infirmary') {
+        const cot = buildProp('bed');
+        if (cot && placeAlongWall(cot)) {
+          _placeAdjacent(cot, 'nightstand', { facing: 'match', preferSide: 'right' });
+        }
+        _placeAndLoot('cabinet', placeBackToWall);
+      } else if (theme === 'security') {
+        const desk = buildProp('desk');
+        if (desk && placeAlongWall(desk)) {
+          _maybeLoot(desk);
+          _placeAdjacent(desk, 'chair', { facing: 'inward', preferSide: 'front' });
+        }
+        const tv = buildProp('tv');
+        if (tv) placeAlongWall(tv);
+      } else if (theme === 'mailroom') {
+        // Sorting table + locker rows.
+        const table = buildProp('table');
+        if (table) placeInterior(table);
+        _placeAndLoot('locker', placeBackToWall);
+        _placeAndLoot('locker', placeBackToWall);
+      } else if (theme === 'shop') {
+        // Vendor fallback — display cabinets + stock shelves so the
+        // shop never reads as an empty box even if templates miss.
+        _placeAndLoot('cabinet', placeBackToWall);
+        _placeAndLoot('cabinet', placeBackToWall);
+        _placeAndLoot('bookshelf', placeBackToWall);
       }
     }
 
@@ -3743,6 +3837,110 @@ export class Level {
         this.obstacles.push(mesh);
         placed.push({ x, z });
         placedCount++;
+      }
+    } else if (room.layout === 'pillar-ring') {
+      // Four chunky pillars arranged in a diamond around room centre,
+      // pulled in 30% from each wall. Reads as a colonnade — the
+      // player can break LoS by stepping behind any pillar and
+      // enemies have to commit to a side. Different from `pillars-
+      // grid` (which packs a 3×3 of small pillars in a tight square)
+      // by using fewer, bigger blocks at wider spacing.
+      const inset = 0.3;
+      const px = (b.maxX - b.minX) * inset;
+      const pz = (b.maxZ - b.minZ) * inset;
+      const w = 1.2, d = 1.2, h = WALL_HEIGHT;
+      const spots = [
+        [b.minX + px, cz], [b.maxX - px, cz],
+        [cx, b.minZ + pz], [cx, b.maxZ - pz],
+      ];
+      for (const [sx, sz] of spots) {
+        // Skip any pillar that lands in a doorway approach.
+        if (this._blocksDoor(room, sx, sz, 2.4)) continue;
+        this._addObstacle(sx, h / 2, sz, w, h, d, FULL_WALL_COLOR);
+      }
+    } else if (room.layout === 'kill-box') {
+      // For every doorway, drop a pair of cover blocks 3m inside the
+      // room flanking the door's centerline. Channels enemy + player
+      // movement through the same chokepoint per door without
+      // sealing anything. Skip a pair if its slot would overlap an
+      // adjacent perpendicular door's strip.
+      const flankOffset = DOOR_WIDTH / 2 + 0.6;
+      const inset = 3.0;
+      for (const n of room.neighbors) {
+        const other = this.rooms[n.otherId];
+        if (!other) continue;
+        const w = 1.0, d = 1.0, h = 1.2;     // chest-high cover blocks
+        let p1, p2;
+        if (n.dir === 'north' || n.dir === 'south') {
+          const wallZ = (n.dir === 'north') ? b.minZ : b.maxZ;
+          const inwardZ = (n.dir === 'north') ? wallZ + inset : wallZ - inset;
+          const dCx = other.cx;
+          p1 = [dCx - flankOffset, inwardZ];
+          p2 = [dCx + flankOffset, inwardZ];
+        } else {
+          const wallX = (n.dir === 'east') ? b.maxX : b.minX;
+          const inwardX = (n.dir === 'east') ? wallX - inset : wallX + inset;
+          const dCz = other.cz;
+          p1 = [inwardX, dCz - flankOffset];
+          p2 = [inwardX, dCz + flankOffset];
+        }
+        for (const [sx, sz] of [p1, p2]) {
+          if (sx < b.minX + 0.8 || sx > b.maxX - 0.8) continue;
+          if (sz < b.minZ + 0.8 || sz > b.maxZ - 0.8) continue;
+          this._addObstacle(sx, h / 2, sz, w, h, d, LOW_COVER_COLOR);
+        }
+      }
+    } else if (room.layout === 'central-cover') {
+      // Single chunky chest-high cover block dead-centre. The block
+      // is bigger than scatter cover (3×3 vs. ~1.2×1.2) so it reads
+      // as deliberate — forces the player and AI to flank rather
+      // than peek over. Skip if room.cx/cz lands inside a keep-out
+      // (boss exit, encounter spawn) — the central cover would
+      // collide with the gameplay disc.
+      const blockW = 3.2, blockD = 3.2, h = 1.2;
+      let blocked = false;
+      if (this._keepouts) {
+        for (const k of this._keepouts) {
+          const dx = cx - k.x, dz = cz - k.z;
+          if (dx * dx + dz * dz < (k.r + 1.6) * (k.r + 1.6)) { blocked = true; break; }
+        }
+      }
+      if (!blocked) {
+        this._addObstacle(cx, h / 2, cz, blockW, h, blockD, LOW_COVER_COLOR);
+      }
+    } else if (room.layout === 'flank-pockets') {
+      // Two short wall stubs jut out from opposite walls, creating
+      // little inset cover pockets the player + AI can hug. The
+      // stubs are perpendicular to the wall they grow from and
+      // ~3m long. Skip a wall that has a doorway to keep the
+      // approach clear.
+      const stubLen = 3.0;
+      const stubDepth = 1.2;
+      const h = WALL_HEIGHT;
+      // Each stub at 25% from one corner of the un-doored wall.
+      const candidates = [];
+      if (!dirs.has('north')) candidates.push({ side: 'north', cz: b.minZ + stubDepth / 2 });
+      if (!dirs.has('south')) candidates.push({ side: 'south', cz: b.maxZ - stubDepth / 2 });
+      if (!dirs.has('east'))  candidates.push({ side: 'east',  cx: b.maxX - stubDepth / 2 });
+      if (!dirs.has('west'))  candidates.push({ side: 'west',  cx: b.minX + stubDepth / 2 });
+      // Shuffle and pick up to 2 different walls so the room has
+      // pockets on opposite or perpendicular faces.
+      for (let i = candidates.length - 1; i > 0; i--) {
+        const j = Math.floor(Math.random() * (i + 1));
+        [candidates[i], candidates[j]] = [candidates[j], candidates[i]];
+      }
+      const picks = candidates.slice(0, 2);
+      for (const pk of picks) {
+        if (pk.side === 'north' || pk.side === 'south') {
+          // Stub runs along Z, jutting inward; placed at ~30% in X.
+          const sx = b.minX + (b.maxX - b.minX) * (Math.random() < 0.5 ? 0.30 : 0.70);
+          this._addObstacle(sx, h / 2, pk.cz + (pk.side === 'north' ? stubLen / 2 : -stubLen / 2),
+            stubDepth, h, stubLen, FULL_WALL_COLOR);
+        } else {
+          const sz = b.minZ + (b.maxZ - b.minZ) * (Math.random() < 0.5 ? 0.30 : 0.70);
+          this._addObstacle(pk.cx + (pk.side === 'east' ? -stubLen / 2 : stubLen / 2), h / 2, sz,
+            stubLen, h, stubDepth, FULL_WALL_COLOR);
+        }
       }
     } else if (room.layout === 'boss-perch') {
       // Boss perch — a raised platform along one wall the boss can
