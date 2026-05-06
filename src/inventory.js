@@ -1132,48 +1132,53 @@ export const ARMOR_DEFS = {
     tint: 0x3a2a18, reduction: 0.08, speedMult: 0.95, durability: dur(110, 0.88),
     description: '−8% dmg, −5% move' },
 
+  // Bag sizes bumped 1.5× across the regular line + magical pack to
+  // 60. Playtest call: "lets increase the size of all bags by 50%
+  // except the magic bag, make it 60 slots." Grid layouts re-picked
+  // for clean rectangles where possible; one bag (Large Rucksack at
+  // 22) keeps a 2-cell bonus inside an 8×3 grid (same pattern as
+  // the original Ranger Pack at 17 in 6×3=18).
   backpack_small: { id: 'backpack_small', name: 'Small Pack', slot: 'backpack', type: 'backpack',
-    tint: 0x6a5530, durability: dur(120, 0.95), pockets: 6, rarity: 'common',
-    gridLayout: { w: 3, h: 2 },
-    description: '6 pack slots' },
+    tint: 0x6a5530, durability: dur(120, 0.95), pockets: 9, rarity: 'common',
+    gridLayout: { w: 3, h: 3 },
+    description: '9 pack slots' },
   backpack_satchel: { id: 'backpack_satchel', name: 'Field Satchel', slot: 'backpack', type: 'backpack',
-    tint: 0x584a28, durability: dur(140, 0.94), pockets: 8, rarity: 'common',
-    gridLayout: { w: 4, h: 2 },
-    description: '8 pack slots' },
-  backpack_med: { id: 'backpack_med', name: 'Combat Pack', slot: 'backpack', type: 'backpack',
-    tint: 0x4a4028, durability: dur(170, 0.92), pockets: 10, rarity: 'uncommon',
-    gridLayout: { w: 5, h: 2 },
-    description: '10 pack slots' },
-  backpack_assault: { id: 'backpack_assault', name: 'Assault Pack', slot: 'backpack', type: 'backpack',
-    tint: 0x404020, durability: dur(195, 0.90), pockets: 12, rarity: 'uncommon',
+    tint: 0x584a28, durability: dur(140, 0.94), pockets: 12, rarity: 'common',
     gridLayout: { w: 4, h: 3 },
     description: '12 pack slots' },
-  backpack_large: { id: 'backpack_large', name: 'Large Rucksack', slot: 'backpack', type: 'backpack',
-    tint: 0x3a3418, durability: dur(220, 0.88), pockets: 15, rarity: 'rare',
+  backpack_med: { id: 'backpack_med', name: 'Combat Pack', slot: 'backpack', type: 'backpack',
+    tint: 0x4a4028, durability: dur(170, 0.92), pockets: 15, rarity: 'uncommon',
     gridLayout: { w: 5, h: 3 },
     description: '15 pack slots' },
-  backpack_ranger: { id: 'backpack_ranger', name: 'Ranger Pack', slot: 'backpack', type: 'backpack',
-    tint: 0x33321c, durability: dur(240, 0.87), pockets: 17, rarity: 'rare',
-    // 17 is prime — closest clean rectangle is 6×3=18, so the grid
-    // gets one extra cell. Bumping `pockets` to 17 keeps The Crow's
-    // ladder correct (15 → 17 → 20) and the description honest; the
-    // 18th cell reads as a small bonus, not a bug.
+  backpack_assault: { id: 'backpack_assault', name: 'Assault Pack', slot: 'backpack', type: 'backpack',
+    tint: 0x404020, durability: dur(195, 0.90), pockets: 18, rarity: 'uncommon',
     gridLayout: { w: 6, h: 3 },
-    description: '17 pack slots' },
+    description: '18 pack slots' },
+  backpack_large: { id: 'backpack_large', name: 'Large Rucksack', slot: 'backpack', type: 'backpack',
+    tint: 0x3a3418, durability: dur(220, 0.88), pockets: 22, rarity: 'rare',
+    // 22 in an 8×3 = 24 grid leaves 2 cells free — same "bonus
+    // cells" pattern the Ranger Pack uses, keeps the description
+    // honest at 22 while the visible grid still reads clean.
+    gridLayout: { w: 8, h: 3 },
+    description: '22 pack slots' },
+  backpack_ranger: { id: 'backpack_ranger', name: 'Ranger Pack', slot: 'backpack', type: 'backpack',
+    tint: 0x33321c, durability: dur(240, 0.87), pockets: 25, rarity: 'rare',
+    gridLayout: { w: 5, h: 5 },
+    description: '25 pack slots' },
   backpack_expedition: { id: 'backpack_expedition', name: 'Expedition Frame', slot: 'backpack', type: 'backpack',
-    tint: 0x2a2a18, durability: dur(260, 0.86), pockets: 20, rarity: 'epic',
-    gridLayout: { w: 5, h: 4 },
+    tint: 0x2a2a18, durability: dur(260, 0.86), pockets: 30, rarity: 'epic',
+    gridLayout: { w: 6, h: 5 },
     speedMult: 0.97,
-    description: '20 pack slots · −3% move' },
+    description: '30 pack slots · −3% move' },
   // Apr-26 — Travel Buddy encounter reward. _encounter flag keeps it
   // out of merchant stocks / random gear pools; only the bear-trade
   // for the unused rocket ticket yields it.
   backpack_magical: { id: 'backpack_magical', name: 'Small Magical Pack',
     slot: 'backpack', type: 'backpack',
-    tint: 0xeaeaff, durability: dur(400, 0.95), pockets: 50, rarity: 'mythic',
-    gridLayout: { w: 10, h: 5 },
+    tint: 0xeaeaff, durability: dur(400, 0.95), pockets: 60, rarity: 'mythic',
+    gridLayout: { w: 10, h: 6 },
     speedMult: 0.75,
-    description: '50 pack slots · −25% move',
+    description: '60 pack slots · −25% move',
     _encounter: true },
 
   // Expanded lineup — distinct per-slot utility so build variety matters.
