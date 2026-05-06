@@ -1506,7 +1506,15 @@ function _resetEncounterCompletionForRun() {
 let _activeModifiers = buildModifiers(null);
 function _refreshActiveModifiers() {
   const ac = getActiveContract();
-  const def = ac ? defForId(ac.activeContractId) : null;
+  // Modifiers end the moment the contract is claimed (completed).
+  // User: "these should all end at some point" — the natural breakpoint
+  // is completion. After claimedAt is stamped, the player has paid the
+  // penalty and earned the reward; carrying "no consumables" or "melee
+  // only" past that moment punishes the player for not having picked
+  // a fresh contract yet. A claimed slot collapses to no-op modifiers
+  // until the player accepts a new contract.
+  const claimed = !!(ac && (ac.claimedAt | 0) > 0);
+  const def = (!claimed && ac) ? defForId(ac.activeContractId) : null;
   _activeModifiers = buildModifiers(def);
 }
 function getActiveModifiers() { return _activeModifiers; }
@@ -1574,20 +1582,35 @@ function _completeContractWithCelebration(def, ac) {
   const rankBefore = getContractRank();
   const completionRank = rankRewardFor(def);
   const balanceBefore = getPersistentChips();
+  // Post-restart penalty: marks + sigils stop accruing the moment
+  // the player has hit Restart Level on this run. Chips + rank stay
+  // on (the existing chip-earnings scale-down + leaderboard taint
+  // are the chip-side penalty). User: "if player chooses to restart
+  // they no longer earn anymore marks or sigils."
+  const _restarted = (runStats.restartCount | 0) > 0;
   const result = tryClaimContract(
     ac, snapshot,
     setActiveContract,
     (n) => awardPersistentChips(n),
-    (n) => awardMarks(n),
+    (n) => { if (!_restarted) awardMarks(n); },
     () => awardRankPoints(completionRank),
-    (n) => awardSigils(n),
+    (n) => { if (!_restarted) awardSigils(n); },
   );
+  if (_restarted) {
+    // tryClaimContract returned the would-have-been amounts; zero
+    // them so the celebration toast doesn't lie about what landed.
+    result.marks = 0;
+    result.sigils = 0;
+  }
   // Only celebrate if the claim actually paid something — guards
   // against the vanishingly rare case of a 0/0/0/0 def slipping
   // through (e.g., a future content tweak that pays only via the
   // per-kill drip). Falls back to the legacy toast.
   const paidAnything = result.chips > 0 || result.marks > 0
     || result.sigils > 0 || completionRank > 0;
+  // Drop active modifiers immediately on claim — see _refreshActiveModifiers
+  // for the rationale ("these should all end at some point").
+  _refreshActiveModifiers();
   if (paidAnything) {
     _queueContractReward(def, result, completionRank, balanceBefore);
   } else {
@@ -1624,6 +1647,133 @@ function _checkObjectiveContractClaim() {
       _completeContractWithCelebration(def, ac);
     }
   } catch (e) { console.warn('[contract-objective-claim]', e); }
+}
+
+// Center-screen "active contract" reminder. Fired at the start of
+// each new floor (advanceFloor) so the player sees their commitment
+// the moment they load in — name, objective, and any modifier chips.
+// User report 2026-05-06: "remind player of the contract that took
+// as a toast in the middle of the screen as soon as they load in."
+// No-op when no contract is active (or it's already claimed).
+function _showActiveContractReminder() {
+  try {
+    const ac = getActiveContract();
+    if (!ac || (ac.claimedAt | 0) > 0) return;
+    const def = defForId(ac.activeContractId);
+    if (!def) return;
+
+    if (!document.getElementById('contract-reminder-styles')) {
+      const ss = document.createElement('style');
+      ss.id = 'contract-reminder-styles';
+      ss.textContent = `
+        #contract-reminder-overlay {
+          position: fixed; inset: 0;
+          display: flex; align-items: center; justify-content: center;
+          z-index: 24;
+          font: 13px 'Inter', system-ui, sans-serif;
+          pointer-events: none;
+        }
+        .contract-reminder-card {
+          padding: 14px 22px 12px;
+          background: linear-gradient(180deg, #1a2228 0%, #0c1014 100%);
+          border: 1.5px solid #c9a87a; border-radius: 6px;
+          color: #f2e7c9;
+          min-width: 380px; max-width: 640px;
+          box-shadow: 0 0 28px rgba(201, 168, 122, 0.45),
+                      0 6px 24px rgba(0, 0, 0, 0.6);
+          animation: cr-in 380ms cubic-bezier(0.22, 1.2, 0.36, 1) both,
+                     cr-out 480ms ease-in 3800ms forwards;
+        }
+        @keyframes cr-in {
+          from { opacity: 0; transform: translateY(-22px) scale(0.92); }
+          60%  { opacity: 1; transform: translateY(0) scale(1.03); }
+          to   { opacity: 1; transform: translateY(0) scale(1); }
+        }
+        @keyframes cr-out {
+          to { opacity: 0; transform: translateY(-12px) scale(0.96); }
+        }
+        .cr-eyebrow {
+          color: #c9a87a; font-weight: 800;
+          font-size: 10px; letter-spacing: 4px; text-transform: uppercase;
+          text-align: center; margin-bottom: 4px;
+        }
+        .cr-title {
+          color: #f2c060; font-weight: 800; font-size: 17px;
+          letter-spacing: 1.2px; text-align: center;
+          margin-bottom: 4px;
+        }
+        .cr-conds {
+          color: #c9a87a; font-size: 12px; letter-spacing: 0.8px;
+          text-align: center; margin-bottom: 6px;
+        }
+        .cr-mods {
+          display: flex; flex-wrap: wrap; gap: 4px;
+          justify-content: center;
+          padding-top: 8px;
+          border-top: 1px dashed rgba(155, 139, 106, 0.25);
+        }
+        .cr-mods .row-mod {
+          /* row-mod styles already in hideout-styles, just reuse them */
+          font-size: 11px;
+        }
+      `;
+      document.head.appendChild(ss);
+    }
+
+    // Reuse the modifier-chip generator the in-game picker uses.
+    const _modChips = (def) => {
+      const m = def.modifiers || {};
+      const out = [];
+      const push = (cls, glyph, label, full) =>
+        out.push(`<span class="row-mod ${cls}" title="${full}">${glyph} ${label}</span>`);
+      if (m.weaponClass === 'pistol') push('restrict', '⚲', 'Pistols only', 'Restricted to pistol-class weapons');
+      if (m.weaponClass === 'melee')  push('restrict', '⚔', 'Melee only',   'Restricted to melee weapons');
+      if (m.noConsumables)            push('restrict', '⊘', 'No items',      'Consumables disabled this run');
+      if ((m.enemyHpMult || 1) > 1) {
+        const p = Math.round((m.enemyHpMult - 1) * 100);
+        push('threat', '♥', `+${p}% HP`, `Enemy HP +${p}%`);
+      }
+      if ((m.enemyDamageMult || 1) > 1) {
+        const p = Math.round((m.enemyDamageMult - 1) * 100);
+        push('threat', '⚡', `+${p}% dmg`, `Enemy damage +${p}%`);
+      }
+      if ((m.spawnDensityMult || 1) > 1) {
+        const p = Math.round((m.spawnDensityMult - 1) * 100);
+        push('threat', '⚏', `+${p}% spawns`, `Spawn density +${p}%`);
+      }
+      if ((m.eliteChanceMult || 1) > 1) {
+        push('threat', '★', `Elites ×${m.eliteChanceMult.toFixed(1)}`, `Elite chance ×${m.eliteChanceMult.toFixed(2)}`);
+      }
+      if ((m.playerDamageTakenMult || 1) > 1) {
+        const p = Math.round((m.playerDamageTakenMult - 1) * 100);
+        push('penalty', '⊕', `+${p}% taken`, `You take +${p}% damage`);
+      }
+      if ((m.playerDamageDealtMult || 1) !== 1) {
+        const p = Math.round((m.playerDamageDealtMult - 1) * 100);
+        const sign = p >= 0 ? '+' : '';
+        push(p >= 0 ? 'buff' : 'penalty', '⊖', `${sign}${p}% out`, `You deal ${sign}${p}% damage`);
+      }
+      return out;
+    };
+
+    const overlay = document.createElement('div');
+    overlay.id = 'contract-reminder-overlay';
+    const card = document.createElement('div');
+    card.className = 'contract-reminder-card';
+    const chips = _modChips(def);
+    card.innerHTML = `
+      <div class="cr-eyebrow">Contract Active</div>
+      <div class="cr-title">${(def.label || def.id).toUpperCase()}</div>
+      <div class="cr-conds">${objectiveSubtitle(def)}</div>
+      ${chips.length ? `<div class="cr-mods">${chips.join('')}</div>` : ''}
+    `;
+    overlay.appendChild(card);
+    document.body.appendChild(overlay);
+    // Total animation = 380ms in + ~3.4s hold + 480ms out = ~4.3s.
+    setTimeout(() => { try { document.body.removeChild(overlay); } catch (_) {} }, 4400);
+  } catch (e) {
+    console.warn('[contract-reminder]', e);
+  }
 }
 
 // Queued contract rewards the player hasn't viewed yet. Each
@@ -2209,6 +2359,60 @@ window.__diagAim = () => {
   }
   console.groupEnd();
 };
+
+// Death-screen tally state. Each scheduled tally pushes a record
+// onto _deathTallyJobs; the rAF loop reads `_skipDeathTally` every
+// frame and snaps to final on the next tick if the player clicked
+// to skip. _initDeathClickToSkip wires the click handler once on
+// the death root.
+let _deathTallyJobs = [];
+let _skipDeathTally = false;
+function _scheduleDeathTally(id, finalValue, opts = {}) {
+  const el = document.getElementById(id);
+  if (!el) return;
+  const final = (finalValue | 0);
+  const delay = opts.delay | 0;
+  const dur = Math.max(50, opts.dur | 0 || 600);
+  const prefix = opts.prefix || '';
+  const suffix = opts.suffix || '';
+  const fmt = (v) => `${prefix}${(v | 0).toLocaleString()}${suffix}`;
+  const job = { id, el, final, delay, dur, prefix, suffix, fmt, done: false };
+  _deathTallyJobs.push(job);
+  const start = performance.now();
+  const tick = (now) => {
+    if (job.done) return;
+    if (_skipDeathTally) {
+      el.textContent = fmt(final);
+      job.done = true;
+      return;
+    }
+    const t = now - start - delay;
+    if (t < 0) {
+      requestAnimationFrame(tick);
+      return;
+    }
+    const k = Math.min(1, t / dur);
+    const eased = 1 - (1 - k) * (1 - k);
+    const v = Math.round(final * eased);
+    el.textContent = fmt(v);
+    if (k < 1) requestAnimationFrame(tick);
+    else job.done = true;
+  };
+  requestAnimationFrame(tick);
+}
+// Wire click-to-skip on the death root once. Subsequent deaths
+// reuse the same handler — the per-death reset of _skipDeathTally
+// (in the death-screen population block above) is what re-enables
+// the animations.
+let _deathClickToSkipWired = false;
+function _initDeathClickToSkip() {
+  if (_deathClickToSkipWired) return;
+  const root = document.getElementById('death-root');
+  if (!root) return;
+  root.addEventListener('click', () => { _skipDeathTally = true; }, true);
+  _deathClickToSkipWired = true;
+}
+_initDeathClickToSkip();
 
 // Run-start baselines for the death-screen rewards readout. Captured
 // at startNewRun so we can show "+N" deltas at run end rather than
@@ -2810,6 +3014,11 @@ function startRunWithWeaponDef(def) {
   player.applyDerivedStats(derivedStats);
   player.restoreFullHealth();
   regenerateLevel();
+  // Run-start reminder of the active contract — same toast that fires
+  // on each floor transition. Helps the player remember which contract
+  // they're committed to (and what modifiers they signed up for) the
+  // moment they deploy.
+  _showActiveContractReminder();
 }
 
 // Build `n` weapon offers biased by the current rarity tier. Pools
@@ -17785,6 +17994,12 @@ async function advanceFloor() {
   paused = false;
   recomputeStats();
   regenerateLevel();
+  // Center-screen reminder of the active contract + any modifiers in
+  // effect on this floor. Fires on the freshly-loaded level so the
+  // player sees their commitment up front. (User: "remind player of
+  // the contract that took as a toast in the middle of the screen as
+  // soon as they load in.") No-op when no contract is active.
+  _showActiveContractReminder();
 }
 
 // Locked-trial unlock prompt — shared between death + extract. Walks
@@ -19773,11 +19988,29 @@ function tick() {
     // far the run went (peak floor + 1) plus fractional credit for
     // damage and kills. Floor: 5 marks for a fresh-start death; a
     // mid-run death at floor 8 with decent kills lands ~30 marks.
+    //
+    // 2026-05-06: zeroed when the player restarted the run. User:
+    // "if player chooses to restart they no longer earn anymore
+    // marks or sigils." Restart already taints the leaderboard
+    // submission and scales chip earnings down; this extends the
+    // same penalty to marks. Sigils stop earning the moment the
+    // restart happens (see _completeContractWithCelebration).
+    const _restartedThisRun = (runStats.restartCount | 0) > 0;
     const peak = (runStats.levels | 0) + 1;
     const damageBonus = Math.floor((runStats.damage | 0) / 800);
     const killBonus = Math.floor((runStats.kills | 0) / 8);
-    const marksEarned = Math.max(5, peak * 3 + damageBonus + killBonus);
+    const marksFloorBonus = peak * 3;
+    const marksEarnedRaw = Math.max(5, marksFloorBonus + damageBonus + killBonus);
+    const marksEarned = _restartedThisRun ? 0 : marksEarnedRaw;
     runStats.marksEarned = marksEarned;
+    // Stash the breakdown for the death-screen tally render below.
+    runStats.marksBreakdown = {
+      floor: marksFloorBonus,
+      damage: damageBonus,
+      kills: killBonus,
+      raw: marksEarnedRaw,
+      restarted: _restartedThisRun,
+    };
     try { awardMarks(marksEarned); } catch (e) { console.warn(e); }
     // Lifetime run counter — feeds the hidden encounter-tier formula
     // and the cooldownRuns timer. Bumped here on death; extract path
@@ -19805,17 +20038,49 @@ function tick() {
     // sealed stats. Mirrors the leaderboard fields so the player gets
     // immediate feedback about how the run went without having to
     // open the leaderboard tab.
+    //
+    // 2026-05-06: each numeric stat now COUNTS UP individually rather
+    // than appearing all at once. Stats tally in stagger so the
+    // player walks through floor → kills → damage → credits → time,
+    // then the rewards panel draws + tallies marks / sigils / chips.
+    // A click anywhere on the death root snaps every running tally
+    // to its final value (`_skipDeathTally`). User: "do an individual
+    // tally of marks, sigils, and chips earned, associate them with
+    // the floor reached, damage dealt, bosses killed, etc. let
+    // player skip the countup with a click."
+    const runSec = Math.max(0, Math.round((Date.now() - (runStats.startedAt || Date.now())) / 1000));
+    const mins = Math.floor(runSec / 60);
+    const secs = runSec % 60;
+    // Reset the per-death skip flag and the tally registry so each
+    // death starts fresh. Existing animations from a prior death
+    // (e.g., the player died, restarted, and immediately died again
+    // before the prior tally finished) are abandoned by their next
+    // rAF tick reading the new flag/list.
+    _deathTallyJobs = [];
+    _skipDeathTally = false;
+    _initDeathClickToSkip();   // belt-and-braces if the boot-time wire missed the DOM
     const setDS = (id, val) => {
       const el = document.getElementById(id);
       if (el) el.textContent = String(val);
     };
-    const runSec = Math.max(0, Math.round((Date.now() - (runStats.startedAt || Date.now())) / 1000));
-    const mins = Math.floor(runSec / 60);
-    const secs = runSec % 60;
-    setDS('death-stat-level', `${(runStats.deathLevel | 0) + 1}`);
-    setDS('death-stat-kills', `${runStats.kills | 0}`);
-    setDS('death-stat-damage', `${Math.round(runStats.damage || 0)}`);
-    setDS('death-stat-credits', `${Math.round(runStats.credits || 0)}c`);
+    setDS('death-stat-level', '0');
+    setDS('death-stat-kills', '0');
+    setDS('death-stat-damage', '0');
+    setDS('death-stat-credits', '0c');
+    setDS('death-stat-time', '0m 0s');
+    _scheduleDeathTally('death-stat-level',
+      (runStats.deathLevel | 0) + 1,
+      { delay: 200, dur: 480, suffix: '' });
+    _scheduleDeathTally('death-stat-kills',
+      runStats.kills | 0,
+      { delay: 460, dur: 600 });
+    _scheduleDeathTally('death-stat-damage',
+      Math.round(runStats.damage || 0),
+      { delay: 760, dur: 700 });
+    _scheduleDeathTally('death-stat-credits',
+      Math.round(runStats.credits || 0),
+      { delay: 1100, dur: 700, suffix: 'c' });
+    // Time is small + cosmetic — set immediately rather than animate.
     setDS('death-stat-time', `${mins}m ${secs}s`);
 
     // Death recap — list the top attackers by cumulative damage with
@@ -19866,10 +20131,11 @@ function tick() {
         }
       }
     }
-    // Rewards block — marks earned this run (already set above),
-    // sigils / chips / rank deltas vs run-start baselines, plus an
-    // accuracy approximation. Rank-up callout shown if the player
-    // crossed at least one contract-rank threshold during this run.
+    // Rewards block — marks earned this run, sigils / chips / rank
+    // deltas vs run-start baselines, plus an accuracy approximation.
+    // Marks gets a "from where" breakdown line so the formula isn't
+    // a black box. Each value tallies in sequence; restart-zeroed
+    // values get an explanatory subtitle.
     try {
       const rewardsEl = document.getElementById('death-rewards');
       if (rewardsEl) rewardsEl.style.display = 'block';
@@ -19880,9 +20146,74 @@ function tick() {
       const fired = runStats.firedShots | 0;
       const landed = runStats.landedShots | 0;
       const acc = fired > 0 ? Math.round((landed / fired) * 100) : null;
-      setDS('death-stat-marks', `${runStats.marksEarned | 0}`);
-      setDS('death-stat-sigils', sigilsDelta > 0 ? `+${sigilsDelta}` : '0');
-      setDS('death-stat-chips', chipsDelta > 0 ? `+${chipsDelta}` : '0');
+      setDS('death-stat-marks', '0');
+      setDS('death-stat-sigils', '0');
+      setDS('death-stat-chips', '0');
+      setDS('death-stat-accuracy', '—');
+      // Stagger the rewards tally AFTER the run-summary tally above
+      // (which lasts ~1.8s). Marks counts up first, then the
+      // breakdown line slides in below it.
+      const REW_BASE = 1900;
+      _scheduleDeathTally('death-stat-marks',
+        runStats.marksEarned | 0,
+        { delay: REW_BASE, dur: 700 });
+      _scheduleDeathTally('death-stat-sigils', sigilsDelta,
+        { delay: REW_BASE + 320, dur: 480, prefix: sigilsDelta > 0 ? '+' : '' });
+      _scheduleDeathTally('death-stat-chips', chipsDelta,
+        { delay: REW_BASE + 600, dur: 640, prefix: chipsDelta > 0 ? '+' : '' });
+      // Marks breakdown — show how the number was assembled (or why
+      // it's zero post-restart). Inserted as a subtitle row under the
+      // Marks line. Renders immediately in faded text; the bold
+      // total above counts up from 0.
+      const marksRow = document.querySelector('#death-stat-marks')?.closest('.death-stat-row');
+      if (marksRow) {
+        let breakdownEl = marksRow.querySelector('.death-marks-breakdown');
+        if (!breakdownEl) {
+          breakdownEl = document.createElement('div');
+          breakdownEl.className = 'death-marks-breakdown';
+          breakdownEl.style.cssText = `
+            grid-column: 1 / -1;
+            font-size: 10px; color: #a89070;
+            letter-spacing: 0.4px; padding-top: 2px;
+          `;
+          marksRow.appendChild(breakdownEl);
+        }
+        const bd = runStats.marksBreakdown;
+        if (bd && bd.restarted) {
+          breakdownEl.innerHTML = `
+            <span style="color:#d24868;">— Restart penalty: 0 marks (would have been ${bd.raw}: ${bd.floor} floor + ${bd.damage} damage + ${bd.kills} kills, min 5)</span>
+          `;
+        } else if (bd) {
+          breakdownEl.innerHTML = `
+            <span>Floor ${bd.floor} + Damage ${bd.damage} + Kills ${bd.kills} (min 5)</span>
+          `;
+        } else {
+          breakdownEl.innerHTML = '';
+        }
+      }
+      // Sigils breakdown — note the restart penalty so the player
+      // sees why it's zero if they restarted mid-run.
+      const sigilsRow = document.querySelector('#death-stat-sigils')?.closest('.death-stat-row');
+      if (sigilsRow) {
+        let bd = sigilsRow.querySelector('.death-sigils-note');
+        const _restartedThisRun = (runStats.restartCount | 0) > 0;
+        if (_restartedThisRun) {
+          if (!bd) {
+            bd = document.createElement('div');
+            bd.className = 'death-sigils-note';
+            bd.style.cssText = `
+              grid-column: 1 / -1;
+              font-size: 10px; color: #d24868;
+              letter-spacing: 0.4px; padding-top: 2px;
+            `;
+            sigilsRow.appendChild(bd);
+          }
+          bd.textContent = '— Restart penalty: sigils stopped earning when you restarted.';
+        } else if (bd) {
+          bd.remove();
+        }
+      }
+      // Accuracy — instant, no count-up (it's a percentage, jittery).
       setDS('death-stat-accuracy', acc != null ? `${acc}% (${landed}/${fired})` : '—');
       const rankupEl = document.getElementById('death-rankup');
       const rankupTxt = document.getElementById('death-rankup-text');

@@ -6900,15 +6900,36 @@ export class Level {
     const az = z + dirZ * lookAhead;
     if (!this._collidesAt(ax, az, radius)) return { x: dirX, z: dirZ };
     // Blocked along the desired heading. Try whiskers at ±30°, ±60°,
-    // ±90°. Stop on the first clear one — closer-to-desired wins.
-    const angles = [Math.PI / 6, -Math.PI / 6, Math.PI / 3, -Math.PI / 3, Math.PI / 2, -Math.PI / 2];
-    for (const a of angles) {
-      const c = Math.cos(a), s = Math.sin(a);
-      const nx = dirX * c - dirZ * s;
-      const nz = dirX * s + dirZ * c;
-      const wx = x + nx * lookAhead;
-      const wz = z + nz * lookAhead;
-      if (!this._collidesAt(wx, wz, radius)) return { x: nx, z: nz };
+    // ±75°, ±90°, ±105°, ±120° — denser fan than the original
+    // ±30/±60/±90 set so the search has finer-grained options when an
+    // enemy is brushing a door corner. Without the in-between angles
+    // (75 / 105 / 120), a 0.42m enemy collision circle threading a
+    // doorway whose flanking walls extend perpendicular to its
+    // approach can have all six original whiskers blocked
+    // simultaneously — leading to the axis-clamp deadlock the user
+    // reported. (User 2026-05-06: "enemies are getting stuck on the
+    // corners of doors trying to get to the player.")
+    //
+    // Two-pass: try full lookAhead first; if every probe is blocked,
+    // retry at half lookAhead. Tight gaps where the full look-ahead
+    // overshoots into wall geometry resolve at the shorter probe.
+    const angles = [
+      Math.PI / 6, -Math.PI / 6,
+      Math.PI / 3, -Math.PI / 3,
+      Math.PI * (5 / 12), -Math.PI * (5 / 12),     // ±75°
+      Math.PI / 2, -Math.PI / 2,
+      Math.PI * (7 / 12), -Math.PI * (7 / 12),     // ±105°
+      Math.PI * (2 / 3), -Math.PI * (2 / 3),       // ±120°
+    ];
+    for (const probeLen of [lookAhead, lookAhead * 0.5]) {
+      for (const a of angles) {
+        const c = Math.cos(a), s = Math.sin(a);
+        const nx = dirX * c - dirZ * s;
+        const nz = dirX * s + dirZ * c;
+        const wx = x + nx * probeLen;
+        const wz = z + nz * probeLen;
+        if (!this._collidesAt(wx, wz, radius)) return { x: nx, z: nz };
+      }
     }
     return { x: dirX, z: dirZ };
   }
