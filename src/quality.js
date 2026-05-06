@@ -197,8 +197,9 @@ export function applyQuality(mode, ctx = {}) {
     }
     ctx.keyLight.shadow.normalBias = 0.02;
   }
-  if (ctx.gridHelper) {
-    ctx.gridHelper.visible = !low;
-  }
+  // Grid helper stays hidden across quality modes — the per-room
+  // floor patches + dark void make the 300×300 grid lines fight the
+  // intended look. Kept in the scene as a debug-toggle handle, not
+  // a quality-tier visual.
   setCelShading(!low);
 }

@@ -3237,21 +3237,41 @@ export class Level {
       cx += (cx - room.elevatorCenter.x) * 0.2;
       cz += (cz - room.elevatorCenter.z) * 0.2;
     }
+    // Per-room lamp tint. The fixture color + light color shift by
+    // theme so a lab reads cool-clinical-white from above, a factory
+    // reads sodium-amber, a server room reads cold-blue, etc. Falls
+    // back to the warm cream default when the theme has no entry.
+    // Free in shader cost — same number of SpotLights, just
+    // different color values per instance.
+    const lampTints = {
+      lab:        { fixture: 0xc8f0ff, light: 0xc8f0ff },     // clinical
+      infirmary:  { fixture: 0xe0ffe8, light: 0xd8ffe0 },     // soft green-white
+      server:     { fixture: 0xc0d8ff, light: 0xb0c8ff },     // cold blue
+      security:   { fixture: 0xffe0d0, light: 0xffd0c0 },     // tungsten warm
+      garage:     { fixture: 0xffc080, light: 0xffb060 },     // sodium amber
+      shop:       { fixture: 0xfff0c0, light: 0xffe0a0 },     // gold pendant
+      bedroom:    { fixture: 0xffd8a0, light: 0xffd0a0 },     // bedside warm
+      livingRoom: { fixture: 0xffd8a0, light: 0xffd0a0 },     // hearth
+      lobby:      { fixture: 0xfff0d0, light: 0xfff0c0 },     // chandelier
+      kitchen:    { fixture: 0xffeec0, light: 0xffe6a0 },     // can lights
+      library:    { fixture: 0xffd8a0, light: 0xffd0a0 },     // study lamp
+      office:     { fixture: 0xf8f8ff, light: 0xf0f0ff },     // fluorescent
+      archive:    { fixture: 0xffe6c0, light: 0xffd8a0 },     // dim warm
+      mailroom:   { fixture: 0xfff0d0, light: 0xffe6c0 },     // utility warm
+      gym:        { fixture: 0xe0eeff, light: 0xd8e8ff },     // gym overhead
+      warehouse:  { fixture: 0xffd8a0, light: 0xffd0a0 },     // hi-bay
+    };
+    const tint = lampTints[room.theme] || { fixture: 0xffcf80, light: 0xffe6b0 };
     // Bright per-room SpotLight pointing straight down at the floor.
     // The earlier additive-cone mesh approach (Phase 4) read as a
     // hazy fog cone instead of a lit room and was scrapped at
     // playtest. A real SpotLight is the right tool here — it gives
-    // the "pool of warm light on the floor" read that anchors the
-    // room visually. Cost is bounded by light reduction work
-    // elsewhere in the pass: we kept the per-prop PointLight cuts,
-    // dropped 6+ encounter PointLights, and dropped the per-drone
-    // PointLight, so the budget for one bright per-room SpotLight is
-    // comfortable. Shadow casting OFF — walls already don't cast
-    // shadows in this project (see _addObstacle), and shadow-map
-    // updates per SpotLight × per room would dwarf the win.
+    // the "pool of light on the floor" read that anchors the room
+    // visually. Cost is bounded by light reduction work elsewhere
+    // in the pass.
     const fixtureMat = sharedMaterial({
-      color: 0xffcf80,
-      emissive: 0xffcf80,
+      color: tint.fixture,
+      emissive: tint.fixture,
       emissiveIntensity: 1.6,
       roughness: 0.3,
     });
@@ -3269,7 +3289,7 @@ export class Level {
     // ring. Distance comfortably covers an 18×18m room from ceiling
     // height. No shadows.
     const light = new THREE.SpotLight(
-      0xffe6b0,         // warmer cream than the old 0xffcf80
+      tint.light,
       9.0,              // intensity — bright enough to compete with the
                         // hemi+key directionals
       14.0,             // distance
@@ -5339,14 +5359,26 @@ export class Level {
         // shape template that misaligned an outer-wall segment
         // can't seal off a doorway.
         const isShapeWall = o.userData.kind === 'shape-wall';
-        // Only outer walls that sit directly ON the door axis (the walls
-        // that produced the gap) are preserved; outer walls further into
-        // the room that happen to share the color still get cleared.
+        // Outer walls that sit directly ON the door axis are
+        // candidates for preservation — they're typically the
+        // flanking segments _buildRoomPerimeter built around the
+        // door gap. BUT if the wall's perpendicular extent SPANS
+        // the door's full passable gap (e.g. a single full-length
+        // outer wall built when the room had no neighbour on that
+        // side, like the boss room's wall on the extraction-door
+        // side), it's a blocker, not a flanking segment, and it
+        // must be cleared. Without this check rect boss rooms
+        // ended up with a solid wall behind the open extraction
+        // door.
         const isOuterColor = o.material?.color?.getHex?.() === OUTER_WALL_COLOR;
         const onDoorEdge = horizDoor
           ? Math.abs(((b.minZ + b.maxZ) / 2) - dz) < 0.8
           : Math.abs(((b.minX + b.maxX) / 2) - dx) < 0.8;
-        if (!isShapeWall && isOuterColor && onDoorEdge) continue;
+        const halfDoorGap = DOOR_WIDTH / 2;
+        const wallSpansGap = horizDoor
+          ? (b.minX <= dx - halfDoorGap + 0.1 && b.maxX >= dx + halfDoorGap - 0.1)
+          : (b.minZ <= dz - halfDoorGap + 0.1 && b.maxZ >= dz + halfDoorGap - 0.1);
+        if (!isShapeWall && isOuterColor && onDoorEdge && !wallSpansGap) continue;
         o.userData.collisionXZ = null;
         o.visible = false;
         // Props register an invisible proxy mesh + a linked visible

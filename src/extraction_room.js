@@ -159,11 +159,18 @@ export function buildExtractionRoom(level, bossRoom, opts = {}) {
   };
 
   // ---- Walls --------------------------------------------------------
-  // Three solid outer walls (the side facing bossRoom is the door
-  // wall, handled separately).
+  // The wall facing bossRoom is the door wall. `dir` here is the side
+  // of bossRoom the chamber sits on (e.g. dir='east' means the chamber
+  // is east of boss, so its facing wall is its WEST wall). The
+  // door-wall side is therefore OPP[dir]. Earlier this code used
+  // `dir` directly for the flanking-segment branch, which put the
+  // door gap on the FAR side of the chamber; the boss-facing wall
+  // ended up sealed and the chamber appeared inaccessible.
+  const OPP = { east: 'west', west: 'east', north: 'south', south: 'north' };
+  const doorWallSide = OPP[dir];
   const halfGap = DOOR_WIDTH / 2;
   // North wall (minZ).
-  if (dir !== 'north') {
+  if (doorWallSide !== 'north') {
     addWall(cx, WALL_HEIGHT / 2, bounds.minZ,
       ROOM_SIZE, WALL_HEIGHT, WALL_THICK, true);
   } else {
@@ -176,7 +183,7 @@ export function buildExtractionRoom(level, bossRoom, opts = {}) {
       rightLen, WALL_HEIGHT, WALL_THICK, true);
   }
   // South wall (maxZ).
-  if (dir !== 'south') {
+  if (doorWallSide !== 'south') {
     addWall(cx, WALL_HEIGHT / 2, bounds.maxZ,
       ROOM_SIZE, WALL_HEIGHT, WALL_THICK, true);
   } else {
@@ -188,7 +195,7 @@ export function buildExtractionRoom(level, bossRoom, opts = {}) {
       rightLen, WALL_HEIGHT, WALL_THICK, true);
   }
   // East wall (maxX).
-  if (dir !== 'east') {
+  if (doorWallSide !== 'east') {
     addWall(bounds.maxX, WALL_HEIGHT / 2, cz,
       WALL_THICK, WALL_HEIGHT, ROOM_SIZE, true);
   } else {
@@ -200,7 +207,7 @@ export function buildExtractionRoom(level, bossRoom, opts = {}) {
       WALL_THICK, WALL_HEIGHT, botLen, true);
   }
   // West wall (minX).
-  if (dir !== 'west') {
+  if (doorWallSide !== 'west') {
     addWall(bounds.minX, WALL_HEIGHT / 2, cz,
       WALL_THICK, WALL_HEIGHT, ROOM_SIZE, true);
   } else {
@@ -275,13 +282,17 @@ export function buildExtractionRoom(level, bossRoom, opts = {}) {
   const built = builder ? builder() : null;
   if (built && built.group) {
     // Face the prop's local +Z toward the door so it reads as "the way
-    // out is THIS direction." Mapping dir to yaw: door is on the boss
-    // side of the room, so the prop should face that direction.
+    // out is THIS direction." dir is the BOSS-room side the chamber
+    // attaches to; the door sits on the chamber's OPPOSITE wall (the
+    // wall facing boss). The prop's local +Z front should point at
+    // that door so the player walks INTO the prop. Earlier this map
+    // was matched to the old wrong-side wall logic and had every
+    // prop facing the FAR wall after the wall fix landed.
     let yaw = 0;
-    if (dir === 'south') yaw = 0;            // door at south (max z) — face +Z
-    else if (dir === 'north') yaw = Math.PI; // door at north — face -Z
-    else if (dir === 'east')  yaw = -Math.PI / 2; // door east — face +X
-    else if (dir === 'west')  yaw =  Math.PI / 2; // door west — face -X
+    if (dir === 'south') yaw = Math.PI;             // chamber south, door on N wall — face -Z
+    else if (dir === 'north') yaw = 0;              // chamber north, door on S wall — face +Z
+    else if (dir === 'east')  yaw =  Math.PI / 2;   // chamber east, door on W wall — face -X
+    else if (dir === 'west')  yaw = -Math.PI / 2;   // chamber west, door on E wall — face +X
     built.group.rotation.y = yaw;
     built.group.position.set(cx, 0, cz);
     built.group.visible = false;     // hidden until reveal
