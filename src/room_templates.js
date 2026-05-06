@@ -801,6 +801,160 @@ export const ROOM_TEMPLATES = [
       { kind: 'rug', placer: 'interior', chance: 0.6 },
     ],
   },
+
+  // ============= VENDOR-SPECIFIC SHOP TEMPLATES =====================
+  // The generic shop templates above run for every vendor room. The
+  // templates below filter on `vendorTypes` so each vendor type
+  // (gunsmith, healer, etc.) has at least one signature look that
+  // tells the player at a glance what kind of shop it is.
+  // pickTemplateForRoom honors `vendorTypes` when room.type matches
+  // one of the listed vendor types.
+
+  // -- Gunsmith --------------------------------------------------------
+  // Vertical lockers reading as gun cabinets, a workbench front and
+  // center, ammo crates flanking. Orange-iron palette via NPC_STYLE.
+  {
+    id: 'gunsmith-armory',
+    themes: ['shop'],
+    vendorTypes: ['gunsmith'],
+    weight: 1.4,
+    minSize: { w: 12, d: 12 },
+    props: [
+      { kind: 'locker', placer: 'wall', back: true,
+        count: { min: 3, max: 5 }, lootable: true },
+      { kind: 'bench', placer: 'wall', name: 'workbench' },
+      { kind: 'crate', placer: 'adjacent', anchor: 'workbench',
+        side: 'left', lootable: true },
+      { kind: 'crate', placer: 'adjacent', anchor: 'workbench',
+        side: 'right', lootable: true, chance: 0.7 },
+      { kind: 'cabinet', placer: 'wall', chance: 0.5, lootable: true },
+    ],
+  },
+
+  // -- Healer / clinic --------------------------------------------------
+  // Cots + medCart silhouette, supply cabinets. Reads as a triage room
+  // even before you spot the green NPC.
+  {
+    id: 'healer-clinic',
+    themes: ['shop'],
+    vendorTypes: ['healer'],
+    weight: 1.4,
+    minSize: { w: 12, d: 12 },
+    props: [
+      { kind: 'bed', placer: 'wall', count: { min: 1, max: 2 },
+        name: 'cot' },
+      { kind: 'medCart', placer: 'adjacent', anchor: 'cot',
+        side: 'right', facing: 'match', chance: 0.95 },
+      { kind: 'cabinet', placer: 'wall', count: { min: 2, max: 3 },
+        lootable: true },
+      { kind: 'locker', placer: 'wall', chance: 0.65, lootable: true },
+      { kind: 'neonStick', placer: 'wall', chance: 0.85 },
+    ],
+  },
+
+  // -- Armorer ---------------------------------------------------------
+  // Armor "displays" rendered as tables with chairs (pose stands)
+  // around them, plus display cabinets along the perimeter. Blue/grey
+  // palette via NPC_STYLE.
+  {
+    id: 'armorer-fitting',
+    themes: ['shop'],
+    vendorTypes: ['armorer'],
+    weight: 1.4,
+    minSize: { w: 12, d: 12 },
+    props: [
+      { kind: 'table', placer: 'interior', name: 'standA' },
+      { kind: 'table', placer: 'interior', name: 'standB', chance: 0.85 },
+      { kind: 'displayCase', placer: 'wall', back: true,
+        count: { min: 1, max: 2 } },
+      { kind: 'cabinet', placer: 'wall', count: { min: 2, max: 3 },
+        lootable: true },
+      { kind: 'locker', placer: 'wall', chance: 0.65, lootable: true },
+    ],
+  },
+
+  // -- Tailor ---------------------------------------------------------
+  // Bookshelves stand in for fabric-roll racks; central cutting table
+  // surrounded by chairs. Pink palette via NPC_STYLE.
+  {
+    id: 'tailor-atelier',
+    themes: ['shop'],
+    vendorTypes: ['tailor'],
+    weight: 1.4,
+    minSize: { w: 12, d: 12 },
+    props: [
+      { kind: 'bookshelf', placer: 'wall', back: true,
+        count: { min: 2, max: 3 }, lootable: true },
+      { kind: 'table', placer: 'interior', name: 'cutTable' },
+      { kind: 'chair', placer: 'adjacent', anchor: 'cutTable',
+        side: 'front', facing: 'inward' },
+      { kind: 'chair', placer: 'adjacent', anchor: 'cutTable',
+        side: 'back', facing: 'inward', chance: 0.7 },
+      { kind: 'cabinet', placer: 'wall', chance: 0.55, lootable: true },
+      { kind: 'rug', placer: 'interior', chance: 0.7 },
+    ],
+  },
+
+  // -- Relic Seller ----------------------------------------------------
+  // Museum-vibe — heavy on glass cases, planters, decorative stand-
+  // alone vases. Gold accent via NPC_STYLE.
+  {
+    id: 'relic-gallery',
+    themes: ['shop'],
+    vendorTypes: ['relicSeller'],
+    weight: 1.4,
+    minSize: { w: 12, d: 12 },
+    props: [
+      { kind: 'displayCase', placer: 'wall', back: true,
+        count: { min: 3, max: 4 } },
+      { kind: 'planter', placer: 'wall', count: { min: 1, max: 2 } },
+      { kind: 'vase', placer: 'interior', chance: 0.85 },
+      { kind: 'bookshelf', placer: 'wall', back: true,
+        chance: 0.6, lootable: true },
+      { kind: 'rug', placer: 'interior', chance: 0.65 },
+    ],
+  },
+
+  // -- Black Market ----------------------------------------------------
+  // Dark warehouse vibe — lockers, crates, pallets, neonStick UV
+  // accents. Purple palette via NPC_STYLE.
+  {
+    id: 'blackmarket-stash',
+    themes: ['shop'],
+    vendorTypes: ['blackMarket'],
+    weight: 1.4,
+    minSize: { w: 12, d: 12 },
+    props: [
+      { kind: 'locker', placer: 'wall', back: true,
+        count: { min: 2, max: 4 }, lootable: true },
+      { kind: 'crate', placer: 'wall', count: { min: 1, max: 3 },
+        lootable: true },
+      { kind: 'pallet', placer: 'interior', chance: 0.8 },
+      { kind: 'barrel', placer: 'wall', chance: 0.55 },
+      { kind: 'neonStick', placer: 'wall', count: { min: 1, max: 2 } },
+    ],
+  },
+
+  // -- Merchant (general store) ----------------------------------------
+  // Variety pack — display cases, stock shelves, a vending machine.
+  // Reads as a corner-store / general-goods vendor.
+  {
+    id: 'merchant-general',
+    themes: ['shop'],
+    vendorTypes: ['merchant'],
+    weight: 1.4,
+    minSize: { w: 12, d: 12 },
+    props: [
+      { kind: 'displayCase', placer: 'wall', back: true, chance: 0.85 },
+      { kind: 'cabinet', placer: 'wall', count: { min: 2, max: 3 },
+        lootable: true },
+      { kind: 'bookshelf', placer: 'wall', back: true,
+        count: { min: 1, max: 2 }, lootable: true },
+      { kind: 'vendingMachine', placer: 'wall', back: true,
+        chance: 0.55 },
+      { kind: 'crate', placer: 'wall', chance: 0.5, lootable: true },
+    ],
+  },
 ];
 
 // ---------------------------------------------------------------------
@@ -826,6 +980,14 @@ export function pickTemplateForRoom(room, theme) {
       if (w < t.minSize.w) return false;
       if (d < t.minSize.d) return false;
     }
+    // vendorTypes filter — when present, the template only applies
+    // to specific vendor room types (gunsmith, healer, etc.). When
+    // absent, the template is generic and runs for any room of the
+    // matching theme. Generic shop templates fall back here when
+    // a vendor-specific template happens not to roll, so a 'tailor'
+    // room can still pick 'shop-stockroom' instead of always rolling
+    // 'tailor-atelier'.
+    if (t.vendorTypes && !t.vendorTypes.includes(room.type)) return false;
     return true;
   });
   if (!eligible.length) return null;
