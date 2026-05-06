@@ -1079,6 +1079,36 @@ export class GunmanManager {
       g.alive = false;
       g.state = STATE.DEAD;
       g.deathT = 0;
+      // Squad death-ping — teammates within 18m get a suspicion
+      // bump pointing at the corpse. Handles the stealth-with-
+      // suppressor case where the gunshot alert (radius gated by
+      // noiseRange) misses the squad AND body-sight (12m + cone +
+      // LoS) hasn't yet fired. Bump caps at 0.85 — strong enough
+      // to drive INVESTIGATE immediately, below the 1.0 ALERTED
+      // crest so survivors still need their own LoS before firing.
+      // Same-room only (gated by roomId) — without a level handle
+      // we can't compute neighbor-rooms cheaply, and bleeding
+      // pings through walls into adjacent rooms felt like the AI
+      // was psychic.
+      const dx0 = g.group.position.x;
+      const dz0 = g.group.position.z;
+      const PING_R = 18.0;
+      const PING_R2 = PING_R * PING_R;
+      for (const other of this.gunmen) {
+        if (other === g || !other.alive) continue;
+        if (other.state !== STATE.IDLE) continue;
+        if (other.roomId !== g.roomId) continue;
+        const ox = other.group.position.x, oz = other.group.position.z;
+        const ddx = ox - dx0, ddz = oz - dz0;
+        const d2 = ddx * ddx + ddz * ddz;
+        if (d2 > PING_R2) continue;
+        const bump = 0.85 * (1 - Math.sqrt(d2) / PING_R);
+        if (bump > (other.suspicion || 0)) {
+          other.suspicion = bump;
+          other.lastKnownX = dx0;
+          other.lastKnownZ = dz0;
+        }
+      }
       // Sniper paint laser is parented to the world (not the body
       // group), so it doesn't auto-hide when the corpse fades. Cut
       // it explicitly on death.
