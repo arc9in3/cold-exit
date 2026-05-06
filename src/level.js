@@ -194,7 +194,98 @@ export class Level {
     this.ledges = [];
   }
 
+  // Phase M — wraps _generateBody with a hard walkability gate. After
+  // each build, checkRealWalkability() floods from the player spawn
+  // through the actual collision geometry. If any room is unreachable
+  // we retry up to 3 times with a remixed seed; if all retries fail,
+  // we degrade each unreachable room's shape to 'rect' and rebuild.
+  // Final fallback (rare): accept the broken level + log critical so
+  // the player can file a bug. Never crash gen.
   generate() {
+    const MAX_RETRIES = 3;
+    for (let attempt = 0; attempt <= MAX_RETRIES; attempt++) {
+      // Mix the seed for retries by perturbing Math.random() — we're
+      // inside main.js's _withRunSeed wrapper so re-seeding the same
+      // mulberry32 stream with a per-attempt salt produces a fresh
+      // deterministic layout. attempt=0 keeps the original seed so
+      // the common case (no retry) is byte-for-byte identical.
+      let restoreRand = null;
+      if (attempt > 0) {
+        const orig = Math.random;
+        const SALT = (0x9E3779B1 * attempt) >>> 0;
+        let s = SALT;
+        Math.random = () => {
+          s = (s + 0x6D2B79F5) >>> 0;
+          let t = s;
+          t = Math.imul(t ^ (t >>> 15), t | 1);
+          t ^= t + Math.imul(t ^ (t >>> 7), t | 61);
+          return ((t ^ (t >>> 14)) >>> 0) / 4294967296;
+        };
+        restoreRand = () => { Math.random = orig; };
+      }
+      try {
+        this._generateBody();
+      } finally {
+        if (restoreRand) restoreRand();
+      }
+      // Tutorial / mega-arena paths bypass the chain generator; they
+      // build their own room layout via _generateBody → generateTutorial
+      // / generateMegaArena and don't need the walkability retry.
+      if (typeof window !== 'undefined' && window.__tutorialMode && window.__tutorialMode()) {
+        return;
+      }
+      let result = null;
+      try {
+        result = this.checkRealWalkability();
+        if (typeof window !== 'undefined') window.__lastWalkabilityCheck = result;
+      } catch (err) {
+        console.warn('[level] checkRealWalkability threw:', err);
+        return;   // accept whatever was built; don't loop on a probe bug
+      }
+      if (result.ok) {
+        if (attempt > 0) {
+          console.log(`[level] walkability OK after ${attempt} retr${attempt === 1 ? 'y' : 'ies'}`);
+        }
+        return;
+      }
+      console.warn(`[level] checkRealWalkability FAIL (attempt ${attempt + 1}/${MAX_RETRIES + 1}):`,
+        result.unreachable);
+      if (attempt < MAX_RETRIES) {
+        // Roll back so the next pass starts from a clean state. clear()
+        // disposes scene objects, re-zeros obstacles, and the index
+        // bump in _generateBody is what we want to undo (each retry
+        // counts as the same floor). Decrement here so the next
+        // _generateBody++ lands us back on this floor's index.
+        this.clear();
+        this.index -= 1;
+        continue;
+      }
+      // Degrade: every unreachable chain room → rect. Run one final
+      // _generateBody with a flag the body checks. Only degrade real
+      // rooms (id >= 0); synthetic ones (extraction id=-1) can't be
+      // degraded.
+      const ids = result.unreachable.map(u => u.id).filter(id => id >= 0);
+      console.warn('[level] degrading unreachable rooms to rect:', ids);
+      this.clear();
+      this.index -= 1;
+      this._forceRectIds = new Set(ids);
+      this._generateBody();
+      this._forceRectIds = null;
+      try {
+        const final = this.checkRealWalkability();
+        if (final.ok) {
+          console.log('[level] walkability OK after degrade');
+        } else {
+          console.error('[level] CRITICAL: walkability still failing after degrade — accepting broken level',
+            final.unreachable);
+        }
+        if (typeof window !== 'undefined') window.__lastWalkabilityCheck = final;
+      } catch (_) { /* defensive */ }
+      return;
+    }
+  }
+
+  _generateBody() {
     this.clear();
     this.index += 1;
     // Wall instancer — fresh per generate() so per-color pools start
@@ -537,6 +628,11 @@ export class Level {
       // assume single-cell footprints and would tile poorly across a
       // 2-cell extension.
       if (room.giant || room.doubled) room.shape = 'rect';
+      // Phase M degrade pass — generate() retry-on-fail forces these
+      // ids back to 'rect' to recover from a wedged shape combination.
+      if (this._forceRectIds && this._forceRectIds.has(room.id)) {
+        room.shape = 'rect';
+      }
     }
 
     // --- Build walls + doors ----------------------------------------------
@@ -1311,7 +1407,29 @@ export class Level {
       const tpl = SHAPE_REGISTRY[room.shape];
       if (tpl && typeof tpl.build === 'function') {
         try {
-          const out = tpl.build(this, room);
+          // Phase M step 3 — tag every obstacle created by the shape
+          // template with userData.kind = 'shape-wall' so
+          // _clearDoorCorridors can recognise + clear them when a
+          // shape template seals off a doorway. We snapshot the
+          // obstacles length before the build then walk the new
+          // tail afterwards.
+          //
+          // Phase M step 5 — flag main-path rooms so shape templates
+          // can widen any internal corridor segments to >= 3m.
+          // start / combat / boss rooms are on the main path; subBoss
+          // / shop / encounter rooms are branches and keep narrower
+          // widths.
+          const _shapeStart = this.obstacles.length;
+          const isMainPath = (room.type === 'start'
+                            || room.type === 'combat'
+                            || room.type === 'boss');
+          const out = tpl.build(this, room, { isMainPath });
+          for (let i = _shapeStart; i < this.obstacles.length; i++) {
+            const m = this.obstacles[i];
+            if (m && m.userData && !m.userData.kind) {
+              m.userData.kind = 'shape-wall';
+            }
+          }
           if (out && out.walkableBounds) {
             room._walkableBounds = out.walkableBounds;
             // Sanity guard — every doorway position must be inside
@@ -2008,6 +2126,33 @@ export class Level {
     // two desks placed corner-to-corner, etc.) and to enforce a real
     // walking gap between props instead of letting them touch.
     const PROP_GAP = 0.45;
+    // Phase M step 4 — door clearance band. Cache every door's
+    // footprint + axis once per call so the prop-placement test
+    // can reject any candidate that lands within DOOR_WIDTH/2 + 1m
+    // along the door's axis. Stops props from spawning inside the
+    // doorway approach and pinning the player at the threshold.
+    const _doorBands = [];
+    {
+      const halfBand = DOOR_WIDTH / 2 + 1.0;
+      const inwardDepth = 2.5;   // band reach into both rooms
+      for (const o of this.obstacles) {
+        if (!o.userData?.isDoor) continue;
+        const dx = o.userData.cx, dz = o.userData.cz;
+        const geo = o.geometry?.parameters;
+        const horiz = (geo?.width || 0) > (geo?.depth || 0);
+        if (horiz) {
+          _doorBands.push({
+            minX: dx - halfBand, maxX: dx + halfBand,
+            minZ: dz - inwardDepth, maxZ: dz + inwardDepth,
+          });
+        } else {
+          _doorBands.push({
+            minX: dx - inwardDepth, maxX: dx + inwardDepth,
+            minZ: dz - halfBand, maxZ: dz + halfBand,
+          });
+        }
+      }
+    }
     const _propFootprintFree = (x, z, prop, yaw) => {
       const col = prop.collision || prop.footprint;
       if (!col) return true;
@@ -2022,6 +2167,16 @@ export class Level {
       }
       const halfW = w / 2 + PROP_GAP;
       const halfD = d / 2 + PROP_GAP;
+      // Door clearance — reject if the prop's footprint overlaps
+      // any door band.
+      for (let i = 0; i < _doorBands.length; i++) {
+        const db = _doorBands[i];
+        if (x + halfW <= db.minX) continue;
+        if (x - halfW >= db.maxX) continue;
+        if (z + halfD <= db.minZ) continue;
+        if (z - halfD >= db.maxZ) continue;
+        return false;
+      }
       for (const o of this.obstacles) {
         const ob = o.userData.collisionXZ;
         if (!ob) continue;
@@ -4678,6 +4833,22 @@ export class Level {
         if (!b) continue;
         if (b.maxX < stripMinX || b.minX > stripMaxX) continue;
         if (b.maxZ < stripMinZ || b.minZ > stripMaxZ) continue;
+        // Phase M step 3 — props that landed inside a door corridor
+        // (despite the prop-overlap pass + door-clearance band)
+        // get unconditionally cleared. Both the proxy collision is
+        // nulled AND the visible propGroup is hidden so a stray
+        // couch / bookshelf can't straddle a doorway.
+        if (o.userData.isProp) {
+          o.userData.collisionXZ = null;
+          o.visible = false;
+          if (o.userData.propGroup) o.userData.propGroup.visible = false;
+          continue;
+        }
+        // Phase M step 3 — shape-built walls (level_shapes.js) are
+        // cleared even when they share the outer-wall colour, so a
+        // shape template that misaligned an outer-wall segment
+        // can't seal off a doorway.
+        const isShapeWall = o.userData.kind === 'shape-wall';
         // Only outer walls that sit directly ON the door axis (the walls
         // that produced the gap) are preserved; outer walls further into
         // the room that happen to share the color still get cleared.
@@ -4685,7 +4856,7 @@ export class Level {
         const onDoorEdge = horizDoor
           ? Math.abs(((b.minZ + b.maxZ) / 2) - dz) < 0.8
           : Math.abs(((b.minX + b.maxX) / 2) - dx) < 0.8;
-        if (isOuterColor && onDoorEdge) continue;
+        if (!isShapeWall && isOuterColor && onDoorEdge) continue;
         o.userData.collisionXZ = null;
         o.visible = false;
         // Props register an invisible proxy mesh + a linked visible
@@ -4948,6 +5119,171 @@ export class Level {
     const result = { ok: failures.length === 0, failures };
     if (typeof window !== 'undefined') window.__lastInvariantCheck = result;
     return result;
+  }
+
+  // HARD walkability gate (Phase M) — flood-fills the same _collidesAt
+  // surface the player physics checks at runtime, so any "stuck on
+  // level 1" repro is caught at gen-time. Independent of
+  // checkPathwayInvariants which only inspects topology / walkableBounds
+  // unions; this one tests the actual physics geometry the player will
+  // walk on.
+  //
+  // Doors are treated as virtually open while the flood runs (their
+  // collisionXZ is stashed and nulled, then restored). Without this,
+  // locked doors would partition the level and report every gated room
+  // as unreachable, but those rooms are reachable once unlocked at
+  // runtime via the existing room-clear flow.
+  //
+  // For each room (including connectors + extraction): the flood must
+  // reach the room centre OR any sample in a 3×3 grid around the centre
+  // (covers cases where a centroid sits in a chamfered corner / on top
+  // of a dais).
+  //
+  // Returns { ok, unreachable: [{id, type, shape}], visitedCells, totalCells }.
+  checkRealWalkability() {
+    const STEP = 0.5;
+    const RAD  = 0.4;        // matches player collision radius @ 0.40m
+    if (!this.rooms.length) {
+      return { ok: true, unreachable: [], visitedCells: 0, totalCells: 0 };
+    }
+
+    // 1. Stash door collisions. Includes both locked + unlocked doors —
+    //    locked doors have a non-null collisionXZ that would otherwise
+    //    block the flood.
+    const stashed = [];
+    for (const o of this.obstacles) {
+      if (o.userData?.isDoor) {
+        stashed.push({ mesh: o, prev: o.userData.collisionXZ });
+        o.userData.collisionXZ = null;
+      }
+    }
+
+    let unreachable = [];
+    let visitedCells = 0;
+    let totalCells = 0;
+    try {
+      // 2. Build an aggregate level bbox covering every room (including
+      //    synthetic id < 0 connectors + extraction).
+      let minX = Infinity, maxX = -Infinity, minZ = Infinity, maxZ = -Infinity;
+      for (const r of this.rooms) {
+        if (!r.bounds) continue;
+        if (r.bounds.minX < minX) minX = r.bounds.minX;
+        if (r.bounds.maxX > maxX) maxX = r.bounds.maxX;
+        if (r.bounds.minZ < minZ) minZ = r.bounds.minZ;
+        if (r.bounds.maxZ > maxZ) maxZ = r.bounds.maxZ;
+      }
+      if (!isFinite(minX)) {
+        return { ok: true, unreachable: [], visitedCells: 0, totalCells: 0 };
+      }
+      // Pad so doorway corridors at edges fall inside the grid.
+      minX -= STEP; maxX += STEP; minZ -= STEP; maxZ += STEP;
+      const w = Math.ceil((maxX - minX) / STEP);
+      const d = Math.ceil((maxZ - minZ) / STEP);
+      totalCells = w * d;
+      const idx = (i, j) => i * d + j;
+      const visited = new Uint8Array(totalCells);
+
+      // 3. Seed BFS at the player spawn. If the spawn cell itself is
+      //    blocked (rare — e.g. spawn lands inside an elevator panel
+      //    geometry that's reset later), nudge one cell in the +Z
+      //    direction so BFS starts from a walkable seed.
+      const sp = this.playerSpawn;
+      let si = Math.max(0, Math.min(w - 1, Math.floor((sp.x - minX) / STEP)));
+      let sj = Math.max(0, Math.min(d - 1, Math.floor((sp.z - minZ) / STEP)));
+      const seedAt = (i, j) => {
+        const cx = minX + (i + 0.5) * STEP;
+        const cz = minZ + (j + 0.5) * STEP;
+        return !this._collidesAt(cx, cz, RAD);
+      };
+      if (!seedAt(si, sj)) {
+        // Try a 5×5 window around the spawn for an open seed.
+        let found = false;
+        for (let oi = -2; oi <= 2 && !found; oi++) {
+          for (let oj = -2; oj <= 2 && !found; oj++) {
+            const i = si + oi, j = sj + oj;
+            if (i < 0 || i >= w || j < 0 || j >= d) continue;
+            if (seedAt(i, j)) { si = i; sj = j; found = true; }
+          }
+        }
+      }
+
+      const queue = [[si, sj]];
+      visited[idx(si, sj)] = 1;
+      visitedCells = 1;
+      while (queue.length) {
+        const [i, j] = queue.shift();
+        const dirs = [[1,0],[-1,0],[0,1],[0,-1]];
+        for (const [di, dj] of dirs) {
+          const ni = i + di, nj = j + dj;
+          if (ni < 0 || ni >= w || nj < 0 || nj >= d) continue;
+          if (visited[idx(ni, nj)]) continue;
+          const cx = minX + (ni + 0.5) * STEP;
+          const cz = minZ + (nj + 0.5) * STEP;
+          if (this._collidesAt(cx, cz, RAD)) continue;
+          visited[idx(ni, nj)] = 1;
+          visitedCells++;
+          queue.push([ni, nj]);
+        }
+      }
+
+      // 4. Check every room — centre + 3×3 sample around centre.
+      const sampleReached = (room) => {
+        const samples = [
+          [room.cx, room.cz],
+          [room.cx - 1.5, room.cz],
+          [room.cx + 1.5, room.cz],
+          [room.cx, room.cz - 1.5],
+          [room.cx, room.cz + 1.5],
+          [room.cx - 1.5, room.cz - 1.5],
+          [room.cx + 1.5, room.cz - 1.5],
+          [room.cx - 1.5, room.cz + 1.5],
+          [room.cx + 1.5, room.cz + 1.5],
+        ];
+        for (const [sx, sz] of samples) {
+          const ci = Math.floor((sx - minX) / STEP);
+          const cj = Math.floor((sz - minZ) / STEP);
+          if (ci < 0 || ci >= w || cj < 0 || cj >= d) continue;
+          if (visited[idx(ci, cj)]) return true;
+        }
+        return false;
+      };
+      for (const r of this.rooms) {
+        if (!r.bounds) continue;
+        if (!sampleReached(r)) {
+          unreachable.push({ id: r.id, type: r.type, shape: r.shape || 'rect' });
+        }
+      }
+
+      // 5. Encounter spawns.
+      for (const r of this.rooms) {
+        const esp = r._encounterSpawn;
+        if (!esp) continue;
+        const ci = Math.floor((esp.x - minX) / STEP);
+        const cj = Math.floor((esp.z - minZ) / STEP);
+        let ok = false;
+        for (let oi = -1; oi <= 1 && !ok; oi++) {
+          for (let oj = -1; oj <= 1 && !ok; oj++) {
+            const i = ci + oi, j = cj + oj;
+            if (i < 0 || i >= w || j < 0 || j >= d) continue;
+            if (visited[idx(i, j)]) ok = true;
+          }
+        }
+        if (!ok) {
+          unreachable.push({ id: r.id, type: 'encounter-spawn', shape: r.shape || 'rect' });
+        }
+      }
+    } finally {
+      // 6. Restore door collisions.
+      for (const s of stashed) s.mesh.userData.collisionXZ = s.prev;
+      this._dirtySolid();
+    }
+
+    return {
+      ok: unreachable.length === 0,
+      unreachable,
+      visitedCells,
+      totalCells,
+    };
   }
 
   // Pass 1C invariants — outdoor / window / connector / ledge sanity.
