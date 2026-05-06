@@ -5469,18 +5469,19 @@ export class Level {
           if (o.userData.propGroup) o.userData.propGroup.visible = false;
           continue;
         }
-        // Phase M step 3 — shape-built walls (level_shapes.js) are
-        // cleared even when they share the outer-wall colour, so a
-        // shape template that misaligned an outer-wall segment
-        // can't seal off a doorway.
-        const isShapeWall = o.userData.kind === 'shape-wall';
+        // Shape-built walls (level_shapes.js _addRectPerimeter) used
+        // to be unconditionally cleared. That over-cleared them: a
+        // shape room's perimeter builds proper flanking segments
+        // around every doorway, and clearing the flanks left gaps
+        // the player could slip through (the keycard-door bug).
+        // Now shape walls follow the same wallSpansGap rule as
+        // rect walls — flanks survive, anything actually straddling
+        // the door's passable gap still gets nulled.
+        //
         // Extraction-room walls are flanking segments around their
         // own door — they MUST stay collidable, otherwise the
         // player walks straight through the chamber wall instead of
-        // through the door panel. Preserving them is conditional on
-        // them not spanning the door's passable gap (the same
-        // wallSpansGap test below catches a misbuilt full-length
-        // chamber wall and clears it).
+        // through the door panel.
         const isExtractionWall = !!o.userData?.isExtractionWall;
         // Outer walls that sit directly ON the door axis are
         // candidates for preservation — they're typically the
@@ -5513,7 +5514,7 @@ export class Level {
         const wallSpansGap = horizDoor
           ? (b.minX <= dx - halfDoorGap + 0.1 && b.maxX >= dx + halfDoorGap - 0.1)
           : (b.minZ <= dz - halfDoorGap + 0.1 && b.maxZ >= dz + halfDoorGap - 0.1);
-        if (!isShapeWall && isOuterColor && onDoorEdge && !wallSpansGap) continue;
+        if (isOuterColor && onDoorEdge && !wallSpansGap) continue;
         o.userData.collisionXZ = null;
         o.visible = false;
         // Props register an invisible proxy mesh + a linked visible
