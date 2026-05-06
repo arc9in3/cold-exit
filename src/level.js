@@ -1160,6 +1160,12 @@ export class Level {
       // Encounters never get assigned to an elevator room, but
       // belt-and-braces.
       if (ud.isElevatorWall) { keptObstacles.push(m); continue; }
+      // Shape-template "edge" features — railings (courtyard's
+      // parapet, plaza/catwalk safety rails). Without these the
+      // courtyard's no-wall side becomes a floating gap. The
+      // y < 1.0 height meant the perimeter-tall check below would
+      // remove them. Tag-based keep handles it.
+      if (ud.isRailing || ud.isFallGuard) { keptObstacles.push(m); continue; }
       // Columns / pillars — explicitly stripped (any layout that
       // produced columns now leaves the encounter floor clean).
       // _addColumn uses real meshes, but `pillars-grid` etc.
