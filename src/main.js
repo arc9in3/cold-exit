@@ -1578,7 +1578,7 @@ function _completeContractWithCelebration(def, ac) {
   const paidAnything = result.chips > 0 || result.marks > 0
     || result.sigils > 0 || completionRank > 0;
   if (paidAnything) {
-    _showContractCompletionPresentation(def, result, completionRank, balanceBefore);
+    _queueContractReward(def, result, completionRank, balanceBefore);
   } else {
     transientHudMsg(`Contract complete`, 2.0);
   }
@@ -1615,6 +1615,175 @@ function _checkObjectiveContractClaim() {
   } catch (e) { console.warn('[contract-objective-claim]', e); }
 }
 
+// Queued contract rewards the player hasn't viewed yet. Each
+// completion pushes onto the tail; clicking the bottom toast OR the
+// HUD pip drains the head and plays the full celebration. Mirrors
+// the skill-point pattern: brief moment-of-earn toast + persistent
+// click-to-view pip until the player engages with it.
+const _pendingContractRewards = [];
+
+function _queueContractReward(def, result, completionRank, balanceBefore) {
+  _pendingContractRewards.push({ def, result, completionRank, balanceBefore });
+  _showContractCompleteToast(def, result, completionRank);
+  _refreshContractRewardPip();
+}
+
+// Bottom-of-screen toast that surfaces immediately on completion.
+// Sits above the quickbar so the player sees it without their HUD
+// being covered. Auto-dismisses after ~5.5s; clicking it opens the
+// full celebration AND drains the queue head. Glanceable summary
+// fits on one line: contract name + total rewards.
+function _showContractCompleteToast(def, result, completionRank) {
+  if (!document.getElementById('contract-toast-styles')) {
+    const ss = document.createElement('style');
+    ss.id = 'contract-toast-styles';
+    ss.textContent = `
+      .contract-toast {
+        position: fixed; left: 50%; bottom: 90px;
+        transform: translateX(-50%);
+        z-index: 25;
+        min-width: 380px; max-width: 720px;
+        padding: 12px 22px;
+        background: linear-gradient(180deg, #2a2418 0%, #1a1408 100%);
+        border: 2px solid #f2c060; border-radius: 6px;
+        color: #f2e7c9;
+        font: 13px 'Inter', system-ui, sans-serif;
+        letter-spacing: 0.5px;
+        cursor: pointer;
+        box-shadow: 0 0 36px rgba(242, 192, 96, 0.55),
+                    0 6px 24px rgba(0, 0, 0, 0.65);
+        animation: ct-in 360ms cubic-bezier(0.22, 1.2, 0.36, 1) both;
+        display: flex; align-items: center; gap: 18px;
+      }
+      .contract-toast.dismissing { animation: ct-out 300ms ease-in both; }
+      @keyframes ct-in {
+        from { opacity: 0; transform: translateX(-50%) translateY(28px) scale(0.94); }
+        60%  { opacity: 1; transform: translateX(-50%) translateY(0)    scale(1.04); }
+        to   { opacity: 1; transform: translateX(-50%) translateY(0)    scale(1); }
+      }
+      @keyframes ct-out {
+        to { opacity: 0; transform: translateX(-50%) translateY(12px) scale(0.96); }
+      }
+      .contract-toast .ct-eyebrow {
+        color: #f2c060; font-weight: 800;
+        font-size: 10px; letter-spacing: 3.5px; text-transform: uppercase;
+        text-shadow: 0 0 10px rgba(242, 192, 96, 0.55);
+      }
+      .contract-toast .ct-title {
+        font-size: 16px; font-weight: 800; color: #ffe8ad;
+        letter-spacing: 1.2px; line-height: 1.2;
+        margin-top: 2px;
+      }
+      .contract-toast .ct-rewards {
+        margin-top: 4px;
+        font-size: 12px; color: #c9a87a;
+        letter-spacing: 0.8px;
+      }
+      .contract-toast .ct-rewards b { color: #f2c060; font-weight: 800; }
+      .contract-toast .ct-cta {
+        margin-left: auto;
+        font-size: 11px; font-weight: 800; letter-spacing: 2px;
+        color: #0c1014; background: #f2c060;
+        padding: 8px 14px; border-radius: 3px;
+        text-transform: uppercase;
+        white-space: nowrap;
+      }
+      .contract-toast:hover .ct-cta { background: #ffd070; }
+      /* Persistent HUD pip — sits below the skill-point pip when both
+         are active. Pulses gently so it pulls a glance without
+         shouting. Click → drains the queue head + plays the full
+         celebration. */
+      #hud-contract-pip {
+        position: fixed; top: 102px; right: 24px;
+        padding: 6px 12px;
+        background: rgba(60, 40, 16, 0.85);
+        border: 1px solid #f2c060; border-radius: 4px;
+        color: #ffe8ad;
+        font: 12px 'Inter', system-ui, sans-serif;
+        letter-spacing: 1px; text-transform: uppercase;
+        z-index: 18;
+        cursor: pointer;
+        box-shadow: 0 0 12px rgba(242, 192, 96, 0.45);
+        animation: cp-pulse 2400ms ease-in-out infinite;
+      }
+      #hud-contract-pip:hover {
+        background: rgba(80, 56, 24, 0.95);
+        box-shadow: 0 0 18px rgba(242, 192, 96, 0.7);
+      }
+      @keyframes cp-pulse {
+        0%, 100% { box-shadow: 0 0 12px rgba(242, 192, 96, 0.45); }
+        50%      { box-shadow: 0 0 22px rgba(242, 192, 96, 0.7); }
+      }
+    `;
+    document.head.appendChild(ss);
+  }
+
+  // Don't stack a second toast on top of an existing one — replace
+  // it. The pip count still tracks the queue depth so a follow-up
+  // contract isn't "lost," and clicking the pip lets the player
+  // walk through them in order.
+  const existing = document.querySelector('.contract-toast');
+  if (existing) {
+    try { document.body.removeChild(existing); } catch (_) {}
+  }
+
+  const toast = document.createElement('div');
+  toast.className = 'contract-toast';
+  const rewardBits = [];
+  if (result.chips > 0)   rewardBits.push(`<b>+${result.chips.toLocaleString()}c</b>`);
+  if (completionRank > 0) rewardBits.push(`<b>+${completionRank} rp</b>`);
+  if (result.marks > 0)   rewardBits.push(`<b>+${result.marks} m</b>`);
+  if (result.sigils > 0)  rewardBits.push(`<b>+${result.sigils} s</b>`);
+  toast.innerHTML = `
+    <div class="ct-text">
+      <div class="ct-eyebrow">Contract Complete</div>
+      <div class="ct-title">${(def.label || def.id).toUpperCase()}</div>
+      <div class="ct-rewards">${rewardBits.join(' · ')}</div>
+    </div>
+    <div class="ct-cta">View ▶</div>
+  `;
+  const dismiss = () => {
+    if (toast.classList.contains('dismissing')) return;
+    toast.classList.add('dismissing');
+    setTimeout(() => { try { document.body.removeChild(toast); } catch (_) {} }, 320);
+  };
+  toast.addEventListener('click', () => {
+    dismiss();
+    _viewLatestContractReward();
+  });
+  document.body.appendChild(toast);
+  setTimeout(dismiss, 5500);
+  try { sfx?.uiAccept?.(); } catch (_) {}
+}
+
+// Persistent pip in the HUD that stays until the player views the
+// reward. Click → drains the queue head + plays the celebration.
+const _contractRewardPipEl = (() => {
+  const el = document.createElement('div');
+  el.id = 'hud-contract-pip';
+  el.style.display = 'none';
+  el.addEventListener('click', () => _viewLatestContractReward());
+  document.body.appendChild(el);
+  return el;
+})();
+function _refreshContractRewardPip() {
+  const n = _pendingContractRewards.length;
+  if (n > 0) {
+    _contractRewardPipEl.textContent = n === 1
+      ? '🏷 Contract reward · view'
+      : `🏷 ${n} contract rewards · view`;
+    _contractRewardPipEl.style.display = 'block';
+  } else {
+    _contractRewardPipEl.style.display = 'none';
+  }
+}
+function _viewLatestContractReward() {
+  const entry = _pendingContractRewards.shift();
+  _refreshContractRewardPip();
+  if (!entry) return;
+  _showContractCompletionPresentation(entry.def, entry.result, entry.completionRank, entry.balanceBefore);
+}
+
 // Full-screen contract-completion presentation. Renders the wanted-
 // card the player accepted, then walks through:
 //   1. Card slides in
@@ -1624,9 +1793,9 @@ function _checkObjectiveContractClaim() {
 //   5. New balance flashes
 //   6. Auto-dismiss + fade
 //
-// Non-blocking — fires-and-forgets. Game keeps running underneath
-// (extraction shooter — pausing mid-run is hostile + breaks coop).
-// Auto-dismisses after ~4.5s; clicking the overlay dismisses early.
+// Now opened on demand via the bottom toast or the HUD pip — see
+// _queueContractReward / _viewLatestContractReward. Non-blocking,
+// click anywhere on the frame to dismiss early.
 function _showContractCompletionPresentation(def, result, completionRank, balanceBefore) {
   try {
     if (!document.getElementById('contract-celebration-styles')) {
@@ -14052,6 +14221,13 @@ function _makeGhostMaterial() {
     `,
     transparent: true,
     depthWrite: false,
+    // Ghosts are a "see through walls" tell — the player should always
+    // be able to read aggro silhouettes regardless of cover. Disabling
+    // the depth test means walls in front of the enemy don't occlude
+    // the ghost. (User 2026-05-06: "enemy ghosts should always draw
+    // through walls.") Pair with the high renderOrder set in
+    // _setEnemyGhost so the ghost paints last and reads cleanly on top.
+    depthTest: false,
     blending: THREE.NormalBlending,
     side: THREE.FrontSide,
   });
