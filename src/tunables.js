@@ -320,8 +320,18 @@ export const tunables = {
   // the legacy quadrant-feel spread behaviour.
   aim: {
     pixelMode: true,
-    enemyTightenSingle: 0.20,
-    enemyTightenPellet: 0.50,
+    // 2026-05-06: bumped body-hover tighten 0.20 → 0.10 — user
+    // reported low-bloom body shots felt unreliable. Cone now
+    // collapses to 10% baseline when cursor is on enemy, so a
+    // first-shot body hit at typical engagement range almost
+    // always lands. Spread variance still exists (the user
+    // explicitly accepts that), just no longer wide enough to
+    // randomly miss the silhouette. Pellet tighten also nudged
+    // 0.50 → 0.40 so shotgun pattern clusters more on the body.
+    // No aim-snap is performed for body hits — the bullet still
+    // goes where the cursor points, the cone is just tighter.
+    enemyTightenSingle: 0.10,
+    enemyTightenPellet: 0.40,
     // Head-aim assist. When the cursor is within `headAssistRadiusPx`
     // pixels of an enemy head's screen-space center, snap the aim
     // point onto that head (and stamp zone='head' for the damage
@@ -341,7 +351,11 @@ export const tunables = {
     // gets an additional tightening multiplier on top of the existing
     // pixel-mode enemyTighten. Headshots are the highest-skill outcome
     // and should reward consistent aim with consistent landings.
-    headHoverSpreadMult: 0.55,
+    // 2026-05-06: nudged 0.55 → 0.45 — user wanted a small head bump
+    // alongside the larger body tighten. Combined with enemyTightenSingle
+    // (0.10) a stable head-hover shot now lands at 4.5% of baseline
+    // cone — effectively pixel-locked on the head pixel.
+    headHoverSpreadMult: 0.45,
   },
   medkit: {
     smallHeal: 30,
