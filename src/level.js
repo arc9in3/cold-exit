@@ -865,16 +865,21 @@ export class Level {
           // The extraction door drops INTO the boss room's existing
           // perimeter wall — the boss's perimeter (rect or shape) was
           // already built without knowing this door would be added.
-          // Re-run the corridor clearer so the wall sections that
-          // straddle the door's gap get their collision nulled. The
-          // earlier _clearDoorCorridors at line ~776 ran before the
-          // extraction door existed, so it didn't know to clear
-          // around it. Without this pass the boss-side wall stays
-          // solid across the doorway and the player can't enter the
-          // extraction chamber even after revealExit() unlocks the
-          // door, which the walkability gate flagged as an
-          // "unreachable extraction" room every level.
+          // The original wall there was a single full-edge solid wall
+          // (boss had no chain neighbour on that side). Replace it
+          // with two short flanking segments around the door so the
+          // boss arena still reads as enclosed during the fight: the
+          // door panel sits in the middle, flanking walls on either
+          // side, and only the door drops on revealExit.
+          this._splitBossWallForExtractionDoor(bossRoom, exit);
+          // Sweep interior props / columns / cover that landed in
+          // the new door corridor. The split-wall pass above
+          // already handled the perimeter wall itself; this catches
+          // anything else (boss-room interior cover that happened
+          // to land near the chamber edge).
           this._clearDoorCorridors();
+          // Defensive sweep — anything still straddling the door
+          // gap (interior props, columns, etc.) gets nulled.
           this._repairDoorOverlaps();
         }
       }
@@ -5314,6 +5319,116 @@ export class Level {
     spawn(x1 + thick / 2, (z0 + z1) / 2, thick, depth);              // east
   }
 
+  // Replace the boss room's solid edge wall (on the side the
+  // extraction chamber attaches to) with two flanking segments that
+  // hug the door. Without this, the entire boss-side edge would
+  // stay rendered as one wall straddling the door — leading to the
+  // playtest report "boss exit wall doesn't go down". The chamber
+  // already has its own flanking walls; this method does the same
+  // for the boss side. Hides the original wall (zero-scales the
+  // instancer slot + nulls collision) and adds two new short
+  // flanking obstacles. Both flanking segments stay solid forever;
+  // only the door panel drops on revealExit().
+  _splitBossWallForExtractionDoor(bossRoom, exit) {
+    if (!bossRoom || !exit || !exit.doorMesh || !exit.dir) return;
+    const door = exit.doorMesh;
+    const dx = door.userData.cx;
+    const dz = door.userData.cz;
+    const geo = door.geometry?.parameters;
+    if (!geo) return;
+    const horizDoor = (geo.width || 0) > (geo.depth || 0);
+    const halfDoorGap = DOOR_WIDTH / 2;
+    const b = bossRoom.bounds;
+    // Find the perimeter wall on the boss-side edge facing the
+    // chamber. dir is the direction the chamber sits relative to
+    // the boss, so the boss's facing wall is along that side.
+    const dir = exit.dir;
+    let target = null;
+    let bestScore = Infinity;
+    for (const o of this.obstacles) {
+      if (o.userData.isDoor) continue;
+      if (o.userData.isProp) continue;
+      if (!o.userData?.collisionXZ) continue;
+      // Filter out interior cover / columns — perimeter walls run
+      // along the room edge; we match by axis position + length.
+      const cb = o.userData.collisionXZ;
+      const wMidX = (cb.minX + cb.maxX) / 2;
+      const wMidZ = (cb.minZ + cb.maxZ) / 2;
+      const wW = cb.maxX - cb.minX;
+      const wD = cb.maxZ - cb.minZ;
+      let onEdge = false;
+      let score = Infinity;
+      if (dir === 'east' && Math.abs(wMidX - b.maxX) < 1.0 && wD > wW) {
+        onEdge = true;
+        score = Math.abs(wMidX - b.maxX) + Math.abs(wMidZ - dz);
+      } else if (dir === 'west' && Math.abs(wMidX - b.minX) < 1.0 && wD > wW) {
+        onEdge = true;
+        score = Math.abs(wMidX - b.minX) + Math.abs(wMidZ - dz);
+      } else if (dir === 'north' && Math.abs(wMidZ - b.minZ) < 1.0 && wW > wD) {
+        onEdge = true;
+        score = Math.abs(wMidZ - b.minZ) + Math.abs(wMidX - dx);
+      } else if (dir === 'south' && Math.abs(wMidZ - b.maxZ) < 1.0 && wW > wD) {
+        onEdge = true;
+        score = Math.abs(wMidZ - b.maxZ) + Math.abs(wMidX - dx);
+      }
+      if (!onEdge) continue;
+      // The wall must actually intersect the door's gap span;
+      // otherwise it's already a flanking segment that we should
+      // leave alone.
+      const spans = horizDoor
+        ? (cb.minX <= dx - halfDoorGap + 0.1 && cb.maxX >= dx + halfDoorGap - 0.1)
+        : (cb.minZ <= dz - halfDoorGap + 0.1 && cb.maxZ >= dz + halfDoorGap - 0.1);
+      if (!spans) continue;
+      if (score < bestScore) {
+        bestScore = score;
+        target = o;
+      }
+    }
+    if (!target) return;
+    // Hide the original wall (zero-scale via instancer if applicable;
+    // .visible setter handles both proxy + real-mesh paths).
+    const old = target.userData.collisionXZ;
+    target.userData.collisionXZ = null;
+    target.visible = false;
+    // Build two flanking segments. Use the original wall's outer
+    // axis + length minus the door gap.
+    if (horizDoor) {
+      // Wall runs along X (perpendicular axis = Z). Wall midZ
+      // matches old wall, X span gets carved around the door.
+      const wMidZ = (old.minZ + old.maxZ) / 2;
+      const wD = old.maxZ - old.minZ;
+      const leftFrom = old.minX, leftTo = dx - halfDoorGap;
+      const rightFrom = dx + halfDoorGap, rightTo = old.maxX;
+      if (leftTo > leftFrom + 0.05) {
+        const m = this._addObstacle((leftFrom + leftTo) / 2, WALL_HEIGHT / 2, wMidZ,
+          leftTo - leftFrom, WALL_HEIGHT, wD, OUTER_WALL_COLOR);
+        if (m) m.userData.kind = m.userData.kind || 'boss-flank';
+      }
+      if (rightTo > rightFrom + 0.05) {
+        const m = this._addObstacle((rightFrom + rightTo) / 2, WALL_HEIGHT / 2, wMidZ,
+          rightTo - rightFrom, WALL_HEIGHT, wD, OUTER_WALL_COLOR);
+        if (m) m.userData.kind = m.userData.kind || 'boss-flank';
+      }
+    } else {
+      // Wall runs along Z. Carve Z span around the door.
+      const wMidX = (old.minX + old.maxX) / 2;
+      const wW = old.maxX - old.minX;
+      const topFrom = old.minZ, topTo = dz - halfDoorGap;
+      const botFrom = dz + halfDoorGap, botTo = old.maxZ;
+      if (topTo > topFrom + 0.05) {
+        const m = this._addObstacle(wMidX, WALL_HEIGHT / 2, (topFrom + topTo) / 2,
+          wW, WALL_HEIGHT, topTo - topFrom, OUTER_WALL_COLOR);
+        if (m) m.userData.kind = m.userData.kind || 'boss-flank';
+      }
+      if (botFrom < botTo - 0.05) {
+        const m = this._addObstacle(wMidX, WALL_HEIGHT / 2, (botFrom + botTo) / 2,
+          wW, WALL_HEIGHT, botTo - botFrom, OUTER_WALL_COLOR);
+        if (m) m.userData.kind = m.userData.kind || 'boss-flank';
+      }
+    }
+    this._dirtySolid();
+  }
+
   _clearDoorCorridors() {
     const doors = this.obstacles.filter(o => o.userData.isDoor);
     // Even-wider corridor than before — 1m extra on each side of the door
@@ -5359,6 +5474,14 @@ export class Level {
         // shape template that misaligned an outer-wall segment
         // can't seal off a doorway.
         const isShapeWall = o.userData.kind === 'shape-wall';
+        // Extraction-room walls are flanking segments around their
+        // own door — they MUST stay collidable, otherwise the
+        // player walks straight through the chamber wall instead of
+        // through the door panel. Preserving them is conditional on
+        // them not spanning the door's passable gap (the same
+        // wallSpansGap test below catches a misbuilt full-length
+        // chamber wall and clears it).
+        const isExtractionWall = !!o.userData?.isExtractionWall;
         // Outer walls that sit directly ON the door axis are
         // candidates for preservation — they're typically the
         // flanking segments _buildRoomPerimeter built around the
@@ -5370,7 +5493,19 @@ export class Level {
         // must be cleared. Without this check rect boss rooms
         // ended up with a solid wall behind the open extraction
         // door.
-        const isOuterColor = o.material?.color?.getHex?.() === OUTER_WALL_COLOR;
+        //
+        // Color-based check now accepts BOTH level.js's biome-
+        // dynamic OUTER_WALL_COLOR and extraction_room.js's
+        // hard-coded 0x1a1e24. Earlier this only matched the level
+        // value — chamber flanking walls use the extraction-room
+        // constant and were silently cleared, leaving a hole the
+        // player could walk around the door through. Tagged
+        // isExtractionWall above is the more reliable signal but
+        // we keep the colour test for legacy outer-wall flanking.
+        const wallColor = o.material?.color?.getHex?.();
+        const isOuterColor = wallColor === OUTER_WALL_COLOR
+          || wallColor === 0x1a1e24
+          || isExtractionWall;
         const onDoorEdge = horizDoor
           ? Math.abs(((b.minZ + b.maxZ) / 2) - dz) < 0.8
           : Math.abs(((b.minX + b.maxX) / 2) - dx) < 0.8;
