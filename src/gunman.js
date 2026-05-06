@@ -1998,20 +1998,79 @@ export class GunmanManager {
         g.idleStage = 'suspicious';
       } else {
         g.idleStage = 'patrol';
-        // PATROL — wander within a small radius of the spawn point.
-        // Idle enemies stay in their spawn room. The previous between-
-        // room drift (25% chance to wander to a neighbour's centre with
-        // no door-aware pathing) made everyone pile up at the first
-        // choke point on level start. Cross-room movement happens when
-        // they're *alerted* — door-graph pathing lives in that path.
+        // PATROL — wander home area, optionally roaming into a
+        // connected room via the door graph.
+        //
+        // Roamers are flagged at spawn (~35% of non-defenders); each
+        // re-roll picks either a home-area waypoint OR a neighbor
+        // room's centre. When the target is in a different room the
+        // gunman walks to the door first, crosses, then continues to
+        // the target. After dwelling in the neighbor briefly the
+        // patrolT cycle re-rolls — sometimes picking another
+        // neighbor, sometimes returning home — so a roamer organically
+        // moves through 2-3 connected rooms over a minute or so.
+        // Defenders stay rooted to their post.
+        if (g._isRoamer === undefined) {
+          g._isRoamer = (g.role !== 'defender') && (Math.random() < 0.35);
+        }
         g.patrolT -= dt;
         if (g.patrolT <= 0) {
           g.patrolT = 2 + Math.random() * 3;
-          g.patrolTargetX = g.homeX + (Math.random() - 0.5) * 6;
-          g.patrolTargetZ = g.homeZ + (Math.random() - 0.5) * 6;
+          // Roll a new target. For roamers in their original spawn
+          // room, ~50% chance to pick a neighbor room's centre as
+          // the next destination. Already-roaming gunmen (currently
+          // outside their spawn room) tend to head back home.
+          let pickedNeighbor = false;
+          if (g._isRoamer && ctx.level && ctx.level.rooms) {
+            const here = ctx.level.roomAt(g.group.position.x, g.group.position.z);
+            const hereId = here ? here.id : g.roomId;
+            const room = ctx.level.rooms[hereId];
+            if (room && room.neighbors && room.neighbors.length
+                && hereId === g.roomId
+                && Math.random() < 0.5) {
+              const n = room.neighbors[Math.floor(Math.random() * room.neighbors.length)];
+              const other = ctx.level.rooms[n.otherId];
+              if (other && other.bounds) {
+                g.patrolTargetX = other.cx + (Math.random() - 0.5) * 4;
+                g.patrolTargetZ = other.cz + (Math.random() - 0.5) * 4;
+                g._patrolTargetRoomId = other.id;
+                pickedNeighbor = true;
+              }
+            }
+          }
+          if (!pickedNeighbor) {
+            g.patrolTargetX = g.homeX + (Math.random() - 0.5) * 6;
+            g.patrolTargetZ = g.homeZ + (Math.random() - 0.5) * 6;
+            g._patrolTargetRoomId = g.roomId;
+          }
         }
-        const tx = g.patrolTargetX - g.group.position.x;
-        const tz = g.patrolTargetZ - g.group.position.z;
+        // Compute walk direction. If the patrol target is in a
+        // different room than the gunman, route through a door first.
+        let stepX = g.patrolTargetX, stepZ = g.patrolTargetZ;
+        if (typeof g._patrolTargetRoomId === 'number'
+            && ctx.level && typeof ctx.level.pathDoorsFrom === 'function') {
+          const here = ctx.level.roomAt(g.group.position.x, g.group.position.z);
+          const hereId = here ? here.id : g.roomId;
+          if (hereId !== g._patrolTargetRoomId) {
+            // Cache the next door so we don't re-query every frame.
+            g._roamPathCache = g._roamPathCache || { t: 0, toId: -1, door: null };
+            g._roamPathCache.t -= dt;
+            if (g._roamPathCache.t <= 0
+                || g._roamPathCache.toId !== g._patrolTargetRoomId) {
+              g._roamPathCache.t = 1.5 + Math.random() * 0.5;
+              g._roamPathCache.toId = g._patrolTargetRoomId;
+              const doors = ctx.level.pathDoorsFrom(hereId, g._patrolTargetRoomId);
+              g._roamPathCache.door = (doors && doors.length) ? doors[0] : null;
+            }
+            const nd = g._roamPathCache.door;
+            if (nd && nd.userData) {
+              stepX = nd.userData.cx;
+              stepZ = nd.userData.cz;
+            }
+          }
+        }
+        const tx = stepX - g.group.position.x;
+        const tz = stepZ - g.group.position.z;
         const td = Math.hypot(tx, tz);
         if (td > 0.4) {
           const pdir = { x: tx / td, z: tz / td };
