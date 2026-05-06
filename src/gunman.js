@@ -2044,15 +2044,68 @@ export class GunmanManager {
         if (g._isRoamer === undefined) {
           g._isRoamer = (g.role !== 'defender') && (Math.random() < 0.35);
         }
+        // Defender pre-positioning — first patrol tick where the
+        // gunman is in their home room, pick a GUARD POST 5m back
+        // from a randomly-chosen door, facing the door. NOT a cover
+        // anchor (findCoverFor puts you BEHIND a prop with the prop
+        // blocking LoS from you to the doorway — defenders parked
+        // there literally can't see the player walk in, which broke
+        // aggro entirely in playtest). The post is in open floor
+        // with clear LoS to the door; once alerted the alerted-state
+        // cover seek picks proper cover relative to the actual
+        // player pos.
+        if (g.role === 'defender' && !g._homeCoverPos
+            && ctx.level && ctx.level.rooms && typeof g.roomId === 'number') {
+          const room = ctx.level.rooms[g.roomId];
+          if (room && room.neighbors && room.neighbors.length) {
+            const n = room.neighbors[Math.floor(Math.random() * room.neighbors.length)];
+            const other = ctx.level.rooms[n.otherId];
+            if (other && typeof other.cx === 'number'
+                && typeof room.cx === 'number') {
+              // Direction from door (≈ shared wall midpoint between
+              // room.cx and other.cx) inward into this room, away
+              // from the neighbor. Walk 5m in along that axis.
+              const inX = room.cx - other.cx;
+              const inZ = room.cz - other.cz;
+              const inL = Math.hypot(inX, inZ) || 1;
+              const distFromDoor = 5.0;
+              // Door is at (other.cx + inX/inL * (room.cx - other.cx) / 2)
+              // — roughly the midpoint along the axis. We just step
+              // 5m INTO the room from the neighbor's centre line.
+              let postX = other.cx + (inX / inL) * (Math.hypot(inX, inZ) * 0.5 + distFromDoor);
+              let postZ = other.cz + (inZ / inL) * (Math.hypot(inX, inZ) * 0.5 + distFromDoor);
+              // Jitter ±1.5m so defenders sharing a door don't stack
+              // on the same spot.
+              postX += (Math.random() - 0.5) * 3;
+              postZ += (Math.random() - 0.5) * 3;
+              // Clamp to room interior (1.5m from each wall).
+              if (room.bounds) {
+                postX = Math.max(room.bounds.minX + 1.5, Math.min(room.bounds.maxX - 1.5, postX));
+                postZ = Math.max(room.bounds.minZ + 1.5, Math.min(room.bounds.maxZ - 1.5, postZ));
+              }
+              g._homeCoverPos = { x: postX, z: postZ };
+              g._homeCoverFaceX = other.cx;
+              g._homeCoverFaceZ = other.cz;
+            }
+          }
+        }
         g.patrolT -= dt;
         if (g.patrolT <= 0) {
           g.patrolT = 2 + Math.random() * 3;
-          // Roll a new target. For roamers in their original spawn
-          // room, ~50% chance to pick a neighbor room's centre as
-          // the next destination. Already-roaming gunmen (currently
-          // outside their spawn room) tend to head back home.
+          // Defenders with an established home cover spot don't
+          // wander — they re-target the spot every cycle so a small
+          // collision deflection doesn't drift them off-post.
           let pickedNeighbor = false;
-          if (g._isRoamer && ctx.level && ctx.level.rooms) {
+          if (g.role === 'defender' && g._homeCoverPos) {
+            // Tiny ±0.3m jitter so multiple defenders sharing the
+            // same anchor area don't stack in one spot.
+            g.patrolTargetX = g._homeCoverPos.x + (Math.random() - 0.5) * 0.6;
+            g.patrolTargetZ = g._homeCoverPos.z + (Math.random() - 0.5) * 0.6;
+            g._patrolTargetRoomId = g.roomId;
+          } else if (g._isRoamer && ctx.level && ctx.level.rooms) {
+            // Roller re-roll. ~50% chance to pick a neighbor room's
+            // centre as the next destination. Already-roaming gunmen
+            // (currently outside their spawn room) tend to head back.
             const here = ctx.level.roomAt(g.group.position.x, g.group.position.z);
             const hereId = here ? here.id : g.roomId;
             const room = ctx.level.rooms[hereId];
@@ -2069,7 +2122,7 @@ export class GunmanManager {
               }
             }
           }
-          if (!pickedNeighbor) {
+          if (!pickedNeighbor && g.role !== 'defender') {
             g.patrolTargetX = g.homeX + (Math.random() - 0.5) * 6;
             g.patrolTargetZ = g.homeZ + (Math.random() - 0.5) * 6;
             g._patrolTargetRoomId = g.roomId;
@@ -2113,6 +2166,21 @@ export class GunmanManager {
             tunables.ai.collisionRadius);
           g.group.position.x = res.x;
           g.group.position.z = res.z;
+        } else if (g.role === 'defender'
+            && typeof g._homeCoverFaceX === 'number') {
+          // At post — slowly turn to face the watched door so the
+          // player sees defenders aimed at the entry instead of
+          // staring at a wall. Lerp the yaw at ~0.4 rad/s; doesn't
+          // need to be snappy because there's no shot pressure yet.
+          const fx = g._homeCoverFaceX - g.group.position.x;
+          const fz = g._homeCoverFaceZ - g.group.position.z;
+          if (fx * fx + fz * fz > 0.001) {
+            const targetYaw = Math.atan2(fx, fz);
+            let dy = targetYaw - g.group.rotation.y;
+            while (dy > Math.PI) dy -= 2 * Math.PI;
+            while (dy < -Math.PI) dy += 2 * Math.PI;
+            g.group.rotation.y += dy * Math.min(1, dt * 1.4);
+          }
         }
       }
     }
