@@ -1976,6 +1976,17 @@ export class GunmanManager {
         g.state = STATE.ALERTED;
         g.reactionT = reactionT;
         ctx.onAlert?.(g);
+        // "!" tell — give the player a clear visual that the AI just
+        // spotted them. Spawned as a short speech bubble over the
+        // head; pairs with the existing "?" head-rotate at lower
+        // suspicion to make the awareness ramp visible. Skips when
+        // the camera ref isn't available (host-side AI in coop where
+        // the joiner owns the camera).
+        if (ctx.camera && g.rig) {
+          const head = g.rig.head.getWorldPosition(_g_head);
+          head.y += 0.55;
+          spawnSpeechBubble(head, ctx.camera, '!', 0.9);
+        }
         // Squad propagation — when one gunman crests to ALERTED,
         // teammates within 15m receive a suspicion bump scaled by
         // distance. Killing a guard in room A no longer leaves the
