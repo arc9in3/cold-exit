@@ -2727,15 +2727,23 @@ export class Level {
     // as containers (the visible mesh stays; the player gets a "Search
     // <prop>" prompt instead of a separate chest). Cuts visual chest
     // clutter without losing loot density.
+    // Per-prop chance to flag the placed prop as lootable. With themed
+    // rooms placing 4-8 props each and most levels having 5+ themed
+    // rooms, the prior values (30-55% per prop) were producing ~12-24
+    // lootable props per level on top of the dedicated chests + body
+    // drops. Playtest: "user is saying theres about 3x more loot than
+    // before and its become unmanagable ... we need props to not
+    // always have loot in them." Cut every chance to ~1/3 so the
+    // typical level surfaces 4-8 lootable props instead of 12-24.
     const LOOT_PROP_CONFIG = {
-      desk:       { p: 0.45, type: () => Math.random() < 0.4 ? 'weapon' : 'general',  size: 'm' },
-      bookshelf:  { p: 0.30, type: () => Math.random() < 0.5 ? 'medical' : 'general', size: 'm' },
-      cabinet:    { p: 0.45, type: () => Math.random() < 0.4 ? 'medical' : 'general', size: 'm' },
-      locker:     { p: 0.55, type: () => Math.random() < 0.5 ? 'armor' : 'weapon',    size: 'm' },
-      nightstand: { p: 0.35, type: () => Math.random() < 0.6 ? 'medical' : 'general', size: 's' },
-      crate:      { p: 0.50, type: () => Math.random() < 0.4 ? 'weapon' : 'general',  size: 'm' },
-      barrel:     { p: 0.35, type: () => 'general',                                    size: 's' },
-      pallet:     { p: 0.40, type: () => 'general',                                    size: 'm' },
+      desk:       { p: 0.15, type: () => Math.random() < 0.4 ? 'weapon' : 'general',  size: 'm' },
+      bookshelf:  { p: 0.10, type: () => Math.random() < 0.5 ? 'medical' : 'general', size: 'm' },
+      cabinet:    { p: 0.15, type: () => Math.random() < 0.4 ? 'medical' : 'general', size: 'm' },
+      locker:     { p: 0.18, type: () => Math.random() < 0.5 ? 'armor' : 'weapon',    size: 'm' },
+      nightstand: { p: 0.12, type: () => Math.random() < 0.6 ? 'medical' : 'general', size: 's' },
+      crate:      { p: 0.16, type: () => Math.random() < 0.4 ? 'weapon' : 'general',  size: 'm' },
+      barrel:     { p: 0.12, type: () => 'general',                                    size: 's' },
+      pallet:     { p: 0.13, type: () => 'general',                                    size: 'm' },
     };
     const placeLootable = (kind, placer) => {
       const prop = buildProp(kind);
