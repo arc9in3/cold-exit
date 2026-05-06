@@ -1173,6 +1173,11 @@ export class Level {
       // through the instancer) and tag them isColumn — those are
       // wall-instancer proxies, where scene.remove is a no-op.
       if (ud.isColumn) {
+        // Belt-and-braces — null collisionXZ in addition to dropping
+        // from this.obstacles. If anything still references the proxy
+        // (cached list, stale grid index between rebuilds), the
+        // collision check can't fire on a null bounds.
+        ud.collisionXZ = null;
         if (m.isWallProxy) {
           m.visible = false;
         } else {
@@ -1196,13 +1201,12 @@ export class Level {
       // pool's InstancedMesh is), so scene.remove() on the proxy
       // is a no-op. We have to flip `visible = false` to reach
       // the proxy's setter, which zero-scales the slot in the
-      // InstancedMesh — without this, every "stripped" interior
-      // wall stayed visually present even after we dropped it
-      // from this.obstacles. Same shape applies to the
-      // disposeMaterialIfNotShared call (proxy.material is a stub
-      // with a no-op dispose, so it does nothing harmful but
-      // also nothing useful — the real material lives on the
-      // pool).
+      // InstancedMesh.
+      //
+      // Belt-and-braces — null collisionXZ in addition to dropping
+      // from this.obstacles, in case any cached list still
+      // references the proxy.
+      ud.collisionXZ = null;
       if (m.isWallProxy) {
         m.visible = false;
       } else {
