@@ -7317,39 +7317,10 @@ window.addEventListener('keydown', (ev) => {
   _perf.toggle();
 });
 
-// Dev key — F3 dumps the current `tunables.lighting` block to the
-// console in copy-paste-ready form so you can iterate on values in
-// real time (e.g. `tunables.lighting.keyIntensity = 0.8` in the
-// console → see effect immediately → hit F3 to snapshot the
-// winning values for checking in).
-window.addEventListener('keydown', (ev) => {
-  if (ev.code !== 'F3') return;
-  ev.preventDefault();
-  const L = tunables.lighting;
-  const hex = (n) => '0x' + n.toString(16).padStart(6, '0');
-  const text =
-`lighting: {
-  hemiSky:             ${hex(L.hemiSky)},
-  hemiGround:          ${hex(L.hemiGround)},
-  hemiIntensity:       ${L.hemiIntensity.toFixed(3)},
-  keyColor:            ${hex(L.keyColor)},
-  keyIntensity:        ${L.keyIntensity.toFixed(3)},
-  fillColor:           ${hex(L.fillColor)},
-  fillIntensity:       ${L.fillIntensity.toFixed(3)},
-  rimColor:            ${hex(L.rimColor)},
-  rimIntensity:        ${L.rimIntensity.toFixed(3)},
-  fogColor:            ${hex(L.fogColor)},
-  fogDensity:          ${L.fogDensity.toFixed(4)},
-  playerAuraColor:     ${hex(L.playerAuraColor)},
-  playerAuraIntensity: ${L.playerAuraIntensity.toFixed(3)},
-  playerAuraDistance:  ${L.playerAuraDistance.toFixed(2)},
-  playerAuraDecay:     ${L.playerAuraDecay.toFixed(2)},
-},`;
-  console.log('=== LIGHTING TUNABLES (F3) ===');
-  console.log(text);
-  console.log('=== END ===');
-  transientHudMsg?.('lighting dump → console', 1.2);
-});
+// (F3 was previously the lighting-tunables snapshot. The new F3 is
+// the room-dump in this same file, near the F2 handler. Run the
+// lighting dump from the console directly:
+// `JSON.stringify(tunables.lighting, null, 2)` — no hotkey needed.)
 
 // Apply `tunables.lighting` to the live light objects every frame so
 // console edits take effect immediately. Colors are reassigned via
