@@ -709,17 +709,39 @@ export class Level {
       if (room.hasElevator) this._buildElevator(room);
     }
 
-    // Seed keep-out discs BEFORE every spawn pass (cover, container,
-    // theme, sprinkle) so the boss-room exit ring — revealed after
-    // boss death — never lands inside a low-cover block, a chest, a
-    // pillar, or a couch. Exit lands at the boss centroid with r=2.2;
-    // pad to 3.2m so the ring + player interact halo both stay clear.
+    // Seed keep-out discs BEFORE every spawn pass (theme, cover,
+    // container, sprinkle) so the boss-room exit ring — revealed
+    // after boss death — never lands inside a low-cover block, a
+    // chest, a pillar, or a couch. Exit lands at the boss centroid
+    // with r=2.2; pad to 3.2m so the ring + player interact halo
+    // both stay clear.
     {
       const boss = rooms[this.bossRoomId];
       if (boss) this._keepouts.push({ x: boss.cx, z: boss.cz, r: 3.2 });
     }
 
-    // Scatter some cover inside non-start rooms for tactical play.
+    // Themed props — pick a theme per combat-tier / shop room and drop
+    // matching furniture against walls + interior anchors.
+    //
+    // Order matters: theme runs BEFORE cover + containers so its
+    // wall-placement step has clean perimeter slots to choose from.
+    // Earlier the order was layouts → cover → containers → theme,
+    // which left theme templates competing with 1-2 random cover
+    // blocks and a chest for wall slots and dropped placement to
+    // ~3 props per room. Cover + containers run after now and avoid
+    // theme props via the same _collidesAt rejection they already
+    // used for layouts. Encounter rooms stay intentionally empty
+    // (the encounter NPC + props are placed by main.js after gen).
+    const SHOP_TYPES = new Set(['merchant', 'healer', 'gunsmith',
+      'armorer', 'tailor', 'relicSeller', 'blackMarket']);
+    for (const room of rooms) {
+      if (room.type === 'combat' || room.type === 'subBoss'
+          || room.type === 'boss' || SHOP_TYPES.has(room.type)) {
+        this._themeRoom(room);
+      }
+    }
+
+    // Scatter cover after theme so cover avoids theme prop footprints.
     for (const room of rooms) {
       if (room.type === 'start') continue;
       this._scatterCover(room);
@@ -732,25 +754,6 @@ export class Level {
     for (const room of rooms) {
       if (room.type === 'start') continue;
       this._scatterContainers(room);
-    }
-
-    // Themed props — pick a theme per combat-tier room (library, lobby,
-    // bedroom, living room, warehouse) and drop matching furniture on
-    // top of the cover pass. Added BEFORE clear-door-corridors so any
-    // prop that lands in a doorway strip gets its collision nulled.
-    //
-    // Shop rooms are themed too: _themeRoom routes shop room.types
-    // through the dedicated 'shop' theme, which fills the storefront
-    // with display cabinets / stock shelves around the kiosk that
-    // _spawnNPC adds later. Encounter rooms stay intentionally empty
-    // (the encounter NPC + props are placed by main.js after gen).
-    const SHOP_TYPES = new Set(['merchant', 'healer', 'gunsmith',
-      'armorer', 'tailor', 'relicSeller', 'blackMarket']);
-    for (const room of rooms) {
-      if (room.type === 'combat' || room.type === 'subBoss'
-          || room.type === 'boss' || SHOP_TYPES.has(room.type)) {
-        this._themeRoom(room);
-      }
     }
 
     // Ambient lighting pass — every themed / combat room gets a
