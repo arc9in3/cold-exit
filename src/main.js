@@ -5236,9 +5236,12 @@ function _regenerateLevelImpl() {
   // Tear down any prior boss instance — previous-floor leftovers
   // would dangle their HUD bar + scene meshes otherwise.
   if (megaBoss) { megaBoss.destroy(); megaBoss = null; }
-  // Reset the per-level "exit auto-opened" latch so the new floor's
-  // extraction door starts locked again.
+  // Reset the per-level "exit auto-opened" latch + the "boss was
+  // ever alive" flag so the new floor's extraction door starts
+  // locked again and waits to see this floor's boss spawn before
+  // it can auto-open.
   _bossExitAutoOpenLatch = false;
+  _bossWasEverAlive = false;
   if (isMegaFloor) {
     level.generateMegaArena();
   } else {
@@ -17588,6 +17591,7 @@ function tickAmbushDrops(dt) {
 // extraction door visual treatment (gold tint, emissive) makes it
 // clear at a glance which door is THE exit.
 let _bossExitAutoOpenLatch = false;     // reset on level regen via clear()
+let _bossWasEverAlive = false;          // reset on level regen via clear()
 function updateBossExitAutoOpen() {
   if (_bossExitAutoOpenLatch) return;
   if (!level.exitRoom && !level._exitPendingBounds) return;
@@ -17602,15 +17606,19 @@ function updateBossExitAutoOpen() {
     }
   }
   if (!bossAlive && megaBoss && megaBoss.alive !== false) bossAlive = true;
-  // Extra guard — if a boss SPAWN is queued but not yet instantiated
-  // (mid-level-load, async asset still resolving), don't pop the door
-  // open before the boss appears. enemySpawns is populated by gen.
-  if (!bossAlive && level.enemySpawns) {
-    for (const s of level.enemySpawns) {
-      if (s.tier === 'boss' || s.majorBoss) { bossAlive = true; break; }
-    }
+  if (bossAlive) {
+    _bossWasEverAlive = true;
+    return;
   }
-  if (bossAlive) return;
+  // Don't fire until we've SEEN the boss alive at least once. Without
+  // this, the boss-load gap (between level.generate finishing and
+  // gunmen.spawn instantiating the boss from level.enemySpawns) would
+  // briefly read as "no boss" and trigger revealExit prematurely —
+  // the chamber walls become visible and start fading via occlusion
+  // even though the boss fight hasn't started. User report: "before
+  // the boss exit door is opened, the room that contains the level
+  // exit's walls are all transparent."
+  if (!_bossWasEverAlive) return;
   try { level.revealExit?.(); } catch (_) {}
   _bossExitAutoOpenLatch = true;
 }

@@ -176,7 +176,7 @@ export const ROOM_TEMPLATES = [
     minSize: { w: 12, d: 12 },
     props: [
       // Bed against a wall.
-      { kind: 'bed', placer: 'wall', name: 'bed' },
+      { kind: 'bed', placer: 'wall', back: true, name: 'bed' },
       // Nightstand on the right (head end).
       { kind: 'nightstand', placer: 'adjacent', anchor: 'bed',
         side: 'right', facing: 'match', gap: 0.05, lootable: true },
@@ -197,8 +197,8 @@ export const ROOM_TEMPLATES = [
     minSize: { w: 12, d: 12 },
     props: [
       // Two beds on opposite walls.
-      { kind: 'bed', placer: 'wall', name: 'bedA' },
-      { kind: 'bed', placer: 'wall', name: 'bedB' },
+      { kind: 'bed', placer: 'wall', back: true, name: 'bedA' },
+      { kind: 'bed', placer: 'wall', back: true, name: 'bedB' },
       // A locker per bunk — barracks vibe. Lootable.
       { kind: 'locker', placer: 'wall', count: { min: 1, max: 2 },
         lootable: true },
@@ -214,7 +214,7 @@ export const ROOM_TEMPLATES = [
     weight: 0.6,
     minSize: { w: 11, d: 11 },
     props: [
-      { kind: 'bed', placer: 'wall', name: 'bed' },
+      { kind: 'bed', placer: 'wall', back: true, name: 'bed' },
       { kind: 'nightstand', placer: 'adjacent', anchor: 'bed',
         side: 'right', facing: 'match', gap: 0.05,
         chance: 0.85, lootable: true },
@@ -722,7 +722,7 @@ export const ROOM_TEMPLATES = [
     weight: 1.0,
     minSize: { w: 12, d: 12 },
     props: [
-      { kind: 'bed', placer: 'wall', count: { min: 2, max: 3 },
+      { kind: 'bed', placer: 'wall', back: true, count: { min: 2, max: 3 },
         name: 'cot' },
       { kind: 'medCart', placer: 'adjacent', anchor: 'cot',
         side: 'right', facing: 'match', chance: 0.9 },
@@ -739,7 +739,7 @@ export const ROOM_TEMPLATES = [
     props: [
       // One cot, doctor's desk, supply cabinets, a med cart parked
       // bedside.
-      { kind: 'bed', placer: 'wall', name: 'cot' },
+      { kind: 'bed', placer: 'wall', back: true, name: 'cot' },
       { kind: 'medCart', placer: 'adjacent', anchor: 'cot',
         side: 'right', facing: 'match', chance: 0.85 },
       { kind: 'desk', placer: 'wall', name: 'docDesk', lootable: true },
@@ -960,7 +960,7 @@ export const ROOM_TEMPLATES = [
     weight: 1.4,
     minSize: { w: 12, d: 12 },
     props: [
-      { kind: 'bed', placer: 'wall', count: { min: 1, max: 2 },
+      { kind: 'bed', placer: 'wall', back: true, count: { min: 1, max: 2 },
         name: 'cot' },
       { kind: 'medCart', placer: 'adjacent', anchor: 'cot',
         side: 'right', facing: 'match', chance: 0.95 },
