@@ -72,6 +72,17 @@ class WallInstancer {
       inst.instanceMatrix.setUsage(THREE.DynamicDrawUsage);
       inst.castShadow = false;             // walls don't cast (per _addObstacle comment)
       inst.receiveShadow = true;
+      // Per-instance color attribute. setColorAt(slot, c) writes RGB
+      // per-instance which the renderer multiplies against the
+      // material's base color. We use it for occlusion-fade —
+      // setting (k, k, k) for k < 1 darkens the slot toward black,
+      // mimicking transparency by losing brightness rather than
+      // hiding the wall entirely. Initial fill = (1,1,1) so every
+      // newly-added wall renders at full brightness.
+      inst.instanceColor = new THREE.InstancedBufferAttribute(
+        new Float32Array(INITIAL_CAP * 3).fill(1), 3,
+      );
+      inst.instanceColor.setUsage(THREE.DynamicDrawUsage);
       // Frustum culling on InstancedMesh tests the LOCAL bounding sphere
       // against the camera. Walls span the entire level, so the local
       // sphere of one unit cube doesn't represent the world bounds.
@@ -135,24 +146,39 @@ class WallInstancer {
     return proxy;
   }
 
-  // Recompute the slot's matrix from the proxy's effective visibility.
-  // Effective = gameplay-visible (proxy._visible) AND NOT occlusion-
-  // faded (proxy._occlHidden). Either flag flipping recomputes here.
+  // Recompute the slot's matrix + per-instance color from the proxy's
+  // current state. Two independent flags drive the visual:
+  //   _visible    — gameplay hide. False → zero-scale slot completely.
+  //   _occlHidden — occlusion fade. True → multiply per-instance
+  //                 colour by FADE so the wall darkens but stays
+  //                 rendered (user request: "they need to have a
+  //                 bit of opacity still").
   _refreshSlot(proxy) {
     const pool = proxy._pool;
     if (!pool) return;
     const slot = proxy._slot;
-    const effective = proxy._visible && !proxy._occlHidden;
-    if (effective) {
+    if (!proxy._visible) {
+      pool.inst.setMatrixAt(slot, _zero);
+    } else {
       _scratchPos.set(proxy.position.x, proxy.position.y, proxy.position.z);
       _scratchQuat.identity();
       _scratchScale.set(proxy._w, proxy._h, proxy._d);
       _scratchMat4.compose(_scratchPos, _scratchQuat, _scratchScale);
       pool.inst.setMatrixAt(slot, _scratchMat4);
-    } else {
-      pool.inst.setMatrixAt(slot, _zero);
     }
     pool.inst.instanceMatrix.needsUpdate = true;
+    // Per-instance color tint for occlusion fade. (k, k, k)
+    // multiplies the material's base color → wall darkens while
+    // remaining visible. 0.32 picks a value where the wall reads
+    // as a translucent shape but the enemy / target behind still
+    // pops as the focal element.
+    const k = proxy._occlHidden ? 0.32 : 1.0;
+    if (pool.inst.instanceColor) {
+      const arr = pool.inst.instanceColor.array;
+      const o = slot * 3;
+      arr[o] = k; arr[o + 1] = k; arr[o + 2] = k;
+      pool.inst.instanceColor.needsUpdate = true;
+    }
   }
 
   // Old name kept for back-compat with the visible-setter call site
