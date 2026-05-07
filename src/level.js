@@ -821,10 +821,26 @@ export class Level {
       }
     }
 
-    // Scatter cover after theme so cover avoids theme prop footprints.
-    for (const room of rooms) {
-      if (room.type === 'start') continue;
-      this._scatterCover(room);
+    // _scatterCover is disabled by default. User has reported
+    // repeatedly (most recently F3 dump 2026-05-07) that the
+    // anonymous low-cover blocks it drops feel like phantom thin
+    // walls — they're untagged 1-2.5m × 0.8-2m boxes at chest
+    // height with `kind: null`, and the player can't tell what
+    // they're supposed to be. The theme-room props (desks, crates,
+    // bookshelves, planters, pillars, etc.) already provide
+    // identified cover. Opt-in via localStorage so the function
+    // stays available for testing without re-introducing the bug.
+    const _scatterCoverOn = (() => {
+      try {
+        return typeof localStorage !== 'undefined'
+          && localStorage.getItem('coldExitScatterCover') === '1';
+      } catch (_) { return false; }
+    })();
+    if (_scatterCoverOn) {
+      for (const room of rooms) {
+        if (room.type === 'start') continue;
+        this._scatterCover(room);
+      }
     }
 
     // Lootable containers — boxes / chests scattered through combat
@@ -4211,7 +4227,12 @@ export class Level {
       // Pillars grid — 2×3 arrangement of stub pillars across the
       // room. Each pillar is a 0.6×0.6 collidable obstacle at half
       // wall height so the player and enemies break LoS while moving
-      // through. Centres skipped if too close to a doorway approach.
+      // through. Centres skipped if too close to a doorway approach
+      // OR if the spot already has a shape wall sitting on it (e.g.,
+      // rotunda's chamfered 4.5×4.5 corner blocks). Without the
+      // collision check, a rotunda+pillars-grid combo plants 4 of
+      // its 6 pillars inside the corner blocks; F3 dump 2026-05-07
+      // showed columns visibly poking through the chamfer faces.
       const cols = longX ? 3 : 2;
       const rows = longX ? 2 : 3;
       const pad = 3.0;
@@ -4222,6 +4243,10 @@ export class Level {
           const x = b.minX + pad + (cols === 1 ? usableW / 2 : (usableW * i) / (cols - 1));
           const z = b.minZ + pad + (rows === 1 ? usableD / 2 : (usableD * j) / (rows - 1));
           if (this._blocksDoor(room, x, z, 1.6)) continue;
+          // Spatial-hash check at the pillar's half-extent + a small
+          // margin. If a shape wall (rotunda corner block, lShape
+          // notch, etc.) is already there, skip.
+          if (this._collidesAt(x, z, 0.6)) continue;
           const m = this._addObstacle(x, WALL_HEIGHT / 2, z, 0.6, WALL_HEIGHT, 0.6, FULL_WALL_COLOR);
           // Tag so encounter conversion strips this pillar from rooms
           // that get re-rolled as encounter spaces.
