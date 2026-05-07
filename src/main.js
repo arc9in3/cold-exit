@@ -813,14 +813,28 @@ window.__usePeekPlayer = async () => {
     'walk-crouching-forward-left', 'walk-crouching-forward-right',
     'walk-crouching-backward-left', 'walk-crouching-backward-right',
   ];
+  // Pistol locomotion — runner pack ships a full pistol set (walk /
+  // run / strafe / arcs). Loaded as FULL-BODY clips (no lower-body
+  // strip) so when wantSuffix=OneHand_Pistol substitutes them in for
+  // walk_F / run_F / etc., the legs play pistol-stride instead of
+  // rifle-stride. Only pistol-idle stays as a layered upper-body clip
+  // (used as the layer over rifle-8way/idle for stationary pose).
+  const PISTOL_LOCOMOTION = [
+    'pistol-walk', 'pistol-walk-backward',
+    'pistol-walk-arc', 'pistol-walk-arc-2',
+    'pistol-walk-backward-arc', 'pistol-walk-backward-arc-2',
+    'pistol-run', 'pistol-run-backward',
+    'pistol-run-arc', 'pistol-run-arc-2',
+    'pistol-run-backward-arc', 'pistol-run-backward-arc-2',
+  ];
   const slugs = RIFLE_8WAY.map(c => `rifle-8way/${c}`).concat([
-    // Pistol stance — layered upper body for pistol/smg/revolver
-    // weapons. Lower body keeps rifle locomotion (no clean 8-way pistol
-    // pack); upper body holds the gun in pistol grip via this clip's
-    // tracks (lower-body tracks stripped below). Loaded BEFORE the
-    // one-shot combat clips so that during reload, the reload action
-    // (created later) wins on shared upper-body bones — Three.js
-    // mixer applies actions in insertion order, last-write-wins.
+    // Pistol stance — layered upper body for pistol/revolver weapons.
+    // Stationary lower body keeps rifle-8way/idle; upper body holds
+    // the gun in pistol grip via this clip's tracks (lower-body tracks
+    // stripped below). Loaded BEFORE the one-shot combat clips so that
+    // during reload, the reload action (created later) wins on shared
+    // upper-body bones — Three.js mixer applies actions in insertion
+    // order, last-write-wins.
     'pistol-locomotion/pistol-idle',
     // Combat seeds — fire, reload, hit-react, death variants.
     'basic-shooter/firing-rifle',
@@ -829,7 +843,7 @@ window.__usePeekPlayer = async () => {
     'rifle-8way/death-from-the-front',
     'rifle-8way/death-from-the-back',
     'rifle-8way/death-from-right',
-  ]);
+  ]).concat(PISTOL_LOCOMOTION.map(c => `pistol-locomotion/${c}`));
   for (const slug of slugs) {
     try {
       await charMod.loadAnimationFBX(player.rig, `${PACK}/${slug}.glb`, slug);
