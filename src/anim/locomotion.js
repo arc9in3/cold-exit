@@ -64,6 +64,41 @@ export function bodyLocalAngle(velocity, bodyYaw) {
   return Math.atan2(-localX, localZ);
 }
 
+// Pick the rifle / one-hand variant of a base clip given the active
+// weapon class. Resolution order:
+//   1. s.adsClip / s.oneHandClip — explicit per-state override (runner
+//      pack JSON wires these directly because its base clips don't
+//      end in '_Pistol' and the suffix-swap path can't construct a
+//      valid candidate).
+//   2. Suffix swap on '_Pistol' base clips (gasp_lower_body convention)
+//      — replace trailing '_Pistol' with '_Rifle' / '_OneHand_Pistol'
+//      and verify against _availableClips before committing.
+//   3. Fall through to the original base clip.
+//
+// REGRESSION: anim-onehand-explicit-clip — the gating used to require
+// the base clip to end in '_Pistol' even when an explicit oneHandClip
+// was set, so runner_lower_body's pistol-walk / pistol-run mappings
+// never engaged and the lower body fell back to rifle stride.
+function _swapForWeaponClass(state, baseClip, wantSuffix, smCfg) {
+  if (wantSuffix === 'Rifle') {
+    if (state?.adsClip) return state.adsClip;
+    if (baseClip.endsWith('_Pistol')) {
+      const candidate = baseClip.slice(0, -'_Pistol'.length) + '_Rifle';
+      if (smCfg?._availableClips?.has(candidate)) return candidate;
+    }
+    return baseClip;
+  }
+  if (wantSuffix === 'OneHand_Pistol') {
+    if (state?.oneHandClip) return state.oneHandClip;
+    if (baseClip.endsWith('_Pistol')) {
+      const candidate = baseClip.slice(0, -'_Pistol'.length) + '_OneHand_Pistol';
+      if (smCfg?._availableClips?.has(candidate)) return candidate;
+    }
+    return baseClip;
+  }
+  return baseClip;
+}
+
 // Map a weapon.class to a GASP clip-set suffix.
 //   Rifle           → two-handed shouldered (rifle/shotgun/sniper/lmg)
 //   OneHand_Pistol  → one-handed pistol grip (pistol/revolver)
@@ -111,18 +146,7 @@ export function selectGaspLocomotion(smCfg, playerState, planarSpeed, velocity, 
     // with the moving path below or pistols idle in two-handed pose.
     const weaponClass = playerState?.equipped?.class;
     const wantSuffix = _clipSuffixForWeapon(weaponClass);
-    let clipName = s.clip;
-    if (wantSuffix === 'Rifle' && clipName.endsWith('_Pistol')) {
-      const candidate = clipName.slice(0, -'_Pistol'.length) + '_Rifle';
-      if (s.adsClip || (smCfg._availableClips && smCfg._availableClips.has(candidate))) {
-        clipName = s.adsClip || candidate;
-      }
-    } else if (wantSuffix === 'OneHand_Pistol' && clipName.endsWith('_Pistol')) {
-      const candidate = clipName.slice(0, -'_Pistol'.length) + '_OneHand_Pistol';
-      if (s.oneHandClip || (smCfg._availableClips && smCfg._availableClips.has(candidate))) {
-        clipName = s.oneHandClip || candidate;
-      }
-    }
+    const clipName = _swapForWeaponClass(s, s.clip, wantSuffix, smCfg);
     return { stateId: id, clip: clipName, loop: s.loop !== false, speedRef: null,
              sector: 'F', bucket: 'idle', weaponClass };
   }
@@ -170,24 +194,16 @@ export function selectGaspLocomotion(smCfg, playerState, planarSpeed, velocity, 
   }
   if (!s) return null;
 
-  // Weapon-class swap — substitute the suffix on the base clip
-  // name based on weapon class. The state-machine entry is keyed
-  // off the BASE _Pistol clip; we swap to _Rifle (rifle stance)
-  // or _OneHand_Pistol (pistol-only stance) when appropriate.
+  // Weapon-class swap — substitute the base clip with the rifle /
+  // one-hand variant based on weapon class. Two paths:
+  //   • explicit s.adsClip / s.oneHandClip wins (runner_lower_body
+  //     wires these directly per state).
+  //   • else: if the base clip name ends in '_Pistol' (gasp_lower_body
+  //     naming), build candidate by suffix-swap and check
+  //     _availableClips.
   const weaponClass = playerState?.equipped?.class;
   const wantSuffix = _clipSuffixForWeapon(weaponClass);
-  let clipName = s.clip;
-  if (wantSuffix === 'Rifle' && clipName.endsWith('_Pistol')) {
-    const candidate = clipName.slice(0, -'_Pistol'.length) + '_Rifle';
-    if (s.adsClip || (smCfg._availableClips && smCfg._availableClips.has(candidate))) {
-      clipName = s.adsClip || candidate;
-    }
-  } else if (wantSuffix === 'OneHand_Pistol' && clipName.endsWith('_Pistol')) {
-    const candidate = clipName.slice(0, -'_Pistol'.length) + '_OneHand_Pistol';
-    if (s.oneHandClip || (smCfg._availableClips && smCfg._availableClips.has(candidate))) {
-      clipName = s.oneHandClip || candidate;
-    }
-  }
+  const clipName = _swapForWeaponClass(s, s.clip, wantSuffix, smCfg);
 
   return {
     stateId: id,
