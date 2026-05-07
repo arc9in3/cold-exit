@@ -732,6 +732,10 @@ export function getActiveContract() {
     expiresAt: Math.max(0, Number(v.expiresAt) || 0),
     progress: v.progress && typeof v.progress === 'object' ? v.progress : {},
     claimedAt: Math.max(0, Number(v.claimedAt) || 0),
+    // Mid-run pickups attach a runStats baseline so contract progress
+    // counts only kills/loot/extracts AFTER pickup. Hideout pickups
+    // omit it (runStats is at zero between runs).
+    pickupBaseline: v.pickupBaseline && typeof v.pickupBaseline === 'object' ? v.pickupBaseline : null,
   };
 }
 export function setActiveContract(c) {
@@ -741,6 +745,7 @@ export function setActiveContract(c) {
     expiresAt: Math.max(0, Number(c.expiresAt) || 0),
     progress: c.progress || {},
     claimedAt: Math.max(0, Number(c.claimedAt) || 0),
+    pickupBaseline: c.pickupBaseline || null,
   });
 }
 export function clearActiveContract() { _write(CONTRACTS_KEY, null); }

@@ -91,7 +91,8 @@ import { MainMenuUI } from './ui_main_menu.js';
 import { HideoutUI } from './ui_hideout.js';
 import { tryClaimContract, defForId, buildModifiers, evaluateContract,
          rankRewardFor, rankPerKillFor, CONTRACT_DEFS, objectiveSubtitle,
-         pickWeightedContractDef, isContractUnlocked as _isContractDefUnlocked }
+         pickWeightedContractDef, isContractUnlocked as _isContractDefUnlocked,
+         buildContractBaseline }
          from './contracts.js';
 import {
   getActiveContract, setActiveContract, awardMarks, bumpContractRank, bumpMegabossKills,
@@ -18227,11 +18228,17 @@ function _showMidRunContractOffer() {
           <div class="wanted-rewards">${rewardChips.join('')}</div>
         `;
         btn.addEventListener('click', () => {
+          // Mid-run pickup — snapshot current runStats as the baseline
+          // so progress counts only what happens AFTER this moment.
+          // Without this, the contract's targetCount evaluates against
+          // the run's running totals and instantly satisfies if the
+          // player already had enough kills/loot/extracts on the board.
           setActiveContract({
             activeContractId: def.id,
             expiresAt: Date.now() + 7 * 24 * 60 * 60 * 1000,
             progress: {},
             claimedAt: 0,
+            pickupBaseline: buildContractBaseline(runStats.snapshot()),
           });
           _refreshActiveModifiers();
           close(def);

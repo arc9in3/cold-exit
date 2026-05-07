@@ -116,6 +116,55 @@ function _autoEval(def) {
     return (ak[def.targetType] | 0) >= need;
   };
 }
+
+// Build a contract-relevant baseline from a runStats snapshot. Used at
+// mid-run contract pickup (main.js) so progress-since-pickup is what
+// counts, not progress-since-run-start. Hideout pickup happens between
+// runs when runStats is at zero, so the baseline there is all zeros
+// and a no-op.
+//
+// REGRESSION: contract-pre-pickup-progress — previous behavior counted
+// kills/loot/credits/extracts the player had ALREADY done before
+// picking up a mid-run contract, instantly satisfying contracts whose
+// targetCount was below current run progress.
+export function buildContractBaseline(runStatsSnapshot) {
+  const s = runStatsSnapshot || {};
+  return {
+    kills: s.kills | 0,
+    credits: s.credits | 0,
+    containersSearched: s.containersSearched | 0,
+    bodiesLooted: s.bodiesLooted | 0,
+    levelsExtracted: s.levelsExtracted | 0,
+    megabossKillsThisRun: s.megabossKillsThisRun | 0,
+    archetypeKills: { ...(s.archetypeKills || {}) },
+    critHeadshots: s.critHeadshots | 0,
+    throwableKills: s.throwableKills | 0,
+  };
+}
+
+// Subtract the pickup baseline from a current snapshot so contract
+// evaluators / progress readouts see deltas instead of run totals.
+// Returns a NEW object — does not mutate the input. Counters that
+// aren't tracked in baseline pass through untouched.
+function _subtractBaseline(snapshot, baseline) {
+  if (!snapshot) return snapshot;
+  if (!baseline) return snapshot;
+  const out = { ...snapshot };
+  out.kills = Math.max(0, (snapshot.kills | 0) - (baseline.kills | 0));
+  out.credits = Math.max(0, (snapshot.credits | 0) - (baseline.credits | 0));
+  out.containersSearched = Math.max(0, (snapshot.containersSearched | 0) - (baseline.containersSearched | 0));
+  out.bodiesLooted = Math.max(0, (snapshot.bodiesLooted | 0) - (baseline.bodiesLooted | 0));
+  out.levelsExtracted = Math.max(0, (snapshot.levelsExtracted | 0) - (baseline.levelsExtracted | 0));
+  out.megabossKillsThisRun = Math.max(0, (snapshot.megabossKillsThisRun | 0) - (baseline.megabossKillsThisRun | 0));
+  out.critHeadshots = Math.max(0, (snapshot.critHeadshots | 0) - (baseline.critHeadshots | 0));
+  out.throwableKills = Math.max(0, (snapshot.throwableKills | 0) - (baseline.throwableKills | 0));
+  const ak = snapshot.archetypeKills || {};
+  const bk = baseline.archetypeKills || {};
+  const akOut = {};
+  for (const k of Object.keys(ak)) akOut[k] = Math.max(0, (ak[k] | 0) - (bk[k] | 0));
+  out.archetypeKills = akOut;
+  return out;
+}
 // Per-rarity rank-point defaults — used when a contract def doesn't
 // override `rankReward` / `rankPerKill` explicitly. Rarer contracts
 // pay more both for completion and per qualifying kill, so taking
@@ -681,7 +730,8 @@ export function evaluateContract(activeContract, snapshot) {
   if ((activeContract.claimedAt | 0) > 0) {
     return { def, passed: false, alreadyClaimed: true, reward: def.reward };
   }
-  const passed = !!def.evaluate(snapshot);
+  const evalSnapshot = _subtractBaseline(snapshot, activeContract.pickupBaseline);
+  const passed = !!def.evaluate(evalSnapshot);
   return { def, passed, alreadyClaimed: false, reward: def.reward };
 }
 
@@ -717,6 +767,9 @@ export function tryClaimContract(activeContract, snapshot, setActiveContractFn, 
 export function liveProgressFor(contract, eventsSnapshot) {
   const def = defForId(contract?.activeContractId);
   if (!def || !eventsSnapshot) return { label: '', pct: 0 };
+  // Apply pickup baseline so the displayed counter reflects progress
+  // since the contract was taken, not since the start of the run.
+  const s = _subtractBaseline(eventsSnapshot, contract?.pickupBaseline);
   // Objective-driven progress takes precedence — the basic-mechanic
   // contracts read uniform fields off the snapshot. Falls through to
   // legacy id-keyed cases for the few hand-tuned dailies.
@@ -724,23 +777,23 @@ export function liveProgressFor(contract, eventsSnapshot) {
   const pct = (have) => need > 0 ? Math.min(1, (have | 0) / need) : 0;
   switch (def.objective) {
     case 'kills_total':
-      return { label: `${eventsSnapshot.kills | 0} / ${need} kills`, pct: pct(eventsSnapshot.kills) };
+      return { label: `${s.kills | 0} / ${need} kills`, pct: pct(s.kills) };
     case 'containers_searched':
-      return { label: `${eventsSnapshot.containersSearched | 0} / ${need} searched`, pct: pct(eventsSnapshot.containersSearched) };
+      return { label: `${s.containersSearched | 0} / ${need} searched`, pct: pct(s.containersSearched) };
     case 'bodies_looted':
-      return { label: `${eventsSnapshot.bodiesLooted | 0} / ${need} looted`, pct: pct(eventsSnapshot.bodiesLooted) };
+      return { label: `${s.bodiesLooted | 0} / ${need} looted`, pct: pct(s.bodiesLooted) };
     case 'credits_banked':
-      return { label: `${eventsSnapshot.credits | 0} / ${need} chips`, pct: pct(eventsSnapshot.credits) };
+      return { label: `${s.credits | 0} / ${need} chips`, pct: pct(s.credits) };
     case 'levels_extracted':
-      return { label: `${eventsSnapshot.levelsExtracted | 0} / ${need} extracts`, pct: pct(eventsSnapshot.levelsExtracted) };
+      return { label: `${s.levelsExtracted | 0} / ${need} extracts`, pct: pct(s.levelsExtracted) };
   }
   switch (def.id) {
     case 'daily_kills_50':
-      return { label: `${eventsSnapshot.kills | 0} / 50 kills`, pct: Math.min(1, (eventsSnapshot.kills | 0) / 50) };
+      return { label: `${s.kills | 0} / 50 kills`, pct: Math.min(1, (s.kills | 0) / 50) };
     case 'daily_throwable_kills_10':
-      return { label: `${eventsSnapshot.throwableKills | 0} / 10 thrown kills`, pct: Math.min(1, (eventsSnapshot.throwableKills | 0) / 10) };
+      return { label: `${s.throwableKills | 0} / 10 thrown kills`, pct: Math.min(1, (s.throwableKills | 0) / 10) };
     case 'daily_crit_heads_15':
-      return { label: `${eventsSnapshot.critHeadshots | 0} / 15 crit headshots`, pct: Math.min(1, (eventsSnapshot.critHeadshots | 0) / 15) };
+      return { label: `${s.critHeadshots | 0} / 15 crit headshots`, pct: Math.min(1, (s.critHeadshots | 0) / 15) };
     default:
       return { label: 'In progress', pct: 0 };
   }
