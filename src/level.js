@@ -205,6 +205,14 @@ export class Level {
     this._roomLamps = [];
     this._cullableProps = [];
     this.exitBounds = null;
+    // REGRESSION: mega-boss arenas had no exit because revealExit() saw
+    // a stale exitRoom reference from the previous floor and took its
+    // primary path (calling .reveal() on disposed meshes), bypassing the
+    // legacy ring fallback that generateMegaArena stages via
+    // _exitPendingBounds. Reset both here so subsequent gen paths start
+    // clean and revealExit picks the right branch per floor.
+    this.exitRoom = null;
+    this._exitPendingBounds = null;
     this.bossRoomId = -1;
     this._solidCache = null;
     this._solidDirty = true;
