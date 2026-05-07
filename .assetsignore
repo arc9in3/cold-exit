@@ -33,6 +33,9 @@ Assets/models/animations/FBX_Pistol_Starter_27A
 Assets/models/animations/FBX_Pistol_Starter_27A_glb
 Assets/models/animations/Universal Animation Library[Standard]
 Assets/models/animations/gaspfix_extracted
+# Oversized character GLBs not referenced by runtime code — exceed Pages
+# 25 MiB per-file cap. Keep on disk for asset pipeline / Blender work.
+Assets/models/characters/agentf.glb
 Assets/proposed
 *.fbx
 **/*.fbx
