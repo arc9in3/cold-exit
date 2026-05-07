@@ -968,25 +968,17 @@ window.__usePistolPack = async () => {
 window.__useGaspMannequin = async () => {
   const PACK = 'Assets/models/animations/gasp_glb';
   const playerMod = await import('./player.js');
-  // Player-mesh override — `localStorage.coldExitPlayerMesh = 'female'`
-  // swaps the UEFN male mannequin GLB for the Mixamo→UE5 retargeted
-  // T-pose female model (Assets/models/characters/female-tpose-ue5.glb,
-  // produced by tools/blender-fbx-to-glb.py with the bone-rename map
-  // AND --no-actions so the source FBX's embedded pose action can't
-  // bind on load). The female skeleton has fewer bones than the UE5
-  // reference (3 vs 5 spines, 1 vs 2 necks, 2 vs 5 fingers, no
-  // twist/IK chains) so GASP clips driving missing bones get silently
-  // skipped by the AnimationMixer. The biped subset (hips/spine/
-  // arms/legs/hands) animates correctly. T-pose source replaces the
-  // earlier female-pose-ue5.glb attempt — that one had a leg-in-air
-  // symptom because its embedded "pose" action overrode bind.
-  let meshUrl = `${PACK}/SKM_UEFN_Mannequin.glb`;
-  try {
-    if (typeof localStorage !== 'undefined'
-        && localStorage.getItem('coldExitPlayerMesh') === 'female') {
-      meshUrl = 'Assets/models/characters/female-tpose-ue5.glb';
-    }
-  } catch (_) {}
+  // Player-mesh path. Female-character swap was attempted in the
+  // 2026-05-07 session (Mixamo skeleton → UE5/GASP rename + rest-pose
+  // retarget) and parked — the rest-align math couldn't bridge the
+  // skeleton-orientation gap cleanly without a more sophisticated
+  // retarget pipeline. Revisit when there's either (a) a UE5/Epic-
+  // skeleton female asset that drops in directly, or (b) budget for
+  // a proper retargeter (Auto-Rig Pro / Game Rig Tools / similar).
+  // The converter tooling (--rest-align, --no-actions, the
+  // bone-rename-mixamo-to-ue5.json map, tools/inspect-skeleton.py)
+  // stays in tree for future use.
+  const meshUrl = `${PACK}/SKM_UEFN_Mannequin.glb`;
   await playerMod.swapPlayerToFbxRig(player, scene, meshUrl,
                                      { rigId: 'gasp_uefn' });
   // Bump the rig group scale a touch so the UEFN mannequin matches
@@ -1079,19 +1071,6 @@ window.__useGaspMannequin = async () => {
   return `gasp mannequin loaded — ${player.rig.clipNames?.().length} clips`;
 };
 
-// Console: __usePlayerMesh('female') | 'male' | 'default'
-//   Persists the player-mesh choice to localStorage and reloads the
-//   GASP rig immediately so the swap takes effect without a refresh.
-//   Currently supports the UE5/GASP male mannequin (default) and the
-//   Mixamo→UE5 retargeted female model. Per-session tweak only —
-//   doesn't replace the eventual proper character-select UI.
-window.__usePlayerMesh = async (which = 'default') => {
-  try {
-    if (which === 'female') localStorage.setItem('coldExitPlayerMesh', 'female');
-    else                    localStorage.removeItem('coldExitPlayerMesh');
-  } catch (_) {}
-  return await window.__useGaspMannequin();
-};
 
 // AUTO-LOAD on game start — the Motus pistol pack becomes the default
 // player rig instead of the procgen rig. Procgen stays in scene as a

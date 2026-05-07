@@ -63,6 +63,8 @@ def parse_args():
                    help="apply scale on import (Mixamo FBX is cm; pass 0.01 for meters)")
     p.add_argument("--no-actions", action="store_true",
                    help="strip all actions before export (mesh + skeleton only). Use for source FBXs whose embedded action is a static rest-pose snapshot that would override the runtime clip pack on bind.")
+    p.add_argument("--rest-align", default=None,
+                   help="path to a reference GLB whose skeleton's rest WORLD ORIENTATIONS should be copied onto the target. Used after --rename-bones so renamed Mixamo bones inherit UE5/Epic mannequin rest matrices, letting GASP clips bind correctly. Position is preserved from target (proportions stay), only rotation is taken from reference.")
     return p.parse_args(argv)
 
 
@@ -236,6 +238,126 @@ def rename_bones(armature, mapping):
     return renamed
 
 
+def rest_align_to_reference(target_armature, ref_glb_path):
+    """Re-bind target armature so its rest pose matches a reference
+    skeleton's rest WORLD ORIENTATIONS. Used after --rename-bones so
+    a Mixamo skeleton (renamed to UE5/GASP names) ends up with each
+    bone's local axes pointing the same direction as the UE5 mannequin
+    they were renamed to mimic. Without this, GASP clip rotations
+    (authored against UE5 rest matrices) produce wildly wrong world
+    orientations on the Mixamo skeleton — e.g., a "leg straight" clip
+    rotation lands the leg in the air because its rest axis differed.
+
+    Position is preserved from target (proportions stay), only rotation
+    is copied from reference. Bones with no name match in reference
+    are left alone (acceptable for unmapped finger leaves etc.).
+
+    Process:
+      1. Import reference GLB (added to current scene)
+      2. Capture {bone_name: rest_world_quaternion} from ref
+      3. Switch target to pose mode
+      4. For each target pose bone with a ref-name match, set its
+         pose-world matrix to (ref orientation, target position)
+         in depth order so parent rotations bake before children
+      5. Apply pose as rest pose — Blender rebinds skin weights so
+         the mesh deformation stays put while the rest matrices change
+      6. Delete the imported reference armature + meshes
+    Returns the count of aligned bones.
+    """
+    import mathutils
+    if not target_armature:
+        print("[rest-align] no target armature; skipping")
+        return 0
+
+    pre_objects = set(bpy.context.scene.objects)
+    bpy.ops.import_scene.gltf(filepath=ref_glb_path)
+    new_objects = [o for o in bpy.context.scene.objects if o not in pre_objects]
+    ref_armature_obj = next((o for o in new_objects if o.type == 'ARMATURE'), None)
+    if not ref_armature_obj:
+        print("[rest-align] WARN: no armature in reference; skipping")
+        for o in new_objects:
+            try: bpy.data.objects.remove(o, do_unlink=True)
+            except Exception: pass
+        return 0
+
+    # Capture reference bone rest WORLD quaternions. matrix_local is
+    # in armature space, so multiply through armature.matrix_world.
+    ref_rest = {}
+    for b in ref_armature_obj.data.bones:
+        m = ref_armature_obj.matrix_world @ b.matrix_local
+        ref_rest[b.name] = m.to_quaternion()
+
+    # Capture target's bone rest WORLD quaternions for the local-frame
+    # math below.
+    target_rest_q = {}
+    for b in target_armature.data.bones:
+        m = target_armature.matrix_world @ b.matrix_local
+        target_rest_q[b.name] = m.to_quaternion()
+
+    # Switch focus to target armature for pose-mode operations.
+    bpy.context.view_layer.objects.active = target_armature
+    target_armature.select_set(True)
+    bpy.ops.object.mode_set(mode='POSE')
+
+    # Order pose bones by hierarchy depth so a parent's pose-world
+    # rotation is finalized before children compute their own deltas.
+    def depth(bone):
+        d = 0
+        b = bone.parent
+        while b is not None:
+            d += 1
+            b = b.parent
+        return d
+    pose_bones_ordered = sorted(target_armature.pose.bones, key=lambda pb: depth(pb.bone))
+
+    # Track each bone's effective POSE-WORLD rotation so children can
+    # compute their basis relative to the parent's NEW orientation.
+    # An unmapped bone keeps its REST world rotation (no pose change).
+    parent_pose_world_q = {}
+    aligned = 0
+    for pb in pose_bones_ordered:
+        ref_q = ref_rest.get(pb.name)
+        target_q = target_rest_q[pb.name]
+        # Desired world orientation for this bone after my pose. If we
+        # have a ref match, take ref's rotation; otherwise leave the
+        # bone at its rest orientation.
+        desired_world_q = ref_q if ref_q else target_q
+        parent = pb.parent
+        if parent is None:
+            parent_pose_q = mathutils.Quaternion()  # identity
+            parent_rest_q = mathutils.Quaternion()
+        else:
+            parent_pose_q = parent_pose_world_q.get(parent.name, target_rest_q[parent.name])
+            parent_rest_q = target_rest_q[parent.name]
+        # Bone's REST rotation in its parent's REST frame.
+        bone_local_rest = parent_rest_q.inverted() @ target_q
+        # Local pose basis = inverse(parent_pose × local_rest) × desired_world.
+        # Solving (parent_pose × local_rest × basis) = desired_world.
+        bone_local_basis = (parent_pose_q @ bone_local_rest).inverted() @ desired_world_q
+        pb.rotation_mode = 'QUATERNION'
+        pb.rotation_quaternion = bone_local_basis
+        parent_pose_world_q[pb.name] = desired_world_q
+        bpy.context.view_layer.update()
+        if ref_q:
+            aligned += 1
+
+    # Bake the current pose into the rest pose. Blender re-skins the
+    # mesh so it stays in roughly the same world position despite the
+    # bone-axis changes.
+    bpy.ops.pose.armature_apply(selected=False)
+    bpy.ops.object.mode_set(mode='OBJECT')
+
+    # Cleanup imported reference geometry.
+    for o in new_objects:
+        try:
+            bpy.data.objects.remove(o, do_unlink=True)
+        except Exception:
+            pass
+
+    print(f"[rest-align] aligned {aligned} bones to reference")
+    return aligned
+
+
 def export_glb(path, export_animations=True):
     """Export the current scene as GLB. Pass export_animations=False
     to ship a mesh-only / skeleton-only GLB (no actions baked in) —
@@ -279,6 +401,9 @@ def main():
     if rename_map:
         n = rename_bones(armature, rename_map)
         print(f"[blender] renamed {n} bones")
+
+    if args.rest_align:
+        rest_align_to_reference(armature, os.path.abspath(args.rest_align))
 
     if args.strip_root_motion:
         n = strip_root_motion(actions, armature)
