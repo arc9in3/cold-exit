@@ -236,6 +236,13 @@ export const tunables = {
       boss:    [110, 180],
     },
     sellMult: 0.35,
+    // Per-level sell-value ramp — every level past 1 adds this to the
+    // sell multiplier so vendor sell prices keep up (partially) with
+    // the buy-side levelPriceRamp. Tuned to ~half the buy ramp so the
+    // gap between buy and sell still grows over the run, but slowly
+    // enough that mid-floor cashflow stays viable. Applied in
+    // sellPriceFor via _sellLevelMult().
+    sellLevelRamp: 0.10,
     // Shop prices, set so a rare/epic/legendary purchase is a real
     // commitment rather than a casual pickup. Roughly 5–10× the
     // pre-rebalance numbers; rare gear is intentionally a big spend.

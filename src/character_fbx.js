@@ -348,6 +348,29 @@ function buildRigAdapter(group, mixer, rigCfg = null) {
     rig._fbx.currentAction = action;
     return action;
   };
+  // Play a clip alongside the currently-playing locomotion clip without
+  // fading the locomotion out. Used for upper-body-only one-shots
+  // (reload, fire, hit-react) whose tracks have been pre-filtered to
+  // upper-body bones — the mixer applies both actions, locomotion drives
+  // legs, the layered clip drives arms. Caller manages action lifecycle
+  // (LoopOnce + clampWhenFinished are this caller's responsibility).
+  rig.playLayered = (clipNameOrIndex, opts = {}) => {
+    const { fadeMs = 100, loop = false, timeScale = 1.0 } = opts;
+    let action = null;
+    if (typeof clipNameOrIndex === 'string') {
+      action = rig._fbx.actions.get(clipNameOrIndex);
+    } else if (typeof clipNameOrIndex === 'number') {
+      action = Array.from(rig._fbx.actions.values())[clipNameOrIndex];
+    }
+    if (!action) return null;
+    action.setLoop(loop ? THREE.LoopRepeat : THREE.LoopOnce, loop ? Infinity : 1);
+    action.timeScale = timeScale;
+    action.reset().fadeIn(fadeMs / 1000).play();
+    // Deliberately NOT updating rig._fbx.currentAction — locomotion
+    // selector tracks that field for its crossfade logic, and a layered
+    // action shouldn't displace the current locomotion clip.
+    return action;
+  };
   rig.update = (dt) => {
     if (rig._fbx.mixer) rig._fbx.mixer.update(dt);
   };

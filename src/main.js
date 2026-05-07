@@ -814,15 +814,48 @@ window.__usePeekPlayer = async () => {
     'walk-crouching-backward-left', 'walk-crouching-backward-right',
   ];
   const slugs = RIFLE_8WAY.map(c => `rifle-8way/${c}`).concat([
-    // Combat seeds — Phase C will expand into hit/death/jump triggers.
+    // Pistol stance — layered upper body for pistol/smg/revolver
+    // weapons. Lower body keeps rifle locomotion (no clean 8-way pistol
+    // pack); upper body holds the gun in pistol grip via this clip's
+    // tracks (lower-body tracks stripped below). Loaded BEFORE the
+    // one-shot combat clips so that during reload, the reload action
+    // (created later) wins on shared upper-body bones — Three.js
+    // mixer applies actions in insertion order, last-write-wins.
+    'pistol-locomotion/pistol-idle',
+    // Combat seeds — fire, reload, hit-react, death variants.
     'basic-shooter/firing-rifle',
     'basic-shooter/reloading',
     'basic-shooter/hit-reaction',
+    'rifle-8way/death-from-the-front',
+    'rifle-8way/death-from-the-back',
+    'rifle-8way/death-from-right',
   ]);
   for (const slug of slugs) {
     try {
       await charMod.loadAnimationFBX(player.rig, `${PACK}/${slug}.glb`, slug);
     } catch (e) { console.warn(`[peek] skipped ${slug}:`, e.message); }
+  }
+  // Filter combat clips down to upper-body tracks only so they layer
+  // cleanly on top of the locomotion clip (legs keep moving while
+  // arms reload / fire / react). Mixamo's lower-body bone names
+  // covered: Hips, *UpLeg, *Leg, *Foot, *ToeBase. We accept both
+  // 'mixamorig:Bone' (FBX-imported) and 'mixamorigBone' (GLB-imported,
+  // GLTFLoader sanitizes the colon out).
+  const COMBAT_LAYERED = new Set([
+    'basic-shooter/reloading',
+    'basic-shooter/firing-rifle',
+    'basic-shooter/hit-reaction',
+    'pistol-locomotion/pistol-idle',
+  ]);
+  const lowerRe = /^(mixamorig:?)(Hips|LeftUpLeg|LeftLeg|LeftFoot|LeftToeBase|RightUpLeg|RightLeg|RightFoot|RightToeBase)\b/;
+  for (const slug of COMBAT_LAYERED) {
+    const action = player.rig._fbx?.actions?.get(slug);
+    if (!action) continue;
+    const clip = action.getClip();
+    const before = clip.tracks.length;
+    clip.tracks = clip.tracks.filter(t => !lowerRe.test(t.name));
+    const after = clip.tracks.length;
+    if (before !== after) console.log(`[peek] ${slug}: stripped ${before - after}/${before} lower-body tracks`);
   }
   // Engage the locomotion path. The block in player.js:2210 is gated
   // on rig._fbx.useGaspLocomotion — without this flag set, player.update
@@ -891,6 +924,27 @@ window.__useEveWithUAL = async () => {
   await charMod.loadAnimationFBX(player.rig,
     'Assets/models/animations/Universal%20Animation%20Library%5BStandard%5D/Unreal-Godot/UAL1_Standard.glb');
   return `eve.glb + UAL clips: ${player.rig.clipNames?.().length} total`;
+};
+
+// Console: __animDump()  — list every AnimationAction currently
+// running on the player's FBX rig with weight > 0.01. Used to debug
+// "what's actually contributing to the pose right now" when the rig
+// looks wrong. Returns a string for easy console paste.
+window.__animDump = () => {
+  const rig = player?.rig;
+  if (!rig?._fbx?.actions) return 'not on FBX rig';
+  const out = [];
+  for (const [name, action] of rig._fbx.actions) {
+    if (!action.isRunning?.()) continue;
+    const w = action.getEffectiveWeight?.() ?? 1;
+    if (w < 0.01) continue;
+    const t = action.time?.toFixed?.(2) ?? '?';
+    const dur = action.getClip?.()?.duration?.toFixed?.(2) ?? '?';
+    const tracks = action.getClip?.()?.tracks?.length ?? '?';
+    out.push(`${name}  weight=${w.toFixed(2)}  t=${t}/${dur}  tracks=${tracks}`);
+  }
+  out.push(`(currentAction=${rig._fbx.currentAction?.getClip?.()?.name || 'none'}, currentClipName=${rig._fbx.currentClipName || 'none'})`);
+  return out.join('\n');
 };
 
 // Console: __viewPeek()                    — embedded peek clip
@@ -9658,6 +9712,11 @@ function tryReload(weapon) {
   // dips and the physics dt clamp can't stretch a 1.4s reload into 6s,
   // AND pausing the game (inventory/shop/etc.) pauses the reload too.
   weapon.reloadEndsAt = gameClockMs + duration * 1000;
+  // FBX/Mixamo path — play the reload clip layered on the upper body
+  // so the legs keep walking. The clip's lower-body tracks are stripped
+  // at load time in __usePeekPlayer so this layered playback only
+  // modulates spine/arms/hands. No-op on procgen rig.
+  player.playOneShot?.('basic-shooter/reloading', duration, { fadeMs: 100, upperOnly: true });
 }
 function tickWeaponReload(weapon) {
   if (!weapon || weapon.type !== 'ranged') return;
@@ -11743,10 +11802,11 @@ function _onEnemyKilledImpl(enemy, opts = {}) {
     // Joiner kill — bundle every killer-instanced reward (credits +
     // skill points + kill count + archetype) for the joiner.
     // Host's local share of the team-progress runs immediately after.
-    const credits = (!enemy.noXp ? rollCredits(enemy.tier || 'normal') : 0)
-      + (!enemy.noXp && artifacts?.has('lucky_dice')
-          ? ((1 + Math.floor(Math.random() * 6)) + (1 + Math.floor(Math.random() * 6)))
-          : 0);
+    const _baseCredits = !enemy.noXp ? rollCredits(enemy.tier || 'normal') : 0;
+    const _luckyBonus = (!enemy.noXp && artifacts?.has('lucky_dice'))
+      ? Math.round(_baseCredits * (0.05 + Math.random() * 0.10))   // 5-15% of base drop
+      : 0;
+    const credits = _baseCredits + _luckyBonus;
     const skillPts = enemy.tier === 'subBoss' ? 1 : 0;
     try {
       _coopT_kill.send('rpc-grant-rewards', {
@@ -11783,10 +11843,14 @@ function _onEnemyKilledImpl(enemy, opts = {}) {
       const gained = rollCredits(enemy.tier || 'normal');
       if (gained > 0) { playerCredits += gained; runStats.addCredits(gained); totalCredits += gained; }
       if (artifacts && artifacts.has('lucky_dice')) {
-        const dice = (1 + Math.floor(Math.random() * 6)) + (1 + Math.floor(Math.random() * 6));
-        playerCredits += dice;
-        runStats.addCredits(dice);
-        totalCredits += dice;
+        // 5-15% of the base drop, so the bonus tracks floor depth
+        // instead of staying flat 2-12 forever.
+        const bonus = Math.round(gained * (0.05 + Math.random() * 0.10));
+        if (bonus > 0) {
+          playerCredits += bonus;
+          runStats.addCredits(bonus);
+          totalCredits += bonus;
+        }
       }
     }
     if (totalCredits > 0 && enemy.group?.position) {

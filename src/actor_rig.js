@@ -54,7 +54,11 @@ import { solveTwoBoneIK } from './anim/ik_two_bone.js';
 // new weapon doesn't need pose authoring.
 export const SUPPORT_GRIP_FRACTION_BY_CLASS = Object.freeze({
   pistol:  0.00,    // hands meet at grip — IK skipped (FK handles)
-  smg:     0.30,
+  smg:     0.10,    // short barrel — small fraction so the IK pulls
+                    // the support hand close to the dominant grip
+                    // (mimicking a two-handed SMG hold) rather than
+                    // out at rifle-foregrip distance, which the clip
+                    // authors but doesn't fit a short SMG.
   rifle:   0.50,
   shotgun: 0.50,
   sniper:  0.65,

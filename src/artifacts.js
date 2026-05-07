@@ -345,14 +345,15 @@ export const ARTIFACT_DEFS = {
   // -------------------------------------------------------------
   // Lucky Dice — Brian encounter reward (the "take off the hat"
   // path). A small set of weighted dice that hum in your pocket.
-  // Every kill grants 2-12 extra credits on top of the base roll.
+  // Every kill rolls a 5-15% bonus on the base credit drop, so the
+  // bonus scales with floor depth instead of staying flat.
   // synthetic: true keeps it out of shops + random pools — only
   // path is the Brian encounter.
   // -------------------------------------------------------------
   lucky_dice: {
     id: 'lucky_dice', name: 'Lucky Dice',
     lore: 'A loaded pair Brian rolled when he could still sleep. They roll for you now.',
-    short: 'Every kill drops 2-12 extra credits',
+    short: '+5-15% credits on every kill',
     tint: 0xe8d060,
     price: 0,
     synthetic: true,

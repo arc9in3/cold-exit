@@ -147,6 +147,17 @@ function _relicLevelMult() {
   return 0.05 + (lv - 1) * (0.95 / 6);
 }
 
+// Per-level sell-value ramp. Buy prices ramp at tunables.currency.
+// levelPriceRamp (0.18/level by default); sell ramps at the slower
+// sellLevelRamp so vendor sell prices keep partial pace with floor
+// inflation without closing the gap entirely. Caller-side: applied
+// inside sellPriceFor; callers don't need to know the formula.
+function _sellLevelMult() {
+  const ramp = tunables.currency.sellLevelRamp || 0;
+  const lv = (typeof window !== 'undefined' && (window.__levelIndex | 0)) || 1;
+  return 1 + ramp * Math.max(0, lv - 1);
+}
+
 // `priceFor` returns the merchant-facing BUY price and honours per-item
 // `priceMult` fluctuations rolled at stock time, plus a premium for
 // affixes + perks that reflects how strong the roll is.
@@ -193,14 +204,15 @@ export function sellPriceFor(item) {
   // from specific encounters with their own narrative arcs and
   // shouldn't be insta-cashed for chips.
   if (item._encounter) return 0;
+  const lvMult = _sellLevelMult();
   if (item.type === 'junk' && typeof item.sellValue === 'number') {
-    return Math.max(1, item.sellValue * count);
+    return Math.max(1, Math.round(item.sellValue * count * lvMult));
   }
   const base = tunables.currency.basePrice[inferRarity(item)] ?? 25;
   let rawBuy = base;
   if (item.type === 'consumable') rawBuy = Math.round(base * 0.5);
   else if (item.type === 'attachment') rawBuy = Math.round(base * 1.2);
-  let price = Math.round(rawBuy * tunables.currency.sellMult * count);
+  let price = Math.round(rawBuy * tunables.currency.sellMult * count * lvMult);
   if (item.durability && item.durability.current <= 0) {
     price = Math.round(price * BROKEN_SELL_MULT);
   }

@@ -86,13 +86,22 @@ function _runUpperBodyIK(rig, state, aimPoint, aimPitch, dt = 1/60) {
   fbx._pendingRecoilK = recoilK;
 
   // Resolve spine chain + neck + head + clavicles on first call.
+  // Prefers registry-driven abstract refs (rig.stomach, rig.chest,
+  // rig.neck, rig.leftArm.shoulder.pivot, rig.rightArm.shoulder.pivot)
+  // so this works on any rig (gasp_uefn, mixamo, future). Falls back
+  // to hardcoded UE5 names if the abstract refs aren't populated.
   if (!fbx._spineChain) {
     const bones = fbx.bonesByName;
-    const candidates = ['spine_01', 'spine_02', 'spine_03', 'spine_04', 'spine_05'];
-    fbx._spineChain = candidates.map(n => bones?.get(n) || null).filter(Boolean);
-    fbx._neckBone = bones?.get('neck_01') || null;
-    fbx._clavicleL = bones?.get('clavicle_l') || null;
-    fbx._clavicleR = bones?.get('clavicle_r') || null;
+    const fromAbstract = [rig.stomach, rig.chest].filter(Boolean);
+    if (fromAbstract.length) {
+      fbx._spineChain = fromAbstract;
+    } else {
+      const candidates = ['spine_01', 'spine_02', 'spine_03', 'spine_04', 'spine_05'];
+      fbx._spineChain = candidates.map(n => bones?.get(n) || null).filter(Boolean);
+    }
+    fbx._neckBone  = rig.neck                       || bones?.get('neck_01')   || null;
+    fbx._clavicleL = rig.leftArm?.shoulder?.pivot   || bones?.get('clavicle_l') || null;
+    fbx._clavicleR = rig.rightArm?.shoulder?.pivot  || bones?.get('clavicle_r') || null;
   }
 
   // Hip-sway cancellation: stabilize ONLY spine_01 to a fixed
@@ -257,6 +266,26 @@ function _runUpperBodyIK(rig, state, aimPoint, aimPitch, dt = 1/60) {
   applyChain(fbx._neckBone, aimYaw * 0.10, 0);
   applyChain(rig.head,      aimYaw * 0.30, 0);
 
+  // Absolute head-yaw override — Mixamo idle clips author the head
+  // pitched down, and the bindLocal capture above runs AFTER the clip
+  // posed the bone, so applyChain composes deltas against a downward-
+  // looking "rest" pose. This block snaps the head's WORLD rotation
+  // to body-yaw + aim delta, ignoring bindLocal entirely — the head
+  // ends up looking forward (or toward the cursor) regardless of what
+  // the clip authored. Same world-frame technique as the spine_01
+  // stabilization at the top of this function.
+  if (rig.head && rig.head.parent) {
+    rig.group.updateMatrixWorld(true);
+    rig.group.getWorldQuaternion(_aimParentWorldQ);
+    _aimDeltaE.set(0, aimYaw * 0.4, 0, 'YXZ');
+    _aimDeltaQ.setFromEuler(_aimDeltaE);
+    const _desired = _aimComposeQ.copy(_aimParentWorldQ).multiply(_aimDeltaQ);
+    const _parentW = new THREE.Quaternion();
+    rig.head.parent.updateMatrixWorld(true);
+    rig.head.parent.getWorldQuaternion(_parentW);
+    rig.head.quaternion.copy(_parentW.invert()).multiply(_desired);
+  }
+
   // ── Support-arm IK (option 5: gun-anchored target) ─────────
   // Target is computed from the gun's grip + muzzle anchors —
   // both are children of the right-hand wrist, so they move with
@@ -270,7 +299,26 @@ function _runUpperBodyIK(rig, state, aimPoint, aimPitch, dt = 1/60) {
   // doesn't compose its delta with the clip's per-frame rotation.
   const _ikCls = state.equipped?.class;
   const _ikFrac = SUPPORT_GRIP_FRACTION_BY_CLASS[_ikCls];
+  // Skip the support-arm IK while a one-shot is locked AND when the
+  // currently-running clip set includes a layered upper-body action
+  // (reload / fire / hit-react). The IK forces the support hand to
+  // grip the gun's grip-anchor, which fights the layered clip's
+  // authored arm pose and locks the off-hand mid-reload. Detection:
+  // if the current locomotion action's mixer has any non-locomotion
+  // action with weight > 0.1, defer to the clip.
+  const _now = (typeof performance !== 'undefined' ? performance.now() : Date.now());
+  const _clipLocked = rig._fbx?._clipLockUntil && _now < rig._fbx._clipLockUntil;
+  let _layeredActive = false;
+  if (rig._fbx?.actions && rig._fbx.currentAction) {
+    for (const a of rig._fbx.actions.values()) {
+      if (a !== rig._fbx.currentAction && a.isRunning?.() && (a.getEffectiveWeight?.() ?? 1) > 0.1) {
+        _layeredActive = true; break;
+      }
+    }
+  }
   if (_ikFrac && _ikFrac > 0.01
+      && !_clipLocked
+      && !_layeredActive
       && !state.offhandEquipped
       && rig._weaponGripAnchor
       && rig._weaponMuzzleAnchor
@@ -906,6 +954,36 @@ export function createPlayer(scene) {
     }
     buildAccessories(weapon);
     state.blocking = false;
+
+    // FBX/Mixamo path — toggle the pistol-stance upper-body layer.
+    // Pistol/SMG/revolver classes get pistol-locomotion/pistol-idle
+    // running as a layered action on top of locomotion (its lower-body
+    // tracks were stripped at load in __usePeekPlayer). Shouldered
+    // weapons hard-stop the layer so the rifle clip's authored upper
+    // body shows. We use action.stop() (not fadeOut) on the rifle path
+    // because fadeOut just drops weight to 0 over time but leaves the
+    // action in the mixer's running list; if isRunning() then returns
+    // a stale value on the next swap the stop branch can be skipped.
+    if (rig?._fbx?.actions) {
+      const pistolStance = rig._fbx.actions.get('pistol-locomotion/pistol-idle');
+      if (pistolStance) {
+        // SMGs use rifle locomotion (two-hand grip) — they're shouldered
+        // weapons in this game's pose convention even though they're
+        // smaller than rifles. Only true sidearms (pistol/revolver)
+        // get the one-hand pistol-idle upper-body layer.
+        const isOneHand = cls === 'pistol' || cls === 'revolver';
+        if (window.__animDebug) console.log(`[setWeapon] cls=${cls} isOneHand=${isOneHand} pistolWasRunning=${pistolStance.isRunning()}`);
+        if (isOneHand) {
+          pistolStance.setLoop(THREE.LoopRepeat, Infinity);
+          if (!pistolStance.isRunning()) {
+            pistolStance.reset().fadeIn(0.2).play();
+          }
+        } else {
+          // Hard stop — idempotent if already stopped.
+          pistolStance.stop();
+        }
+      }
+    }
 
     // Kick off the in-hand FBX swap. Primitive gunMesh + extras stay
     // visible as a placeholder while the model loads, then hide once
@@ -2398,9 +2476,19 @@ export function createPlayer(scene) {
               `pickVel=(${pickVel.x?.toFixed(2)},${pickVel.z?.toFixed(2)}) ads=${ads}`);
           }
           if (pick && rig._fbx.currentClipName !== pick.clip) {
-            const action = rig.play(pick.clip, { fadeMs: pick.playback?.fadeMs ?? 200, loop: pick.loop });
-            rig._fbx.currentClipName = pick.clip;
-            rig._fbx.currentAction = action;
+            // One-shot lock — death / reload / hit-react / jump phase
+            // sets _clipLockUntil so the locomotion selector doesn't
+            // immediately overwrite the held / playing clip on the
+            // next frame. Lock auto-clears when the wall-clock passes
+            // its deadline (Infinity for death = never auto-clear).
+            const _now = (typeof performance !== 'undefined' ? performance.now() : Date.now());
+            if (rig._fbx._clipLockUntil && _now < rig._fbx._clipLockUntil) {
+              // Locked — leave the held one-shot in place this frame.
+            } else {
+              const action = rig.play(pick.clip, { fadeMs: pick.playback?.fadeMs ?? 200, loop: pick.loop });
+              rig._fbx.currentClipName = pick.clip;
+              rig._fbx.currentAction = action;
+            }
           }
           if (pick?.speedRef && rig._fbx.currentAction) {
             const clamp = pick.playback?.timeScaleClamp ?? [0.5, 1.5];
@@ -2815,7 +2903,59 @@ export function createPlayer(scene) {
     }
   }
   function reactToHit(dirX, dirZ, mag) { pokeHit(rig, dirX, dirZ, mag); }
-  function reactToDeath(dirX, dirZ, mag) { pokeDeath(rig, dirX, dirZ, mag); }
+  function reactToDeath(dirX, dirZ, mag) {
+    pokeDeath(rig, dirX, dirZ, mag);
+    // FBX/Mixamo path — pick a death clip based on impact direction
+    // (front/back/right) and lock locomotion off so the locomotion
+    // selector doesn't override it on the next frame. Mirror right →
+    // left via the rig group's local frame; we only have death-from-right
+    // in the runner pack.
+    if (rig?._fbx?.actions) {
+      const bodyYaw = rig.group.rotation.y;
+      const fx = -Math.sin(bodyYaw), fz = -Math.cos(bodyYaw);     // body forward (faces -Z at yaw 0)
+      const rx =  Math.cos(bodyYaw), rz = -Math.sin(bodyYaw);     // body right
+      const len = Math.hypot(dirX, dirZ) || 1;
+      const dx = dirX / len, dz = dirZ / len;
+      const dotF = dx * fx + dz * fz;
+      const dotR = dx * rx + dz * rz;
+      let clip;
+      if (Math.abs(dotR) > Math.abs(dotF)) clip = 'rifle-8way/death-from-right';
+      else if (dotF > 0)                   clip = 'rifle-8way/death-from-the-front';
+      else                                 clip = 'rifle-8way/death-from-the-back';
+      playOneShot(clip, Infinity, { hold: true, fadeMs: 120 });
+    }
+  }
+
+  // Play a single one-shot clip (death, reload, hit-react, jump phase)
+  // and optionally lock locomotion off for `durationSeconds`. Pass
+  // Infinity to lock until reset (death). With `hold: true` the final
+  // frame is clamped so the rig stays in the end pose. With
+  // `upperOnly: true` the clip plays LAYERED on top of the locomotion
+  // (reload, fire, hit-react) — caller is responsible for stripping
+  // the clip's lower-body tracks ahead of time so legs keep walking.
+  // Returns the AnimationAction or null if the clip isn't loaded.
+  function playOneShot(clipName, durationSeconds, opts = {}) {
+    if (!rig?._fbx?.actions?.has?.(clipName)) return null;
+    let action;
+    if (opts.upperOnly && rig.playLayered) {
+      action = rig.playLayered(clipName, { fadeMs: opts.fadeMs ?? 100, loop: false });
+    } else {
+      action = rig.play(clipName, { fadeMs: opts.fadeMs ?? 100, loop: false });
+    }
+    if (!action) return null;
+    action.setLoop(THREE.LoopOnce, 1);
+    if (opts.hold) action.clampWhenFinished = true;
+    // Lock locomotion-clip swap only when the one-shot fully owns the
+    // body. Layered upper-body clips (reload etc.) leave the locomotion
+    // selector free to keep the legs walking.
+    if (!opts.upperOnly) {
+      const now = (typeof performance !== 'undefined' ? performance.now() : Date.now());
+      rig._fbx._clipLockUntil = durationSeconds > 1e6 ? Infinity : now + durationSeconds * 1000;
+      rig._fbx.currentClipName = clipName;
+      rig._fbx.currentAction = action;
+    }
+    return action;
+  }
 
   // Swap the firing shoulder. Reparents the gun mesh + muzzle + FBX
   // in-hand model to the opposite anchor (shoulder for long guns,
@@ -3090,7 +3230,7 @@ export function createPlayer(scene) {
     if (state.equipped) setWeapon(state.equipped);
   }
   return {
-    mesh: group, body, rig, _setRig, update, setWeapon, setOffhandWeapon, reattachWeapon, prewarmWeapon, takeDamage, heal, applyStatus,
+    mesh: group, body, rig, _setRig, update, setWeapon, setOffhandWeapon, reattachWeapon, playOneShot, prewarmWeapon, takeDamage, heal, applyStatus,
     tryMeleeAttack, tryQuickMelee, cancelCombo,
     tryParry, isBlocking, isParryActive,
     consumeStamina, refundStamina, applyDerivedStats, restoreFullHealth,
