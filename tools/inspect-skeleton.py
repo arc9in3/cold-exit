@@ -49,7 +49,18 @@ def main():
         walk(r, 0)
     print(f"[inspect] actions: {len(bpy.data.actions)}")
     for a in bpy.data.actions:
-        print(f"  {a.name}  fcurves={len(a.fcurves)}")
+        try:
+            curves = list(a.fcurves) if a.fcurves else []
+            print(f"  {a.name}  fcurves={len(curves)}")
+            for fc in curves[:30]:
+                kp = list(fc.keyframe_points)
+                rng = ''
+                if kp:
+                    vals = [k.co[1] for k in kp]
+                    rng = f" range=[{min(vals):+.3f}..{max(vals):+.3f}]"
+                print(f"    {fc.data_path}[{fc.array_index}]  keys={len(kp)}{rng}")
+        except Exception as e:
+            print(f"  {a.name}  (could not read fcurves: {e})")
 
 
 if __name__ == '__main__':

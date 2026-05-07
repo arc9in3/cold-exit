@@ -61,6 +61,8 @@ def parse_args():
                    help="disable Blender's automatic leaf-bone insertion (default true)")
     p.add_argument("--scale", type=float, default=1.0,
                    help="apply scale on import (Mixamo FBX is cm; pass 0.01 for meters)")
+    p.add_argument("--no-actions", action="store_true",
+                   help="strip all actions before export (mesh + skeleton only). Use for source FBXs whose embedded action is a static rest-pose snapshot that would override the runtime clip pack on bind.")
     return p.parse_args(argv)
 
 
@@ -234,13 +236,16 @@ def rename_bones(armature, mapping):
     return renamed
 
 
-def export_glb(path):
-    """Export the current scene as GLB."""
+def export_glb(path, export_animations=True):
+    """Export the current scene as GLB. Pass export_animations=False
+    to ship a mesh-only / skeleton-only GLB (no actions baked in) —
+    used when the source FBX carries a single static "pose" action
+    that would override the runtime's clip pack on bind."""
     os.makedirs(os.path.dirname(path), exist_ok=True)
     bpy.ops.export_scene.gltf(
         filepath=path,
         export_format='GLB',
-        export_animations=True,
+        export_animations=export_animations,
         export_apply=True,
         export_yup=True,
         export_skins=True,
@@ -278,6 +283,19 @@ def main():
     if args.strip_root_motion:
         n = strip_root_motion(actions, armature)
         print(f"[blender] stripped {n} root-motion fcurves")
+
+    if args.no_actions:
+        # Wipe every action AND every NLA strip on the armature so the
+        # exported GLB carries only the rig + bind pose. Used when the
+        # source FBX ships a pose-snapshot action that would otherwise
+        # bind on load and override the runtime's clip pack — leg-in-
+        # air symptom 2026-05-07.
+        if armature and armature.animation_data:
+            armature.animation_data_clear()
+        for a in list(bpy.data.actions):
+            try: bpy.data.actions.remove(a, do_unlink=True)
+            except Exception: pass
+        print(f"[blender] stripped all actions ({len(bpy.data.actions)} remaining)")
 
     # Diagnostic — print a representative bone's world Y so we can
     # confirm scale baking worked. A 1.8m character should have its

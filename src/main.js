@@ -970,18 +970,21 @@ window.__useGaspMannequin = async () => {
   const playerMod = await import('./player.js');
   // Player-mesh override — `localStorage.coldExitPlayerMesh = 'female'`
   // swaps the UEFN male mannequin GLB for the Mixamo→UE5 retargeted
-  // female-pose GLB (Assets/models/characters/female-pose-ue5.glb,
-  // produced by tools/blender-fbx-to-glb.py + bone-rename-mixamo-to-ue5.json).
-  // The female skeleton has fewer bones than the UE5 reference (3 vs
-  // 5 spines, 1 vs 2 necks, 2 vs 5 fingers, no twist/IK chains) so
-  // GASP clips driving missing bones get silently skipped by the
-  // AnimationMixer. The biped subset (hips/spine/arms/legs/hands)
-  // animates correctly, which is the load-bearing motion.
+  // T-pose female model (Assets/models/characters/female-tpose-ue5.glb,
+  // produced by tools/blender-fbx-to-glb.py with the bone-rename map
+  // AND --no-actions so the source FBX's embedded pose action can't
+  // bind on load). The female skeleton has fewer bones than the UE5
+  // reference (3 vs 5 spines, 1 vs 2 necks, 2 vs 5 fingers, no
+  // twist/IK chains) so GASP clips driving missing bones get silently
+  // skipped by the AnimationMixer. The biped subset (hips/spine/
+  // arms/legs/hands) animates correctly. T-pose source replaces the
+  // earlier female-pose-ue5.glb attempt — that one had a leg-in-air
+  // symptom because its embedded "pose" action overrode bind.
   let meshUrl = `${PACK}/SKM_UEFN_Mannequin.glb`;
   try {
     if (typeof localStorage !== 'undefined'
         && localStorage.getItem('coldExitPlayerMesh') === 'female') {
-      meshUrl = 'Assets/models/characters/female-pose-ue5.glb';
+      meshUrl = 'Assets/models/characters/female-tpose-ue5.glb';
     }
   } catch (_) {}
   await playerMod.swapPlayerToFbxRig(player, scene, meshUrl,
