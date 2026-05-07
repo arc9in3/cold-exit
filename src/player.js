@@ -2539,11 +2539,25 @@ export function createPlayer(scene) {
             }
             rig._fbx.currentLayeredClipName = wantLayered;
           }
+          // Compute timeScale from the base clip's speedRef and apply
+          // to BOTH the base and the layered upper-body action so the
+          // pistol-locomotion arm-swing stays phase-locked with the
+          // rifle-8way leg cycle. Without mirroring, the base runs at
+          // planarSpeed/speedRef while the layered plays at 1.0; they
+          // drift, the layered loop restarts mid-base-stride, and the
+          // arms hiccup as the cycle resets while the legs continue.
+          let layeredTimeScale = 1.0;
           if (pick?.speedRef && rig._fbx.currentAction) {
             const clamp = pick.playback?.timeScaleClamp ?? [0.5, 1.5];
-            rig._fbx.currentAction.timeScale = Math.max(clamp[0], Math.min(clamp[1], planarSpeed / pick.speedRef));
+            const ts = Math.max(clamp[0], Math.min(clamp[1], planarSpeed / pick.speedRef));
+            rig._fbx.currentAction.timeScale = ts;
+            layeredTimeScale = ts;
           } else if (rig._fbx.currentAction) {
             rig._fbx.currentAction.timeScale = 1.0;
+          }
+          if (rig._fbx.currentLayeredClipName) {
+            const layeredAction = rig._fbx.actions?.get(rig._fbx.currentLayeredClipName);
+            if (layeredAction) layeredAction.timeScale = layeredTimeScale;
           }
           rig.update(dt);
           // Upper body IK — point the wrists at the aim target. The
