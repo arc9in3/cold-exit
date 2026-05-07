@@ -917,19 +917,35 @@ export function createPlayer(scene) {
       // GASP path — anchor under rig.group, tracking the dominant
       // hand bone. Gun barrel extends along anchor's +Z.
       //
-      // Forward-offset formula is class-dependent: pistols use the
-      // original (len/2) so grip sits at the anchor and the full
-      // gun extends forward (this was perfect for the 1911 at
-      // commit 13a43e1). Long rifles use (len*0.2) so the back of
-      // the gun overlaps the wrist instead of the muzzle floating
-      // ~1.4m in front of the body (the AK fix from 8e5b22e).
+      // Grip placement: short guns (pistol / smg / flame / melee)
+      // rest with their grip AT the anchor — these GLB clones have
+      // their origin at the grip end so position.z=0 lands the visible
+      // grip in the hand. Long guns (rifle / shotgun / sniper / lmg)
+      // keep the (len*0.2) offset so the back of the rifle stock
+      // overlaps the wrist + forearm instead of clipping into the body
+      // (the AK fix from 8e5b22e).
+      //
+      // Muzzle placement: at the FORWARD tip of the visible barrel.
+      // The visible gun length is ~ 2 × cs × len (bounding-sphere fit
+      // diameter), so the per-class VISIBLE_FACTOR mirrors CLASS_SCALE
+      // × 2 with a small bump for muzzle attachments (suppressors etc.
+      // extend ~10% past the bare-barrel bbox). Without this the
+      // tracer originated 30cm past the visible barrel tip on pistols.
+      // REGRESSION: anim-gun-grip-floating — gunMesh.position.z=fwd
+      // used to put the grip 17cm forward of the hand on pistols.
       gunMesh.rotation.set(0, 0, 0);
       inHandModel.rotation.set(0, 0, 0);
       const isLong = cls === 'rifle' || cls === 'shotgun'
         || cls === 'sniper' || cls === 'lmg';
-      const fwd = isLong ? (len * 0.2) : (len / 2);
-      gunMesh.position.set(0, 0, fwd * ws);
-      muzzle.position.set(0, 0, (fwd + len / 2) * ws);
+      const VISIBLE_FACTOR = {
+        pistol: 0.50, smg: 1.40, rifle: 1.60, shotgun: 1.60,
+        sniper: 1.95, lmg: 1.60, flame: 1.50, melee: 1.50,
+      };
+      const vf = VISIBLE_FACTOR[cls] ?? 1.0;
+      const gripZ = isLong ? (len * 0.2) : 0;
+      const muzzleZ = isLong ? (len * 0.2 + len * vf * 0.5) : (len * vf);
+      gunMesh.position.set(0, 0, gripZ * ws);
+      muzzle.position.set(0, 0, muzzleZ * ws);
       inHandModel.position.copy(gunMesh.position);
     } else if (isShouldered) {
       // Chest-local forward is +Z (no axis swap needed). Stock sits at
