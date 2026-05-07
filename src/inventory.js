@@ -102,10 +102,16 @@ const MIL_BASE  = 'Assets/UI/Military/';
 // render and skip the procedural primitive without touching the build
 // system.
 export const GEAR_RENDER_BY_ID = {
-  helmet_kevlar:    'Assets/proposed/helmet_kevlar.png',
-  helmet_tactical:  'Assets/proposed/helmet_tactical.png',
-  helmet_tac_nvg:   'Assets/proposed/helmet_tac_nvg.png',
-  helmet_ballistic: 'Assets/proposed/helmet_ballistic.png',
+  // 2026-05-06: helmet_tactical / _kevlar / _ballistic art lives
+  // under the `artpass-item-` prefix on disk. helmet_tac_nvg has both
+  // a prefixed AND unprefixed copy; it kept loading because the
+  // unprefixed version exists. (Bug #78: tactical helmet image
+  // missing.) Pointed all four at the prefixed asset names so the
+  // proposed-art batch all resolves consistently.
+  helmet_kevlar:    'Assets/proposed/artpass-item-helmet_kevlar.png',
+  helmet_tactical:  'Assets/proposed/artpass-item-helmet_tactical.png',
+  helmet_tac_nvg:   'Assets/proposed/artpass-item-helmet_tac_nvg.png',
+  helmet_ballistic: 'Assets/proposed/artpass-item-helmet_ballistic.png',
   chest_light:     'Assets/generated/icon-chest_light-v304.png',
   chest_med:       'Assets/generated/chest-med-r2.png',
   chest_heavy:     'Assets/generated/chest-heavy.png',

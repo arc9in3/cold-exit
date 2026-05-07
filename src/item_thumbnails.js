@@ -1490,7 +1490,22 @@ export function thumbnailFor(item) {
           _disposeStage();
           _stage.add(obj);
           const hiUrl = _fitAndRender(item.tint);
-          _cache.set(key, hiUrl);
+          if (hiUrl) {
+            _cache.set(key, hiUrl);
+            // Notify any UI that already painted a thumbnail for this
+            // item so it can swap to the upgraded render. (Bug #77,
+            // 2026-05-06: shop item images show grey blocks until
+            // 'Sell All Junk' is clicked — that click triggered a
+            // render() which re-pulled from the cache, but without
+            // the broadcast, tiles were stuck on whatever they got
+            // first.) Each shop / loot / inventory surface listens
+            // and re-renders or patches the matching <img>.
+            try {
+              window.dispatchEvent(new CustomEvent('cold-exit:thumbnail-updated', {
+                detail: { key, url: hiUrl, item },
+              }));
+            } catch (_) {}
+          }
         } catch (err) {
           console.warn('[thumbnails] model render failed', err);
         }

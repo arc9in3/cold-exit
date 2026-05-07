@@ -60,6 +60,20 @@ export class InventoryUI {
     `;
     document.body.appendChild(this.root);
 
+    // Async-thumbnail listener — when an FBX render upgrade lands in
+    // the cache, re-pull tiles so grey blocks swap to the upgraded
+    // image. Same pattern as ShopUI / LootUI. Throttled to one render
+    // per animation frame.
+    this._thumbRerenderQueued = false;
+    window.addEventListener('cold-exit:thumbnail-updated', () => {
+      if (!this.visible || this._thumbRerenderQueued) return;
+      this._thumbRerenderQueued = true;
+      requestAnimationFrame(() => {
+        this._thumbRerenderQueued = false;
+        if (this.visible) this.render();
+      });
+    });
+
     this.gridEl = this.root.querySelector('#inv-grid');
     this.gridsStackEl = this.root.querySelector('#inv-grids-stack');
 

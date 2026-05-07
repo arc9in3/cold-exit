@@ -223,6 +223,19 @@ export class LootUI {
     `;
     document.body.appendChild(this.root);
 
+    // Async-thumbnail listener — same pattern as ShopUI. When an FBX
+    // render upgrade lands, re-pull tiles so grey blocks swap to the
+    // upgraded image without waiting for an explicit user action.
+    this._thumbRerenderQueued = false;
+    window.addEventListener('cold-exit:thumbnail-updated', () => {
+      if (!this.isOpen() || this._thumbRerenderQueued) return;
+      this._thumbRerenderQueued = true;
+      requestAnimationFrame(() => {
+        this._thumbRerenderQueued = false;
+        if (this.isOpen()) this.render();
+      });
+    });
+
     // Build player side
     this.playerSlotsEl = this.root.querySelector('#loot-player-slots');
     this.playerGridsStackEl = this.root.querySelector('#loot-player-grids-stack');
@@ -1452,8 +1465,27 @@ export class LootUI {
     const ammoLine = (entry.item.type === 'ranged' && typeof entry.item.ammo === 'number')
       ? `<span class="pkt-ammo">${entry.item.ammo}/${entry.item.magSize ?? '—'}</span>`
       : '';
+    // Keep / junk badge — same .cell-mark-tag the equipment cells +
+    // body-side workspace tile render. Without this the player can't
+    // tell which of their pocket/rig/backpack items they've already
+    // marked while a loot modal is open. (Bug #79, 2026-05-06: "keep
+    // and junk tags aren't displayed on my pocket, rig, and backpack
+    // items in the looting menu.")
+    const markBadge = entry.item.markedJunk
+      ? `<div class="cell-mark-tag mark-junk pkt-mark-tag" title="Marked as Junk">JUNK</div>`
+      : entry.item.markedKeep
+      ? `<div class="cell-mark-tag mark-keep pkt-mark-tag" title="Marked to Keep">KEEP</div>`
+      : '';
+    // Stack badge — consumables / junk that stack > 1 should show
+    // their count just like the body-side workspace tile (was also
+    // missing on player-side, same root regression).
+    const count = (entry.item.count | 0) || 1;
+    const stackBadge = ((entry.item.type === 'consumable' || entry.item.type === 'junk') && count > 1)
+      ? `<span class="pkt-stack">×${count}</span>` : '';
     tile.innerHTML = `
       ${thumb ? `<img class="pkt-thumb" src="${thumb}" alt="" draggable="false" style="${weaponImageMirrorStyle(entry.item)}">` : `<span class="pkt-glyph">${TYPE_ICONS[entry.item.type] || '◇'}</span>`}
+      ${stackBadge}
+      ${markBadge}
       <div class="pkt-name">${label}</div>
       ${durPct >= 0 ? `<div class="pkt-dur"><div class="pkt-dur-fill" style="width:${durPct.toFixed(0)}%;background:${durPct > 60 ? '#6abe8a' : durPct > 30 ? '#e0c040' : '#d24040'}"></div></div>` : ''}
       ${ammoLine}

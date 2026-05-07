@@ -2457,6 +2457,19 @@ function startNewRun(weaponClass) {
   // queue if there's a fresh buff purchase.
   _starterBuffSpeedFloors = 0;
   _starterBuffReloadFloors = 0;
+  // Clear pending level-up + mastery picks from the prior run.
+  // (Bug #82, 2026-05-06: "pending level ups from the previous run
+  // are still available to choose after quitting to menu and starting
+  // a new run.") onQuit doesn't touch these; they accumulate during
+  // the run and need an explicit run-start reset so the skill-pick
+  // overlay doesn't fire with stale picks queued.
+  pendingLevelUps = 0;
+  _pendingLevelUpPicks = 0;
+  _pendingMasteryPicks = [];
+  playerSkillPoints = 0;
+  playerLevel = 1;
+  playerXp = 0;
+  _refreshSkillPointPip();
   // Clear keystone window flags from a prior run — they're one-shots
   // consumed at run start. _applyOneShotKeystone below re-sets them
   // if a fresh keystone is in the queue.
@@ -17387,6 +17400,23 @@ function _tickBurnFlames(dt) {
   }
 }
 
+// Pre-flight gate for any consumable use. The noConsumables contract
+// modifier needs to block the inventory mutation, not just the effect
+// inside applyConsumable — otherwise the item is gone before the
+// effect-side gate runs. (Bug #80, 2026-05-06: "during a contract
+// that bars consumables, consumables can be consumed but with no
+// effect.") Throwables are exempt — they don't trip the contract,
+// applyConsumable handles them via a charge spend not a stack
+// decrement, and the inner noConsumables gate sits AFTER the throwable
+// branch by design.
+function _consumableBlockedByContract(item) {
+  if (!item || item.type === 'throwable') return false;
+  if (!_activeModifiers.noConsumables) return false;
+  transientHudMsg('Contract bars consumables.');
+  try { sfx.empty?.(); } catch (_) {}
+  return true;
+}
+
 // Use a specific consumable / throwable from anywhere in the player's
 // inventory (E hotkey while hovering an item in the inventory grid).
 // Mirrors tryUseMedkit's stack-aware decrement: if the item is a
@@ -17402,6 +17432,7 @@ function useInventoryItem(item) {
     return true;
   }
   if (item.type !== 'consumable') return false;
+  if (_consumableBlockedByContract(item)) return false;
   const stackCount = (item.count | 0) || 1;
   if (stackCount > 1) {
     item.count = stackCount - 1;
@@ -17428,6 +17459,7 @@ window.__useInventoryItem = useInventoryItem;
 function tryUseMedkit() {
   const found = inventory.findFirstConsumable(it => it.useEffect?.kind === 'heal');
   if (!found) return;
+  if (_consumableBlockedByContract(found.item)) return;
   // Stack-aware consume — decrement count if there's more than one
   // in the stack, otherwise pull the item out entirely. Without
   // this, pressing H on a 5-bandage stack would consume the whole
@@ -17472,7 +17504,9 @@ function useActionSlot(idx) {
     return;
   }
   // Everything else (heal / buff consumables) is single-use: pull
-  // it out and apply.
+  // it out and apply. Pre-flight contract gate: if noConsumables is
+  // active, do not pull from the slot.
+  if (_consumableBlockedByContract(item)) return;
   const taken = inventory.consumeActionSlot(idx);
   if (taken) {
     applyConsumable(taken);
@@ -18783,20 +18817,28 @@ function _ensureLevelUpBanner() {
         80%  { text-shadow: 0 0 14px #ffe070, 0 0 32px #ffd040, 0 0 70px #ff9020; opacity: 1; }
         100% { text-shadow: 0 0 12px #ffe070, 0 0 28px #ffd040, 0 0 60px #ff9020; transform: translate(-50%, -50%) scale(1.04); opacity: 0; }
       }
+      /* 2026-05-06: shrunk + relocated. Banner used to sit at 38%
+         center of the screen at 96px — too big, blocked the play
+         area during combat-triggered level-ups. (Bug #81: "level up
+         text blocks the screen during gameplay.") Now anchored
+         to the top third with smaller text + tighter sub line so
+         the player still gets a clear "you leveled" beat without
+         losing visibility into what's happening on screen. */
       #level-up-banner {
-        position: fixed; top: 38%; left: 50%;
+        position: fixed; top: 18%; left: 50%;
         transform: translate(-50%, -50%);
         z-index: 60; pointer-events: none;
         font-family: ui-monospace, Menlo, Consolas, monospace;
-        font-weight: 700; font-size: 96px; letter-spacing: 14px;
+        font-weight: 700; font-size: 48px; letter-spacing: 8px;
         color: #fff5b8;
         opacity: 0; display: none; user-select: none;
+        text-align: center;
         text-shadow: 0 0 12px #ffe070, 0 0 28px #ffd040, 0 0 60px #ff9020;
       }
       #level-up-banner.show { display: block; }
       #level-up-banner .sub {
-        display: block; margin-top: 6px;
-        font-size: 18px; letter-spacing: 6px;
+        display: block; margin-top: 4px;
+        font-size: 14px; letter-spacing: 4px;
         color: #ffd070; text-shadow: 0 0 8px #ffb030;
       }
     `;
@@ -18860,20 +18902,24 @@ function _ensureClassLevelUpBanner() {
         80%  { text-shadow: 0 0 14px #e0a0ff, 0 0 32px #a040e0, 0 0 70px #6020a0; opacity: 1; }
         100% { text-shadow: 0 0 12px #d090ff, 0 0 28px #a040e0, 0 0 60px #6020a0; transform: translate(-50%, -50%) scale(1.04); opacity: 0; }
       }
+      /* Same 2026-05-06 shrink as #level-up-banner — was 76px at
+         38% center, now 42px at 18% top so it doesn't block the
+         play area during a class-up that fires mid-combat. */
       #class-level-up-banner {
-        position: fixed; top: 38%; left: 50%;
+        position: fixed; top: 18%; left: 50%;
         transform: translate(-50%, -50%);
         z-index: 60; pointer-events: none;
         font-family: ui-monospace, Menlo, Consolas, monospace;
-        font-weight: 700; font-size: 76px; letter-spacing: 12px;
+        font-weight: 700; font-size: 42px; letter-spacing: 7px;
         color: #f0d8ff;
         opacity: 0; display: none; user-select: none;
+        text-align: center;
         text-shadow: 0 0 12px #d090ff, 0 0 28px #a040e0, 0 0 60px #6020a0;
       }
       #class-level-up-banner.show { display: block; }
       #class-level-up-banner .sub {
-        display: block; margin-top: 6px;
-        font-size: 16px; letter-spacing: 5px;
+        display: block; margin-top: 4px;
+        font-size: 13px; letter-spacing: 4px;
         color: #d8a8ff; text-shadow: 0 0 8px #8030c0;
       }
     `;

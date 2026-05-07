@@ -291,6 +291,22 @@ export class ShopUI {
     this.keeperFlavorEl = this.root.querySelector('#shop-keeper-flavor');
     this.root.querySelector('#shop-close').addEventListener('click', () => this.hide());
     this.root.addEventListener('mousedown', (e) => { if (e.target === this.root) this.hide(); });
+    // Async-thumbnail listener — when an FBX-upgraded item render lands
+    // in the cache, re-pull the affected tiles. (Bug #77, 2026-05-06:
+    // shop item images show grey blocks until 'Sell All Junk' is
+    // clicked.) The event was the missing wire — Sell-All-Junk's
+    // re-render was the only thing that re-pulled the cache. Throttled
+    // to one render per animation frame so a burst of FBX completions
+    // doesn't thrash the DOM.
+    this._thumbRerenderQueued = false;
+    window.addEventListener('cold-exit:thumbnail-updated', () => {
+      if (!this.isOpen() || this._thumbRerenderQueued) return;
+      this._thumbRerenderQueued = true;
+      requestAnimationFrame(() => {
+        this._thumbRerenderQueued = false;
+        if (this.isOpen()) this.render();
+      });
+    });
     // Bulk-action buttons — wired once at construct, gated per-merchant
     // inside their handlers.
     this.sellJunkBtn = this.root.querySelector('#shop-sell-junk');
