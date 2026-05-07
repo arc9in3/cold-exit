@@ -968,7 +968,23 @@ window.__usePistolPack = async () => {
 window.__useGaspMannequin = async () => {
   const PACK = 'Assets/models/animations/gasp_glb';
   const playerMod = await import('./player.js');
-  await playerMod.swapPlayerToFbxRig(player, scene, `${PACK}/SKM_UEFN_Mannequin.glb`,
+  // Player-mesh override — `localStorage.coldExitPlayerMesh = 'female'`
+  // swaps the UEFN male mannequin GLB for the Mixamo→UE5 retargeted
+  // female-pose GLB (Assets/models/characters/female-pose-ue5.glb,
+  // produced by tools/blender-fbx-to-glb.py + bone-rename-mixamo-to-ue5.json).
+  // The female skeleton has fewer bones than the UE5 reference (3 vs
+  // 5 spines, 1 vs 2 necks, 2 vs 5 fingers, no twist/IK chains) so
+  // GASP clips driving missing bones get silently skipped by the
+  // AnimationMixer. The biped subset (hips/spine/arms/legs/hands)
+  // animates correctly, which is the load-bearing motion.
+  let meshUrl = `${PACK}/SKM_UEFN_Mannequin.glb`;
+  try {
+    if (typeof localStorage !== 'undefined'
+        && localStorage.getItem('coldExitPlayerMesh') === 'female') {
+      meshUrl = 'Assets/models/characters/female-pose-ue5.glb';
+    }
+  } catch (_) {}
+  await playerMod.swapPlayerToFbxRig(player, scene, meshUrl,
                                      { rigId: 'gasp_uefn' });
   // Bump the rig group scale a touch so the UEFN mannequin matches
   // the procgen rig's visual size — the bare GLB lands at ~1.8m
@@ -1058,6 +1074,20 @@ window.__useGaspMannequin = async () => {
   // when this flag is set.
   player.rig._fbx.useGaspLocomotion = true;
   return `gasp mannequin loaded — ${player.rig.clipNames?.().length} clips`;
+};
+
+// Console: __usePlayerMesh('female') | 'male' | 'default'
+//   Persists the player-mesh choice to localStorage and reloads the
+//   GASP rig immediately so the swap takes effect without a refresh.
+//   Currently supports the UE5/GASP male mannequin (default) and the
+//   Mixamo→UE5 retargeted female model. Per-session tweak only —
+//   doesn't replace the eventual proper character-select UI.
+window.__usePlayerMesh = async (which = 'default') => {
+  try {
+    if (which === 'female') localStorage.setItem('coldExitPlayerMesh', 'female');
+    else                    localStorage.removeItem('coldExitPlayerMesh');
+  } catch (_) {}
+  return await window.__useGaspMannequin();
 };
 
 // AUTO-LOAD on game start — the Motus pistol pack becomes the default
