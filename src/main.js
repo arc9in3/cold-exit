@@ -1342,17 +1342,22 @@ const _wantFbxDefault = (() => {
 if (_wantFbxDefault) {
   setTimeout(async () => {
     try {
-      // Default: GASP UEFN mannequin + 8-way locomotion. Set
-      // localStorage.coldExitDefaultRig = 'pistol' to swap back to
-      // the Motus pistol pack, or 'procgen' for the original
-      // primitive rig.
+      // Default: peek.glb (Mixamo) + runner-pack 8-way + GASP M_Neutral
+      // clips for the OneHand_Pistol stance. The phase-c animation
+      // migration targets peek; promoting it to default lets the OneHand
+      // suffix swap + pistol-locomotion layer actually exercise on boot
+      // without a console call. Set localStorage.coldExitDefaultRig to:
+      //   'gasp'    — old GASP UEFN mannequin path (pre-Mixamo)
+      //   'pistol'  — Motus pistol pack (legacy)
+      //   'procgen' — primitive rig
       const choice = (() => {
         try { return localStorage.getItem('coldExitDefaultRig'); }
         catch (_) { return null; }
       })();
-      const result = (choice === 'pistol')
-        ? await window.__usePistolPack()
-        : await window.__useGaspMannequin();
+      let result;
+      if (choice === 'pistol') result = await window.__usePistolPack();
+      else if (choice === 'gasp') result = await window.__useGaspMannequin();
+      else result = await window.__usePeekPlayer();
       console.log('[anim] default rig loaded:', result);
     } catch (err) {
       console.warn('[anim] FBX auto-load failed; staying on procgen:', err.message);

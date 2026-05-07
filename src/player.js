@@ -19,9 +19,19 @@ import { solveTwoBoneIK, solvePostClipTwoBoneIK, resetIkCache } from './anim/ik_
 let _gaspSmCfg = null;
 let _gaspSmFetched = false;
 function _ensureGaspSmLoaded() {
-  if (_gaspSmFetched) return;
+  // Skip if anything has already supplied a state machine. Without this
+  // guard, this function fires from the player.update tick the instant
+  // useGaspLocomotion=true is set, races against __usePeekPlayer's
+  // setLocomotionStateMachine(runner_sm) call, and (on .then resolve)
+  // overwrites runner_sm with gasp_lower_body — whose clip names refer
+  // to GASP M_Neutral_* clips that aren't loaded on peek, leaving
+  // selectGaspLocomotion's lookups silently null and locomotion broken.
+  if (_gaspSmFetched || _gaspSmCfg) return;
   _gaspSmFetched = true;
   loadStateMachine('gasp_lower_body').then(cfg => {
+    // Re-check: setLocomotionStateMachine may have run between the
+    // fetch start and resolution. Don't clobber an explicitly-chosen SM.
+    if (_gaspSmCfg) return;
     _gaspSmCfg = cfg;
     if (cfg) console.log('[player] gasp_lower_body state machine loaded');
   }).catch(err => {
@@ -38,6 +48,10 @@ function _ensureGaspSmLoaded() {
 // gasp_lower_body.json.
 export function setLocomotionStateMachine(cfg) {
   _gaspSmCfg = cfg;
+  // Flip the auto-load guard so the gasp_lower_body fetch (kicked off
+  // from player.update the first tick after useGaspLocomotion=true)
+  // can't clobber the explicit choice when its promise resolves.
+  _gaspSmFetched = true;
 }
 
 // Aim-IK target scratch (world-space point the wrist should reach).
@@ -2421,16 +2435,29 @@ export function createPlayer(scene) {
         const armBone = state.handedness === 'right'
           ? rig.rightArm?.shoulder?.pivot
           : rig.leftArm?.shoulder?.pivot;
-        if (armBone && armBone.quaternion) {
-          if (!rig._fbx._armBaseQ) rig._fbx._armBaseQ = armBone.quaternion.clone();
-          armBone.quaternion.copy(rig._fbx._armBaseQ);
-          if (Math.abs(armYawTotal) > 0.001) {
-            _aimDeltaE.set(0, armYawTotal, 0, 'YXZ');
-            _aimDeltaQ.setFromEuler(_aimDeltaE);
-            armBone.quaternion.multiply(_aimDeltaQ);
-          }
+        // REGRESSION: anim-arm-base-clobber — only modify the shoulder
+        // when we actually have a residual to apply, and apply it as a
+        // multiply on top of the clip-driven pose rather than reset-to-
+        // first-frame. The previous reset-every-frame branch captured
+        // _armBaseQ from whichever clip was playing on the first call
+        // (often rifle-8way/idle's down-at-side arm) and locked the
+        // dominant shoulder to that pose forever, killing pistol/SMG
+        // one-handed arm composition. Phase D deferred fix.
+        if (armBone && armBone.quaternion && Math.abs(armYawTotal) > 0.001) {
+          _aimDeltaE.set(0, armYawTotal, 0, 'YXZ');
+          _aimDeltaQ.setFromEuler(_aimDeltaE);
+          armBone.quaternion.multiply(_aimDeltaQ);
         }
         if (_gaspSmCfg) {
+          // Populate _availableClips lazily so the selector's
+          // _Pistol → _OneHand_Pistol / _Rifle suffix swap can verify
+          // the candidate clip exists. The runner_lower_body path sets
+          // this in main.js __usePeekPlayer; the default gasp_lower_body
+          // load doesn't, so without this the OneHand_Pistol swap silently
+          // no-ops and pistols idle in two-handed pose.
+          if (!_gaspSmCfg._availableClips && rig._fbx?.actions) {
+            _gaspSmCfg._availableClips = new Set(rig._fbx.actions.keys());
+          }
           // Use the ACTUAL world velocity for sector picking. Body is
           // rigid-locked to cursor; velocity-vs-body-yaw gives the
           // honest body-relative motion direction. When cursor and

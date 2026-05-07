@@ -103,11 +103,26 @@ export function selectGaspLocomotion(smCfg, playerState, planarSpeed, velocity, 
     if (!s) return null;
     // Apply weapon-class swap to idle just like the moving path —
     // rifle-class weapons should idle in shouldered Rifle pose,
-    // not low-ready Pistol pose.
+    // pistol/revolver should idle in OneHand_Pistol stance, otherwise
+    // the GASP _Pistol clip (two-handed low-ready) wins on upper-body
+    // bones and overrides the layered pistol-locomotion/pistol-idle
+    // (insertion order: layer was added before GASP clips → GASP wins).
+    // REGRESSION: anim-pistol-idle — keep these two branches symmetric
+    // with the moving path below or pistols idle in two-handed pose.
     const weaponClass = playerState?.equipped?.class;
     const wantSuffix = _clipSuffixForWeapon(weaponClass);
     let clipName = s.clip;
-    if (wantSuffix === 'Rifle' && s.adsClip) clipName = s.adsClip;
+    if (wantSuffix === 'Rifle' && clipName.endsWith('_Pistol')) {
+      const candidate = clipName.slice(0, -'_Pistol'.length) + '_Rifle';
+      if (s.adsClip || (smCfg._availableClips && smCfg._availableClips.has(candidate))) {
+        clipName = s.adsClip || candidate;
+      }
+    } else if (wantSuffix === 'OneHand_Pistol' && clipName.endsWith('_Pistol')) {
+      const candidate = clipName.slice(0, -'_Pistol'.length) + '_OneHand_Pistol';
+      if (s.oneHandClip || (smCfg._availableClips && smCfg._availableClips.has(candidate))) {
+        clipName = s.oneHandClip || candidate;
+      }
+    }
     return { stateId: id, clip: clipName, loop: s.loop !== false, speedRef: null,
              sector: 'F', bucket: 'idle', weaponClass };
   }
