@@ -29,6 +29,17 @@ function _ensureGaspSmLoaded() {
   });
 }
 
+// Swap the active locomotion state machine. The variable name says
+// "gasp" for historical reasons (the GASP UEFN clip set was the
+// original consumer); selectGaspLocomotion is generic and works on
+// any state-machine config that uses the same state IDs (walk_F,
+// run_FL, sprint_F, etc.). Used by the Mixamo runner-pack player
+// swap to point the selector at runner_lower_body.json instead of
+// gasp_lower_body.json.
+export function setLocomotionStateMachine(cfg) {
+  _gaspSmCfg = cfg;
+}
+
 // Aim-IK target scratch (world-space point the wrist should reach).
 const _aimIkTarget = new THREE.Vector3();
 const _aimIkPole = new THREE.Vector3();
@@ -2140,10 +2151,20 @@ export function createPlayer(scene) {
       // crouching, idle — without per-clip sink tuning.
       // Resolved on first call.
       if (!rig._fbx._footBones) {
-        const bones = rig._fbx.bonesByName;
-        rig._fbx._footBones = ['foot_l', 'foot_r']
-          .map(n => bones?.get(n) || null)
-          .filter(Boolean);
+        // Prefer the registry-driven abstract refs (rig.leftLeg.ankle /
+        // rightLeg.ankle) so this works on any rig (gasp_uefn → foot_l/r,
+        // mixamo → mixamorigLeftFoot/RightFoot, etc.). Fall back to the
+        // hardcoded UE5 names if the abstract refs aren't populated
+        // (legacy procgen path).
+        const fromAbstract = [rig.leftLeg?.ankle, rig.rightLeg?.ankle].filter(Boolean);
+        if (fromAbstract.length) {
+          rig._fbx._footBones = fromAbstract;
+        } else {
+          const bones = rig._fbx.bonesByName;
+          rig._fbx._footBones = ['foot_l', 'foot_r']
+            .map(n => bones?.get(n) || null)
+            .filter(Boolean);
+        }
       }
       let lowestFootY = Infinity;
       for (const fb of rig._fbx._footBones) {
@@ -3061,8 +3082,15 @@ export function createPlayer(scene) {
       rig._weaponMuzzleAnchor = muzzle;
     }
   }
+  // Re-run setWeapon with the currently equipped weapon. Used after
+  // a mid-run rig swap (swapPlayerToFbxRig) so the gun mesh hops from
+  // the OLD rig's anchor (now hidden) to the NEW rig's anchor. Without
+  // this, bullets keep firing from the old wrist's last world position.
+  function reattachWeapon() {
+    if (state.equipped) setWeapon(state.equipped);
+  }
   return {
-    mesh: group, body, rig, _setRig, update, setWeapon, setOffhandWeapon, prewarmWeapon, takeDamage, heal, applyStatus,
+    mesh: group, body, rig, _setRig, update, setWeapon, setOffhandWeapon, reattachWeapon, prewarmWeapon, takeDamage, heal, applyStatus,
     tryMeleeAttack, tryQuickMelee, cancelCombo,
     tryParry, isBlocking, isParryActive,
     consumeStamina, refundStamina, applyDerivedStats, restoreFullHealth,

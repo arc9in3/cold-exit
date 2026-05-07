@@ -4,7 +4,7 @@
   "rigs":         ["mixamo", "motus", "biped", "procgen", "gasp_uefn"],
   "rigParts":     ["assassin_top", "eve_bottom"],
   "rigCompose":   ["eve_alt"],
-  "stateMachines":["cold_exit_player", "gasp_lower_body"],
+  "stateMachines":["cold_exit_player", "gasp_lower_body", "runner_lower_body"],
   "overrides":    ["eve"],
   "scenes":       ["intro_lab"]
 }

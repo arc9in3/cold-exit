@@ -755,6 +755,127 @@ window.__openRecruiter = async () => {
   return await window.__recruiterUI.show();
 };
 
+// Console: __usePeekPlayer()  — swap player rig to peek.glb (Mixamo
+// skeleton) and bind a curated subset of runner-pack clips. Phase A of
+// the Mixamo migration: validates the mesh swap, weapon attach, and
+// foot offset land cleanly before wiring the full locomotion state
+// machine to runner-pack clips (Phase B).
+window.__usePeekPlayer = async () => {
+  const playerMod = await import('./player.js');
+  const charMod = await import('./character_fbx.js');
+  await playerMod.swapPlayerToFbxRig(player, scene,
+    'Assets/models/characters/peek.glb', { rigId: 'mixamo' });
+  // Force OPAQUE on every material — Mixamo's FBX exporter writes
+  // alphaMode=BLEND even for opaque characters; without this the body
+  // renders see-through. Same fix as __viewPeek.
+  player.rig?.group?.traverse?.(o => {
+    if (o.isMesh && o.material) {
+      const mats = Array.isArray(o.material) ? o.material : [o.material];
+      for (const m of mats) {
+        m.transparent = false;
+        m.depthWrite = true;
+        m.alphaTest = 0;
+        m.side = THREE.FrontSide;
+      }
+    }
+  });
+  // Gun anchor — same shape as __useGaspMannequin, parented under the
+  // rig group so it inherits body yaw but not chest twist or arm
+  // bones. Hipfire / ADS placement is unchanged.
+  if (player.rig && player.rig.group) {
+    const anchor = new (await import('three')).Object3D();
+    anchor.name = '_gunAnchor';
+    anchor.position.set(0, 1.30, 0.45);
+    const groupScale = player.rig.group.scale.x || 1.0;
+    anchor.scale.setScalar(1.0 / groupScale);
+    player.rig.group.add(anchor);
+    player.rig._gunAnchor = anchor;
+  }
+  // Phase B — load all rifle-8way locomotion clips referenced by
+  // runner_lower_body.json + a small combat seed set. Mixamo's exporter
+  // names every clip 'Armature|mixamo.com|Layer0' so we MUST pass an
+  // explicit clipName (the slug) — without it, every merge collides
+  // on the same name and only the last one sticks.
+  const PACK = 'Assets/models/animations/runner_glb';
+  const RIFLE_8WAY = [
+    'idle', 'idle-aiming', 'idle-crouching', 'idle-crouching-aiming',
+    'walk-forward', 'walk-backward', 'walk-left', 'walk-right',
+    'walk-forward-left', 'walk-forward-right',
+    'walk-backward-left', 'walk-backward-right',
+    'run-forward', 'run-backward', 'run-left', 'run-right',
+    'run-forward-left', 'run-forward-right',
+    'run-backward-left', 'run-backward-right',
+    'sprint-forward', 'sprint-backward', 'sprint-left', 'sprint-right',
+    'sprint-forward-left', 'sprint-forward-right',
+    'sprint-backward-left', 'sprint-backward-right',
+    'walk-crouching-forward', 'walk-crouching-backward',
+    'walk-crouching-left', 'walk-crouching-right',
+    'walk-crouching-forward-left', 'walk-crouching-forward-right',
+    'walk-crouching-backward-left', 'walk-crouching-backward-right',
+  ];
+  const slugs = RIFLE_8WAY.map(c => `rifle-8way/${c}`).concat([
+    // Combat seeds — Phase C will expand into hit/death/jump triggers.
+    'basic-shooter/firing-rifle',
+    'basic-shooter/reloading',
+    'basic-shooter/hit-reaction',
+  ]);
+  for (const slug of slugs) {
+    try {
+      await charMod.loadAnimationFBX(player.rig, `${PACK}/${slug}.glb`, slug);
+    } catch (e) { console.warn(`[peek] skipped ${slug}:`, e.message); }
+  }
+  // Engage the locomotion path. The block in player.js:2210 is gated
+  // on rig._fbx.useGaspLocomotion — without this flag set, player.update
+  // falls through to the legacy hardcoded W1_* clip names from the
+  // Motus pack that don't exist on the Mixamo rig (visible as T-pose
+  // during movement). The flag itself is generic; "gasp" is just the
+  // first consumer that authored the path.
+  if (player.rig?._fbx) player.rig._fbx.useGaspLocomotion = true;
+  // Swap the active locomotion state machine to runner_lower_body so
+  // the GASP-clip selector picks rifle-8way slugs instead of the
+  // M_Neutral_*_Pistol GASP names. Same selector logic — only the
+  // clip names referenced by smCfg.states differ.
+  try {
+    const { loadStateMachine } = await import('./anim/state_machine.js');
+    const { setLocomotionStateMachine } = await import('./player.js');
+    const sm = await loadStateMachine('runner_lower_body');
+    if (sm) {
+      // Build the _availableClips set the selector consults for the
+      // Pistol→Rifle suffix swap path. For runner pack the suffix
+      // swap is a no-op (slugs don't end in _Pistol) but populating
+      // it keeps the selector defensive against future remixes.
+      sm._availableClips = new Set(player.rig.clipNames?.() || []);
+      setLocomotionStateMachine(sm);
+      console.log('[peek] runner_lower_body state machine active');
+    } else {
+      console.warn('[peek] runner_lower_body state machine failed to load');
+    }
+  } catch (e) {
+    console.warn('[peek] state-machine swap:', e.message);
+  }
+  // Auto-play idle so the player isn't in T-pose.
+  try { player.rig.play?.('rifle-8way/idle'); } catch (_) {}
+  // Re-attach the gun mesh to the new rig's _gunAnchor. Without
+  // this, the gun stays parented to the previous rig's wrist (which
+  // is now hidden), so bullets fire from a stale world position.
+  try { player.reattachWeapon?.(); } catch (e) { console.warn('[peek] reattachWeapon:', e.message); }
+  // Diagnostic — head bone world Y. Mixamo head should be around
+  // 1.65m for a 1.85m character with feet at Y=0. Three.js's GLTFLoader
+  // strips colons from glTF node names so peek's bones land as
+  // 'mixamorigHead' (no colon) — try both spellings.
+  const head = player.rig.group?.getObjectByName?.('mixamorigHead')
+            || player.rig.group?.getObjectByName?.('mixamorig:Head');
+  if (head) {
+    player.rig.group.updateMatrixWorld(true);
+    const v = new THREE.Vector3();
+    head.getWorldPosition(v);
+    console.log(`[peek] head world Y = ${v.y.toFixed(3)} (expect ~1.65)`);
+  } else {
+    console.warn('[peek] head bone not found — bones may not be sanitized as expected');
+  }
+  return `peek.glb player rig loaded — clips: ${player.rig.clipNames?.().join(', ') || 'none'}`;
+};
+
 // Console: __useEve()           — load Assets/models/characters/eve.glb
 //          __useEveDetailed()   — load eve1.glb (24MB, more polys/textures)
 //          __useEveWithUAL()    — eve.glb + Universal Animation Library
@@ -770,6 +891,83 @@ window.__useEveWithUAL = async () => {
   await charMod.loadAnimationFBX(player.rig,
     'Assets/models/animations/Universal%20Animation%20Library%5BStandard%5D/Unreal-Godot/UAL1_Standard.glb');
   return `eve.glb + UAL clips: ${player.rig.clipNames?.().length} total`;
+};
+
+// Console: __viewPeek()                    — embedded peek clip
+//          __viewPeek('rifle-8way/idle')    — load runner-pack clip onto rig
+//          __viewPeek(null)                 — remove
+//
+// Drops Assets/models/characters/peek.glb next to the player and plays
+// either its own embedded clip or a runner-pack clip from
+// Assets/models/animations/runner_glb/<pack>/<clip>.glb. Cross-pack
+// binding works because both rig and clip use `mixamorig:*` bone
+// names — Three.js's AnimationMixer resolves tracks by name.
+window.__viewPeek = async (clipPath) => {
+  const { GLTFLoader } = await import(
+    'https://unpkg.com/three@0.161.0/examples/jsm/loaders/GLTFLoader.js'
+  );
+  if (window.__peekDispose) { window.__peekDispose(); window.__peekDispose = null; }
+  if (clipPath === null) return 'peek removed';
+  const loader = new GLTFLoader();
+  const gltf = await loader.loadAsync('Assets/models/characters/peek.glb');
+  // Optional external clip: 'rifle-8way/idle' or full repo path. If
+  // provided, load it and play its first animation on peek's rig
+  // instead of peek's embedded clip. Bone-name match (mixamorig:*) on
+  // both rig and clip lets the AnimationMixer auto-resolve tracks.
+  let externalClip = null;
+  if (typeof clipPath === 'string') {
+    const fullPath = clipPath.startsWith('Assets/')
+      ? clipPath
+      : `Assets/models/animations/runner_glb/${clipPath}.glb`;
+    try {
+      const cgltf = await loader.loadAsync(fullPath);
+      externalClip = cgltf.animations[0] || null;
+    } catch (e) {
+      return `failed to load clip ${fullPath}: ${e.message}`;
+    }
+  }
+  const root = gltf.scene;
+  // Mixamo's FBX exporter writes alphaMode=BLEND on the material even
+  // for opaque characters, which Three.js maps to material.transparent
+  // and disables depth-write — you see through arms / overlapping body
+  // parts. Force OPAQUE on every material here so the rest of the
+  // pipeline can stay simple.
+  root.traverse(o => {
+    if (o.isMesh && o.material) {
+      const mats = Array.isArray(o.material) ? o.material : [o.material];
+      for (const m of mats) {
+        m.transparent = false;
+        m.depthWrite = true;
+        m.alphaTest = 0;
+        m.side = THREE.FrontSide;
+      }
+    }
+  });
+  // Mixamo rest pose centers verts on hips (AABB Y from -0.96 to +0.95);
+  // shift down so feet land on ground at Y=0.
+  root.position.y = -0.956;
+  const wrap = new THREE.Group();
+  wrap.add(root);
+  // Drop next to player, facing the player's facing direction.
+  const px = player?.mesh?.position?.x ?? 0;
+  const pz = player?.mesh?.position?.z ?? 0;
+  wrap.position.set(px + 1.5, 0, pz);
+  scene.add(wrap);
+  const mixer = new THREE.AnimationMixer(root);
+  const activeClip = externalClip || gltf.animations[0] || null;
+  if (activeClip) mixer.clipAction(activeClip).play();
+  // Per-frame mixer update via main render loop hook.
+  window.__peekMixers = window.__peekMixers || [];
+  window.__peekMixers.push(mixer);
+  window.__peekDispose = () => {
+    scene.remove(wrap);
+    root.traverse(o => {
+      if (o.geometry) o.geometry.dispose();
+      if (o.material) (Array.isArray(o.material) ? o.material : [o.material]).forEach(m => m.dispose?.());
+    });
+    window.__peekMixers = window.__peekMixers.filter(m => m !== mixer);
+  };
+  return `peek.glb spawned at (${(px+1.5).toFixed(1)}, 0, ${pz.toFixed(1)}); clip: ${activeClip?.name || '(none)'}, ${activeClip?.duration?.toFixed(2) || 0}s`;
 };
 
 // Console: __playScene('intro_lab')
@@ -20464,6 +20662,11 @@ function _safeRender(rawDt, modalPaused = false) {
         try { cs.step(rawDt); } catch (e) { console.warn('[cutscene]', e); }
       }
       window.__activeCutscenes = window.__activeCutscenes.filter(cs => cs.playing || cs.t < cs.duration);
+    }
+    if (window.__peekMixers && window.__peekMixers.length) {
+      for (const mx of window.__peekMixers) {
+        try { mx.update(rawDt); } catch (_) {}
+      }
     }
     const hsActive = hideoutUI?.isOpen?.() && hideoutUI._scene && hideoutUI._scene.visible;
     if (hsActive) {

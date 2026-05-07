@@ -476,6 +476,18 @@ function _onLoadGroup(scene, group, scale, resolve, rigCfg = null) {
   // FBX this is a no-op for the existing methods; it adds rig.kind +
   // rig.hasClips so downstream code can treat any rig uniformly.
   adaptRig(rig);
+  // Auto foot offset — Mixamo exports rest pose with hips at origin
+  // (feet at Y ≈ -0.95). UEFN exports feet at origin (Y ≈ 0). Compute
+  // the visible mesh's min Y after scale; if feet sit below origin,
+  // lift child content up so feet land at group.y = 0. We shift
+  // children, NOT group.position, so swapPlayerToFbxRig's later
+  // `group.position.copy(procgen.position)` doesn't clobber the fix.
+  group.updateMatrixWorld(true);
+  const _bbox = new THREE.Box3().setFromObject(group);
+  if (Number.isFinite(_bbox.min.y) && _bbox.min.y < -0.05) {
+    const lift = -_bbox.min.y / scale;   // children are below the scaled group
+    for (const child of group.children) child.position.y += lift;
+  }
   scene.add(group);
   // Auto-play the first clip if any.
   const firstClipName = actions.keys().next().value;
