@@ -13,8 +13,8 @@
   },
 
   "states": {
-    "stand_idle":    { "clip": "rifle-8way/idle",            "adsClip": "rifle-8way/idle-aiming",            "loop": true },
-    "crouch_idle":   { "clip": "rifle-8way/idle-crouching",  "adsClip": "rifle-8way/idle-crouching-aiming",  "loop": true },
+    "stand_idle":    { "clip": "rifle-8way/idle",            "adsClip": "rifle-8way/idle-aiming",            "oneHandClip": "pistol-locomotion/pistol-idle", "loop": true },
+    "crouch_idle":   { "clip": "rifle-8way/idle-crouching",  "adsClip": "rifle-8way/idle-crouching-aiming",  "oneHandClip": "pistol-locomotion/pistol-idle", "loop": true },
 
     "walk_F":  { "clip": "rifle-8way/walk-forward",        "oneHandClip": "pistol-locomotion/pistol-walk",                "loop": true, "speedRef": 1.4 },
     "walk_B":  { "clip": "rifle-8way/walk-backward",       "oneHandClip": "pistol-locomotion/pistol-walk-backward",       "loop": true, "speedRef": 1.2 },

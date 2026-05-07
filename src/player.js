@@ -992,9 +992,14 @@ export function createPlayer(scene) {
           if (!pistolStance.isRunning()) {
             pistolStance.reset().fadeIn(0.2).play();
           }
+          // Sync the layered-clip tracker so the locomotion tick that
+          // also wants pistol-idle as the layered upper-body doesn't
+          // restart what setWeapon just kicked off.
+          rig._fbx.currentLayeredClipName = 'pistol-locomotion/pistol-idle';
         } else {
           // Hard stop — idempotent if already stopped.
           pistolStance.stop();
+          rig._fbx.currentLayeredClipName = null;
         }
       }
     }
@@ -2516,6 +2521,23 @@ export function createPlayer(scene) {
               rig._fbx.currentClipName = pick.clip;
               rig._fbx.currentAction = action;
             }
+          }
+          // Layered upper-body swap — pistol/revolver class plays a
+          // pistol-locomotion clip on top of the rifle-8way base so the
+          // upper body holds the grip + swings to match the gait while
+          // the lower body keeps the tuned rifle stride. Lower-body
+          // tracks were stripped from these clips at load time. We
+          // cross-fade at the same cadence as the base.
+          const wantLayered = pick?.layeredClip || null;
+          if (wantLayered !== rig._fbx.currentLayeredClipName) {
+            const fadeS = (pick?.playback?.fadeMs ?? 200) / 1000;
+            const prevName = rig._fbx.currentLayeredClipName;
+            const prevAction = prevName ? rig._fbx.actions?.get(prevName) : null;
+            if (prevAction && prevAction.isRunning()) prevAction.fadeOut(fadeS);
+            if (wantLayered && rig.playLayered) {
+              rig.playLayered(wantLayered, { fadeMs: pick?.playback?.fadeMs ?? 200, loop: true });
+            }
+            rig._fbx.currentLayeredClipName = wantLayered;
           }
           if (pick?.speedRef && rig._fbx.currentAction) {
             const clamp = pick.playback?.timeScaleClamp ?? [0.5, 1.5];

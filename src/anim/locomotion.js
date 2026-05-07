@@ -64,39 +64,40 @@ export function bodyLocalAngle(velocity, bodyYaw) {
   return Math.atan2(-localX, localZ);
 }
 
-// Pick the rifle / one-hand variant of a base clip given the active
-// weapon class. Resolution order:
-//   1. s.adsClip / s.oneHandClip — explicit per-state override (runner
-//      pack JSON wires these directly because its base clips don't
-//      end in '_Pistol' and the suffix-swap path can't construct a
-//      valid candidate).
-//   2. Suffix swap on '_Pistol' base clips (gasp_lower_body convention)
-//      — replace trailing '_Pistol' with '_Rifle' / '_OneHand_Pistol'
-//      and verify against _availableClips before committing.
-//   3. Fall through to the original base clip.
+// Resolve the base + layered clip pair for the active weapon class.
+// Returns { baseClip, layeredClip } where:
+//   • baseClip drives the FULL body. Rifle / SMG / shotgun / sniper /
+//     LMG / two-handed all use the rifle-8way base. The Rifle suffix
+//     path also performs the GASP-naming `_Pistol → _Rifle` swap so
+//     gasp_lower_body's pistol-base clips become rifle-base for those
+//     weapons.
+//   • layeredClip drives the UPPER body only and is played alongside
+//     baseClip. Used by pistol/revolver class — the lower body keeps
+//     the tuned rifle-8way cadence (real game speed), while the upper
+//     body holds the pistol grip and swings to match the gait. The
+//     layered clip's lower-body tracks are stripped at load time so
+//     it can't fight the base's stride. Returns null when no layer
+//     is needed (rifle-class, default-class).
 //
-// REGRESSION: anim-onehand-explicit-clip — the gating used to require
-// the base clip to end in '_Pistol' even when an explicit oneHandClip
-// was set, so runner_lower_body's pistol-walk / pistol-run mappings
-// never engaged and the lower body fell back to rifle stride.
-function _swapForWeaponClass(state, baseClip, wantSuffix, smCfg) {
+// REGRESSION: anim-pistol-base-replaces-stride — earlier passes had
+// pistol-locomotion clips taking over the BASE slot, which gave a
+// pistol-pack-authored stride speed that didn't match the game's
+// tuned movement cadence. Layering on top of rifle keeps stride
+// timing tied to runner_lower_body.json's speedRefs.
+function _pickClipsForWeapon(state, wantSuffix, smCfg) {
+  const base = state?.clip;
   if (wantSuffix === 'Rifle') {
-    if (state?.adsClip) return state.adsClip;
-    if (baseClip.endsWith('_Pistol')) {
-      const candidate = baseClip.slice(0, -'_Pistol'.length) + '_Rifle';
-      if (smCfg?._availableClips?.has(candidate)) return candidate;
+    if (state?.adsClip) return { baseClip: state.adsClip, layeredClip: null };
+    if (base && base.endsWith('_Pistol')) {
+      const candidate = base.slice(0, -'_Pistol'.length) + '_Rifle';
+      if (smCfg?._availableClips?.has(candidate)) return { baseClip: candidate, layeredClip: null };
     }
-    return baseClip;
+    return { baseClip: base, layeredClip: null };
   }
   if (wantSuffix === 'OneHand_Pistol') {
-    if (state?.oneHandClip) return state.oneHandClip;
-    if (baseClip.endsWith('_Pistol')) {
-      const candidate = baseClip.slice(0, -'_Pistol'.length) + '_OneHand_Pistol';
-      if (smCfg?._availableClips?.has(candidate)) return candidate;
-    }
-    return baseClip;
+    return { baseClip: base, layeredClip: state?.oneHandClip || null };
   }
-  return baseClip;
+  return { baseClip: base, layeredClip: null };
 }
 
 // Map a weapon.class to a GASP clip-set suffix.
@@ -146,8 +147,8 @@ export function selectGaspLocomotion(smCfg, playerState, planarSpeed, velocity, 
     // with the moving path below or pistols idle in two-handed pose.
     const weaponClass = playerState?.equipped?.class;
     const wantSuffix = _clipSuffixForWeapon(weaponClass);
-    const clipName = _swapForWeaponClass(s, s.clip, wantSuffix, smCfg);
-    return { stateId: id, clip: clipName, loop: s.loop !== false, speedRef: null,
+    const { baseClip, layeredClip } = _pickClipsForWeapon(s, wantSuffix, smCfg);
+    return { stateId: id, clip: baseClip, layeredClip, loop: s.loop !== false, speedRef: null,
              sector: 'F', bucket: 'idle', weaponClass };
   }
 
@@ -194,20 +195,18 @@ export function selectGaspLocomotion(smCfg, playerState, planarSpeed, velocity, 
   }
   if (!s) return null;
 
-  // Weapon-class swap — substitute the base clip with the rifle /
-  // one-hand variant based on weapon class. Two paths:
-  //   • explicit s.adsClip / s.oneHandClip wins (runner_lower_body
-  //     wires these directly per state).
-  //   • else: if the base clip name ends in '_Pistol' (gasp_lower_body
-  //     naming), build candidate by suffix-swap and check
-  //     _availableClips.
+  // Weapon-class clip resolution — picks base (full-body) and an
+  // optional layered (upper-body) clip. See _pickClipsForWeapon for
+  // the policy. Rifle-class swaps base; OneHand_Pistol keeps the
+  // rifle base for tuned stride and adds a layered upper-body clip.
   const weaponClass = playerState?.equipped?.class;
   const wantSuffix = _clipSuffixForWeapon(weaponClass);
-  const clipName = _swapForWeaponClass(s, s.clip, wantSuffix, smCfg);
+  const { baseClip, layeredClip } = _pickClipsForWeapon(s, wantSuffix, smCfg);
 
   return {
     stateId: id,
-    clip: clipName,
+    clip: baseClip,
+    layeredClip,
     loop: s.loop !== false,
     speedRef: s.speedRef ?? null,
     sector,

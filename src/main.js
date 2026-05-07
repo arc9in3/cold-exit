@@ -850,17 +850,20 @@ window.__usePeekPlayer = async () => {
       await charMod.loadAnimationFBX(player.rig, `${PACK}/${slug}.glb`, slug);
     } catch (e) { console.warn(`[peek] skipped ${slug}:`, e.message); }
   }
-  // Filter combat clips down to upper-body tracks only so they layer
-  // cleanly on top of the locomotion clip (legs keep moving while
-  // arms reload / fire / react). Mixamo's lower-body bone names
-  // covered: Hips, *UpLeg, *Leg, *Foot, *ToeBase. We accept both
-  // 'mixamorig:Bone' (FBX-imported) and 'mixamorigBone' (GLB-imported,
-  // GLTFLoader sanitizes the colon out).
+  // Filter combat + pistol-locomotion clips down to upper-body tracks
+  // only so they layer cleanly on top of the locomotion base clip
+  // (lower body keeps the rifle-8way stride which is tuned to game
+  // movement speed; upper body holds the pistol grip and swings to
+  // match). Mixamo's lower-body bone names covered: Hips, *UpLeg,
+  // *Leg, *Foot, *ToeBase. We accept both 'mixamorig:Bone' (FBX-
+  // imported) and 'mixamorigBone' (GLB-imported, GLTFLoader sanitizes
+  // the colon out).
   const COMBAT_LAYERED = new Set([
     'basic-shooter/reloading',
     'basic-shooter/firing-rifle',
     'basic-shooter/hit-reaction',
     'pistol-locomotion/pistol-idle',
+    ...PISTOL_LOCOMOTION.map(c => `pistol-locomotion/${c}`),
   ]);
   const lowerRe = /^(mixamorig:?)(Hips|LeftUpLeg|LeftLeg|LeftFoot|LeftToeBase|RightUpLeg|RightLeg|RightFoot|RightToeBase)\b/;
   for (const slug of COMBAT_LAYERED) {
