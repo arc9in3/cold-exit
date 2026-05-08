@@ -244,6 +244,17 @@ function _updateGunFollow(rig, state) {
   _gfM.decompose(_gfPos, _gfQuat, _gfScale);
 
   if (!rig._gunFollowRef) {
+    // Defer capture until the locomotion clip is fully blended in.
+    // Capturing during T-pose (or during fade-in from T-pose) means
+    // the next frame's clip-pose hand differs by 90°+ in body-local
+    // → that delta gets applied as gun rotation and the gun spawns
+    // visibly rotated. We require the current clip's action weight
+    // ≥ 0.99 before capture so the reference is the actual idle /
+    // run pose, not a transitional one.
+    const fbx = rig._fbx;
+    const action = fbx?.currentClipName ? fbx.actions?.get(fbx.currentClipName) : null;
+    const weight = action?.getEffectiveWeight?.() ?? 0;
+    if (!action || weight < 0.99) return;
     rig._gunFollowRef = {
       handPos: _gfPos.clone(),
       handQuat: _gfQuat.clone(),
