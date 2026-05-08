@@ -97,12 +97,13 @@ function _pickClipsForWeapon(state, wantSuffix, smCfg, isMoving, ads, crouched) 
       movementUpper = 'pistol-locomotion/pistol-idle';
     } else {
       // Rifle / Pistol-suffix (smg / flame / melee / default) all use
-      // the rifle-8way idle-upper derivatives. Crouch + ADS pick the
-      // matching variant so the gun reads correctly in posture.
-      if (crouched && ads) movementUpper = 'rifle-8way/idle-crouching-aiming-upper';
-      else if (crouched)   movementUpper = 'rifle-8way/idle-crouching-upper';
-      else if (ads)        movementUpper = 'rifle-8way/idle-aiming-upper';
-      else                 movementUpper = 'rifle-8way/idle-upper';
+      // the rifle-8way idle-AIMING-upper derivative — gun shouldered
+      // at eye-line, ready to fire. The non-aiming (low-ready) idle
+      // looks like the player is just walking around with the gun
+      // loose, which doesn't match the "ready to shoot while moving"
+      // gameplay. Crouch picks the crouching-aiming variant.
+      if (crouched) movementUpper = 'rifle-8way/idle-crouching-aiming-upper';
+      else          movementUpper = 'rifle-8way/idle-aiming-upper';
     }
   }
   if (wantSuffix === 'Rifle') {
