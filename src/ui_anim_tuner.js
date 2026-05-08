@@ -122,6 +122,9 @@ export function openAnimTuner(player) {
   armFolder.addBinding(ANIM_TUNE.arm.anchorOffset, 'z', {
     label: 'anchor offset Z', min: -0.5, max: 0.5, step: 0.01,
   });
+  armFolder.addBinding(ANIM_TUNE.arm, 'dominantArmIK', {
+    label: 'pull hand to grip (IK)',
+  });
 
   // ---- Buttons ----
   pane.addBlade({ view: 'separator' });

@@ -78,6 +78,12 @@ export const ANIM_TUNE = {
     // Direct additive offset on the gun-anchor lerp target. Always
     // visible. Local to rig.group (so x = right, y = up, z = forward).
     anchorOffset: { x: 0, y: 0, z: 0 },
+    // OFF by default — dominant-arm IK forces the hand to grip the
+    // gun, which prevents tuning held-close poses (the arm becomes
+    // fully outstretched no matter what the user dials in).
+    // Flip ON in the tuner if you want hand-on-grip behavior; the
+    // gameplay default trusts the clip's authored arm pose.
+    dominantArmIK: false,
   },
 };
 
@@ -468,7 +474,8 @@ function _runUpperBodyIK(rig, state, aimPoint, aimPitch, dt = 1/60) {
   // ============================================================
   const _domSide = state.handedness === 'right' ? rig.rightArm : rig.leftArm;
   const _domSwinging = state.attack && state.attack.phase !== 'idle';
-  if (state.equipped?.type === 'ranged'
+  if (ANIM_TUNE.arm.dominantArmIK
+      && state.equipped?.type === 'ranged'
       && !_clipLocked
       && !_layeredActive
       && !_domSwinging
@@ -1080,10 +1087,15 @@ export function createPlayer(scene) {
       // calling player.reattachWeapon() reapplies any panel changes.
       const vf = ANIM_TUNE.visibleFactor[cls] ?? 1.0;
       const gz = ANIM_TUNE.gripZScale[cls] ?? 0.5;
-      const gripZ = (cls === 'pistol') ? 0 : (gz * len);
-      const muzzleZ = isLong
-        ? (gripZ + len * vf * 0.5)
-        : (cls === 'pistol' ? (len * vf) : len);
+      // Unified grip + muzzle formula across all classes — was three
+      // different formulas (isLong / pistol / other) and the
+      // visibleFactor slider for SMG/flame/melee did nothing because
+      // muzzleZ was hardcoded to `len`. Now: grip = gz × len for all,
+      // muzzle = grip + len × vf. Slider drag visibly affects every
+      // class. (cls === 'pistol' still pins gz=0 in defaults so the
+      // grip lands at the hand on a grip-end-origin clone.)
+      const gripZ = gz * len;
+      const muzzleZ = gripZ + len * vf;
       // Per-class grip X/Y nudge — for fine-tuning where the visible
       // gun sits relative to the hand-tracked anchor. Z stays driven
       // by gripZScale.
@@ -1488,9 +1500,17 @@ export function createPlayer(scene) {
     // gracefully via playOneShot's null return. Duration covers
     // startup + active so the impact frame lands during the active
     // damage window; recovery uses whatever the clip's tail does.
+    // Clip timeScale is rescaled so the authored ~1.2 s Mixamo swing
+    // finishes within the gameplay window — without this, fast
+    // gameplay attacks (~0.4 s) finish their damage before the
+    // clip's wind-up arrives, and slow heavies look sluggish.
     const swingClip = `melee/swing-${Math.min(nextStep + 1, 3)}`;
     const swingDur = Math.max(0.1, (attack.startup || 0) + (attack.active || 0));
-    playOneShot(swingClip, swingDur, { upperOnly: true, fadeMs: 80 });
+    const swingAction = playOneShot(swingClip, swingDur, { upperOnly: true, fadeMs: 80 });
+    if (swingAction) {
+      const clipLen = swingAction.getClip().duration;
+      if (clipLen > 0.05) swingAction.timeScale = clipLen / swingDur;
+    }
     // Pick a swing style — random for variety, but a crit overrides
     // with a dedicated "critical" style that the rig reads to throw a
     // bigger whole-body strike. Style is locked for this swing so the
