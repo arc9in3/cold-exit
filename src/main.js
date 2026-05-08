@@ -991,32 +991,6 @@ window.__usePeekPlayer = async () => {
   _mkUpperOnly('rifle-8way/idle-aiming',           'rifle-8way/idle-aiming-upper');
   _mkUpperOnly('rifle-8way/idle-crouching',        'rifle-8way/idle-crouching-upper');
   _mkUpperOnly('rifle-8way/idle-crouching-aiming', 'rifle-8way/idle-crouching-aiming-upper');
-  // Strip UPPER-body tracks from movement locomotion clips so they
-  // only drive legs/hips. The layered idle-aiming-upper is the sole
-  // writer for upper-body bones during run/walk/sprint, which means
-  // we don't depend on Three.js's mixer iteration order to settle
-  // the conflict — without this strip, the run clip can win the
-  // arm-swing fight whenever it's first-played AFTER idle-aiming-
-  // upper (which happens routinely as the player crosses speed
-  // thresholds) and the gun visibly rocks back and forth. Idle clips
-  // (idle, idle-aiming, idle-crouching, idle-crouching-aiming) stay
-  // full-body so rifle stand_idle's no-layered case still poses the
-  // upper body via the base.
-  const MOVEMENT_LOCOMOTION_SLUGS = [];
-  for (const slug of RIFLE_8WAY_SLUGS) {
-    if (slug.endsWith('/idle') || slug.endsWith('/idle-aiming') ||
-        slug.endsWith('/idle-crouching') || slug.endsWith('/idle-crouching-aiming')) continue;
-    MOVEMENT_LOCOMOTION_SLUGS.push(slug);
-  }
-  for (const slug of MOVEMENT_LOCOMOTION_SLUGS) {
-    const action = player.rig._fbx?.actions?.get(slug);
-    if (!action) continue;
-    const clip = action.getClip();
-    const before = clip.tracks.length;
-    clip.tracks = clip.tracks.filter(t => lowerRe.test(t.name));
-    const after = clip.tracks.length;
-    if (before !== after) console.log(`[peek] ${slug}: stripped ${before - after}/${before} upper-body tracks (movement → lower-only)`);
-  }
   // Now load the overlay clips (pistol-idle, basic-shooter, melee).
   // They get registered AFTER the idle-upper derivatives so the mixer
   // picks them last on shared bones when both play together.
