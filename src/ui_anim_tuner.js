@@ -85,20 +85,20 @@ export function openAnimTuner(player) {
   for (const cls of CLASSES) {
     const sub = classFolder.addFolder({ title: cls, expanded: false });
     sub.addBinding(ANIM_TUNE.visibleFactor, cls, {
-      label: 'muzzle distance (vf)', min: 0.2, max: 3.0, step: 0.05,
+      label: 'muzzle distance (vf)', min: 0.0, max: 3.0, step: 0.05,
     });
     sub.addBinding(ANIM_TUNE.gripZScale, cls, {
-      label: 'grip Z (× len)', min: 0.0, max: 1.0, step: 0.02,
+      label: 'grip Z (× len, -=back)', min: -1.0, max: 1.5, step: 0.02,
     });
     sub.addBinding(ANIM_TUNE.sizeMul, cls, {
-      label: 'size mul', min: 0.3, max: 3.5, step: 0.05,
+      label: 'size mul', min: 0.3, max: 4.0, step: 0.05,
     });
     if (!ANIM_TUNE.gripOffset[cls]) ANIM_TUNE.gripOffset[cls] = { x: 0, y: 0 };
     sub.addBinding(ANIM_TUNE.gripOffset[cls], 'x', {
-      label: 'main hand X', min: -0.5, max: 0.5, step: 0.01,
+      label: 'main hand X', min: -1.0, max: 1.0, step: 0.01,
     });
     sub.addBinding(ANIM_TUNE.gripOffset[cls], 'y', {
-      label: 'main hand Y', min: -0.5, max: 0.5, step: 0.01,
+      label: 'main hand Y', min: -1.0, max: 1.0, step: 0.01,
     });
     sub.addBinding(ANIM_TUNE.supportGrip, cls, {
       label: 'support hand frac', min: 0.0, max: 1.0, step: 0.05,
@@ -116,13 +116,13 @@ export function openAnimTuner(player) {
     label: 'hipfire arm pitch', min: -0.4, max: 0.4, step: 0.01,
   });
   armFolder.addBinding(ANIM_TUNE.arm.anchorOffset, 'x', {
-    label: 'anchor offset X', min: -0.5, max: 0.5, step: 0.01,
+    label: 'anchor offset X', min: -1.0, max: 1.0, step: 0.01,
   });
   armFolder.addBinding(ANIM_TUNE.arm.anchorOffset, 'y', {
-    label: 'anchor offset Y', min: -0.5, max: 0.5, step: 0.01,
+    label: 'anchor offset Y', min: -1.0, max: 1.0, step: 0.01,
   });
   armFolder.addBinding(ANIM_TUNE.arm.anchorOffset, 'z', {
-    label: 'anchor offset Z', min: -0.5, max: 0.5, step: 0.01,
+    label: 'anchor offset Z', min: -1.0, max: 1.0, step: 0.01,
   });
   armFolder.addBinding(ANIM_TUNE.arm, 'dominantArmIK', {
     label: 'pull hand to grip (IK)',
