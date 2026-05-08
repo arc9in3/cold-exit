@@ -952,6 +952,16 @@ window.__usePeekPlayer = async () => {
     } catch (e) { console.warn(`[peek] skipped ${slug}:`, e.message); }
   }
   const lowerRe = /^(mixamorig:?)(Hips|LeftUpLeg|LeftLeg|LeftFoot|LeftToeBase|RightUpLeg|RightLeg|RightFoot|RightToeBase)\b/;
+  // Legs only — Hips deliberately excluded. Movement clips strip
+  // EVERYTHING except these tracks, so the run / walk / sprint /
+  // crouch-walk clips can no longer write the Hips quaternion. The
+  // run-cycle's authored Hips lean was the source of the "gun bob /
+  // arm swing" — leaning Hips forward propagates down the bone chain
+  // to the wrist, dragging the gun (parented to wrist via gun-follow)
+  // with it. Body stays upright via the always-on idle-aiming-upper
+  // layered (which now KEEPS its Hips track since the derived clip
+  // is built with this same regex — see _mkUpperOnly below).
+  const legsOnlyRe = /^(mixamorig:?)(LeftUpLeg|LeftLeg|LeftFoot|LeftToeBase|RightUpLeg|RightLeg|RightFoot|RightToeBase)\b/;
   // Reload clips additionally strip Spine/Spine1/Spine2 — without
   // this, the reload's authored erect-spine quaternions override the
   // run clip's forward lean, and the legs cycle but the body reads
@@ -979,10 +989,14 @@ window.__usePeekPlayer = async () => {
     if (fbx.actions.has(derivedSlug)) return true;
     const upperClip = srcAction.getClip().clone();
     upperClip.name = derivedSlug;
-    upperClip.tracks = upperClip.tracks.filter(t => !lowerRe.test(t.name));
+    // Strip legs only (NOT Hips) so the derived clip keeps the Hips
+    // quaternion track. With movement clips also stripped of Hips,
+    // this layer is the sole writer for Hips during run / walk /
+    // sprint, holding the body upright at the idle-aiming pose.
+    upperClip.tracks = upperClip.tracks.filter(t => !legsOnlyRe.test(t.name));
     if (!upperClip.tracks.length) return false;
     fbx.actions.set(derivedSlug, fbx.mixer.clipAction(upperClip));
-    console.log(`[peek] derived ${derivedSlug} from ${srcSlug} (${upperClip.tracks.length} upper tracks)`);
+    console.log(`[peek] derived ${derivedSlug} from ${srcSlug} (${upperClip.tracks.length} upper+spine+hips tracks)`);
     return true;
   };
   _mkUpperOnly('rifle-8way/idle',                  'rifle-8way/idle-upper');
@@ -1033,18 +1047,23 @@ window.__usePeekPlayer = async () => {
   // run / walk / sprint / crouch-walk clips simply don't write the
   // arms / hands / spine / head. The always-on idle-upper layered
   // (added above) is the sole writer for upper bones during movement.
+  // Strip ALL non-leg tracks from EVERY rifle-8way clip (idle clips
+  // included now). Both stand_idle and movement-state base clips
+  // become legs-only. The always-on idle-aiming-upper layered (cloned
+  // before this strip) is the SOLE upper-body writer in every state,
+  // so the wrist ends up at the same body-local pose whether the
+  // player is idle, walking, or sprinting — gun-follow's reference
+  // captured during stand_idle stays valid through movement, no drift.
   for (const slug of RIFLE_8WAY_SLUGS) {
-    if (slug === 'rifle-8way/idle' || slug === 'rifle-8way/idle-aiming' ||
-        slug === 'rifle-8way/idle-crouching' || slug === 'rifle-8way/idle-crouching-aiming') continue;
     if (slug === 'rifle-8way/death-from-the-front' || slug === 'rifle-8way/death-from-the-back' ||
         slug === 'rifle-8way/death-from-right') continue;
     const action = player.rig._fbx?.actions?.get(slug);
     if (!action) continue;
     const clip = action.getClip();
     const before = clip.tracks.length;
-    clip.tracks = clip.tracks.filter(t => lowerRe.test(t.name));
+    clip.tracks = clip.tracks.filter(t => legsOnlyRe.test(t.name));
     const after = clip.tracks.length;
-    if (before !== after) console.log(`[peek] ${slug}: stripped ${before - after}/${before} upper-body tracks (movement → lower-only)`);
+    if (before !== after) console.log(`[peek] ${slug}: stripped ${before - after}/${before} non-leg tracks (legs-only)`);
   }
   // Engage the locomotion path. The block in player.js:2210 is gated
   // on rig._fbx.useGaspLocomotion — without this flag set, player.update
