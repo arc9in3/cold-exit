@@ -89,9 +89,11 @@ export const ANIM_TUNE = {
     // support-arm IK, dominant-arm IK, gun-anchor hand-tracking lerp,
     // gun-anchor pitch/yaw aim. Body still rotates to cursor (rigid
     // follow), so the player can move + look around, but the rig is
-    // pure clip-driven from there. Useful to see what the locomotion
-    // / pistol-idle clips actually author before any code touches them.
-    disableAllIK: false,
+    // pure clip-driven from there. DEFAULT TRUE — user found IK was
+    // the cause of the persistent arm-vs-gun + bias issues. The clip
+    // authoring is what the tuning sliders compose against now;
+    // re-enable IK at your own risk via the tuner toggle.
+    disableAllIK: true,
     // Per-axis lerp rate on the gun-anchor's hand-tracking. Lower =
     // more smoothing (gun lags more, bob attenuates). Y is dropped
     // by default because vertical hand-bob during the run cycle is
