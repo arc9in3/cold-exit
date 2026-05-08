@@ -985,29 +985,6 @@ window.__usePeekPlayer = async () => {
     const after = clip.tracks.length;
     if (before !== after) console.log(`[peek] ${slug}: stripped ${before - after}/${before} ${STRIP_SPINE.has(slug) ? 'lower+spine' : 'lower-body'} tracks`);
   }
-  // Strip UPPER-body tracks from the rifle-8way movement clips so
-  // they only drive legs + hips. The run-cycle arm-swing is the
-  // animation the user wanted killed — without these tracks, the
-  // run / walk / sprint / crouch-walk clips simply don't write the
-  // arms / hands / spine / head, and those bones hold whatever pose
-  // was last written (the idle clip's pose, since stand_idle plays
-  // first on spawn). Idle clips (idle, idle-aiming, idle-crouching,
-  // idle-crouching-aiming) keep their full-body tracks so they can
-  // still establish the canonical upper-body pose on spawn.
-  for (const slug of slugs) {
-    if (!slug.startsWith('rifle-8way/')) continue;
-    if (slug === 'rifle-8way/idle' || slug === 'rifle-8way/idle-aiming' ||
-        slug === 'rifle-8way/idle-crouching' || slug === 'rifle-8way/idle-crouching-aiming') continue;
-    if (slug === 'rifle-8way/death-from-the-front' || slug === 'rifle-8way/death-from-the-back' ||
-        slug === 'rifle-8way/death-from-right') continue;
-    const action = player.rig._fbx?.actions?.get(slug);
-    if (!action) continue;
-    const clip = action.getClip();
-    const before = clip.tracks.length;
-    clip.tracks = clip.tracks.filter(t => lowerRe.test(t.name));
-    const after = clip.tracks.length;
-    if (before !== after) console.log(`[peek] ${slug}: stripped ${before - after}/${before} upper-body tracks (movement → lower-only)`);
-  }
   // Engage the locomotion path. The block in player.js:2210 is gated
   // on rig._fbx.useGaspLocomotion — without this flag set, player.update
   // falls through to the legacy hardcoded W1_* clip names from the

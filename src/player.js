@@ -112,15 +112,14 @@ export const ANIM_TUNE = {
     },
     // When ON, the gun-anchor inherits the dominant hand bone's
     // position + rotation DELTAS each frame — gun visibly tracks the
-    // hand swing. Reference is captured the first frame the rig is
-    // confirmed at the canonical IDLE pose (currentClipName matches
-    // an idle-state clip AND base/layered actions are at full weight)
-    // so the captured pose is stable run-to-run. Companion feature
-    // _freezeArmsDuringMovement (below) zeros out the run-cycle arm-
-    // swing so the wrist doesn't actually move from the idle pose
-    // while running — the gun-follow delta then stays near zero and
-    // the gun visually stays at its tuned base position throughout.
-    gunFollowsHand: true,
+    // hand swing during run / aim / reload clips. DEFAULT OFF — the
+    // reference capture timing was flaky (depended on which clip
+    // happened to hit weight ≥ 0.99 first across spawns), producing
+    // visible floating-gun positions inconsistent run-to-run. Static
+    // base position is what the user's per-class gripOffsets are
+    // tuned against; flip on via the tuner only when intentionally
+    // pursuing arm-swing visuals.
+    gunFollowsHand: false,
   },
 };
 
@@ -247,19 +246,15 @@ function _updateGunFollow(rig, state) {
   _gfM.decompose(_gfPos, _gfQuat, _gfScale);
 
   if (!rig._gunFollowRef) {
-    // Defer capture until we're confidently in a stand_idle / crouch_idle
-    // pose. The previous "wait for action weight ≥ 0.99" gate fired
-    // during run/walk if those happened to be the first base clip with
-    // full weight (e.g., a fast spawn → run sequence), and the wrist
-    // pose at that moment isn't the canonical idle pose the user's
-    // gripOffsets are tuned against. By keying capture to an idle clip
-    // name AND full weight, the reference is the same pose run-to-run.
+    // Defer capture until the locomotion clip is fully blended in.
+    // Capturing during T-pose (or during fade-in from T-pose) means
+    // the next frame's clip-pose hand differs by 90°+ in body-local
+    // → that delta gets applied as gun rotation and the gun spawns
+    // visibly rotated. We require the current clip's action weight
+    // ≥ 0.99 before capture so the reference is the actual idle /
+    // run pose, not a transitional one.
     const fbx = rig._fbx;
-    const cur = fbx?.currentClipName;
-    const isIdleClip = cur === 'rifle-8way/idle' || cur === 'rifle-8way/idle-aiming'
-                    || cur === 'rifle-8way/idle-crouching' || cur === 'rifle-8way/idle-crouching-aiming';
-    if (!isIdleClip) return;
-    const action = fbx.actions?.get(cur);
+    const action = fbx?.currentClipName ? fbx.actions?.get(fbx.currentClipName) : null;
     const weight = action?.getEffectiveWeight?.() ?? 0;
     if (!action || weight < 0.99) return;
     rig._gunFollowRef = {
