@@ -27,7 +27,7 @@ export const ANIM_TUNE = {
   // from grip → tracer originates at the visible barrel tip.
   visibleFactor: {
     pistol: 0.20, smg: 0.20, rifle: 0.40, shotgun: 0.45,
-    sniper: 0.20, lmg: 0.20, flame: 1.50, melee: 0.90,
+    sniper: 0.20, lmg: 0.35, flame: 1.50, melee: 0.90,
   },
   // Per-class grip Z offset multiplier (applied as `gripZScale * len`).
   // 0 = grip-end clones (pistol used to want this; tuner pass moved
