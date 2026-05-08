@@ -658,6 +658,30 @@ const postFx = createPostFx(renderer, scene, camera);
 const losMask = createLosMask(renderer, camera);
 postFx.setLosMask(losMask.texture, true);
 
+// Hurt vignette controller — module-scope spike + per-frame combiner.
+// `_hurtFlashSpike` is a 0..1 level bumped by damagePlayer; decays
+// exponentially in _updateHurtFlash. Status pulse (bleed/broken)
+// runs a sin wave on top so the screen edges throb continuously
+// while the player has a status effect.
+let _hurtFlashSpike = 0;
+const HURT_FLASH_DECAY = 4.0;       // 1/sec — full decay in ~250ms
+const HURT_PULSE_HZ = 1.6;          // sin pulse rate while bleed/broken
+const HURT_PULSE_BLEED = 0.18;      // peak intensity for bleed
+const HURT_PULSE_BROKEN = 0.24;     // peak intensity for broken (heavier)
+function _updateHurtFlash(dt, info) {
+  _hurtFlashSpike = Math.max(0, _hurtFlashSpike - HURT_FLASH_DECAY * dt);
+  let pulse = 0;
+  const bleeding = (info?.bleedT || 0) > 0;
+  const broken   = (info?.brokenT || 0) > 0;
+  if (bleeding || broken) {
+    const peak = Math.max(bleeding ? HURT_PULSE_BLEED : 0,
+                          broken   ? HURT_PULSE_BROKEN : 0);
+    const t = (typeof performance !== 'undefined' ? performance.now() : Date.now()) / 1000;
+    pulse = peak * (Math.sin(t * Math.PI * 2 * HURT_PULSE_HZ) * 0.5 + 0.5);
+  }
+  postFx.setHurtFlash(Math.max(_hurtFlashSpike, pulse));
+}
+
 // Footstep emitter state — accumulates horizontal distance travelled
 // and emits a sample when the step-distance threshold is crossed. Step
 // length shortens with sprint so fast movement = fast cadence without
@@ -12945,6 +12969,12 @@ function damagePlayer(amount, damageType = 'generic', srcCtx = null) {
     return;
   }
   player.takeDamage(amount);
+  // Hurt vignette — spike on each real damage event. Magnitude maps
+  // amount → flash level: ~5 dmg = 0.5, ~30 dmg = 1.0. Decays via
+  // _updateHurtFlash() in the render loop. Capped against existing
+  // spike so multi-pellet hits don't compound past 1.0.
+  const _flashAmt = Math.min(1, 0.40 + amount * 0.020);
+  if (_flashAmt > _hurtFlashSpike) _hurtFlashSpike = _flashAmt;
 
   // Death-recap accounting — credit the source enemy with `amount`
   // (post-reduction). srcCtx is { source, zone, distance } from the
@@ -19611,6 +19641,9 @@ function tick() {
   // sees the player's actual mouse state. _tickAkimbo will be
   // called later in this tick and needs the real RMB value.
   if (_akimboActive) inputState.adsHeld = _origAdsHeld;
+  // Drive the hurt vignette every frame — combines the recent-damage
+  // spike (set in damagePlayer) with the bleed/broken pulse.
+  _updateHurtFlash(dt, playerInfo);
 
   // Pass 1C — mantle / drop-off tick. Reads the global mantlePressed
   // edge flag set by the KeyV listener below. While ON ledge, the

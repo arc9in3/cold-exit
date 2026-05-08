@@ -119,11 +119,15 @@ export const tunables = {
     collisionRadius: 0.4,
   },
   status: {
-    bleedDps: 3,            // current-HP DoT while bleeding
-    brokenDps: 2,           // current-HP DoT while broken
-    brokenCapDps: 1.2,      // regenCap DoT while broken (makes it urgent)
-    bleedDuration: 12,      // seconds a bleed lasts untreated
-    brokenDuration: 20,     // seconds a broken bone lasts untreated
+    // Total damage delivered is preserved (3× duration, 1/3× DPS) so
+    // the player has more time to react with a med kit but the same
+    // hit-points get carved out if they ignore it. Pulsing red
+    // vignette gives a continuous on-screen reminder.
+    bleedDps: 1.0,          // current-HP DoT while bleeding (was 3)
+    brokenDps: 0.67,        // current-HP DoT while broken (was 2)
+    brokenCapDps: 0.4,      // regenCap DoT while broken (was 1.2)
+    bleedDuration: 36,      // seconds a bleed lasts untreated (was 12)
+    brokenDuration: 60,     // seconds a broken bone lasts untreated (was 20)
     meleeBleedChance: 0.22, // chance a melee enemy swing inflicts bleed
     meleeBrokenChance: 0.10,// chance a melee swing cracks a bone
     bulletBleedChance: 0.08,// chance a bullet hit causes a bleed

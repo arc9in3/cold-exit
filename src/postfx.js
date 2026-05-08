@@ -220,6 +220,12 @@ const FinisherShader = {
     uLosOn:    { value: 0.0 },     // 0 disables the LoS pass entirely (toggle / saves)
     uLosDark:  { value: 0.30 },    // floor brightness applied outside LoS
     uLosSoft:  { value: 0.06 },    // smoothstep edge width on the mask
+    // Hurt vignette — radial red overlay weighted toward the corners.
+    // 0 = invisible, 1 = full red bloom on the edges. Driven from
+    // outside via setHurtFlash() — main.js spikes on takeDamage, holds
+    // a sin pulse while bleeding/broken status is active.
+    uHurt:     { value: 0.0 },
+    uHurtTint: { value: new THREE.Color(0xff1a1a) },
   },
   vertexShader: /* glsl */`
     varying vec2 vUv;
@@ -239,6 +245,8 @@ const FinisherShader = {
     uniform float uLosOn;
     uniform float uLosDark;
     uniform float uLosSoft;
+    uniform float uHurt;
+    uniform vec3  uHurtTint;
     uniform float uContrast;
     uniform float uSaturation;
     uniform vec3  uShadowTint;
@@ -336,6 +344,18 @@ const FinisherShader = {
       float n = hash(gl_FragCoord.xy + uTime * 60.0) - 0.5;
       col += n * uGrain;
 
+      // Hurt vignette — radial red overlay biased to the corners.
+      // Driven externally; spikes on damage, pulses while bleed/broken
+      // statuses are active. Uses screen->lerp toward uHurtTint with
+      // a corner-weighted falloff so the center stays clear (the
+      // player can still see the action) but the periphery flashes
+      // the warning color.
+      if (uHurt > 0.001) {
+        float radial = smoothstep(0.25, 0.85, length(c));
+        float k = clamp(uHurt * radial, 0.0, 0.95);
+        col = mix(col, uHurtTint, k);
+      }
+
       gl_FragColor = vec4(col, 1.0);
     }
   `,
@@ -408,5 +428,13 @@ export function createPostFx(renderer, scene, camera) {
     finisher.uniforms.uLosOn.value = enabled && texture ? 1.0 : 0.0;
   }
 
-  return { composer, bloom, finisher, render, resize, setLosMask };
+  // Drive the hurt vignette intensity directly. Caller supplies a
+  // 0..1 level each frame (or whenever it changes). Use this from a
+  // game-code controller that combines hit-flash spikes with status
+  // pulses — postfx itself is purely render.
+  function setHurtFlash(level) {
+    finisher.uniforms.uHurt.value = Math.max(0, Math.min(1, level || 0));
+  }
+
+  return { composer, bloom, finisher, render, resize, setLosMask, setHurtFlash };
 }
