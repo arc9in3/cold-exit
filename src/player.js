@@ -948,6 +948,12 @@ export function createPlayer(scene) {
       muzzle.position.set(0, 0, muzzleZ * ws);
       inHandModel.position.copy(gunMesh.position);
     } else if (isShouldered) {
+      // PROCGEN-RIG FALLBACK — only reached when rig._gunAnchor is
+      // unset, i.e. user opted into the primitive procgen rig via
+      // localStorage.coldExitDefaultRig='procgen' or __useFbx(null).
+      // Default boot uses peek (or GASP) which both set _gunAnchor and
+      // hit the GASP branch above instead.
+      //
       // Chest-local forward is +Z (no axis swap needed). Stock sits at
       // anchor, barrel extends forward by `len`.
       gunMesh.rotation.set(0, 0, 0);
@@ -956,6 +962,10 @@ export function createPlayer(scene) {
       muzzle.position.set(0, 0, (0.1 + len) * ws);
       inHandModel.position.copy(gunMesh.position);
     } else {
+      // PROCGEN-RIG FALLBACK — pistol / smg / flame / melee on procgen.
+      // Same trigger condition as the isShouldered branch above (no
+      // _gunAnchor on rig).
+      //
       // Hand-local forward is -Y (thanks to the cumulative arm rot).
       // Pistol-class extra: tilt the gun an additional ~30° so the
       // muzzle reads as pointing FORWARD in world space rather than
