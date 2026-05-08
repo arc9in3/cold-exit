@@ -26,7 +26,7 @@ export const ANIM_TUNE = {
   // uses `len * 0.2 + len * vf * 0.5`. Higher vf → muzzle further
   // from grip → tracer originates at the visible barrel tip.
   visibleFactor: {
-    pistol: 2.60, smg: 1.40, rifle: 1.25, shotgun: 1.60,
+    pistol: 2.60, smg: 0.20, rifle: 0.65, shotgun: 1.60,
     sniper: 1.95, lmg: 1.60, flame: 1.50, melee: 1.50,
   },
   // Per-class grip Z offset multiplier (applied as `gripZScale * len`).
@@ -35,7 +35,7 @@ export const ANIM_TUNE = {
   // ~0.42-0.50 keeps the back from clipping into the chest. Long
   // guns sit near 0.0-0.20 so the stock overlaps wrist + forearm.
   gripZScale: {
-    pistol: 0.58, smg: 0.42, rifle: 0.00, shotgun: 0.20,
+    pistol: 0.58, smg: 0.60, rifle: 0.00, shotgun: 0.20,
     sniper: 0.20, lmg: 0.20, flame: 0.50, melee: 0.50,
   },
   // Per-class size multiplier — applied as inHandModel.scale.setScalar
@@ -43,7 +43,7 @@ export const ANIM_TUNE = {
   // and SMG were undersized post-fit and got bumped via the tuner
   // pass to match the class-uniform diameter targets.
   sizeMul: {
-    pistol: 2.5, smg: 1.5, rifle: 1.0, shotgun: 1.0,
+    pistol: 2.5, smg: 1.4, rifle: 1.0, shotgun: 1.0,
     sniper: 1.0, lmg: 1.0, flame: 1.0, melee: 1.0,
   },
   // Per-class GRIP X/Y offset — applied to gunMesh.position (X, Y).
@@ -61,7 +61,7 @@ export const ANIM_TUNE = {
   // values pull the support hand further down the barrel. Overrides
   // actor_rig's SUPPORT_GRIP_FRACTION_BY_CLASS at runtime.
   supportGrip: {
-    pistol: 0.0,  smg: 0.30, rifle: 0.50, shotgun: 0.50,
+    pistol: 0.0,  smg: 0.0,  rifle: 1.0,  shotgun: 0.50,
     sniper: 0.65, lmg: 0.45, flame: 0.50, melee:   0.0,
   },
   // Arm + body pose tunables read by _runUpperBodyIK per frame.
@@ -74,7 +74,7 @@ export const ANIM_TUNE = {
     // Hipfire arm pitch baseline — chest pitches down by this many
     // radians at adsAmount=0, lerping to 0 at adsAmount=1. Negative
     // lifts arms up. (1 - ads) * gaspPitchHipfire is added to aimPitch.
-    gaspPitchHipfire: -0.03,
+    gaspPitchHipfire: -0.02,
     // Direct additive offset on the gun-anchor lerp target. Always
     // visible. Local to rig.group (so x = right, y = up, z = forward).
     anchorOffset: { x: 0, y: 0, z: 0 },
@@ -446,6 +446,53 @@ function _runUpperBodyIK(rig, state, aimPoint, aimPitch, dt = 1/60) {
       rig.leftArm.wrist,
       _target,
       _pole,
+    );
+  }
+
+  // ============================================================
+  // DOMINANT-ARM IK — pulls the dominant hand to the gun's grip
+  // position so the hand visibly stays on the gun no matter how
+  // the user shifts arm.anchorOffset / gripOffset / gripZScale via
+  // the tuner. Without this, the dominant hand stays wherever the
+  // clip's authored pose put it and the gun floats off into space.
+  //
+  // Same gating as the support-arm IK: skip during one-shot locks
+  // (death, reload), during layered upper-body clips (reload-arm
+  // pose), and during melee swings (the swing clip authors the
+  // arm). AnimationMixer rewrites bone quaternions every frame
+  // before this IK runs, so there's no compounding across frames.
+  //
+  // Skipped for melee weapons (the melee swing clip authors the
+  // dominant arm) and for state.attack.phase !== 'idle' (a swing
+  // is in flight).
+  // ============================================================
+  const _domSide = state.handedness === 'right' ? rig.rightArm : rig.leftArm;
+  const _domSwinging = state.attack && state.attack.phase !== 'idle';
+  if (state.equipped?.type === 'ranged'
+      && !_clipLocked
+      && !_layeredActive
+      && !_domSwinging
+      && rig._weaponGripAnchor
+      && _domSide?.shoulder?.pivot
+      && _domSide?.elbow
+      && _domSide?.wrist
+      && rig.chest) {
+    rig.group.updateMatrixWorld(true);
+    const _domTarget = new THREE.Vector3();
+    rig._weaponGripAnchor.getWorldPosition(_domTarget);
+    const _domShW = new THREE.Vector3();
+    const _domChW = new THREE.Vector3();
+    _domSide.shoulder.pivot.getWorldPosition(_domShW);
+    rig.chest.getWorldPosition(_domChW);
+    const _domPole = _domShW.clone().sub(_domChW).normalize();
+    _domPole.y -= 0.3;
+    _domPole.normalize();
+    solvePostClipTwoBoneIK(
+      _domSide.shoulder.pivot,
+      _domSide.elbow,
+      _domSide.wrist,
+      _domTarget,
+      _domPole,
     );
   }
 }

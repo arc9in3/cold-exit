@@ -134,7 +134,12 @@ export function openAnimTuner(player) {
     _reapply(player);
   });
   pane.addButton({ title: 'Print ANIM_TUNE → console' }).on('click', () => {
-    console.log('[anim-tuner] current ANIM_TUNE:', JSON.parse(JSON.stringify(ANIM_TUNE)));
+    // Pretty-printed JSON so devtools doesn't truncate nested objects
+    // with `{...}`. The string is also handed to clipboard if the user
+    // grants permission, otherwise just logged for copy-paste.
+    const dump = JSON.stringify(ANIM_TUNE, null, 2);
+    console.log('[anim-tuner] ANIM_TUNE (paste back to bake defaults):\n' + dump);
+    try { navigator.clipboard?.writeText(dump); } catch (_) {}
   });
 
   // Auto-save + auto-reapply on any change. Tweakpane fires `change`
