@@ -684,14 +684,16 @@ function _ensureHurtOverlay() {
   el.style.cssText = [
     'position:fixed', 'inset:0', 'pointer-events:none', 'z-index:9999',
     'opacity:0',
-    // Radial gradient: clear center → strong red at corners. The
-    // center alpha is 0 so combat reads through; corners cap at
-    // ~0.85 alpha when the level driver is at 1.0.
+    // Radial gradient: red-floor center → opaque red at edges.
+    // mix-blend-mode normal so the red ADDS over the scene instead
+    // of multiplying (multiply darkened invisibly on already-dark
+    // pixels). Center alpha 0.30 so a level=1 spike clearly tints
+    // the whole frame; edges 0.95 nearly fully cover.
     'background: radial-gradient(circle at center,' +
-    '   rgba(255,30,30,0.0) 30%,' +
-    '   rgba(255,30,30,0.55) 75%,' +
-    '   rgba(255,15,15,0.85) 100%)',
-    'mix-blend-mode: multiply',
+    '   rgba(220,30,30,0.30) 0%,' +
+    '   rgba(220,30,30,0.55) 50%,' +
+    '   rgba(180,10,10,0.85) 80%,' +
+    '   rgba(160,5,5,0.95) 100%)',
     'transition: opacity 0.05s linear',
   ].join(';');
   document.body.appendChild(el);

@@ -344,17 +344,14 @@ const FinisherShader = {
       float n = hash(gl_FragCoord.xy + uTime * 60.0) - 0.5;
       col += n * uGrain;
 
-      // Hurt vignette — radial red overlay biased to the edges.
-      // Driven externally; spikes on damage, pulses while bleed/broken
-      // statuses are active. Uses screen->lerp toward uHurtTint with
-      // a corner-weighted falloff so the center stays clear (the
-      // player can still see the action) but the periphery flashes
-      // the warning color. Falloff widened so the red is visible
-      // across roughly the outer 60% of the screen, not just the
-      // corners.
+      // Hurt vignette — radial red overlay. Center keeps a 0.45 floor
+      // so even mid-screen tints visibly red on a hit (combat still
+      // reads — the floor is far below 1.0 — but a flash at uHurt=1.0
+      // makes the whole frame go red-orange). Edges crush to 0.98
+      // (effectively full red).
       if (uHurt > 0.001) {
-        float radial = smoothstep(0.10, 0.70, length(c));
-        float k = clamp(uHurt * radial, 0.0, 0.95);
+        float radial = mix(0.45, 1.0, smoothstep(0.0, 0.55, length(c)));
+        float k = clamp(uHurt * radial * 1.25, 0.0, 0.98);
         col = mix(col, uHurtTint, k);
       }
 
