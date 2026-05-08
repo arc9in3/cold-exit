@@ -730,6 +730,19 @@ window.__useFbx = async (url) => {
   return `loaded ${url}, clips: ${player.rig.clipNames?.().join(', ')}`;
 };
 
+// Console: __openTuner() / __closeTuner() — tweakpane panel for live
+// tuning of weapon scale / grip / muzzle / arm pose. Bound to
+// player.js's exported ANIM_TUNE; sliders mutate the live config and
+// any change auto-saves to localStorage so edits survive reloads.
+window.__openTuner = async () => {
+  const mod = await import('./ui_anim_tuner.js');
+  return mod.openAnimTuner(player);
+};
+window.__closeTuner = async () => {
+  const mod = await import('./ui_anim_tuner.js');
+  return mod.closeAnimTuner();
+};
+
 // Console: __openRecruiter() — open the agency recruiter modal.
 // Wires the modal to the agency_economy chip balance so spent chips
 // debit and refresh costs ladder per session.

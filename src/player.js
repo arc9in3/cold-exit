@@ -13,6 +13,69 @@ import { attachGraph } from './anim/graph.js';
 import { selectGaspLocomotion } from './anim/locomotion.js';
 import { solveTwoBoneIK, solvePostClipTwoBoneIK, resetIkCache } from './anim/ik_two_bone.js';
 
+// ============================================================
+// ANIM_TUNE — live-tunable knobs for weapon position, size, and
+// arm pose. Bound by tweakpane in src/ui_anim_tuner.js
+// (window.__openTuner()). setWeapon + _runUpperBodyIK read these
+// fresh each call, so panel slider changes apply immediately on
+// the next frame (or on the next reattachWeapon() for grip/scale).
+// ============================================================
+export const ANIM_TUNE = {
+  // Per-class visible-factor: muzzle Z offset is `len * vf` for
+  // pistol-class weapons (grip-at-hand authoring). Long-gun muzzle
+  // uses `len * 0.2 + len * vf * 0.5`. Higher vf → muzzle further
+  // from grip → tracer originates at the visible barrel tip.
+  visibleFactor: {
+    pistol: 0.50, smg: 1.40, rifle: 1.60, shotgun: 1.60,
+    sniper: 1.95, lmg: 1.60, flame: 1.50, melee: 1.50,
+  },
+  // Per-class grip Z offset multiplier (applied as `gripZScale * len`).
+  // Pistol clones have grip-end origin → 0 lands grip in the hand.
+  // SMG / flame / melee clones have center origin → 0.5 keeps the
+  // back from clipping into the chest. Long guns use 0.2 so the
+  // stock overlaps wrist + forearm.
+  gripZScale: {
+    pistol: 0.00, smg: 0.50, rifle: 0.20, shotgun: 0.20,
+    sniper: 0.20, lmg: 0.20, flame: 0.50, melee: 0.50,
+  },
+  // Per-class size multiplier — applied as inHandModel.scale.setScalar
+  // on top of the fitToRadius initial fit. 1.0 = no change. Use this
+  // to shrink/grow a class without re-running fitToRadius.
+  sizeMul: {
+    pistol: 1.0, smg: 1.0, rifle: 1.0, shotgun: 1.0,
+    sniper: 1.0, lmg: 1.0, flame: 1.0, melee: 1.0,
+  },
+  // Arm + body pose tunables read by _runUpperBodyIK per frame.
+  arm: {
+    // Hipfire arm pitch baseline — chest pitches down by this many
+    // radians at adsAmount=0, lerping to 0 at adsAmount=1. Negative
+    // lifts arms up. (1 - ads) * gaspPitchHipfire is added to aimPitch.
+    gaspPitchHipfire: 0.10,
+    // Gun anchor lerp Y target. Hipfire keeps gun lower (chest
+    // height); ADS raises toward eye-line. The anchor lerps toward
+    // the hand bone but is floored at `wantY * 0.9` where wantY is
+    // hipY + (adsY - hipY) * adsAmount.
+    hipY: 1.30,
+    adsY: 1.55,
+    // Z floor on the gun anchor — keeps the gun from dipping behind
+    // the chest when the hand bone's local Z drops near zero.
+    fwdMin: 0.30,
+  },
+};
+
+// Apply persisted tuner overrides from localStorage (set by
+// ui_anim_tuner's "save" action). Survives reload. Failure-safe.
+try {
+  const saved = JSON.parse(localStorage.getItem('coldExitAnimTune') || 'null');
+  if (saved && typeof saved === 'object') {
+    for (const k of Object.keys(saved)) {
+      if (ANIM_TUNE[k] && typeof saved[k] === 'object') {
+        Object.assign(ANIM_TUNE[k], saved[k]);
+      }
+    }
+  }
+} catch (_) { /* corrupt entry; ignore */ }
+
 // Lazy-load the GASP locomotion state machine (only fetched when a
 // rig with useGaspLocomotion=true is loaded). Same fire-and-forget
 // pattern as _ensurePlayerSmLoaded.
@@ -942,27 +1005,22 @@ export function createPlayer(scene) {
       inHandModel.rotation.set(0, 0, 0);
       const isLong = cls === 'rifle' || cls === 'shotgun'
         || cls === 'sniper' || cls === 'lmg';
-      const VISIBLE_FACTOR = {
-        pistol: 0.50, smg: 1.40, rifle: 1.60, shotgun: 1.60,
-        sniper: 1.95, lmg: 1.60, flame: 1.50, melee: 1.50,
-      };
-      const vf = VISIBLE_FACTOR[cls] ?? 1.0;
-      let gripZ, muzzleZ;
-      if (isLong) {
-        gripZ = len * 0.2;
-        muzzleZ = len * 0.2 + len * vf * 0.5;
-      } else if (cls === 'pistol') {
-        gripZ = 0;
-        muzzleZ = len * vf;
-      } else {
-        // SMG, flame, melee — center-origin clones. Restore legacy
-        // offsets so the back of the mesh doesn't intersect the chest.
-        gripZ = len / 2;
-        muzzleZ = len;
-      }
+      // Live tuning knobs — see ANIM_TUNE at module top. Tweakpane
+      // panel writes here; setWeapon reads on every weapon swap, so
+      // calling player.reattachWeapon() reapplies any panel changes.
+      const vf = ANIM_TUNE.visibleFactor[cls] ?? 1.0;
+      const gz = ANIM_TUNE.gripZScale[cls] ?? 0.5;
+      const gripZ = (cls === 'pistol') ? 0 : (gz * len);
+      const muzzleZ = isLong
+        ? (gripZ + len * vf * 0.5)
+        : (cls === 'pistol' ? (len * vf) : len);
       gunMesh.position.set(0, 0, gripZ * ws);
       muzzle.position.set(0, 0, muzzleZ * ws);
       inHandModel.position.copy(gunMesh.position);
+      // Per-class size multiplier — applied on top of the clone's
+      // existing fitToRadius scale. Default 1.0 = no change.
+      const sm = ANIM_TUNE.sizeMul[cls] ?? 1.0;
+      inHandModel.scale.setScalar(sm);
     } else if (isShouldered) {
       // PROCGEN-RIG FALLBACK — only reached when rig._gunAnchor is
       // unset, i.e. user opted into the primitive procgen rig via
@@ -2467,14 +2525,15 @@ export function createPlayer(scene) {
             rig.group.worldToLocal(_handTrackV);
             // Hipfire keeps gun lower (chest height); ADS raises
             // toward eye-line. Blend the hand-tracked Y with the
-            // target height.
-            const hipY = 1.30, adsY = 1.55;
+            // target height. Live-tunable via ANIM_TUNE.arm.
+            const hipY = ANIM_TUNE.arm.hipY, adsY = ANIM_TUNE.arm.adsY;
             const wantY = hipY + (adsY - hipY) * ads;
+            const fwdMin = ANIM_TUNE.arm.fwdMin;
             rig._gunAnchor.position.x += (_handTrackV.x - rig._gunAnchor.position.x) * 0.18;
             rig._gunAnchor.position.y += (Math.max(_handTrackV.y, wantY * 0.9) - rig._gunAnchor.position.y) * 0.18;
-            rig._gunAnchor.position.z += (Math.max(_handTrackV.z, 0.30) - rig._gunAnchor.position.z) * 0.18;
+            rig._gunAnchor.position.z += (Math.max(_handTrackV.z, fwdMin) - rig._gunAnchor.position.z) * 0.18;
           } else {
-            const hipY = 1.30, adsY = 1.55;
+            const hipY = ANIM_TUNE.arm.hipY, adsY = ANIM_TUNE.arm.adsY;
             rig._gunAnchor.position.set(0, hipY + (adsY - hipY) * ads, 0.45);
           }
           let gunYaw = cursorYaw - rig.group.rotation.y;
@@ -2508,7 +2567,7 @@ export function createPlayer(scene) {
         // smoothly raise to clip-authored aim level as adsAmt → 1.
         // Bump magnitude if arms still read too high; flip sign
         // to restore old behavior.
-        state._gaspPitchOffset = (1 - adsAmt) * 0.10;
+        state._gaspPitchOffset = (1 - adsAmt) * (ANIM_TUNE.arm.gaspPitchHipfire ?? 0.10);
         // Arm-shoulder twist for extended aim range — when the
         // cursor is FAR off-axis (residual past the chest's 45°
         // limit), rotate the dominant clavicle / upperarm to point
