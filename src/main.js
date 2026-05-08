@@ -690,10 +690,10 @@ function _ensureHurtOverlay() {
     // pixels). Center alpha 0.30 so a level=1 spike clearly tints
     // the whole frame; edges 0.95 nearly fully cover.
     'background: radial-gradient(circle at center,' +
-    '   rgba(220,30,30,0.30) 0%,' +
-    '   rgba(220,30,30,0.55) 50%,' +
-    '   rgba(180,10,10,0.85) 80%,' +
-    '   rgba(160,5,5,0.95) 100%)',
+    '   rgba(220,30,30,0.15) 0%,' +
+    '   rgba(220,30,30,0.40) 55%,' +
+    '   rgba(180,10,10,0.70) 85%,' +
+    '   rgba(160,5,5,0.85) 100%)',
     'transition: opacity 0.05s linear',
   ].join(';');
   document.body.appendChild(el);

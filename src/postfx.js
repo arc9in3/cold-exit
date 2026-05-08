@@ -350,8 +350,8 @@ const FinisherShader = {
       // makes the whole frame go red-orange). Edges crush to 0.98
       // (effectively full red).
       if (uHurt > 0.001) {
-        float radial = mix(0.45, 1.0, smoothstep(0.0, 0.55, length(c)));
-        float k = clamp(uHurt * radial * 1.25, 0.0, 0.98);
+        float radial = mix(0.22, 1.0, smoothstep(0.05, 0.65, length(c)));
+        float k = clamp(uHurt * radial * 1.10, 0.0, 0.95);
         col = mix(col, uHurtTint, k);
       }
 
