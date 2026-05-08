@@ -107,6 +107,11 @@ export function openAnimTuner(player) {
     sub.addBinding(ANIM_TUNE.supportGrip, cls, {
       label: 'support hand frac', min: 0.0, max: 1.0, step: 0.05,
     });
+    if (ANIM_TUNE.arm.stanceYaw && cls in ANIM_TUNE.arm.stanceYaw) {
+      sub.addBinding(ANIM_TUNE.arm.stanceYaw, cls, {
+        label: 'upper-body twist (rad)', min: -0.8, max: 0.8, step: 0.01,
+      });
+    }
   }
 
   // ---- Arm + anchor pose (live, no reattach) ----

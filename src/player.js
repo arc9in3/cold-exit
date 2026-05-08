@@ -90,6 +90,16 @@ export const ANIM_TUNE = {
     // the most visible source of gun jitter; X/Z stay snappy so the
     // gun still tracks aim direction + chest twist responsively.
     anchorLerp: { x: 0.18, y: 0.08, z: 0.18 },
+    // Per-class bladed-stance yaw (radians). Spine twists this much
+    // in world frame relative to body forward — used to put the
+    // shoulder forward / arms slightly off-axis for a "ready to
+    // shoot" stance silhouette. Causes the arm-vs-gun split when
+    // the gun is anchored to cursor while spine is offset; dial to
+    // 0 if you want arms and gun perfectly co-linear.
+    stanceYaw: {
+      rifle: 0.26, shotgun: 0.26, sniper: 0.26, lmg: 0.26,
+      smg: 0.10, pistol: 0.0, flame: 0.0, melee: 0.0,
+    },
   },
 };
 
@@ -286,9 +296,12 @@ function _runUpperBodyIK(rig, state, aimPoint, aimPitch, dt = 1/60) {
   // the chain accumulates, so a local-Y "yaw" reads as a roll.
   // World-frame conversion below produces a clean horizontal twist.
   const cls = state?.equipped?.class;
-  const isRifleStance = cls === 'rifle' || cls === 'shotgun'
-    || cls === 'sniper' || cls === 'lmg';
-  const stanceYaw = isRifleStance ? 0.26 : 0;   // +15° bladed pose
+  // Live-tunable per-class bladed-stance yaw — see ANIM_TUNE.arm.stanceYaw.
+  // Was a hardcoded 0.26 for rifle-class and 0 for everything else;
+  // the offset is what made arms point ~15° off where the gun aims,
+  // so this is the user-facing knob to fix that misalignment per
+  // weapon class.
+  const stanceYaw = (ANIM_TUNE.arm.stanceYaw?.[cls]) ?? 0;
   const STANCE_WEIGHTS = [0, 0.05, 0.18, 0.35, 0.42];
   const YAW_WEIGHTS   = [0, 0, 0, 0, 0];
   const PITCH_WEIGHTS = [0, 0, 0, 0, 0];
