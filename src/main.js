@@ -663,11 +663,52 @@ postFx.setLosMask(losMask.texture, true);
 // exponentially in _updateHurtFlash. Status pulse (bleed/broken)
 // runs a sin wave on top so the screen edges throb continuously
 // while the player has a status effect.
+//
+// Two render paths in parallel:
+//   • postfx finisher uniform (uHurt) — when quality high.
+//   • DOM overlay (radial gradient div) — works regardless of
+//     postfx setting, so users with postfx OFF still see the flash.
+//     Identical curve drives both; they layer additively when both
+//     active, but the postfx version is much darker at center so the
+//     extra DOM tint is visually negligible at high quality.
 let _hurtFlashSpike = 0;
-const HURT_FLASH_DECAY = 4.0;       // 1/sec — full decay in ~250ms
+const HURT_FLASH_DECAY = 3.0;       // 1/sec — full decay in ~333ms
 const HURT_PULSE_HZ = 1.6;          // sin pulse rate while bleed/broken
-const HURT_PULSE_BLEED = 0.18;      // peak intensity for bleed
-const HURT_PULSE_BROKEN = 0.24;     // peak intensity for broken (heavier)
+const HURT_PULSE_BLEED = 0.35;      // peak intensity for bleed
+const HURT_PULSE_BROKEN = 0.50;     // peak intensity for broken (heavier)
+let _hurtOverlayEl = null;
+function _ensureHurtOverlay() {
+  if (_hurtOverlayEl || typeof document === 'undefined') return _hurtOverlayEl;
+  const el = document.createElement('div');
+  el.id = '__hurt-overlay';
+  el.style.cssText = [
+    'position:fixed', 'inset:0', 'pointer-events:none', 'z-index:9999',
+    'opacity:0',
+    // Radial gradient: clear center → strong red at corners. The
+    // center alpha is 0 so combat reads through; corners cap at
+    // ~0.85 alpha when the level driver is at 1.0.
+    'background: radial-gradient(circle at center,' +
+    '   rgba(255,30,30,0.0) 30%,' +
+    '   rgba(255,30,30,0.55) 75%,' +
+    '   rgba(255,15,15,0.85) 100%)',
+    'mix-blend-mode: multiply',
+    'transition: opacity 0.05s linear',
+  ].join(';');
+  document.body.appendChild(el);
+  _hurtOverlayEl = el;
+  return el;
+}
+// Console: __testHurt(0.8) — manually drive the hurt vignette to a
+// specific level for ~1.5 s to verify the visual fires. Use to
+// diagnose: if this lights up red, the rendering works; the issue
+// is then in the damage→spike wiring. If even __testHurt(1.0) shows
+// nothing, postfx + DOM overlay are both broken.
+if (typeof window !== 'undefined') {
+  window.__testHurt = (level = 0.8) => {
+    _hurtFlashSpike = Math.max(0, Math.min(1, level));
+    return `[hurt-test] driving level=${_hurtFlashSpike.toFixed(2)} (decays ~${(1/HURT_FLASH_DECAY).toFixed(2)}s)`;
+  };
+}
 function _updateHurtFlash(dt, info) {
   _hurtFlashSpike = Math.max(0, _hurtFlashSpike - HURT_FLASH_DECAY * dt);
   let pulse = 0;
@@ -679,7 +720,13 @@ function _updateHurtFlash(dt, info) {
     const t = (typeof performance !== 'undefined' ? performance.now() : Date.now()) / 1000;
     pulse = peak * (Math.sin(t * Math.PI * 2 * HURT_PULSE_HZ) * 0.5 + 0.5);
   }
-  postFx.setHurtFlash(Math.max(_hurtFlashSpike, pulse));
+  const level = Math.max(_hurtFlashSpike, pulse);
+  postFx.setHurtFlash(level);
+  // DOM overlay fallback (also stacks on top of postfx for users
+  // with both on — radial gradient + multiply blend mode keeps the
+  // tint contained to the corners and respects underlying scene).
+  const el = _ensureHurtOverlay();
+  if (el) el.style.opacity = level.toFixed(3);
 }
 
 // Footstep emitter state — accumulates horizontal distance travelled
@@ -12970,10 +13017,11 @@ function damagePlayer(amount, damageType = 'generic', srcCtx = null) {
   }
   player.takeDamage(amount);
   // Hurt vignette — spike on each real damage event. Magnitude maps
-  // amount → flash level: ~5 dmg = 0.5, ~30 dmg = 1.0. Decays via
-  // _updateHurtFlash() in the render loop. Capped against existing
-  // spike so multi-pellet hits don't compound past 1.0.
-  const _flashAmt = Math.min(1, 0.40 + amount * 0.020);
+  // amount → flash level: even 1 dmg gets a 0.65 floor so the player
+  // always sees the hit; ~25 dmg = 1.0. Decays via _updateHurtFlash()
+  // in the render loop. Capped against existing spike so multi-pellet
+  // hits don't compound past 1.0.
+  const _flashAmt = Math.min(1, 0.65 + amount * 0.020);
   if (_flashAmt > _hurtFlashSpike) _hurtFlashSpike = _flashAmt;
 
   // Death-recap accounting — credit the source enemy with `amount`
