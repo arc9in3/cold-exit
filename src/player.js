@@ -281,6 +281,27 @@ export function resetGunFollowReference(rig) {
   if (rig) rig._gunFollowRef = null;
 }
 
+// Forcibly write the upper-body bones to the snapshot pose stored on
+// rig._fbx._frozenUpper (built in main.js __usePeekPlayer from the
+// rifle-8way/idle-aiming clip's frame-0 keyframes). Runs AFTER the
+// mixer's per-frame update so it overrides whatever the locomotion /
+// layered clips wrote to those bones — no mixer-iteration-order
+// dependency, no track stripping needed. The lower body (Hips, legs,
+// feet) is excluded from the snapshot, so the locomotion clip's leg
+// cycle still drives the player's stride.
+function _freezeUpperBody(rig) {
+  const frozen = rig?._fbx?._frozenUpper;
+  if (!frozen) return;
+  for (const boneName in frozen) {
+    const entry = frozen[boneName];
+    const bone = entry.bone;
+    if (!bone) continue;
+    if (entry.position)   bone.position.fromArray(entry.position);
+    if (entry.quaternion) bone.quaternion.fromArray(entry.quaternion);
+    if (entry.scale)      bone.scale.fromArray(entry.scale);
+  }
+}
+
 // Upper-body aim for the GASP rig — the locomotion clips already
 // pose the arms holding the gun forward (they're authored as
 // "_Pistol" gun-aim cycles), so we DON'T run a 2-bone IK on the
@@ -2943,6 +2964,14 @@ export function createPlayer(scene) {
             if (layeredAction) layeredAction.timeScale = layeredTimeScale;
           }
           rig.update(dt);
+          // Forcibly pin the upper-body bones to the idle-aiming
+          // snapshot pose (captured in main.js from frame 0 of the
+          // rifle-8way/idle-aiming clip). Runs AFTER the mixer wrote
+          // its per-frame poses, so the locomotion clip's arm-swing
+          // and any leftover layered-clip writes are overwritten.
+          // The mixer's track ordering is no longer relevant — the
+          // upper body is gameplay-frozen at the aim pose.
+          _freezeUpperBody(rig);
           // Upper body IK — point the wrists at the aim target. The
           // arms came from the locomotion clip (which is a gun-pose
           // clip with arms forward); IK overwrites the arm bones to
