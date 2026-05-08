@@ -110,6 +110,14 @@ export const ANIM_TUNE = {
       rifle: 0.26, shotgun: 0.26, sniper: 0.26, lmg: 0.00,
       smg: -0.63, pistol: -0.10, flame: 0.0, melee: 0.0,
     },
+    // When ON, the gun-anchor inherits the dominant hand bone's
+    // position + rotation DELTAS each frame — gun visibly tracks the
+    // hand swing during run / aim / reload clips. Reference pose is
+    // captured the first frame the rig updates, so the gun's static
+    // baked position (and per-class gripOffsets) is preserved at t=0
+    // and the hand's clip-driven motion is added on top. Independent
+    // of disableAllIK; works with raw clips. Toggle in tuner.
+    gunFollowsHand: true,
   },
 };
 
@@ -197,6 +205,70 @@ export function setLocomotionStateMachine(cfg) {
 // Aim-IK target scratch (world-space point the wrist should reach).
 const _aimIkTarget = new THREE.Vector3();
 const _aimIkPole = new THREE.Vector3();
+
+// Gun-follow-hand scratch — see _updateGunFollow below.
+const _gfM = new THREE.Matrix4();
+const _gfPos = new THREE.Vector3();
+const _gfQuat = new THREE.Quaternion();
+const _gfScale = new THREE.Vector3();
+const _gfDeltaPos = new THREE.Vector3();
+const _gfDeltaQuat = new THREE.Quaternion();
+const _gfRefInv = new THREE.Quaternion();
+
+// Pin the gun anchor to the dominant hand's clip-driven motion. We
+// don't re-parent the anchor (that would fight the body-local
+// gripOffsets the user already baked); instead we read the hand
+// bone's CURRENT pose in body-local space, capture a one-shot
+// reference pose on first call, and apply (current - reference) to
+// the anchor's static base each frame. Result:
+//  - frame 0: anchor stays at its baked body-relative position
+//  - frame N: anchor.pos = base + (handLocalPos_N - handLocalPos_0)
+//             anchor.quat = (handLocalQuat_N * inv(handLocalQuat_0))
+//                           composed with the baked base quat
+// So idle bob, run swing, reload reach, and aim micromotion all
+// translate into gun motion, but the user's tuned chest-forward
+// position survives untouched.
+function _updateGunFollow(rig, state) {
+  if (!ANIM_TUNE.arm.gunFollowsHand) return;
+  if (!rig || !rig._gunAnchor || !rig.group) return;
+  const handBone = (state?.handedness === 'left')
+    ? rig.leftArm?.wrist
+    : rig.rightArm?.wrist;
+  if (!handBone) return;
+
+  rig.group.updateMatrixWorld();
+  handBone.updateMatrixWorld();
+  // hand's pose expressed in rig.group's local frame:
+  //   localM = inv(group.world) * hand.world
+  _gfM.copy(rig.group.matrixWorld).invert().multiply(handBone.matrixWorld);
+  _gfM.decompose(_gfPos, _gfQuat, _gfScale);
+
+  if (!rig._gunFollowRef) {
+    rig._gunFollowRef = {
+      handPos: _gfPos.clone(),
+      handQuat: _gfQuat.clone(),
+      anchorBasePos: rig._gunAnchor.position.clone(),
+      anchorBaseQuat: rig._gunAnchor.quaternion.clone(),
+    };
+    return;
+  }
+  const ref = rig._gunFollowRef;
+
+  _gfDeltaPos.copy(_gfPos).sub(ref.handPos);
+  // dQ such that curQ = dQ * refQ (body-local frame) → dQ = curQ * inv(refQ)
+  _gfRefInv.copy(ref.handQuat).invert();
+  _gfDeltaQuat.copy(_gfQuat).multiply(_gfRefInv);
+
+  rig._gunAnchor.position.copy(ref.anchorBasePos).add(_gfDeltaPos);
+  // anchor body-local rotation = dQ applied to base in body frame
+  rig._gunAnchor.quaternion.copy(ref.anchorBaseQuat).premultiply(_gfDeltaQuat);
+}
+
+// Public hook so a future handedness flip / rig swap can clear the
+// captured reference and re-establish it on the next update tick.
+export function resetGunFollowReference(rig) {
+  if (rig) rig._gunFollowRef = null;
+}
 
 // Upper-body aim for the GASP rig — the locomotion clips already
 // pose the arms holding the gun forward (they're authored as
@@ -2866,6 +2938,12 @@ export function createPlayer(scene) {
           // make them track the cursor. Chest + head get yaw/pitch
           // additive deltas via the existing world-space IK math.
           _runUpperBodyIK(rig, state, aimPoint, aimPitch, dt);
+          // Pin the gun anchor to the hand bone's clip-driven delta
+          // so the gun follows arm swing, reload reach, etc. Runs
+          // independently of disableAllIK — the IK pipeline above is
+          // gated, but hand-follow is a pure read-and-mirror, no
+          // bone overrides involved.
+          _updateGunFollow(rig, state);
           // Done with anim for this frame.
           // Skip the remainder of the FBX clip-selection block via
           // a continue-like construct: structured as a labeled
@@ -3334,6 +3412,10 @@ export function createPlayer(scene) {
     if (gunMesh.parent !== newAnchor) newAnchor.add(gunMesh);
     if (muzzle.parent !== newAnchor) newAnchor.add(muzzle);
     if (inHandModel.parent !== newAnchor) newAnchor.add(inHandModel);
+    // Re-baseline the hand-follow reference against the newly
+    // dominant wrist so the gun's chest-forward base position
+    // anchors to the new side instead of the old.
+    if (rig) rig._gunFollowRef = null;
     // Note: the visual body pose itself doesn't mirror here. A
     // proper left-handed body pose requires either authored
     // left-handed clips or a per-bone mirror retarget, both of

@@ -64,6 +64,9 @@ function _resetAll() {
   ANIM_TUNE.arm.anchorOffset.x = DEFAULTS.arm.anchorOffset.x;
   ANIM_TUNE.arm.anchorOffset.y = DEFAULTS.arm.anchorOffset.y;
   ANIM_TUNE.arm.anchorOffset.z = DEFAULTS.arm.anchorOffset.z;
+  if ('gunFollowsHand' in DEFAULTS.arm) {
+    ANIM_TUNE.arm.gunFollowsHand = DEFAULTS.arm.gunFollowsHand;
+  }
   try { localStorage.removeItem(STORAGE_KEY); } catch (_) {}
 }
 
@@ -129,6 +132,9 @@ export function openAnimTuner(player) {
   });
   armFolder.addBinding(ANIM_TUNE.arm, 'disableAllIK', {
     label: 'DISABLE ALL IK (raw clips)',
+  });
+  armFolder.addBinding(ANIM_TUNE.arm, 'gunFollowsHand', {
+    label: 'gun follows hand bone',
   });
   // Per-axis hand-tracking smoothing. Lower = more smoothing /
   // more gun lag. Y in particular dampens running stride bob.
