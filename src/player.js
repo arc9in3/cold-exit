@@ -1305,16 +1305,40 @@ export function createPlayer(scene) {
     buildAccessories(weapon);
     state.blocking = false;
 
-    // The locomotion picker now owns the layered-clip slot completely
-    // — it returns the right idle-upper variant per weapon class on
-    // every tick, and the crossfade in player.update fades the old
-    // layered out as it brings the new one in. We deliberately do NOT
-    // touch currentLayeredClipName here; nulling it would make the
-    // next crossfade skip its fadeOut (prev=null), leaving the OLD
-    // layered running at weight 1 alongside the new one. Two layered
-    // clips writing the same upper bones at full weight produced a
-    // weight-blended pose that didn't match either — visible as the
-    // gun floating above where it was tuned.
+    // FBX/Mixamo path — toggle the pistol-stance upper-body layer.
+    // Pistol/SMG/revolver classes get pistol-locomotion/pistol-idle
+    // running as a layered action on top of locomotion (its lower-body
+    // tracks were stripped at load in __usePeekPlayer). Shouldered
+    // weapons hard-stop the layer so the rifle clip's authored upper
+    // body shows. We use action.stop() (not fadeOut) on the rifle path
+    // because fadeOut just drops weight to 0 over time but leaves the
+    // action in the mixer's running list; if isRunning() then returns
+    // a stale value on the next swap the stop branch can be skipped.
+    if (rig?._fbx?.actions) {
+      const pistolStance = rig._fbx.actions.get('pistol-locomotion/pistol-idle');
+      if (pistolStance) {
+        // SMGs use rifle locomotion (two-hand grip) — they're shouldered
+        // weapons in this game's pose convention even though they're
+        // smaller than rifles. Only true sidearms (pistol/revolver)
+        // get the one-hand pistol-idle upper-body layer.
+        const isOneHand = cls === 'pistol' || cls === 'revolver';
+        if (window.__animDebug) console.log(`[setWeapon] cls=${cls} isOneHand=${isOneHand} pistolWasRunning=${pistolStance.isRunning()}`);
+        if (isOneHand) {
+          pistolStance.setLoop(THREE.LoopRepeat, Infinity);
+          if (!pistolStance.isRunning()) {
+            pistolStance.reset().fadeIn(0.2).play();
+          }
+          // Sync the layered-clip tracker so the locomotion tick that
+          // also wants pistol-idle as the layered upper-body doesn't
+          // restart what setWeapon just kicked off.
+          rig._fbx.currentLayeredClipName = 'pistol-locomotion/pistol-idle';
+        } else {
+          // Hard stop — idempotent if already stopped.
+          pistolStance.stop();
+          rig._fbx.currentLayeredClipName = null;
+        }
+      }
+    }
 
     // Kick off the in-hand FBX swap. Primitive gunMesh + extras stay
     // visible as a placeholder while the model loads, then hide once
