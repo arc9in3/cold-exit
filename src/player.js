@@ -1444,6 +1444,27 @@ export function createPlayer(scene) {
       state.health = 0;
       velocity.set(0, 0, 0);
     }
+    // Hit-react upper-body flinch — plays the runner pack's
+    // basic-shooter/hit-reaction clip layered over locomotion (lower
+    // body keeps walking; arms flinch + recoil briefly). Skipped when:
+    //   - dealt damage is below 5 HP (chip damage shouldn't constantly
+    //     interrupt the player's pose for cosmetic reasons)
+    //   - we're already in a one-shot lock (death animation playing)
+    //   - a hit-react is already in flight (~250ms cooldown — multi-
+    //     pellet shotgun blasts and burst-fire SMG sprays would
+    //     otherwise re-trigger each frame and read as a glitch)
+    //   - player just died this hit (death clip is the right one to play)
+    if (dealt >= 5 && state.health > 0 && rig?._fbx?.actions?.has?.('basic-shooter/hit-reaction')) {
+      const _now = (typeof performance !== 'undefined' ? performance.now() : Date.now());
+      const lockUntil = rig._fbx._clipLockUntil || 0;
+      const lastHitReactAt = rig._fbx._lastHitReactAt || 0;
+      const inLock = lockUntil > _now;
+      const offCooldown = (_now - lastHitReactAt) > 250;
+      if (!inLock && offCooldown) {
+        playOneShot('basic-shooter/hit-reaction', 0.4, { upperOnly: true, fadeMs: 60 });
+        rig._fbx._lastHitReactAt = _now;
+      }
+    }
     return dealt;
   }
 
