@@ -35,15 +35,15 @@ export const ANIM_TUNE = {
   // ~0.42-0.50 keeps the back from clipping into the chest. Long
   // guns sit near 0.0-0.20 so the stock overlaps wrist + forearm.
   gripZScale: {
-    pistol: 0.46, smg: 0.60, rifle: 0.24, shotgun: 0.24,
-    sniper: 0.20, lmg: 0.22, flame: 0.24, melee: 0.36,
+    pistol: 0.00, smg: 0.22, rifle: -0.10, shotgun: -0.10,
+    sniper: 0.00, lmg: -0.10, flame: 0.24, melee: -0.10,
   },
   // Per-class size multiplier — applied as inHandModel.scale.setScalar
   // on top of the fitToRadius initial fit. 1.0 = no change. Pistol
   // and SMG were undersized post-fit and got bumped via the tuner
   // pass to match the class-uniform diameter targets.
   sizeMul: {
-    pistol: 3.5, smg: 1.4, rifle: 1.0, shotgun: 1.8,
+    pistol: 2.4, smg: 1.5, rifle: 1.0, shotgun: 1.8,
     sniper: 1.0, lmg: 1.0, flame: 1.25, melee: 0.85,
   },
   // Per-class GRIP X/Y offset — applied to gunMesh.position (X, Y).
@@ -51,10 +51,10 @@ export const ANIM_TUNE = {
   // gun left/right/up/down relative to the dominant hand bone. Units
   // are world meters (post weapon-scale).
   gripOffset: {
-    pistol:  { x: -0.03, y: -0.07 }, smg:     { x:  0.00, y:  0.10 },
-    rifle:   { x:  0.00, y:  0.08 }, shotgun: { x: -0.05, y:  0.11 },
-    sniper:  { x: -0.01, y:  0.15 }, lmg:     { x: -0.05, y:  0.07 },
-    flame:   { x:  0.00, y:  0.00 }, melee:   { x: -0.09, y: -0.05 },
+    pistol:  { x: -0.16, y:  0.04 }, smg:     { x: -0.15, y:  0.20 },
+    rifle:   { x: -0.13, y:  0.17 }, shotgun: { x: -0.17, y:  0.24 },
+    sniper:  { x: -0.11, y:  0.24 }, lmg:     { x: -0.13, y:  0.17 },
+    flame:   { x:  0.00, y:  0.00 }, melee:   { x: -0.15, y:  0.02 },
   },
   // Per-class SUPPORT-HAND grip fraction along the grip→muzzle line.
   // 0 = skip support-arm IK (pistol / melee — single-handed); larger
@@ -77,7 +77,7 @@ export const ANIM_TUNE = {
     gaspPitchHipfire: -0.02,
     // Direct additive offset on the gun-anchor lerp target. Always
     // visible. Local to rig.group (so x = right, y = up, z = forward).
-    anchorOffset: { x: -0.13, y: -0.03, z: -0.02 },
+    anchorOffset: { x: -0.12, y: -0.08, z: -0.01 },
     // OFF by default — dominant-arm IK forces the hand to grip the
     // gun, which prevents tuning held-close poses (the arm becomes
     // fully outstretched no matter what the user dials in).
@@ -99,7 +99,7 @@ export const ANIM_TUNE = {
     // by default because vertical hand-bob during the run cycle is
     // the most visible source of gun jitter; X/Z stay snappy so the
     // gun still tracks aim direction + chest twist responsively.
-    anchorLerp: { x: 0.17, y: 0.16, z: 0.24 },
+    anchorLerp: { x: 0.16, y: 0.16, z: 0.15 },
     // Per-class bladed-stance yaw (radians). Spine twists this much
     // in world frame relative to body forward — used to put the
     // shoulder forward / arms slightly off-axis for a "ready to
@@ -107,8 +107,8 @@ export const ANIM_TUNE = {
     // the gun is anchored to cursor while spine is offset; dial to
     // 0 if you want arms and gun perfectly co-linear.
     stanceYaw: {
-      rifle: 0.26, shotgun: 0.26, sniper: 0.26, lmg: 0.26,
-      smg: -0.63, pistol: 0.0, flame: 0.0, melee: 0.0,
+      rifle: 0.26, shotgun: 0.26, sniper: 0.26, lmg: 0.00,
+      smg: -0.63, pistol: -0.10, flame: 0.0, melee: 0.0,
     },
   },
 };
