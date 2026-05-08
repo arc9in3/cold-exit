@@ -26,7 +26,7 @@ export const ANIM_TUNE = {
   // uses `len * 0.2 + len * vf * 0.5`. Higher vf → muzzle further
   // from grip → tracer originates at the visible barrel tip.
   visibleFactor: {
-    pistol: 0.20, smg: 0.20, rifle: 0.40, shotgun: 1.20,
+    pistol: 0.20, smg: 0.20, rifle: 0.40, shotgun: 0.45,
     sniper: 0.20, lmg: 0.20, flame: 1.50, melee: 0.90,
   },
   // Per-class grip Z offset multiplier (applied as `gripZScale * len`).
@@ -35,8 +35,8 @@ export const ANIM_TUNE = {
   // ~0.42-0.50 keeps the back from clipping into the chest. Long
   // guns sit near 0.0-0.20 so the stock overlaps wrist + forearm.
   gripZScale: {
-    pistol: 0.18, smg: 0.60, rifle: 0.26, shotgun: 0.28,
-    sniper: 0.06, lmg: 0.22, flame: 0.24, melee: 0.14,
+    pistol: 0.46, smg: 0.60, rifle: 0.24, shotgun: 0.24,
+    sniper: 0.20, lmg: 0.22, flame: 0.24, melee: 0.36,
   },
   // Per-class size multiplier — applied as inHandModel.scale.setScalar
   // on top of the fitToRadius initial fit. 1.0 = no change. Pistol
@@ -51,17 +51,17 @@ export const ANIM_TUNE = {
   // gun left/right/up/down relative to the dominant hand bone. Units
   // are world meters (post weapon-scale).
   gripOffset: {
-    pistol:  { x: 0.22, y: -0.02 }, smg:     { x: 0.00, y: 0.02 },
-    rifle:   { x: 0.14, y:  0.13 }, shotgun: { x: 0.14, y: 0.16 },
-    sniper:  { x: 0.07, y:  0.00 }, lmg:     { x: 0.13, y: 0.07 },
-    flame:   { x: 0.00, y:  0.00 }, melee:   { x: 0.22, y: 0.00 },
+    pistol:  { x: -0.03, y: -0.07 }, smg:     { x:  0.00, y:  0.10 },
+    rifle:   { x:  0.00, y:  0.08 }, shotgun: { x: -0.05, y:  0.11 },
+    sniper:  { x: -0.01, y:  0.15 }, lmg:     { x: -0.05, y:  0.07 },
+    flame:   { x:  0.00, y:  0.00 }, melee:   { x: -0.09, y: -0.05 },
   },
   // Per-class SUPPORT-HAND grip fraction along the grip→muzzle line.
   // 0 = skip support-arm IK (pistol / melee — single-handed); larger
   // values pull the support hand further down the barrel. Overrides
   // actor_rig's SUPPORT_GRIP_FRACTION_BY_CLASS at runtime.
   supportGrip: {
-    pistol: 0.00, smg: 0.00, rifle: 1.00, shotgun: 0.50,
+    pistol: 0.00, smg: 0.35, rifle: 1.00, shotgun: 0.50,
     sniper: 0.65, lmg: 0.45, flame: 0.50, melee:   0.00,
   },
   // Arm + body pose tunables read by _runUpperBodyIK per frame.
@@ -99,7 +99,7 @@ export const ANIM_TUNE = {
     // by default because vertical hand-bob during the run cycle is
     // the most visible source of gun jitter; X/Z stay snappy so the
     // gun still tracks aim direction + chest twist responsively.
-    anchorLerp: { x: 0.18, y: 0.08, z: 0.18 },
+    anchorLerp: { x: 0.17, y: 0.16, z: 0.24 },
     // Per-class bladed-stance yaw (radians). Spine twists this much
     // in world frame relative to body forward — used to put the
     // shoulder forward / arms slightly off-axis for a "ready to
@@ -108,7 +108,7 @@ export const ANIM_TUNE = {
     // 0 if you want arms and gun perfectly co-linear.
     stanceYaw: {
       rifle: 0.26, shotgun: 0.26, sniper: 0.26, lmg: 0.26,
-      smg: 0.10, pistol: 0.0, flame: 0.0, melee: 0.0,
+      smg: -0.63, pistol: 0.0, flame: 0.0, melee: 0.0,
     },
   },
 };
@@ -2655,13 +2655,13 @@ export function createPlayer(scene) {
         //   anchor.y = cursorYaw - bodyYaw
         // So the BULLET ORIGIN always points at the cursor, even
         // while the body lags within the chest-twist deadzone.
-        if (rig._gunAnchor && !ANIM_TUNE.arm.disableAllIK) {
+        if (rig._gunAnchor) {
           const ads = state.adsAmount || 0;
           // Track the dominant hand-bone's WORLD position so the
-          // gun visually pins to the hand. Damped lerp so the
-          // anchor doesn't shake with locomotion-clip arm-swing
-          // (~0.05 lerp factor per frame, snappy enough to
-          // visually follow but smoothed against stride).
+          // gun visually pins to the hand. This is pure position
+          // pinning — NOT IK. Runs whether or not disableAllIK is
+          // on; the IK gate only suppresses bone-rotation passes
+          // (spine twist, support / dominant arm IK, gun-anchor aim).
           const handBone = state.handedness === 'right'
             ? rig.rightArm?.wrist
             : rig.leftArm?.wrist;
@@ -2685,6 +2685,14 @@ export function createPlayer(scene) {
             const ao = ANIM_TUNE.arm.anchorOffset;
             rig._gunAnchor.position.set(0 + ao.x, 1.30 + ao.y, 0.45 + ao.z);
           }
+        }
+        // Gun-anchor pitch/yaw aim — composes with body rotation so
+        // bullets fire at the cursor. Skipped under disableAllIK so
+        // gun-vs-arm aim split (the original problem) doesn't return.
+        // With IK off, gun points wherever the body forward points;
+        // body rigid-follows cursor so bullets still land near aim.
+        if (rig._gunAnchor && !ANIM_TUNE.arm.disableAllIK) {
+          const ads = state.adsAmount || 0;
           let gunYaw = cursorYaw - rig.group.rotation.y;
           while (gunYaw >  Math.PI) gunYaw -= 2 * Math.PI;
           while (gunYaw < -Math.PI) gunYaw += 2 * Math.PI;
