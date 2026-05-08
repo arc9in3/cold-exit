@@ -21,6 +21,7 @@
 
 import { Pane } from 'tweakpane';
 import { ANIM_TUNE } from './player.js';
+import { DETAIL_TUNE, refreshDetailOverlay } from './material_pool.js';
 
 const STORAGE_KEY = 'coldExitAnimTune';
 const CLASSES = ['pistol', 'smg', 'rifle', 'shotgun', 'sniper', 'lmg', 'flame', 'melee'];
@@ -136,6 +137,20 @@ export function openAnimTuner(player) {
   armFolder.addBinding(ANIM_TUNE.arm.anchorLerp, 'z', {
     label: 'anchor lerp Z', min: 0.02, max: 0.5, step: 0.01,
   });
+
+  // ---- World material detail overlay ----
+  const matFolder = pane.addFolder({ title: 'World materials', expanded: false });
+  matFolder.addBinding(DETAIL_TUNE, 'enabled', { label: 'detail overlay' });
+  matFolder.addBinding(DETAIL_TUNE, 'strength', {
+    label: 'strength', min: 0.0, max: 0.6, step: 0.01,
+  });
+  matFolder.addBinding(DETAIL_TUNE, 'scale', {
+    label: 'scale (per m)', min: 0.2, max: 6.0, step: 0.05,
+  });
+  // Push DETAIL_TUNE → live shader uniforms on any change in this
+  // folder. The general pane.on('change') handler below ALSO fires
+  // but only triggers reattachWeapon (cheap to no-op call here).
+  matFolder.on('change', () => { refreshDetailOverlay(); });
 
   // ---- Buttons ----
   pane.addBlade({ view: 'separator' });
