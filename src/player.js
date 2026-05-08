@@ -26,8 +26,8 @@ export const ANIM_TUNE = {
   // uses `len * 0.2 + len * vf * 0.5`. Higher vf → muzzle further
   // from grip → tracer originates at the visible barrel tip.
   visibleFactor: {
-    pistol: 2.60, smg: 0.20, rifle: 0.65, shotgun: 1.60,
-    sniper: 1.95, lmg: 1.60, flame: 1.50, melee: 1.50,
+    pistol: 2.60, smg: 0.20, rifle: 0.65, shotgun: 1.20,
+    sniper: 0.20, lmg: 1.60, flame: 1.50, melee: 1.50,
   },
   // Per-class grip Z offset multiplier (applied as `gripZScale * len`).
   // 0 = grip-end clones (pistol used to want this; tuner pass moved
@@ -35,15 +35,15 @@ export const ANIM_TUNE = {
   // ~0.42-0.50 keeps the back from clipping into the chest. Long
   // guns sit near 0.0-0.20 so the stock overlaps wrist + forearm.
   gripZScale: {
-    pistol: 0.58, smg: 0.60, rifle: 0.00, shotgun: 0.20,
-    sniper: 0.20, lmg: 0.20, flame: 0.50, melee: 0.50,
+    pistol: 0.58, smg: 0.60, rifle: 0.00, shotgun: 0.00,
+    sniper: 0.06, lmg: 0.20, flame: 0.50, melee: 0.50,
   },
   // Per-class size multiplier — applied as inHandModel.scale.setScalar
   // on top of the fitToRadius initial fit. 1.0 = no change. Pistol
   // and SMG were undersized post-fit and got bumped via the tuner
   // pass to match the class-uniform diameter targets.
   sizeMul: {
-    pistol: 2.5, smg: 1.4, rifle: 1.0, shotgun: 1.0,
+    pistol: 2.5, smg: 1.4, rifle: 1.0, shotgun: 1.8,
     sniper: 1.0, lmg: 1.0, flame: 1.0, melee: 1.0,
   },
   // Per-class GRIP X/Y offset — applied to gunMesh.position (X, Y).
