@@ -894,14 +894,23 @@ window.__usePeekPlayer = async () => {
     ...MELEE_CLIPS,
   ]);
   const lowerRe = /^(mixamorig:?)(Hips|LeftUpLeg|LeftLeg|LeftFoot|LeftToeBase|RightUpLeg|RightLeg|RightFoot|RightToeBase)\b/;
+  // Reload clips additionally strip Spine/Spine1/Spine2 — without
+  // this, the reload's authored erect-spine quaternions override the
+  // run clip's forward lean, and the legs cycle but the body reads
+  // "stuck upright" which user perceives as a shuffle. Pistol-idle /
+  // melee swings / firing / hit-react legitimately want spine motion
+  // (stance lean, recoil pulse, swing arc), so they keep spine.
+  const lowerAndSpineRe = /^(mixamorig:?)(Hips|LeftUpLeg|LeftLeg|LeftFoot|LeftToeBase|RightUpLeg|RightLeg|RightFoot|RightToeBase|Spine|Spine1|Spine2)\b/;
+  const STRIP_SPINE = new Set(['basic-shooter/reloading']);
   for (const slug of COMBAT_LAYERED) {
     const action = player.rig._fbx?.actions?.get(slug);
     if (!action) continue;
     const clip = action.getClip();
     const before = clip.tracks.length;
-    clip.tracks = clip.tracks.filter(t => !lowerRe.test(t.name));
+    const re = STRIP_SPINE.has(slug) ? lowerAndSpineRe : lowerRe;
+    clip.tracks = clip.tracks.filter(t => !re.test(t.name));
     const after = clip.tracks.length;
-    if (before !== after) console.log(`[peek] ${slug}: stripped ${before - after}/${before} lower-body tracks`);
+    if (before !== after) console.log(`[peek] ${slug}: stripped ${before - after}/${before} ${STRIP_SPINE.has(slug) ? 'lower+spine' : 'lower-body'} tracks`);
   }
   // Engage the locomotion path. The block in player.js:2210 is gated
   // on rig._fbx.useGaspLocomotion — without this flag set, player.update
