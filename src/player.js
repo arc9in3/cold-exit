@@ -113,6 +113,14 @@ export const ANIM_TUNE = {
   },
 };
 
+// Frozen pre-merge snapshot of the SHIPPING ANIM_TUNE — what a
+// fresh-localStorage user sees on first visit. Tuner's "Reset to
+// defaults" uses this so reset really restores the baked code
+// values, not the user's last saved tuning. When new values are
+// baked into ANIM_TUNE above, this constant tracks them
+// automatically (deep clone before any mutation runs).
+export const ANIM_TUNE_DEFAULTS = JSON.parse(JSON.stringify(ANIM_TUNE));
+
 // Apply persisted tuner overrides from localStorage (set by
 // ui_anim_tuner's "save" action). Survives reload. Failure-safe.
 // Only KNOWN keys merge in — drops orphaned fields from old schemas

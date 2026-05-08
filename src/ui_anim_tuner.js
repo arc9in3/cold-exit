@@ -20,23 +20,19 @@
 // re-applies on every change; arm/anchor changes are continuous.
 
 import { Pane } from 'tweakpane';
-import { ANIM_TUNE } from './player.js';
+import { ANIM_TUNE, ANIM_TUNE_DEFAULTS } from './player.js';
 import { DETAIL_TUNE, refreshDetailOverlay } from './material_pool.js';
 
 const STORAGE_KEY = 'coldExitAnimTune';
 const CLASSES = ['pistol', 'smg', 'rifle', 'shotgun', 'sniper', 'lmg', 'flame', 'melee'];
 
-// Snapshot of defaults so "Reset" can restore. Captured once on
-// module load before any user edits. Deep-clone to dodge nested
-// object aliasing.
-const DEFAULTS = JSON.parse(JSON.stringify({
-  visibleFactor: ANIM_TUNE.visibleFactor,
-  gripZScale:    ANIM_TUNE.gripZScale,
-  sizeMul:       ANIM_TUNE.sizeMul,
-  gripOffset:    ANIM_TUNE.gripOffset,
-  supportGrip:   ANIM_TUNE.supportGrip,
-  arm:           ANIM_TUNE.arm,
-}));
+// Defaults source — ANIM_TUNE_DEFAULTS is captured BEFORE the
+// localStorage merge in player.js, so this is the actual baked
+// shipping values, NOT a snapshot of what the user already had
+// saved. Reset to defaults via this constant restores the code
+// state instead of looping back to the user's stored tuning
+// (which was the bug — bakes felt invisible).
+const DEFAULTS = ANIM_TUNE_DEFAULTS;
 
 function _save() {
   try {
@@ -162,10 +158,12 @@ export function openAnimTuner(player) {
 
   // ---- Buttons ----
   pane.addBlade({ view: 'separator' });
-  pane.addButton({ title: 'Reset all to defaults' }).on('click', () => {
+  pane.addButton({ title: '⤺ Adopt baked defaults (clear saved)' }).on('click', () => {
     _resetAll();
     _reapply(player);
+    refreshDetailOverlay();
     pane.refresh();
+    console.log('[anim-tuner] localStorage cleared; ANIM_TUNE reset to baked code defaults.');
   });
   pane.addButton({ title: 'Reattach active weapon' }).on('click', () => {
     _reapply(player);
