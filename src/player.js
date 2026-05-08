@@ -2930,17 +2930,7 @@ export function createPlayer(scene) {
           }
           if (rig._fbx.currentLayeredClipName) {
             const layeredAction = rig._fbx.actions?.get(rig._fbx.currentLayeredClipName);
-            if (layeredAction) {
-              // Freeze the always-on idle-upper layered at frame 0.
-              // The clip's idle-bob loop was making the wrist bone
-              // micro-cycle through ±5cm of motion, which gun-follow
-              // saw as drift relative to its captured reference and
-              // visibly displaced the gun. Static pose = static gun.
-              // (One-shots like reload play through playLayered with
-              // their own timeScale, bypassing this assignment.)
-              layeredAction.timeScale = 0;
-              layeredAction.time = 0;
-            }
+            if (layeredAction) layeredAction.timeScale = layeredTimeScale;
           }
           rig.update(dt);
           // Upper body IK — point the wrists at the aim target. The
