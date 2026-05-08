@@ -112,12 +112,14 @@ export const ANIM_TUNE = {
     },
     // When ON, the gun-anchor inherits the dominant hand bone's
     // position + rotation DELTAS each frame — gun visibly tracks the
-    // hand swing during run / aim / reload clips. Reference pose is
-    // captured the first frame the rig updates, so the gun's static
-    // baked position (and per-class gripOffsets) is preserved at t=0
-    // and the hand's clip-driven motion is added on top. Independent
-    // of disableAllIK; works with raw clips. Toggle in tuner.
-    gunFollowsHand: true,
+    // hand swing during run / aim / reload clips. DEFAULT OFF — the
+    // reference capture timing was flaky (depended on which clip
+    // happened to hit weight ≥ 0.99 first across spawns), producing
+    // visible floating-gun positions inconsistent run-to-run. Static
+    // base position is what the user's per-class gripOffsets are
+    // tuned against; flip on via the tuner only when intentionally
+    // pursuing arm-swing visuals.
+    gunFollowsHand: false,
   },
 };
 
