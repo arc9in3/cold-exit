@@ -917,22 +917,27 @@ export function createPlayer(scene) {
       // GASP path — anchor under rig.group, tracking the dominant
       // hand bone. Gun barrel extends along anchor's +Z.
       //
-      // Grip placement: short guns (pistol / smg / flame / melee)
-      // rest with their grip AT the anchor — these GLB clones have
-      // their origin at the grip end so position.z=0 lands the visible
-      // grip in the hand. Long guns (rifle / shotgun / sniper / lmg)
-      // keep the (len*0.2) offset so the back of the rifle stock
-      // overlaps the wrist + forearm instead of clipping into the body
-      // (the AK fix from 8e5b22e).
+      // Grip placement is per-class, not per-shouldered, because GLB
+      // clones in the runtime asset set don't share a common origin
+      // convention:
+      //   • pistol clones — origin at grip end → gripZ=0 lands the
+      //     visible grip in the hand (REGRESSION: anim-gun-grip-floating
+      //     — gunMesh.position.z=len/2 used to put grip 17cm forward of
+      //     the hand on pistols).
+      //   • smg / flame — clones have their origin at the mesh CENTER;
+      //     gripZ=0 would push the back half into the chest. Keep the
+      //     legacy len/2 forward offset so the visible mesh sits forward
+      //     of the wrist.
+      //   • long guns (rifle / shotgun / sniper / lmg) — keep the
+      //     (len*0.2) offset so the rifle stock overlaps the wrist +
+      //     forearm instead of clipping into the body (AK fix 8e5b22e).
       //
       // Muzzle placement: at the FORWARD tip of the visible barrel.
-      // The visible gun length is ~ 2 × cs × len (bounding-sphere fit
-      // diameter), so the per-class VISIBLE_FACTOR mirrors CLASS_SCALE
-      // × 2 with a small bump for muzzle attachments (suppressors etc.
-      // extend ~10% past the bare-barrel bbox). Without this the
-      // tracer originated 30cm past the visible barrel tip on pistols.
-      // REGRESSION: anim-gun-grip-floating — gunMesh.position.z=fwd
-      // used to put the grip 17cm forward of the hand on pistols.
+      // Per-class VISIBLE_FACTOR mirrors CLASS_SCALE × 2 (visible
+      // bounding-sphere diameter) with small headroom for attachments.
+      // SMG keeps the legacy `len` muzzle offset because that's what
+      // its center-origin authoring measured against — VISIBLE_FACTOR
+      // overshoots when the clone origin is at center, not grip-end.
       gunMesh.rotation.set(0, 0, 0);
       inHandModel.rotation.set(0, 0, 0);
       const isLong = cls === 'rifle' || cls === 'shotgun'
@@ -942,8 +947,19 @@ export function createPlayer(scene) {
         sniper: 1.95, lmg: 1.60, flame: 1.50, melee: 1.50,
       };
       const vf = VISIBLE_FACTOR[cls] ?? 1.0;
-      const gripZ = isLong ? (len * 0.2) : 0;
-      const muzzleZ = isLong ? (len * 0.2 + len * vf * 0.5) : (len * vf);
+      let gripZ, muzzleZ;
+      if (isLong) {
+        gripZ = len * 0.2;
+        muzzleZ = len * 0.2 + len * vf * 0.5;
+      } else if (cls === 'pistol') {
+        gripZ = 0;
+        muzzleZ = len * vf;
+      } else {
+        // SMG, flame, melee — center-origin clones. Restore legacy
+        // offsets so the back of the mesh doesn't intersect the chest.
+        gripZ = len / 2;
+        muzzleZ = len;
+      }
       gunMesh.position.set(0, 0, gripZ * ws);
       muzzle.position.set(0, 0, muzzleZ * ws);
       inHandModel.position.copy(gunMesh.position);
