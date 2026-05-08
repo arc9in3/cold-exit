@@ -84,6 +84,14 @@ export const ANIM_TUNE = {
     // Flip ON in the tuner if you want hand-on-grip behavior; the
     // gameplay default trusts the clip's authored arm pose.
     dominantArmIK: false,
+    // Master kill switch — when ON, ALL upper-body IK + anchor logic
+    // skips: spine twist applyChain, stance yaw, arm-shoulder twist,
+    // support-arm IK, dominant-arm IK, gun-anchor hand-tracking lerp,
+    // gun-anchor pitch/yaw aim. Body still rotates to cursor (rigid
+    // follow), so the player can move + look around, but the rig is
+    // pure clip-driven from there. Useful to see what the locomotion
+    // / pistol-idle clips actually author before any code touches them.
+    disableAllIK: false,
     // Per-axis lerp rate on the gun-anchor's hand-tracking. Lower =
     // more smoothing (gun lags more, bob attenuates). Y is dropped
     // by default because vertical hand-bob during the run cycle is
@@ -193,6 +201,10 @@ const _aimIkPole = new THREE.Vector3();
 // correct for the GASP locomotion set.
 function _runUpperBodyIK(rig, state, aimPoint, aimPitch, dt = 1/60) {
   if (!rig || !rig._fbx) return;
+  // Master kill switch — see ANIM_TUNE.arm.disableAllIK doc above.
+  // When ON, the entire upper-body IK pipeline is skipped: clips
+  // own everything from the spine up.
+  if (ANIM_TUNE.arm.disableAllIK) return;
   const fbx = rig._fbx;
   const aimYaw = state.chestTwist || 0;
   // Add the GASP pitch-up baseline (negative aimPitch tilts upper
@@ -2641,7 +2653,7 @@ export function createPlayer(scene) {
         //   anchor.y = cursorYaw - bodyYaw
         // So the BULLET ORIGIN always points at the cursor, even
         // while the body lags within the chest-twist deadzone.
-        if (rig._gunAnchor) {
+        if (rig._gunAnchor && !ANIM_TUNE.arm.disableAllIK) {
           const ads = state.adsAmount || 0;
           // Track the dominant hand-bone's WORLD position so the
           // gun visually pins to the hand. Damped lerp so the

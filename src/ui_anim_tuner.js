@@ -131,6 +131,9 @@ export function openAnimTuner(player) {
   armFolder.addBinding(ANIM_TUNE.arm, 'dominantArmIK', {
     label: 'pull hand to grip (IK)',
   });
+  armFolder.addBinding(ANIM_TUNE.arm, 'disableAllIK', {
+    label: 'DISABLE ALL IK (raw clips)',
+  });
   // Per-axis hand-tracking smoothing. Lower = more smoothing /
   // more gun lag. Y in particular dampens running stride bob.
   armFolder.addBinding(ANIM_TUNE.arm.anchorLerp, 'x', {
