@@ -828,6 +828,20 @@ window.__usePeekPlayer = async () => {
     'pistol-run-arc', 'pistol-run-arc-2',
     'pistol-run-backward-arc', 'pistol-run-backward-arc-2',
   ];
+  // Melee swing clips — three combo-step variants + a quick-melee jab.
+  // Authored in Mixamo, downloaded as FBX, converted to GLB via
+  // tools/blender-fbx-to-glb.bat. Lower-body tracks are stripped
+  // (COMBAT_LAYERED below) so they layer over locomotion: the legs
+  // keep walking while the arms swing. tryMeleeAttack picks one based
+  // on combo step; tryQuickMelee uses the jab. Missing GLBs no-op
+  // (playOneShot returns null) so this is safe to ship before the
+  // assets land.
+  const MELEE_CLIPS = [
+    'melee/swing-1',     // light/fast — combo step 0
+    'melee/swing-2',     // medium     — combo step 1
+    'melee/swing-3',     // heavy/finisher — combo step 2+
+    'melee/quick-jab',   // gun pistol-whip / rifle-butt
+  ];
   const slugs = RIFLE_8WAY.map(c => `rifle-8way/${c}`).concat([
     // Pistol stance — layered upper body for pistol/revolver weapons.
     // Stationary lower body keeps rifle-8way/idle; upper body holds
@@ -844,7 +858,7 @@ window.__usePeekPlayer = async () => {
     'rifle-8way/death-from-the-front',
     'rifle-8way/death-from-the-back',
     'rifle-8way/death-from-right',
-  ]).concat(PISTOL_LOCOMOTION.map(c => `pistol-locomotion/${c}`));
+  ]).concat(PISTOL_LOCOMOTION.map(c => `pistol-locomotion/${c}`)).concat(MELEE_CLIPS);
   for (const slug of slugs) {
     try {
       await charMod.loadAnimationFBX(player.rig, `${PACK}/${slug}.glb`, slug);
@@ -864,6 +878,7 @@ window.__usePeekPlayer = async () => {
     'basic-shooter/hit-reaction',
     'pistol-locomotion/pistol-idle',
     ...PISTOL_LOCOMOTION.map(c => `pistol-locomotion/${c}`),
+    ...MELEE_CLIPS,
   ]);
   const lowerRe = /^(mixamorig:?)(Hips|LeftUpLeg|LeftLeg|LeftFoot|LeftToeBase|RightUpLeg|RightLeg|RightFoot|RightToeBase)\b/;
   for (const slug of COMBAT_LAYERED) {

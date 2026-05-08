@@ -1324,6 +1324,15 @@ export function createPlayer(scene) {
     else a.facing.set(0, 0, 1);
     a.advanceSpeed = attack.advance / Math.max(0.01, attack.active);
     a.firedActive = false;
+    // Per-combo-step swing clip — light / medium / heavy. Layers
+    // upper-body only over the locomotion base so legs keep walking
+    // through the swing. Missing clip GLBs (not yet imported) no-op
+    // gracefully via playOneShot's null return. Duration covers
+    // startup + active so the impact frame lands during the active
+    // damage window; recovery uses whatever the clip's tail does.
+    const swingClip = `melee/swing-${Math.min(nextStep + 1, 3)}`;
+    const swingDur = Math.max(0.1, (attack.startup || 0) + (attack.active || 0));
+    playOneShot(swingClip, swingDur, { upperOnly: true, fadeMs: 80 });
     // Pick a swing style — random for variety, but a crit overrides
     // with a dedicated "critical" style that the rig reads to throw a
     // bigger whole-body strike. Style is locked for this swing so the
@@ -1398,6 +1407,11 @@ export function createPlayer(scene) {
     }
     state.blocking = false;
     state.parryT = 0;
+    // Quick-melee swing clip — pistol-whip / rifle-butt jab. Same
+    // upper-body layer as combo melee, but the dedicated quick-jab
+    // clip (faster, single-arm). No-op when GLB missing.
+    const _qDur = Math.max(0.1, (attack.startup || 0) + (attack.active || 0));
+    playOneShot('melee/quick-jab', _qDur, { upperOnly: true, fadeMs: 60 });
     return true;
   }
 
