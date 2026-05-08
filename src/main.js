@@ -985,37 +985,6 @@ window.__usePeekPlayer = async () => {
     const after = clip.tracks.length;
     if (before !== after) console.log(`[peek] ${slug}: stripped ${before - after}/${before} ${STRIP_SPINE.has(slug) ? 'lower+spine' : 'lower-body'} tracks`);
   }
-  // Snapshot the upper-body bone poses from rifle-8way/idle-aiming
-  // frame 0 — gun shouldered, arms at eye-line aim. player.js applies
-  // this snapshot post-mixer every frame, overriding whatever the
-  // locomotion / layered clips wrote so the upper body is gameplay-
-  // frozen at the idle-aiming pose. Lower body (Hips, legs, feet) is
-  // intentionally excluded so the locomotion stride keeps driving the
-  // legs as authored.
-  {
-    const fbx = player.rig?._fbx;
-    const idleAimAction = fbx?.actions?.get('rifle-8way/idle-aiming');
-    const root = fbx?.root;
-    if (idleAimAction && root) {
-      const clip = idleAimAction.getClip();
-      const frozen = {};
-      for (const track of clip.tracks) {
-        if (lowerRe.test(track.name)) continue;
-        const dotIdx = track.name.lastIndexOf('.');
-        if (dotIdx < 0) continue;
-        const boneName = track.name.substring(0, dotIdx);
-        const property = track.name.substring(dotIdx + 1);
-        if (property !== 'position' && property !== 'quaternion' && property !== 'scale') continue;
-        const bone = root.getObjectByName(boneName);
-        if (!bone) continue;
-        const valueSize = track.getValueSize();
-        if (!frozen[boneName]) frozen[boneName] = { bone };
-        frozen[boneName][property] = Array.from(track.values.slice(0, valueSize));
-      }
-      fbx._frozenUpper = frozen;
-      console.log(`[peek] frozen upper-body pose snapshot: ${Object.keys(frozen).length} bones`);
-    }
-  }
   // Engage the locomotion path. The block in player.js:2210 is gated
   // on rig._fbx.useGaspLocomotion — without this flag set, player.update
   // falls through to the legacy hardcoded W1_* clip names from the
@@ -9876,11 +9845,11 @@ function tryReload(weapon) {
   // dips and the physics dt clamp can't stretch a 1.4s reload into 6s,
   // AND pausing the game (inventory/shop/etc.) pauses the reload too.
   weapon.reloadEndsAt = gameClockMs + duration * 1000;
-  // Reload anim disabled — its timing didn't match the reload duration
-  // and produced jarring blends + lower-body locomotion glitches at
-  // its start/end. Upper body is now gameplay-frozen to the idle-aiming
-  // pose (see _freezeUpperBody in player.js); reload is a pure timer
-  // mechanic with no animation overlay. Audio/VFX still play.
+  // FBX/Mixamo path — play the reload clip layered on the upper body
+  // so the legs keep walking. The clip's lower-body tracks are stripped
+  // at load time in __usePeekPlayer so this layered playback only
+  // modulates spine/arms/hands. No-op on procgen rig.
+  player.playOneShot?.('basic-shooter/reloading', duration, { fadeMs: 100, upperOnly: true });
 }
 function tickWeaponReload(weapon) {
   if (!weapon || weapon.type !== 'ranged') return;
