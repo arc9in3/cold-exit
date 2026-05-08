@@ -2919,14 +2919,7 @@ export function createPlayer(scene) {
           // tracks were stripped from these clips at load time. We
           // cross-fade at the same cadence as the base.
           const wantLayered = pick?.layeredClip || null;
-          // Respect the upper-only one-shot lock — when reload / fire /
-          // hit-react / melee-swing is active via playOneShot upperOnly,
-          // it owns the layered slot for its duration. Re-engaging the
-          // always-on idle-upper layered early would yank the gun mid-
-          // reload back to the idle pose.
-          const _now = (typeof performance !== 'undefined' ? performance.now() : Date.now());
-          const _layeredLocked = (rig._fbx._layeredLockUntil ?? 0) > _now;
-          if (!_layeredLocked && wantLayered !== rig._fbx.currentLayeredClipName) {
+          if (wantLayered !== rig._fbx.currentLayeredClipName) {
             const fadeS = (pick?.playback?.fadeMs ?? 200) / 1000;
             const prevName = rig._fbx.currentLayeredClipName;
             const prevAction = prevName ? rig._fbx.actions?.get(prevName) : null;
@@ -3404,24 +3397,7 @@ export function createPlayer(scene) {
     if (!rig?._fbx?.actions?.has?.(clipName)) return null;
     let action;
     if (opts.upperOnly && rig.playLayered) {
-      // Take over the layered slot from the locomotion picker. Without
-      // this, the always-on idle-upper layer keeps playing alongside
-      // the one-shot at weight 1.0 and the mixer weight-blends them
-      // (one-shot fights idle pose). Fade the current layered out and
-      // set _layeredLockUntil so the locomotion picker doesn't re-
-      // engage idle-upper for the one-shot's duration.
-      const fbx = rig._fbx;
-      const prevName = fbx.currentLayeredClipName;
-      if (prevName && prevName !== clipName) {
-        const prev = fbx.actions.get(prevName);
-        if (prev && prev.isRunning()) prev.fadeOut((opts.fadeMs ?? 100) / 1000);
-      }
       action = rig.playLayered(clipName, { fadeMs: opts.fadeMs ?? 100, loop: false });
-      if (action) {
-        fbx.currentLayeredClipName = clipName;
-        const now = (typeof performance !== 'undefined' ? performance.now() : Date.now());
-        fbx._layeredLockUntil = durationSeconds > 1e6 ? Infinity : now + durationSeconds * 1000;
-      }
     } else {
       action = rig.play(clipName, { fadeMs: opts.fadeMs ?? 100, loop: false });
     }

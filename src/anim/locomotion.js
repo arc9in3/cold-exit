@@ -84,37 +84,20 @@ export function bodyLocalAngle(velocity, bodyYaw) {
 // pistol-pack-authored stride speed that didn't match the game's
 // tuned movement cadence. Layering on top of rifle keeps stride
 // timing tied to runner_lower_body.json's speedRefs.
-function _pickClipsForWeapon(state, wantSuffix, smCfg, crouched, ads) {
+function _pickClipsForWeapon(state, wantSuffix, smCfg) {
   const base = state?.clip;
-  // Always-on upper-body layered clip — keeps the arms in their idle
-  // pose regardless of locomotion (run / walk / sprint / crouch). The
-  // movement clips have their upper-body tracks stripped at boot so
-  // this layered is the sole writer for upper bones during movement;
-  // during stand_idle the base clip ALSO writes upper but the mixer
-  // weighted-blends the two same-pose contributions to the same pose.
-  // One-shot overlays (reload / fire / hit-react / melee swings) take
-  // over this slot via `_layeredLockUntil` in player.js.
-  let alwaysUpper;
-  if (wantSuffix === 'OneHand_Pistol') {
-    alwaysUpper = 'pistol-locomotion/pistol-idle';
-  } else if (wantSuffix === 'Rifle') {
-    // Rifle / SMG / shotgun / sniper / LMG — eye-line aim pose.
-    if (crouched) alwaysUpper = 'rifle-8way/idle-crouching-aiming-upper';
-    else          alwaysUpper = 'rifle-8way/idle-aiming-upper';
-  } else {
-    // Pistol-suffix bucket — melee / flame / default. Low-ready idle.
-    if (crouched) alwaysUpper = 'rifle-8way/idle-crouching-upper';
-    else          alwaysUpper = 'rifle-8way/idle-upper';
-  }
   if (wantSuffix === 'Rifle') {
-    if (state?.adsClip) return { baseClip: state.adsClip, layeredClip: alwaysUpper };
+    if (state?.adsClip) return { baseClip: state.adsClip, layeredClip: null };
     if (base && base.endsWith('_Pistol')) {
       const candidate = base.slice(0, -'_Pistol'.length) + '_Rifle';
-      if (smCfg?._availableClips?.has(candidate)) return { baseClip: candidate, layeredClip: alwaysUpper };
+      if (smCfg?._availableClips?.has(candidate)) return { baseClip: candidate, layeredClip: null };
     }
-    return { baseClip: base, layeredClip: alwaysUpper };
+    return { baseClip: base, layeredClip: null };
   }
-  return { baseClip: base, layeredClip: alwaysUpper };
+  if (wantSuffix === 'OneHand_Pistol') {
+    return { baseClip: base, layeredClip: state?.oneHandClip || null };
+  }
+  return { baseClip: base, layeredClip: null };
 }
 
 // Map a weapon.class to a GASP clip-set suffix.
@@ -150,14 +133,21 @@ export function selectGaspLocomotion(smCfg, playerState, planarSpeed, velocity, 
   const moving    = planarSpeed > (T.moving ?? 0.2);
   const crouched  = !!playerState?.crouched;
 
-  const adsIdle = (playerState?.adsAmount || 0) > 0.5;
   if (!moving) {
     const id = crouched ? 'crouch_idle' : 'stand_idle';
     const s  = smCfg.states[id];
     if (!s) return null;
+    // Apply weapon-class swap to idle just like the moving path —
+    // rifle-class weapons should idle in shouldered Rifle pose,
+    // pistol/revolver should idle in OneHand_Pistol stance, otherwise
+    // the GASP _Pistol clip (two-handed low-ready) wins on upper-body
+    // bones and overrides the layered pistol-locomotion/pistol-idle
+    // (insertion order: layer was added before GASP clips → GASP wins).
+    // REGRESSION: anim-pistol-idle — keep these two branches symmetric
+    // with the moving path below or pistols idle in two-handed pose.
     const weaponClass = playerState?.equipped?.class;
     const wantSuffix = _clipSuffixForWeapon(weaponClass);
-    const { baseClip, layeredClip } = _pickClipsForWeapon(s, wantSuffix, smCfg, crouched, adsIdle);
+    const { baseClip, layeredClip } = _pickClipsForWeapon(s, wantSuffix, smCfg);
     return { stateId: id, clip: baseClip, layeredClip, loop: s.loop !== false, speedRef: null,
              sector: 'F', bucket: 'idle', weaponClass };
   }
@@ -211,7 +201,7 @@ export function selectGaspLocomotion(smCfg, playerState, planarSpeed, velocity, 
   // rifle base for tuned stride and adds a layered upper-body clip.
   const weaponClass = playerState?.equipped?.class;
   const wantSuffix = _clipSuffixForWeapon(weaponClass);
-  const { baseClip, layeredClip } = _pickClipsForWeapon(s, wantSuffix, smCfg, crouched, ads);
+  const { baseClip, layeredClip } = _pickClipsForWeapon(s, wantSuffix, smCfg);
 
   return {
     stateId: id,
