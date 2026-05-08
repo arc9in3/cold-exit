@@ -11039,6 +11039,15 @@ let _emptyClickT = 0;
 // double-tap both triggers in alternation.
 // ============================================================
 function _isAkimbo() {
+  // Akimbo (paired pistols / SMGs) is currently DISABLED while the
+  // arm-pose system + off-hand weapon mounting is sorted out on the
+  // peek rig. Skill-tree capstones and class identity copy still
+  // mention akimbo (classes.js); the gating here keeps the feature
+  // off in gameplay until re-enabled. To turn back on: delete the
+  // early `return false` below — the pre-existing detection logic
+  // beneath it is intact and will resume working.
+  return false;
+  // eslint-disable-next-line no-unreachable
   const w1 = inventory?.equipment?.weapon1;
   const w2 = inventory?.equipment?.weapon2;
   if (!w1 || !w2) return false;
