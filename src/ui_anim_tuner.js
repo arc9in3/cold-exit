@@ -26,30 +26,47 @@ const STORAGE_KEY = 'coldExitAnimTune';
 const CLASSES = ['pistol', 'smg', 'rifle', 'shotgun', 'sniper', 'lmg', 'flame', 'melee'];
 
 // Snapshot of defaults so "Reset" can restore. Captured once on
-// module load before any user edits.
+// module load before any user edits. Deep-clone to dodge nested
+// object aliasing.
 const DEFAULTS = JSON.parse(JSON.stringify({
-  visibleFactor: { ...ANIM_TUNE.visibleFactor },
-  gripZScale:    { ...ANIM_TUNE.gripZScale },
-  sizeMul:       { ...ANIM_TUNE.sizeMul },
-  arm:           { ...ANIM_TUNE.arm },
+  visibleFactor: ANIM_TUNE.visibleFactor,
+  gripZScale:    ANIM_TUNE.gripZScale,
+  sizeMul:       ANIM_TUNE.sizeMul,
+  gripOffset:    ANIM_TUNE.gripOffset,
+  supportGrip:   ANIM_TUNE.supportGrip,
+  arm:           ANIM_TUNE.arm,
 }));
 
 function _save() {
   try {
     localStorage.setItem(STORAGE_KEY, JSON.stringify({
-      visibleFactor: { ...ANIM_TUNE.visibleFactor },
-      gripZScale:    { ...ANIM_TUNE.gripZScale },
-      sizeMul:       { ...ANIM_TUNE.sizeMul },
-      arm:           { ...ANIM_TUNE.arm },
+      visibleFactor: ANIM_TUNE.visibleFactor,
+      gripZScale:    ANIM_TUNE.gripZScale,
+      sizeMul:       ANIM_TUNE.sizeMul,
+      gripOffset:    ANIM_TUNE.gripOffset,
+      supportGrip:   ANIM_TUNE.supportGrip,
+      arm:           ANIM_TUNE.arm,
     }));
   } catch (_) { /* quota / private mode — ignore */ }
 }
 
+// Deep-merge defaults back into ANIM_TUNE without re-creating the
+// containing objects (other modules close over the references).
 function _resetAll() {
-  Object.assign(ANIM_TUNE.visibleFactor, DEFAULTS.visibleFactor);
-  Object.assign(ANIM_TUNE.gripZScale,    DEFAULTS.gripZScale);
-  Object.assign(ANIM_TUNE.sizeMul,       DEFAULTS.sizeMul);
-  Object.assign(ANIM_TUNE.arm,           DEFAULTS.arm);
+  for (const cls of CLASSES) {
+    ANIM_TUNE.visibleFactor[cls] = DEFAULTS.visibleFactor[cls];
+    ANIM_TUNE.gripZScale[cls]    = DEFAULTS.gripZScale[cls];
+    ANIM_TUNE.sizeMul[cls]       = DEFAULTS.sizeMul[cls];
+    ANIM_TUNE.supportGrip[cls]   = DEFAULTS.supportGrip[cls];
+    if (DEFAULTS.gripOffset[cls]) {
+      ANIM_TUNE.gripOffset[cls].x = DEFAULTS.gripOffset[cls].x;
+      ANIM_TUNE.gripOffset[cls].y = DEFAULTS.gripOffset[cls].y;
+    }
+  }
+  ANIM_TUNE.arm.gaspPitchHipfire = DEFAULTS.arm.gaspPitchHipfire;
+  ANIM_TUNE.arm.anchorOffset.x = DEFAULTS.arm.anchorOffset.x;
+  ANIM_TUNE.arm.anchorOffset.y = DEFAULTS.arm.anchorOffset.y;
+  ANIM_TUNE.arm.anchorOffset.z = DEFAULTS.arm.anchorOffset.z;
   try { localStorage.removeItem(STORAGE_KEY); } catch (_) {}
 }
 
@@ -71,13 +88,23 @@ export function openAnimTuner(player) {
   for (const cls of CLASSES) {
     const sub = classFolder.addFolder({ title: cls, expanded: false });
     sub.addBinding(ANIM_TUNE.visibleFactor, cls, {
-      label: 'visibleFactor', min: 0.2, max: 3.0, step: 0.05,
+      label: 'muzzle distance (vf)', min: 0.2, max: 3.0, step: 0.05,
     });
     sub.addBinding(ANIM_TUNE.gripZScale, cls, {
-      label: 'gripZScale (× len)', min: 0.0, max: 1.0, step: 0.02,
+      label: 'grip Z (× len)', min: 0.0, max: 1.0, step: 0.02,
     });
     sub.addBinding(ANIM_TUNE.sizeMul, cls, {
-      label: 'sizeMul', min: 0.3, max: 2.5, step: 0.05,
+      label: 'size mul', min: 0.3, max: 3.5, step: 0.05,
+    });
+    if (!ANIM_TUNE.gripOffset[cls]) ANIM_TUNE.gripOffset[cls] = { x: 0, y: 0 };
+    sub.addBinding(ANIM_TUNE.gripOffset[cls], 'x', {
+      label: 'main hand X', min: -0.5, max: 0.5, step: 0.01,
+    });
+    sub.addBinding(ANIM_TUNE.gripOffset[cls], 'y', {
+      label: 'main hand Y', min: -0.5, max: 0.5, step: 0.01,
+    });
+    sub.addBinding(ANIM_TUNE.supportGrip, cls, {
+      label: 'support hand frac', min: 0.0, max: 1.0, step: 0.05,
     });
   }
 
@@ -86,14 +113,14 @@ export function openAnimTuner(player) {
   armFolder.addBinding(ANIM_TUNE.arm, 'gaspPitchHipfire', {
     label: 'hipfire arm pitch', min: -0.4, max: 0.4, step: 0.01,
   });
-  armFolder.addBinding(ANIM_TUNE.arm, 'hipY', {
-    label: 'anchor hipY (m)', min: 0.8, max: 1.8, step: 0.02,
+  armFolder.addBinding(ANIM_TUNE.arm.anchorOffset, 'x', {
+    label: 'anchor offset X', min: -0.5, max: 0.5, step: 0.01,
   });
-  armFolder.addBinding(ANIM_TUNE.arm, 'adsY', {
-    label: 'anchor adsY (m)', min: 1.0, max: 2.0, step: 0.02,
+  armFolder.addBinding(ANIM_TUNE.arm.anchorOffset, 'y', {
+    label: 'anchor offset Y', min: -0.5, max: 0.5, step: 0.01,
   });
-  armFolder.addBinding(ANIM_TUNE.arm, 'fwdMin', {
-    label: 'anchor fwdMin (m)', min: 0.0, max: 0.8, step: 0.02,
+  armFolder.addBinding(ANIM_TUNE.arm.anchorOffset, 'z', {
+    label: 'anchor offset Z', min: -0.5, max: 0.5, step: 0.01,
   });
 
   // ---- Buttons ----

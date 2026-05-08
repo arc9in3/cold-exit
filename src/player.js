@@ -46,25 +46,38 @@ export const ANIM_TUNE = {
     pistol: 2.5, smg: 1.5, rifle: 1.0, shotgun: 1.0,
     sniper: 1.0, lmg: 1.0, flame: 1.0, melee: 1.0,
   },
+  // Per-class GRIP X/Y offset — applied to gunMesh.position (X, Y).
+  // Z is driven by gripZScale × len. Use this to nudge the visible
+  // gun left/right/up/down relative to the dominant hand bone. Units
+  // are world meters (post weapon-scale).
+  gripOffset: {
+    pistol: { x: 0, y: 0 }, smg:    { x: 0, y: 0 },
+    rifle:  { x: 0, y: 0 }, shotgun:{ x: 0, y: 0 },
+    sniper: { x: 0, y: 0 }, lmg:    { x: 0, y: 0 },
+    flame:  { x: 0, y: 0 }, melee:  { x: 0, y: 0 },
+  },
+  // Per-class SUPPORT-HAND grip fraction along the grip→muzzle line.
+  // 0 = skip support-arm IK (pistol / melee — single-handed); larger
+  // values pull the support hand further down the barrel. Overrides
+  // actor_rig's SUPPORT_GRIP_FRACTION_BY_CLASS at runtime.
+  supportGrip: {
+    pistol: 0.0,  smg: 0.30, rifle: 0.50, shotgun: 0.50,
+    sniper: 0.65, lmg: 0.45, flame: 0.50, melee:   0.0,
+  },
   // Arm + body pose tunables read by _runUpperBodyIK per frame.
-  // Defaults updated 2026-05-08 from the tweakpane tuner pass — the
-  // arms used to read too low + too forward; pulling hipY up + adsY
-  // down + flipping the hipfire pitch sign brought hands to the
-  // chest plate where the pistol grip reads cleanly.
+  // anchorOffset is a DIRECT additive shift on the gun-anchor lerp
+  // target (the lerp follows the dominant hand bone); slider drags
+  // visibly translate the gun. Replaces the prior hipY/adsY/fwdMin
+  // floor knobs which only kicked in when the hand bone dropped
+  // below the floor — confusing and often inert.
   arm: {
     // Hipfire arm pitch baseline — chest pitches down by this many
     // radians at adsAmount=0, lerping to 0 at adsAmount=1. Negative
     // lifts arms up. (1 - ads) * gaspPitchHipfire is added to aimPitch.
     gaspPitchHipfire: -0.03,
-    // Gun anchor lerp Y target. Hipfire holds gun at chest plate
-    // (1.64 m); ADS pulls down to a more grounded sight pose
-    // (1.39 m). Counter-intuitive (ADS lower than hipfire) because
-    // the cursor-aim path adds pitch on top.
-    hipY: 1.64,
-    adsY: 1.39,
-    // Z floor on the gun anchor — keeps the gun from dipping behind
-    // the chest when the hand bone's local Z drops near zero.
-    fwdMin: 0.42,
+    // Direct additive offset on the gun-anchor lerp target. Always
+    // visible. Local to rig.group (so x = right, y = up, z = forward).
+    anchorOffset: { x: 0, y: 0, z: 0 },
   },
 };
 
@@ -380,7 +393,12 @@ function _runUpperBodyIK(rig, state, aimPoint, aimPitch, dt = 1/60) {
   // the previous solveTwoBoneIK attempt: the post-clip solver
   // doesn't compose its delta with the clip's per-frame rotation.
   const _ikCls = state.equipped?.class;
-  const _ikFrac = SUPPORT_GRIP_FRACTION_BY_CLASS[_ikCls];
+  // Live-tunable override; falls back to the rig-builder's class
+  // table if no entry. ANIM_TUNE.supportGrip exposes 0..1 sliders
+  // per class so the user can move the support hand along the
+  // grip→muzzle line without restarting.
+  const _ikFracTune = ANIM_TUNE.supportGrip?.[_ikCls];
+  const _ikFrac = (_ikFracTune != null) ? _ikFracTune : SUPPORT_GRIP_FRACTION_BY_CLASS[_ikCls];
   // Skip the support-arm IK while a one-shot is locked AND when the
   // currently-running clip set includes a layered upper-body action
   // (reload / fire / hit-react). The IK forces the support hand to
@@ -1019,8 +1037,12 @@ export function createPlayer(scene) {
       const muzzleZ = isLong
         ? (gripZ + len * vf * 0.5)
         : (cls === 'pistol' ? (len * vf) : len);
-      gunMesh.position.set(0, 0, gripZ * ws);
-      muzzle.position.set(0, 0, muzzleZ * ws);
+      // Per-class grip X/Y nudge — for fine-tuning where the visible
+      // gun sits relative to the hand-tracked anchor. Z stays driven
+      // by gripZScale.
+      const go = ANIM_TUNE.gripOffset[cls] || { x: 0, y: 0 };
+      gunMesh.position.set(go.x, go.y, gripZ * ws);
+      muzzle.position.set(go.x, go.y, muzzleZ * ws);
       inHandModel.position.copy(gunMesh.position);
       // Per-class size multiplier — applied on top of the clone's
       // existing fitToRadius scale. Default 1.0 = no change.
@@ -2528,18 +2550,18 @@ export function createPlayer(scene) {
             handBone.getWorldPosition(_handTrackV);
             // Convert world hand position to rig.group local.
             rig.group.worldToLocal(_handTrackV);
-            // Hipfire keeps gun lower (chest height); ADS raises
-            // toward eye-line. Blend the hand-tracked Y with the
-            // target height. Live-tunable via ANIM_TUNE.arm.
-            const hipY = ANIM_TUNE.arm.hipY, adsY = ANIM_TUNE.arm.adsY;
-            const wantY = hipY + (adsY - hipY) * ads;
-            const fwdMin = ANIM_TUNE.arm.fwdMin;
-            rig._gunAnchor.position.x += (_handTrackV.x - rig._gunAnchor.position.x) * 0.18;
-            rig._gunAnchor.position.y += (Math.max(_handTrackV.y, wantY * 0.9) - rig._gunAnchor.position.y) * 0.18;
-            rig._gunAnchor.position.z += (Math.max(_handTrackV.z, fwdMin) - rig._gunAnchor.position.z) * 0.18;
+            // Direct additive offset — visibly shifts the gun-anchor
+            // relative to the dominant hand bone. Live-tunable via
+            // ANIM_TUNE.arm.anchorOffset.
+            const ao = ANIM_TUNE.arm.anchorOffset;
+            rig._gunAnchor.position.x += ((_handTrackV.x + ao.x) - rig._gunAnchor.position.x) * 0.18;
+            rig._gunAnchor.position.y += ((_handTrackV.y + ao.y) - rig._gunAnchor.position.y) * 0.18;
+            rig._gunAnchor.position.z += ((_handTrackV.z + ao.z) - rig._gunAnchor.position.z) * 0.18;
           } else {
-            const hipY = ANIM_TUNE.arm.hipY, adsY = ANIM_TUNE.arm.adsY;
-            rig._gunAnchor.position.set(0, hipY + (adsY - hipY) * ads, 0.45);
+            // No hand bone available (procgen rig fallback). Hold the
+            // anchor at a chest-forward fixed point with the offset.
+            const ao = ANIM_TUNE.arm.anchorOffset;
+            rig._gunAnchor.position.set(0 + ao.x, 1.30 + ao.y, 0.45 + ao.z);
           }
           let gunYaw = cursorYaw - rig.group.rotation.y;
           while (gunYaw >  Math.PI) gunYaw -= 2 * Math.PI;
