@@ -2663,13 +2663,15 @@ export function createPlayer(scene) {
         //   anchor.y = cursorYaw - bodyYaw
         // So the BULLET ORIGIN always points at the cursor, even
         // while the body lags within the chest-twist deadzone.
-        if (rig._gunAnchor) {
+        if (rig._gunAnchor && !ANIM_TUNE.arm.disableAllIK) {
           const ads = state.adsAmount || 0;
           // Track the dominant hand-bone's WORLD position so the
-          // gun visually pins to the hand. This is pure position
-          // pinning — NOT IK. Runs whether or not disableAllIK is
-          // on; the IK gate only suppresses bone-rotation passes
-          // (spine twist, support / dominant arm IK, gun-anchor aim).
+          // gun visually pins to the hand. Damped lerp so the
+          // anchor doesn't shake with locomotion-clip arm-swing.
+          // GATED by disableAllIK because the user's tuned gripOffsets
+          // are dialled relative to the STATIC default anchor at
+          // (anchorOffset). Letting the anchor lerp shifts the
+          // reference frame and breaks every per-class tune.
           const handBone = state.handedness === 'right'
             ? rig.rightArm?.wrist
             : rig.leftArm?.wrist;
@@ -2693,14 +2695,6 @@ export function createPlayer(scene) {
             const ao = ANIM_TUNE.arm.anchorOffset;
             rig._gunAnchor.position.set(0 + ao.x, 1.30 + ao.y, 0.45 + ao.z);
           }
-        }
-        // Gun-anchor pitch/yaw aim — composes with body rotation so
-        // bullets fire at the cursor. Skipped under disableAllIK so
-        // gun-vs-arm aim split (the original problem) doesn't return.
-        // With IK off, gun points wherever the body forward points;
-        // body rigid-follows cursor so bullets still land near aim.
-        if (rig._gunAnchor && !ANIM_TUNE.arm.disableAllIK) {
-          const ads = state.adsAmount || 0;
           let gunYaw = cursorYaw - rig.group.rotation.y;
           while (gunYaw >  Math.PI) gunYaw -= 2 * Math.PI;
           while (gunYaw < -Math.PI) gunYaw += 2 * Math.PI;
