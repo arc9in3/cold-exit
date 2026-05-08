@@ -84,6 +84,12 @@ export const ANIM_TUNE = {
     // Flip ON in the tuner if you want hand-on-grip behavior; the
     // gameplay default trusts the clip's authored arm pose.
     dominantArmIK: false,
+    // Per-axis lerp rate on the gun-anchor's hand-tracking. Lower =
+    // more smoothing (gun lags more, bob attenuates). Y is dropped
+    // by default because vertical hand-bob during the run cycle is
+    // the most visible source of gun jitter; X/Z stay snappy so the
+    // gun still tracks aim direction + chest twist responsively.
+    anchorLerp: { x: 0.18, y: 0.08, z: 0.18 },
   },
 };
 
@@ -2638,11 +2644,14 @@ export function createPlayer(scene) {
             rig.group.worldToLocal(_handTrackV);
             // Direct additive offset — visibly shifts the gun-anchor
             // relative to the dominant hand bone. Live-tunable via
-            // ANIM_TUNE.arm.anchorOffset.
+            // ANIM_TUNE.arm.anchorOffset. Per-axis lerp rate dampens
+            // vertical bob (Y) more than horizontal/depth so gun
+            // doesn't visibly bounce on each running stride.
             const ao = ANIM_TUNE.arm.anchorOffset;
-            rig._gunAnchor.position.x += ((_handTrackV.x + ao.x) - rig._gunAnchor.position.x) * 0.18;
-            rig._gunAnchor.position.y += ((_handTrackV.y + ao.y) - rig._gunAnchor.position.y) * 0.18;
-            rig._gunAnchor.position.z += ((_handTrackV.z + ao.z) - rig._gunAnchor.position.z) * 0.18;
+            const al = ANIM_TUNE.arm.anchorLerp;
+            rig._gunAnchor.position.x += ((_handTrackV.x + ao.x) - rig._gunAnchor.position.x) * al.x;
+            rig._gunAnchor.position.y += ((_handTrackV.y + ao.y) - rig._gunAnchor.position.y) * al.y;
+            rig._gunAnchor.position.z += ((_handTrackV.z + ao.z) - rig._gunAnchor.position.z) * al.z;
           } else {
             // No hand bone available (procgen rig fallback). Hold the
             // anchor at a chest-forward fixed point with the offset.

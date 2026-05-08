@@ -125,6 +125,17 @@ export function openAnimTuner(player) {
   armFolder.addBinding(ANIM_TUNE.arm, 'dominantArmIK', {
     label: 'pull hand to grip (IK)',
   });
+  // Per-axis hand-tracking smoothing. Lower = more smoothing /
+  // more gun lag. Y in particular dampens running stride bob.
+  armFolder.addBinding(ANIM_TUNE.arm.anchorLerp, 'x', {
+    label: 'anchor lerp X', min: 0.02, max: 0.5, step: 0.01,
+  });
+  armFolder.addBinding(ANIM_TUNE.arm.anchorLerp, 'y', {
+    label: 'anchor lerp Y (bob)', min: 0.02, max: 0.5, step: 0.01,
+  });
+  armFolder.addBinding(ANIM_TUNE.arm.anchorLerp, 'z', {
+    label: 'anchor lerp Z', min: 0.02, max: 0.5, step: 0.01,
+  });
 
   // ---- Buttons ----
   pane.addBlade({ view: 'separator' });
