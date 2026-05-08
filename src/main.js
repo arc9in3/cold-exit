@@ -928,18 +928,14 @@ window.__usePeekPlayer = async () => {
     'melee/swing-3',     // heavy/finisher — combo step 2+
     'melee/quick-jab',   // gun pistol-whip / rifle-butt
   ];
-  // Load order matters: Three.js mixer applies actions in insertion
-  // order with last-write-wins on shared bones. We need:
-  //   rifle-8way (base locomotion)
-  //     → derived idle-upper layers (always-on movement layer)
-  //     → pistol-idle / basic-shooter / melee (one-shot overlays that
-  //       must beat idle-upper when triggered)
-  // so reload / fire / melee swings WIN over idle-upper when they
-  // play together. Splitting the slug list into two passes around the
-  // derive step gives us that ordering.
-  const RIFLE_8WAY_SLUGS = RIFLE_8WAY.map(c => `rifle-8way/${c}`);
-  const OVERLAY_SLUGS = [
+  const slugs = RIFLE_8WAY.map(c => `rifle-8way/${c}`).concat([
     // Pistol stance — layered upper body for pistol/revolver weapons.
+    // Stationary lower body keeps rifle-8way/idle; upper body holds
+    // the gun in pistol grip via this clip's tracks (lower-body tracks
+    // stripped below). Loaded BEFORE the one-shot combat clips so that
+    // during reload, the reload action (created later) wins on shared
+    // upper-body bones — Three.js mixer applies actions in insertion
+    // order, last-write-wins.
     'pistol-locomotion/pistol-idle',
     // Combat seeds — fire, reload, hit-react, death variants.
     'basic-shooter/firing-rifle',
@@ -948,53 +944,8 @@ window.__usePeekPlayer = async () => {
     'rifle-8way/death-from-the-front',
     'rifle-8way/death-from-the-back',
     'rifle-8way/death-from-right',
-  ].concat(PISTOL_LOCOMOTION.map(c => `pistol-locomotion/${c}`)).concat(MELEE_CLIPS);
-  for (const slug of RIFLE_8WAY_SLUGS) {
-    try {
-      await charMod.loadAnimationFBX(player.rig, `${PACK}/${slug}.glb`, slug);
-    } catch (e) { console.warn(`[peek] skipped ${slug}:`, e.message); }
-  }
-  const lowerRe = /^(mixamorig:?)(Hips|LeftUpLeg|LeftLeg|LeftFoot|LeftToeBase|RightUpLeg|RightLeg|RightFoot|RightToeBase)\b/;
-  // Reload clips additionally strip Spine/Spine1/Spine2 — without
-  // this, the reload's authored erect-spine quaternions override the
-  // run clip's forward lean, and the legs cycle but the body reads
-  // "stuck upright" which user perceives as a shuffle. Pistol-idle /
-  // melee swings / firing / hit-react legitimately want spine motion
-  // (stance lean, recoil pulse, swing arc), so they keep spine.
-  const lowerAndSpineRe = /^(mixamorig:?)(Hips|LeftUpLeg|LeftLeg|LeftFoot|LeftToeBase|RightUpLeg|RightLeg|RightFoot|RightToeBase|Spine|Spine1|Spine2)\b/;
-  const STRIP_SPINE = new Set(['basic-shooter/reloading']);
-  // Derived UPPER-ONLY idle layers — clone the rifle-8way idle clips,
-  // strip lower-body tracks, register as new actions. These get force-
-  // selected as the layered clip during MOVEMENT states (run / walk /
-  // sprint / crouch) so the upper body holds the idle pose regardless
-  // of leg cadence. Without these, the locomotion clip's full-body
-  // arm-swing dominates the upper body while running, which fights
-  // the user's tuned chest-forward weapon positions. CRITICAL: derived
-  // BEFORE the overlay clips load so reload / fire / hit-react / melee
-  // (registered AFTER) win on shared upper-body bones via insertion-
-  // order last-write-wins.
-  const _mkUpperOnly = (srcSlug, derivedSlug) => {
-    const fbx = player.rig?._fbx;
-    if (!fbx?.actions || !fbx.mixer) return false;
-    const srcAction = fbx.actions.get(srcSlug);
-    if (!srcAction) return false;
-    if (fbx.actions.has(derivedSlug)) return true;
-    const upperClip = srcAction.getClip().clone();
-    upperClip.name = derivedSlug;
-    upperClip.tracks = upperClip.tracks.filter(t => !lowerRe.test(t.name));
-    if (!upperClip.tracks.length) return false;
-    fbx.actions.set(derivedSlug, fbx.mixer.clipAction(upperClip));
-    console.log(`[peek] derived ${derivedSlug} from ${srcSlug} (${upperClip.tracks.length} upper tracks)`);
-    return true;
-  };
-  _mkUpperOnly('rifle-8way/idle',                  'rifle-8way/idle-upper');
-  _mkUpperOnly('rifle-8way/idle-aiming',           'rifle-8way/idle-aiming-upper');
-  _mkUpperOnly('rifle-8way/idle-crouching',        'rifle-8way/idle-crouching-upper');
-  _mkUpperOnly('rifle-8way/idle-crouching-aiming', 'rifle-8way/idle-crouching-aiming-upper');
-  // Now load the overlay clips (pistol-idle, basic-shooter, melee).
-  // They get registered AFTER the idle-upper derivatives so the mixer
-  // picks them last on shared bones when both play together.
-  for (const slug of OVERLAY_SLUGS) {
+  ]).concat(PISTOL_LOCOMOTION.map(c => `pistol-locomotion/${c}`)).concat(MELEE_CLIPS);
+  for (const slug of slugs) {
     try {
       await charMod.loadAnimationFBX(player.rig, `${PACK}/${slug}.glb`, slug);
     } catch (e) { console.warn(`[peek] skipped ${slug}:`, e.message); }
@@ -1015,6 +966,15 @@ window.__usePeekPlayer = async () => {
     ...PISTOL_LOCOMOTION.map(c => `pistol-locomotion/${c}`),
     ...MELEE_CLIPS,
   ]);
+  const lowerRe = /^(mixamorig:?)(Hips|LeftUpLeg|LeftLeg|LeftFoot|LeftToeBase|RightUpLeg|RightLeg|RightFoot|RightToeBase)\b/;
+  // Reload clips additionally strip Spine/Spine1/Spine2 — without
+  // this, the reload's authored erect-spine quaternions override the
+  // run clip's forward lean, and the legs cycle but the body reads
+  // "stuck upright" which user perceives as a shuffle. Pistol-idle /
+  // melee swings / firing / hit-react legitimately want spine motion
+  // (stance lean, recoil pulse, swing arc), so they keep spine.
+  const lowerAndSpineRe = /^(mixamorig:?)(Hips|LeftUpLeg|LeftLeg|LeftFoot|LeftToeBase|RightUpLeg|RightLeg|RightFoot|RightToeBase|Spine|Spine1|Spine2)\b/;
+  const STRIP_SPINE = new Set(['basic-shooter/reloading']);
   for (const slug of COMBAT_LAYERED) {
     const action = player.rig._fbx?.actions?.get(slug);
     if (!action) continue;
