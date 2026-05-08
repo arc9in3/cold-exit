@@ -1418,10 +1418,15 @@ export function createPlayer(scene) {
     state.blocking = false;
     state.parryT = 0;
     // Quick-melee swing clip — pistol-whip / rifle-butt jab. Same
-    // upper-body layer as combo melee, but the dedicated quick-jab
-    // clip (faster, single-arm). No-op when GLB missing.
+    // upper-body layer as combo melee. Prefers a dedicated quick-jab
+    // clip when present; falls back to the fastest combo swing
+    // (melee/swing-1, the horizontal slash) so quick-melee still
+    // reads as a swing even if quick-jab.glb hasn't been authored
+    // yet. playOneShot returns null when neither clip is loaded.
     const _qDur = Math.max(0.1, (attack.startup || 0) + (attack.active || 0));
-    playOneShot('melee/quick-jab', _qDur, { upperOnly: true, fadeMs: 60 });
+    const qClip = rig?._fbx?.actions?.has?.('melee/quick-jab')
+      ? 'melee/quick-jab' : 'melee/swing-1';
+    playOneShot(qClip, _qDur, { upperOnly: true, fadeMs: 60 });
     return true;
   }
 
