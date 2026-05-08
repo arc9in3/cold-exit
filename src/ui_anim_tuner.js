@@ -147,6 +147,34 @@ export function openAnimTuner(player) {
   pane.addButton({ title: 'Reattach active weapon' }).on('click', () => {
     _reapply(player);
   });
+  pane.addButton({ title: 'Log anim state (NOW)' }).on('click', () => {
+    // Snapshot current clip + active layered actions + locomotion
+    // inputs. Use during reload-while-running playtests so we can
+    // see exactly which clip is feeding the legs and which layered
+    // actions are stacked.
+    const p = window.__player;
+    const fbx = p?.rig?._fbx;
+    const playing = [];
+    if (fbx?.actions) {
+      for (const [name, a] of fbx.actions) {
+        if (a.isRunning?.() && (a.getEffectiveWeight?.() ?? 1) > 0.01) {
+          playing.push(`${name}  w=${a.getEffectiveWeight().toFixed(2)}  ts=${a.timeScale.toFixed(2)}  t=${a.time.toFixed(2)}`);
+        }
+      }
+    }
+    const v = p?.body?.velocity;
+    const planar = v ? Math.hypot(v.x || 0, v.z || 0) : 0;
+    const eq = p?.__equipped || p?.state?.equipped;
+    console.log('[anim-snap]\n  base       :', fbx?.currentClipName,
+      '\n  layered    :', fbx?.currentLayeredClipName,
+      '\n  weapon     :', eq?.name, '/', eq?.class,
+      '\n  reloading  :', eq?.reloadingT > 0 ? 'YES' : 'no',
+      '\n  speed      :', planar.toFixed(2), 'm/s',
+      '\n  adsAmount  :', (p?.state?.adsAmount ?? 0).toFixed(2),
+      '\n  sprinting  :', !!p?.state?.sprinting,
+      '\n  crouched   :', !!p?.state?.crouched,
+      '\n  running    :', playing.join('\n               '));
+  });
   pane.addButton({ title: 'Print ANIM_TUNE → console' }).on('click', () => {
     // Pretty-printed JSON so devtools doesn't truncate nested objects
     // with `{...}`. The string is also handed to clipboard if the user
