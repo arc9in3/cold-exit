@@ -26,8 +26,8 @@ export const ANIM_TUNE = {
   // uses `len * 0.2 + len * vf * 0.5`. Higher vf → muzzle further
   // from grip → tracer originates at the visible barrel tip.
   visibleFactor: {
-    pistol: 2.60, smg: 0.20, rifle: 0.65, shotgun: 1.20,
-    sniper: 0.20, lmg: 1.60, flame: 1.50, melee: 1.50,
+    pistol: 0.20, smg: 0.20, rifle: 0.40, shotgun: 1.20,
+    sniper: 0.20, lmg: 0.20, flame: 1.50, melee: 0.90,
   },
   // Per-class grip Z offset multiplier (applied as `gripZScale * len`).
   // 0 = grip-end clones (pistol used to want this; tuner pass moved
@@ -35,34 +35,34 @@ export const ANIM_TUNE = {
   // ~0.42-0.50 keeps the back from clipping into the chest. Long
   // guns sit near 0.0-0.20 so the stock overlaps wrist + forearm.
   gripZScale: {
-    pistol: 0.58, smg: 0.60, rifle: 0.00, shotgun: 0.00,
-    sniper: 0.06, lmg: 0.20, flame: 0.50, melee: 0.50,
+    pistol: 0.18, smg: 0.60, rifle: 0.26, shotgun: 0.28,
+    sniper: 0.06, lmg: 0.22, flame: 0.24, melee: 0.14,
   },
   // Per-class size multiplier — applied as inHandModel.scale.setScalar
   // on top of the fitToRadius initial fit. 1.0 = no change. Pistol
   // and SMG were undersized post-fit and got bumped via the tuner
   // pass to match the class-uniform diameter targets.
   sizeMul: {
-    pistol: 2.5, smg: 1.4, rifle: 1.0, shotgun: 1.8,
-    sniper: 1.0, lmg: 1.0, flame: 1.0, melee: 1.0,
+    pistol: 3.5, smg: 1.4, rifle: 1.0, shotgun: 1.8,
+    sniper: 1.0, lmg: 1.0, flame: 1.25, melee: 0.85,
   },
   // Per-class GRIP X/Y offset — applied to gunMesh.position (X, Y).
   // Z is driven by gripZScale × len. Use this to nudge the visible
   // gun left/right/up/down relative to the dominant hand bone. Units
   // are world meters (post weapon-scale).
   gripOffset: {
-    pistol: { x: 0, y: 0 }, smg:    { x: 0, y: 0 },
-    rifle:  { x: 0, y: 0 }, shotgun:{ x: 0, y: 0 },
-    sniper: { x: 0, y: 0 }, lmg:    { x: 0, y: 0 },
-    flame:  { x: 0, y: 0 }, melee:  { x: 0, y: 0 },
+    pistol:  { x: 0.22, y: -0.02 }, smg:     { x: 0.00, y: 0.02 },
+    rifle:   { x: 0.14, y:  0.13 }, shotgun: { x: 0.14, y: 0.16 },
+    sniper:  { x: 0.07, y:  0.00 }, lmg:     { x: 0.13, y: 0.07 },
+    flame:   { x: 0.00, y:  0.00 }, melee:   { x: 0.22, y: 0.00 },
   },
   // Per-class SUPPORT-HAND grip fraction along the grip→muzzle line.
   // 0 = skip support-arm IK (pistol / melee — single-handed); larger
   // values pull the support hand further down the barrel. Overrides
   // actor_rig's SUPPORT_GRIP_FRACTION_BY_CLASS at runtime.
   supportGrip: {
-    pistol: 0.0,  smg: 0.0,  rifle: 1.0,  shotgun: 0.50,
-    sniper: 0.65, lmg: 0.45, flame: 0.50, melee:   0.0,
+    pistol: 0.00, smg: 0.00, rifle: 1.00, shotgun: 0.50,
+    sniper: 0.65, lmg: 0.45, flame: 0.50, melee:   0.00,
   },
   // Arm + body pose tunables read by _runUpperBodyIK per frame.
   // anchorOffset is a DIRECT additive shift on the gun-anchor lerp
@@ -77,7 +77,7 @@ export const ANIM_TUNE = {
     gaspPitchHipfire: -0.02,
     // Direct additive offset on the gun-anchor lerp target. Always
     // visible. Local to rig.group (so x = right, y = up, z = forward).
-    anchorOffset: { x: 0, y: 0, z: 0 },
+    anchorOffset: { x: -0.13, y: -0.03, z: -0.02 },
     // OFF by default — dominant-arm IK forces the hand to grip the
     // gun, which prevents tuning held-close poses (the arm becomes
     // fully outstretched no matter what the user dials in).
@@ -89,12 +89,31 @@ export const ANIM_TUNE = {
 
 // Apply persisted tuner overrides from localStorage (set by
 // ui_anim_tuner's "save" action). Survives reload. Failure-safe.
+// Only KNOWN keys merge in — drops orphaned fields from old schemas
+// (e.g. arm.hipY/adsY/fwdMin from the pre-2026-05-08 floor-style
+// knobs that were superseded by anchorOffset). Without this, stale
+// fields linger in the live ANIM_TUNE forever and clutter the
+// Print dump.
 try {
   const saved = JSON.parse(localStorage.getItem('coldExitAnimTune') || 'null');
   if (saved && typeof saved === 'object') {
-    for (const k of Object.keys(saved)) {
-      if (ANIM_TUNE[k] && typeof saved[k] === 'object') {
-        Object.assign(ANIM_TUNE[k], saved[k]);
+    for (const k of Object.keys(ANIM_TUNE)) {
+      const dst = ANIM_TUNE[k];
+      const src = saved[k];
+      if (!src || typeof src !== 'object' || typeof dst !== 'object') continue;
+      for (const inner of Object.keys(dst)) {
+        const v = src[inner];
+        if (v == null) continue;
+        // Nested object (per-class { x, y } or arm.anchorOffset).
+        if (typeof dst[inner] === 'object' && typeof v === 'object') {
+          for (const leaf of Object.keys(dst[inner])) {
+            if (typeof v[leaf] === 'number' || typeof v[leaf] === 'boolean') {
+              dst[inner][leaf] = v[leaf];
+            }
+          }
+        } else if (typeof v === typeof dst[inner]) {
+          dst[inner] = v;
+        }
       }
     }
   }
