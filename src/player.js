@@ -26,40 +26,45 @@ export const ANIM_TUNE = {
   // uses `len * 0.2 + len * vf * 0.5`. Higher vf → muzzle further
   // from grip → tracer originates at the visible barrel tip.
   visibleFactor: {
-    pistol: 0.50, smg: 1.40, rifle: 1.60, shotgun: 1.60,
+    pistol: 2.60, smg: 1.40, rifle: 1.25, shotgun: 1.60,
     sniper: 1.95, lmg: 1.60, flame: 1.50, melee: 1.50,
   },
   // Per-class grip Z offset multiplier (applied as `gripZScale * len`).
-  // Pistol clones have grip-end origin → 0 lands grip in the hand.
-  // SMG / flame / melee clones have center origin → 0.5 keeps the
-  // back from clipping into the chest. Long guns use 0.2 so the
-  // stock overlaps wrist + forearm.
+  // 0 = grip-end clones (pistol used to want this; tuner pass moved
+  // it to 0.58). SMG / flame / melee clones have center origin →
+  // ~0.42-0.50 keeps the back from clipping into the chest. Long
+  // guns sit near 0.0-0.20 so the stock overlaps wrist + forearm.
   gripZScale: {
-    pistol: 0.00, smg: 0.50, rifle: 0.20, shotgun: 0.20,
+    pistol: 0.58, smg: 0.42, rifle: 0.00, shotgun: 0.20,
     sniper: 0.20, lmg: 0.20, flame: 0.50, melee: 0.50,
   },
   // Per-class size multiplier — applied as inHandModel.scale.setScalar
-  // on top of the fitToRadius initial fit. 1.0 = no change. Use this
-  // to shrink/grow a class without re-running fitToRadius.
+  // on top of the fitToRadius initial fit. 1.0 = no change. Pistol
+  // and SMG were undersized post-fit and got bumped via the tuner
+  // pass to match the class-uniform diameter targets.
   sizeMul: {
-    pistol: 1.0, smg: 1.0, rifle: 1.0, shotgun: 1.0,
+    pistol: 2.5, smg: 1.5, rifle: 1.0, shotgun: 1.0,
     sniper: 1.0, lmg: 1.0, flame: 1.0, melee: 1.0,
   },
   // Arm + body pose tunables read by _runUpperBodyIK per frame.
+  // Defaults updated 2026-05-08 from the tweakpane tuner pass — the
+  // arms used to read too low + too forward; pulling hipY up + adsY
+  // down + flipping the hipfire pitch sign brought hands to the
+  // chest plate where the pistol grip reads cleanly.
   arm: {
     // Hipfire arm pitch baseline — chest pitches down by this many
     // radians at adsAmount=0, lerping to 0 at adsAmount=1. Negative
     // lifts arms up. (1 - ads) * gaspPitchHipfire is added to aimPitch.
-    gaspPitchHipfire: 0.10,
-    // Gun anchor lerp Y target. Hipfire keeps gun lower (chest
-    // height); ADS raises toward eye-line. The anchor lerps toward
-    // the hand bone but is floored at `wantY * 0.9` where wantY is
-    // hipY + (adsY - hipY) * adsAmount.
-    hipY: 1.30,
-    adsY: 1.55,
+    gaspPitchHipfire: -0.03,
+    // Gun anchor lerp Y target. Hipfire holds gun at chest plate
+    // (1.64 m); ADS pulls down to a more grounded sight pose
+    // (1.39 m). Counter-intuitive (ADS lower than hipfire) because
+    // the cursor-aim path adds pitch on top.
+    hipY: 1.64,
+    adsY: 1.39,
     // Z floor on the gun anchor — keeps the gun from dipping behind
     // the chest when the hand bone's local Z drops near zero.
-    fwdMin: 0.30,
+    fwdMin: 0.42,
   },
 };
 
