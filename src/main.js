@@ -146,6 +146,9 @@ import { buildRig as _buildAllyRig, initAnim as _initAllyAnim, updateAnim as _up
 import * as _coopSnapshotModule from './coop/snapshot.js';
 const {
   encodeEnemySnapshot, encodeSnapshotsPerPeer,
+  encodeSnapshotsPerPeerWithDelta,
+  reconstructFromDelta, notifyResyncRequested,
+  dropPeerBaseline, clearAllBaselines, clearJoinerBaseline,
   applyLootSnapshot, applyDroneSnapshot,
   applyMegaBossSnapshot,
   applyWindowsSnapshot,
@@ -153,6 +156,15 @@ const {
   pushSnapshotForInterp, pickInterpSnapshots, applyInterpolated,
   clearSnapshotBuffer,
 } = _coopSnapshotModule;
+// Coop snapshot delta encoding flag (host-side). Off by default;
+// enable by setting `localStorage['coop:delta'] = '1'` in DevTools.
+// Joiners auto-detect via the `_d` field on incoming packets, so this
+// is host-only — turning it on at the host transparently delta-encodes
+// outgoing snapshots without coordinating with joiners.
+function _coopDeltaEnabled() {
+  try { return localStorage.getItem('coop:delta') === '1'; }
+  catch (_) { return false; }
+}
 // Dev-time probe exposer — paired with __level / __gunmen so a
 // playwright probe can read the latest applied snapshot directly
 // (e.g. for asserting bw/oL bits without ferrying logs).
@@ -4424,8 +4436,16 @@ function _ensureCoopLobby() {
   transport.addEventListener('close', () => { try { _coopSaveJoinerState(); } catch (_) {} });
   transport.addEventListener('host-lost', () => { try { _coopSaveJoinerState(); } catch (_) {} });
   // Clear interp buffer on disconnect so a stale snapshot can't
-  // briefly drive the apply path when the next session opens.
-  transport.addEventListener('close', () => clearSnapshotBuffer());
+  // briefly drive the apply path when the next session opens. Same
+  // for the delta-encoding baselines on both sides — host's per-peer
+  // map and joiner's last-full reconstruction. Without this, a fresh
+  // session would either send mismatched deltas (host) or reject
+  // the first FULL as a stale-base delta (joiner).
+  transport.addEventListener('close', () => {
+    clearSnapshotBuffer();
+    clearAllBaselines();
+    clearJoinerBaseline();
+  });
   // Peer-out cleanup — strip the disconnected peer's downed entry +
   // overlay so the reviver-detection loop doesn't keep finding a
   // ghost teammate after they've disconnected. Ghost mesh is pruned
@@ -4433,6 +4453,9 @@ function _ensureCoopLobby() {
   transport.addEventListener('peer-out', (e) => {
     const pid = e?.detail?.peer?.id;
     if (!pid) return;
+    // Free the host's delta baseline for this peer. No-op when running
+    // with the delta flag off (map stays empty).
+    try { dropPeerBaseline(pid); } catch (_) {}
     if (_coopPeerDowned.has(pid)) {
       _coopPeerDowned.delete(pid);
       try { _coopApplyDownedOverlay(pid, false); } catch (_) {}
@@ -4445,7 +4468,11 @@ function _ensureCoopLobby() {
       try { _closeMedicalMenu(); } catch (_) {}
     }
   });
-  transport.addEventListener('host-lost', () => clearSnapshotBuffer());
+  transport.addEventListener('host-lost', () => {
+    clearSnapshotBuffer();
+    clearAllBaselines();
+    clearJoinerBaseline();
+  });
   // Host re-broadcasts the current seed whenever a peer joins. Without
   // this the joiner has to wait for the host's NEXT regenerateLevel
   // call (next floor extract) before they can sync. Since regen is
@@ -4492,9 +4519,32 @@ function _ensureCoopLobby() {
       // single moving target at 20Hz.
       if (transport.isHost) return;
       if (!body || (body.seq | 0) <= _coopLatestSeq) return;
-      _coopLatestSeq = body.seq | 0;
-      _coopPendingSnapshot = body;
-      pushSnapshotForInterp(body);
+      // Delta path: reconstructFromDelta returns a full snapshot
+      // (passes through if body._d is absent, otherwise merges into
+      // the joiner's last-full baseline). Returns null when our
+      // baseline doesn't match the delta's `base` seq — usually means
+      // we missed the FULL that started this run of deltas. Recovery
+      // is a `snapshot-resync` to the host, which drops our baseline
+      // there and emits a FULL on the next encode tick.
+      const reconstructed = reconstructFromDelta(body);
+      if (!reconstructed) {
+        notifyResyncRequested();
+        try { transport.send('snapshot-resync', { at: performance.now() | 0 }); }
+        catch (_) {}
+        return;
+      }
+      _coopLatestSeq = reconstructed.seq | 0;
+      _coopPendingSnapshot = reconstructed;
+      pushSnapshotForInterp(reconstructed);
+      return;
+    }
+    if (kind === 'snapshot-resync') {
+      // Host-only — a joiner's reconstruction baseline diverged. Drop
+      // their baseline so the next snapshot tick emits a FULL packet
+      // to them. Worker allowlist gates this kind to non-host senders
+      // so a host-spoofed resync can't poison the system.
+      if (!transport.isHost || !from) return;
+      try { dropPeerBaseline(from); } catch (_) {}
       return;
     }
     if (kind === 'rpc-player-damage') {
@@ -12353,7 +12403,13 @@ function _tickCoop(dt) {
         // No joiners yet — skip the broadcast entirely. Saves a
         // packet per snapshot tick on a host-alone room.
       } else {
-        const perPeer = encodeSnapshotsPerPeer(
+        // Delta encoder is opt-in via localStorage so we can A/B it in
+        // playtest. Joiners detect deltas via the `_d` field on the
+        // packet — no client-side flag coordination needed.
+        const encoder = _coopDeltaEnabled()
+          ? encodeSnapshotsPerPeerWithDelta
+          : encodeSnapshotsPerPeer;
+        const perPeer = encoder(
           gunmen, melees, _coopSnapshotSeq, performance.now() | 0,
           loot, peerIds, drones, megaBoss, level,
         );

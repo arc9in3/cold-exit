@@ -762,3 +762,223 @@ export function applyLootSnapshot(snap, lootMgr, spawnFn) {
     }
   }
 }
+
+// ----- Delta encoding (v1) -----
+//
+// Behind the `coop:delta` localStorage flag (host-side). When the flag
+// is on, the host emits a delta packet against the per-peer baseline
+// instead of the full snapshot. The joiner reconstructs the full
+// snapshot from baseline + delta and feeds the same downstream apply
+// path (interp buffer, applyInterpolated, applyMegaBossSnapshot, etc).
+//
+// Wire shape:
+//   FULL  (existing): { seq, t, gunmen:[..], melees:[..], drones:[..],
+//                       boss, loot:[..], corpses:[..], bw:[..], dp:[..] }
+//   DELTA (new):      { seq, t, _d:1, base:<prior_seq>,
+//                       dgunmen?:[..changed], xgunmen?:[netIds],
+//                       dmelees?, xmelees?, ddrones?, xdrones?,
+//                       dloot?, xloot?, dcorpses?, xcorpses?,
+//                       boss?, bw?, dp? }
+//   For dgunmen / dmelees / etc., entries are FULL records keyed by n;
+//   the joiner replaces baseline.<n> with the new record. xgunmen lists
+//   netIds removed since baseline.
+//   boss / bw / dp are sent in full when changed; absent fields mean
+//   "use baseline value." `boss` may be `null` to mean "boss died."
+//
+// Resync: if the joiner's baseline doesn't match the delta's `base`
+// seq, it sends `snapshot-resync` (kind allowlisted on the worker).
+// The host drops that peer's baseline; the next encode tick emits a
+// FULL snapshot and the cycle restarts.
+
+const _peerBaselines = new Map();   // host-side: peerId → last full snapshot
+let _joinerLastFullSnap = null;     // joiner-side: last reconstructed full
+const _deltaStats = {
+  sentFull: 0, sentDelta: 0,
+  bytesFull: 0, bytesDelta: 0,
+  recvFull: 0, recvDelta: 0,
+  resyncRequested: 0, resyncServed: 0,
+};
+export function getDeltaStats() { return { ..._deltaStats }; }
+export function resetDeltaStats() {
+  _deltaStats.sentFull = 0; _deltaStats.sentDelta = 0;
+  _deltaStats.bytesFull = 0; _deltaStats.bytesDelta = 0;
+  _deltaStats.recvFull = 0; _deltaStats.recvDelta = 0;
+  _deltaStats.resyncRequested = 0; _deltaStats.resyncServed = 0;
+}
+
+// Host-side: peer disconnected → free its baseline. Caller wires this
+// from the transport's peer-out event so memory doesn't grow with
+// churn over a long session.
+export function dropPeerBaseline(peerId) {
+  if (_peerBaselines.delete(peerId)) _deltaStats.resyncServed += 1;
+}
+// Host-side: clear all baselines (e.g., on transport close, host-lost,
+// or when the user toggles the flag mid-session).
+export function clearAllBaselines() { _peerBaselines.clear(); }
+// Joiner-side: forget the reconstructed baseline. Pair with
+// clearSnapshotBuffer() on disconnect / host-lost so the next session
+// starts clean.
+export function clearJoinerBaseline() { _joinerLastFullSnap = null; }
+
+// Host-side encode wrapper. Builds full snapshots via the existing
+// encodeSnapshotsPerPeer, then for each peer either sends the full
+// (no baseline yet) or computes a delta against the stored baseline.
+// Returns Map<peerId, payload>; caller iterates and `transport.send`s.
+export function encodeSnapshotsPerPeerWithDelta(
+  gunmen, melees, seq, t, loot, peerIds, droneMgr, megaBoss, level,
+) {
+  const fullPerPeer = encodeSnapshotsPerPeer(
+    gunmen, melees, seq, t, loot, peerIds, droneMgr, megaBoss, level,
+  );
+  const out = new Map();
+  for (const [peerId, full] of fullPerPeer) {
+    const baseline = _peerBaselines.get(peerId);
+    if (!baseline) {
+      _peerBaselines.set(peerId, full);
+      _deltaStats.sentFull += 1;
+      out.set(peerId, full);
+      continue;
+    }
+    const delta = _diffSnap(baseline, full);
+    _peerBaselines.set(peerId, full);
+    _deltaStats.sentDelta += 1;
+    out.set(peerId, delta);
+  }
+  return out;
+}
+
+// Joiner-side: turn an incoming snapshot (full OR delta) into a full
+// snapshot the existing apply path can consume. Returns null if the
+// delta references a baseline we don't have — caller should request
+// resync and drop the packet.
+export function reconstructFromDelta(snap) {
+  if (!snap) return null;
+  if (!snap._d) {
+    // Full snapshot — install as new baseline and pass through.
+    _joinerLastFullSnap = snap;
+    _deltaStats.recvFull += 1;
+    return snap;
+  }
+  _deltaStats.recvDelta += 1;
+  const base = _joinerLastFullSnap;
+  if (!base || base.seq !== snap.base) return null;
+  const merged = {
+    seq: snap.seq | 0,
+    t:   snap.t   | 0,
+    gunmen:  _applyArrayDelta(base.gunmen,  snap.dgunmen,  snap.xgunmen),
+    melees:  _applyArrayDelta(base.melees,  snap.dmelees,  snap.xmelees),
+    drones:  _applyArrayDelta(base.drones,  snap.ddrones,  snap.xdrones),
+    loot:    _applyArrayDelta(base.loot,    snap.dloot,    snap.xloot),
+    corpses: _applyArrayDelta(base.corpses, snap.dcorpses, snap.xcorpses),
+    boss: Object.prototype.hasOwnProperty.call(snap, 'boss') ? snap.boss : base.boss,
+    bw:   Object.prototype.hasOwnProperty.call(snap, 'bw')   ? snap.bw   : base.bw,
+    dp:   Object.prototype.hasOwnProperty.call(snap, 'dp')   ? snap.dp   : base.dp,
+  };
+  _joinerLastFullSnap = merged;
+  return merged;
+}
+
+// Joiner-side: convenience marker for "we got a delta but couldn't
+// apply it." Bumps the resync counter and returns true so the caller
+// can branch cleanly.
+export function notifyResyncRequested() {
+  _deltaStats.resyncRequested += 1;
+  return true;
+}
+
+function _diffSnap(base, cur) {
+  const out = { seq: cur.seq | 0, t: cur.t | 0, _d: 1, base: base.seq | 0 };
+  const g = _diffArrayByN(base.gunmen, cur.gunmen);
+  if (g.d.length) out.dgunmen = g.d;
+  if (g.x.length) out.xgunmen = g.x;
+  const m = _diffArrayByN(base.melees, cur.melees);
+  if (m.d.length) out.dmelees = m.d;
+  if (m.x.length) out.xmelees = m.x;
+  const d = _diffArrayByN(base.drones, cur.drones);
+  if (d.d.length) out.ddrones = d.d;
+  if (d.x.length) out.xdrones = d.x;
+  const lo = _diffArrayByN(base.loot, cur.loot);
+  if (lo.d.length) out.dloot = lo.d;
+  if (lo.x.length) out.xloot = lo.x;
+  const c = _diffArrayByN(base.corpses, cur.corpses);
+  if (c.d.length) out.dcorpses = c.d;
+  if (c.x.length) out.xcorpses = c.x;
+  // Boss + bw + dp ride along as full when changed, omitted when not.
+  // They're tiny enough that an inner-shape diff isn't worth the code.
+  if (!_bossEq(base.boss, cur.boss)) out.boss = cur.boss;
+  if (!_arrEq(base.bw, cur.bw)) out.bw = cur.bw;
+  if (!_arrEq(base.dp, cur.dp)) out.dp = cur.dp;
+  return out;
+}
+
+// Diff arrays-of-records keyed by `n`. Emits full record for new or
+// changed entries in `d`, just netIds for removals in `x`. Stable
+// across orderings since we key by `n`, not array index.
+function _diffArrayByN(baseArr, curArr) {
+  const baseMap = new Map();
+  if (baseArr) for (const e of baseArr) baseMap.set(e.n, e);
+  const dOut = [];
+  const live = new Set();
+  if (curArr) {
+    for (const e of curArr) {
+      live.add(e.n);
+      const prev = baseMap.get(e.n);
+      if (!prev || !_recordEq(prev, e)) dOut.push(e);
+    }
+  }
+  const xOut = [];
+  if (baseArr) for (const e of baseArr) if (!live.has(e.n)) xOut.push(e.n);
+  return { d: dOut, x: xOut };
+}
+
+function _applyArrayDelta(baseArr, dArr, xArr) {
+  const map = new Map();
+  if (baseArr) for (const e of baseArr) map.set(e.n, e);
+  if (xArr) for (const n of xArr) map.delete(n);
+  if (dArr) for (const e of dArr) map.set(e.n, e);
+  return [...map.values()];
+}
+
+// Shallow record equality with one level of array recursion (corpse
+// `l` arrays of item records, boss `eg` ghost arrays). Intentionally
+// over-conservative: any non-=== object value that isn't an array
+// counts as different — which means we re-send. False negatives are
+// invisible-desync bugs; false positives just cost a few bytes.
+function _recordEq(a, b) {
+  if (a === b) return true;
+  if (!a || !b) return false;
+  const ka = Object.keys(a), kb = Object.keys(b);
+  if (ka.length !== kb.length) return false;
+  for (const k of ka) {
+    const va = a[k], vb = b[k];
+    if (va === vb) continue;
+    if (Array.isArray(va) && Array.isArray(vb)) {
+      if (va.length !== vb.length) return false;
+      for (let i = 0; i < va.length; i++) {
+        const ea = va[i], eb = vb[i];
+        if (ea === eb) continue;
+        if (typeof ea === 'object' && ea && typeof eb === 'object' && eb) {
+          if (!_recordEq(ea, eb)) return false;
+        } else {
+          return false;
+        }
+      }
+      continue;
+    }
+    return false;
+  }
+  return true;
+}
+
+function _bossEq(a, b) {
+  if (a == null && b == null) return true;
+  if (a == null || b == null) return false;
+  return _recordEq(a, b);
+}
+function _arrEq(a, b) {
+  if (!a && !b) return true;
+  if (!a || !b) return false;
+  if (a.length !== b.length) return false;
+  for (let i = 0; i < a.length; i++) if (a[i] !== b[i]) return false;
+  return true;
+}
