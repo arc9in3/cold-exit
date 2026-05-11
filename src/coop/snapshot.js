@@ -790,19 +790,40 @@ export function applyLootSnapshot(snap, lootMgr, spawnFn) {
 // The host drops that peer's baseline; the next encode tick emits a
 // FULL snapshot and the cycle restarts.
 
-const _peerBaselines = new Map();   // host-side: peerId → last full snapshot
-let _joinerLastFullSnap = null;     // joiner-side: last reconstructed full
+const _peerBaselines = new Map();   // host-side: peerId → last full snapshot (ENCODED form when quantized)
+let _joinerLastFullSnap = null;     // joiner-side: last reconstructed full (ENCODED form when quantized)
+// Position + yaw quantization scales for the v2 wire format. Positions
+// ride on cm precision (int16 covers ±327m world range) — visually
+// indistinguishable on the iso camera + smoother to diff (int === int
+// is reliable, float === float is not). Yaw rides on millirad precision
+// (~0.057° resolution), which is far below what 60Hz interp can show.
+const POS_SCALE = 100;
+const YAW_SCALE = 1000;
 const _deltaStats = {
   sentFull: 0, sentDelta: 0,
-  bytesFull: 0, bytesDelta: 0,
+  // bytesSent: total JSON body bytes emitted (sum of stringified payloads,
+  //   delta + full). Wire bytes include the ~30B transport envelope on top.
+  // bytesFullEquivalent: stringified bytes of the FULL snapshot for every
+  //   tick — including the ones where we actually sent a delta. Subtract
+  //   bytesSent from this to see how many bytes the delta path saved.
+  bytesSent: 0, bytesFullEquivalent: 0,
   recvFull: 0, recvDelta: 0,
+  bytesReceived: 0,
   resyncRequested: 0, resyncServed: 0,
 };
-export function getDeltaStats() { return { ..._deltaStats }; }
+export function getDeltaStats() {
+  const s = { ..._deltaStats };
+  s.bytesSaved = Math.max(0, s.bytesFullEquivalent - s.bytesSent);
+  s.savingsRatio = s.bytesFullEquivalent > 0
+    ? +(s.bytesSaved / s.bytesFullEquivalent).toFixed(3)
+    : 0;
+  return s;
+}
 export function resetDeltaStats() {
   _deltaStats.sentFull = 0; _deltaStats.sentDelta = 0;
-  _deltaStats.bytesFull = 0; _deltaStats.bytesDelta = 0;
+  _deltaStats.bytesSent = 0; _deltaStats.bytesFullEquivalent = 0;
   _deltaStats.recvFull = 0; _deltaStats.recvDelta = 0;
+  _deltaStats.bytesReceived = 0;
   _deltaStats.resyncRequested = 0; _deltaStats.resyncServed = 0;
 }
 
@@ -821,28 +842,49 @@ export function clearAllBaselines() { _peerBaselines.clear(); }
 export function clearJoinerBaseline() { _joinerLastFullSnap = null; }
 
 // Host-side encode wrapper. Builds full snapshots via the existing
-// encodeSnapshotsPerPeer, then for each peer either sends the full
-// (no baseline yet) or computes a delta against the stored baseline.
-// Returns Map<peerId, payload>; caller iterates and `transport.send`s.
+// encodeSnapshotsPerPeer, quantizes their position/yaw fields in
+// place, then for each peer either sends the full (no baseline yet)
+// or computes a delta against the stored baseline. Returns
+// Map<peerId, payload>; caller iterates and `transport.send`s.
+//
+// Quantization runs across all per-peer snapshots with a seen-Set so
+// the SHARED enemy-section records (same references across peers) get
+// scaled exactly once per tick — otherwise the second peer's pass
+// would multiply by POS_SCALE again, sending the rig to orbit.
 export function encodeSnapshotsPerPeerWithDelta(
   gunmen, melees, seq, t, loot, peerIds, droneMgr, megaBoss, level,
 ) {
   const fullPerPeer = encodeSnapshotsPerPeer(
     gunmen, melees, seq, t, loot, peerIds, droneMgr, megaBoss, level,
   );
+  if (fullPerPeer.size > 0) {
+    const seen = new Set();
+    for (const snap of fullPerPeer.values()) _quantizeSnapInPlace(snap, seen);
+  }
   const out = new Map();
   for (const [peerId, full] of fullPerPeer) {
     const baseline = _peerBaselines.get(peerId);
+    let payload;
     if (!baseline) {
       _peerBaselines.set(peerId, full);
       _deltaStats.sentFull += 1;
-      out.set(peerId, full);
-      continue;
+      payload = full;
+    } else {
+      const delta = _diffSnap(baseline, full);
+      _peerBaselines.set(peerId, full);
+      _deltaStats.sentDelta += 1;
+      payload = delta;
     }
-    const delta = _diffSnap(baseline, full);
-    _peerBaselines.set(peerId, full);
-    _deltaStats.sentDelta += 1;
-    out.set(peerId, delta);
+    // Bandwidth instrumentation. Stringify both the FULL (what we'd
+    // have sent without delta encoding) and the actual payload, so
+    // savings ratio is derivable. JSON.stringify is the same path
+    // transport.send takes — measurement reflects body-bytes on wire
+    // (minus the ~30B envelope the transport wraps around it).
+    try {
+      _deltaStats.bytesFullEquivalent += JSON.stringify(full).length;
+      _deltaStats.bytesSent += JSON.stringify(payload).length;
+    } catch (_) {}
+    out.set(peerId, payload);
   }
   return out;
 }
@@ -851,13 +893,22 @@ export function encodeSnapshotsPerPeerWithDelta(
 // snapshot the existing apply path can consume. Returns null if the
 // delta references a baseline we don't have — caller should request
 // resync and drop the packet.
+//
+// Baseline storage keeps records in their ENCODED form (matching host's
+// baseline byte-for-byte) so the next delta-merge sees the same value
+// space the host diffed against. The returned snapshot is a freshly
+// materialized DEQUANTIZED clone — the existing apply path (interp
+// buffer, applyInterpolated, applyMegaBossSnapshot, etc.) consumes
+// meter-precision floats unchanged.
 export function reconstructFromDelta(snap) {
   if (!snap) return null;
+  try { _deltaStats.bytesReceived += JSON.stringify(snap).length; }
+  catch (_) {}
   if (!snap._d) {
-    // Full snapshot — install as new baseline and pass through.
+    // Full snapshot — install as new baseline and materialize for apply.
     _joinerLastFullSnap = snap;
     _deltaStats.recvFull += 1;
-    return snap;
+    return _materializeForApply(snap);
   }
   _deltaStats.recvDelta += 1;
   const base = _joinerLastFullSnap;
@@ -865,6 +916,7 @@ export function reconstructFromDelta(snap) {
   const merged = {
     seq: snap.seq | 0,
     t:   snap.t   | 0,
+    _q:  snap._q || base._q || 0,
     gunmen:  _applyArrayDelta(base.gunmen,  snap.dgunmen,  snap.xgunmen),
     melees:  _applyArrayDelta(base.melees,  snap.dmelees,  snap.xmelees),
     drones:  _applyArrayDelta(base.drones,  snap.ddrones,  snap.xdrones),
@@ -875,7 +927,7 @@ export function reconstructFromDelta(snap) {
     dp:   Object.prototype.hasOwnProperty.call(snap, 'dp')   ? snap.dp   : base.dp,
   };
   _joinerLastFullSnap = merged;
-  return merged;
+  return _materializeForApply(merged);
 }
 
 // Joiner-side: convenience marker for "we got a delta but couldn't
@@ -981,4 +1033,93 @@ function _arrEq(a, b) {
   if (a.length !== b.length) return false;
   for (let i = 0; i < a.length; i++) if (a[i] !== b[i]) return false;
   return true;
+}
+
+// ---- Quantization helpers (v2 wire format) ----
+//
+// Records reference different physical quantities under the same key
+// letters: gunmen/melee/boss have `y` = yaw; drones have `y` = world
+// height; loot/corpses/echo-ghosts omit `y` entirely. We dispatch by
+// record type at the array level so each gets the right scale.
+//
+// Quantize MUTATES records in place (host-side) to keep allocs zero
+// on the hot encode path. Dequantize CLONES (joiner-side) so the
+// stored baseline remains in encoded form for the next delta merge.
+
+function _quantizePosYaw(r) {
+  if (typeof r.x === 'number') r.x = Math.round(r.x * POS_SCALE);
+  if (typeof r.z === 'number') r.z = Math.round(r.z * POS_SCALE);
+  if (typeof r.y === 'number') r.y = Math.round(r.y * YAW_SCALE);
+}
+function _quantizePosOnly3(r) {       // drones: x/y/z all positions
+  if (typeof r.x === 'number') r.x = Math.round(r.x * POS_SCALE);
+  if (typeof r.y === 'number') r.y = Math.round(r.y * POS_SCALE);
+  if (typeof r.z === 'number') r.z = Math.round(r.z * POS_SCALE);
+}
+function _quantizePos(r) {            // loot/corpses/echo-ghosts: x/z only
+  if (typeof r.x === 'number') r.x = Math.round(r.x * POS_SCALE);
+  if (typeof r.z === 'number') r.z = Math.round(r.z * POS_SCALE);
+}
+
+function _quantizeSnapInPlace(snap, seen) {
+  if (!snap) return;
+  for (const r of snap.gunmen || []) if (!seen.has(r)) { _quantizePosYaw(r); seen.add(r); }
+  for (const r of snap.melees || []) if (!seen.has(r)) { _quantizePosYaw(r); seen.add(r); }
+  for (const r of snap.drones || []) if (!seen.has(r)) { _quantizePosOnly3(r); seen.add(r); }
+  for (const r of snap.loot   || []) if (!seen.has(r)) { _quantizePos(r); seen.add(r); }
+  for (const r of snap.corpses|| []) if (!seen.has(r)) { _quantizePos(r); seen.add(r); }
+  if (snap.boss && !seen.has(snap.boss)) {
+    _quantizePosYaw(snap.boss);
+    if (Array.isArray(snap.boss.eg)) {
+      for (const g of snap.boss.eg) if (!seen.has(g)) { _quantizePos(g); seen.add(g); }
+    }
+    seen.add(snap.boss);
+  }
+  snap._q = 1;
+}
+
+function _dequantizePosYawClone(r) {
+  const out = { ...r };
+  if (typeof out.x === 'number') out.x /= POS_SCALE;
+  if (typeof out.z === 'number') out.z /= POS_SCALE;
+  if (typeof out.y === 'number') out.y /= YAW_SCALE;
+  return out;
+}
+function _dequantizePosOnly3Clone(r) {
+  const out = { ...r };
+  if (typeof out.x === 'number') out.x /= POS_SCALE;
+  if (typeof out.y === 'number') out.y /= POS_SCALE;
+  if (typeof out.z === 'number') out.z /= POS_SCALE;
+  return out;
+}
+function _dequantizePosClone(r) {
+  const out = { ...r };
+  if (typeof out.x === 'number') out.x /= POS_SCALE;
+  if (typeof out.z === 'number') out.z /= POS_SCALE;
+  return out;
+}
+function _dequantizeBossClone(b) {
+  if (!b) return b;
+  const out = { ...b };
+  if (typeof out.x === 'number') out.x /= POS_SCALE;
+  if (typeof out.z === 'number') out.z /= POS_SCALE;
+  if (typeof out.y === 'number') out.y /= YAW_SCALE;
+  if (Array.isArray(out.eg)) out.eg = out.eg.map(_dequantizePosClone);
+  return out;
+}
+
+// Build a fresh dequantized snapshot for the apply path. When _q is
+// falsy (delta encoder off or legacy wire format), pass through as-is.
+function _materializeForApply(snap) {
+  if (!snap || !snap._q) return snap;
+  return {
+    seq: snap.seq, t: snap.t,
+    gunmen:  (snap.gunmen  || []).map(_dequantizePosYawClone),
+    melees:  (snap.melees  || []).map(_dequantizePosYawClone),
+    drones:  (snap.drones  || []).map(_dequantizePosOnly3Clone),
+    loot:    (snap.loot    || []).map(_dequantizePosClone),
+    corpses: (snap.corpses || []).map(_dequantizePosClone),
+    boss:    _dequantizeBossClone(snap.boss),
+    bw: snap.bw, dp: snap.dp,
+  };
 }
