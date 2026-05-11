@@ -156,14 +156,14 @@ const {
   pushSnapshotForInterp, pickInterpSnapshots, applyInterpolated,
   clearSnapshotBuffer,
 } = _coopSnapshotModule;
-// Coop snapshot delta encoding flag (host-side). Off by default;
-// enable by setting `localStorage['coop:delta'] = '1'` in DevTools.
-// Joiners auto-detect via the `_d` field on incoming packets, so this
-// is host-only — turning it on at the host transparently delta-encodes
-// outgoing snapshots without coordinating with joiners.
+// Coop snapshot delta encoding (host-side). On by default — joiners
+// auto-detect via the `_d` field on incoming packets, so this is
+// host-only and transparent to the other side. Kill-switch for
+// emergency rollback: `localStorage['coop:delta'] = '0'` in DevTools
+// → reverts to v1 full-snapshot wire format on the next encode tick.
 function _coopDeltaEnabled() {
-  try { return localStorage.getItem('coop:delta') === '1'; }
-  catch (_) { return false; }
+  try { return localStorage.getItem('coop:delta') !== '0'; }
+  catch (_) { return true; }
 }
 // Dev-time probe exposer — paired with __level / __gunmen so a
 // playwright probe can read the latest applied snapshot directly
