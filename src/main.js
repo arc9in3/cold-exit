@@ -15247,8 +15247,15 @@ function updateEnemyVisibility() {
       e.group.visible = true;
       continue;
     }
-    const d = Math.hypot(e.group.position.x - px, e.group.position.z - pz);
-    if (d >= range) {
+    // Squared-distance cull first; only sqrt for the in-range ghost
+    // opacity calc below. Math.hypot is ~5-8× slower than dx²+dz²
+    // because of the overflow-safe scaling, and every off-screen-
+    // listening-range enemy was paying that cost just to compare
+    // against a constant.
+    const ddx = e.group.position.x - px;
+    const ddz = e.group.position.z - pz;
+    const d2 = ddx * ddx + ddz * ddz;
+    if (d2 >= range * range) {
       // Beyond hearing range — hide entirely. The InstancedMesh
       // doesn't honour e.group.visible (it's not a child of the
       // group); explicitly park instance slots at zero-scale.
@@ -15260,6 +15267,7 @@ function updateEnemyVisibility() {
     // Within hearing range, out of LoS — render as a fresnel ghost.
     // Per-enemy opacity drives the silhouette strength: closer + active
     // = stronger rim, farther = whisper.
+    const d = Math.sqrt(d2);
     const t = Math.max(0, Math.min(1, d / range));
     const eased = 1 - (1 - t) * (1 - t);
     let opacity = nearAlpha + (GHOST_FAR_ALPHA - nearAlpha) * eased;
