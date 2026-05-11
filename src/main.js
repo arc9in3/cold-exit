@@ -7911,8 +7911,21 @@ const _perf = (() => {
   const stamps = {};   // key → start timestamp
   const order = [];    // insertion order for stable display ordering
   const SAMPLES = 60;
-  let visible = false;
+  // Default ON for playtester telemetry. The overlay starts hidden
+  // (toggle with backquote) but data collection always runs so
+  // hitches get recorded into __hitchLog automatically — the player
+  // can paste `JSON.stringify(__hitchLog())` after a stutter without
+  // needing to enable anything ahead of time.
+  let visible = true;
+  let overlayVisible = false;
   let el = null;
+  // Hitch ring buffer. Every frame whose total time crosses HITCH_MS
+  // snapshots the per-system breakdown so we can see which row spiked.
+  // Running averages smooth out exactly the events we care about — this
+  // captures the raw single-frame values at the moment of the spike.
+  const hitchLog = [];
+  const HITCH_MS = 25;          // ~30fps frame budget — anything past = stutter
+  const HITCH_LOG_MAX = 50;     // ring-buffer cap
   function start(key) {
     if (!visible) return;
     stamps[key] = performance.now();
@@ -7926,9 +7939,23 @@ const _perf = (() => {
     if (!arr) { arr = totals[key] = []; order.push(key); }
     arr.push(dt);
     if (arr.length > SAMPLES) arr.shift();
+    // Hitch capture — at end-of-frame, if the whole frame exceeded
+    // the budget, snapshot the latest sample from every tracked
+    // system. arr[arr.length-1] is THIS frame's value (every other
+    // _perf.end() already fired earlier in the tick).
+    if (key === 'frame' && dt > HITCH_MS) {
+      const snap = { t: Date.now(), dtMs: +dt.toFixed(1) };
+      for (const k of order) {
+        if (k === 'frame') continue;
+        const a = totals[k];
+        if (a && a.length) snap[k] = +a[a.length - 1].toFixed(2);
+      }
+      hitchLog.push(snap);
+      if (hitchLog.length > HITCH_LOG_MAX) hitchLog.shift();
+    }
   }
   function toggle() {
-    visible = !visible;
+    overlayVisible = !overlayVisible;
     if (!el) {
       el = document.createElement('div');
       el.id = 'perf-overlay';
@@ -7942,11 +7969,10 @@ const _perf = (() => {
       `;
       document.body.appendChild(el);
     }
-    el.style.display = visible ? 'block' : 'none';
-    if (!visible) { for (const k of order) totals[k] = []; }
+    el.style.display = overlayVisible ? 'block' : 'none';
   }
   function render(fps) {
-    if (!visible || !el) return;
+    if (!overlayVisible || !el) return;
     let total = 0;
     let lines = `FPS  ${fps.toFixed(0).padStart(4)}\n`;
     for (const k of order) {
@@ -7959,11 +7985,35 @@ const _perf = (() => {
       lines += `${k.padEnd(10)} ${avg.toFixed(2).padStart(5)} ms\n`;
     }
     lines += `${'TOTAL'.padEnd(10)} ${total.toFixed(2).padStart(5)} ms`;
+    // Show recent hitches so the playtester can see them even after
+    // the spike already passed. Running averages smooth out single-
+    // frame spikes; this section is the captured raw samples.
+    if (hitchLog.length) {
+      lines += `\n--- recent hitches (${hitchLog.length}) ---`;
+      const recent = hitchLog.slice(-5);
+      for (let i = recent.length - 1; i >= 0; i--) {
+        const h = recent[i];
+        const ago = ((Date.now() - h.t) / 1000).toFixed(0);
+        lines += `\n${String(h.dtMs).padStart(5)}ms (${ago}s ago)`;
+      }
+    }
     el.textContent = lines;
   }
-  return { start, end, toggle, render, isVisible: () => visible };
+  function getHitchLog() { return hitchLog.slice(); }
+  function clearHitchLog() { hitchLog.length = 0; }
+  return { start, end, toggle, render,
+           isVisible: () => visible,
+           isOverlayVisible: () => overlayVisible,
+           getHitchLog, clearHitchLog };
 })();
 window.__perf = _perf;
+// Playtester helpers — `__hitchLog()` returns the array, `__hitchLogReset()`
+// clears it so the next stretch of play starts clean. Default-on data
+// collection means a player can hit a hitch, open devtools, run
+// `JSON.stringify(__hitchLog())` and paste back without needing to
+// have toggled anything ahead of time.
+window.__hitchLog = () => _perf.getHitchLog();
+window.__hitchLogReset = () => _perf.clearHitchLog();
 // Restart-snapshot stack — most recent first. Capped at MAX_RESTART_SLOTS;
 // older entries fall off the end. Restart Level defaults to slot 0 (newest);
 // the death-screen slot picker exposes [0..n-1] so you can rewind further
