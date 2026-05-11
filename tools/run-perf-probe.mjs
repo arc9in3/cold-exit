@@ -1,13 +1,30 @@
 #!/usr/bin/env node
-// Run the perf-hitch probe headlessly via Playwright. Spawns a hidden
-// Chromium, loads the game, pastes the probe, waits for the report,
-// dumps it to stdout. Intended for the "find me real hitches" workflow
-// without making the user open another visible browser window.
+// Run the perf-hitch probe via Playwright. Loads the game, pastes the
+// probe, waits for the report, dumps it to stdout.
 //
 // Usage:
-//   node tools/run-perf-probe.mjs
+//   node tools/run-perf-probe.mjs              # headed (default)
+//   PROBE_HEADED=0 node tools/run-perf-probe.mjs   # headless (CI only)
+//   PROBE_BASE=https://cold-exit.pages.dev node tools/run-perf-probe.mjs
 //
-// Requires the dev server running on http://localhost:8080.
+// Env flags:
+//   PROBE_HEADED=1 (default) — opens a visible Chromium window using
+//     the real GPU. Frame times are representative; the 33ms hitch
+//     threshold is meaningful.
+//
+//   PROBE_HEADED=0 — runs headless. Chromium falls back to SwiftShader
+//     (CPU software WebGL). For a Three.js scene with shadows + postfx
+//     + instanced meshes that pushes baseline frame time from ~10ms to
+//     ~100-300ms — the probe's HITCH_LIGHT=33ms threshold becomes
+//     meaningless in this mode (every frame "hitches" for reasons
+//     unrelated to the game's JS work) and tag attribution breaks
+//     (the 32ms window shorter than a single rendered frame). Only
+//     useful for catching pathological regressions (e.g. >2s level-
+//     gen spikes) where the noise floor doesn't matter.
+//
+//   PROBE_BASE=...   — dev server / deploy URL (default
+//                       http://localhost:8080).
+//
 // Requires playwright installed (npm i -D playwright). The script
 // will fail-soft with an install hint if it isn't.
 
@@ -18,6 +35,7 @@ import { fileURLToPath } from 'node:url';
 const HERE = dirname(fileURLToPath(import.meta.url));
 const ROOT = resolve(HERE, '..');
 const BASE = process.env.PROBE_BASE || 'http://localhost:8080';
+const HEADED = process.env.PROBE_HEADED !== '0';
 
 let chromium;
 try {
@@ -31,15 +49,20 @@ try {
   process.exit(2);
 }
 
+console.log('[probe] launching chromium (headed=' + HEADED + ')');
 const browser = await chromium.launch({
-  headless: true,
-  args: ['--enable-precise-memory-info', '--disable-extensions'],
+  headless: !HEADED,
+  args: [
+    '--enable-precise-memory-info',
+    '--disable-extensions',
+    // Real GPU rasterization + compositing when headed. These flags
+    // are no-ops in headless mode (Chromium still uses SwiftShader)
+    // but kept so a future PROBE_HEADED=0 + Vulkan path inherits them.
+    ...(HEADED ? ['--ignore-gpu-blocklist', '--enable-gpu-rasterization'] : []),
+  ],
 });
 const ctx = await browser.newContext({
   viewport: { width: 1280, height: 720 },
-  // Headless Chromium uses SwiftShader (CPU-rendered WebGL) by default.
-  // That's slower than real GPU, but the script-side hitches we're
-  // hunting (level gen, allocations, GC pauses) still surface clearly.
 });
 const page = await ctx.newPage();
 
