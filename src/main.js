@@ -13614,6 +13614,26 @@ function _flameTongueGeom() {
   }
   return _flameTongueGeom._g;
 }
+// Shared spheres for ember / smoke / flung / actor-burn particles. Was
+// `new THREE.SphereGeometry(...)` per spawn — at the 240-orb cap with
+// ~0.3-1.4s lifetimes that's 600-900 fresh Float32Arrays/sec during a
+// fire encounter, which surfaced as GC-pause hitches in playtest. The
+// tick path already overwrites `mesh.scale` per frame, so the spawn-
+// time random size was visually ineffective beyond frame 1 anyway —
+// pick a representative size per kind, let the tick scale handle the
+// life-driven animation, never dispose the geometry.
+function _emberGeom() {
+  if (!_emberGeom._g) _emberGeom._g = new THREE.SphereGeometry(0.06, 4, 3);
+  return _emberGeom._g;
+}
+function _smokeGeom() {
+  if (!_smokeGeom._g) _smokeGeom._g = new THREE.SphereGeometry(0.27, 5, 4);
+  return _smokeGeom._g;
+}
+function _flungOrbGeom() {
+  if (!_flungOrbGeom._g) _flungOrbGeom._g = new THREE.SphereGeometry(0.16, 6, 5);
+  return _flungOrbGeom._g;
+}
 function _spawnFlameTongue(x, y, z) {
   const mesh = new THREE.Mesh(
     _flameTongueGeom(),
@@ -13644,9 +13664,8 @@ function _spawnFlameTongue(x, y, z) {
   });
 }
 function _spawnEmber(x, z) {
-  const sz = 0.04 + Math.random() * 0.04;
   const mesh = new THREE.Mesh(
-    new THREE.SphereGeometry(sz, 4, 3),
+    _emberGeom(),
     new THREE.MeshBasicMaterial({
       color: 0xffe89a, transparent: true, opacity: 1,
       depthWrite: false, blending: THREE.AdditiveBlending,
@@ -13665,9 +13684,8 @@ function _spawnEmber(x, z) {
   });
 }
 function _spawnSmoke(x, y, z) {
-  const sz = 0.18 + Math.random() * 0.18;
   const mesh = new THREE.Mesh(
-    new THREE.SphereGeometry(sz, 5, 4),
+    _smokeGeom(),
     new THREE.MeshBasicMaterial({
       color: 0x202020, transparent: true, opacity: 0.35,
       depthWrite: false,   // standard blending — smoke darkens, not adds
@@ -13711,9 +13729,8 @@ function spawnFireOrbBurst(pos, radius, count = 18) {
 // seeds a small persistent burn zone at the touchdown point so the
 // splash leaves a real fire pattern instead of a single circle.
 function _spawnFlungFireOrb(pos, dirX, dirZ, speed, fireDuration, fireDps) {
-  const sz = 0.13 + Math.random() * 0.06;
   const mesh = new THREE.Mesh(
-    new THREE.SphereGeometry(sz, 6, 5),
+    _flungOrbGeom(),
     new THREE.MeshBasicMaterial({
       color: 0xff8030,
       transparent: true, opacity: 0.95,
@@ -13868,8 +13885,10 @@ function _tickFireOrbs(dt) {
     }
     if (o.t >= o.life) {
       scene.remove(o.mesh);
-      // Tongue geometry is shared/cached — don't dispose it.
-      if (o.kind !== 'tongue') o.mesh.geometry.dispose();
+      // All fire-orb kinds (tongue / ember / smoke / flung / actor-
+      // burn) now share lazy-cached geometry — never dispose it.
+      // Materials stay per-instance (color + opacity are mutated per
+      // frame) so they still dispose.
       o.mesh.material.dispose();
       _fireOrbs.splice(i, 1);
     }
@@ -17830,10 +17849,9 @@ function _spawnActorBurnFlames(actor) {
     const r = 0.28 + Math.random() * 0.18;
     const x = pos.x + Math.cos(a) * r;
     const z = pos.z + Math.sin(a) * r;
-    const sz = 0.05 + Math.random() * 0.05;
     const color = Math.random() < 0.5 ? 0xff8030 : 0xffc060;
     const mesh = new THREE.Mesh(
-      new THREE.SphereGeometry(sz, 4, 3),
+      _emberGeom(),   // shared with _spawnEmber — same size range, same look
       new THREE.MeshBasicMaterial({
         color, transparent: true, opacity: 0.85,
         depthWrite: false, blending: THREE.AdditiveBlending,
@@ -21056,7 +21074,8 @@ function _warmShaders() {
   try {
     for (const o of _fireOrbs) {
       scene.remove(o.mesh);
-      if (o.kind !== 'tongue') o.mesh.geometry.dispose();
+      // Shared geometry across all fire-orb kinds — see _tickFireOrbs
+      // retire path. Materials are per-instance, dispose those only.
       o.mesh.material.dispose();
     }
     _fireOrbs.length = 0;
