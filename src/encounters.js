@@ -5111,7 +5111,27 @@ export const ENCOUNTER_DEFS = {
     name: 'Spicy Challenge',
     floorColor: 0x802020,            // chili red
     oncePerSave: true,
-    condition: (state) => state.levelIndex >= 2,
+    // Gated on the player actually HOLDING Spicy Noodles — the
+    // encounter's only resolution path is dropping noodles at the
+    // NPC's feet, so spawning him without them in inventory burns a
+    // one-shot encounter slot the player can't progress. Spicy
+    // Noodles only drop from Shinigami (level 8+ megaboss), so this
+    // condition implicitly requires the player to have killed
+    // Shinigami at least once this run.
+    condition: (state) => {
+      if (state.levelIndex < 2) return false;
+      const inv = state.inventory;
+      if (!inv || typeof inv.allGridsIncludingPouch !== 'function') return false;
+      for (const g of inv.allGridsIncludingPouch()) {
+        if (!g || typeof g.items !== 'function') continue;
+        for (const it of g.items()) {
+          if (it && (it.id === 'junk_spicy_noodles' || it.name === 'Spicy Noodles')) {
+            return true;
+          }
+        }
+      }
+      return false;
+    },
     barks: [
       'you wanna do a spicy challenge?',
       "i'll eat anything",
