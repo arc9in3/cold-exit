@@ -1010,22 +1010,26 @@ export class MeleeEnemyManager {
     }
     e.cooldownT = Math.max(0, e.cooldownT - dt);
     // Melee boss teleport — every 9-14s of engaged combat, the boss
-    // blinks to a random open spot in its room. Counters kiting at
-    // range. Skips while idle (no aggro yet) or stunned.
+    // blinks. Default is teleportBehindPlayer (the cinematic re-engage
+    // beat the player feels every time). Skips while idle / stunned.
     //
-    // SHINIGAMI override: prefer teleportBehindPlayer so the megaboss
-    // re-engages right behind the player's facing — a horror-movie
-    // beat that pairs with his post-melee molotov ring.
-    if (e.tier === 'boss' && ctx.bossTeleport && (e.stunT || 0) <= 0
-        && e.state !== STATE.IDLE && e.state !== STATE.DEAD) {
+    // SHINIGAMI exception: random in-room blink via bossTeleport so
+    // the post-teleport molotov ring scatters around the arena
+    // instead of landing behind the player every time. Pairs with
+    // his post-melee molotov ring.
+    if (e.tier === 'boss' && (e.stunT || 0) <= 0
+        && e.state !== STATE.IDLE && e.state !== STATE.DEAD
+        && (ctx.teleportBehindPlayer || ctx.bossTeleport)) {
       e.teleportT = (e.teleportT === undefined)
         ? (9 + Math.random() * 5)
         : e.teleportT - dt;
       if (e.teleportT <= 0) {
         let ok = false;
-        if (e.shinigami && ctx.teleportBehindPlayer) {
+        if (e.shinigami) {
+          if (ctx.bossTeleport) ok = ctx.bossTeleport(e);
+        } else if (ctx.teleportBehindPlayer) {
           ok = ctx.teleportBehindPlayer(e);
-        } else {
+        } else if (ctx.bossTeleport) {
           ok = ctx.bossTeleport(e);
         }
         e.teleportT = ok ? (9 + Math.random() * 5) : 1.0;
@@ -1035,16 +1039,16 @@ export class MeleeEnemyManager {
     // (4-7s) so the player has to track them mid-fight. Skipped while
     // idle / stunned / dead.
     //
-    // Throwers prefer ctx.teleportBehindPlayer — drops them ~7-9m
-    // behind the player's facing so the player has time to spin and
-    // see the incoming knife fan. Sword variant uses random
-    // bossTeleport (in-room blink) since they want to close to melee.
+    // All cloaked variants (sword + thrower) prefer
+    // teleportBehindPlayer for the signature "appear behind you" beat.
+    // The behind-player path internally falls back to bossTeleport
+    // when no valid behind-spot exists (ctx wrapper in main.js).
     if (e.cloakedAssassin && (e.stunT || 0) <= 0
         && e.state !== STATE.IDLE && e.state !== STATE.DEAD) {
       e.teleportT -= dt;
       if (e.teleportT <= 0) {
         let ok = false;
-        if (e.cloakedThrower && ctx.teleportBehindPlayer) {
+        if (ctx.teleportBehindPlayer) {
           ok = ctx.teleportBehindPlayer(e);
         } else if (ctx.bossTeleport) {
           ok = ctx.bossTeleport(e);
