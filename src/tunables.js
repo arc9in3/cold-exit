@@ -2060,6 +2060,7 @@ export const tunables = {
       fireMode: 'grapple',
       grappleRange: 14,
       grappleEnemyDamage: 35,
+      grappleEnemyStunSec: 3.0, // hit enemy is stunned for 3s — pull lands in ~0.45s, leaves ~2.5s open punish window
       grappleSpeed: 32,        // pull travel speed (m/s) — 14m crossed in ~0.45s
       fireRate: 0.2,           // single-shot pacing (one shot per ~5s incl. reload)
       damage: 35,

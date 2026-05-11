@@ -10238,6 +10238,12 @@ function firePlayerGrapple(playerInfo, weapon, aimPoint) {
     enemy.manager.applyHit(enemy, dmg, hit.zone || 'torso', dir, { weaponClass: 'exotic' });
     if (enemy.alive) {
       enemy.staggerT = Math.max(enemy.staggerT || 0, life + 0.2);
+      // Stun the pulled enemy — paralyzes AI for the full duration so
+      // the player has a clean punish window after the reel completes.
+      // Pull lands in ~0.45s (life), leaving the remainder of stunSec
+      // as open damage time. Math.max preserves a longer existing stun.
+      const stunSec = weapon.grappleEnemyStunSec ?? 3.0;
+      enemy.stunT = Math.max(enemy.stunT || 0, stunSec);
       _activeGrapples.push({
         target: enemy, towardEnemy: false,
         srcPos: enemy.group.position,
