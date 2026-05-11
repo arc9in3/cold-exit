@@ -18986,22 +18986,45 @@ function tickCorpseDespawn(dt) {
       c._despawnT -= dt;
       const fadeStart = CORPSE_FADE_DUR;
       if (c._despawnT < fadeStart && c.group) {
-        const k = Math.max(0, c._despawnT / fadeStart);
-        c.group.traverse((obj) => {
-          if (obj.material) {
-            const apply = (m) => {
+        // Cache a flat material list on the first fade-frame. The
+        // old per-frame `group.traverse(...)` walked the entire rig
+        // tree on every frame for every fading corpse — a deep
+        // recursive walk + per-node branching for what's actually
+        // just a tight inner-loop opacity write. Late-floor sessions
+        // with 20+ corpses simultaneously fading was a dominant
+        // contributor to frame drops in playtest.
+        if (!c._fadeMaterials) {
+          const mats = [];
+          c.group.traverse((obj) => {
+            if (!obj.material) return;
+            const ms = Array.isArray(obj.material) ? obj.material : [obj.material];
+            for (const m of ms) {
               if (m._origOpacity === undefined) m._origOpacity = m.opacity ?? 1;
               m.transparent = true;
-              m.opacity = m._origOpacity * k;
-            };
-            if (Array.isArray(obj.material)) obj.material.forEach(apply);
-            else apply(obj.material);
-          }
-        });
+              mats.push(m);
+            }
+          });
+          c._fadeMaterials = mats;
+        }
+        const k = Math.max(0, c._despawnT / fadeStart);
+        const mats = c._fadeMaterials;
+        for (let j = 0; j < mats.length; j++) {
+          const m = mats[j];
+          m.opacity = m._origOpacity * k;
+        }
       }
       if (c._despawnT <= 0) {
         c.group.traverse((obj) => {
-          if (obj.geometry) obj.geometry.dispose();
+          // sharedRigGeom guard — PROJECT.md "critical interactions"
+          // rule. The actor-rig primitive cache stamps pooled geom
+          // with userData.sharedRigGeom; disposing one of those
+          // would kill every other live actor sharing that buffer.
+          // After corpse-bake the mesh holds a unique geom and this
+          // branch fires; pre-bake corpses skip dispose harmlessly
+          // (the buffer stays cached for future actors).
+          if (obj.geometry && !obj.geometry.userData?.sharedRigGeom) {
+            obj.geometry.dispose();
+          }
           if (obj.material) {
             if (Array.isArray(obj.material)) obj.material.forEach(m => m.dispose());
             else obj.material.dispose();
