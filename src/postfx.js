@@ -220,12 +220,16 @@ const FinisherShader = {
     uLosOn:    { value: 0.0 },     // 0 disables the LoS pass entirely (toggle / saves)
     uLosDark:  { value: 0.30 },    // floor brightness applied outside LoS
     uLosSoft:  { value: 0.06 },    // smoothstep edge width on the mask
-    // Hurt vignette — radial red overlay weighted toward the corners.
-    // 0 = invisible, 1 = full red bloom on the edges. Driven from
-    // outside via setHurtFlash() — main.js spikes on takeDamage, holds
-    // a sin pulse while bleeding/broken status is active.
-    uHurt:     { value: 0.0 },
-    uHurtTint: { value: new THREE.Color(0xff1a1a) },
+    // Hurt vignette — two channels.
+    //   uHurt      — transient hit flash; wide radial with a center
+    //                floor so a full spike washes the whole frame red.
+    //   uHurtPulse — persistent status pulse (bleed/broken); edge-only
+    //                radial, center stays untinted so a continuous
+    //                effect doesn't oppress mid-screen readability.
+    // Both driven from outside via setHurtFlash(spike, pulse).
+    uHurt:      { value: 0.0 },
+    uHurtPulse: { value: 0.0 },
+    uHurtTint:  { value: new THREE.Color(0xff1a1a) },
   },
   vertexShader: /* glsl */`
     varying vec2 vUv;
@@ -246,6 +250,7 @@ const FinisherShader = {
     uniform float uLosDark;
     uniform float uLosSoft;
     uniform float uHurt;
+    uniform float uHurtPulse;
     uniform vec3  uHurtTint;
     uniform float uContrast;
     uniform float uSaturation;
@@ -344,14 +349,19 @@ const FinisherShader = {
       float n = hash(gl_FragCoord.xy + uTime * 60.0) - 0.5;
       col += n * uGrain;
 
-      // Hurt vignette — radial red overlay. Center keeps a 0.45 floor
-      // so even mid-screen tints visibly red on a hit (combat still
-      // reads — the floor is far below 1.0 — but a flash at uHurt=1.0
-      // makes the whole frame go red-orange). Edges crush to 0.98
-      // (effectively full red).
+      // Hurt vignette — transient hit flash. Wide radial with a low
+      // center floor so a full spike washes the whole frame.
       if (uHurt > 0.001) {
         float radial = mix(0.22, 1.0, smoothstep(0.05, 0.65, length(c)));
         float k = clamp(uHurt * radial * 1.10, 0.0, 0.95);
+        col = mix(col, uHurtTint, k);
+      }
+      // Status pulse — edge-only red. Continuous bleed/broken effect
+      // shouldn't oppress mid-screen, so the tint stays at 0 until
+      // ~40% of the radius and ramps to full at the corners.
+      if (uHurtPulse > 0.001) {
+        float radial = smoothstep(0.42, 0.72, length(c));
+        float k = clamp(uHurtPulse * radial, 0.0, 0.85);
         col = mix(col, uHurtTint, k);
       }
 
@@ -427,12 +437,14 @@ export function createPostFx(renderer, scene, camera) {
     finisher.uniforms.uLosOn.value = enabled && texture ? 1.0 : 0.0;
   }
 
-  // Drive the hurt vignette intensity directly. Caller supplies a
-  // 0..1 level each frame (or whenever it changes). Use this from a
-  // game-code controller that combines hit-flash spikes with status
-  // pulses — postfx itself is purely render.
-  function setHurtFlash(level) {
-    finisher.uniforms.uHurt.value = Math.max(0, Math.min(1, level || 0));
+  // Drive the hurt vignette intensities directly. Caller supplies two
+  // 0..1 levels each frame: `spike` (transient hit) drives the wide
+  // full-screen flash; `pulse` (persistent status: bleed/broken) drives
+  // the edge-only tint. postfx itself is purely render — the combiner
+  // and decay live in game code.
+  function setHurtFlash(spike, pulse = 0) {
+    finisher.uniforms.uHurt.value      = Math.max(0, Math.min(1, spike || 0));
+    finisher.uniforms.uHurtPulse.value = Math.max(0, Math.min(1, pulse || 0));
   }
 
   return { composer, bloom, finisher, render, resize, setLosMask, setHurtFlash };

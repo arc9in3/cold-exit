@@ -688,7 +688,13 @@ const HURT_FLASH_DECAY = 3.0;       // 1/sec — full decay in ~333ms
 const HURT_PULSE_HZ = 1.6;          // sin pulse rate while bleed/broken
 const HURT_PULSE_BLEED = 0.35;      // peak intensity for bleed
 const HURT_PULSE_BROKEN = 0.50;     // peak intensity for broken (heavier)
+// Two stacked DOM overlays so the transient hit flash and the
+// persistent bleed/broken pulse can use different gradient shapes.
+//   spike: red-tinted across the whole frame (matches takeDamage feel).
+//   pulse: transparent center, red only at the edges — a continuous
+//          status effect shouldn't oppress mid-screen readability.
 let _hurtOverlayEl = null;
+let _hurtPulseOverlayEl = null;
 function _ensureHurtOverlay() {
   if (_hurtOverlayEl || typeof document === 'undefined') return _hurtOverlayEl;
   const el = document.createElement('div');
@@ -697,10 +703,8 @@ function _ensureHurtOverlay() {
     'position:fixed', 'inset:0', 'pointer-events:none', 'z-index:9999',
     'opacity:0',
     // Radial gradient: red-floor center → opaque red at edges.
-    // mix-blend-mode normal so the red ADDS over the scene instead
-    // of multiplying (multiply darkened invisibly on already-dark
-    // pixels). Center alpha 0.30 so a level=1 spike clearly tints
-    // the whole frame; edges 0.95 nearly fully cover.
+    // Center alpha 0.15 so a level=1 spike clearly tints the whole
+    // frame; edges 0.85 nearly fully cover.
     'background: radial-gradient(circle at center,' +
     '   rgba(220,30,30,0.15) 0%,' +
     '   rgba(220,30,30,0.40) 55%,' +
@@ -710,6 +714,28 @@ function _ensureHurtOverlay() {
   ].join(';');
   document.body.appendChild(el);
   _hurtOverlayEl = el;
+  return el;
+}
+function _ensureHurtPulseOverlay() {
+  if (_hurtPulseOverlayEl || typeof document === 'undefined') return _hurtPulseOverlayEl;
+  const el = document.createElement('div');
+  el.id = '__hurt-pulse-overlay';
+  el.style.cssText = [
+    'position:fixed', 'inset:0', 'pointer-events:none', 'z-index:9999',
+    'opacity:0',
+    // Edge-only gradient: fully transparent through ~40% of the
+    // radius, then ramps to red at the corners. Mirrors the postfx
+    // shader's uHurtPulse smoothstep band.
+    'background: radial-gradient(circle at center,' +
+    '   rgba(220,30,30,0.00) 0%,' +
+    '   rgba(220,30,30,0.00) 40%,' +
+    '   rgba(220,30,30,0.30) 70%,' +
+    '   rgba(180,10,10,0.65) 90%,' +
+    '   rgba(160,5,5,0.80) 100%)',
+    'transition: opacity 0.05s linear',
+  ].join(';');
+  document.body.appendChild(el);
+  _hurtPulseOverlayEl = el;
   return el;
 }
 // Console: __testHurt(0.8) — manually drive the hurt vignette to a
@@ -734,13 +760,17 @@ function _updateHurtFlash(dt, info) {
     const t = (typeof performance !== 'undefined' ? performance.now() : Date.now()) / 1000;
     pulse = peak * (Math.sin(t * Math.PI * 2 * HURT_PULSE_HZ) * 0.5 + 0.5);
   }
-  const level = Math.max(_hurtFlashSpike, pulse);
-  postFx.setHurtFlash(level);
-  // DOM overlay fallback (also stacks on top of postfx for users
-  // with both on — radial gradient + multiply blend mode keeps the
-  // tint contained to the corners and respects underlying scene).
-  const el = _ensureHurtOverlay();
-  if (el) el.style.opacity = level.toFixed(3);
+  // Spike + pulse drive separate render channels. The shader applies
+  // a wide radial to spike and an edge-only radial to pulse; the DOM
+  // overlays mirror those gradients. Keeping them separate (instead
+  // of combining with Math.max) is what makes the persistent
+  // bleed/broken effect read as "just the edges" while a hit still
+  // washes the whole frame.
+  postFx.setHurtFlash(_hurtFlashSpike, pulse);
+  const elSpike = _ensureHurtOverlay();
+  if (elSpike) elSpike.style.opacity = _hurtFlashSpike.toFixed(3);
+  const elPulse = _ensureHurtPulseOverlay();
+  if (elPulse) elPulse.style.opacity = pulse.toFixed(3);
 }
 
 // Footstep emitter state — accumulates horizontal distance travelled
