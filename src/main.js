@@ -20234,6 +20234,12 @@ function tick() {
     }
   }
   {
+  // _perf wrapper — exposes AI tick cost on the hitch log. Without
+  // this the gunmen/melees update path is invisible to __hitchLog
+  // (anything not wrapped in _perf shows as part of the frame total
+  // but not attributed to a system), so low-render hitches that come
+  // from a swarm-aggro cascade don't surface in playtester reports.
+  _perf.start('ai');
   gunmen.update({
     coopJoiner: _coopJoiner,
     players: _coopPlayers,
@@ -20424,6 +20430,7 @@ function tick() {
     playerBlocking: playerInfo.blocking,
     resolveCollision: enemyResolveCollision,
   });
+  _perf.end('ai');
   }   // end of gunmen/melees update block — coopJoiner flag inside the
       // managers gates the AI, not this outer wrapper, so death physics
       // + rig anim still run on joiner.
@@ -21322,33 +21329,80 @@ _warmShaders();
 // land mid-gameplay.
 try { renderer.debug.checkShaderErrors = false; } catch (_) {}
 
-// Background-preload every weapon's FBX model. First-time spawns of a
-// new weapon class were paying the FBX parse + GPU upload cost on the
-// gameplay frame the gunman was added — visible as a hitch the moment
-// you walked into a sniper room. loadModel() caches by URL, so kicking
-// the loads off here means subsequent `loadModelClone` calls hit the
-// cache instantly. Uses dynamic import so the warmup doesn't add to
-// the synchronous bundle's hot path.
+// Background-preload + pin every weapon's GLB. The CRITICAL fix here
+// is that `loadModelClone` is async — when a gunman spawns and calls
+// loadModelClone(url).then(cb), the weapon mesh lands in the scene
+// AFTER _warmShaders' renderer.compile() has already run. The compile
+// never sees the weapon material, so the FIRST render frame after a
+// new weapon class spawns synchronously compiles its shader on the
+// GPU — visible as a 50-150ms render hitch in playtester __hitchLog
+// reports.
+//
+// Fix: await every weapon GLB, pin one clone of each in a hidden FAR
+// group, stamp materials skipDispose so they survive teardown, then
+// renderer.compile + a throwaway render so the GPU commits the
+// programs. Future loadModelClone calls produce new clones; their
+// new materials hash-match the pinned ones in Three.js's
+// WebGLPrograms cache and reuse the compiled program for free.
 (async () => {
   try {
     const mm = await import('./model_manifest.js');
     const gltf = await import('./gltf_cache.js');
     const seen = new Set();
-    const enqueue = (url) => {
-      if (!url || seen.has(url)) return;
-      seen.add(url);
-      // Fire-and-forget; loadModel caches the parsed template under
-      // the URL key so any later loadModelClone(url) is a synchronous
-      // template.clone(true) instead of a fresh parse.
-      gltf.loadModelClone(url).catch(() => {});
-    };
-    for (const w of (tunables.weapons || [])) enqueue(mm.modelForItem(w));
+    const weaponUrls = [];
+    for (const w of (tunables.weapons || [])) {
+      const url = mm.modelForItem(w);
+      if (url && !seen.has(url)) { seen.add(url); weaponUrls.push(url); }
+    }
+    // Await every weapon GLB so we KNOW the materials are ready to
+    // pin. Promise.all so they load in parallel; .catch(null) keeps
+    // a single broken URL from killing the rest of the warmup.
+    const weaponClones = await Promise.all(
+      weaponUrls.map((u) => gltf.loadModelClone(u).catch(() => null)),
+    );
+    if (renderer && scene && camera) {
+      const FAR = -9999;
+      const pinGroup = new THREE.Group();
+      pinGroup.position.set(FAR, FAR, FAR);
+      pinGroup.userData.__warmupWeaponPin = true;
+      scene.add(pinGroup);
+      let pinned = 0;
+      for (const clone of weaponClones) {
+        if (!clone) continue;
+        // Skip-dispose stamp on every material so any traversal-dispose
+        // path (level regen teardown, weapon swap) leaves them alone.
+        // The pin group ITSELF is never removed.
+        clone.traverse((obj) => {
+          if (!obj.material) return;
+          const ms = Array.isArray(obj.material) ? obj.material : [obj.material];
+          for (const m of ms) {
+            if (!m) continue;
+            m.userData = m.userData || {};
+            m.userData.skipDispose = true;
+          }
+        });
+        pinGroup.add(clone);
+        pinned++;
+      }
+      // Force compile + a single throwaway render so the GPU commits
+      // the programs + uploads textures. Cost lands during the boot
+      // load sequence (where a brief stall reads as normal) rather
+      // than during the first combat encounter.
+      try { renderer.compile(scene, camera); } catch (_) {}
+      try { renderer.render(scene, camera); } catch (_) {}
+      try { console.info('[warmup] pinned', pinned, '/', weaponUrls.length, 'weapon GLBs'); } catch (_) {}
+    }
     // Small idle pause before priming the heavier non-weapon URLs so
     // the first frame the player sees can render before this finishes.
     await new Promise((r) => setTimeout(r, 250));
     for (const idTbl of [mm.MODEL_BY_ITEM_ID]) {
       if (!idTbl) continue;
-      for (const id in idTbl) enqueue('Assets/models/' + idTbl[id]);
+      for (const id in idTbl) {
+        const url = 'Assets/models/' + idTbl[id];
+        if (seen.has(url)) continue;
+        seen.add(url);
+        gltf.loadModelClone(url).catch(() => {});
+      }
     }
   } catch (_) { /* preload best-effort */ }
 })();
