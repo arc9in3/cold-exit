@@ -495,8 +495,13 @@ export class MeleeEnemyManager {
           obj.geometry.dispose();
         }
         if (obj.material) {
-          if (Array.isArray(obj.material)) obj.material.forEach(m => m.dispose());
-          else obj.material.dispose();
+          // skipDispose: see gunman.removeAll for the rationale —
+          // _warmShaders stamps boot-time materials with this flag so
+          // their compiled programs survive level-regen teardowns and
+          // stay refcounted in the WebGLPrograms cache.
+          const ds = (m) => { if (m && !m.userData?.skipDispose) m.dispose(); };
+          if (Array.isArray(obj.material)) obj.material.forEach(ds);
+          else ds(obj.material);
         }
       });
       this.scene.remove(e.group);

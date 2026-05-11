@@ -864,8 +864,16 @@ export class GunmanManager {
           obj.geometry.dispose();
         }
         if (obj.material) {
-          if (Array.isArray(obj.material)) obj.material.forEach(m => m.dispose());
-          else obj.material.dispose();
+          // skipDispose: stamp set by _warmShaders so the boot-time
+          // compiled programs stay refcounted forever. Without this the
+          // warmup is useless — disposing the warmup materials drops
+          // their program refcount to 0 and Three.js flushes the
+          // compiled program, so the first real-gameplay spawn of the
+          // same variant recompiles on the GPU during a render frame
+          // (200-400ms hitch in playtest reports).
+          const ds = (m) => { if (m && !m.userData?.skipDispose) m.dispose(); };
+          if (Array.isArray(obj.material)) obj.material.forEach(ds);
+          else ds(obj.material);
         }
       });
       this.scene.remove(g.group);

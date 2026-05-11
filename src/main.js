@@ -21170,10 +21170,35 @@ function _warmShaders() {
   // visible frame. Even at -9999 the warmup entities walk through
   // the full draw path. Single throw-away frame.
   try { renderer.render(scene, camera); } catch (_) {}
-  // Tear down the warmups. removeAll() disposes the rig geometry +
-  // materials per entity; loot.remove() returns the pool slot to
-  // the idle queue without disposing (geometry is shared, material
-  // stays compiled).
+  // Stamp every warmup material with userData.skipDispose BEFORE
+  // teardown. Three.js's WebGLPrograms cache is keyed by serialized
+  // material params and refcounted via material.dispose(); when the
+  // refcount hits zero the program is flushed. Without this stamp the
+  // warmup's removeAll() drops every warmup material's program to
+  // refcount 0 — flushing the cache and undoing the whole warmup. The
+  // first real-gameplay spawn of the same variant then recompiles its
+  // shader on a render frame, which shows up as 200-400ms hitches in
+  // playtester __hitchLog reports. With the stamp, the warmup materials
+  // stay alive forever (tiny memory cost) and pin every compiled
+  // program in cache so runtime spawns reuse them for free.
+  const stampNoDispose = (root) => {
+    if (!root) return;
+    root.traverse((obj) => {
+      if (!obj.material) return;
+      const ms = Array.isArray(obj.material) ? obj.material : [obj.material];
+      for (const m of ms) {
+        if (!m) continue;
+        m.userData = m.userData || {};
+        m.userData.skipDispose = true;
+      }
+    });
+  };
+  if (gunmen?.gunmen) for (const g of gunmen.gunmen) stampNoDispose(g.group);
+  if (melees?.enemies) for (const e of melees.enemies) stampNoDispose(e.group);
+  // Tear down the warmup entities. removeAll() disposes geometry
+  // normally; materials with skipDispose pass through untouched so
+  // their compiled programs persist. loot.remove() returns the pool
+  // slot to the idle queue without disposing (geometry is shared).
   try { gunmen.removeAll(); } catch (_) {}
   try { melees.removeAll(); } catch (_) {}
   for (const e of warmLootEntries) {
