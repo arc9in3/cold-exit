@@ -6436,6 +6436,16 @@ function regenerateLevel() {
     console.log('[coop] skipped broadcast (not host or no seed)',
       { isHost: transport.isHost, runSeed: _runSeed });
   }
+  // Post-level-build compile pass — every encounter prop, every wall
+  // variant, every fresh enemy material from this floor's roll exists
+  // in the scene by this point. Calling renderer.compile here forces
+  // their shaders + texture uploads NOW (during the natural level-load
+  // moment, where a brief stall reads as part of loading), instead of
+  // dripping into the first ~30s of gameplay as 100-3000ms render
+  // hitches when each new material first hits the camera frustum.
+  // Wrapped in try/catch so a renderer/scene glitch can't break the
+  // load flow. Cheap on subsequent calls for materials already cached.
+  try { renderer?.compile?.(scene, camera); } catch (_) {}
   return result;
 }
 function _regenerateLevelImpl() {
@@ -15009,8 +15019,16 @@ const GHOST_ACTIVE_BOOST = 0.18;   // extra visibility when actively firing
 // own room.
 const GHOST_BASE_RANGE = 10;
 
+// Module-level template — the FIRST call to _makeGhostMaterial pins
+// this template forever via userData.skipDispose so its compiled
+// program stays refcounted in the WebGLPrograms cache. Every
+// subsequent call creates a new ShaderMaterial with identical source,
+// which Three.js dedupes to the same cached program (no recompile).
+// Per-enemy materials still dispose normally when their gunmen leave
+// the scene; the template keeps the refcount >= 1.
+let _ghostMatTemplate = null;
 function _makeGhostMaterial() {
-  return new THREE.ShaderMaterial({
+  const m = new THREE.ShaderMaterial({
     uniforms: {
       uColor:   { value: new THREE.Color(0xb3b8c0) },
       uEdge:    { value: new THREE.Color(0xe2e6ee) },
@@ -15059,6 +15077,16 @@ function _makeGhostMaterial() {
     blending: THREE.NormalBlending,
     side: THREE.FrontSide,
   });
+  // First call pins the template so its program survives every
+  // gunman/melee removeAll. Three.js's program cache is keyed by
+  // serialized material params — subsequent materials with the same
+  // source reuse this template's compiled program for free.
+  if (!_ghostMatTemplate) {
+    _ghostMatTemplate = m;
+    m.userData = m.userData || {};
+    m.userData.skipDispose = true;
+  }
+  return m;
 }
 
 // Swap an enemy's renderable meshes between original materials and the
@@ -21119,14 +21147,59 @@ function _warmShaders() {
   // variants compile too. y/x/z are irrelevant — compile doesn't
   // check visibility, just that the materials exist in scene.
   const FAR = -9999;
-  // Pick a benign weapon for the warmup gunmen (any non-mythic ranged
-  // entry — the weapon mesh just needs to be in scene to compile).
-  const warmWeapon = (tunables.weapons || []).find(w =>
-    !w.artifact && w.rarity !== 'mythic' && w.type !== 'melee') || tunables.weapons?.[0];
-  try { gunmen.spawn(FAR, FAR, warmWeapon, { tier: 'normal', roomId: -1 }); } catch (_) {}
-  try { gunmen.spawn(FAR, FAR, warmWeapon, { tier: 'subBoss', roomId: -1, variant: 'shieldBearer' }); } catch (_) {}
+  // Pick one ranged weapon per class so every weapon GLB's materials
+  // compile at boot. Pre-fix this only picked ONE weapon (the first
+  // non-mythic ranged entry) and the other ~5 weapon classes paid
+  // compile cost on first-sight during gameplay — visible as 50-150ms
+  // render hitches in playtest __hitchLog reports.
+  const weaponsByClass = new Map();
+  for (const w of (tunables.weapons || [])) {
+    if (!w || w.artifact || w.rarity === 'mythic' || w.type !== 'ranged') continue;
+    if (!w.class || w.class === 'exotic') continue;
+    if (!weaponsByClass.has(w.class)) weaponsByClass.set(w.class, w);
+  }
+  const weaponList = [...weaponsByClass.values()];
+  const fallbackWeapon = weaponList[0]
+    || (tunables.weapons || []).find(w => !w.artifact && w.rarity !== 'mythic' && w.type !== 'melee')
+    || tunables.weapons?.[0];
+  // One spawn per weapon class so every weapon-GLB material compiles.
+  for (const w of weaponList) {
+    try { gunmen.spawn(FAR, FAR, w, { tier: 'normal', roomId: -1 }); } catch (_) {}
+  }
+  // One spawn per variant profile so variant-specific tints / shields /
+  // sniper-flag rigs all compile. VARIANT_PROFILES keys in gunman.js
+  // were 'standard' (covered above), 'tank', 'dasher', 'coverSeeker',
+  // 'runner', 'shieldedPistol', 'sniper'. Rotate through the weapon
+  // list so the variant spawns also exercise different weapon GLBs.
+  const VARIANT_KEYS = ['tank', 'dasher', 'coverSeeker', 'runner', 'shieldedPistol', 'sniper'];
+  let _wIdx = 0;
+  for (const variant of VARIANT_KEYS) {
+    const w = weaponList.length ? weaponList[_wIdx++ % weaponList.length] : fallbackWeapon;
+    try { gunmen.spawn(FAR, FAR, w, { tier: 'normal', roomId: -1, variant }); } catch (_) {}
+  }
+  // Tier coverage — subBoss + boss have different rig scale + tint
+  // material work. shieldBearer keeps the shield-mesh compile alive.
+  try { gunmen.spawn(FAR, FAR, fallbackWeapon, { tier: 'subBoss', roomId: -1, variant: 'shieldBearer' }); } catch (_) {}
+  try { gunmen.spawn(FAR, FAR, fallbackWeapon, { tier: 'boss', roomId: -1 }); } catch (_) {}
+  // Melee coverage — normal + shieldBearer + boss tier.
   try { melees.spawn(FAR, FAR, { tier: 'normal', roomId: -1 }); } catch (_) {}
   try { melees.spawn(FAR, FAR, { tier: 'normal', roomId: -1, variant: 'shieldBearer' }); } catch (_) {}
+  try { melees.spawn(FAR, FAR, { tier: 'boss', roomId: -1 }); } catch (_) {}
+  // Ghost material — used when an enemy is out of LoS. Was created
+  // lazily on first ghost transition per enemy, which meant the first
+  // enemy that went ghost in a level paid the compile cost during a
+  // render frame. Bootstrap the template here so the program lands
+  // in the cache + the skipDispose stamp keeps it pinned.
+  try {
+    const _ghostBootstrap = _makeGhostMaterial();
+    const _ghostMesh = new THREE.Mesh(
+      new THREE.SphereGeometry(0.1, 4, 3),
+      _ghostBootstrap,
+    );
+    _ghostMesh.position.set(FAR, FAR, FAR);
+    _ghostMesh.userData.__warmupGhost = true;
+    scene.add(_ghostMesh);
+  } catch (_) {}
   // Loot pool — warm beacon variants for legendary + epic so the
   // first rare-tier drop in gameplay (disarm push, kill loot, etc.)
   // doesn't compile its beacon shader mid-frame.
