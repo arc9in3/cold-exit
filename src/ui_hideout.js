@@ -36,6 +36,7 @@ import {
   storeNextSlotCost, storeNextCeilingCost, storeNextRefreshCost,
   getStarterInventory, addStarterInventoryItem, setStarterInventory,
   getPouchSlots, setPouchSlots, pouchNextSlotCost, POUCH_SLOT_MAX,
+  getContractSlots, setContractSlots, contractSlotUpgradeCost,
   getStartingStoreState, setStartingStoreState,
   getMerchantUpgrades, setMerchantUpgrade, merchantUpgradeNextCost, MERCHANT_KINDS, MERCHANT_UPGRADE_MAX,
   getRerollUnlocked, setRerollUnlocked, REROLL_UNLOCK_COST,
@@ -2177,6 +2178,30 @@ export class HideoutUI {
         this.render();
       });
       refreshBar.appendChild(refreshBtn);
+
+      // EXPAND SLOTS — one-time chip purchase that bumps the contract
+      // card cap from 3 to 5. Only shows while the player hasn't
+      // already bought it (getContractSlots < 5).
+      const curSlots = getContractSlots();
+      const expandCost = contractSlotUpgradeCost(curSlots);
+      if (expandCost != null) {
+        const expandBtn = document.createElement('button');
+        expandBtn.type = 'button';
+        expandBtn.className = 'hideout-btn';
+        expandBtn.textContent = `EXPAND SLOTS — ${expandCost} chips`;
+        expandBtn.style.marginLeft = '12px';
+        const have = getPersistentChips();
+        expandBtn.disabled = have < expandCost;
+        this._gateTitle(expandBtn, have, expandCost);
+        expandBtn.addEventListener('click', () => {
+          if (!this.ctx.spendChips || !this.ctx.spendChips(expandCost)) return;
+          setContractSlots(5);
+          this._toast(`Contract slots expanded to 5 · -${expandCost}c`);
+          this._cardSlots = [];   // re-roll so the new slots fill
+          this.render();
+        });
+        refreshBar.appendChild(expandBtn);
+      }
       wrap.appendChild(refreshBar);
       // No back button — cards IS the entry point now (home step
       // collapsed). Back from leaderboard / weapon flows back here.
@@ -2810,7 +2835,10 @@ export class HideoutUI {
   // active contract. Existing slots are kept stable (so the player
   // sees the same cards across renders) until they accept one.
   _refreshCardSlots(allDefs, activeId) {
-    const MAX_CARDS = 6;
+    // Slot count = player's purchased contract-slot allocation. 3 base,
+    // upgradable to 5 via a single chip purchase (see prefs.getContractSlots
+    // + the EXPAND SLOTS button on this tab).
+    const MAX_CARDS = getContractSlots();
     const cap = Math.min(MAX_CARDS, allDefs.length);
     // Drop slots that point to the active contract or to a missing
     // def, so cycling kicks in at the right moments.
@@ -4113,12 +4141,17 @@ export class HideoutUI {
         position: relative;
         width: 100%; height: 100%;
         background:
-          /* Subtle vignette so the cards-on-table area reads with
-             enough contrast for white card text. Lighter than the
-             prior overlay because the contractor.png is the focal
-             image — we don't want to mute it. */
-          radial-gradient(ellipse at center 65%, transparent 35%, rgba(12,14,22,0.55) 100%),
-          url('/Assets/contractor.png') center/cover no-repeat,
+          /* Subtle vignette toward the cards-on-table region (lower
+             third) so the white card text reads against the contractor
+             image without muting the focal area. */
+          radial-gradient(ellipse at center 80%, transparent 40%, rgba(12,14,22,0.55) 100%),
+          /* `contain` instead of `cover` shows the FULL portrait so
+             head + torso + desk are all visible. Without this the
+             panel was cropping aggressively to the chest area and
+             cutting both head and table out of frame. Anchor to
+             top so the head is at the top of the viewport and the
+             table sits naturally above where the cards will land. */
+          url('/Assets/contractor.png') center top / contain no-repeat,
           #0c0e16;
         overflow: hidden;
       }
@@ -4169,10 +4202,17 @@ export class HideoutUI {
       .board-row .board-val { color: #f2c060; font-weight: 700; }
 
       .contractor-host {
-        position: absolute; top: 30px; left: 50%;
-        transform: translateX(-50%);
-        display: flex; flex-direction: column; align-items: center;
-        gap: 14px; max-width: 540px;
+        /* Speech bubble anchored to the upper-right of the stage so
+           it floats over the dark margin next to the contractor's
+           portrait instead of covering her face (was centered above
+           which dropped the bubble directly over her eyes after the
+           contain swap). The board side-rail occupies the far right
+           on the cards step (right: 14px, width: 220px), so the host
+           sits at right: 240px to clear it. */
+        position: absolute; top: 18px; right: 240px;
+        left: auto; transform: none;
+        display: flex; flex-direction: column; align-items: flex-end;
+        gap: 14px; max-width: 320px;
       }
       /* Portrait is now baked into the contractor-stage background
          (Assets/contractor.png covers the whole panel), so the small

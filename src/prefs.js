@@ -112,6 +112,26 @@ export function pouchNextSlotCost(currentSlots) {
   return POUCH_SLOT_COSTS[currentSlots - POUCH_SLOT_MIN];
 }
 
+// Contract slot count — 3 base, upgradable to 5 via a single chip
+// purchase. Mirrors getPouchSlots wiring (above) so the same accessor
+// pattern works for both. The expansion is permanent across runs.
+const CONTRACT_SLOTS_KEY = 'tacticalrogue:contractSlots';
+const CONTRACT_SLOT_MIN = 3;
+const CONTRACT_SLOT_MAX = 5;
+const CONTRACT_SLOT_UPGRADE_COST = 1500;
+export function getContractSlots() {
+  const n = _read(CONTRACT_SLOTS_KEY, CONTRACT_SLOT_MIN) | 0;
+  return Math.max(CONTRACT_SLOT_MIN, Math.min(CONTRACT_SLOT_MAX, n || CONTRACT_SLOT_MIN));
+}
+export function setContractSlots(n) {
+  const clamped = Math.max(CONTRACT_SLOT_MIN, Math.min(CONTRACT_SLOT_MAX, n | 0));
+  _write(CONTRACT_SLOTS_KEY, clamped);
+}
+export function contractSlotUpgradeCost(currentSlots) {
+  if (currentSlots >= CONTRACT_SLOT_MAX) return null;
+  return CONTRACT_SLOT_UPGRADE_COST;
+}
+
 // Per-merchant stock-size upgrades + a one-time "reroll-any-shop"
 // unlock. Both fund out of contract chips.
 //
