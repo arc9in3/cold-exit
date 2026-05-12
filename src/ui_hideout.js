@@ -117,6 +117,29 @@ const STORE_BUFF_CATALOG = [
 ];
 const RARITY_INDEX = { common: 0, uncommon: 1, rare: 2, epic: 3, legendary: 4 };
 
+// Contract banner art — keyed by the `image` field on a contract def
+// (see CONTRACT_DEFS in contracts.js). 12 activity buckets share
+// renders across the 26 contracts so e.g. all "kill 30 gunmen"
+// variants surface the same banner. Missing entries fall through to
+// the gradient + glyph render in _portraitGlyph(). When the gen-art
+// approval workflow lands the renders, swap each path here to the
+// actual Assets/generated/gen-contract-<bucket>-via-<owner>.png
+// (same pattern as KEEPER_PORTRAIT_ART in ui_shop.js).
+const CONTRACT_BANNER_ART = {
+  firefight:     'Assets/UI/contracts/firefight.png',
+  search_crates: 'Assets/UI/contracts/search_crates.png',
+  loot_bodies:   'Assets/UI/contracts/loot_bodies.png',
+  bank_credits:  'Assets/UI/contracts/bank_credits.png',
+  extract:       'Assets/UI/contracts/extract.png',
+  dasher_hunt:   'Assets/UI/contracts/dasher_hunt.png',
+  tank_hunt:     'Assets/UI/contracts/tank_hunt.png',
+  gunman_hunt:   'Assets/UI/contracts/gunman_hunt.png',
+  boss_hunt:     'Assets/UI/contracts/boss_hunt.png',
+  megaboss_hunt: 'Assets/UI/contracts/megaboss_hunt.png',
+  pistol_only:   'Assets/UI/contracts/pistol_only.png',
+  melee_only:    'Assets/UI/contracts/melee_only.png',
+};
+
 const TAB_DEFS = [
   { id: 'contractor',   label: 'CONTRACTOR'    },
   // Stash is the chip-buy queue surface (Pre-Mission Store + paperdoll
@@ -2965,8 +2988,12 @@ export class HideoutUI {
       rewardChips.push(`<span class="rwd sigils" title="Sigils reward">+${def.sigilsReward} s</span>`);
     }
 
+    const bannerPath = (def.image && CONTRACT_BANNER_ART[def.image]) || '';
+    const portraitClass = bannerPath ? 'wanted-portrait has-banner' : 'wanted-portrait';
+    const portraitStyle = bannerPath ? ` style="background-image: url('${bannerPath}')"` : '';
+    const portraitInner = bannerPath ? '' : this._portraitGlyph(def.portrait);
     card.innerHTML = `
-      <div class="wanted-portrait" data-portrait="${def.portrait || 'any'}">${this._portraitGlyph(def.portrait)}</div>
+      <div class="${portraitClass}" data-portrait="${def.portrait || 'any'}"${portraitStyle}>${portraitInner}</div>
       <div class="wanted-head">
         <div class="wanted-name">${def.label.toUpperCase()}</div>
         <div class="wanted-conds">${subtitle}</div>
@@ -5111,6 +5138,25 @@ export class HideoutUI {
       .wanted-portrait[data-portrait="melee"]    { color: #d24868; }
       .wanted-portrait[data-portrait="boss"]     { color: #f2c060; }
       .wanted-portrait[data-portrait="megaboss"] { color: #f2a040; }
+      /* has-banner: a contract has gen-art set via CONTRACT_BANNER_ART;
+         render the image as a cover-fit background instead of the
+         CSS-gradient + glyph fallback. Subtle dark gradient stays on
+         top so the wanted-name (white) keeps contrast. */
+      .wanted-portrait.has-banner {
+        background-size: cover;
+        background-position: center;
+        background-repeat: no-repeat;
+        font-size: 0;
+        position: relative;
+      }
+      .wanted-portrait.has-banner::after {
+        content: '';
+        position: absolute; inset: 0;
+        background: linear-gradient(180deg,
+          rgba(8,10,14,0.10) 0%,
+          rgba(8,10,14,0.55) 100%);
+        pointer-events: none;
+      }
       /* Card v2 (2026-05-04): tighter hierarchy — name + conds stacked
          in one block, modifiers as iconified chips, rewards as a
          horizontal strip. Drops the "ELIMINATE TARGET" line entirely. */
@@ -5352,13 +5398,13 @@ export class HideoutUI {
         box-shadow: inset 0 -20px 30px rgba(0,0,0,0.55);
       }
       .hideout-section-portrait[data-npc="armorer"] {
-        background-image: url('/Assets/generated/art-armorer-portrait-v3-via-qwen-image-bg-1777706086510.png');
+        background-image: url('/Assets/generated/gen-keeper-armorer-v5-via-qwen-image.png');
       }
       .hideout-section-portrait[data-npc="fence"] {
         background-image: url('/Assets/generated/art-fence-portrait-v3-via-qwen-image-bg-1777705843292.png');
       }
       .hideout-section-portrait[data-npc="blackmarket"] {
-        background-image: url('/Assets/generated/art-black-marketeer-portrait-via-qwen-image-bg-1777704741765.png');
+        background-image: url('/Assets/generated/gen-keeper-broker-v5-via-qwen-image.png');
       }
       .hideout-section-portrait[data-npc="vault"] {
         background-image: url('/Assets/generated/gen-art-vault-keeper-portrait-via-qwen-image-bg-1777845441426.png');

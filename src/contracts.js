@@ -230,6 +230,7 @@ export const CONTRACT_DEFS = {
   // they hadn't unlocked options for.)
   common_clear_5: _kill({
     id: 'common_clear_5',
+    image: 'firefight',
     label: 'Sweep the Block',
     rarity: 'common',
     portrait: 'any',
@@ -238,6 +239,7 @@ export const CONTRACT_DEFS = {
   }),
   common_search_5: _kill({
     id: 'common_search_5',
+    image: 'search_crates',
     label: 'Inventory Check',
     rarity: 'common',
     portrait: 'any',
@@ -246,6 +248,7 @@ export const CONTRACT_DEFS = {
   }),
   common_loot_5: _kill({
     id: 'common_loot_5',
+    image: 'loot_bodies',
     label: 'Pat Them Down',
     rarity: 'common',
     portrait: 'any',
@@ -254,6 +257,7 @@ export const CONTRACT_DEFS = {
   }),
   common_credits_300: _kill({
     id: 'common_credits_300',
+    image: 'bank_credits',
     label: 'Make Bank',
     rarity: 'common',
     portrait: 'any',
@@ -262,6 +266,7 @@ export const CONTRACT_DEFS = {
   }),
   common_levels_2: _kill({
     id: 'common_levels_2',
+    image: 'extract',
     label: 'Two and Out',
     rarity: 'common',
     portrait: 'any',
@@ -270,6 +275,7 @@ export const CONTRACT_DEFS = {
   }),
   common_clear_15: _kill({
     id: 'common_clear_15',
+    image: 'firefight',
     label: 'Make Some Noise',
     rarity: 'common',
     portrait: 'any',
@@ -298,6 +304,7 @@ export const CONTRACT_DEFS = {
   //     a few contracts so it isn't the player's first uncommon
   uncommon_search_8: _kill({
     id: 'uncommon_search_8',
+    image: 'search_crates',
     label: 'Toss the Block',
     rarity: 'uncommon',
     portrait: 'any',
@@ -307,6 +314,7 @@ export const CONTRACT_DEFS = {
   }),
   uncommon_loot_8: _kill({
     id: 'uncommon_loot_8',
+    image: 'loot_bodies',
     label: 'Body Bagger',
     rarity: 'uncommon',
     portrait: 'any',
@@ -316,6 +324,7 @@ export const CONTRACT_DEFS = {
   }),
   uncommon_credits_500: _kill({
     id: 'uncommon_credits_500',
+    image: 'bank_credits',
     label: 'Bigger Score',
     rarity: 'uncommon',
     portrait: 'any',
@@ -325,6 +334,7 @@ export const CONTRACT_DEFS = {
   }),
   uncommon_levels_3: _kill({
     id: 'uncommon_levels_3',
+    image: 'extract',
     label: 'Deep Dive',
     rarity: 'uncommon',
     portrait: 'any',
@@ -334,6 +344,7 @@ export const CONTRACT_DEFS = {
   }),
   uncommon_dashers_8: _kill({
     id: 'uncommon_dashers_8',
+    image: 'dasher_hunt',
     label: 'Faster Than They Look',
     rarity: 'uncommon',
     portrait: 'dasher',
@@ -343,6 +354,7 @@ export const CONTRACT_DEFS = {
   }),
   uncommon_tanks_4: _kill({
     id: 'uncommon_tanks_4',
+    image: 'tank_hunt',
     label: 'Bring Down the Heavies',
     rarity: 'uncommon',
     portrait: 'tank',
@@ -352,6 +364,7 @@ export const CONTRACT_DEFS = {
   }),
   uncommon_clear_30: _kill({
     id: 'uncommon_clear_30',
+    image: 'firefight',
     label: 'Body Count',
     rarity: 'uncommon',
     portrait: 'any',
@@ -361,6 +374,7 @@ export const CONTRACT_DEFS = {
   }),
   uncommon_gunmen_15: _kill({
     id: 'uncommon_gunmen_15',
+    image: 'gunman_hunt',
     label: 'Quiet the Watchers',
     rarity: 'uncommon',
     portrait: 'gunman',
@@ -372,6 +386,7 @@ export const CONTRACT_DEFS = {
   // ============= RARE — unlock at rank 8, ONE mild modifier, marks floor ============
   rare_density_dashers: _kill({
     id: 'rare_density_dashers',
+    image: 'dasher_hunt',
     label: 'They Sent More',
     rarity: 'rare',
     portrait: 'dasher',
@@ -382,6 +397,7 @@ export const CONTRACT_DEFS = {
   }),
   rare_tough_tanks: _kill({
     id: 'rare_tough_tanks',
+    image: 'tank_hunt',
     label: 'Reinforced Plating',
     rarity: 'rare',
     portrait: 'tank',
@@ -392,6 +408,7 @@ export const CONTRACT_DEFS = {
   }),
   rare_boss_hunt: _kill({
     id: 'rare_boss_hunt',
+    image: 'boss_hunt',
     label: 'Bag the Captain',
     rarity: 'rare',
     portrait: 'boss',
@@ -404,6 +421,7 @@ export const CONTRACT_DEFS = {
   // enemyDamageMult + eliteChanceMult fields (previously dead schema).
   rare_bloodthirsty: _kill({
     id: 'rare_bloodthirsty',
+    image: 'firefight',
     label: 'Bloodthirsty',
     rarity: 'rare',
     portrait: 'any',
@@ -414,6 +432,7 @@ export const CONTRACT_DEFS = {
   }),
   rare_elite_squad: _kill({
     id: 'rare_elite_squad',
+    image: 'gunman_hunt',
     label: 'Elite Squad',
     rarity: 'rare',
     portrait: 'gunman',
@@ -426,6 +445,7 @@ export const CONTRACT_DEFS = {
   // ============= EPIC — unlock at rank 15, stacked modifiers ========================
   epic_press_wave: _kill({
     id: 'epic_press_wave',
+    image: 'firefight',
     label: 'Press Wave',
     rarity: 'epic',
     portrait: 'any',
@@ -436,6 +456,7 @@ export const CONTRACT_DEFS = {
   }),
   epic_glass_cannon: _kill({
     id: 'epic_glass_cannon',
+    image: 'firefight',
     label: 'Glass Cannon',
     rarity: 'epic',
     portrait: 'any',
@@ -446,6 +467,7 @@ export const CONTRACT_DEFS = {
   }),
   epic_iron_will: _kill({
     id: 'epic_iron_will',
+    image: 'tank_hunt',
     label: 'Iron Will',
     rarity: 'epic',
     portrait: 'tank',
@@ -459,6 +481,7 @@ export const CONTRACT_DEFS = {
   // doesn't lock the loadout (no weaponClass restriction).
   epic_warband: _kill({
     id: 'epic_warband',
+    image: 'firefight',
     label: 'Warband',
     rarity: 'epic',
     portrait: 'any',
@@ -471,6 +494,7 @@ export const CONTRACT_DEFS = {
   // ============= LEGENDARY — unlock at rank 25 + 2 megabosses; the gauntlets =======
   legendary_pistolero: _kill({
     id: 'legendary_pistolero',
+    image: 'pistol_only',
     label: 'Lone Pistol',
     rarity: 'legendary',
     portrait: 'gunman',
@@ -481,6 +505,7 @@ export const CONTRACT_DEFS = {
   }),
   legendary_knife_work: _kill({
     id: 'legendary_knife_work',
+    image: 'melee_only',
     label: 'Knife Work',
     rarity: 'legendary',
     portrait: 'melee',
@@ -491,6 +516,7 @@ export const CONTRACT_DEFS = {
   }),
   legendary_megaboss_hunt: _kill({
     id: 'legendary_megaboss_hunt',
+    image: 'megaboss_hunt',
     label: 'Megaboss Hunt',
     rarity: 'legendary',
     portrait: 'megaboss',
