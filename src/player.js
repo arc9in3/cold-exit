@@ -1855,7 +1855,18 @@ export function createPlayer(scene) {
   }
 
   function startDash(dir) {
-    if (state.dashCd > 0) return false;
+    // Mid-melee dash cancel — when the player is committed to a swing
+    // (any phase: startup / active / recovery) OR a gun-held quick-
+    // melee, a stamina dash bypasses the normal dashCd gate. Without
+    // this, a recent dash's cooldown locks the player into the swing's
+    // recovery + the next swing's wind-up, which reads as the dash
+    // input being "eaten" during melee. Stamina is still required,
+    // so spam-dashing the same swing is naturally rate-limited.
+    const a = state.attack;
+    const inMeleeCancel = a && (
+      a.phase === 'startup' || a.phase === 'active' || a.phase === 'recovery'
+    );
+    if (!inMeleeCancel && state.dashCd > 0) return false;
     if (!consumeStamina(tunables.stamina.dodgeCost)) return false;
     const d = dir.lengthSq() > 0.001 ? dir.clone().normalize() : facing.clone();
     state.mode = MODE.DASH;
