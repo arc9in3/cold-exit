@@ -92,6 +92,15 @@ export class RunStats {
     // "complete N levels" contracts read this so partial progress
     // (entered floor 5 but died) doesn't satisfy "extract from 3".
     this.levelsExtracted = 0;
+    // Phase-2/3 contract counters. Each one is bumped from a single
+    // gameplay site (main.js / gunman.js / melee_enemy.js) so the
+    // _autoEval reads in contracts.js can resolve them. Defaults at
+    // 0 mean an inactive contract sees no progress.
+    this.disarms = 0;            // bumped on each disarm-transition (gunman + melee_enemy)
+    this.distanceKills = 0;      // kills landed from > 15m
+    this.closeKills = 0;         // kills landed from < 3m
+    this.maxHeadshotStreak = 0;  // longest consecutive head-zone hit streak this run
+    this._curHeadshotStreak = 0; // current streak (private — not snapshotted)
   }
 
   markTainted() { this.tainted = true; }
@@ -134,6 +143,26 @@ export class RunStats {
   noteExtracted()          { this.extracted = true; this.levelsExtracted += 1; }
   noteContainerSearched()  { this.containersSearched += 1; }
   noteBodyLooted()         { this.bodiesLooted += 1; }
+  // Phase-2/3 contract notes.
+  noteDisarm()             { this.disarms = (this.disarms | 0) + 1; }
+  noteKillDistance(dist) {
+    if (!isFinite(dist) || dist < 0) return;
+    if (dist > 15) this.distanceKills = (this.distanceKills | 0) + 1;
+    if (dist < 3)  this.closeKills    = (this.closeKills    | 0) + 1;
+  }
+  // Streak: any non-head HIT (not kill) breaks the chain. Cheap two-
+  // counter pattern — track current + max separately so the snapshot
+  // surface only ever publishes the high-water mark.
+  noteHeadshotHit(isHead) {
+    if (isHead) {
+      this._curHeadshotStreak = (this._curHeadshotStreak | 0) + 1;
+      if (this._curHeadshotStreak > this.maxHeadshotStreak) {
+        this.maxHeadshotStreak = this._curHeadshotStreak;
+      }
+    } else {
+      this._curHeadshotStreak = 0;
+    }
+  }
 
   snapshot() {
     return {
@@ -165,6 +194,11 @@ export class RunStats {
       containersSearched: this.containersSearched | 0,
       bodiesLooted: this.bodiesLooted | 0,
       levelsExtracted: this.levelsExtracted | 0,
+      // Phase-2/3 counters surfaced to contracts.js evaluators.
+      disarms: this.disarms | 0,
+      distanceKills: this.distanceKills | 0,
+      closeKills: this.closeKills | 0,
+      maxHeadshotStreak: this.maxHeadshotStreak | 0,
     };
   }
 }

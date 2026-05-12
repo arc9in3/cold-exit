@@ -126,18 +126,18 @@ const RARITY_INDEX = { common: 0, uncommon: 1, rare: 2, epic: 3, legendary: 4 };
 // actual Assets/generated/gen-contract-<bucket>-via-<owner>.png
 // (same pattern as KEEPER_PORTRAIT_ART in ui_shop.js).
 const CONTRACT_BANNER_ART = {
-  firefight:     'Assets/UI/contracts/firefight.png',
-  search_crates: 'Assets/UI/contracts/search_crates.png',
-  loot_bodies:   'Assets/UI/contracts/loot_bodies.png',
-  bank_credits:  'Assets/UI/contracts/bank_credits.png',
-  extract:       'Assets/UI/contracts/extract.png',
-  dasher_hunt:   'Assets/UI/contracts/dasher_hunt.png',
-  tank_hunt:     'Assets/UI/contracts/tank_hunt.png',
-  gunman_hunt:   'Assets/UI/contracts/gunman_hunt.png',
-  boss_hunt:     'Assets/UI/contracts/boss_hunt.png',
-  megaboss_hunt: 'Assets/UI/contracts/megaboss_hunt.png',
-  pistol_only:   'Assets/UI/contracts/pistol_only.png',
-  melee_only:    'Assets/UI/contracts/melee_only.png',
+  firefight:     'Assets/generated/gen-contract-firefight-via-qwen-image.png',
+  search_crates: 'Assets/generated/gen-contract-search-crates-via-qwen-image-r2.png',
+  loot_bodies:   'Assets/generated/gen-contract-loot-bodies-via-qwen-image-r3.png',
+  bank_credits:  'Assets/generated/gen-contract-bank-credits-via-qwen-image.png',
+  extract:       'Assets/generated/gen-contract-extract-via-qwen-image.png',
+  dasher_hunt:   'Assets/generated/gen-contract-dasher-hunt-via-qwen-image.png',
+  tank_hunt:     'Assets/generated/gen-contract-tank-hunt-via-qwen-image-r3.png',
+  gunman_hunt:   'Assets/generated/gen-contract-gunman-hunt-via-qwen-image-r2.png',
+  boss_hunt:     'Assets/generated/gen-contract-boss-hunt-via-qwen-image-r2.png',
+  megaboss_hunt: 'Assets/generated/gen-contract-megaboss-hunt-via-qwen-image.png',
+  pistol_only:   'Assets/generated/gen-contract-pistol-only-via-qwen-image.png',
+  melee_only:    'Assets/generated/gen-contract-melee-only-via-qwen-image.png',
 };
 
 const TAB_DEFS = [
@@ -3657,6 +3657,34 @@ export class HideoutUI {
       const sign = p >= 0 ? '+' : '';
       push(p >= 0 ? 'buff' : 'penalty', '⊖', `${sign}${p}% out`, `You deal ${sign}${p}% damage`);
     }
+    // Phase-2/3 modifier chips.
+    if ((m.moveSpeedMult || 1) > 1) {
+      const p = Math.round(((m.moveSpeedMult || 1) - 1) * 100);
+      push('threat', '»', 'Tweakers', `Enemies move +${p}% faster`);
+    }
+    if (m.resurrect)       push('threat',   '↺', 'Resurrection', 'Enemies revive once 5s after death (unless headshot-killed)');
+    if (m.detonators)      push('threat',   '✱', 'Detonators',   'Every enemy explodes on death — small AOE');
+    if ((m.lifesteal || 0) > 0) {
+      const p = Math.round(m.lifesteal * 100);
+      push('threat', '⤴', `Lifesteal ${p}%`, `Enemies heal ${p}% of damage they deal to you`);
+    }
+    if (m.scarcity)        push('restrict', '⌗', 'Scarcity',     'No reloads — one magazine per weapon, period');
+    if (m.noDash)          push('restrict', '⊗', 'No Dash',      'Dash is disabled for this contract');
+    if (m.bleed)           push('penalty',  '♢', 'Bleed',        'Taking damage starts a bleed DOT — bandages cancel');
+    if ((m.hpCapMult || 1) < 1) {
+      const p = Math.round((m.hpCapMult || 1) * 100);
+      push('penalty', '♡', `${p}% max HP`, `Max HP reduced to ${p}% of normal`);
+    }
+    if ((m.runTimerSec || 0) > 0) {
+      const t = m.runTimerSec | 0;
+      const mins = Math.floor(t / 60), secs = t % 60;
+      push('penalty', '⏱', `${mins}:${String(secs).padStart(2, '0')} timer`, `Run fails ${mins}m${secs > 0 ? ` ${secs}s` : ''} after contract start`);
+    }
+    if ((m.pressurePerSec || 0) > 0) {
+      const pctPerMin = Math.round(m.pressurePerSec * 60 * 100);
+      push('penalty', '▲', 'Pressure', `Damage taken ramps +${pctPerMin}% per minute on each floor (resets on extract)`);
+    }
+    if (m.headshotsOnly)   push('restrict', '◎', 'Headshots',    'Only head shots deal damage');
 
     if (!chips.length) return '';
     return `<div class="row-mods">${chips.join('')}</div>`;

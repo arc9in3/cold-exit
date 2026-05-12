@@ -1961,6 +1961,23 @@ function _refreshActiveModifiers() {
   const claimed = !!(ac && (ac.claimedAt | 0) > 0);
   const def = (!claimed && ac) ? defForId(ac.activeContractId) : null;
   _activeModifiers = buildModifiers(def);
+  // Phase-2 state aligned to contract change. Timed Extract anchors
+  // its countdown at the moment the contract becomes active; clearing
+  // _contractTimerExpired here lets a fresh contract re-arm the timer
+  // even if the previous one already fired. Pressure floor-start
+  // also resets here so a mid-run contract pickup feels fair (no
+  // accumulated stack carried over from the old contract's clock).
+  _contractTimerStartedAt = (_activeModifiers.runTimerSec > 0) ? Date.now() : 0;
+  _contractTimerExpired = false;
+  _pressureFloorStartT = Date.now();
+  _clearBleed();
+  // hpCapMult applies via recomputeStats (final-pass scalar in
+  // derivedStats.maxHealthBonus). Without re-running recompute on
+  // contract change, the new max HP wouldn't take effect until the
+  // next inventory change. Guarded — same pattern used elsewhere when
+  // calling recomputeStats from outside its usual entry points.
+  if (typeof recomputeStats === 'function') try { recomputeStats(); } catch (_) {}
+  if (player && player.applyDerivedStats) try { player.applyDerivedStats(derivedStats); } catch (_) {}
 }
 function getActiveModifiers() { return _activeModifiers; }
 window.__activeModifiers = () => _activeModifiers;
@@ -2198,6 +2215,34 @@ function _showActiveContractReminder() {
         const sign = p >= 0 ? '+' : '';
         push(p >= 0 ? 'buff' : 'penalty', '⊖', `${sign}${p}% out`, `You deal ${sign}${p}% damage`);
       }
+      // Phase-2/3 modifier chips — kept in sync with ui_hideout.js:_renderModifierList.
+      if ((m.moveSpeedMult || 1) > 1) {
+        const p = Math.round(((m.moveSpeedMult || 1) - 1) * 100);
+        push('threat', '»', 'Tweakers', `Enemies move +${p}% faster`);
+      }
+      if (m.resurrect)       push('threat',   '↺', 'Resurrection', 'Enemies revive once 5s after death');
+      if (m.detonators)      push('threat',   '✱', 'Detonators',   'Every enemy explodes on death — small AOE');
+      if ((m.lifesteal || 0) > 0) {
+        const p = Math.round(m.lifesteal * 100);
+        push('threat', '⤴', `Lifesteal ${p}%`, `Enemies heal ${p}% of damage they deal to you`);
+      }
+      if (m.scarcity)        push('restrict', '⌗', 'Scarcity',     'No reloads — one magazine per weapon');
+      if (m.noDash)          push('restrict', '⊗', 'No Dash',      'Dash is disabled');
+      if (m.bleed)           push('penalty',  '♢', 'Bleed',        'Taking damage starts a bleed DOT — bandages cancel');
+      if ((m.hpCapMult || 1) < 1) {
+        const p = Math.round((m.hpCapMult || 1) * 100);
+        push('penalty', '♡', `${p}% max HP`, `Max HP reduced to ${p}% of normal`);
+      }
+      if ((m.runTimerSec || 0) > 0) {
+        const t = m.runTimerSec | 0;
+        const mins = Math.floor(t / 60), secs = t % 60;
+        push('penalty', '⏱', `${mins}:${String(secs).padStart(2, '0')} timer`, `Run fails ${mins}m${secs > 0 ? ` ${secs}s` : ''} after contract start`);
+      }
+      if ((m.pressurePerSec || 0) > 0) {
+        const pctPerMin = Math.round(m.pressurePerSec * 60 * 100);
+        push('penalty', '▲', 'Pressure', `Damage taken ramps +${pctPerMin}% per minute (resets on extract)`);
+      }
+      if (m.headshotsOnly)   push('restrict', '◎', 'Headshots',    'Only head shots deal damage');
       return out;
     };
 
@@ -6389,6 +6434,12 @@ function _withRunSeed(seed, fn) {
 }
 
 function regenerateLevel() {
+  // Active contract: Pressure resets per-floor. Reset here (the
+  // single funnel for "start a fresh floor") rather than at the
+  // noteExtracted call site, so transition time between extract and
+  // next-floor-start doesn't accidentally count toward the ramp.
+  _pressureFloorStartT = Date.now();
+  _clearBleed();
   // Coop seed sync — host generates a seed lazily on first level
   // generation if one isn't set yet, so the broadcast below carries
   // a valid value joiners can mirror. Single-player runs leave
@@ -10070,6 +10121,11 @@ function tickFlame(dt, playerInfo, weapon, inputState, aimInfo) {
 
 function tryReload(weapon) {
   if (!weapon || weapon.type !== 'ranged') return;
+  // Active contract: Scarcity — no reloads available. One magazine
+  // per weapon for the duration of the contract. Returns silently
+  // so the trigger / dry-fire UX doesn't queue a reload that never
+  // resolves.
+  if (_activeModifiers.scarcity) return;
   const eff = effectiveWeapon(weapon);
   if (typeof eff.magSize !== 'number') return;
   if (weapon.ammo >= eff.magSize) return;
@@ -11478,6 +11534,11 @@ function fireOneShot(playerInfo, weapon, aimPoint, isADS, aimOwner, aimZone) {
       if (hit.zone !== 'head') critChance += (derivedStats.bodyCritChanceBonus || 0);
       const crit = Math.random() < critChance;
       if (crit && hit.zone === 'head') runStats.noteCritHeadshot();
+      // Phase-2 contract counter: every ranged hit advances the
+      // headshot-streak counter (or resets it on any non-head hit).
+      // Distinct from critHeadshots — streak is hit-based, crit
+      // headshot is the kill-flavor counter.
+      runStats.noteHeadshotHit(hit.zone === 'head');
       if (crit) {
         let critMult = derivedStats.critDamageMult || 2;
         if (hit.zone !== 'head') critMult += (derivedStats.bodyCritDamageBonus || 0);
@@ -11530,7 +11591,13 @@ function fireOneShot(playerInfo, weapon, aimPoint, isADS, aimOwner, aimZone) {
         dmg = 0;
       }
       const wasAlive = hit.owner.alive;
+      const _wasDisarmed = !!hit.owner.disarmed;
       const result = hit.owner.manager.applyHit(hit.owner, dmg, hit.zone, dir, { weaponClass: weapon.class, shieldBreaker: !!weapon.shieldBreaker });
+      // Phase-2 contract counter: a fresh false→true disarm transition
+      // from this hit counts toward the `disarms` objective. Covers the
+      // primary arm-shot disarm path; rare other disarm sites (force-
+      // disarm from the tutorial path) bypass this on purpose.
+      if (!_wasDisarmed && hit.owner.disarmed) runStats.noteDisarm();
       // Shield interactions short-circuit the body-damage path. The
       // shield itself shows its own damage number (0 for a fully
       // blocked shot, the chip amount for a shield-breaker hit) and
@@ -12536,6 +12603,24 @@ function onEnemyKilled(enemy, opts = {}) {
   }
 }
 function _onEnemyKilledImpl(enemy, opts = {}) {
+  // Phase-2 contract counters — measured before any other onEnemy
+  // bookkeeping fires so kill-chains (e.g. detonator chains) don't
+  // double-count distance against the original kill's position.
+  if (enemy && enemy.group && player && player.mesh) {
+    const px = player.mesh.position.x;
+    const pz = player.mesh.position.z;
+    const dx = enemy.group.position.x - px;
+    const dz = enemy.group.position.z - pz;
+    runStats.noteKillDistance(Math.hypot(dx, dz));
+  }
+  // Active contract: Detonators — every enemy explodes on death,
+  // reusing the existing spawnKillBlast (small AOE + blood burst).
+  // Chained kills from the blast don't re-enter onEnemyKilled by
+  // design (spawnKillBlast calls applyHit directly), so this is a
+  // bounded effect — no infinite reaction.
+  if (_activeModifiers.detonators && enemy && enemy.group && !opts.silent) {
+    try { spawnKillBlast(enemy.group.position, 3.0, 30); } catch (_) {}
+  }
   // Drone-summoner death (THE HIVEMASTER): sweep every in-flight
   // drone owned by this boss so they don't continue homing in on
   // the player after the boss is down. User report 2026-05-06:
@@ -12959,6 +13044,25 @@ runStats.reset = function () {
 let _playerFireStandT = 0;
 let _playerFireLastTickT = 0;
 const _PLAYER_FIRE_STACK_PER_SEC = 1.0;   // additive per second of exposure
+
+// Phase-2/3 contract-modifier state. All reset on run start + floor
+// extract. _pressureFloorStartT is the wall-clock at the START of the
+// current floor; the Pressure modifier reads (now - it) to compute the
+// per-floor ramp factor. _playerBleedT is the remaining seconds of the
+// current bleed DOT — bumps to BLEED_DURATION on every damage tick
+// while Bleed is active, and ticks to 0 either via the per-frame tick
+// or a bandage. _contractTimerExpired blocks re-firing the run-fail
+// path once Timed Extract has already killed the player.
+let _pressureFloorStartT = Date.now();
+let _playerBleedT = 0;
+let _contractTimerExpired = false;
+// Anchor for the Timed Extract countdown. Set when a contract with
+// runTimerSec > 0 becomes active (via _refreshActiveModifiers), so
+// mid-run pickup of a 5-min contract on a 10-min-old run starts the
+// timer at zero — not auto-failing on contact.
+let _contractTimerStartedAt = 0;
+const BLEED_DURATION_S = 5.0;
+const BLEED_DPS = 4.0;
 // Coop tick — broadcast local player XZ at 5Hz under kind='pos',
 // and lerp ghost meshes toward each peer's latest reported position.
 // THIS IS SCAFFOLDING — replaced by snapshot-driven rendering when
@@ -13618,6 +13722,34 @@ function _escHtml(s) {
     .replace(/>/g, '&gt;').replace(/"/g, '&quot;');
 }
 
+// Active contract: Timed Extract — run-level wall-clock timer. When
+// the elapsed run time exceeds runTimerSec, drop player health to 0
+// so the existing death gate at the end of the tick picks it up
+// (avoids parallel death paths). One-shot via _contractTimerExpired.
+function _tickContractTimer(_dt) {
+  const limit = (_activeModifiers && _activeModifiers.runTimerSec) || 0;
+  if (limit <= 0 || _contractTimerExpired || playerDead) return;
+  if (!_contractTimerStartedAt) return;     // safety — anchor not set yet
+  const elapsed = (Date.now() - _contractTimerStartedAt) / 1000;
+  if (elapsed >= limit) {
+    _contractTimerExpired = true;
+    if (playerInfo) playerInfo.health = 0;
+    transientHudMsg('CONTRACT TIMER EXPIRED', 2.0);
+  }
+}
+// Active contract: Bleed — damage-triggered DOT. damagePlayer sets
+// _playerBleedT to BLEED_DURATION_S; this tick drains HP at BLEED_DPS
+// while the timer is alive, and counts the timer down. Bandage use
+// clears via _clearBleed() so a successful heal stops the bleed.
+function _tickBleed(dt) {
+  if (_playerBleedT <= 0) return;
+  if (playerDead) { _playerBleedT = 0; return; }
+  // Drain damage flows through damagePlayer with a special damageType
+  // so further bleed re-triggering can be filtered (avoid feedback).
+  damagePlayer(BLEED_DPS * dt, 'bleed', null);
+  _playerBleedT = Math.max(0, _playerBleedT - dt);
+}
+function _clearBleed() { _playerBleedT = 0; }
 function _decayFireStandStack(dt) {
   // Called every frame from the main tick loop. If the player hasn't
   // taken fire damage in the last 0.4s (slightly longer than a single
@@ -13643,6 +13775,34 @@ function damagePlayer(amount, damageType = 'generic', srcCtx = null) {
   // resistances scale over the modified base.
   if (_activeModifiers.playerDamageTakenMult !== 1) {
     amount *= _activeModifiers.playerDamageTakenMult;
+  }
+  // Active contract: Pressure — per-floor stat ramp. Every second
+  // spent on the floor scales inbound damage by (1 + pressurePerSec
+  // × seconds). Reset on extract. Skip the scaling when the damage
+  // source is the bleed DOT itself — that would compound exponentially.
+  if ((_activeModifiers.pressurePerSec || 0) > 0 && damageType !== 'bleed') {
+    const sec = Math.max(0, (Date.now() - _pressureFloorStartT) / 1000);
+    amount *= 1 + (_activeModifiers.pressurePerSec * sec);
+  }
+  // Active contract: Bleed — taking any damage starts (or refreshes)
+  // a HP-drain timer. _tickBleed drains BLEED_DPS until the timer
+  // expires or a bandage clears it via _clearBleed. Bleed-source
+  // damage doesn't re-arm the timer (no self-perpetuation).
+  if (_activeModifiers.bleed && damageType !== 'bleed') {
+    _playerBleedT = BLEED_DURATION_S;
+  }
+  // Active contract: Lifesteal — when an enemy hits the player, that
+  // enemy heals a fraction of the inbound (post-mult) damage. srcCtx
+  // carries the attacker reference under .source for combat hits.
+  // Healing is clamped to maxHp; non-enemy sources (env hazards,
+  // bleed DOT) have no usable .source and are ignored.
+  if ((_activeModifiers.lifesteal || 0) > 0 && srcCtx && srcCtx.source) {
+    const e = srcCtx.source;
+    if (e && typeof e.hp === 'number' && e.alive) {
+      const maxHp = (typeof e.maxHp === 'number' && e.maxHp > 0) ? e.maxHp : e.hp;
+      const heal = amount * _activeModifiers.lifesteal;
+      e.hp = Math.min(maxHp, e.hp + heal);
+    }
   }
   // Mourner's Bell relic — incoming damage scales by the bell's hidden
   // multiplier (default no-op when the relic isn't owned).
@@ -17104,6 +17264,9 @@ function applyConsumable(item) {
   if (e.kind === 'heal') {
     // Pass through `cures` so healing items can clear bleed / broken bones.
     player.heal(e.amount, { cures: e.cures || [] });
+    // Active contract: Bleed — heal items (bandages, medkits) cancel
+    // the contract-imposed bleed DOT in addition to any per-item cures.
+    _clearBleed();
     sfx.uiAccept();
     return true;
   }
@@ -19344,6 +19507,36 @@ function _showMidRunContractOffer() {
           const sign = p >= 0 ? '+' : '';
           push(p >= 0 ? 'buff' : 'penalty', '⊖', `${sign}${p}% out`, `You deal ${sign}${p}% damage`);
         }
+        // Phase-2/3 modifier chips — kept in sync with the other two
+        // chip generators (ui_hideout.js:_renderModifierList and the
+        // reminder overlay above).
+        if ((m.moveSpeedMult || 1) > 1) {
+          const p = Math.round(((m.moveSpeedMult || 1) - 1) * 100);
+          push('threat', '»', 'Tweakers', `Enemies move +${p}% faster`);
+        }
+        if (m.resurrect)       push('threat',   '↺', 'Resurrection', 'Enemies revive once 5s after death');
+        if (m.detonators)      push('threat',   '✱', 'Detonators',   'Every enemy explodes on death — small AOE');
+        if ((m.lifesteal || 0) > 0) {
+          const p = Math.round(m.lifesteal * 100);
+          push('threat', '⤴', `Lifesteal ${p}%`, `Enemies heal ${p}% of damage they deal to you`);
+        }
+        if (m.scarcity)        push('restrict', '⌗', 'Scarcity',     'No reloads — one magazine per weapon');
+        if (m.noDash)          push('restrict', '⊗', 'No Dash',      'Dash is disabled');
+        if (m.bleed)           push('penalty',  '♢', 'Bleed',        'Taking damage starts a bleed DOT — bandages cancel');
+        if ((m.hpCapMult || 1) < 1) {
+          const p = Math.round((m.hpCapMult || 1) * 100);
+          push('penalty', '♡', `${p}% max HP`, `Max HP reduced to ${p}% of normal`);
+        }
+        if ((m.runTimerSec || 0) > 0) {
+          const t = m.runTimerSec | 0;
+          const mins = Math.floor(t / 60), secs = t % 60;
+          push('penalty', '⏱', `${mins}:${String(secs).padStart(2, '0')} timer`, `Run fails ${mins}m${secs > 0 ? ` ${secs}s` : ''} after contract start`);
+        }
+        if ((m.pressurePerSec || 0) > 0) {
+          const pctPerMin = Math.round(m.pressurePerSec * 60 * 100);
+          push('penalty', '▲', 'Pressure', `Damage taken ramps +${pctPerMin}% per minute (resets on extract)`);
+        }
+        if (m.headshotsOnly)   push('restrict', '◎', 'Headshots',    'Only head shots deal damage');
         return out.length ? `<div class="row-mods">${out.join('')}</div>` : '';
       };
 
@@ -19425,6 +19618,11 @@ async function advanceFloor() {
   // run and still satisfy "extract from floor X" if they extracted
   // earlier). peakLevel is monotonic via runStats.setLevel.
   runStats.noteExtracted();
+  // Active contract: Pressure resets per floor. _tickContractTimer
+  // is run-level (no reset). Bleed clears on extract too so the
+  // player doesn't pick up the next floor mid-bleed.
+  _pressureFloorStartT = Date.now();
+  _clearBleed();
   _checkObjectiveContractClaim();
   // Mid-run reveal trigger — chip-earn / rank-up that crossed a
   // threshold during this floor unlocks the matching tab. Same
@@ -20957,6 +21155,10 @@ function tick() {
   projectiles.enemyLists = [gunmen.gunmen, melees.enemies];
   projectiles.update(dt, level, onProjectileExplode);
   _decayFireStandStack(dt);
+  // Active contract ticks. Both are cheap branches that exit early when
+  // no contract is active (timer = 0 / bleed timer = 0).
+  _tickContractTimer(dt);
+  _tickBleed(dt);
   // _tickCoop now runs above the modal-pause gate (line ~12862) so
   // it stays active during lobby / inventory / shop screens and
   // ghosts don't freeze when either peer opens a UI.
