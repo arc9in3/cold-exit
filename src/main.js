@@ -10411,10 +10411,44 @@ function firePlayerGauss(playerInfo, weapon, aimPoint) {
   runStats.addDamage(totalDmg);
   enemy.manager.applyHit(enemy, totalDmg, hit.zone || 'torso', _gr_dir,
     { weaponClass: 'exotic' });
+  // Floating damage number + impact spark on the enemy hit. Standard
+  // fire path does these via fireOneShot; the gauss handler was
+  // skipping both so the player got no damage feedback even though
+  // damage was applying. Slam crit-flag drives the brighter / larger
+  // number formatting.
+  if (typeof spawnDamageNumber === 'function' && camera) {
+    try { spawnDamageNumber(hit.point, camera, totalDmg, hit.zone || 'torso', slammed); }
+    catch (_) {}
+  }
+  combat.spawnImpact(hit.point);
+  // Hit-reaction lock — staggerT briefly pauses AI movement so the
+  // knockback impulse is actually visible. Without this, gunmen
+  // keep walking through the impulse and the shove reads as zero.
+  // Boss-tier gets a shorter stagger because their movement is the
+  // designed challenge.
+  const staggerSec = (enemy.tier === 'boss' || enemy.tier === 'subBoss') ? 0.18 : 0.30;
+  enemy.staggerT = Math.max(enemy.staggerT || 0, staggerSec);
+  // Knockback impulse — slammed enemies get the FULL push (clear
+  // signal something hit them hard); non-slam gets standard. Slammed
+  // additionally take a brief stun lock + a wall-impact spark for
+  // physical feedback.
   if (enemy.manager.applyKnockback && enemy.alive) {
-    _gr_impulse.x = _gr_dir.x * knockback;
-    _gr_impulse.z = _gr_dir.z * knockback;
+    const slamMult = slammed ? 1.6 : 1.0;
+    _gr_impulse.x = _gr_dir.x * knockback * slamMult;
+    _gr_impulse.z = _gr_dir.z * knockback * slamMult;
     enemy.manager.applyKnockback(enemy, _gr_impulse);
+  }
+  if (slammed && slamHit) {
+    // Momentary stun on a wall slam — gives the player a clean punish
+    // window after pinning them, plus communicates "you nailed it"
+    // mechanically. Boss-tier gets a shorter stun (same reason as
+    // staggerSec above).
+    const stunSec = (enemy.tier === 'boss' || enemy.tier === 'subBoss') ? 0.35 : 0.8;
+    if (enemy.alive) enemy.stunT = Math.max(enemy.stunT || 0, stunSec);
+    // Wall impact feedback — extra impact spark at the wall contact
+    // point so the player visually sees the slam connect. Pooled,
+    // no allocation cost.
+    if (slamHit.point) combat.spawnImpact(slamHit.point);
   }
 }
 
