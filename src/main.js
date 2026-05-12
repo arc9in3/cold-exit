@@ -14207,18 +14207,21 @@ function spawnMolotovShatter(pos, radius, fireDuration, fireDps) {
     _spawnEmber(pos.x + Math.cos(a) * r, pos.z + Math.sin(a) * r);
   }
   // 6 ballistic fire orbs flung outward at evenly-spaced angles with
-  // jitter, each carrying enough horizontal velocity to land within
-  // ~0.7..1.1 × radius. A short fuseDuration on each landing pool so
-  // the satellite zones decay before the central one to keep the
-  // overall area trending inward over time.
+  // jitter. Throw distance tightened (was 1.35-1.90x radius, now
+  // 0.55-0.85x) so the satellite pools land much closer to the impact
+  // point — the original distance scattered the fire across half a
+  // room which read more like fragmentation than a splash. Per-pool
+  // burn duration also bumped to match the longer base molotov life
+  // (0.85-1.05x of fireDuration) so satellites linger nearly as long
+  // as the central pool.
   const N = 6;
   for (let i = 0; i < N; i++) {
     const a = (i / N) * Math.PI * 2 + (Math.random() - 0.5) * 0.6;
     const dx = Math.cos(a), dz = Math.sin(a);
-    const speed = radius * (1.35 + Math.random() * 0.55);
+    const speed = radius * (0.55 + Math.random() * 0.30);
     _spawnFlungFireOrb(
       pos, dx, dz, speed,
-      fireDuration * (0.55 + Math.random() * 0.20),
+      fireDuration * (0.85 + Math.random() * 0.20),
       fireDps * (0.45 + Math.random() * 0.15),
     );
   }
@@ -14283,10 +14286,13 @@ function _tickFireOrbs(dt) {
         if (o.mesh.position.y <= 0.06) {
           o.landed = true;
           o.mesh.position.y = 0.06;
-          // Seed a small persistent burn zone at touchdown.
+          // Seed a persistent burn zone at touchdown. Pool radius
+          // bumped (was 0.55-0.80) so satellites overlap the central
+          // pool and read as a continuous burn pattern rather than
+          // tiny isolated dots ringing the main fire.
           spawnFireZone(
             o.mesh.position.clone(),
-            0.55 + Math.random() * 0.25,
+            1.1 + Math.random() * 0.40,
             o.fireDuration,
             o.fireDps,
           );

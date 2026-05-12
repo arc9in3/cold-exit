@@ -155,6 +155,30 @@ export class ProjectileManager {
             continue;
           }
         } else if (p.age >= p.lifetime) {
+          // Molotov design says the bottle only ignites on floor
+          // contact — see the spawn path's `bounciness: 0` for
+          // molotovs and the wall-skip branch below. The fuse field
+          // is repurposed as a safety cap (8s) so a thrown bottle
+          // that never lands (off a ledge, caught in geometry) just
+          // fizzles silently instead of igniting mid-air. Without
+          // this, a long throw whose lifetime elapses while the
+          // bottle is still arcing detonates in midair — exactly
+          // the bug playtest reported on 2026-05-11.
+          if (p.throwKind === 'molotov') {
+            p.dead = true;
+            this.scene.remove(p.body);
+            p.body.geometry?.dispose?.();
+            if (p.body.material) {
+              if (Array.isArray(p.body.material)) p.body.material.forEach(m => m.dispose());
+              else p.body.material.dispose();
+            }
+            if (p.trail) {
+              this.scene.remove(p.trail);
+              p.trail.geometry?.dispose?.();
+              p.trail.material?.dispose?.();
+            }
+            continue;
+          }
           this._detPos.copy(p.pos); this._detonate(p, this._detPos, onExplode);
           continue;
         }

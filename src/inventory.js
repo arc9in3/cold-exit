@@ -1762,10 +1762,10 @@ export const THROWABLE_DEFS = {
     id: 'thr_molotov', name: 'Molotov Cocktail', type: 'throwable', rarity: 'uncommon',
     tint: 0xc86830,
     throwKind: 'molotov',
-    aoeRadius: 3.5, fuse: 0.6,   // shatters on impact
-    fireDuration: 6.0, fireTickDps: 21,
+    aoeRadius: 3.5, fuse: 8.0,   // safety-cap — real trigger is floor contact (see projectiles.js molotov path)
+    fireDuration: 12.0, fireTickDps: 21,
     maxCharges: 2, cooldownSec: 30,
-    description: 'Pool of fire on impact · 6s burn zone · 2 charges, 30s each',
+    description: 'Pool of fire on impact · 12s burn zone · 2 charges, 30s each',
   },
   maotai_molotov: {
     // Glass Maotai bottle filled with accelerant. Bigger pool, longer
@@ -1774,10 +1774,10 @@ export const THROWABLE_DEFS = {
     id: 'thr_maotai', name: 'Maotai Molotov', type: 'throwable', rarity: 'rare',
     tint: 0xe8c060,
     throwKind: 'molotov',
-    aoeRadius: 4.4, fuse: 0.6,
-    fireDuration: 9.0, fireTickDps: 15,
+    aoeRadius: 4.4, fuse: 8.0,
+    fireDuration: 18.0, fireTickDps: 15,
     maxCharges: 1, cooldownSec: 38,
-    description: 'Wide burn pool · 9s denial zone · 1 charge, 38s',
+    description: 'Wide burn pool · 18s denial zone · 1 charge, 38s',
   },
   flashbang: {
     id: 'thr_flash', name: 'Flashbang', type: 'throwable', rarity: 'uncommon',
