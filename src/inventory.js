@@ -1751,12 +1751,17 @@ export const THROWABLE_DEFS = {
     id: 'thr_frag', name: 'Frag Grenade', type: 'throwable', rarity: 'uncommon',
     tint: 0x4a5040,
     throwKind: 'frag',
-    aoeRadius: 5.0, aoeDamage: 90, aoeShake: 0.55,
+    // aoeDamage bumped 90 → 180 (2.0x). Fuse-after-land + 1.5s timing
+    // window makes a well-placed frag genuinely difficult — it needs
+    // to one-shot a grunt at ground zero AND chunk meaningful HP off
+    // a tank to feel worth the throw. With the 25% edge falloff this
+    // is 180 at center / 99 at mid-radius / 45 at the 5m edge.
+    aoeRadius: 5.0, aoeDamage: 180, aoeShake: 0.55,
     // Fuse runs from first ground contact now (fuseAfterLand). 1.5s
     // gives the grenade visible bounce + settle before going off.
     fuse: 1.5,
     maxCharges: 1, cooldownSec: 45,
-    description: 'Timed fragmentation grenade · 5m blast · 45s cooldown',
+    description: 'Timed fragmentation grenade · 5m blast · 180 dmg · 45s cooldown',
   },
   molotov: {
     id: 'thr_molotov', name: 'Molotov Cocktail', type: 'throwable', rarity: 'uncommon',
