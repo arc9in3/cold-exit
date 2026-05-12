@@ -4320,6 +4320,35 @@
     }
     .action-slot.empty-charges,
     .weapon-slot.empty-charges { opacity: 0.55; border-color: #4a2a2a; }
+    /* Throwable charge pips — small dots along the top of the slot
+       so the player can read remaining throws at a glance instead of
+       parsing the small "N/M" text in the corner. Filled = available
+       charge; hollow = spent. Centered above the icon. */
+    .action-slot .action-charges,
+    .weapon-slot .action-charges {
+      position: absolute;
+      top: 2px;
+      left: 0; right: 0;
+      display: flex;
+      gap: 2px;
+      justify-content: center;
+      pointer-events: none;
+      z-index: 2;
+    }
+    .action-slot .action-charges .pip,
+    .weapon-slot .action-charges .pip {
+      width: 6px; height: 6px;
+      border-radius: 50%;
+      background: rgba(180,180,180,0.18);
+      border: 1px solid rgba(255,255,255,0.35);
+      box-sizing: border-box;
+    }
+    .action-slot .action-charges .pip.filled,
+    .weapon-slot .action-charges .pip.filled {
+      background: #ffd27a;
+      border-color: #ffd27a;
+      box-shadow: 0 0 4px rgba(255,210,122,0.75);
+    }
     /* Stack count badge — top-right corner of any cell holding a
        consumable with more than one in the stack. Same chrome on
        inventory pocket tiles, body-loot tiles, and hotbar slots so

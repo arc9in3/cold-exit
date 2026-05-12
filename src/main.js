@@ -13785,13 +13785,10 @@ const _flashDomes = [];
 const _flashDomePool = [];
 const _FLASH_DOME_POOL = 8;
 let _flashDomeGeom = null;
-let _flashRingGeom = null;
 function _ensureFlashDomePool() {
   if (_flashDomePool.length === _FLASH_DOME_POOL) return;
   if (!_flashDomeGeom) _flashDomeGeom = new THREE.SphereGeometry(1, 20, 14);
-  if (!_flashRingGeom) _flashRingGeom = new THREE.RingGeometry(0.85, 1.0, 32);
   for (let i = _flashDomePool.length; i < _FLASH_DOME_POOL; i++) {
-    // Outer dome — the big additive volume that fills the room briefly.
     const mat = new THREE.MeshBasicMaterial({
       color: 0xffffff, transparent: true, opacity: 0,
       depthWrite: false, blending: THREE.AdditiveBlending,
@@ -13800,32 +13797,7 @@ function _ensureFlashDomePool() {
     mesh.visible = false;
     mesh.frustumCulled = false;
     scene.add(mesh);
-    // Hot core — smaller, brighter sphere that pops faster than the
-    // dome. Reuses the same sphere geom; per-mesh material so opacity
-    // / color can animate independently of the outer dome.
-    const coreMat = new THREE.MeshBasicMaterial({
-      color: 0xffffff, transparent: true, opacity: 0,
-      depthWrite: false, blending: THREE.AdditiveBlending,
-    });
-    const core = new THREE.Mesh(_flashDomeGeom, coreMat);
-    core.visible = false;
-    core.frustumCulled = false;
-    scene.add(core);
-    // Shockwave ring — flat thin ring on the ground that snaps outward
-    // FAST so the flash reads as a propagating concussion, not just a
-    // glow. RingGeometry is a thin annulus; we scale uniformly so the
-    // visible band stays at ~1/6th the outer radius regardless of size.
-    const ringMat = new THREE.MeshBasicMaterial({
-      color: 0xeef4ff, transparent: true, opacity: 0,
-      depthWrite: false, side: THREE.DoubleSide,
-      blending: THREE.AdditiveBlending,
-    });
-    const ring = new THREE.Mesh(_flashRingGeom, ringMat);
-    ring.rotation.x = -Math.PI / 2;
-    ring.visible = false;
-    ring.frustumCulled = false;
-    scene.add(ring);
-    _flashDomePool.push({ mesh, core, ring, inUse: false });
+    _flashDomePool.push({ mesh, inUse: false });
   }
 }
 function spawnFlashDome(pos, radius, tint = 0xffffff) {
@@ -13833,26 +13805,11 @@ function spawnFlashDome(pos, radius, tint = 0xffffff) {
   let entry = _flashDomePool.find(e => !e.inUse);
   if (!entry) entry = _flashDomePool[0];
   entry.inUse = true;
-  // Outer dome — slow swell from 0.2 → radius, fades through full life.
   entry.mesh.position.copy(pos);
   entry.mesh.scale.setScalar(0.2);
   entry.mesh.material.color.setHex(tint);
   entry.mesh.material.opacity = 0.85;
   entry.mesh.visible = true;
-  // Hot core — same center, starts smaller, fades faster than the dome
-  // so the inner pop reads as "white-hot then gone" while the dome
-  // glows around it.
-  entry.core.position.copy(pos);
-  entry.core.scale.setScalar(0.1);
-  entry.core.material.color.setHex(tint);
-  entry.core.material.opacity = 1.0;
-  entry.core.visible = true;
-  // Shockwave ring on the ground — snaps outward fast, fades fast.
-  entry.ring.position.set(pos.x, 0.08, pos.z);
-  entry.ring.scale.setScalar(0.3);
-  entry.ring.material.color.setHex(tint);
-  entry.ring.material.opacity = 0.95;
-  entry.ring.visible = true;
   _flashDomes.push({ entry, t: 0, life: 0.4, radius });
 }
 function _tickFlashDomes(dt) {
@@ -13860,25 +13817,13 @@ function _tickFlashDomes(dt) {
     const d = _flashDomes[i];
     d.t += dt;
     const k = d.t / d.life;
-    const e = d.entry;
-    // Outer dome — slow swell, linear fade (same as before).
-    e.mesh.scale.setScalar(0.2 + (d.radius - 0.2) * Math.min(1, k * 1.1));
-    e.mesh.material.opacity = Math.max(0, 0.85 * (1 - k));
-    // Hot core — faster fade (3× rate, clamped). Snaps to ~0.7×radius
-    // quickly, then collapses opacity to 0 by ~33% of the entry life.
-    const kc = Math.min(1, k * 3);
-    e.core.scale.setScalar(0.1 + (d.radius * 0.65 - 0.1) * Math.min(1, k * 4));
-    e.core.material.opacity = Math.max(0, 1.0 * (1 - kc));
-    // Shockwave ring — snaps to 1.4×radius in the first 40% of life,
-    // then fades. Looks like a concussion wave radiating outward.
-    const kr = Math.min(1, k * 2.5);
-    e.ring.scale.setScalar(0.3 + (d.radius * 1.4 - 0.3) * kr);
-    e.ring.material.opacity = Math.max(0, 0.95 * (1 - kr) * (1 - kr));
+    const mesh = d.entry.mesh;
+    // Scale 0.2 → radius, opacity 0.85 → 0.
+    mesh.scale.setScalar(0.2 + (d.radius - 0.2) * Math.min(1, k * 1.1));
+    mesh.material.opacity = Math.max(0, 0.85 * (1 - k));
     if (d.t >= d.life) {
-      e.mesh.visible = false;
-      e.core.visible = false;
-      e.ring.visible = false;
-      e.inUse = false;
+      mesh.visible = false;
+      d.entry.inUse = false;
       _flashDomes.splice(i, 1);
     }
   }
@@ -18692,10 +18637,21 @@ function _renderHotbarSlot(el, barIdx, keyLabelText) {
   const tintStr = `#${tint.toString(16).padStart(6, '0')}`;
   let extra = `<span class="action-count" style="color:${tintStr}">${item.name}</span>`;
   let cooldownOverlay = '';
+  let chargesPips = '';
   if (item.type === 'throwable') {
     const max = throwableMaxCharges(item);
     const charges = item.charges | 0;
-    extra = `<span class="action-count" style="color:${tintStr}">${item.name} · ${charges}/${max}</span>`;
+    // Pip-dots above the icon — far easier to read at a glance than
+    // the small N/M text. Filled = available charge, hollow = spent.
+    // The name still shows below; the redundant "· N/M" text is
+    // dropped since the pips communicate the same thing visually.
+    if (max > 0) {
+      let pipsInner = '';
+      for (let pi = 0; pi < max; pi++) {
+        pipsInner += `<span class="pip${pi < charges ? ' filled' : ''}"></span>`;
+      }
+      chargesPips = `<div class="action-charges">${pipsInner}</div>`;
+    }
     if (charges < max && (item.cooldownT || 0) > 0) {
       const total = throwableCooldownSec(item);
       const pct = Math.max(0, Math.min(1, 1 - (item.cooldownT / total)));
@@ -18710,7 +18666,7 @@ function _renderHotbarSlot(el, barIdx, keyLabelText) {
   if (item.type === 'consumable' && ((item.count | 0) || 1) > 1) {
     stackBadge = `<span class="action-stack">×${item.count | 0}</span>`;
   }
-  el.innerHTML = `${keyLabel}${icon ? `<img src="${icon}" alt="">` : ''}${extra}${cooldownOverlay}${stackBadge}`;
+  el.innerHTML = `${keyLabel}${icon ? `<img src="${icon}" alt="">` : ''}${extra}${cooldownOverlay}${stackBadge}${chargesPips}`;
   el.classList.add('filled');
   el.classList.toggle('empty-charges',
     item.type === 'throwable' && (item.charges | 0) <= 0);
@@ -21758,8 +21714,6 @@ function _warmShaders() {
     _gasZones.length = 0;
     for (const d of _flashDomes) {
       d.entry.mesh.visible = false;
-      if (d.entry.core) d.entry.core.visible = false;
-      if (d.entry.ring) d.entry.ring.visible = false;
       d.entry.inUse = false;
     }
     _flashDomes.length = 0;
