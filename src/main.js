@@ -18056,8 +18056,8 @@ function teleportBehindPlayer(enemy) {
   if (!room) return false;
   const px = player.mesh.position.x;
   const pz = player.mesh.position.z;
-  // "Behind" = opposite the player's aim. Falls back to opposite
-  // facing if aim isn't defined.
+  // Base "behind" direction = opposite the player's aim. Falls back
+  // to opposite player facing if aim isn't defined.
   let bx, bz;
   if (lastAim && (lastAim.x !== px || lastAim.z !== pz)) {
     bx = px - lastAim.x;
@@ -18068,15 +18068,45 @@ function teleportBehindPlayer(enemy) {
   }
   const bd = Math.hypot(bx, bz) || 1;
   bx /= bd; bz /= bd;
+  // Side directions — perpendicular to "behind" in the XZ plane.
+  // Rotate (bx, bz) by ±90°: left = (-bz, bx), right = (bz, -bx).
+  const lx = -bz, lz = bx;
+  const rx = bz,  rz = -bx;
   const b = room.bounds;
-  for (let attempt = 0; attempt < 20; attempt++) {
-    const dist = 7 + Math.random() * 2.5;       // 7-9.5m behind player
-    const jitter = (Math.random() - 0.5) * 1.6;
-    const tx = px + bx * dist + bz * jitter;
-    const tz = pz + bz * dist - bx * jitter;
+  // Three position-anchor options each attempt — behind / side-left /
+  // side-right — weighted 60/20/20 toward the signature "appear right
+  // behind you" beat. The previous version only tried one direction
+  // (straight behind), so a single failed candidate left the AI
+  // teleporting back to its origin OR (via the wrapper fallback)
+  // popping to a random in-room spot which often read as "they
+  // teleported away from me." Distance also tightened — 4-7m instead
+  // of 7-9.5m — so the teleport lands in the player's peripheral
+  // vision instead of across the room.
+  for (let attempt = 0; attempt < 24; attempt++) {
+    const roll = Math.random();
+    const dx = roll < 0.60 ? bx : (roll < 0.80 ? lx : rx);
+    const dz = roll < 0.60 ? bz : (roll < 0.80 ? lz : rz);
+    const dist = 4 + Math.random() * 3;
+    // Perpendicular jitter relative to the chosen axis so spawns
+    // don't always land on the exact cardinal line.
+    const perpX = -dz, perpZ = dx;
+    const jitter = (Math.random() - 0.5) * 1.4;
+    const tx = px + dx * dist + perpX * jitter;
+    const tz = pz + dz * dist + perpZ * jitter;
+    // Room bounds — 1m buffer from walls so the enemy doesn't appear
+    // clipped into geometry. Implicitly also gates "not into locked
+    // room" because enemy.roomId is their own room; a teleport
+    // candidate outside those bounds is rejected, so a non-boss
+    // enemy can't pop into a sealed boss arena (or any other room).
     if (tx < b.minX + 1 || tx > b.maxX - 1) continue;
     if (tz < b.minZ + 1 || tz > b.maxZ - 1) continue;
+    // Wall / prop collision — same check the player's movement uses.
     if (level._collidesAt && level._collidesAt(tx, tz, 0.6)) continue;
+    // Min distance from player — 2m so the teleport doesn't land
+    // ON the player (which reads as a glitch + immediately triggers
+    // the enemy's melee swing inside the player hitbox).
+    const ddx = tx - px, ddz = tz - pz;
+    if (ddx * ddx + ddz * ddz < 4) continue;
     const oldX = enemy.group.position.x;
     const oldZ = enemy.group.position.z;
     enemy.group.position.x = tx;
