@@ -2421,7 +2421,13 @@ export class GunmanManager {
     // cached per-enemy for ~0.6s so BFS isn't run every frame, and
     // is invalidated when the player crosses a room boundary.
     let doorTarget = null;
-    if (!canSee && (g.noLosT || 0) > 0.6
+    // Smoke confusion overrides door-graph pursuit. Without this, a
+    // gunman that lost LoS to smoke and stamped lastKnownX/Z on a
+    // random smoke point would STILL get routed toward the player's
+    // actual room because pathDoorsFrom reads ctx.playerRoomId — the
+    // doorTarget then overrides approachDir downstream.
+    const _smokeConfusedForDoor = (g.smokeConfusedT || 0) > 0;
+    if (!_smokeConfusedForDoor && !canSee && (g.noLosT || 0) > 0.6
         && ctx.level
         && typeof ctx.playerRoomId === 'number'
         && ctx.playerRoomId >= 0) {
@@ -2452,7 +2458,9 @@ export class GunmanManager {
     // Fallback: if the path-graph couldn't find a route (e.g. the
     // rooms graph hit a key-gated dead end) still try the direct
     // nearest-door lookup so the enemy doesn't just stand still.
-    if (!doorTarget && !canSee && (g.noLosT || 0) > 0.8
+    // Same smoke-confusion gate as the primary doorTarget block —
+    // findDoorToward also targets the real player room.
+    if (!doorTarget && !_smokeConfusedForDoor && !canSee && (g.noLosT || 0) > 0.8
         && typeof ctx.playerRoomId === 'number'
         && ctx.playerRoomId !== g.roomId
         && ctx.findDoorToward) {
@@ -2837,9 +2845,18 @@ export class GunmanManager {
         // (within preferredRange + tolerance) so close-quarters
         // strafing reads naturally instead of snapping to
         // grid-axis movement.
+        // REGRESSION: smoke confusion stamped lastKnownX/Z onto the
+        // gunman's random smoke-aim point, but the flow-field below
+        // queries flowFieldTo(ctx.playerPos) — the REAL player. The
+        // 70/30 blend then re-routed 70% of approachDir back at the
+        // player, so a smoke-confused gunman still bee-lined through
+        // the cloud. Skip the flow-field bias while smoke-confused
+        // so the lastKnown-driven approach stays at the smoke target.
+        const smokeConfused = (g.smokeConfusedT || 0) > 0;
         const useFlow = !!aiSpatial?.flowFieldTo
           && moveSign === 1
-          && dist > (pref + tol);
+          && dist > (pref + tol)
+          && !smokeConfused;
         if (useFlow) {
           const flow = aiSpatial.flowFieldTo(ctx.playerPos.x, ctx.playerPos.z);
           if (flow && typeof flow.sample === 'function') {

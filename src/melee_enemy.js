@@ -1320,7 +1320,16 @@ export class MeleeEnemyManager {
       // We only sample when the player is more than 3m away; close-
       // quarters chase wants the direct vector so the actor doesn't
       // snap to grid axes during the strike.
-      if (aiSpatial?.flowFieldTo && ctx.level && dist > 3.0) {
+      //
+      // REGRESSION: smoke confusion was being silently overridden
+      // here. dir2d already points at the random smoke-aim point when
+      // _smokeOn is true, but the flow-field sample below targets
+      // ctx.playerPos.x/z (the REAL player), then the 70/30 blend
+      // re-routes 70% of the approach back at the player — melee
+      // chased through smoke. Skip the flow-field bias entirely
+      // while smoke-confused so dir2d's smoke-aim target drives
+      // motion unmodified.
+      if (!_smokeOn && aiSpatial?.flowFieldTo && ctx.level && dist > 3.0) {
         const flow = aiSpatial.flowFieldTo(ctx.playerPos.x, ctx.playerPos.z);
         if (flow && typeof flow.sample === 'function') {
           const dir = flow.sample(e.group.position.x, e.group.position.z);
@@ -1347,7 +1356,11 @@ export class MeleeEnemyManager {
         // chase-branch movement runs straight away.
         approach = _m_approach.set(-dir2d.x, 0, -dir2d.z);
       } else
-      if (ctx.level && ctx.playerPos) {
+      // Same regression as the flow-field bias above — door-graph
+      // routing targets the REAL player room (ctx.playerPos), so a
+      // smoke-confused melee in a different room would still beeline
+      // to the player's actual door. Skip while smoke-confused.
+      if (!_smokeOn && ctx.level && ctx.playerPos) {
         const here = ctx.level.roomAt(e.group.position.x, e.group.position.z);
         const there = ctx.level.roomAt(ctx.playerPos.x, ctx.playerPos.z);
         if (here && there && here.id !== there.id) {
