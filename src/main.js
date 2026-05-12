@@ -6440,6 +6440,10 @@ function regenerateLevel() {
   // next-floor-start doesn't accidentally count toward the ramp.
   _pressureFloorStartT = Date.now();
   _clearBleed();
+  // Per-floor flags reset at the same funnel — every new floor is a
+  // fresh shot at no_damage_floor / no_reload_floor / single_class_floor
+  // / no_consumables_floor.
+  if (runStats && runStats.resetFloor) runStats.resetFloor();
   // Coop seed sync — host generates a seed lazily on first level
   // generation if one isn't set yet, so the broadcast below carries
   // a valid value joiners can mirror. Single-player runs leave
@@ -10130,6 +10134,12 @@ function tryReload(weapon) {
   if (typeof eff.magSize !== 'number') return;
   if (weapon.ammo >= eff.magSize) return;
   if (weapon.reloadingT > 0) return;
+  // Per-floor "reloaded" flag — promoted to noReloadFloors at
+  // extract. Set BEFORE the reload actually starts so even an
+  // aborted reload (player cancels) still counts. The objective is
+  // "extract floor without needing to reload" — any reload attempt
+  // breaks the flag.
+  runStats.noteFloorReload();
   const mult = derivedStats.reloadSpeedMult || 1;
   // Shotgun Quad Load — reload time scales with shells-per-pump on top
   // of the regular reload-speed mult. shellsPerPump=4 ⇒ extra 4× faster
@@ -12613,6 +12623,8 @@ function _onEnemyKilledImpl(enemy, opts = {}) {
     const dz = enemy.group.position.z - pz;
     runStats.noteKillDistance(Math.hypot(dx, dz));
   }
+  // Multi-kill tracker — flushes at the end of the current sync stack.
+  _trackMultiKill();
   // Active contract: Detonators — every enemy explodes on death,
   // reusing the existing spawnKillBlast (small AOE + blood burst).
   // Chained kills from the blast don't re-enter onEnemyKilled by
@@ -13056,6 +13068,13 @@ const _PLAYER_FIRE_STACK_PER_SEC = 1.0;   // additive per second of exposure
 let _pressureFloorStartT = Date.now();
 let _playerBleedT = 0;
 let _contractTimerExpired = false;
+// Multi-kill burst tracker. Every onEnemyKilled in a single
+// synchronous call stack (one frag detonation, one charge cannon
+// fire, one shotgun blast, etc.) accumulates here; the microtask at
+// the end of the stack flushes — if >= 2 kills happened in that
+// burst, it counts as one multi-kill event.
+let _multiKillBurst = 0;
+let _multiKillScheduled = false;
 // Anchor for the Timed Extract countdown. Set when a contract with
 // runTimerSec > 0 becomes active (via _refreshActiveModifiers), so
 // mid-run pickup of a 5-min contract on a 10-min-old run starts the
@@ -13750,6 +13769,24 @@ function _tickBleed(dt) {
   _playerBleedT = Math.max(0, _playerBleedT - dt);
 }
 function _clearBleed() { _playerBleedT = 0; }
+// Multi-kill burst — counts deaths within one synchronous call stack
+// (queueMicrotask flushes at the end of the current microtask, which
+// is the end of the current synchronous JS frame). Two or more deaths
+// in one burst = one multi_kills event. Cross-frame kills get their
+// own burst and don't aggregate. Approximate but cheap, and covers
+// the spirit of "kills from one shot / explosion / blast" without
+// needing to instrument every multi-target damage source.
+function _trackMultiKill() {
+  _multiKillBurst++;
+  if (!_multiKillScheduled) {
+    _multiKillScheduled = true;
+    queueMicrotask(() => {
+      if (_multiKillBurst >= 2) runStats.noteMultiKill();
+      _multiKillBurst = 0;
+      _multiKillScheduled = false;
+    });
+  }
+}
 function _decayFireStandStack(dt) {
   // Called every frame from the main tick loop. If the player hasn't
   // taken fire damage in the last 0.4s (slightly longer than a single
@@ -13770,6 +13807,12 @@ function damagePlayer(amount, damageType = 'generic', srcCtx = null) {
       && Math.random() < derivedStats.flinchDodgeChance) {
     return;
   }
+  // Per-floor "took damage" flag — promoted to noDamageFloors by
+  // noteFloorExtract() on extract. Flagged on every non-dodged
+  // damage event regardless of source (env hazards, bleed, enemy
+  // hits all count — extracting after taking ANY damage breaks the
+  // no_damage_floor objective).
+  runStats.noteFloorDamage();
   // Active contract modifier: playerDamageTakenMult (Glass Cannon
   // and similar). 1.0 = neutral. Applied first so subsequent
   // resistances scale over the modified base.
@@ -19618,6 +19661,14 @@ async function advanceFloor() {
   // run and still satisfy "extract from floor X" if they extracted
   // earlier). peakLevel is monotonic via runStats.setLevel.
   runStats.noteExtracted();
+  // Promote per-floor flags into the run-level counters BEFORE we
+  // reset them. Each promotion is conditional on the flag staying in
+  // the "best case" state across this floor:
+  //   noDamageFloors      ← !floorTookDamage
+  //   noReloadFloors      ← !floorReloaded
+  //   singleClassFloors   ← floorFirstClass set && !floorMixedClass
+  //   noConsumableFloors  ← !floorUsedConsumable
+  runStats.noteFloorExtract();
   // Active contract: Pressure resets per floor. _tickContractTimer
   // is run-level (no reset). Bleed clears on extract too so the
   // player doesn't pick up the next floor mid-bleed.

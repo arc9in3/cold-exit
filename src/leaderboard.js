@@ -101,6 +101,21 @@ export class RunStats {
     this.closeKills = 0;         // kills landed from < 3m
     this.maxHeadshotStreak = 0;  // longest consecutive head-zone hit streak this run
     this._curHeadshotStreak = 0; // current streak (private — not snapshotted)
+    // Per-floor-flag-promotion counters. Each is incremented in
+    // noteFloorExtract() when the matching _floor* flag stayed in the
+    // "best case" state across the whole floor. Reset to 0 in reset()
+    // (run-start); per-floor flags reset every regenerateLevel.
+    this.noDamageFloors = 0;       // floors extracted having taken 0 damage
+    this.noReloadFloors = 0;       // floors extracted without reloading
+    this.singleClassFloors = 0;    // floors extracted firing only one weapon class
+    this.noConsumableFloors = 0;   // floors extracted without using a consumable
+    this.multiKills = 0;           // burst kill events (2+ kills in one synchronous burst)
+    // Per-floor flag state — cleared by resetFloor() each new floor.
+    this._floorTookDamage = false;
+    this._floorReloaded = false;
+    this._floorUsedConsumable = false;
+    this._floorFirstClass = null;  // first weapon class fired on this floor
+    this._floorMixedClass = false; // true once a different class is fired
   }
 
   markTainted() { this.tainted = true; }
@@ -125,6 +140,13 @@ export class RunStats {
   noteFireWeaponClass(cls) {
     this.firedShots = (this.firedShots | 0) + 1;
     if (cls && cls !== 'pistol') this.pistolOnly = false;
+    // Per-floor single-class tracking for the single_class_floor
+    // objective. First class fired anchors the floor; any later class
+    // flips _floorMixedClass true. Both reset on regenerateLevel.
+    if (cls) {
+      if (this._floorFirstClass === null) this._floorFirstClass = cls;
+      else if (this._floorFirstClass !== cls) this._floorMixedClass = true;
+    }
   }
   noteShotHit() { this.landedShots = (this.landedShots | 0) + 1; }
   // Bump an archetype counter on enemy kill. main.js calls this at
@@ -136,7 +158,7 @@ export class RunStats {
       this.archetypeKills[archetype] += 1;
     }
   }
-  noteConsumableUsed()     { this.noConsumables = false; }
+  noteConsumableUsed()     { this.noConsumables = false; this._floorUsedConsumable = true; }
   noteMeleeLanded()        { this.noMelee = false; }
   noteCritHeadshot()       { this.critHeadshots += 1; }
   noteThrowableKill()      { this.throwableKills += 1; }
@@ -163,6 +185,32 @@ export class RunStats {
       this._curHeadshotStreak = 0;
     }
   }
+  // Per-floor flag setters — main.js calls these from the relevant
+  // gameplay sites. Each is monotonic (only ever flips one direction
+  // within a floor). resetFloor() clears them at floor boundary.
+  noteFloorDamage()     { this._floorTookDamage = true; }
+  noteFloorReload()     { this._floorReloaded = true; }
+  resetFloor() {
+    this._floorTookDamage = false;
+    this._floorReloaded = false;
+    this._floorUsedConsumable = false;
+    this._floorFirstClass = null;
+    this._floorMixedClass = false;
+  }
+  // Called from main.js the moment the player successfully extracts a
+  // floor (AFTER noteExtracted, BEFORE resetFloor). Promotes the
+  // per-floor flags into the run-level counters that contracts.js
+  // _autoEval reads. Each promotion is conditional on the flag staying
+  // in the best-case state — pure flag → counter, no side effects.
+  noteFloorExtract() {
+    if (!this._floorTookDamage)     this.noDamageFloors      = (this.noDamageFloors      | 0) + 1;
+    if (!this._floorReloaded)       this.noReloadFloors      = (this.noReloadFloors      | 0) + 1;
+    if (!this._floorUsedConsumable) this.noConsumableFloors  = (this.noConsumableFloors  | 0) + 1;
+    if (this._floorFirstClass !== null && !this._floorMixedClass) {
+      this.singleClassFloors = (this.singleClassFloors | 0) + 1;
+    }
+  }
+  noteMultiKill()       { this.multiKills = (this.multiKills | 0) + 1; }
 
   snapshot() {
     return {
@@ -199,6 +247,11 @@ export class RunStats {
       distanceKills: this.distanceKills | 0,
       closeKills: this.closeKills | 0,
       maxHeadshotStreak: this.maxHeadshotStreak | 0,
+      noDamageFloors: this.noDamageFloors | 0,
+      noReloadFloors: this.noReloadFloors | 0,
+      singleClassFloors: this.singleClassFloors | 0,
+      noConsumableFloors: this.noConsumableFloors | 0,
+      multiKills: this.multiKills | 0,
     };
   }
 }
