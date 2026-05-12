@@ -10412,8 +10412,14 @@ function firePlayerRicochet(playerInfo, weapon, aimPoint) {
     const isEnemy = !!(hit.owner && hit.owner.manager && hit.owner.alive);
     if (isEnemy) {
       runStats.addDamage(dmg);
+      const _rxWasAlive = hit.owner.alive;
       hit.owner.manager.applyHit(hit.owner, dmg, hit.zone || 'torso',
         _rx_dir, { weaponClass: 'exotic' });
+      // Kill hook — loot generation + xp + cooldown refunds all live
+      // on onEnemyKilled. Without this, exotic-weapon corpses never
+      // get c.loot populated and the corpse-despawn sweep treats them
+      // as "still has loot to find" forever, leaving bodies forever.
+      if (_rxWasAlive && !hit.owner.alive) onEnemyKilled(hit.owner);
       // Floating damage number + impact spark on every ricochet
       // hit. Bounced shots that land late get the same feedback as
       // the initial shot. hit.zone === 'head' flags as crit so the
@@ -10509,8 +10515,11 @@ function firePlayerGauss(playerInfo, weapon, aimPoint) {
   const slammed = !!(slamHit && slamHit.distance <= knockback);
   const totalDmg = slammed ? baseDmg + slamBonus : baseDmg;
   runStats.addDamage(totalDmg);
+  const _grWasAlive = enemy.alive;
   enemy.manager.applyHit(enemy, totalDmg, hit.zone || 'torso', _gr_dir,
     { weaponClass: 'exotic' });
+  // Kill hook — see firePlayerRicochet for the corpse-despawn rationale.
+  if (_grWasAlive && !enemy.alive) onEnemyKilled(enemy);
   // Floating damage number + impact spark on the enemy hit. Standard
   // fire path does these via fireOneShot; the gauss handler was
   // skipping both so the player got no damage feedback even though
@@ -10596,8 +10605,14 @@ function firePlayerStickyExplosive(playerInfo, weapon, aimPoint) {
       const e = p.stuckEnemy;
       if (e && e.alive && e.manager?.applyHit) {
         try {
+          const _exWasAlive = e.alive;
           e.manager.applyHit(e, stuckBonus, 'torso',
             { x: dir.x, z: dir.z }, { weaponClass: 'exotic' });
+          // Kill hook — without onEnemyKilled, corpses from the
+          // stuck-bonus path never get c.loot populated and the
+          // despawn sweep keeps them alive forever. Same fix as
+          // firePlayerRicochet / Gauss / Charge.
+          if (_exWasAlive && !e.alive) onEnemyKilled(e);
           // Bonus-damage number — flagged crit since stuck-bonus is
           // the EX-* signature payoff (the player aimed for the
           // stick). Anchored to the enemy's current position rather
@@ -10702,8 +10717,11 @@ function firePlayerCharge(playerInfo, weapon, aimPoint, tierIdx) {
   const isEnemy = !!(hit.owner && hit.owner.manager && hit.owner.alive);
   if (!isEnemy) return;
   runStats.addDamage(dmg);
+  const _vcWasAlive = hit.owner.alive;
   hit.owner.manager.applyHit(hit.owner, dmg, hit.zone || 'torso', _vc_dir,
     { weaponClass: 'exotic' });
+  // Kill hook — see firePlayerRicochet for the corpse-despawn rationale.
+  if (_vcWasAlive && !hit.owner.alive) onEnemyKilled(hit.owner);
   // Damage number + impact spark — VC charge release was applying
   // damage cleanly but the player got no on-screen feedback, so a
   // tier-3 nova read as "where did my charge go?" Tier index >= 1
