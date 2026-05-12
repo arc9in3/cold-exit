@@ -4145,7 +4145,7 @@ export class HideoutUI {
              third) so the white card text reads against the contractor
              image without muting the focal area. */
           radial-gradient(ellipse at center 80%, transparent 40%, rgba(12,14,22,0.55) 100%),
-          /* `contain` instead of `cover` shows the FULL portrait so
+          /* contain instead of cover shows the FULL portrait so
              head + torso + desk are all visible. Without this the
              panel was cropping aggressively to the chest area and
              cutting both head and table out of frame. Anchor to
