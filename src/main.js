@@ -6865,6 +6865,36 @@ function _regenerateLevelImpl() {
       // a flamer must spawn with the flamethrower; a grenadier carries
       // a tagged AI-only projectile launcher derived from the frag
       // throwable. Other archetypes fall through to the random weapon.
+      //
+      // Cover gate: THE BURN (flamer archetype) is impossible to deal
+      // with in a sealed arena without cover — the flame cone covers
+      // a huge area with no dodge window. If the boss room has fewer
+      // than 3 free-standing props (counted inset from the room
+      // perimeter so walls + doors don't count), quietly substitute
+      // 'elite' (steady fire + dash) before the weapon override below
+      // would otherwise hand out the flamethrower.
+      if (s.archetype === 'flamer') {
+        const room = level.rooms?.find(r => r.id === s.roomId);
+        if (room) {
+          let propsInRoom = 0;
+          const INSET = 1.5;
+          for (const obs of level.obstacles) {
+            if (!obs.position) continue;
+            if (obs.userData?.isDoor) continue;
+            if (obs.position.x >= room.minX + INSET && obs.position.x <= room.maxX - INSET
+                && obs.position.z >= room.minZ + INSET && obs.position.z <= room.maxZ - INSET) {
+              propsInRoom++;
+            }
+          }
+          if (propsInRoom < 3) {
+            // Quiet substitution — happens before the boss-name
+            // announce, so the player sees "ELITE" not "THE BURN"
+            // for this fight. The flamer slot in the rotation comes
+            // back around on the next eligible boss room.
+            s.archetype = 'elite';
+          }
+        }
+      }
       let bossWeapon = pickWeaponForAI(s.variant);
       if (s.archetype === 'flamer') {
         const flame = tunables.weapons.find(w => w.fireMode === 'flame');
