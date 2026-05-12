@@ -573,19 +573,46 @@ export class Combat {
     // with a custom tint. Default impact spark is warm orange.
     entry.mesh.material.color.setHex(0xffbb55);
     entry.mesh.material.opacity = 1;
-    entry.mesh.scale.setScalar(1);
+    // Slight non-uniform scale jitter so the spark isn't a perfect
+    // sphere — reads more like a chip / spark fragment.
+    const sxs = 0.85 + Math.random() * 0.4;
+    const sys = 0.85 + Math.random() * 0.4;
+    const szs = 0.85 + Math.random() * 0.4;
+    entry.mesh.scale.set(sxs, sys, szs);
+    entry.mesh.rotation.y = Math.random() * Math.PI * 2;
     entry.mesh.visible = true;
     this.impacts.push({ entry, t: 0, life: tunables.attack.impactLife });
     // Companion dust puff — same point, larger and softer than the
-    // hot spark. Sells the "hard surface impact" beat.
-    let de = this._dustPool.find(e => !e.inUse);
-    if (!de) de = this._dustPool[0];
-    de.inUse = true;
-    de.mesh.position.copy(point);
-    de.mesh.scale.setScalar(0.6);
-    de.mesh.material.opacity = 0.55;
-    de.mesh.visible = true;
-    this.dusts.push({ entry: de, t: 0, life: 0.22 });
+    // hot spark. Sells the "hard surface impact" beat. Two puffs
+    // per impact now (was one), each with random offset + rotation
+    // + non-uniform scale so the cloud reads as a turbulent burst
+    // instead of a single sphere.
+    for (let i = 0; i < 2; i++) {
+      let de = this._dustPool.find(e => !e.inUse);
+      if (!de) de = this._dustPool[0];
+      de.inUse = true;
+      // Small position jitter — keeps puffs near the impact but
+      // separates them enough to read as distinct.
+      de.mesh.position.set(
+        point.x + (Math.random() - 0.5) * 0.18,
+        point.y + (Math.random() - 0.5) * 0.18,
+        point.z + (Math.random() - 0.5) * 0.18,
+      );
+      const dx = 0.5 + Math.random() * 0.35;
+      const dy = 0.55 + Math.random() * 0.35;
+      const dz = 0.5 + Math.random() * 0.35;
+      de.mesh.scale.set(dx, dy, dz);
+      de.mesh.rotation.set(
+        Math.random() * Math.PI,
+        Math.random() * Math.PI * 2,
+        Math.random() * Math.PI,
+      );
+      de.mesh.material.opacity = 0.45 + Math.random() * 0.20;
+      de.mesh.visible = true;
+      // Slight life jitter so the two puffs don't expire on the
+      // same frame — staggers the fade for visual variety.
+      this.dusts.push({ entry: de, t: 0, life: 0.20 + Math.random() * 0.10 });
+    }
   }
 
   // Eject a brass casing to the side of the muzzle. `dir` is the shot
@@ -878,8 +905,17 @@ export class Combat {
       d.t += dt;
       const k = d.t / d.life;
       const m = d.entry.mesh;
-      m.scale.setScalar(0.6 + k * 1.6);
-      m.material.opacity = Math.max(0, 0.55 * (1 - k));
+      // Preserve the per-puff non-uniform initial scale + the spawn-
+      // time peak opacity (set by spawnImpact). Growth factor is the
+      // same 1.6× across the puff's life; rotation set on spawn stays
+      // untouched so each puff keeps its individual tumble.
+      if (d.baseX == null) {
+        d.baseX = m.scale.x; d.baseY = m.scale.y; d.baseZ = m.scale.z;
+        d.basePeak = m.material.opacity || 0.55;
+      }
+      const g = 1 + k * 1.6;
+      m.scale.set(d.baseX * g, d.baseY * g, d.baseZ * g);
+      m.material.opacity = Math.max(0, d.basePeak * (1 - k));
       if (d.t >= d.life) {
         m.visible = false;
         d.entry.inUse = false;
