@@ -1988,13 +1988,26 @@ export class GunmanManager {
     const bossAggro = g.tier === 'boss' ? 0.5 : (g.tier === 'subBoss' ? 0.75 : 1);
     const aggInv = 1 / Math.max(0.5, g.aggression || 1);
     const reactionT = tunables.ai.reactionTime * g.profile.reactionMult * bossAggro * aggInv;
-    const preferredRange = (g.profile.preferredRange ?? tunables.ai.preferredRange)
+    let preferredRange = (g.profile.preferredRange ?? tunables.ai.preferredRange)
       * (g.tier === 'boss' ? 0.75 : 1);
     const rangeTolerance = g.profile.rangeTolerance ?? tunables.ai.rangeTolerance;
-    const moveSpeed = tunables.ai.moveSpeed * g.profile.moveSpeedMult
+    let moveSpeed = tunables.ai.moveSpeed * g.profile.moveSpeedMult
       * (g.tier === 'boss' ? 1.35 : g.tier === 'subBoss' ? 1.15 : 1)
       * (g.tier === 'boss' ? Math.min(1.6, g.aggression || 1) : 1)
       * (g._berserkMoveMult || 1);
+    // THE BURN (flamer archetype) — overrides at the read site so they
+    // commit to closing distance. The per-frame `g.flamerOverrideRange`
+    // write further down was dead code (never read anywhere); user
+    // reported the boss standing still mid-fight. Tank profile (which
+    // the flamer rides) targets 7m × 0.75 boss = 5.25m, so once the
+    // player gets within ~6.75m the boss hits moveSign=0 and parks.
+    // Drop the preferred range to 3m (well inside flamethrower's 7m
+    // cone) and double the move-speed multiplier — tank's 0.55 base
+    // mult is too sluggish for "walks through your fire" archetype.
+    if (g.archetype === 'flamer') {
+      preferredRange = Math.min(preferredRange, 3.0);
+      moveSpeed *= 2.0;
+    }
 
     if (canSee) {
       if (g.state === STATE.IDLE) {
@@ -3078,15 +3091,10 @@ export class GunmanManager {
         }
       }
 
-      // Flamer boss — short engagement range and zero settle pause so
-      // they keep walking forward through your fire. The flamethrower
-      // weapon already enforces the long reload window the player
-      // exploits to land hits. Push preferred range way down so they
-      // lock onto closing distance instead of camping.
-      if (g.archetype === 'flamer') {
-        // overwrite per-frame range goal
-        g.flamerOverrideRange = 4.0;
-      }
+      // Flamer engagement parameters now live at the top of update()
+      // where preferredRange + moveSpeed are computed (see THE BURN
+      // override there). This block intentionally removed — the
+      // per-frame g.flamerOverrideRange write was dead (never read).
 
       // Elite Gunman — always strafing, always dashing on a short
       // cadence. Override dasher's passive cooldown with a faster one.
