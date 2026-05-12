@@ -9,6 +9,10 @@ export class Combat {
     this.scene = scene;
     this.tracers = [];
     this.flashes = [];
+    // Beams — thick tracers used by charge weapons (VC-*). Same pool
+    // pattern as tracers; lives in a separate list because the visual
+    // (cylinder mesh) and tick (scale + opacity fade) differ.
+    this.beams = [];
     this.impacts = [];
     this.arcs = [];
     this.bloods = [];   // small red spheres that arc and fade
@@ -517,7 +521,15 @@ export class Combat {
   //   should set this false for pellets 2..N so a 9-pellet volley
   //   emits a single flash instead of nine overlapping spheres.
   spawnShot(origin, endPoint, tracerColor, opts = {}) {
-    this._spawnTracer(origin, endPoint, tracerColor);
+    // Charge-weapon path — opts.thickness > 0 swaps the thin tracer
+    // line for a cylinder beam whose radius scales with the achieved
+    // charge tier. The pool is small (12) since charge weapons fire
+    // infrequently relative to autos.
+    if ((opts.thickness || 0) > 0) {
+      this._spawnBeam(origin, endPoint, tracerColor, opts.thickness);
+    } else {
+      this._spawnTracer(origin, endPoint, tracerColor);
+    }
     if (opts.flash !== false) this._spawnFlash(origin, tracerColor, opts.light !== false);
   }
   // Public standalone flash — call this once per fire event when you
@@ -725,6 +737,20 @@ export class Combat {
         entry.line.visible = false;
         entry.inUse = false;
         this.tracers.splice(i, 1);
+      }
+    }
+    // Beams — fade opacity over life, return entry on expire. Same
+    // pool pattern as tracers; the cylinder mesh stays in scene with
+    // visible=false so subsequent spawns are a state-mutation only.
+    for (let i = this.beams.length - 1; i >= 0; i--) {
+      const bm = this.beams[i];
+      bm.t += dt;
+      const entry = bm.entry;
+      entry.mat.opacity = Math.max(0, 1 - bm.t / bm.life);
+      if (bm.t >= bm.life) {
+        entry.mesh.visible = false;
+        entry.inUse = false;
+        this.beams.splice(i, 1);
       }
     }
     for (let i = this.flashes.length - 1; i >= 0; i--) {
@@ -1094,6 +1120,29 @@ export class Combat {
       this.scene.add(L);
       this._lightPool.push({ light: L, inUse: false });
     }
+    // Beam pool — thick variable-radius tracer used by charge weapons
+    // (VC-*). A line can't render with arbitrary thickness in WebGL
+    // (browsers ignore linewidth on default Line geometry), so we
+    // use a unit cylinder oriented from a→b instead. Geometry is
+    // shared across the pool; per-mesh material so colors + fade
+    // opacity are independent. lookAt() handles a→b orientation.
+    const BEAM_POOL = 12;
+    this._beamGeom = new THREE.CylinderGeometry(1, 1, 1, 12, 1, true);
+    // Default cylinder axis is Y; rotate so +Z is the long axis →
+    // lookAt(b) below points the geometry toward the target naturally.
+    this._beamGeom.rotateX(Math.PI / 2);
+    this._beamPool = [];
+    for (let i = 0; i < BEAM_POOL; i++) {
+      const mat = new THREE.MeshBasicMaterial({
+        color: 0x40d0ff, transparent: true, opacity: 0,
+        depthWrite: false, blending: THREE.AdditiveBlending,
+      });
+      const m = new THREE.Mesh(this._beamGeom, mat);
+      m.visible = false;
+      m.frustumCulled = false;
+      this.scene.add(m);
+      this._beamPool.push({ mesh: m, mat, inUse: false });
+    }
     // Impact spark pool — small additive sphere per bullet hit. Was
     // allocating a fresh SphereGeometry + MeshBasicMaterial per call
     // inside spawnImpact; with shotgun pellets across multiple
@@ -1245,6 +1294,44 @@ export class Combat {
     g.fillRect(0, 0, 64, 64);
     this._smokeTex = new THREE.CanvasTexture(c);
     return this._smokeTex;
+  }
+
+  // Thick beam — cylinder oriented from a→b, radius scales with the
+  // requested thickness. Used by charge weapons (VC-*) to communicate
+  // tier visually: tier-3 beam reads as a fat plasma column, tier-1
+  // as a slim energy stripe. Pooled via _ensurePools. Lifetime + fade
+  // ticked in update(). Module-scope scratch for the midpoint copy so
+  // per-shot cost stays at one mesh state mutation.
+  _spawnBeam(a, b, color, thickness) {
+    this._ensurePools();
+    let entry = this._beamPool.find(e => !e.inUse);
+    if (!entry) entry = this._beamPool[0];
+    entry.inUse = true;
+    const dx = b.x - a.x, dy = b.y - a.y, dz = b.z - a.z;
+    const len = Math.hypot(dx, dy, dz);
+    if (len < 0.001) {
+      entry.inUse = false;
+      return;
+    }
+    entry.mesh.position.set(
+      (a.x + b.x) * 0.5,
+      (a.y + b.y) * 0.5,
+      (a.z + b.z) * 0.5,
+    );
+    // Cylinder geometry was rotated so +Z is the long axis (see
+    // _ensurePools). lookAt orients +Z toward `b`; scale.z stretches
+    // along the beam, scale.x/y set the radius.
+    entry.mesh.scale.set(thickness, thickness, len);
+    entry.mesh.lookAt(b.x, b.y, b.z);
+    entry.mat.color.setHex(color ?? 0x40d0ff);
+    entry.mat.opacity = 1;
+    entry.mesh.visible = true;
+    this.beams.push({
+      entry, t: 0,
+      // Beams live a touch longer than tracers so the visual reads
+      // as a sustained beam, not a flash. ~2× tracerLife.
+      life: (tunables.attack.tracerLife || 0.10) * 2.2,
+    });
   }
 
   _spawnTracer(a, b, color) {
