@@ -17333,9 +17333,49 @@ const _gasZones = [];
 // Anything inside (player + enemies) takes per-second drains: 5%
 // max HP / 10% stamina for the player, 5% HP for enemies. Visual
 // is a translucent green dome + ground ring matching smoke zones.
+// Gas-cloud puff color palette — sickly greens that read as toxic
+// gas. Sized + animated identically to smoke puffs (same shared
+// sphere geom via _smokeCloudGeom) so the visual rhythm matches;
+// only the tint distinguishes the two systems.
+const _GAS_CLOUD_COLORS = [0x80e060, 0x60c050, 0xa0e870, 0x70b040];
+function _spawnGasCloudPuff(zone) {
+  const r = zone.radius * (0.15 + Math.random() * 0.75);
+  const a = Math.random() * Math.PI * 2;
+  const x = zone.x + Math.cos(a) * r;
+  const z = zone.z + Math.sin(a) * r;
+  const y = 0.15 + Math.random() * 0.35;
+  const color = _GAS_CLOUD_COLORS[(Math.random() * _GAS_CLOUD_COLORS.length) | 0];
+  const mat = new THREE.MeshBasicMaterial({
+    color, transparent: true, opacity: 0,
+    depthWrite: false,
+  });
+  const mesh = new THREE.Mesh(_smokeCloudGeom(), mat);
+  mesh.position.set(x, y, z);
+  const initScale = 0.7 + Math.random() * 0.6;
+  mesh.scale.setScalar(initScale);
+  mesh.rotation.y = Math.random() * Math.PI * 2;
+  scene.add(mesh);
+  zone.puffs.push({
+    mesh, mat,
+    vy: 0.20 + Math.random() * 0.25,
+    dx: (Math.random() - 0.5) * 0.4,
+    dz: (Math.random() - 0.5) * 0.4,
+    life: 1.6 + Math.random() * 1.0,
+    t: 0,
+    baseScale: initScale,
+    growth: 0.6 + Math.random() * 0.8,
+    // Gas puffs read a touch more opaque than smoke (toxic clouds
+    // should feel denser) — 0.45-0.75 vs smoke's 0.40-0.65.
+    peakOpacity: 0.45 + Math.random() * 0.30,
+  });
+}
 function spawnGasZone(pos, radius, duration, owner = 'player') {
+  // Static dome + ring dialled down to match the smoke-grenade
+  // treatment — the puff emitter (see _tickThrowableZones gas loop)
+  // carries the bulk of the visual now, so the static base is just
+  // a soft tint marking the zone radius.
   const baseMat = new THREE.MeshBasicMaterial({
-    color: 0x60d040, transparent: true, opacity: 0.40,
+    color: 0x60d040, transparent: true, opacity: 0.22,
     depthWrite: false, side: THREE.DoubleSide,
   });
   const ring = new THREE.Mesh(new THREE.CircleGeometry(radius, 24), baseMat);
@@ -17343,13 +17383,17 @@ function spawnGasZone(pos, radius, duration, owner = 'player') {
   ring.position.set(pos.x, 0.05, pos.z);
   scene.add(ring);
   const domeMat = new THREE.MeshBasicMaterial({
-    color: 0x80e060, transparent: true, opacity: 0.32,
+    color: 0x80e060, transparent: true, opacity: 0.18,
     depthWrite: false,
   });
   const dome = new THREE.Mesh(new THREE.SphereGeometry(radius, 16, 8, 0, Math.PI * 2, 0, Math.PI / 2), domeMat);
   dome.position.set(pos.x, 0, pos.z);
   scene.add(dome);
-  _gasZones.push({ x: pos.x, z: pos.z, radius, life: duration, t: 0, ring, dome, owner });
+  _gasZones.push({
+    x: pos.x, z: pos.z, radius, life: duration, t: 0, ring, dome, owner,
+    nextPuffT: 0,
+    puffs: [],
+  });
 }
 
 // Shared sphere geometry for grenade smoke puffs. Per-instance materials
@@ -17510,8 +17554,42 @@ function _tickThrowableZones(dt) {
     const fade = z.t > z.life * 0.7
       ? Math.max(0, (z.life - z.t) / (z.life * 0.3))
       : 1;
-    z.ring.material.opacity = 0.40 * fade;
-    z.dome.material.opacity = 0.32 * fade;
+    z.ring.material.opacity = 0.22 * fade;
+    z.dome.material.opacity = 0.18 * fade;
+    // Particle puffs — same pattern as smoke grenades. Build phase
+    // (first 25%) emits fast to fill the volume; sustain emits at
+    // half cadence; last 25% stops emitting so the cloud thins out
+    // naturally before zone expiry instead of cutting cold.
+    if (z.t < z.life * 0.75 && z.puffs.length < Math.ceil(z.radius * 6)) {
+      z.nextPuffT -= dt;
+      if (z.nextPuffT <= 0) {
+        const buildPhase = z.t < z.life * 0.25;
+        z.nextPuffT = (buildPhase ? 0.08 : 0.18) + Math.random() * 0.10;
+        _spawnGasCloudPuff(z);
+        if (Math.random() < 0.55) _spawnGasCloudPuff(z);
+      }
+    }
+    // Tick + retire each puff in the zone's pool.
+    for (let j = z.puffs.length - 1; j >= 0; j--) {
+      const p = z.puffs[j];
+      p.t += dt;
+      const k = p.t / p.life;
+      let alpha;
+      if (k < 0.25) alpha = (k / 0.25) * p.peakOpacity;
+      else if (k > 0.65) alpha = Math.max(0, (1 - k) / 0.35) * p.peakOpacity;
+      else alpha = p.peakOpacity;
+      p.mat.opacity = alpha * fade;
+      p.mesh.position.x += p.dx * dt;
+      p.mesh.position.z += p.dz * dt;
+      p.mesh.position.y += p.vy * dt;
+      p.vy *= 1 - dt * 0.4;
+      p.mesh.scale.setScalar(p.baseScale * (1 + k * p.growth));
+      if (p.t >= p.life) {
+        scene.remove(p.mesh);
+        p.mat.dispose();
+        z.puffs.splice(j, 1);
+      }
+    }
     const r2 = z.radius * z.radius;
     // Player drain — gated on owner !== 'remote' so a coop visual
     // mirror of someone else's gas (or the local thrower's own
@@ -17578,6 +17656,13 @@ function _tickThrowableZones(dt) {
     if (z.t >= z.life) {
       scene.remove(z.ring); z.ring.geometry.dispose(); z.ring.material.dispose();
       scene.remove(z.dome); z.dome.geometry.dispose(); z.dome.material.dispose();
+      // Clean up any remaining puffs (rare — the last-25% emit gate
+      // should keep this empty by zone-end, but defensive).
+      for (const p of z.puffs) {
+        scene.remove(p.mesh);
+        p.mat.dispose();
+      }
+      z.puffs.length = 0;
       _gasZones.splice(i, 1);
     }
   }
