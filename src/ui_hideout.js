@@ -3662,7 +3662,7 @@ export class HideoutUI {
       const p = Math.round(((m.moveSpeedMult || 1) - 1) * 100);
       push('threat', '»', 'Tweakers', `Enemies move +${p}% faster`);
     }
-    if (m.resurrect)       push('threat',   '↺', 'Resurrection', 'Enemies revive once 5s after death (unless headshot-killed)');
+    // Resurrection chip SHELVED 2026-05-12 — see #cold-exit-ideas.
     if (m.detonators)      push('threat',   '✱', 'Detonators',   'Every enemy explodes on death — small AOE');
     if ((m.lifesteal || 0) > 0) {
       const p = Math.round(m.lifesteal * 100);

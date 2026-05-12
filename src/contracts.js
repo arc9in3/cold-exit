@@ -119,6 +119,10 @@ function _autoEval(def) {
       case 'no_consumables_floor': return (s.noConsumableFloors | 0) >= need;
       case 'stealth_floor':        return (s.stealthFloors | 0) >= need;
       case 'pacifist_boss_floor':  return (s.pacifistBossFloors | 0) >= need;
+      // SHELVED 2026-05-12: sweeper_floor — see #cold-exit-ideas.
+      // Evaluator stub kept so a future revival can wire the per-floor
+      // spawn-vs-kill counter without re-adding the case. No contract
+      // currently uses this objective.
       case 'sweeper_floor':        return (s.sweeperFloors | 0) >= need;
       // Running-total counters (cumulative across the run / contract):
       case 'headshots_total':      return (s.critHeadshots | 0) >= need;
@@ -948,7 +952,11 @@ export function difficultyScore(def) {
   // auto-derived rewards in buildModifiers (lootQualityMult / chipsMult
   // / marksMult) so harder modifiers pay better automatically.
   if ((m.moveSpeedMult || 1) > 1) score += ((m.moveSpeedMult || 1) - 1) * 0.4;  // Tweakers
-  if (m.resurrect) score += 0.6;                                                 // Resurrection
+  // SHELVED 2026-05-12: Resurrection — see #cold-exit-ideas. Schema
+  // field + UI chip + difficulty weight removed to avoid false
+  // advertising; `m.resurrect` still passes through buildModifiers as
+  // a no-op so a future revival can wire the engine consumer without
+  // re-touching every modifier callsite.
   if (m.detonators) score += 0.35;                                               // Detonators
   if ((m.lifesteal || 0) > 0) score += (m.lifesteal || 0) * 1.5;                 // Lifesteal
   if (m.scarcity) score += 0.5;                                                  // Scarcity
