@@ -101,6 +101,8 @@ export class Combat {
     exEntry.inUse = true;
     const fireball = exEntry.fireball;
     const ring = exEntry.ring;
+    const smoke = exEntry.smoke;
+    const scorch = exEntry.scorch;
     fireball.position.copy(point);
     fireball.scale.setScalar(0.2);
     fireball.material.opacity = 0.95;
@@ -109,6 +111,19 @@ export class Combat {
     ring.scale.setScalar(1);
     ring.material.opacity = 0.85;
     ring.visible = true;
+    // Smoke ball — starts at fireball position, will swell + rise.
+    // Slightly higher Y so the smoke reads as lifting off the boom.
+    smoke.position.set(point.x, point.y + 0.4, point.z);
+    smoke.scale.setScalar(0.25);
+    smoke.material.opacity = 0;
+    smoke.visible = true;
+    // Scorch disc — snaps to size on the ground at impact. Fades over
+    // the full extended explosion life so the burn mark lingers
+    // visibly after the fireball is gone.
+    scorch.position.set(point.x, 0.04, point.z);
+    scorch.scale.setScalar(radius * 1.1);
+    scorch.material.opacity = 0.72;
+    scorch.visible = true;
 
     // Hot white flash + light so the explosion actually lights
     // surrounding geometry for one beat. Pool-backed (see ctor) so
@@ -121,7 +136,19 @@ export class Combat {
     lightSlot.light.intensity = 6.0;
 
     this.explosions.push({
-      exEntry, fireball, ring, lightSlot, t: 0, life: 0.55, radius,
+      exEntry, fireball, ring, smoke, scorch, lightSlot,
+      t: 0,
+      // Full entry life is the LONGEST sub-effect's life. Fireball
+      // + ring + light still fade by ~0.55s (their own curves in the
+      // tick handler); smoke + scorch use the full duration so the
+      // boom has a settling tail.
+      life: 1.6,
+      // Fireball / ring fade lives — kept separate from `life` so the
+      // tick can normalize each sub-effect's progress independently.
+      fireballLife: 0.55,
+      smokeLife: 1.4,
+      scorchLife: 1.6,
+      radius,
     });
     // Sparks — reuse the shared particle pool with a warm tint and
     // bigger scale so the debris reads at distance.
@@ -681,6 +708,14 @@ export class Combat {
         e.exEntry.ring.visible = false;
         e.exEntry.fireball.material.opacity = 0;
         e.exEntry.ring.material.opacity = 0;
+        if (e.exEntry.smoke) {
+          e.exEntry.smoke.visible = false;
+          e.exEntry.smoke.material.opacity = 0;
+        }
+        if (e.exEntry.scorch) {
+          e.exEntry.scorch.visible = false;
+          e.exEntry.scorch.material.opacity = 0;
+        }
         e.exEntry.inUse = false;
       } else {
         if (e.fireball) { this.scene.remove(e.fireball); e.fireball.geometry?.dispose(); e.fireball.material?.dispose(); }
@@ -1028,22 +1063,47 @@ export class Combat {
     for (let i = this.explosions.length - 1; i >= 0; i--) {
       const ex = this.explosions[i];
       ex.t += dt;
-      const k = ex.t / ex.life;            // 0 → 1
-      const kInv = 1 - k;
-      const fireScale = ex.radius * Math.min(1.0, 0.3 + k * 1.5);
+      // Fireball + ring + light — fast pop on the short 0.55s curve.
+      // Clamping kf at 1 means they freeze at fully-faded once their
+      // sub-life is done; the entry's main life carries on for smoke
+      // and scorch.
+      const kf = Math.min(1, ex.t / ex.fireballLife);
+      const kfInv = 1 - kf;
+      const fireScale = ex.radius * Math.min(1.0, 0.3 + kf * 1.5);
       ex.fireball.scale.setScalar(fireScale);
-      ex.fireball.material.opacity = Math.max(0, 0.95 * kInv);
-      const ringScale = ex.radius * (0.3 + k * 1.2);
+      ex.fireball.material.opacity = Math.max(0, 0.95 * kfInv);
+      const ringScale = ex.radius * (0.3 + kf * 1.2);
       ex.ring.scale.setScalar(ringScale);
-      ex.ring.material.opacity = Math.max(0, 0.85 * kInv * kInv);
-      ex.lightSlot.light.intensity = 6.0 * kInv * kInv;
+      ex.ring.material.opacity = Math.max(0, 0.85 * kfInv * kfInv);
+      ex.lightSlot.light.intensity = 6.0 * kfInv * kfInv;
+      // Smoke ball — swell from 0.25× → ~1.6× radius over its life
+      // while ramping opacity in fast (first 20% of smoke life) then
+      // fading out over the remainder. Slight upward drift so the
+      // smoke reads as lifting off the boom.
+      const ks = Math.min(1, ex.t / ex.smokeLife);
+      const smokeScale = ex.radius * (0.25 + ks * 1.35);
+      ex.smoke.scale.setScalar(smokeScale);
+      let smokeAlpha;
+      if (ks < 0.18) smokeAlpha = (ks / 0.18) * 0.65;
+      else smokeAlpha = Math.max(0, (1 - ks) / 0.82) * 0.65;
+      ex.smoke.material.opacity = smokeAlpha;
+      ex.smoke.position.y += dt * 0.6;        // gentle rise
+      // Scorch disc — already at full size; just fade opacity over
+      // the long curve so the burn mark stays visible after the
+      // fireball is gone.
+      const kc = Math.min(1, ex.t / ex.scorchLife);
+      ex.scorch.material.opacity = 0.72 * (1 - kc * kc);
       if (ex.t >= ex.life) {
-        // Pool-backed fireball + ring — hide + release, no dispose.
+        // Pool-backed sub-meshes — hide + release, no dispose.
         if (ex.exEntry) {
           ex.exEntry.fireball.visible = false;
           ex.exEntry.ring.visible = false;
+          ex.exEntry.smoke.visible = false;
+          ex.exEntry.scorch.visible = false;
           ex.exEntry.fireball.material.opacity = 0;
           ex.exEntry.ring.material.opacity = 0;
+          ex.exEntry.smoke.material.opacity = 0;
+          ex.exEntry.scorch.material.opacity = 0;
           ex.exEntry.inUse = false;
         }
         // Release the pooled light — park it dim and off-screen.
@@ -1191,6 +1251,9 @@ export class Combat {
     this._explosionPool = [];
     const fireballGeom = new THREE.SphereGeometry(1.0, 16, 12);
     const ringGeom = new THREE.RingGeometry(0.6, 0.9, 32);
+    // Smoke ball reuses the fireball sphere geom — same shape, just
+    // tinted grey + animated differently. Scorch is a filled disc.
+    const scorchGeom = new THREE.CircleGeometry(1.0, 24);
     for (let i = 0; i < EXPLOSION_POOL; i++) {
       const fmat = new THREE.MeshBasicMaterial({
         color: 0xffb040, transparent: true, opacity: 0, depthWrite: false,
@@ -1208,7 +1271,30 @@ export class Combat {
       ring.visible = false;
       ring.frustumCulled = false;
       this.scene.add(ring);
-      this._explosionPool.push({ fireball, ring, inUse: false });
+      // Smoke ball — dark grey sphere that swells slower than the
+      // fireball and outlives it. Sells "rolling smoke after the
+      // flash" so the explosion doesn't end on a single white pop.
+      const smat = new THREE.MeshBasicMaterial({
+        color: 0x4a4a52, transparent: true, opacity: 0,
+        depthWrite: false,
+      });
+      const smoke = new THREE.Mesh(fireballGeom, smat);
+      smoke.visible = false;
+      smoke.frustumCulled = false;
+      this.scene.add(smoke);
+      // Scorch disc — dark stain on the ground. Snaps to size + fades
+      // out over the full explosion entry life so the burn mark
+      // lingers visibly after the fireball is gone.
+      const cmat = new THREE.MeshBasicMaterial({
+        color: 0x121008, transparent: true, opacity: 0,
+        depthWrite: false, side: THREE.DoubleSide,
+      });
+      const scorch = new THREE.Mesh(scorchGeom, cmat);
+      scorch.rotation.x = -Math.PI / 2;
+      scorch.visible = false;
+      scorch.frustumCulled = false;
+      this.scene.add(scorch);
+      this._explosionPool.push({ fireball, ring, smoke, scorch, inUse: false });
     }
     // --- Brass casing pool ----------------------------------------------
     // Small cylinder ejected to the right of the muzzle on each player
