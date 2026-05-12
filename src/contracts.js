@@ -105,6 +105,28 @@ function _autoEval(def) {
       case 'credits_banked':       return (s.credits | 0) >= need;
       case 'levels_extracted':     return (s.levelsExtracted | 0) >= need;
       case 'kills_total':          return (s.kills | 0) >= need;
+
+      // Phase-1 stubs. Each new objective reads a runStats counter
+      // that main.js will populate when the corresponding tracker
+      // lands in Phase 2/3. Until then they evaluate to false (0 < N)
+      // so no live contract relies on these without engine support.
+      //
+      // Per-floor flag counters (incremented on a successful extract
+      // where the condition held that floor):
+      case 'no_damage_floor':      return (s.noDamageFloors | 0) >= need;
+      case 'no_reload_floor':      return (s.noReloadFloors | 0) >= need;
+      case 'single_class_floor':   return (s.singleClassFloors | 0) >= need;
+      case 'no_consumables_floor': return (s.noConsumableFloors | 0) >= need;
+      case 'stealth_floor':        return (s.stealthFloors | 0) >= need;
+      case 'pacifist_boss_floor':  return (s.pacifistBossFloors | 0) >= need;
+      case 'sweeper_floor':        return (s.sweeperFloors | 0) >= need;
+      // Running-total counters (cumulative across the run / contract):
+      case 'headshots_total':      return (s.critHeadshots | 0) >= need;
+      case 'headshot_streak':      return (s.maxHeadshotStreak | 0) >= need;
+      case 'disarms':              return (s.disarms | 0) >= need;
+      case 'multi_kills':          return (s.multiKills | 0) >= need;
+      case 'distance_kills':       return (s.distanceKills | 0) >= need;
+      case 'close_kills':          return (s.closeKills | 0) >= need;
     }
     if (def.targetType === 'any' || !def.targetType) {
       return (s.kills | 0) >= need;
@@ -139,6 +161,22 @@ export function buildContractBaseline(runStatsSnapshot) {
     archetypeKills: { ...(s.archetypeKills || {}) },
     critHeadshots: s.critHeadshots | 0,
     throwableKills: s.throwableKills | 0,
+    // Phase-1 baseline fields for the new objective counters. main.js
+    // doesn't populate these yet; baselines default to 0 so when the
+    // counters DO land in Phase 2/3 the subtraction math is clean
+    // (progress-since-pickup, not progress-since-run-start).
+    noDamageFloors: s.noDamageFloors | 0,
+    noReloadFloors: s.noReloadFloors | 0,
+    singleClassFloors: s.singleClassFloors | 0,
+    noConsumableFloors: s.noConsumableFloors | 0,
+    stealthFloors: s.stealthFloors | 0,
+    pacifistBossFloors: s.pacifistBossFloors | 0,
+    sweeperFloors: s.sweeperFloors | 0,
+    maxHeadshotStreak: s.maxHeadshotStreak | 0,
+    disarms: s.disarms | 0,
+    multiKills: s.multiKills | 0,
+    distanceKills: s.distanceKills | 0,
+    closeKills: s.closeKills | 0,
   };
 }
 
@@ -158,6 +196,19 @@ function _subtractBaseline(snapshot, baseline) {
   out.megabossKillsThisRun = Math.max(0, (snapshot.megabossKillsThisRun | 0) - (baseline.megabossKillsThisRun | 0));
   out.critHeadshots = Math.max(0, (snapshot.critHeadshots | 0) - (baseline.critHeadshots | 0));
   out.throwableKills = Math.max(0, (snapshot.throwableKills | 0) - (baseline.throwableKills | 0));
+  // Phase-1 new counters — same delta-from-baseline pattern.
+  out.noDamageFloors = Math.max(0, (snapshot.noDamageFloors | 0) - (baseline.noDamageFloors | 0));
+  out.noReloadFloors = Math.max(0, (snapshot.noReloadFloors | 0) - (baseline.noReloadFloors | 0));
+  out.singleClassFloors = Math.max(0, (snapshot.singleClassFloors | 0) - (baseline.singleClassFloors | 0));
+  out.noConsumableFloors = Math.max(0, (snapshot.noConsumableFloors | 0) - (baseline.noConsumableFloors | 0));
+  out.stealthFloors = Math.max(0, (snapshot.stealthFloors | 0) - (baseline.stealthFloors | 0));
+  out.pacifistBossFloors = Math.max(0, (snapshot.pacifistBossFloors | 0) - (baseline.pacifistBossFloors | 0));
+  out.sweeperFloors = Math.max(0, (snapshot.sweeperFloors | 0) - (baseline.sweeperFloors | 0));
+  out.maxHeadshotStreak = Math.max(0, (snapshot.maxHeadshotStreak | 0) - (baseline.maxHeadshotStreak | 0));
+  out.disarms = Math.max(0, (snapshot.disarms | 0) - (baseline.disarms | 0));
+  out.multiKills = Math.max(0, (snapshot.multiKills | 0) - (baseline.multiKills | 0));
+  out.distanceKills = Math.max(0, (snapshot.distanceKills | 0) - (baseline.distanceKills | 0));
+  out.closeKills = Math.max(0, (snapshot.closeKills | 0) - (baseline.closeKills | 0));
   const ak = snapshot.archetypeKills || {};
   const bk = baseline.archetypeKills || {};
   const akOut = {};
@@ -628,6 +679,22 @@ export function difficultyScore(def) {
   if ((m.eliteChanceMult || 1) > 1) score += ((m.eliteChanceMult || 1) - 1) * 0.4;
   if ((m.playerDamageTakenMult || 1) > 1) score += ((m.playerDamageTakenMult || 1) - 1) * 0.6;
   if ((m.playerDamageDealtMult || 1) < 1) score += (1 - (m.playerDamageDealtMult || 1)) * 0.6;
+  // Phase-1 modifier weights. Each one earns counter-pressure on the
+  // auto-derived rewards in buildModifiers (lootQualityMult / chipsMult
+  // / marksMult) so harder modifiers pay better automatically.
+  if ((m.moveSpeedMult || 1) > 1) score += ((m.moveSpeedMult || 1) - 1) * 0.4;  // Tweakers
+  if (m.resurrect) score += 0.6;                                                 // Resurrection
+  if (m.detonators) score += 0.35;                                               // Detonators
+  if ((m.lifesteal || 0) > 0) score += (m.lifesteal || 0) * 1.5;                 // Lifesteal
+  if (m.scarcity) score += 0.5;                                                  // Scarcity
+  if (m.noDash) score += 0.35;                                                   // No Dash
+  if (m.bleed) score += 0.3;                                                     // Bleed
+  if ((m.hpCapMult || 1) < 1) score += (1 - (m.hpCapMult || 1)) * 0.8;           // Half Heart
+  if (m.lowLight) score += 0.25;                                                 // Low Light
+  if (m.fog) score += 0.3;                                                       // Fog
+  if ((m.runTimerSec || 0) > 0) score += 0.5;                                    // Timed Extract
+  if ((m.pressurePerSec || 0) > 0) score += (m.pressurePerSec || 0) * 24;        // Pressure (~+10%/min → +0.4)
+  if (m.headshotsOnly) score += 0.7;                                             // Headshots Only
   return score;
 }
 
@@ -649,6 +716,23 @@ export function buildModifiers(def) {
     playerDamageTakenMult: m.playerDamageTakenMult || 1,
     playerDamageDealtMult: m.playerDamageDealtMult || 1,
     noConsumables: !!m.noConsumables,
+    // Phase-1 modifier surface. Defaults are no-ops so existing
+    // contracts that don't set these stay unchanged. Engine consumers
+    // (gunman.js, melee_enemy.js, player.js, level.js, main.js) read
+    // these via getActiveContractModifiers() in Phase 2/3.
+    moveSpeedMult: m.moveSpeedMult || 1,                // Tweakers: 1.5 = +50% enemy move speed
+    resurrect: !!m.resurrect,                            // Resurrection: revive once after 5s unless headshot-killed
+    detonators: !!m.detonators,                          // Detonators: every enemy explodes on death (AOE)
+    lifesteal: m.lifesteal || 0,                         // Lifesteal: 0..1 fraction of damage dealt to player healed
+    scarcity: !!m.scarcity,                              // Scarcity: no reload, mags don't refill mid-run
+    noDash: !!m.noDash,                                  // No Dash: dash button disabled
+    bleed: !!m.bleed,                                    // Bleed: taking damage applies HP DOT (bandages cancel)
+    hpCapMult: m.hpCapMult || 1,                         // Half Heart: 0.5 = 50% max HP cap
+    lowLight: !!m.lowLight,                              // Low Light: lights dimmed, visual range halved
+    fog: !!m.fog,                                        // Fog: visual range capped ~10m
+    runTimerSec: m.runTimerSec || 0,                     // Timed Extract: run-fail at N seconds (0 = off)
+    pressurePerSec: m.pressurePerSec || 0,               // Pressure: per-floor stat ramp, resets on extract (0 = off)
+    headshotsOnly: !!m.headshotsOnly,                    // Headshots Only: non-head shots deal 0 damage
     // Auto-derived counter-pressure. Override by setting the field
     // explicitly on a def's `modifiers` block — explicit values win.
     lootQualityMult: m.lootQualityMult || (1 + score * 0.5),
