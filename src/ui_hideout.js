@@ -4202,18 +4202,21 @@ export class HideoutUI {
       .board-row .board-val { color: #f2c060; font-weight: 700; }
 
       .contractor-host {
-        /* Speech bubble anchored to the upper-right of the stage so
-           it floats over the dark margin next to the contractor's
-           portrait instead of covering her face (was centered above
-           which dropped the bubble directly over her eyes after the
-           contain swap). The board side-rail occupies the far right
-           on the cards step (right: 14px, width: 220px), so the host
-           sits at right: 240px to clear it. */
-        position: absolute; top: 18px; right: 240px;
-        left: auto; transform: none;
-        display: flex; flex-direction: column; align-items: flex-end;
-        gap: 14px; max-width: 320px;
+        /* Speech bubble sits just above the "SELECT A CONTRACT"
+           heading — reads as the contractor speaking the line right
+           before presenting the contracts on the table. Heading is
+           at bottom: calc(28% + 70px + 12px); bubble offset another
+           54px above gives a comfortable line-of-text gap. Centered
+           horizontally between the side rails. */
+        position: absolute;
+        bottom: calc(28% + 70px + 12px + 54px);
+        left: 240px; right: 240px;
+        top: auto; transform: none;
+        display: flex; flex-direction: column; align-items: center;
+        gap: 14px;
+        pointer-events: none;     /* doesn't block clicks on cards / heading */
       }
+      .contractor-host .host-bubble { pointer-events: auto; }
       /* Portrait is now baked into the contractor-stage background
          (Assets/contractor.png covers the whole panel), so the small
          square preview is redundant. Speech bubble still renders. */
@@ -4895,9 +4898,11 @@ export class HideoutUI {
          to 280px so 3-6 cards always fit in a single row. */
       /* Cards now sit on the contractor's table — bottom ~28% of the
          stage, where the contractor.png shows desk / table surface.
-         Reads like contracts laid out for the player to inspect. */
+         Reads like contracts laid out for the player to inspect.
+         Bottom raised to 70px so the refresh + expand-slots bar sits
+         CLEARLY below the cards instead of squeezed into a 10px gap. */
       .contractor-cards {
-        position: absolute; bottom: 90px; left: 240px; right: 240px;
+        position: absolute; bottom: 70px; left: 240px; right: 240px;
         top: auto; transform: none;
         height: 28%;
         display: flex; gap: 14px; justify-content: center;
@@ -4913,10 +4918,10 @@ export class HideoutUI {
         50%      { text-shadow: 0 0 22px rgba(255,200,80,0.75), 0 0 36px rgba(255,160,40,0.25); }
       }
       .contracts-heading {
-        /* Sits just above the cards row on the table — was at 30%
-           (top of screen) which clashed with the contractor's head
-           in the new background image. */
-        position: absolute; bottom: calc(28% + 90px + 12px); left: 0; right: 0;
+        /* Sits just above the cards row on the table. Bottom calc
+           mirrors .contractor-cards (bottom: 70px + height: 28%) plus
+           a 12px gap so the heading floats cleanly above. */
+        position: absolute; bottom: calc(28% + 70px + 12px); left: 0; right: 0;
         text-align: center;
         font-family: ui-monospace, Menlo, Consolas, monospace;
         font-size: 18px; font-weight: 700; letter-spacing: 6px;
@@ -4935,11 +4940,13 @@ export class HideoutUI {
         margin-left: 14px; font-size: 12px; vertical-align: 3px;
         color: #c98a3a;
       }
-      /* Refresh button row — pinned to bottom-middle so it sits
-         under the cards regardless of card-row width. */
+      /* Refresh + expand-slots button row — pinned BELOW the cards
+         at the very bottom of the stage. Cards bottom edge is at
+         70px, button-row top is at 20px, so there's a clean ~50px
+         band between the cards and the button bar. */
       .contracts-refresh-bar {
-        position: absolute; bottom: 80px; left: 0; right: 0;
-        display: flex; justify-content: center;
+        position: absolute; bottom: 20px; left: 0; right: 0;
+        display: flex; justify-content: center; gap: 12px;
         pointer-events: none;
       }
       .contracts-refresh-bar .hideout-btn {
