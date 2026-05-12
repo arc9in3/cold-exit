@@ -10353,6 +10353,15 @@ function firePlayerRicochet(playerInfo, weapon, aimPoint) {
       runStats.addDamage(dmg);
       hit.owner.manager.applyHit(hit.owner, dmg, hit.zone || 'torso',
         _rx_dir, { weaponClass: 'exotic' });
+      // Floating damage number + impact spark on every ricochet
+      // hit. Bounced shots that land late get the same feedback as
+      // the initial shot. hit.zone === 'head' flags as crit so the
+      // number renders larger.
+      if (typeof spawnDamageNumber === 'function' && camera) {
+        try { spawnDamageNumber(hit.point, camera, dmg, hit.zone || 'torso', hit.zone === 'head'); }
+        catch (_) {}
+      }
+      combat.spawnImpact(hit.point);
       return;             // enemy hit terminates the chain
     }
     if (bounceIdx >= maxBounces) return;   // out of bounces
@@ -10528,6 +10537,16 @@ function firePlayerStickyExplosive(playerInfo, weapon, aimPoint) {
         try {
           e.manager.applyHit(e, stuckBonus, 'torso',
             { x: dir.x, z: dir.z }, { weaponClass: 'exotic' });
+          // Bonus-damage number — flagged crit since stuck-bonus is
+          // the EX-* signature payoff (the player aimed for the
+          // stick). Anchored to the enemy's current position rather
+          // than the static stuck-point because the bolt freezes in
+          // place but the enemy may have nudged a step during the
+          // fuse. (Falls back to bolt position if no group.)
+          if (typeof spawnDamageNumber === 'function' && camera) {
+            const here = e.group?.position || p.pos;
+            spawnDamageNumber(here, camera, stuckBonus, 'torso', true);
+          }
         } catch (_) { /* defensive */ }
       }
     },
@@ -10624,6 +10643,16 @@ function firePlayerCharge(playerInfo, weapon, aimPoint, tierIdx) {
   runStats.addDamage(dmg);
   hit.owner.manager.applyHit(hit.owner, dmg, hit.zone || 'torso', _vc_dir,
     { weaponClass: 'exotic' });
+  // Damage number + impact spark — VC charge release was applying
+  // damage cleanly but the player got no on-screen feedback, so a
+  // tier-3 nova read as "where did my charge go?" Tier index >= 1
+  // flags the number as a crit so the bigger tiers render with the
+  // larger / brighter number style.
+  if (typeof spawnDamageNumber === 'function' && camera) {
+    try { spawnDamageNumber(hit.point, camera, dmg, hit.zone || 'torso', (tierIdx | 0) >= 1); }
+    catch (_) {}
+  }
+  combat.spawnImpact(hit.point);
 }
 
 function _spawnGrappleCable() {
