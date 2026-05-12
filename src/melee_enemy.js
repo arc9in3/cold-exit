@@ -279,6 +279,7 @@ export class MeleeEnemyManager {
       knockVel: new THREE.Vector3(),
       disarmed: false,
       burnT: 0,
+      fireSlowT: 0,                       // molotov-zone 50% slow timer
       surpriseT: 0,   // brief freeze after a throwable detonation; see main.js
       blindT: 0,
       dazzleT: 0,
@@ -753,6 +754,7 @@ export class MeleeEnemyManager {
 
       e.blindT = Math.max(0, (e.blindT || 0) - dt);
       e.dazzleT = Math.max(0, (e.dazzleT || 0) - dt);
+      e.fireSlowT = Math.max(0, (e.fireSlowT || 0) - dt);
       // Grenade / flash surprise — freezes the rusher briefly after a
       // throwable detonation alerts them. Drained each frame; the
       // chase/windup logic below skips while surpriseT > 0.
@@ -1420,6 +1422,10 @@ export class MeleeEnemyManager {
       // reposition around the shield's narrow arc. Reads as a
       // siege walk rather than a chase.
       if (e.variant === 'shieldBearer') moveSpeed *= 0.25;
+      // Molotov fire-zone slow — 50% movement while standing in
+      // the AoE. Refreshed each frame in zone by _tickFireZones;
+      // decays in 0.5s after exit so the slow drops naturally.
+      if ((e.fireSlowT || 0) > 0) moveSpeed *= 0.5;
       else if (e.dashCdT <= 0 && dist <= tunables.meleeEnemy.dashRange
         && dist > tunables.meleeEnemy.swingRange) {
         e.dashT = tunables.meleeEnemy.dashDuration;

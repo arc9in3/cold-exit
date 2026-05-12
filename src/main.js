@@ -18578,14 +18578,24 @@ function _tickFireZones(dt) {
       }
       z.emitT = 0.06 + Math.random() * 0.05;
     }
-    // DoT — burn every alive entity within the disc. Per-frame
-    // dedupe: a single molotov shatter spawns ~7 overlapping fire
-    // zones (central pool + 6 satellite landings), and pre-fix every
-    // overlap stacked its full DPS each tick — player standing on
-    // the center took 7x damage and died near-instantly while the
-    // enemy walking through took 7x too but had enough HP to survive.
-    // Now we only apply the HIGHEST single zone's dps per entity per
-    // frame: subsequent zones top up to that dps but never beyond.
+    // DoT — burn every alive entity within the disc.
+    //
+    // ASYMMETRIC OVERLAP HANDLING:
+    //   * Enemies: UNCAPPED. Each overlapping zone applies full dps
+    //     each tick. A molotov center where 3-4 satellite pools
+    //     converge is a kill-zone — encourages chokepoint denial
+    //     play against pathing enemies.
+    //   * Player: per-frame max-dps gate (kept from prior version).
+    //     A molotov thrown at the player's feet shouldn't insta-kill
+    //     them with stacked overlap damage; they have agency to walk
+    //     out, but the splat zone shouldn't punish them 7x for it.
+    //
+    // While in zone, enemies also pick up two side-effects: a 50%
+    // movement slow (`fireSlowT`, gates on chase-movement multipliers
+    // in gunman.js / melee_enemy.js) and accumulating burn stacks
+    // (throttled to ~1 stack per 0.5s exposure, so lingering enemies
+    // get a heavier post-exit DoT than walk-throughs). Player has no
+    // slow effect — they keep full mobility to escape.
     const rSq = z.radius * z.radius;
     const apply = (list) => {
       for (const c of list) {
@@ -18594,24 +18604,27 @@ function _tickFireZones(dt) {
         const dz = c.group.position.z - z.z;
         if (dx * dx + dz * dz > rSq) continue;
         c.burnT = Math.max(c.burnT || 0, 1.0);   // keep topped up while in zone
-        // Per-frame max-dps gate. The entity tracks the dps it's
-        // already received this frame; we only top up to z.dps if
-        // this zone is stronger. Net: damage = max(zone.dps) * dt.
-        if (c._fireFrame !== frameCounter) {
-          c._fireFrame = frameCounter;
-          c._fireAppliedDps = 0;
+        // Full per-zone dps with no overlap cap. Multiple zones on
+        // the same enemy each apply their own dps this frame.
+        const tickDmg = z.dps * dt;
+        const prevHp = c.hp;
+        c.hp -= tickDmg;
+        trackBurnDamage(c, tickDmg);
+        // 50% movement slow refreshed each frame in zone. Short
+        // window (0.5s) so the slow drops off naturally on exit.
+        c.fireSlowT = Math.max(c.fireSlowT || 0, 0.5);
+        // Burn-stack throttle. Without this, applyBurnStack would
+        // fire every frame an enemy is inside the zone (60+ stacks/s)
+        // and the post-exit DoT would dominate. Accumulate exposure
+        // time, drop one stack per 0.5s of contact.
+        c._fireStackT = (c._fireStackT || 0) + dt;
+        if (c._fireStackT >= 0.5) {
+          c._fireStackT -= 0.5;
+          applyBurnStack(c, 3.0);
         }
-        if (z.dps > c._fireAppliedDps) {
-          const additionalDps = z.dps - c._fireAppliedDps;
-          const tickDmg = additionalDps * dt;
-          const prevHp = c.hp;
-          c.hp -= tickDmg;
-          trackBurnDamage(c, tickDmg);
-          c._fireAppliedDps = z.dps;
-          if (c.hp <= 0 && prevHp > 0) {
-            c.alive = false;
-            onEnemyKilled(c);
-          }
+        if (c.hp <= 0 && prevHp > 0) {
+          c.alive = false;
+          onEnemyKilled(c);
         }
       }
     };

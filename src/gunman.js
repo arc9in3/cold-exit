@@ -790,6 +790,7 @@ export class GunmanManager {
       reactionT: 0, loseTargetT: 0,
       fireT: 0, burstLeft: 0,
       slowT: 0,
+      fireSlowT: 0,                       // molotov-zone 50% slow timer
       knockVel: new THREE.Vector3(),
       burnT: 0,
       surpriseT: 0,   // brief freeze after a throwable detonation; see main.js
@@ -1295,6 +1296,7 @@ export class GunmanManager {
         }
       }
       g.slowT = Math.max(0, g.slowT - dt);
+      g.fireSlowT = Math.max(0, (g.fireSlowT || 0) - dt);
       g.blindT = Math.max(0, (g.blindT || 0) - dt);
       g.dazzleT = Math.max(0, (g.dazzleT || 0) - dt);
       g.aiSettleT = Math.max(0, (g.aiSettleT || 0) - dt);
@@ -2876,7 +2878,11 @@ export class GunmanManager {
           }
         }
       }
-      const slowK = g.slowT > 0 ? tunables.zones.legs.slowFactor : 1;
+      // Movement slow stack: leg-shot slow + molotov-zone fire slow.
+      // Both multiplicative — an enemy that took a leg shot AND is
+      // standing in a molotov hits the floor of (slowFactor * 0.5).
+      let slowK = g.slowT > 0 ? tunables.zones.legs.slowFactor : 1;
+      if ((g.fireSlowT || 0) > 0) slowK *= 0.5;
 
       // Strafe (dasher/coverSeeker): perpendicular sidestep while in range.
       const strafeVec = { x: 0, z: 0 };
