@@ -745,7 +745,15 @@ export class DetailsUI {
       : (ITEM_LORE[item.name] || ITEM_LORE[item.baseName] || '');
     const descRaw = (item.description || '').trim();
     let noteText = '';
-    if (isArtifact) {
+    // Exotic-class items (the RX/VC/GR/EX-* weapon families, Zipline
+    // Gun, Widowmaker, etc.) get the same always-render treatment as
+    // artifacts. Their unique mechanics aren't rooted in any "real
+    // weapon" the player knows — the description IS the explanation
+    // of what the weapon does (bounces, charge tiers, knockback,
+    // sticky-fuse). Suppressing it because it contains numbers like
+    // "+35 damage on wall slam" leaves the player guessing.
+    const isExotic = item.class === 'exotic';
+    if (isArtifact || isExotic) {
       noteText = descRaw;
     } else {
       // Description is suppressed when it looks stat-like (any %, ×, or

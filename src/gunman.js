@@ -2817,8 +2817,15 @@ export class GunmanManager {
           moveSign = 0;
         }
       } else {
+        // Boss / sub-boss tier: never kite back when too close. Bosses
+        // are locked into their arena once the room seals; backing
+        // away from the player is the opposite of what the arena
+        // contract communicates — the boss should commit to closing
+        // pressure. Approach until inside preferredRange, then stand
+        // and strafe / fire rather than back-pedaling.
+        const isBoss = g.tier === 'boss' || g.tier === 'subBoss';
         if (dist > pref + tol) moveSign = 1;
-        else if (dist < pref - tol) moveSign = -1;
+        else if (!isBoss && dist < pref - tol) moveSign = -1;
         // Flow-field bias — when neither door / tuck / escort is
         // overriding the approach, swap the straight-line dir2d for
         // a flow-field sample toward the player. The flow field
