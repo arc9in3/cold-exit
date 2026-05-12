@@ -513,9 +513,8 @@ export const WEAPON_RENDER_BY_NAME = {
   'Colt 357':               'Colt_357.png',
   '.38 Special':            '_38_Special.png',
   'Colt Six Shooter':       'Colt_Six_Shooter.png',
-  // Variants without their own renders share an existing one.
-  'AR-15 Pistol':           'M4.png',
-  'Draco NAK9':             'AK47.png',
+  'Draco NAK9':             'Draco_NAK9.png',
+  'AR-15 Pistol':           'AR-15_Pistol.png',
 
   // SMGs
   'PDW':                    'PDW.png',
@@ -524,6 +523,8 @@ export const WEAPON_RENDER_BY_NAME = {
   'Spectre':                'Spectre.png',
   'Spectre CQB':            'Spectre_CQB.png',
   'SPC9':                   'SPC9.png',
+  'SPCA3':                  'SPCA3.png',
+  'SPC223':                 'SPC223.png',
 
   // Rifles
   'AK47':                   'AK47.png',
@@ -535,18 +536,12 @@ export const WEAPON_RENDER_BY_NAME = {
   'AUG A3-CQC':             'AUG_A3-CQC.png',
   'CAR-15':                 'CAR-15.png',
   'JARD J67':               'JARD_J67.png',
+  'JARD J68':               'JARD_J68.png',
+  'JARD J56':               'JARD_J56.png',
   'M4':                     'M4.png',
-  // Reuse existing renders for variants without their own PNG yet —
-  // better than the generic 'rifle' silhouette fallback.
-  'Mini-14':                'Hunting_Rifle.png',
-  'AKS-47':                 'AK47.png',
-  'AR-15 SBR':              'M4.png',
-  'JARD J68':               'CAR-15.png',
-  'JARD J56':               'CAR-15.png',
-
-  // SMG variants without their own renders
-  'SPCA3':                  'SPC9.png',
-  'SPC223':                 'SPC9.png',
+  'Mini-14':                'Mini-14.png',
+  'AKS-47':                 'AKS-47.png',
+  'AR-15 SBR':              'AR-15_SBR.png',
 
   // LMGs
   'Type 80 LMG':            'Type_80_LMG.png',
@@ -554,7 +549,7 @@ export const WEAPON_RENDER_BY_NAME = {
 
   // Snipers
   'Remington 700':          'Remington_700.png',
-  'Remington 700 Tactical': 'Remington_700.png',
+  'Remington 700 Tactical': 'Remington_700_Tactical.png',
   'SVD Dragunov':           'SVD_Dragunov.png',
   'Cheytac Intervention':   'Cheytac_Intervention.png',
   'AWP':                    'AWP.png',
@@ -573,24 +568,25 @@ export const WEAPON_RENDER_BY_NAME = {
   'Widowmaker Rocket Launcher': 'Widowmaker_Rocket_Launcher.png',
   'Flamethrower':           'flamethrower.png',
   'Dragonbreath':           'Dragonbreath.png',
-  // New exotic families — placeholder renders reuse the closest
-  // matching existing weapon image. Proper UI renders queued for
-  // #cold-exit-art-2d as a follow-up. All RX-* use the Colt 357
-  // revolver render; VC-* use the Widowmaker rocket launcher render
-  // (closest heavy-energy shape); GR-* use the CAR-15 carbine; EX-*
-  // use the AS_VAL silhouette (long-barrel single-shot read).
-  'RX-1 Rebound':           'Colt_357.png',
-  'RX-2 Caroma':            'Colt_357.png',
-  'RX-3 Pinball':           'Colt_357.png',
-  'VC-7 Volt':              'Widowmaker_Rocket_Launcher.png',
-  'VC-9 Surge':             'Widowmaker_Rocket_Launcher.png',
+  // New exotic families — most still use placeholder renders that
+  // reuse the closest matching existing weapon image. Proper UI
+  // renders being authored in #cold-exit-art-2d and swapped in as
+  // they land. RX-1/RX-2/RX-3 now have real art; VC-* use the
+  // Widowmaker rocket launcher render (closest heavy-energy
+  // shape); GR-* use the CAR-15 carbine; EX-* use the AS_VAL
+  // silhouette (long-barrel single-shot read).
+  'RX-1 Rebound':           'RX-1_Rebound.png',
+  'RX-2 Caroma':            'RX-2_Caroma.png',
+  'RX-3 Pinball':           'RX-3_Pinball.png',
+  'VC-7 Volt':              'VC-7_Volt.png',
+  'VC-9 Surge':             'VC-9_Surge.png',
   'VC-12 Nova':             'Widowmaker_Rocket_Launcher.png',
-  'GR-4 Slug':              'CAR-15.png',
-  'GR-6 Coil':              'CAR-15.png',
-  'GR-9 Mag':               'CAR-15.png',
-  'EX-3 Bolt':              'AS_VAL.png',
-  'EX-5 Spike':             'AS_VAL.png',
-  'EX-8 Stinger':           'AS_VAL.png',
+  'GR-4 Slug':              'GR-4_Slug.png',
+  'GR-6 Coil':              'GR-6_Coil.png',
+  'GR-9 Mag':               'GR-9_Mag.png',
+  'EX-3 Bolt':              'EX-3_Bolt.png',
+  'EX-5 Spike':             'EX-5_Spike.png',
+  'EX-8 Stinger':           'EX-8_Stinger.png',
 
   // Legendary artifact
   "Jessica's Rage":         'Jessica_s_Rage.png',

@@ -3404,10 +3404,10 @@
     #death-root {
       position: fixed; inset: 0;
       background:
-        radial-gradient(ellipse at center, rgba(40, 0, 0, 0.78), rgba(0, 0, 0, 0.94)),
-        url('Assets/generated/artpass-env-mortician-basement.png') center bottom / cover no-repeat,
+        radial-gradient(ellipse at center, rgba(40, 0, 0, 0.55) 0%, rgba(0, 0, 0, 0.88) 75%),
+        linear-gradient(180deg, rgba(8, 0, 4, 0.30) 0%, rgba(8, 0, 4, 0.55) 100%),
+        url('Assets/generated/gen-ui-recap-death-v5-via-qwen-image.png') center / cover no-repeat,
         #000;
-      background-blend-mode: multiply, normal, normal;
       display: flex; align-items: center; justify-content: center;
       z-index: 20;
       font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
@@ -3925,11 +3925,18 @@
       letter-spacing: 0.5px;
     }
 
-    /* Skill pick modal */
+    /* Skill pick modal — shown after every successful extract (advanceFloor
+       → SkillPickUI.show). The cinematic helicopter-at-dusk backdrop sells
+       the "you got out" beat; the radial+linear gradient overlay keeps the
+       card readable regardless of viewport aspect ratio. */
     #skill-pick-root {
       position: fixed;
       inset: 0;
-      background: rgba(0, 0, 0, 0.7);
+      background:
+        radial-gradient(ellipse at center, rgba(0,0,0,0.55) 0%, rgba(0,0,0,0.85) 75%),
+        linear-gradient(180deg, rgba(8,6,12,0.35) 0%, rgba(8,6,12,0.55) 100%),
+        url('Assets/generated/gen-ui-recap-extract-v5-via-qwen-image.png') center / cover no-repeat,
+        #08060c;
       display: flex;
       align-items: center;
       justify-content: center;
@@ -3937,7 +3944,9 @@
       font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
     }
     #skill-pick-card {
-      background: #14161a;
+      background: rgba(20, 22, 26, 0.88);
+      backdrop-filter: blur(6px);
+      -webkit-backdrop-filter: blur(6px);
       border: 1px solid #3a3024;
       border-radius: 6px;
       padding: 24px 28px;

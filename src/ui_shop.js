@@ -110,13 +110,14 @@ const KEEPER_ROOM_ART = {
 };
 
 const KEEPER_PORTRAIT_ART = {
-  merchant: 'Assets/generated/artpass-merchant-portrait.png',
-  healer: 'Assets/generated/artpass-healer-portrait.png',
-  gunsmith: 'Assets/generated/artpass-gunsmith-portrait.png',
-  armorer: 'Assets/generated/artpass-armorer-portrait.png',
-  tailor: 'Assets/generated/artpass-tailor-portrait.png',
-  relicSeller: 'Assets/generated/artpass-relicSeller-portrait.png',
-  blackMarket: 'Assets/generated/artpass-blackMarket-portrait.png',
+  merchant: 'Assets/generated/gen-keeper-fixer-v4-via-qwen-image.png',
+  healer: 'Assets/generated/gen-keeper-surgeon-v5-via-qwen-image.png',
+  gunsmith: 'Assets/generated/gen-keeper-gunsmith-v5-via-qwen-image.png',
+  armorer: 'Assets/generated/gen-keeper-armorer-v5-via-qwen-image.png',
+  tailor: 'Assets/generated/gen-keeper-tailor-v5-via-qwen-image.png',
+  relicSeller: 'Assets/generated/gen-keeper-curator-v5-via-qwen-image.png',
+  blackMarket: 'Assets/generated/gen-keeper-broker-v5-via-qwen-image.png',
+  bearMerchant: 'Assets/generated/gen-keeper-great-bear-v5-via-qwen-image.png',
   recruiter: 'Assets/generated/artpass-recruiter-portrait.png',
 };
 
@@ -1186,13 +1187,16 @@ export class ShopUI {
     const k = KEEPERS[this.merchant?.kind] || KEEPERS.merchant;
     // Rendered avatar takes priority over the glyph — falls back to
     // the glyph if portrait generation fails (WebGL error / headless
-    // test). `bearMerchant` is a giant bear, not a humanoid; skip the
-    // portrait path for it so the glyph stays.
+    // test). The bearMerchant's modal portrait is an anthropomorphic
+    // Great Bear (suited, eye-patched); the in-world NPC stays a giant
+    // glowing white bear primitive — those are two separate surfaces.
     const kind = this.merchant?.kind;
     let portrait = null;
-    if (kind && kind !== 'bearMerchant') {
+    if (kind) {
       portrait = KEEPER_PORTRAIT_ART[kind] || null;
-      if (!portrait) {
+      // Generated humanoid portrait fallback isn't suited for the
+      // non-humanoid Great Bear — skip the procedural attempt for it.
+      if (!portrait && kind !== 'bearMerchant') {
         try { portrait = keeperPortrait(kind); } catch (_) { portrait = null; }
       }
     }
