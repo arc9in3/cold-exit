@@ -3551,6 +3551,10 @@ export class Level {
     // Stealth sampling keeps the radial light entry so detection +
     // cover gameplay tracks the visible pool of light.
     this.lights.push({ x: cx, z: cz, radius: 8.0, intensity: 1.8 });
+    // Return refs so callers that need to gate visibility (e.g. the
+    // extraction chamber, which stays dark until the boss dies) can
+    // flip fixture + light together at reveal time.
+    return { fixture, light, target: light.target };
   }
 
   // Sample the ambient light level at a world point. Returns 0..1

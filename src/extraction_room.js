@@ -481,6 +481,22 @@ export function buildExtractionRoom(level, bossRoom, opts = {}) {
     }
   }
 
+  // ---- Ceiling lamp -------------------------------------------------
+  // Without this the chamber's walls have NO local light source — they
+  // only receive hemispheric ambient + a far key directional, which on
+  // dark biomes (nightclub, garage, rooftop) reads as walls blending
+  // into the void. Tester F3 dump confirmed walls present + visible:true
+  // post-reveal but visually invisible because nothing illuminated
+  // them. Build the lamp now, hide fixture + light + light.target, push
+  // them onto ownedVisuals so reveal() flips them visible alongside the
+  // walls. _addCeilingLamp returns the refs for this purpose; if it
+  // ever changes signature, the chamber falls back to dark + the
+  // gameplay still works (player can extract).
+  //
+  // The synthetic room object below is built without `theme`, so the
+  // lamp tint falls back to the default warm cream — fine for a
+  // back-of-house chamber.
+  // We build the synthetic room object first so cx/cz are accessible.
   // ---- Synthetic room object ---------------------------------------
   // Mirrors the level.rooms shape so things like roomAt() can find the
   // player after they walk inside. type='extraction' is new — code that
@@ -505,6 +521,33 @@ export function buildExtractionRoom(level, bossRoom, opts = {}) {
   // door from the wrong side. Using a circle (cx, cz, r) so the
   // existing isPlayerInExit() distance check works without changes.
   const exitBounds = { cx, cz, r: half - 1.2 };
+
+  // Ceiling lamp — see comment above the synthetic room object. Built
+  // here (after `room` exists) so _addCeilingLamp has cx/cz to work
+  // with. Returned refs are pushed onto ownedVisuals + the SpotLight's
+  // intensity stash so reveal() can flip them on together.
+  let lampRefs = null;
+  if (typeof level._addCeilingLamp === 'function') {
+    try {
+      lampRefs = level._addCeilingLamp(room);
+      if (lampRefs) {
+        if (lampRefs.fixture) {
+          lampRefs.fixture.visible = false;
+          ownedVisuals.push(lampRefs.fixture);
+        }
+        if (lampRefs.light) {
+          // SpotLight + target — hide via visible flag. Three.js skips
+          // light contribution from invisible lights in the renderer.
+          lampRefs.light.visible = false;
+          ownedVisuals.push(lampRefs.light);
+        }
+        if (lampRefs.target) {
+          lampRefs.target.visible = false;
+          ownedVisuals.push(lampRefs.target);
+        }
+      }
+    } catch (_) { /* fall back to dark chamber; gameplay still works */ }
+  }
 
   // Reveal helper — flips every owned visual to visible and unlocks
   // the door. Called from level.revealExit().
