@@ -32,6 +32,12 @@ import {
 import { MegaBossEcho, buildEchoLoot } from './megaboss_echo.js';
 import { MegaBossGeneral, buildGeneralLoot } from './megaboss_general.js';
 import { ProjectileManager } from './projectiles.js';
+// Warmup imports — theme materials (per-floor walls + room-accent
+// floor emissive) compile lazily on first use; without seeding them
+// at boot the player saw paired 200-500ms render spikes when entering
+// a level with a new biome.
+import { LEVEL_THEMES } from './props.js';
+import { sharedMaterial } from './material_pool.js';
 // Pass 1C — windows + ledges. Hitscan bullets vs windows; mantle
 // input handler.
 import { applyWindowDamage, shatter as shatterWindow } from './windows.js';
@@ -21962,6 +21968,75 @@ function _warmShaders() {
   try { spawnSmokeZone({ x: FAR, z: FAR }, 1.0, 1.0); } catch (_) {}
   try { spawnGasZone({ x: FAR, z: FAR }, 1.0, 1.0, 'player'); } catch (_) {}
   try { drones.spawn(FAR, 1.4, FAR); } catch (_) {}
+  // Theme warmup — every level's wall + floor + lamp emissive materials
+  // were compiling on first frame of a new biome (tester log: paired
+  // 537+556ms / 339+217ms render spikes 3 min apart, matching level
+  // transitions). sharedMaterial pool-caches by (color, emissive, ...)
+  // so the first sharedMaterial({color: theme.wall}) on a new floor
+  // allocates a fresh MeshStandardMaterial — and _attachDetailOverlay
+  // re-injects onBeforeCompile, forcing a brand-new shader compile.
+  // Seed every theme's wall trio + every room-theme floor accent here
+  // so the programs land in the WebGLPrograms cache + skipDispose
+  // keeps them pinned. Dummy meshes live forever in the warmup pin
+  // group (cleared with skipDispose).
+  const _themeWarmupGroup = new THREE.Group();
+  _themeWarmupGroup.position.set(FAR, FAR, FAR);
+  _themeWarmupGroup.userData.__warmupTheme = true;
+  scene.add(_themeWarmupGroup);
+  const _darken = (hex, k) => {
+    const r = (hex >> 16) & 0xff, g = (hex >> 8) & 0xff, b = hex & 0xff;
+    const m = 1 - k;
+    return ((Math.round(r * m)) << 16) | ((Math.round(g * m)) << 8) | (Math.round(b * m));
+  };
+  const _themeWarmGeo = new THREE.BoxGeometry(0.1, 0.1, 0.1);
+  _themeWarmGeo.userData = _themeWarmGeo.userData || {};
+  _themeWarmGeo.userData.sharedRigGeom = true;       // skip dispose
+  const _addThemeDummy = (mat) => {
+    if (!mat) return;
+    mat.userData = mat.userData || {};
+    mat.userData.skipDispose = true;
+    const m = new THREE.Mesh(_themeWarmGeo, mat);
+    m.matrixAutoUpdate = false;
+    _themeWarmupGroup.add(m);
+  };
+  try {
+    for (const themeKey of Object.keys(LEVEL_THEMES || {})) {
+      const t = LEVEL_THEMES[themeKey];
+      if (!t || typeof t.wall !== 'number') continue;
+      // Three wall variants per theme — matches level.js's _generateBody.
+      _addThemeDummy(sharedMaterial({ color: t.wall,            roughness: 0.85 }));
+      _addThemeDummy(sharedMaterial({ color: _darken(t.wall, 0.55), roughness: 0.85 }));
+      _addThemeDummy(sharedMaterial({ color: _darken(t.wall, 0.30), roughness: 0.85 }));
+    }
+    // Room-theme floor accents — every entry in level.js's `accents`
+    // map. Kept in sync with _addRoomFloorPatch. Per-room emissive
+    // variants (color + emissive + emissiveIntensity) each get a
+    // unique shader program because of the detail-overlay injection.
+    const ROOM_ACCENT_HEX = [
+      [0x18121a, 0],         // baseHex fallback (default rooms)
+      [0xb27c50, 0.18],      // bedroom: warm tungsten
+      [0xc89060, 0.18],      // livingRoom: hearth
+      [0xd0a060, 0.14],      // lobby: chandelier
+      [0xb29a48, 0.10],      // library: wood warm
+      [0xe6e0c0, 0.10],      // kitchen: can lights
+      [0xa8804a, 0.10],      // archive: warm parchment
+      [0x8aa0c0, 0.06],      // office: fluorescent
+      [0x8a7a60, 0.06],      // archive variant
+      [0x9aa080, 0.06],      // mailroom: utility
+      [0x60a0d0, 0.10],      // gym: cool
+      [0x808088, 0.06],      // warehouse: neutral
+    ];
+    for (const themeKey of Object.keys(LEVEL_THEMES || {})) {
+      const t = LEVEL_THEMES[themeKey];
+      if (!t || typeof t.floor !== 'number') continue;
+      for (const [tint, emi] of ROOM_ACCENT_HEX) {
+        _addThemeDummy(sharedMaterial({
+          color: t.floor, emissive: tint, emissiveIntensity: emi,
+          roughness: 0.85, metalness: 0.05,
+        }));
+      }
+    }
+  } catch (_) { /* warmup is best-effort */ }
   // Compile every material currently in the scene. Costs the same
   // ~100-300ms hitch we wanted to avoid in gameplay, but here it
   // happens at boot before the player can interact, so it reads as
