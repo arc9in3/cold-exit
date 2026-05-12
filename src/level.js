@@ -3634,7 +3634,23 @@ export class Level {
         });
       }
     }
-    if (!prop.collision) return true;
+    if (!prop.collision) {
+      // Decoration-only prop (rug, lamp, vase, TV) — no collision
+      // proxy is built, so the prop never enters `obstacles` and
+      // _clearDoorCorridors can't find + hide it. Track these on a
+      // sibling list so the door sweep can still walk over them and
+      // hide any that landed in a doorway corridor.
+      if (!this._decorationProps) this._decorationProps = [];
+      const fp = this._propFootprints?.[this._propFootprints.length - 1];
+      if (fp) {
+        this._decorationProps.push({
+          group: prop.group,
+          minX: fp.minX, maxX: fp.maxX,
+          minZ: fp.minZ, maxZ: fp.maxZ,
+        });
+      }
+      return true;
+    }
 
     // Rotate the collision footprint by the prop's yaw — axis-aligned
     // at 0/90/180/270, bounded square for anything else (placeInterior
@@ -5777,6 +5793,9 @@ export class Level {
     // that could pin a player at the threshold.
     const halfGap = DOOR_WIDTH / 2 + 1.0;
     const depth = 3.5;
+    // Pre-stash strip-bounds tests so the decoration sweep below can
+    // reuse the same shape checks without duplicating the geometry.
+    const _decoStrips = [];
     for (const d of doors) {
       const dx = d.userData.cx, dz = d.userData.cz;
       const geo = d.geometry.parameters;
@@ -5789,6 +5808,9 @@ export class Level {
         stripMinX = dx - depth;   stripMaxX = dx + depth;
         stripMinZ = dz - halfGap; stripMaxZ = dz + halfGap;
       }
+      // Stash this strip so the decoration-prop sweep below can
+      // reuse the same bounds.
+      _decoStrips.push({ stripMinX, stripMaxX, stripMinZ, stripMaxZ });
       for (const o of this.obstacles) {
         if (o === d || o.userData.isDoor) continue;
         if (o.userData.isBossFlank) continue;     // explicit gameplay walls — see _repairDoorOverlaps
@@ -5863,6 +5885,25 @@ export class Level {
         // group. When the proxy is cleared, hide the whole group too
         // so a bookshelf / couch doesn't straddle an open doorway.
         if (o.userData.propGroup) o.userData.propGroup.visible = false;
+      }
+    }
+    // Decoration-prop sweep — props with no collision (rugs / lamps /
+    // vases / TVs) skipped the obstacle-list registration in
+    // _registerProp, so the doors-vs-obstacles loop above never saw
+    // them. They sit in `_decorationProps` instead; walk that list
+    // against the same strip bounds to hide any that landed in a
+    // doorway. Without this pass the player walks through a rug-on-
+    // the-threshold and through the no-collision lamp blocking the
+    // boss-exit door.
+    if (this._decorationProps && this._decorationProps.length && _decoStrips.length) {
+      for (const dp of this._decorationProps) {
+        if (!dp.group || !dp.group.visible) continue;
+        for (const s of _decoStrips) {
+          if (dp.maxX < s.stripMinX || dp.minX > s.stripMaxX) continue;
+          if (dp.maxZ < s.stripMinZ || dp.minZ > s.stripMaxZ) continue;
+          dp.group.visible = false;
+          break;
+        }
       }
     }
     this._dirtySolid();
