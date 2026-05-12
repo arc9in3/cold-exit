@@ -112,6 +112,27 @@ export class ProjectileManager {
       if (p.dead) continue;
       p.age += dt;
 
+      // Sticky-impact fuse (EX-* Explosive Crossbow path) — once a
+      // sticky projectile has hit something (enemy / wall / ground)
+      // and entered the stuck state, it stops integrating physics
+      // and just runs its fuse timer. When the fuse expires we call
+      // the spawn-supplied onDetonate hook FIRST (lets the caller
+      // apply stuck-enemy bonus damage with full context), then the
+      // standard _detonate fans the AoE explosion. Skipping the
+      // rest of the per-frame work avoids any contact-test re-fire
+      // that would otherwise double-detonate.
+      if (p.stuck && p.stickyImpact) {
+        p.stuckT = (p.stuckT || 0) + dt;
+        if (p.stuckT >= (p.fuseSec || 0.6)) {
+          if (typeof p.onDetonate === 'function') {
+            try { p.onDetonate(p); } catch (_) { /* defensive */ }
+          }
+          this._detPos.copy(p.pos);
+          this._detonate(p, this._detPos, onExplode);
+        }
+        continue;
+      }
+
       // Fuse timeout. Behaviour depends on whether the projectile
       // wants its fuse to start on landing (player throwables — give
       // them time to bounce + settle before going off) or at spawn
@@ -154,6 +175,17 @@ export class ProjectileManager {
       if (armed && p.type === 'rocket' && p.owner === 'player') {
         const close = this._nearbyEnemy(p.pos, 0.8);
         if (close) {
+          // Sticky-impact (EX-* Explosive Crossbow): bind to the
+          // enemy + start the fuse instead of detonating now. The
+          // top-of-loop fuse handler picks it up next frame.
+          if (p.stickyImpact && !p.stuck) {
+            p.stuck = true;
+            p.stuckEnemy = close;
+            p.stuckT = 0;
+            p.vel.set(0, 0, 0);
+            p.gravity = 0;
+            continue;
+          }
           this._detPos.copy(p.pos); this._detonate(p, this._detPos, onExplode);
           continue;
         }
@@ -183,6 +215,18 @@ export class ProjectileManager {
 
       // Ground contact — floor plane at y=0.
       if (ny <= 0.08) {
+        // Sticky-impact: stick at landing point + run the fuse.
+        if (p.stickyImpact && !p.stuck) {
+          p.pos.set(nx, 0.08, nz);
+          p.body.position.copy(p.pos);
+          p.trail.position.copy(p.pos);
+          p.stuck = true;
+          p.stuckEnemy = null;
+          p.stuckT = 0;
+          p.vel.set(0, 0, 0);
+          p.gravity = 0;
+          continue;
+        }
         if (p.type === 'rocket' || !(p.bounciness > 0)) {
           this._detPos.set(nx, 0.08, nz);
           this._detonate(p, this._detPos, onExplode);
@@ -213,6 +257,18 @@ export class ProjectileManager {
         ? false
         : this._hitsObstacle(level, p.pos.x, p.pos.z, nx, ny, nz, p.pos.y);
       if (hitWall) {
+        // Sticky-impact: bind to wall at the contact point + run fuse.
+        if (p.stickyImpact && !p.stuck) {
+          p.pos.set(nx, Math.max(0.08, ny), nz);
+          p.body.position.copy(p.pos);
+          p.trail.position.copy(p.pos);
+          p.stuck = true;
+          p.stuckEnemy = null;
+          p.stuckT = 0;
+          p.vel.set(0, 0, 0);
+          p.gravity = 0;
+          continue;
+        }
         if (p.type === 'rocket') {
           this._detPos.set(nx, Math.max(0.08, ny), nz);
           this._detonate(p, this._detPos, onExplode);

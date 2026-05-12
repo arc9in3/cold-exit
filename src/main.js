@@ -10362,6 +10362,206 @@ function firePlayerRicochet(playerInfo, weapon, aimPoint) {
     dmg *= bounceDmgMult;
   }
 }
+// Gauss Rifle — hitscan kinetic round. Standard damage + applyHit;
+// applyKnockback pushes the enemy in the bullet's direction. We also
+// raycast from the enemy along the knockback direction to test for a
+// nearby wall — if a wall is within knockbackStrength meters, the
+// shove "slams" them and adds wallSlamBonusDmg. Designed for cornering.
+const _gr_origin = new THREE.Vector3();
+const _gr_dir    = new THREE.Vector3();
+const _gr_slamFrom = new THREE.Vector3();
+const _gr_impulse  = { x: 0, z: 0 };
+function firePlayerGauss(playerInfo, weapon, aimPoint) {
+  const range = weapon.range || 24;
+  const knockback = weapon.knockbackStrength ?? 4.0;
+  const slamBonus = weapon.wallSlamBonusDmg ?? 35;
+  const baseDmg = (weapon.damage || 8) * (derivedStats.rangedDmgMult || 1);
+  weapon.ammo = Math.max(0, (weapon.ammo | 0) - 1);
+  if (weapon.ammo <= 0) tryReload(weapon);
+  _gr_origin.copy(playerInfo.muzzleWorld);
+  _gr_dir.set(aimPoint.x - _gr_origin.x, 0, aimPoint.z - _gr_origin.z);
+  if (_gr_dir.lengthSq() < 0.0001) return;
+  _gr_dir.normalize();
+  if (sfx.fire) sfx.fire('exotic');
+  runStats.noteFireWeaponClass('exotic');
+  alertEnemiesFromShot(_gr_origin);
+  const hitTargets = [...allHittables(), ...level.solidObstacles()];
+  const hit = combat.raycast(_gr_origin, _gr_dir, hitTargets, range);
+  const endPoint = hit ? hit.point
+    : new THREE.Vector3(
+        _gr_origin.x + _gr_dir.x * range,
+        _gr_origin.y,
+        _gr_origin.z + _gr_dir.z * range,
+      );
+  combat.spawnShot(_gr_origin, endPoint, weapon.tracerColor || 0xa0e0ff,
+    { light: false, flash: true });
+  if (!hit) return;
+  const isEnemy = !!(hit.owner && hit.owner.manager && hit.owner.alive);
+  if (!isEnemy) return;
+  // Slam test — ray from enemy chest height along the bullet direction;
+  // if a wall hits within knockbackStrength meters, the shove "slams"
+  // and we add the bonus damage. Uses just solidObstacles (not enemies)
+  // so a wall behind another enemy is what counts as a slam.
+  const enemy = hit.owner;
+  _gr_slamFrom.set(enemy.group.position.x, 1.0, enemy.group.position.z);
+  const slamHit = combat.raycast(_gr_slamFrom, _gr_dir,
+    level.solidObstacles(), knockback);
+  const slammed = !!(slamHit && slamHit.distance <= knockback);
+  const totalDmg = slammed ? baseDmg + slamBonus : baseDmg;
+  runStats.addDamage(totalDmg);
+  enemy.manager.applyHit(enemy, totalDmg, hit.zone || 'torso', _gr_dir,
+    { weaponClass: 'exotic' });
+  if (enemy.manager.applyKnockback && enemy.alive) {
+    _gr_impulse.x = _gr_dir.x * knockback;
+    _gr_impulse.z = _gr_dir.z * knockback;
+    enemy.manager.applyKnockback(enemy, _gr_impulse);
+  }
+}
+
+// Explosive Crossbow — projectile that sticks on impact, runs a fuse,
+// then detonates with AoE damage. Bonus damage applied to the stuck
+// enemy on detonation. Uses the existing projectile manager with the
+// new `stickyImpact` flag (see projectiles.js) so we don't need a new
+// projectile type. The onDetonate closure carries the stuck-bonus
+// damage into the post-fuse moment.
+function firePlayerStickyExplosive(playerInfo, weapon, aimPoint) {
+  const speed = weapon.projectileSpeed || 40;
+  const origin = playerInfo.muzzleWorld.clone();
+  const dir = new THREE.Vector3(
+    aimPoint.x - origin.x, 0, aimPoint.z - origin.z,
+  );
+  if (dir.lengthSq() < 0.0001) return;
+  dir.normalize();
+  weapon.ammo = Math.max(0, (weapon.ammo | 0) - 1);
+  if (weapon.ammo <= 0) tryReload(weapon);
+  const explosionDmg = (weapon.explosionDmg || 50) * (derivedStats.rangedDmgMult || 1);
+  const stuckBonus  = (weapon.stuckBonusDmg || 35) * (derivedStats.rangedDmgMult || 1);
+  const tracerColor = weapon.tracerColor || 0xff6020;
+  projectiles.spawn({
+    pos: origin,
+    vel: new THREE.Vector3(dir.x * speed, 0, dir.z * speed),
+    type: 'rocket',
+    lifetime: 5.0,             // safety cap — sticky path overrides via fuseSec
+    radius: 0.14,
+    color: tracerColor,
+    explosion: {
+      radius: weapon.explosionRadius || 3.0,
+      damage: explosionDmg,
+      shake: 0.6,
+    },
+    owner: 'player',
+    gravity: 0,                // bolts fly flat
+    bounciness: 0,
+    // Sticky behaviour — see projectiles.js update() for the handler.
+    stickyImpact: true,
+    fuseSec: weapon.fuseSec || 0.6,
+    // Closure: applies bonus damage to the stuck enemy at detonation
+    // time, BEFORE the AoE explosion fans out. Kept on the spec so
+    // projectiles.js can call it without needing a damage-pipeline ref.
+    onDetonate: (p) => {
+      const e = p.stuckEnemy;
+      if (e && e.alive && e.manager?.applyHit) {
+        try {
+          e.manager.applyHit(e, stuckBonus, 'torso',
+            { x: dir.x, z: dir.z }, { weaponClass: 'exotic' });
+        } catch (_) { /* defensive */ }
+      }
+    },
+  });
+  if (sfx.fire) sfx.fire('exotic');
+  runStats.noteFireWeaponClass('exotic');
+  alertEnemiesFromShot(origin);
+}
+
+// Charge Cannon — hold LMB to charge, release to fire at the achieved
+// tier. State lives on the weapon itself (`_chargeT`) so weapon swap
+// resets cleanly when the player re-equips. Tier thresholds defined
+// in weapon.chargeTiers (ordered low→high); we walk them and pick the
+// highest threshold that chargeT has crossed.
+function tickChargeWeapon(dt, playerInfo, weapon, inputState, aimInfo) {
+  const tiers = weapon.chargeTiers || [];
+  const held = !!inputState.attackHeld;
+  const wasHeld = !!weapon._chargeHeld;
+  weapon._chargeHeld = held;
+  if (held) {
+    weapon._chargeT = (weapon._chargeT || 0) + dt;
+  } else if (wasHeld && (weapon._chargeT || 0) > 0) {
+    // Falling edge — fire at the highest tier whose threshold was met.
+    let tierIdx = 0;
+    for (let i = 0; i < tiers.length; i++) {
+      if ((weapon._chargeT || 0) >= (tiers[i].thresholdSec || 0)) tierIdx = i;
+    }
+    const tier = tiers[tierIdx] || tiers[0];
+    const ammoCost = tier?.ammoCost || 1;
+    if ((weapon.ammo | 0) < ammoCost) {
+      // Not enough ammo for the achieved tier — drop to the highest
+      // tier we CAN afford, or click-empty if nothing affords.
+      let affordIdx = -1;
+      for (let i = tierIdx; i >= 0; i--) {
+        if ((weapon.ammo | 0) >= (tiers[i].ammoCost || 1)) { affordIdx = i; break; }
+      }
+      if (affordIdx < 0) {
+        weapon._chargeT = 0;
+        if (sfx.empty) sfx.empty();
+        tryReload(weapon);
+        return;
+      }
+      const aff = tiers[affordIdx];
+      weapon.ammo = Math.max(0, (weapon.ammo | 0) - (aff.ammoCost || 1));
+      if (aimInfo?.point) firePlayerCharge(playerInfo, weapon, aimInfo.point, affordIdx);
+      weapon._chargeT = 0;
+      if (weapon.ammo <= 0) tryReload(weapon);
+      return;
+    }
+    weapon.ammo = Math.max(0, (weapon.ammo | 0) - ammoCost);
+    if (aimInfo?.point) firePlayerCharge(playerInfo, weapon, aimInfo.point, tierIdx);
+    weapon._chargeT = 0;
+    if (weapon.ammo <= 0) tryReload(weapon);
+  } else if (!held) {
+    weapon._chargeT = 0;
+  }
+}
+
+// Actual beam fire — single hitscan ray. Damage + beam width scale
+// with the achieved tier. The beam is a one-shot tracer call into
+// combat.spawnShot with the tier's tracerColor + a width-override
+// (combat.spawnShot accepts a `thickness` opt that the existing
+// tracer pool already honours; falls back to the default tracer if
+// not). No allocation in the hot path — module-scope vector pool
+// matches the ricochet handler.
+const _vc_origin = new THREE.Vector3();
+const _vc_dir    = new THREE.Vector3();
+function firePlayerCharge(playerInfo, weapon, aimPoint, tierIdx) {
+  const tiers = weapon.chargeTiers || [];
+  const tier = tiers[tierIdx | 0] || tiers[0] || { dmgMult: 1, beamWidth: 0.08 };
+  const range = weapon.range || 26;
+  const baseDmg = (weapon.damage || 40) * (derivedStats.rangedDmgMult || 1);
+  const dmg = baseDmg * (tier.dmgMult || 1);
+  _vc_origin.copy(playerInfo.muzzleWorld);
+  _vc_dir.set(aimPoint.x - _vc_origin.x, 0, aimPoint.z - _vc_origin.z);
+  if (_vc_dir.lengthSq() < 0.0001) return;
+  _vc_dir.normalize();
+  if (sfx.fire) sfx.fire('exotic');
+  runStats.noteFireWeaponClass('exotic');
+  alertEnemiesFromShot(_vc_origin);
+  const hitTargets = [...allHittables(), ...level.solidObstacles()];
+  const hit = combat.raycast(_vc_origin, _vc_dir, hitTargets, range);
+  const endPoint = hit ? hit.point
+    : new THREE.Vector3(
+        _vc_origin.x + _vc_dir.x * range,
+        _vc_origin.y,
+        _vc_origin.z + _vc_dir.z * range,
+      );
+  combat.spawnShot(_vc_origin, endPoint, weapon.tracerColor || 0x40d0ff,
+    { light: false, flash: true, thickness: tier.beamWidth });
+  if (!hit) return;
+  const isEnemy = !!(hit.owner && hit.owner.manager && hit.owner.alive);
+  if (!isEnemy) return;
+  runStats.addDamage(dmg);
+  hit.owner.manager.applyHit(hit.owner, dmg, hit.zone || 'torso', _vc_dir,
+    { weaponClass: 'exotic' });
+}
+
 function _spawnGrappleCable() {
   const geom = new THREE.BufferGeometry();
   const pts = new Float32Array(6);
@@ -10592,16 +10792,28 @@ function fireOneShot(playerInfo, weapon, aimPoint, isADS, aimOwner, aimZone) {
     firePlayerRicochet(playerInfo, weapon, aimPoint);
     return;
   }
-  // === STUB fire modes — currently fall through to standard hitscan
-  // until their dedicated handlers ship. Weapons are usable + drop
-  // correctly; they just behave as a single-shot until the dedicated
-  // mode is wired. Tracked for next-turn work.
-  //   - 'charge'           (VC-*  Charge Cannon)
-  //   - 'gauss'            (GR-*  Gauss Rifle)
-  //   - 'stickyExplosive'  (EX-*  Explosive Crossbow)
-  // Falling through is INTENTIONAL — the standard fire path below
-  // produces a sensible default (damage applies, tracer renders) so
-  // the weapon is never a no-op while we wire the special behaviour.
+  // Gauss Rifle (GR-*) — hitscan kinetic round. Pushes enemies on
+  // hit; bonus damage if knockback would slam them into a wall.
+  if (weapon.fireMode === 'gauss') {
+    firePlayerGauss(playerInfo, weapon, aimPoint);
+    return;
+  }
+  // Explosive Crossbow (EX-*) — projectile that sticks on impact,
+  // detonates after a short fuse, bonus damage if stuck to enemy.
+  if (weapon.fireMode === 'stickyExplosive') {
+    firePlayerStickyExplosive(playerInfo, weapon, aimPoint);
+    return;
+  }
+  // Charge Cannon (VC-*) fire-mode handled separately via the
+  // tickChargeWeapon path in tickShooting — when LMB is released,
+  // firePlayerCharge is called directly. Reaching here with a charge
+  // weapon means someone tried to fire it via a non-charge code path
+  // (e.g. AI driver, RPC). Default to a tier-1 release so the shot
+  // isn't lost.
+  if (weapon.fireMode === 'charge') {
+    firePlayerCharge(playerInfo, weapon, aimPoint, 0);
+    return;
+  }
 
   // Attachment-adjusted stats for damage / spread / range; ammo + reload state
   // stay on the live weapon.
@@ -11596,6 +11808,15 @@ function tickShooting(dt, playerInfo, inputState, aimInfo) {
   if (playerBurstRemaining > 0) return;
   if (playerFireCooldown > 0) return;
   if (!aimInfo.point) return;
+
+  // Charge Cannon (VC-*) — bypasses the standard pressed/held edge
+  // dispatch. tickChargeWeapon handles the LMB held → charge accrue →
+  // release → fire-at-tier state machine. We return early here so the
+  // rest of the normal fire path doesn't double-fire on press.
+  if (weapon.fireMode === 'charge') {
+    tickChargeWeapon(dt, playerInfo, weapon, inputState, aimInfo);
+    return;
+  }
 
   const wantsNew = weapon.fireMode === 'auto'
     ? inputState.attackHeld
