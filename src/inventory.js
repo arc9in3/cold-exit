@@ -1815,20 +1815,6 @@ export const THROWABLE_DEFS = {
     maxCharges: 2, cooldownSec: 30,
     description: 'Vision-blocking smoke for 9s · breaks enemy line of sight',
   },
-  decoy: {
-    id: 'thr_decoy', name: 'Decoy Beacon', type: 'throwable', rarity: 'uncommon',
-    tint: 0xe0c040,
-    throwKind: 'decoy',
-    aoeRadius: 1.2, fuse: 0.8,   // arms quickly on land
-    decoyDuration: 7.0,
-    maxCharges: 2, cooldownSec: 25,
-    description: 'Audio + visual lure pulls enemies to a location for 7s',
-    // Apr-26: pulled from loot pools while the AI hijack design is
-    // sorted out (see git revert of de0eaca). The def stays so the
-    // existing visual + tick code keeps working when an in-flight
-    // decoy lands; just no new ones spawn as drops.
-    encounterOnly: true,
-  },
   // The Gift — Circle of Candles encounter reward only. Through-walls
   // shockwave that obliterates everything in range; costs 10 permanent
   // max HP per use; refuses to fire when max HP < 10. Description is

@@ -14517,11 +14517,6 @@ function _onProjectileExplodeBody(pos, explosion, owner, p, radius, rSq) {
     if (sfx.explode) sfx.explode();
     return;
   }
-  if (kind === 'decoy') {
-    spawnDecoyBeacon(pos, p.decoyDuration || 7.0);
-    if (sfx.explode) sfx.explode();
-    return;
-  }
   if (kind === 'claymore') {
     // Place the mine — no explosion here. The claymore is a persistent
     // prop that sits at `pos` and detonates on enemy proximity, see
@@ -17318,15 +17313,13 @@ function _tickBurnReadouts(dt) {
 }
 
 const _fireZones = [];
-// --- Smoke + decoy throwables --------------------------------------
+// --- Smoke + gas throwables -----------------------------------------
 // Smoke zones block enemy line-of-sight while alive. Visualised as a
-// slowly-expanding low-opacity dome that fades over the zone's life.
-// Decoy beacons attract enemy navigation toward the beacon position
-// (consumed by gunman / melee detection — they treat the decoy as
-// `playerPos` while it's alive). Both register on a module-level
-// list so the per-frame tick can update visuals + expire them.
+// soft fog dome + continuous puff emitter (see _tickThrowableZones).
+// Gas zones drain HP / stamina to anything inside. Both register on
+// a module-level list so the per-frame tick can update visuals +
+// expire them.
 const _smokeZones = [];
-const _decoys = [];
 const _gasZones = [];
 
 // Gas grenade — green poison cloud lingering for `duration`s.
@@ -17430,24 +17423,7 @@ function _spawnSmokeCloudPuff(zone) {
   });
 }
 
-function spawnDecoyBeacon(pos, duration) {
-  // Spinning yellow rod + ground ring so the beacon reads as "active".
-  const rodMat = new THREE.MeshBasicMaterial({ color: 0xe0c040, transparent: true, opacity: 0.85 });
-  const rod = new THREE.Mesh(new THREE.CylinderGeometry(0.08, 0.08, 0.55, 8), rodMat);
-  rod.position.set(pos.x, 0.30, pos.z);
-  scene.add(rod);
-  const ringMat = new THREE.MeshBasicMaterial({
-    color: 0xe0c040, transparent: true, opacity: 0.45,
-    depthWrite: false, side: THREE.DoubleSide,
-  });
-  const ring = new THREE.Mesh(new THREE.RingGeometry(0.4, 0.55, 18), ringMat);
-  ring.rotation.x = -Math.PI / 2;
-  ring.position.set(pos.x, 0.05, pos.z);
-  scene.add(ring);
-  _decoys.push({ x: pos.x, z: pos.z, life: duration, t: 0, rod, ring });
-}
-
-// Tick + cleanup for smoke + decoys. Visuals fade over the last 30%
+// Tick + cleanup for smoke + gas zones. Visuals fade over the last 30%
 // of life; mesh + material disposed on expiry.
 function _tickThrowableZones(dt) {
   for (let i = _smokeZones.length - 1; i >= 0; i--) {
@@ -17516,21 +17492,6 @@ function _tickThrowableZones(dt) {
       }
       z.puffs.length = 0;
       _smokeZones.splice(i, 1);
-    }
-  }
-  for (let i = _decoys.length - 1; i >= 0; i--) {
-    const d = _decoys[i];
-    d.t += dt;
-    d.rod.rotation.y += dt * 4;
-    const fade = d.t > d.life * 0.7
-      ? Math.max(0, (d.life - d.t) / (d.life * 0.3))
-      : 1;
-    d.rod.material.opacity = 0.85 * fade;
-    d.ring.material.opacity = 0.45 * fade;
-    if (d.t >= d.life) {
-      scene.remove(d.rod); d.rod.geometry.dispose(); d.rod.material.dispose();
-      scene.remove(d.ring); d.ring.geometry.dispose(); d.ring.material.dispose();
-      _decoys.splice(i, 1);
     }
   }
   // Gas zones — visual fade + per-second drain on player + enemies
@@ -17872,12 +17833,6 @@ function randomSmokeAim(zone) {
   const a = Math.random() * Math.PI * 2;
   return { x: zone.x + Math.cos(a) * r, z: zone.z + Math.sin(a) * r };
 }
-function activeDecoy() {
-  // Return the freshest active decoy (last spawned), or null.
-  if (_decoys.length === 0) return null;
-  return _decoys[_decoys.length - 1];
-}
-
 // --- Camping detection -----------------------------------------------
 // Track how long the player has held roughly-the-same position. Boss
 // AI uses this to decide whether to throw a grenade and force the
@@ -20708,7 +20663,6 @@ function tick() {
     smokeContaining,                // returns the freshest zone the player is inside
     smokeOnSegment,                 // returns the freshest zone blocking enemy LoS to player
     randomSmokeAim,                 // random aim point inside a zone (for confused fire)
-    activeDecoy,                    // decoy beacon target hijack
     spawnAiThrowable: (g, kind) => spawnAiThrowable(g, kind),
     isPlayerCamping: () => playerCampingT > playerCampingThreshold,
     droneSummonAt: (boss) => spawnDronesAt(boss),
@@ -20732,7 +20686,6 @@ function tick() {
     smokeContaining,
     smokeOnSegment,
     randomSmokeAim,
-    activeDecoy,
     droneSummonAt: (boss) => spawnDronesAt(boss),
     bossTeleport: (e) => bossTeleport(e),
     // SHINIGAMI — drop a ring of small molotov pools around the boss
@@ -21668,7 +21621,7 @@ function _warmShaders() {
       { name: 'WARM_COMMON', type: 'junk', tint: 0x808080, rarity: 'common' }));
   } catch (_) {}
   // FX warmup — first throw of grenade / flashbang / molotov / smoke /
-  // decoy / gas, and first drone sighting, were each compiling their
+  // gas, and first drone sighting, were each compiling their
   // MeshBasicMaterial variants on the gameplay frame they fired
   // (visible as a 30-80ms stutter the first time the player used the
   // ability). Seed one of each at FAR so the compile pass below picks
@@ -21681,7 +21634,6 @@ function _warmShaders() {
   try { _spawnSmoke(FAR, 0, FAR); } catch (_) {}
   try { _spawnFlungFireOrb({ x: FAR, z: FAR }, 1, 0, 1, 1, 1); } catch (_) {}
   try { spawnSmokeZone({ x: FAR, z: FAR }, 1.0, 1.0); } catch (_) {}
-  try { spawnDecoyBeacon({ x: FAR, z: FAR }, 1.0); } catch (_) {}
   try { spawnGasZone({ x: FAR, z: FAR }, 1.0, 1.0, 'player'); } catch (_) {}
   try { drones.spawn(FAR, 1.4, FAR); } catch (_) {}
   // Compile every material currently in the scene. Costs the same
@@ -21730,7 +21682,7 @@ function _warmShaders() {
   }
   // FX teardown — pool-backed entries (flash dome, explosion fireball+
   // ring, sparks) get hidden + released; direct-allocated entries
-  // (fire orbs, smoke / decoy / gas zone meshes) get fully disposed.
+  // (fire orbs, smoke / gas zone meshes) get fully disposed.
   try {
     for (const o of _fireOrbs) {
       scene.remove(o.mesh);
@@ -21747,8 +21699,6 @@ function _warmShaders() {
     };
     for (const z of _smokeZones) disposeZone(z);
     _smokeZones.length = 0;
-    for (const z of _decoys) disposeZone(z);
-    _decoys.length = 0;
     for (const z of _gasZones) disposeZone(z);
     _gasZones.length = 0;
     for (const d of _flashDomes) {
