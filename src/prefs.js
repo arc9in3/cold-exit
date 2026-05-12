@@ -307,6 +307,59 @@ export function bumpRunCount() {
 }
 
 // ---------------------------------------------------------------------
+// Career stats — lifetime aggregates across every run. Visible on the
+// contractor screen's right-rail player profile. Bumped at run-end
+// (death OR extract) with the RunStats snapshot from leaderboard.js.
+// Defaults keep the read path resilient to schema drift — any new
+// field added here is silently zero for existing players.
+// ---------------------------------------------------------------------
+const CAREER_STATS_KEY = 'coldexit:careerStats:v1';
+const CAREER_STATS_DEFAULT = {
+  runs: 0,                  // total runs ended (death OR extract)
+  deaths: 0,                // death-ended runs (subset of runs)
+  kills: 0,                 // lifetime enemies killed
+  damage: 0,                // lifetime damage dealt
+  firedShots: 0,            // lifetime ranged trigger-pulls
+  landedShots: 0,           // lifetime shots that hit an enemy
+  megabossKills: 0,         // lifetime megaboss kills
+  levelsExtracted: 0,       // lifetime floors completed via extract
+  credits: 0,               // lifetime credits earned
+  critHeadshots: 0,         // lifetime crit-headshot kills
+  throwableKills: 0,        // lifetime throwable kills
+  containersSearched: 0,    // lifetime containers opened
+  bodiesLooted: 0,          // lifetime corpses searched
+  peakLevel: 0,             // furthest single-run floor reached
+};
+export function getCareerStats() {
+  return { ...CAREER_STATS_DEFAULT, ..._read(CAREER_STATS_KEY, {}) };
+}
+// Add a per-run snapshot into the career aggregate. opts.death === true
+// also bumps the death counter (extract-only run-ends don't). Returns
+// the updated stats so callers can read the post-bump totals without a
+// second read.
+export function addCareerStats(snap, opts = {}) {
+  if (!snap) return null;
+  const cur = getCareerStats();
+  cur.runs += 1;
+  if (opts.death) cur.deaths += 1;
+  cur.kills += snap.kills | 0;
+  cur.damage += Math.round(snap.damage | 0);
+  cur.firedShots += snap.firedShots | 0;
+  cur.landedShots += snap.landedShots | 0;
+  cur.megabossKills += snap.megabossKillsThisRun | 0;
+  cur.levelsExtracted += snap.levelsExtracted | 0;
+  cur.credits += Math.round(snap.credits | 0);
+  cur.critHeadshots += snap.critHeadshots | 0;
+  cur.throwableKills += snap.throwableKills | 0;
+  cur.containersSearched += snap.containersSearched | 0;
+  cur.bodiesLooted += snap.bodiesLooted | 0;
+  const peak = snap.peakLevel | 0;
+  if (peak > cur.peakLevel) cur.peakLevel = peak;
+  _write(CAREER_STATS_KEY, cur);
+  return cur;
+}
+
+// ---------------------------------------------------------------------
 // Weapon unlocks — chips spent at the Stash Armory permanently unlock
 // a weapon flagged `worldDrop: false` in tunables. Two effects per
 // purchase: (a) the weapon enters the player's free-take starter pool,

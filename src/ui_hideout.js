@@ -42,6 +42,7 @@ import {
   getRerollUnlocked, setRerollUnlocked, REROLL_UNLOCK_COST,
   getRevealedHideoutTabs, isOnboardSeen, markOnboardSeen,
   getPendingAnnouncements, markOnboardAnnounced,
+  getCareerStats,
 } from './prefs.js';
 import { tunables } from './tunables.js';
 import { BALANCE } from './balance.js';
@@ -2082,30 +2083,37 @@ export class HideoutUI {
     // has actually banked some progress to compare against.
     const _firstRunPlayer = (getContractRank() | 0) === 0 && !isOnboardSeen('stash');
     if (this.contractorStep === 'cards' && !_firstRunPlayer) {
+      // Left rail — LIVE CONTRACT FEED at top, leaderboards pinned at
+      // bottom-left. Previously the leaderboards rode inside the feed's
+      // scroll, which buried them on long feeds. User asked for the
+      // leaderboards block to sit at the bottom-left of the screen so
+      // it's always visible.
       const feed = document.createElement('div');
       feed.className = 'contractor-feed';
       feed.innerHTML = `<div class="feed-head">LIVE CONTRACT FEED</div>${this._renderLiveFeedHTML()}`;
-      // Compact leaderboards block below the feed — top 3 in Levels
-      // (the most relatable category for a contracts screen). Click
-      // on the block opens the full leaderboards step.
+      wrap.appendChild(feed);
+
+      // Bottom-left leaderboards block — top 3 in Levels (the most
+      // relatable category for a contracts screen). Click opens the
+      // full leaderboards step. CTA label changed from "View all
+      // categories" to "View leaderboards" per user request.
       const lb = document.createElement('div');
       lb.className = 'contractor-leaderboard-block';
       lb.innerHTML = `
         <div class="lb-block-head">LEADERBOARDS</div>
         ${this._renderLeaderboardMiniHTML('levels', 3)}
-        <button type="button" class="lb-view-all">View all categories ▶</button>
+        <button type="button" class="lb-view-all">View leaderboards ▶</button>
       `;
       lb.querySelector('.lb-view-all').addEventListener('click', () => {
         this.contractorStep = 'leaderboard';
         this.render();
       });
-      feed.appendChild(lb);
-      wrap.appendChild(feed);
+      wrap.appendChild(lb);
 
-      const board = document.createElement('div');
-      board.className = 'contractor-board';
-      board.innerHTML = `<div class="board-head">CONTRACT BOARD</div>${this._renderBoardListHTML(allDefs)}`;
-      wrap.appendChild(board);
+      // Contract-board rail removed. Was top-right, redundant with the
+      // wanted-poster cards in the center column — the player already
+      // has the same contracts visible on the table below. Right edge
+      // is now the player profile / career stats rail (see corner).
 
       // Kick the live-feed shuffle interval. _stopFeedPulse handles
       // cleanup on close.
@@ -2236,14 +2244,68 @@ export class HideoutUI {
       const next = thresholds.find(t => _rankNow < t.rank);
       return next ? `Next: ${next.label} @ Rank ${next.rank}` : '';
     })();
+    // Right rail — career stats. Replaces the small bottom-right
+    // corner widget with a full-height panel that surfaces every
+    // persistent stat we track. Rank block stays at the top so it's
+    // the first thing the eye lands on; CAREER block under it shows
+    // lifetime aggregates; refresh countdown anchors the bottom.
+    // Only renders on the 'cards' step (the screen the user is on
+    // when they want to see profile context); other steps keep their
+    // own banners + layouts.
+    const career = (this.contractorStep === 'cards' && !_firstRunPlayer)
+      ? getCareerStats()
+      : null;
     const corner = document.createElement('div');
     corner.className = 'contractor-corner';
-    corner.innerHTML = `
-      <div class="corner-line corner-rank">RANK <b>${_rankNow}</b> · <b>${_ptsNow}</b>/${_ptsNext} XP</div>
-      ${_nextUnlock ? `<div class="corner-line corner-next">${_nextUnlock}</div>` : ''}
-      <div class="corner-line">MEGABOSSES <b>${unlockState.megabossKills}</b></div>
-      <div class="corner-refresh">CONTRACT REFRESH<br><span class="refresh-time">${this._refreshCountdownStr()}</span></div>
-    `;
+    if (career) {
+      const accuracyPct = career.firedShots > 0
+        ? Math.round((career.landedShots / career.firedShots) * 100)
+        : 0;
+      const _fmt = (n) => (n | 0).toLocaleString();
+      corner.innerHTML = `
+        <div class="corner-section">
+          <div class="corner-section-head">RANK</div>
+          <div class="corner-line corner-rank">RANK <b>${_rankNow}</b> · <b>${_ptsNow}</b>/${_ptsNext} XP</div>
+          ${_nextUnlock ? `<div class="corner-line corner-next">${_nextUnlock}</div>` : ''}
+        </div>
+        <div class="corner-section">
+          <div class="corner-section-head">CAREER</div>
+          <div class="corner-stat"><span class="cs-label">Runs</span><b>${_fmt(career.runs)}</b></div>
+          <div class="corner-stat"><span class="cs-label">Deaths</span><b>${_fmt(career.deaths)}</b></div>
+          <div class="corner-stat"><span class="cs-label">Floors extracted</span><b>${_fmt(career.levelsExtracted)}</b></div>
+          <div class="corner-stat"><span class="cs-label">Peak floor</span><b>${_fmt(career.peakLevel)}</b></div>
+        </div>
+        <div class="corner-section">
+          <div class="corner-section-head">COMBAT</div>
+          <div class="corner-stat"><span class="cs-label">Total kills</span><b>${_fmt(career.kills)}</b></div>
+          <div class="corner-stat"><span class="cs-label">Crit headshots</span><b>${_fmt(career.critHeadshots)}</b></div>
+          <div class="corner-stat"><span class="cs-label">Megaboss kills</span><b>${_fmt(career.megabossKills)}</b></div>
+          <div class="corner-stat"><span class="cs-label">Throwable kills</span><b>${_fmt(career.throwableKills)}</b></div>
+          <div class="corner-stat"><span class="cs-label">Damage dealt</span><b>${_fmt(career.damage)}</b></div>
+          <div class="corner-stat"><span class="cs-label">Shots fired</span><b>${_fmt(career.firedShots)}</b></div>
+          <div class="corner-stat"><span class="cs-label">Accuracy</span><b>${accuracyPct}%</b></div>
+        </div>
+        <div class="corner-section">
+          <div class="corner-section-head">LOOT</div>
+          <div class="corner-stat"><span class="cs-label">Credits earned</span><b>${_fmt(career.credits)}</b></div>
+          <div class="corner-stat"><span class="cs-label">Containers searched</span><b>${_fmt(career.containersSearched)}</b></div>
+          <div class="corner-stat"><span class="cs-label">Bodies looted</span><b>${_fmt(career.bodiesLooted)}</b></div>
+        </div>
+        <div class="corner-refresh">CONTRACT REFRESH<br><span class="refresh-time">${this._refreshCountdownStr()}</span></div>
+      `;
+    } else {
+      // Fallback for non-cards steps — keep the compact rank line so
+      // the player still sees their rank during loadout / leaderboard
+      // views. The full career panel is cards-only to avoid stealing
+      // breathing room on the focused-task screens.
+      corner.innerHTML = `
+        <div class="corner-line corner-rank">RANK <b>${_rankNow}</b> · <b>${_ptsNow}</b>/${_ptsNext} XP</div>
+        ${_nextUnlock ? `<div class="corner-line corner-next">${_nextUnlock}</div>` : ''}
+        <div class="corner-line">MEGABOSSES <b>${unlockState.megabossKills}</b></div>
+        <div class="corner-refresh">CONTRACT REFRESH<br><span class="refresh-time">${this._refreshCountdownStr()}</span></div>
+      `;
+    }
+    if (career) corner.classList.add('contractor-corner--full');
     wrap.appendChild(corner);
 
     return wrap;
@@ -4157,7 +4219,10 @@ export class HideoutUI {
       }
 
       .contractor-feed {
-        position: absolute; top: 14px; left: 14px; bottom: 14px;
+        /* Top-half of the left rail — leaves room for the
+           leaderboards block pinned to the bottom-left. */
+        position: absolute; top: 14px; left: 14px;
+        bottom: calc(50% + 6px);
         width: 200px;
         background: rgba(10,12,18,0.6);
         border: 1px solid rgba(42,47,58,0.9); border-radius: 2px;
@@ -4291,10 +4356,21 @@ export class HideoutUI {
         100% { background: transparent; }
       }
 
-      /* Compact leaderboard block under the live feed */
+      /* Bottom-left leaderboards block — pinned to the lower-left
+         corner, mirrors the .contractor-feed width / styling so the
+         left rail reads as a single column split top/bottom. Top
+         of the block aligns with the bottom of the live feed (the
+         feed's bottom is calc(50% + 6px); leaderboards top is 50%). */
       .contractor-leaderboard-block {
-        margin-top: 14px; padding-top: 10px;
-        border-top: 1px dashed rgba(90,138,207,0.3);
+        position: absolute; left: 14px; bottom: 14px;
+        top: calc(50% + 6px);
+        width: 200px;
+        background: rgba(10,12,18,0.6);
+        border: 1px solid rgba(42,47,58,0.9); border-radius: 2px;
+        padding: 12px 12px; overflow-y: auto;
+        margin-top: 0;        /* override the previous inline-stacked layout */
+        padding-top: 12px;
+        border-top: 1px solid rgba(42,47,58,0.9);
       }
       .lb-block-head {
         font-size: 10px; letter-spacing: 1.6px; color: #5a8acf;
@@ -5102,6 +5178,32 @@ export class HideoutUI {
       }
       .contractor-corner b { color: #f2c060; }
       .corner-line { padding: 2px 0; }
+      /* Full-height right-rail variant — used on the 'cards' step
+         where the right edge is dedicated to the player profile.
+         Replaces the contract-board that used to live up here. */
+      .contractor-corner--full {
+        top: 14px; bottom: 14px; right: 14px;
+        width: 240px; min-width: 240px;
+        padding: 14px 16px;
+        overflow-y: auto;
+        display: flex; flex-direction: column; gap: 14px;
+      }
+      .corner-section { display: flex; flex-direction: column; gap: 4px; }
+      .corner-section-head {
+        font-size: 10px; letter-spacing: 1.6px; color: #5a8acf;
+        padding-bottom: 6px;
+        border-bottom: 1px solid rgba(42,47,58,0.9);
+        margin-bottom: 2px;
+      }
+      /* Stat row — label left, value right. Mirrors the .feed-row
+         layout below so the rail reads as a single visual style. */
+      .corner-stat {
+        display: grid; grid-template-columns: 1fr auto;
+        gap: 6px; padding: 2px 0;
+        font-size: 11px; line-height: 1.3;
+      }
+      .corner-stat .cs-label { color: #c9a87a; letter-spacing: 0.6px; }
+      .corner-stat b { color: #f2c060; font-weight: 700; }
       /* Rank line — bigger so the player notices their progress
          immediately when they walk up to the contracts board. */
       .corner-rank {

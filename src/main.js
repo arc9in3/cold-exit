@@ -102,7 +102,7 @@ import { tryClaimContract, defForId, buildModifiers, evaluateContract,
          from './contracts.js';
 import {
   getActiveContract, setActiveContract, awardMarks, bumpContractRank, bumpMegabossKills,
-  bumpRunCount, queueEncounterFollowup,
+  bumpRunCount, addCareerStats, queueEncounterFollowup,
   getUnlockedWeapons, isWeaponUnlocked, unlockWeapon,
   effectiveStartingRarity,
   consumeStarterInventory, getStarterInventory,
@@ -21475,6 +21475,11 @@ function tick() {
     // and the cooldownRuns timer. Bumped here on death; extract path
     // bumps separately at advanceFloor().
     try { bumpRunCount(); } catch (_) {}
+    // Career stats — aggregate this run's snapshot into the lifetime
+    // totals so the contractor right-rail can display them. Death
+    // path → death counter bumps; extract-only run-ends do not (the
+    // run is still alive). One bump per real run completion.
+    try { addCareerStats(runStats.snapshot(), { death: true }); } catch (_) {}
     // Hades-style progressive reveal — first death unlocks Trainer +
     // Stash, chip thresholds open the Pre-mission Store, contract
     // rank ramp opens vendors / black market / mailbox. Each newly-
