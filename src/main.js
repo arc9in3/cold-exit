@@ -6881,28 +6881,47 @@ function _regenerateLevelImpl() {
       // would otherwise hand out the flamethrower.
       if (s.archetype === 'flamer') {
         const room = level.rooms?.find(r => r.id === s.roomId);
-        if (room) {
+        // BUG FIX: room.bounds.* is the correct path — `room.minX`
+        // doesn't exist as a top-level property, so the prior check
+        // compared obs.position.x against `undefined + INSET` (NaN)
+        // and ALWAYS failed. propsInRoom stayed 0, the demotion to
+        // 'elite' fired every single time, the player saw THE BURN
+        // named correctly (opts.archetype was captured upstream BEFORE
+        // demotion) but with a random weapon (the flame override below
+        // gated on s.archetype === 'flamer' which had been mutated to
+        // 'elite'). Net result: every flamer boss spawned with a non-
+        // flamethrower weapon. Now we read bounds.* correctly AND mirror
+        // the demotion onto opts.archetype so the renamed boss reads
+        // as 'THE SPECIALIST' instead of 'THE BURN'.
+        if (room && room.bounds) {
           let propsInRoom = 0;
           const INSET = 1.5;
+          const b = room.bounds;
           for (const obs of level.obstacles) {
             if (!obs.position) continue;
             if (obs.userData?.isDoor) continue;
-            if (obs.position.x >= room.minX + INSET && obs.position.x <= room.maxX - INSET
-                && obs.position.z >= room.minZ + INSET && obs.position.z <= room.maxZ - INSET) {
+            if (obs.position.x >= b.minX + INSET && obs.position.x <= b.maxX - INSET
+                && obs.position.z >= b.minZ + INSET && obs.position.z <= b.maxZ - INSET) {
               propsInRoom++;
             }
           }
           if (propsInRoom < 3) {
-            // Quiet substitution — happens before the boss-name
-            // announce, so the player sees "ELITE" not "THE BURN"
-            // for this fight. The flamer slot in the rotation comes
-            // back around on the next eligible boss room.
+            // Quiet substitution — boss is renamed to THE SPECIALIST
+            // and gets a random weapon. The flame slot in the boss
+            // rotation comes back around on the next eligible room.
             s.archetype = 'elite';
+            opts.archetype = 'elite';     // KEEP IN SYNC — see comment above
           }
         }
       }
       let bossWeapon = pickWeaponForAI(s.variant);
       if (s.archetype === 'flamer') {
+        // THE BURN always carries a flamethrower. User report: "had a
+        // revolver and other random weapons" — caused by the upstream
+        // demotion bug (see above). With s.archetype now correctly
+        // mirroring opts.archetype, this branch ONLY runs for flamer
+        // bosses that survived the cover gate, and they always get the
+        // flame weapon.
         const flame = tunables.weapons.find(w => w.fireMode === 'flame');
         if (flame) bossWeapon = JSON.parse(JSON.stringify(flame));
       } else if (s.archetype === 'grenadier') {
