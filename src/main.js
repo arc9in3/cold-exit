@@ -16989,10 +16989,11 @@ function throwItem(item) {
     },
     owner: 'player',
     gravity,
-    // Grenades visibly bounce now — bumped from 0.15 → 0.40 so the
-    // throw reads as a hand-held device skipping off the floor before
-    // settling. Molotov + claymore stick on first contact (bounciness 0).
-    bounciness: (item.throwKind === 'molotov' || item.throwKind === 'claymore') ? 0.0 : 0.40,
+    // Grenades visibly bounce, but kept modest — was 0.40, dialled
+    // -30% to 0.28 so the device skips once or twice and settles
+    // instead of pinballing away from the player's intended landing.
+    // Molotov + claymore stick on first contact (bounciness 0).
+    bounciness: (item.throwKind === 'molotov' || item.throwKind === 'claymore') ? 0.0 : 0.28,
     // Fuse-after-landing — frag/flash/stun all want to bounce and
     // settle before going off. Molotov + claymore "detonate" on
     // impact (the claymore's "detonate" means it places the mine,
