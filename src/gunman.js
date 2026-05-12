@@ -1991,10 +1991,15 @@ export class GunmanManager {
     let preferredRange = (g.profile.preferredRange ?? tunables.ai.preferredRange)
       * (g.tier === 'boss' ? 0.75 : 1);
     const rangeTolerance = g.profile.rangeTolerance ?? tunables.ai.rangeTolerance;
+    // Active contract: Tweakers (moveSpeedMult). Cranks every enemy's
+    // base move speed — applies on top of profile + tier multipliers.
+    // Default 1 when no contract is active.
+    const _contractMoveSpeed = (typeof window !== 'undefined' && window.__activeModifiers?.()?.moveSpeedMult) || 1;
     let moveSpeed = tunables.ai.moveSpeed * g.profile.moveSpeedMult
       * (g.tier === 'boss' ? 1.35 : g.tier === 'subBoss' ? 1.15 : 1)
       * (g.tier === 'boss' ? Math.min(1.6, g.aggression || 1) : 1)
-      * (g._berserkMoveMult || 1);
+      * (g._berserkMoveMult || 1)
+      * _contractMoveSpeed;
     // THE BURN (flamer archetype) — overrides at the read site so they
     // commit to closing distance. The per-frame `g.flamerOverrideRange`
     // write further down was dead code (never read anywhere); user

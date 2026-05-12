@@ -1867,6 +1867,10 @@ export function createPlayer(scene) {
       a.phase === 'startup' || a.phase === 'active' || a.phase === 'recovery'
     );
     if (!inMeleeCancel && state.dashCd > 0) return false;
+    // Active contract: No Dash modifier hard-disables the dash button.
+    // Read via the global the engine publishes; defaults false when
+    // no contract is active.
+    if (typeof window !== 'undefined' && window.__activeModifiers?.()?.noDash) return false;
     if (!consumeStamina(tunables.stamina.dodgeCost)) return false;
     const d = dir.lengthSq() > 0.001 ? dir.clone().normalize() : facing.clone();
     state.mode = MODE.DASH;

@@ -1415,8 +1415,11 @@ export class MeleeEnemyManager {
       e.dashCdT = Math.max(0, e.dashCdT - dt);
       e.dashT = Math.max(0, e.dashT - dt);
       const bossSpeed = e.tier === 'boss' ? 1.35 : (e.tier === 'subBoss' ? 1.15 : 1);
-      let moveSpeed = tunables.meleeEnemy.moveSpeed * bossSpeed;
-      if (e.dashT > 0) moveSpeed = tunables.meleeEnemy.dashSpeed * bossSpeed;
+      // Active contract: Tweakers (moveSpeedMult). Same pattern as
+      // gunman.js — multiplicative on top of base + tier scaling.
+      const _contractMoveSpeed = (typeof window !== 'undefined' && window.__activeModifiers?.()?.moveSpeedMult) || 1;
+      let moveSpeed = tunables.meleeEnemy.moveSpeed * bossSpeed * _contractMoveSpeed;
+      if (e.dashT > 0) moveSpeed = tunables.meleeEnemy.dashSpeed * bossSpeed * _contractMoveSpeed;
       // Shield-bearer is the slow-but-tanky archetype — quartered
       // to a creeping advance so the player has plenty of time to
       // reposition around the shield's narrow arc. Reads as a

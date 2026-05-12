@@ -9216,6 +9216,17 @@ function recomputeStats() {
       derivedStats.maxHealthBonus = target - baseMax2;
     }
   }
+  // Active contract: hpCapMult (Half Heart). Applied as a final-pass
+  // scalar AFTER all other maxHealthBonus sources have rolled up, so
+  // 0.5× halves the player's actual working max HP (not just the base).
+  // Same pattern as the equip-mod maxHealthMult above.
+  const _contractHpCap = _activeModifiers?.hpCapMult || 1;
+  if (_contractHpCap !== 1) {
+    const baseMaxC = tunables.player.maxHealth;
+    const finalMaxC = baseMaxC + (derivedStats.maxHealthBonus || 0);
+    const targetC = Math.max(1, Math.round(finalMaxC * _contractHpCap));
+    derivedStats.maxHealthBonus = targetC - baseMaxC;
+  }
   // Pocket-grid resize — pocketsBonus folds in here so trainer-tab
   // Quartermaster purchases (and gear/perk +pockets bonuses that
   // landed in the same bag) actually grow the inventory grid (#42).
@@ -11511,6 +11522,12 @@ function fireOneShot(playerInfo, weapon, aimPoint, isADS, aimOwner, aimZone) {
           && hit.owner.tier !== 'boss'
           && Math.random() < derivedStats.goldenBulletChance) {
         dmg = Math.max(dmg, (hit.owner.hp || 1) + 1);
+      }
+      // Active contract: Headshots Only — non-head shots deal 0 damage.
+      // Visual feedback (impact + damage number) still fires below so
+      // the player sees the shot land; the enemy just doesn't take HP.
+      if (_activeModifiers.headshotsOnly && hit.zone !== 'head') {
+        dmg = 0;
       }
       const wasAlive = hit.owner.alive;
       const result = hit.owner.manager.applyHit(hit.owner, dmg, hit.zone, dir, { weaponClass: weapon.class, shieldBreaker: !!weapon.shieldBreaker });
