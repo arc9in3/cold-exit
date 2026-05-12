@@ -10681,15 +10681,17 @@ function tickChargeWeapon(dt, playerInfo, weapon, inputState, aimInfo) {
   }
 }
 
-// Actual beam fire — single hitscan ray. Damage + beam width scale
-// with the achieved tier. The beam is a one-shot tracer call into
-// combat.spawnShot with the tier's tracerColor + a width-override
-// (combat.spawnShot accepts a `thickness` opt that the existing
-// tracer pool already honours; falls back to the default tracer if
-// not). No allocation in the hot path — module-scope vector pool
-// matches the ricochet handler.
+// Beam fire — penetrating hitscan. Damage + beam width scale with the
+// achieved tier. The beam stops at the first wall it touches BUT
+// passes through every enemy along the way, applying full damage and
+// an impact burst to each. User design: "should penetrate all enemies
+// shot. deal full damage to everything hit in the line and play an
+// impact burst on everything hit". No falloff — line up a row of
+// enemies and the VC cores all of them in one trigger pull.
 const _vc_origin = new THREE.Vector3();
 const _vc_dir    = new THREE.Vector3();
+const _vc_endPt  = new THREE.Vector3();
+const _vc_hitPt  = new THREE.Vector3();
 function firePlayerCharge(playerInfo, weapon, aimPoint, tierIdx) {
   const tiers = weapon.chargeTiers || [];
   const tier = tiers[tierIdx | 0] || tiers[0] || { dmgMult: 1, beamWidth: 0.08 };
@@ -10703,35 +10705,68 @@ function firePlayerCharge(playerInfo, weapon, aimPoint, tierIdx) {
   if (sfx.fire) sfx.fire('exotic');
   runStats.noteFireWeaponClass('exotic');
   alertEnemiesFromShot(_vc_origin);
-  const hitTargets = [...allHittables(), ...level.solidObstacles()];
-  const hit = combat.raycast(_vc_origin, _vc_dir, hitTargets, range);
-  const endPoint = hit ? hit.point
-    : new THREE.Vector3(
-        _vc_origin.x + _vc_dir.x * range,
-        _vc_origin.y,
-        _vc_origin.z + _vc_dir.z * range,
-      );
-  combat.spawnShot(_vc_origin, endPoint, weapon.tracerColor || 0x40d0ff,
+  // Wall-stop raycast. Enemies don't block the beam; only solid
+  // obstacles do. Without filtering enemies out of the hitTargets
+  // list, the raycast would terminate at the FIRST enemy and we'd
+  // lose penetration.
+  const wallHit = combat.raycast(_vc_origin, _vc_dir, level.solidObstacles(), range);
+  const beamLen = wallHit ? wallHit.distance : range;
+  _vc_endPt.set(
+    _vc_origin.x + _vc_dir.x * beamLen,
+    _vc_origin.y,
+    _vc_origin.z + _vc_dir.z * beamLen,
+  );
+  combat.spawnShot(_vc_origin, _vc_endPt, weapon.tracerColor || 0x40d0ff,
     { light: false, flash: true, thickness: tier.beamWidth });
-  if (!hit) return;
-  const isEnemy = !!(hit.owner && hit.owner.manager && hit.owner.alive);
-  if (!isEnemy) return;
-  runStats.addDamage(dmg);
-  const _vcWasAlive = hit.owner.alive;
-  hit.owner.manager.applyHit(hit.owner, dmg, hit.zone || 'torso', _vc_dir,
-    { weaponClass: 'exotic' });
-  // Kill hook — see firePlayerRicochet for the corpse-despawn rationale.
-  if (_vcWasAlive && !hit.owner.alive) onEnemyKilled(hit.owner);
-  // Damage number + impact spark — VC charge release was applying
-  // damage cleanly but the player got no on-screen feedback, so a
-  // tier-3 nova read as "where did my charge go?" Tier index >= 1
-  // flags the number as a crit so the bigger tiers render with the
-  // larger / brighter number style.
-  if (typeof spawnDamageNumber === 'function' && camera) {
-    try { spawnDamageNumber(hit.point, camera, dmg, hit.zone || 'torso', (tierIdx | 0) >= 1); }
-    catch (_) {}
+  // Enemy-segment scan — every alive enemy whose XZ centre lies within
+  // BEAM_HALF_WIDTH of the beam line AND projects onto the segment
+  // (t in [0, beamLen]) takes a full-damage hit. BEAM_HALF_WIDTH is
+  // tuned to enemy collision radius (≈0.4) plus a small margin so a
+  // glancing line still scores; the visual tier.beamWidth is the
+  // *display* thickness and not used for gameplay hit-detection.
+  const BEAM_HALF_WIDTH = 0.7;
+  const candidates = allHittables();
+  // Sort by distance-along-beam so impacts trigger near→far visually.
+  const ordered = [];
+  for (const c of candidates) {
+    if (!c || !c.alive || !c.group) continue;
+    const dx = c.group.position.x - _vc_origin.x;
+    const dz = c.group.position.z - _vc_origin.z;
+    const along = dx * _vc_dir.x + dz * _vc_dir.z;       // projection onto beam
+    if (along < 0 || along > beamLen) continue;
+    const perpX = dx - along * _vc_dir.x;
+    const perpZ = dz - along * _vc_dir.z;
+    const perpDist = Math.hypot(perpX, perpZ);
+    if (perpDist > BEAM_HALF_WIDTH) continue;
+    ordered.push({ c, along });
   }
-  combat.spawnImpact(hit.point);
+  ordered.sort((a, b) => a.along - b.along);
+  for (const { c, along } of ordered) {
+    runStats.addDamage(dmg);
+    const wasAlive = c.alive;
+    c.manager.applyHit(c, dmg, 'torso', _vc_dir, { weaponClass: 'exotic' });
+    if (wasAlive && !c.alive) onEnemyKilled(c);
+    // Impact burst on every enemy hit. Anchor the burst at the
+    // closest-point-on-beam to the enemy centre so the spark reads
+    // as connected to the beam line rather than floating mid-enemy.
+    _vc_hitPt.set(
+      _vc_origin.x + _vc_dir.x * along,
+      c.group.position.y + 1.0,
+      _vc_origin.z + _vc_dir.z * along,
+    );
+    combat.spawnImpact(_vc_hitPt);
+    // Floating damage number per enemy. (tierIdx >= 1) flags as crit
+    // so the bigger tiers render with the larger / brighter style —
+    // unchanged from the single-hit version.
+    if (typeof spawnDamageNumber === 'function' && camera) {
+      try { spawnDamageNumber(_vc_hitPt, camera, dmg, 'torso', (tierIdx | 0) >= 1); }
+      catch (_) {}
+    }
+  }
+  // Terminal wall impact — burst at the beam's endpoint when the
+  // beam stopped on a wall. Reads as the beam dissipating into the
+  // surface, matching how penetrating weapons feel in other games.
+  if (wallHit) combat.spawnImpact(wallHit.point);
 }
 
 function _spawnGrappleCable() {
