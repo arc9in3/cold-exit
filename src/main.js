@@ -17352,11 +17352,21 @@ function spawnGasZone(pos, radius, duration, owner = 'player') {
   _gasZones.push({ x: pos.x, z: pos.z, radius, life: duration, t: 0, ring, dome, owner });
 }
 
+// Shared sphere geometry for grenade smoke puffs. Per-instance materials
+// (color + opacity mutated per puff per frame); geometry pinned forever
+// via the existing skipDispose pattern so the program stays cached.
+function _smokeCloudGeom() {
+  if (!_smokeCloudGeom._g) _smokeCloudGeom._g = new THREE.SphereGeometry(0.5, 6, 5);
+  return _smokeCloudGeom._g;
+}
 function spawnSmokeZone(pos, radius, duration) {
-  // Cheap visual: one disc + one dome, both transparent. No particle
-  // system — keeps the per-frame cost flat regardless of zone count.
+  // Soft fog base — the dome reads as a static volume that fills the
+  // zone so the player can see the radius. Particle puffs (emitted by
+  // _tickThrowableZones below) ride on top for the "actual smoke is
+  // billowing" read. Opacity is dialled down vs. the old pure-static
+  // version because the puffs now do the heavy visual lifting.
   const baseMat = new THREE.MeshBasicMaterial({
-    color: 0x9aa4ad, transparent: true, opacity: 0.35,
+    color: 0x9aa4ad, transparent: true, opacity: 0.18,
     depthWrite: false, side: THREE.DoubleSide,
   });
   const ring = new THREE.Mesh(new THREE.CircleGeometry(radius, 24), baseMat);
@@ -17364,13 +17374,60 @@ function spawnSmokeZone(pos, radius, duration) {
   ring.position.set(pos.x, 0.05, pos.z);
   scene.add(ring);
   const domeMat = new THREE.MeshBasicMaterial({
-    color: 0xb8c0c8, transparent: true, opacity: 0.30,
+    color: 0xb8c0c8, transparent: true, opacity: 0.15,
     depthWrite: false,
   });
   const dome = new THREE.Mesh(new THREE.SphereGeometry(radius, 16, 8, 0, Math.PI * 2, 0, Math.PI / 2), domeMat);
   dome.position.set(pos.x, 0, pos.z);
   scene.add(dome);
-  _smokeZones.push({ x: pos.x, z: pos.z, radius, life: duration, t: 0, ring, dome });
+  // Per-zone particle state — emit a fresh puff every PUFF_INTERVAL
+  // seconds at a random spot inside the radius. Each puff is a
+  // pinned-geom mesh that drifts up + slowly outward and fades over
+  // ~2s. Total active puffs at steady-state ≈ 15-25 per zone.
+  _smokeZones.push({
+    x: pos.x, z: pos.z, radius, life: duration, t: 0, ring, dome,
+    nextPuffT: 0,        // emit immediately on first tick
+    puffs: [],           // active puff list, ticked + retired per zone
+  });
+}
+
+// Spawn one smoke-cloud puff for a smoke grenade zone. Shared geometry,
+// per-instance material so opacity / color can drift independently.
+// Returns the puff entry that the per-zone tick then walks.
+const _SMOKE_CLOUD_COLORS = [0xb8c0c8, 0xa8b0b8, 0xc0c8d0, 0x98a0a8];
+function _spawnSmokeCloudPuff(zone) {
+  // Random offset within the zone, biased toward center so the
+  // outer edge stays a little quieter than the core.
+  const r = zone.radius * (0.15 + Math.random() * 0.75);
+  const a = Math.random() * Math.PI * 2;
+  const x = zone.x + Math.cos(a) * r;
+  const z = zone.z + Math.sin(a) * r;
+  const y = 0.15 + Math.random() * 0.35;
+  const color = _SMOKE_CLOUD_COLORS[(Math.random() * _SMOKE_CLOUD_COLORS.length) | 0];
+  const mat = new THREE.MeshBasicMaterial({
+    color, transparent: true, opacity: 0,    // fade-in from 0
+    depthWrite: false,
+  });
+  const mesh = new THREE.Mesh(_smokeCloudGeom(), mat);
+  mesh.position.set(x, y, z);
+  // Random initial size — varies the cloud read between dense + wispy.
+  const initScale = 0.7 + Math.random() * 0.6;
+  mesh.scale.setScalar(initScale);
+  // Random subtle rotation — sphere is round so this barely shows,
+  // but combined with scale jitter it reduces "obvious copies" reads.
+  mesh.rotation.y = Math.random() * Math.PI * 2;
+  scene.add(mesh);
+  zone.puffs.push({
+    mesh, mat,
+    vy: 0.20 + Math.random() * 0.25,         // upward drift, slow
+    dx: (Math.random() - 0.5) * 0.4,         // lateral drift
+    dz: (Math.random() - 0.5) * 0.4,
+    life: 1.6 + Math.random() * 1.0,         // 1.6-2.6s
+    t: 0,
+    baseScale: initScale,
+    growth: 0.6 + Math.random() * 0.8,       // how much the puff grows over life
+    peakOpacity: 0.40 + Math.random() * 0.25,
+  });
 }
 
 function spawnDecoyBeacon(pos, duration) {
@@ -17399,11 +17456,65 @@ function _tickThrowableZones(dt) {
     const fade = z.t > z.life * 0.7
       ? Math.max(0, (z.life - z.t) / (z.life * 0.3))
       : 1;
-    z.ring.material.opacity = 0.35 * fade;
-    z.dome.material.opacity = 0.30 * fade;
+    z.ring.material.opacity = 0.18 * fade;
+    z.dome.material.opacity = 0.15 * fade;
+    // Emit fresh smoke puffs throughout the zone's active phase.
+    // Cadence scales with radius so a 3m grenade still feels dense
+    // and a 6m chemical-smoke zone doesn't get over-saturated.
+    // Stop emitting in the last 25% of life so the cloud naturally
+    // thins out instead of cutting off cold.
+    if (z.t < z.life * 0.75 && z.puffs.length < Math.ceil(z.radius * 6)) {
+      z.nextPuffT -= dt;
+      if (z.nextPuffT <= 0) {
+        // Cadence: faster early (build the cloud), slower mid-zone
+        // (sustain). Adjusted by radius so visual density is similar
+        // across zone sizes.
+        const buildPhase = z.t < z.life * 0.25;
+        z.nextPuffT = (buildPhase ? 0.08 : 0.18) + Math.random() * 0.10;
+        // Emit a small burst — 2 puffs at once reads as turbulence
+        // rather than a single new puff popping in.
+        _spawnSmokeCloudPuff(z);
+        if (Math.random() < 0.55) _spawnSmokeCloudPuff(z);
+      }
+    }
+    // Tick + retire each puff in the zone's pool.
+    for (let j = z.puffs.length - 1; j >= 0; j--) {
+      const p = z.puffs[j];
+      p.t += dt;
+      const k = p.t / p.life;                   // 0→1
+      // Three-phase opacity: ramp in (0→1 over first 25%), hold,
+      // fade out (last 35%). Gives each puff a life arc instead of
+      // a flat linear fade — reads as billowing.
+      let alpha;
+      if (k < 0.25) alpha = (k / 0.25) * p.peakOpacity;
+      else if (k > 0.65) alpha = Math.max(0, (1 - k) / 0.35) * p.peakOpacity;
+      else alpha = p.peakOpacity;
+      p.mat.opacity = alpha * fade;             // zone-fade applies to puffs too
+      // Position drift + growth.
+      p.mesh.position.x += p.dx * dt;
+      p.mesh.position.z += p.dz * dt;
+      p.mesh.position.y += p.vy * dt;
+      // Velocity slowly decays so puffs don't keep accelerating upward.
+      p.vy *= 1 - dt * 0.4;
+      // Scale grows over life — a puff expanding as it rises sells
+      // the "billowing" read better than a static-sized sphere.
+      p.mesh.scale.setScalar(p.baseScale * (1 + k * p.growth));
+      if (p.t >= p.life) {
+        scene.remove(p.mesh);
+        p.mat.dispose();      // material dispose only; shared geom stays pinned
+        z.puffs.splice(j, 1);
+      }
+    }
     if (z.t >= z.life) {
       scene.remove(z.ring); z.ring.geometry.dispose(); z.ring.material.dispose();
       scene.remove(z.dome); z.dome.geometry.dispose(); z.dome.material.dispose();
+      // Clean up any remaining puffs at zone end (rare — the last-25%
+      // emit gate should keep this empty by zone-end, but safety).
+      for (const p of z.puffs) {
+        scene.remove(p.mesh);
+        p.mat.dispose();
+      }
+      z.puffs.length = 0;
       _smokeZones.splice(i, 1);
     }
   }
