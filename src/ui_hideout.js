@@ -4391,7 +4391,14 @@ export class HideoutUI {
         position: absolute; inset: 0;
         display: grid;
         grid-template-columns: 280px minmax(0, 1fr) minmax(0, 1.2fr);
+        /* Explicit full-height row so each column stretches the
+           available vertical space. Without this, the grid auto-sized
+           rows to content height, collapsing the Pre-Mission Store
+           column to just the few visible tiles instead of filling the
+           panel. */
+        grid-template-rows: minmax(0, 1fr);
         gap: 16px; padding: 88px 24px 56px;
+        box-sizing: border-box;
       }
       .loadout-storecol { overflow-y: auto; }
       .loadout-armorycol { overflow-y: auto; }
