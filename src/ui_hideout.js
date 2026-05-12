@@ -4113,8 +4113,12 @@ export class HideoutUI {
         position: relative;
         width: 100%; height: 100%;
         background:
-          linear-gradient(180deg, rgba(12,14,22,0.78) 0%, rgba(20,16,28,0.86) 100%),
-          url('/Assets/generated/artpass-env-contract-board-bg.png') center/cover no-repeat,
+          /* Subtle vignette so the cards-on-table area reads with
+             enough contrast for white card text. Lighter than the
+             prior overlay because the contractor.png is the focal
+             image — we don't want to mute it. */
+          radial-gradient(ellipse at center 65%, transparent 35%, rgba(12,14,22,0.55) 100%),
+          url('/Assets/contractor.png') center/cover no-repeat,
           #0c0e16;
         overflow: hidden;
       }
@@ -4170,15 +4174,10 @@ export class HideoutUI {
         display: flex; flex-direction: column; align-items: center;
         gap: 14px; max-width: 540px;
       }
-      .host-portrait {
-        width: 240px; height: 240px;
-        background:
-          url('/Assets/generated/avatar-claudie-v2.png') center 55% / 80% no-repeat,
-          radial-gradient(circle at 50% 35%, #2a1a2a 0%, #0a0a14 90%);
-        border: 1px solid rgba(178,112,224,0.4); border-radius: 2px;
-        box-shadow: inset 0 0 30px rgba(178,112,224,0.15);
-        image-rendering: -webkit-optimize-contrast;
-      }
+      /* Portrait is now baked into the contractor-stage background
+         (Assets/contractor.png covers the whole panel), so the small
+         square preview is redundant. Speech bubble still renders. */
+      .host-portrait { display: none; }
       .host-glyph { display: none; }
       .host-bubble {
         background: rgba(20,16,28,0.92);
@@ -4217,9 +4216,10 @@ export class HideoutUI {
         text-transform: uppercase;
       }
       /* Cards step — host shifts up so cards have room at the bottom. */
-      .contractor-stage.step-cards .contractor-host { top: 16px; }
-      .contractor-stage.step-cards .host-portrait { width: 160px; height: 160px; }
-      .contractor-stage.step-cards .host-glyph { font-size: 64px; }
+      /* On the cards step the host-portrait is hidden (see above) so
+         shrinking it is irrelevant. Keep host top position consistent
+         so the speech bubble still anchors near the contractor's
+         head in the background image. */
       /* GLOBAL BACK BUTTON — pinned to the same place on every screen.
          Hard rule: never move this. Sits clear of the tab strip. */
       .global-back-btn {
@@ -4846,9 +4846,13 @@ export class HideoutUI {
       /* Contract row scales to whatever space the window has — no
          scrolling, no wrap. Each card flexes from a 220px floor up
          to 280px so 3-6 cards always fit in a single row. */
+      /* Cards now sit on the contractor's table — bottom ~28% of the
+         stage, where the contractor.png shows desk / table surface.
+         Reads like contracts laid out for the player to inspect. */
       .contractor-cards {
-        position: absolute; top: 56%; left: 240px; right: 240px;
-        transform: translateY(-50%);
+        position: absolute; bottom: 90px; left: 240px; right: 240px;
+        top: auto; transform: none;
+        height: 28%;
         display: flex; gap: 14px; justify-content: center;
         align-items: stretch;
         flex-wrap: nowrap; overflow: hidden;
@@ -4862,7 +4866,10 @@ export class HideoutUI {
         50%      { text-shadow: 0 0 22px rgba(255,200,80,0.75), 0 0 36px rgba(255,160,40,0.25); }
       }
       .contracts-heading {
-        position: absolute; top: 30%; left: 0; right: 0;
+        /* Sits just above the cards row on the table — was at 30%
+           (top of screen) which clashed with the contractor's head
+           in the new background image. */
+        position: absolute; bottom: calc(28% + 90px + 12px); left: 0; right: 0;
         text-align: center;
         font-family: ui-monospace, Menlo, Consolas, monospace;
         font-size: 18px; font-weight: 700; letter-spacing: 6px;
