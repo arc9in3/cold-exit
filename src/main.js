@@ -18466,6 +18466,12 @@ const _flashOverlayEl = (() => {
   return el;
 })();
 
+// Per-frame trackers for fire-zone overlap dedupe — see _tickFireZones.
+// Reset every frame the player enters a fire zone; lets us apply
+// max(zone.dps) instead of sum-of-zone-dps when multiple molotov
+// satellites overlap on the player's position.
+let _playerFireFrame = -1;
+let _playerFireAppliedDps = 0;
 function spawnFireZone(pos, radius, duration, dps) {
   // No ground decal — the zone is visualised purely by continuous
   // upward-rising flame orbs spawned from `_tickFireZones`. Reads as
@@ -18500,7 +18506,14 @@ function _tickFireZones(dt) {
       }
       z.emitT = 0.06 + Math.random() * 0.05;
     }
-    // DoT — burn every alive enemy within the disc.
+    // DoT — burn every alive entity within the disc. Per-frame
+    // dedupe: a single molotov shatter spawns ~7 overlapping fire
+    // zones (central pool + 6 satellite landings), and pre-fix every
+    // overlap stacked its full DPS each tick — player standing on
+    // the center took 7x damage and died near-instantly while the
+    // enemy walking through took 7x too but had enough HP to survive.
+    // Now we only apply the HIGHEST single zone's dps per entity per
+    // frame: subsequent zones top up to that dps but never beyond.
     const rSq = z.radius * z.radius;
     const apply = (list) => {
       for (const c of list) {
@@ -18509,13 +18522,24 @@ function _tickFireZones(dt) {
         const dz = c.group.position.z - z.z;
         if (dx * dx + dz * dz > rSq) continue;
         c.burnT = Math.max(c.burnT || 0, 1.0);   // keep topped up while in zone
-        const prevHp = c.hp;
-        const tickDmg = z.dps * dt;
-        c.hp -= tickDmg;
-        trackBurnDamage(c, tickDmg);
-        if (c.hp <= 0 && prevHp > 0) {
-          c.alive = false;
-          onEnemyKilled(c);
+        // Per-frame max-dps gate. The entity tracks the dps it's
+        // already received this frame; we only top up to z.dps if
+        // this zone is stronger. Net: damage = max(zone.dps) * dt.
+        if (c._fireFrame !== frameCounter) {
+          c._fireFrame = frameCounter;
+          c._fireAppliedDps = 0;
+        }
+        if (z.dps > c._fireAppliedDps) {
+          const additionalDps = z.dps - c._fireAppliedDps;
+          const tickDmg = additionalDps * dt;
+          const prevHp = c.hp;
+          c.hp -= tickDmg;
+          trackBurnDamage(c, tickDmg);
+          c._fireAppliedDps = z.dps;
+          if (c.hp <= 0 && prevHp > 0) {
+            c.alive = false;
+            onEnemyKilled(c);
+          }
         }
       }
     };
@@ -18526,13 +18550,23 @@ function _tickFireZones(dt) {
     // Coop: dps=0 mirrors (fx-throwable visual or joiner's local
     // neutered mirror) skip damage; host's auth zone routes joiner
     // damage via the ghost scan below.
+    //
+    // Same per-frame dedupe as the enemy loop — without this the
+    // player took N x DPS from N overlapping zones.
     if (player && z.dps > 0) {
       const pdx = player.mesh.position.x - z.x;
       const pdz = player.mesh.position.z - z.z;
       if (pdx * pdx + pdz * pdz < rSq) {
-        const tickDmg = z.dps * dt;
-        damagePlayer(tickDmg, 'fire', { source: 'fireZone' });
-        window.__playerBurnT = Math.max(window.__playerBurnT || 0, 1.0);
+        if (_playerFireFrame !== frameCounter) {
+          _playerFireFrame = frameCounter;
+          _playerFireAppliedDps = 0;
+        }
+        if (z.dps > _playerFireAppliedDps) {
+          const additionalDps = z.dps - _playerFireAppliedDps;
+          damagePlayer(additionalDps * dt, 'fire', { source: 'fireZone' });
+          _playerFireAppliedDps = z.dps;
+          window.__playerBurnT = Math.max(window.__playerBurnT || 0, 1.0);
+        }
       }
     }
     // Coop: host-side ghost scan for fire-zone DoT. Same throttle as
