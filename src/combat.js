@@ -117,12 +117,13 @@ export class Combat {
     smoke.scale.setScalar(0.25);
     smoke.material.opacity = 0;
     smoke.visible = true;
-    // Scorch disc — snaps to size on the ground at impact. Fades over
-    // the full extended explosion life so the burn mark lingers
-    // visibly after the fireball is gone.
+    // Scorch disc — snaps to size on the ground at impact. Subtle
+    // dark stain (low opacity, smaller than the fireball footprint)
+    // that fades quickly so the explosion doesn't leave a heavy
+    // permanent-looking burn — just a quick suggestion of scorch.
     scorch.position.set(point.x, 0.04, point.z);
-    scorch.scale.setScalar(radius * 1.1);
-    scorch.material.opacity = 0.72;
+    scorch.scale.setScalar(radius * 0.65);
+    scorch.material.opacity = 0.32;
     scorch.visible = true;
 
     // Hot white flash + light so the explosion actually lights
@@ -147,17 +148,18 @@ export class Combat {
       // tick can normalize each sub-effect's progress independently.
       fireballLife: 0.55,
       smokeLife: 1.4,
-      scorchLife: 1.6,
+      scorchLife: 0.9,
       radius,
     });
-    // Sparks — reuse the shared particle pool with a warm tint and
-    // bigger scale so the debris reads at distance.
+    // Sparks — reuse the shared particle pool with a warm tint.
+    // Scale dialled down from 1.5-2.5x to 0.55-0.95x; the previous
+    // sizing read as cartoony orange blobs rather than debris.
     for (let i = 0; i < 14; i++) {
       const slot = this._acquireParticle();
       slot.inUse = true;
       slot.mat.color.setHex(i % 2 ? 0xffa040 : 0xff6020);
       slot.mat.opacity = 0.95;
-      slot.mesh.scale.setScalar(1.5 + Math.random() * 1.0);
+      slot.mesh.scale.setScalar(0.55 + Math.random() * 0.40);
       slot.mesh.position.copy(point);
       slot.mesh.visible = true;
       if (!slot.vel) slot.vel = new THREE.Vector3();
@@ -1124,11 +1126,11 @@ export class Combat {
       else smokeAlpha = Math.max(0, (1 - ks) / 0.82) * 0.65;
       ex.smoke.material.opacity = smokeAlpha;
       ex.smoke.position.y += dt * 0.6;        // gentle rise
-      // Scorch disc — already at full size; just fade opacity over
-      // the long curve so the burn mark stays visible after the
-      // fireball is gone.
+      // Scorch disc — already at full size; quick subtle fade so the
+      // stain hints at scorch then clears, rather than reading as a
+      // permanent crater mark.
       const kc = Math.min(1, ex.t / ex.scorchLife);
-      ex.scorch.material.opacity = 0.72 * (1 - kc * kc);
+      ex.scorch.material.opacity = 0.32 * (1 - kc * kc);
       if (ex.t >= ex.life) {
         // Pool-backed sub-meshes — hide + release, no dispose.
         if (ex.exEntry) {
