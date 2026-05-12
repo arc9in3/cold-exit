@@ -9411,27 +9411,63 @@ function allHittables() {
 // Light grey smoke-puff at XZ — 6 additive spheres rising and fading
 // over ~0.7s. Used by the Glass Case telegraph; cheap enough that
 // firing 4 in one frame is fine.
+// Movement-smoke puff pool — telegraph effect for dashes, teleports,
+// boss arrivals. Previous version allocated fresh SphereGeometry +
+// MeshBasicMaterial per puff (6 puffs/call) and disposed on retire;
+// dash/teleport-heavy moments showed up as render-dominated hitch
+// clusters (per-puff geometry upload + transparent draw-call sort).
+// Pool keeps 48 slots cycling on the shared geom + per-slot material
+// (mutated, never disposed). Pool overflow recycles the oldest.
+const _SMOKE_PUFF_POOL_SIZE = 48;
+const _smokePuffPool = [];
+function _smokePuffGeom() {
+  if (!_smokePuffGeom._g) _smokePuffGeom._g = new THREE.SphereGeometry(0.22, 6, 5);
+  return _smokePuffGeom._g;
+}
+function _acquireSmokePuffSlot() {
+  for (const slot of _smokePuffPool) {
+    if (!slot.inUse) return slot;
+  }
+  if (_smokePuffPool.length < _SMOKE_PUFF_POOL_SIZE) {
+    const mat = new THREE.MeshBasicMaterial({
+      color: 0xa8a8b0, transparent: true, opacity: 0,
+      depthWrite: false,
+    });
+    const mesh = new THREE.Mesh(_smokePuffGeom(), mat);
+    mesh.visible = false;
+    scene.add(mesh);
+    const slot = { mesh, mat, inUse: false, drift: null };
+    _smokePuffPool.push(slot);
+    return slot;
+  }
+  // Pool exhausted — recycle the oldest in-use slot. _smokePuffs is
+  // FIFO (pushed on spawn) so [0] is the oldest.
+  if (_smokePuffs.length > 0) {
+    const oldest = _smokePuffs.shift();
+    return oldest.slot;
+  }
+  return _smokePuffPool[0];
+}
 function _spawnSmokePuff(x, z) {
   const count = 6;
   for (let i = 0; i < count; i++) {
     const a = (i / count) * Math.PI * 2;
     const r = 0.10 + Math.random() * 0.20;
-    const mesh = new THREE.Mesh(
-      new THREE.SphereGeometry(0.18 + Math.random() * 0.10, 6, 5),
-      new THREE.MeshBasicMaterial({
-        color: 0xa8a8b0, transparent: true, opacity: 0.55,
-        depthWrite: false,
-      }),
-    );
-    mesh.position.set(x + Math.cos(a) * r, 0.20, z + Math.sin(a) * r);
-    scene.add(mesh);
-    const drift = {
+    const slot = _acquireSmokePuffSlot();
+    slot.inUse = true;
+    slot.mesh.visible = true;
+    slot.mesh.position.set(x + Math.cos(a) * r, 0.20, z + Math.sin(a) * r);
+    const initScale = (0.18 + Math.random() * 0.10) / 0.22;
+    slot.mesh.scale.setScalar(initScale);
+    slot.mat.opacity = 0.55;
+    slot.drift = {
       vy: 0.8 + Math.random() * 0.5,
       dx: (Math.random() - 0.5) * 0.4,
       dz: (Math.random() - 0.5) * 0.4,
       life: 0.6 + Math.random() * 0.3, t: 0,
+      baseScale: initScale,
     };
-    _smokePuffs.push({ mesh, drift });
+    _smokePuffs.push({ slot, drift: slot.drift });
   }
 }
 const _smokePuffs = [];
@@ -9439,16 +9475,16 @@ function _tickSmokePuffs(dt) {
   for (let i = _smokePuffs.length - 1; i >= 0; i--) {
     const p = _smokePuffs[i];
     p.drift.t += dt;
-    p.mesh.position.x += p.drift.dx * dt;
-    p.mesh.position.z += p.drift.dz * dt;
-    p.mesh.position.y += p.drift.vy * dt;
+    p.slot.mesh.position.x += p.drift.dx * dt;
+    p.slot.mesh.position.z += p.drift.dz * dt;
+    p.slot.mesh.position.y += p.drift.vy * dt;
     const k = Math.max(0, 1 - p.drift.t / p.drift.life);
-    p.mesh.material.opacity = 0.55 * k;
-    p.mesh.scale.setScalar(1 + (1 - k) * 1.3);
+    p.slot.mat.opacity = 0.55 * k;
+    p.slot.mesh.scale.setScalar(p.drift.baseScale * (1 + (1 - k) * 1.3));
     if (p.drift.t >= p.drift.life) {
-      scene.remove(p.mesh);
-      p.mesh.geometry.dispose();
-      p.mesh.material.dispose();
+      p.slot.mesh.visible = false;
+      p.slot.inUse = false;
+      p.slot.drift = null;
       _smokePuffs.splice(i, 1);
     }
   }
@@ -17431,25 +17467,56 @@ const _gasZones = [];
 // sphere geom via _smokeCloudGeom) so the visual rhythm matches;
 // only the tint distinguishes the two systems.
 const _GAS_CLOUD_COLORS = [0x80e060, 0x60c050, 0xa0e870, 0x70b040];
+// Shared cloud-puff slot pool — used by both smoke + gas zones. Each
+// slot is one mesh + mutable material on shared geom; acquire mutates
+// color/opacity/scale on reuse. Caps total active cloud-puff draw
+// calls across all zones at _CLOUD_PUFF_POOL_SIZE, which keeps the
+// transparent-draw-call ceiling bounded even with many overlapping
+// zones (e.g. molotov's 7 satellite splashes).
+const _CLOUD_PUFF_POOL_SIZE = 64;
+const _cloudPuffPool = [];
+function _acquireCloudPuffSlot() {
+  for (const slot of _cloudPuffPool) {
+    if (!slot.inUse) return slot;
+  }
+  if (_cloudPuffPool.length < _CLOUD_PUFF_POOL_SIZE) {
+    const mat = new THREE.MeshBasicMaterial({
+      color: 0xffffff, transparent: true, opacity: 0,
+      depthWrite: false,
+    });
+    const mesh = new THREE.Mesh(_smokeCloudGeom(), mat);
+    mesh.visible = false;
+    scene.add(mesh);
+    const slot = { mesh, mat, inUse: false };
+    _cloudPuffPool.push(slot);
+    return slot;
+  }
+  return null;     // pool exhausted; caller skips this puff
+}
+function _releaseCloudPuffSlot(slot) {
+  if (!slot) return;
+  slot.inUse = false;
+  slot.mesh.visible = false;
+}
 function _spawnGasCloudPuff(zone) {
+  const slot = _acquireCloudPuffSlot();
+  if (!slot) return;                                  // pool full; drop the puff
   const r = zone.radius * (0.15 + Math.random() * 0.75);
   const a = Math.random() * Math.PI * 2;
   const x = zone.x + Math.cos(a) * r;
   const z = zone.z + Math.sin(a) * r;
   const y = 0.15 + Math.random() * 0.35;
   const color = _GAS_CLOUD_COLORS[(Math.random() * _GAS_CLOUD_COLORS.length) | 0];
-  const mat = new THREE.MeshBasicMaterial({
-    color, transparent: true, opacity: 0,
-    depthWrite: false,
-  });
-  const mesh = new THREE.Mesh(_smokeCloudGeom(), mat);
-  mesh.position.set(x, y, z);
+  slot.mat.color.setHex(color);
+  slot.mat.opacity = 0;
+  slot.inUse = true;
+  slot.mesh.visible = true;
+  slot.mesh.position.set(x, y, z);
   const initScale = 0.7 + Math.random() * 0.6;
-  mesh.scale.setScalar(initScale);
-  mesh.rotation.y = Math.random() * Math.PI * 2;
-  scene.add(mesh);
+  slot.mesh.scale.setScalar(initScale);
+  slot.mesh.rotation.y = Math.random() * Math.PI * 2;
   zone.puffs.push({
-    mesh, mat,
+    slot, mesh: slot.mesh, mat: slot.mat,
     vy: 0.20 + Math.random() * 0.25,
     dx: (Math.random() - 0.5) * 0.4,
     dz: (Math.random() - 0.5) * 0.4,
@@ -17533,6 +17600,8 @@ function spawnSmokeZone(pos, radius, duration) {
 // Returns the puff entry that the per-zone tick then walks.
 const _SMOKE_CLOUD_COLORS = [0xb8c0c8, 0xa8b0b8, 0xc0c8d0, 0x98a0a8];
 function _spawnSmokeCloudPuff(zone) {
+  const slot = _acquireCloudPuffSlot();
+  if (!slot) return;                                  // pool full; drop the puff
   // Random offset within the zone, biased toward center so the
   // outer edge stays a little quieter than the core.
   const r = zone.radius * (0.15 + Math.random() * 0.75);
@@ -17541,21 +17610,19 @@ function _spawnSmokeCloudPuff(zone) {
   const z = zone.z + Math.sin(a) * r;
   const y = 0.15 + Math.random() * 0.35;
   const color = _SMOKE_CLOUD_COLORS[(Math.random() * _SMOKE_CLOUD_COLORS.length) | 0];
-  const mat = new THREE.MeshBasicMaterial({
-    color, transparent: true, opacity: 0,    // fade-in from 0
-    depthWrite: false,
-  });
-  const mesh = new THREE.Mesh(_smokeCloudGeom(), mat);
-  mesh.position.set(x, y, z);
+  slot.mat.color.setHex(color);
+  slot.mat.opacity = 0;                               // fade-in from 0
+  slot.inUse = true;
+  slot.mesh.visible = true;
+  slot.mesh.position.set(x, y, z);
   // Random initial size — varies the cloud read between dense + wispy.
   const initScale = 0.7 + Math.random() * 0.6;
-  mesh.scale.setScalar(initScale);
+  slot.mesh.scale.setScalar(initScale);
   // Random subtle rotation — sphere is round so this barely shows,
   // but combined with scale jitter it reduces "obvious copies" reads.
-  mesh.rotation.y = Math.random() * Math.PI * 2;
-  scene.add(mesh);
+  slot.mesh.rotation.y = Math.random() * Math.PI * 2;
   zone.puffs.push({
-    mesh, mat,
+    slot, mesh: slot.mesh, mat: slot.mat,
     vy: 0.20 + Math.random() * 0.25,         // upward drift, slow
     dx: (Math.random() - 0.5) * 0.4,         // lateral drift
     dz: (Math.random() - 0.5) * 0.4,
@@ -17583,7 +17650,12 @@ function _tickThrowableZones(dt) {
     // and a 6m chemical-smoke zone doesn't get over-saturated.
     // Stop emitting in the last 25% of life so the cloud naturally
     // thins out instead of cutting off cold.
-    if (z.t < z.life * 0.75 && z.puffs.length < Math.ceil(z.radius * 6)) {
+    // Per-zone puff cap halved (radius*6 → radius*3) — combined with
+    // the shared cloud-puff pool ceiling (_CLOUD_PUFF_POOL_SIZE),
+    // this bounds the transparent-draw-call count across all active
+    // zones. Visual density still reads as a dense cloud at the
+    // lower cap because of the build-phase cadence + scale growth.
+    if (z.t < z.life * 0.75 && z.puffs.length < Math.ceil(z.radius * 3)) {
       z.nextPuffT -= dt;
       if (z.nextPuffT <= 0) {
         // Cadence: faster early (build the cloud), slower mid-zone
@@ -17620,8 +17692,7 @@ function _tickThrowableZones(dt) {
       // the "billowing" read better than a static-sized sphere.
       p.mesh.scale.setScalar(p.baseScale * (1 + k * p.growth));
       if (p.t >= p.life) {
-        scene.remove(p.mesh);
-        p.mat.dispose();      // material dispose only; shared geom stays pinned
+        _releaseCloudPuffSlot(p.slot);
         z.puffs.splice(j, 1);
       }
     }
@@ -17630,10 +17701,7 @@ function _tickThrowableZones(dt) {
       scene.remove(z.dome); z.dome.geometry.dispose(); z.dome.material.dispose();
       // Clean up any remaining puffs at zone end (rare — the last-25%
       // emit gate should keep this empty by zone-end, but safety).
-      for (const p of z.puffs) {
-        scene.remove(p.mesh);
-        p.mat.dispose();
-      }
+      for (const p of z.puffs) _releaseCloudPuffSlot(p.slot);
       z.puffs.length = 0;
       _smokeZones.splice(i, 1);
     }
@@ -17653,7 +17721,9 @@ function _tickThrowableZones(dt) {
     // (first 25%) emits fast to fill the volume; sustain emits at
     // half cadence; last 25% stops emitting so the cloud thins out
     // naturally before zone expiry instead of cutting cold.
-    if (z.t < z.life * 0.75 && z.puffs.length < Math.ceil(z.radius * 6)) {
+    // Per-zone puff cap halved (radius*6 → radius*3) to bound total
+    // active cloud-puff draw calls; matches the smoke-zone treatment.
+    if (z.t < z.life * 0.75 && z.puffs.length < Math.ceil(z.radius * 3)) {
       z.nextPuffT -= dt;
       if (z.nextPuffT <= 0) {
         const buildPhase = z.t < z.life * 0.25;
@@ -17678,8 +17748,7 @@ function _tickThrowableZones(dt) {
       p.vy *= 1 - dt * 0.4;
       p.mesh.scale.setScalar(p.baseScale * (1 + k * p.growth));
       if (p.t >= p.life) {
-        scene.remove(p.mesh);
-        p.mat.dispose();
+        _releaseCloudPuffSlot(p.slot);
         z.puffs.splice(j, 1);
       }
     }
@@ -17751,10 +17820,7 @@ function _tickThrowableZones(dt) {
       scene.remove(z.dome); z.dome.geometry.dispose(); z.dome.material.dispose();
       // Clean up any remaining puffs (rare — the last-25% emit gate
       // should keep this empty by zone-end, but defensive).
-      for (const p of z.puffs) {
-        scene.remove(p.mesh);
-        p.mat.dispose();
-      }
+      for (const p of z.puffs) _releaseCloudPuffSlot(p.slot);
       z.puffs.length = 0;
       _gasZones.splice(i, 1);
     }
@@ -21956,11 +22022,28 @@ function _warmShaders() {
       if (z.ring) { scene.remove(z.ring); z.ring.geometry.dispose(); z.ring.material.dispose(); }
       if (z.dome) { scene.remove(z.dome); z.dome.geometry.dispose(); z.dome.material.dispose(); }
       if (z.rod)  { scene.remove(z.rod);  z.rod.geometry.dispose();  z.rod.material.dispose(); }
+      // Release pooled cloud-puff slots so they're available on the
+      // next level (instead of staying flagged inUse forever, which
+      // would silently shrink the effective pool over multi-level
+      // runs and eventually starve the spawn path).
+      if (z.puffs) {
+        for (const p of z.puffs) _releaseCloudPuffSlot(p.slot);
+        z.puffs.length = 0;
+      }
     };
     for (const z of _smokeZones) disposeZone(z);
     _smokeZones.length = 0;
     for (const z of _gasZones) disposeZone(z);
     _gasZones.length = 0;
+    // Movement-smoke trail pool — clear active list + flag all slots
+    // free. Slot meshes stay in the scene (they're invisible) so the
+    // next dash/teleport reuses them without re-allocating.
+    for (const p of _smokePuffs) {
+      p.slot.mesh.visible = false;
+      p.slot.inUse = false;
+      p.slot.drift = null;
+    }
+    _smokePuffs.length = 0;
     for (const d of _flashDomes) {
       d.entry.mesh.visible = false;
       d.entry.inUse = false;
