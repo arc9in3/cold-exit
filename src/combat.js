@@ -456,6 +456,13 @@ export class Combat {
       distance: h.distance,
       zone: h.object.userData?.zone || 'body',
       owner: h.object.userData?.owner || null,
+      // Face + normal — needed for ricochet (RX-*) wall reflection.
+      // Three.js Raycaster returns a Face3 with `.normal` in object-
+      // local space; for the wall meshes the level uses (identity
+      // rotation on the source mesh) local ≈ world. Callers that
+      // don't need this just ignore the extra fields.
+      face: h.face || null,
+      normal: h.face?.normal || null,
     };
   }
   // All hits along the ray, sorted near→far. Used by the sniper

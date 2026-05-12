@@ -83,6 +83,25 @@ export const MODEL_BY_WEAPON_NAME = {
 
   // Exotic
   'Widowmaker Rocket Launcher': 'weapons/SM_Rocket_Launchers_01.glb',
+  // Ricochet Revolver family — reuses the revolver GLB across all 3
+  // variants; visual differentiation is via tracerColor + muzzle size.
+  'RX-1 Rebound':       'weapons/SM_Revolver.glb',
+  'RX-2 Caroma':        'weapons/SM_Revolver.glb',
+  'RX-3 Pinball':       'weapons/SM_Revolver.glb',
+  // Charge Cannon family — rocket-launcher shape reads as a heavy
+  // energy weapon at iso distance. Replace when bespoke GLBs land.
+  'VC-7 Volt':          'weapons/SM_Rocket_Launchers_01.glb',
+  'VC-9 Surge':         'weapons/SM_Rocket_Launchers_02.glb',
+  'VC-12 Nova':         'weapons/SM_Rocket_Launchers_01.glb',
+  // Gauss Rifle family — assault rifle prototype reads as futuristic.
+  'GR-4 Slug':          'weapons/Assault_Rifle_5_56_Prototype.glb',
+  'GR-6 Coil':          'weapons/Assault_Rifle_5_56_Prototype.glb',
+  'GR-9 Mag':           'weapons/Assault_Rifle_5_56_Prototype.glb',
+  // Explosive Crossbow family — sniper-rifle silhouette stands in
+  // (long-barrel single-shot read) until a crossbow GLB is sourced.
+  'EX-3 Bolt':          'weapons/SM_Army_Sniper_Rifle.glb',
+  'EX-5 Spike':         'weapons/SM_Army_Sniper_Rifle.glb',
+  'EX-8 Stinger':       'weapons/SM_Army_Sniper_Rifle.glb',
   // Flamethrower — placeholder uses the heavy MG mesh (long tube +
   // top-mounted feed reads as a fuel-tank shape from the iso angle).
   // Replace when a real flamethrower FBX is sourced.
@@ -554,6 +573,24 @@ export const WEAPON_RENDER_BY_NAME = {
   'Widowmaker Rocket Launcher': 'Widowmaker_Rocket_Launcher.png',
   'Flamethrower':           'flamethrower.png',
   'Dragonbreath':           'Dragonbreath.png',
+  // New exotic families — placeholder renders reuse the closest
+  // matching existing weapon image. Proper UI renders queued for
+  // #cold-exit-art-2d as a follow-up. All RX-* use the Colt 357
+  // revolver render; VC-* use the Widowmaker rocket launcher render
+  // (closest heavy-energy shape); GR-* use the CAR-15 carbine; EX-*
+  // use the AS_VAL silhouette (long-barrel single-shot read).
+  'RX-1 Rebound':           'Colt_357.png',
+  'RX-2 Caroma':            'Colt_357.png',
+  'RX-3 Pinball':           'Colt_357.png',
+  'VC-7 Volt':              'Widowmaker_Rocket_Launcher.png',
+  'VC-9 Surge':             'Widowmaker_Rocket_Launcher.png',
+  'VC-12 Nova':             'Widowmaker_Rocket_Launcher.png',
+  'GR-4 Slug':              'CAR-15.png',
+  'GR-6 Coil':              'CAR-15.png',
+  'GR-9 Mag':               'CAR-15.png',
+  'EX-3 Bolt':              'AS_VAL.png',
+  'EX-5 Spike':             'AS_VAL.png',
+  'EX-8 Stinger':           'AS_VAL.png',
 
   // Legendary artifact
   "Jessica's Rage":         'Jessica_s_Rage.png',

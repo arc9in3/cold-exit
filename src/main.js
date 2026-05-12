@@ -10274,6 +10274,94 @@ function firePlayerGrapple(playerInfo, weapon, aimPoint) {
   }
 }
 
+// Ricochet Revolver — hitscan bullet that bounces off walls. Each
+// bounce reflects the direction along the wall's surface normal and
+// adds a small random Y veer so the bullet doesn't track a perfect
+// plane. Bounces continue until: (a) the bullet hits an enemy
+// (damage + stop), (b) the bullet runs out of bounces, or (c) no
+// wall is hit (open space ends the shot).
+//
+// Module-scope scratch vectors so the per-bounce raycast doesn't
+// allocate. Reused safely because the bounce loop is synchronous —
+// each shot completes before the next one fires.
+const _rx_origin = new THREE.Vector3();
+const _rx_dir    = new THREE.Vector3();
+const _rx_normal = new THREE.Vector3();
+function firePlayerRicochet(playerInfo, weapon, aimPoint) {
+  const range = weapon.range || 22;
+  const maxBounces = (weapon.maxBounces | 0) || 2;
+  const bounceDmgMult = weapon.bounceDmgMult ?? 0.85;
+  const yVeer = weapon.yVeerRange ?? 0.4;
+  const baseDmg = (weapon.damage || 50) * (derivedStats.rangedDmgMult || 1);
+  weapon.ammo = Math.max(0, (weapon.ammo | 0) - 1);
+  if (weapon.ammo <= 0) tryReload(weapon);
+  _rx_origin.copy(playerInfo.muzzleWorld);
+  _rx_dir.set(aimPoint.x - _rx_origin.x, 0, aimPoint.z - _rx_origin.z);
+  if (_rx_dir.lengthSq() < 0.0001) return;
+  _rx_dir.normalize();
+  if (sfx.fire) sfx.fire('exotic');
+  runStats.noteFireWeaponClass('exotic');
+  alertEnemiesFromShot(_rx_origin);
+  let dmg = baseDmg;
+  // Iterate bounces. The "primary" shot uses bounceIdx=0; each wall
+  // hit increments and continues if bounces remain.
+  for (let bounceIdx = 0; bounceIdx <= maxBounces; bounceIdx++) {
+    const hitTargets = [...allHittables(), ...level.solidObstacles()];
+    const hit = combat.raycast(_rx_origin, _rx_dir, hitTargets, range);
+    // Tracer leg — origin to hit point (or to max-range if missed).
+    const endPoint = hit ? hit.point
+      : new THREE.Vector3(
+          _rx_origin.x + _rx_dir.x * range,
+          _rx_origin.y,
+          _rx_origin.z + _rx_dir.z * range,
+        );
+    combat.spawnShot(_rx_origin, endPoint, weapon.tracerColor || 0xffd8a0,
+      { light: false, flash: bounceIdx === 0 });
+    if (!hit) return;     // open-air miss ends the shot
+    const isEnemy = !!(hit.owner && hit.owner.manager && hit.owner.alive);
+    if (isEnemy) {
+      runStats.addDamage(dmg);
+      hit.owner.manager.applyHit(hit.owner, dmg, hit.zone || 'torso',
+        _rx_dir, { weaponClass: 'exotic' });
+      return;             // enemy hit terminates the chain
+    }
+    if (bounceIdx >= maxBounces) return;   // out of bounces
+    // Wall hit — reflect direction along the surface normal. Three.js
+    // raycast hits carry a `face.normal` in object-local space. We
+    // need it in world space; the hit object's matrixWorld is the
+    // transform, but for axis-aligned wall meshes (the level uses
+    // wall instancers with identity rotation on the mesh) the local
+    // normal IS the world normal. Defensive: if a normal isn't
+    // available, just nudge the dir slightly so the bullet keeps
+    // going in roughly the same direction rather than going dead.
+    let nx = 0, nz = 0;
+    if (hit.face?.normal) {
+      _rx_normal.copy(hit.face.normal);
+      // Project onto XZ plane (we don't care about Y normals for
+      // gameplay; ricochet stays roughly level).
+      nx = _rx_normal.x;
+      nz = _rx_normal.z;
+      const nLen = Math.hypot(nx, nz);
+      if (nLen > 0.001) { nx /= nLen; nz /= nLen; }
+      else { nx = -_rx_dir.x; nz = -_rx_dir.z; }
+    } else {
+      nx = -_rx_dir.x; nz = -_rx_dir.z;
+    }
+    // Reflect: r = d - 2(d·n)n  (in XZ plane).
+    const dDotN = _rx_dir.x * nx + _rx_dir.z * nz;
+    _rx_dir.x -= 2 * dDotN * nx;
+    _rx_dir.z -= 2 * dDotN * nz;
+    // Add a small random Y veer for visual variation (±yVeer/2).
+    _rx_dir.y = (Math.random() - 0.5) * yVeer;
+    _rx_dir.normalize();
+    // Step the new origin slightly off the wall so the next raycast
+    // doesn't immediately re-hit the same surface.
+    _rx_origin.copy(hit.point);
+    _rx_origin.x += _rx_dir.x * 0.05;
+    _rx_origin.z += _rx_dir.z * 0.05;
+    dmg *= bounceDmgMult;
+  }
+}
 function _spawnGrappleCable() {
   const geom = new THREE.BufferGeometry();
   const pts = new Float32Array(6);
@@ -10496,6 +10584,24 @@ function fireOneShot(playerInfo, weapon, aimPoint, isADS, aimOwner, aimZone) {
     firePlayerGrapple(playerInfo, weapon, aimPoint);
     return;
   }
+  // Ricochet Revolver (RX-*) — hitscan bullet that reflects off walls
+  // with a small random Y veer. Bounces up to weapon.maxBounces times,
+  // each bounce loses bounceDmgMult fraction of damage. Stops on enemy
+  // hit (damage applies) or when bounces run out.
+  if (weapon.fireMode === 'ricochetBounce') {
+    firePlayerRicochet(playerInfo, weapon, aimPoint);
+    return;
+  }
+  // === STUB fire modes — currently fall through to standard hitscan
+  // until their dedicated handlers ship. Weapons are usable + drop
+  // correctly; they just behave as a single-shot until the dedicated
+  // mode is wired. Tracked for next-turn work.
+  //   - 'charge'           (VC-*  Charge Cannon)
+  //   - 'gauss'            (GR-*  Gauss Rifle)
+  //   - 'stickyExplosive'  (EX-*  Explosive Crossbow)
+  // Falling through is INTENTIONAL — the standard fire path below
+  // produces a sensible default (damage applies, tracer renders) so
+  // the weapon is never a no-op while we wire the special behaviour.
 
   // Attachment-adjusted stats for damage / spread / range; ammo + reload state
   // stay on the live weapon.

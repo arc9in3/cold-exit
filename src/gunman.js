@@ -247,8 +247,17 @@ export class GunmanManager {
     // Locked weapons (worldDrop:false, unowned) don't show up on
     // enemy bodies — keeps the unlock surface "I haven't seen this
     // gun yet" until the player actually unlocks it.
+    //
+    // minFloor gate — exotic-class additions (RX/VC/GR/EX series)
+    // stamp `minFloor: N` so they only show up on enemies from
+    // floor N onwards. Without this the exotic weapons would
+    // appear on floor-1 grunts and dilute the early game's curated
+    // weapon-class progression. Reads window.__level rather than
+    // threading floor through every spawn site.
+    const floor = (typeof window !== 'undefined' && window.__level?.index) | 0;
     const ws = tunables.weapons.filter(w =>
-      w.worldDrop !== false || isWeaponUnlocked(w.name));
+      (w.worldDrop !== false || isWeaponUnlocked(w.name))
+      && (w.minFloor == null || floor >= w.minFloor));
     if (!ws.length) return tunables.weapons[0];
     return ws[Math.floor(Math.random() * ws.length)];
   }
