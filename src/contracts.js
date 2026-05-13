@@ -597,7 +597,7 @@ export const CONTRACT_DEFS = {
   }),
   common_headshots_5: _kill({
     id: 'common_headshots_5',
-    image: 'firefight',
+    image: 'precision_aim',
     label: 'Take Aim',
     rarity: 'common',
     portrait: 'any',
@@ -606,7 +606,7 @@ export const CONTRACT_DEFS = {
   }),
   common_distance_kills_3: _kill({
     id: 'common_distance_kills_3',
-    image: 'firefight',
+    image: 'precision_aim',
     label: 'Long Lens',
     rarity: 'common',
     portrait: 'any',
@@ -615,7 +615,7 @@ export const CONTRACT_DEFS = {
   }),
   common_clean_sheet_1: _kill({
     id: 'common_clean_sheet_1',
-    image: 'firefight',
+    image: 'untouchable',
     label: 'Clean Sheet',
     rarity: 'common',
     portrait: 'any',
@@ -626,7 +626,7 @@ export const CONTRACT_DEFS = {
   // ---- Uncommon -------------------------------------------------------
   uncommon_hat_trick: _kill({
     id: 'uncommon_hat_trick',
-    image: 'firefight',
+    image: 'precision_aim',
     label: 'Hat Trick',
     rarity: 'uncommon',
     portrait: 'any',
@@ -636,7 +636,7 @@ export const CONTRACT_DEFS = {
   }),
   uncommon_reach_out: _kill({
     id: 'uncommon_reach_out',
-    image: 'firefight',
+    image: 'precision_aim',
     label: 'Reach Out',
     rarity: 'uncommon',
     portrait: 'any',
@@ -646,7 +646,7 @@ export const CONTRACT_DEFS = {
   }),
   uncommon_unarmed: _kill({
     id: 'uncommon_unarmed',
-    image: 'firefight',
+    image: 'disarm',
     label: 'Disarmed',
     rarity: 'uncommon',
     portrait: 'any',
@@ -656,7 +656,7 @@ export const CONTRACT_DEFS = {
   }),
   uncommon_tight_schedule: _kill({
     id: 'uncommon_tight_schedule',
-    image: 'firefight',
+    image: 'time_crunch',
     label: 'Tight Schedule',
     rarity: 'uncommon',
     portrait: 'any',
@@ -667,7 +667,7 @@ export const CONTRACT_DEFS = {
   }),
   uncommon_no_reload_2: _kill({
     id: 'uncommon_no_reload_2',
-    image: 'firefight',
+    image: 'low_ammo',
     label: 'Trigger Discipline',
     rarity: 'uncommon',
     portrait: 'any',
@@ -679,7 +679,7 @@ export const CONTRACT_DEFS = {
   // ---- Rare -----------------------------------------------------------
   rare_one_class: _kill({
     id: 'rare_one_class',
-    image: 'firefight',
+    image: 'precision_aim',
     label: 'Specialist',
     rarity: 'rare',
     portrait: 'any',
@@ -689,7 +689,7 @@ export const CONTRACT_DEFS = {
   }),
   rare_one_mag: _kill({
     id: 'rare_one_mag',
-    image: 'firefight',
+    image: 'low_ammo',
     label: 'One Mag',
     rarity: 'rare',
     portrait: 'any',
@@ -700,7 +700,7 @@ export const CONTRACT_DEFS = {
   }),
   rare_sharpshooter: _kill({
     id: 'rare_sharpshooter',
-    image: 'firefight',
+    image: 'precision_aim',
     label: 'Sharpshooter',
     rarity: 'rare',
     portrait: 'any',
@@ -711,7 +711,7 @@ export const CONTRACT_DEFS = {
   }),
   rare_half_heart: _kill({
     id: 'rare_half_heart',
-    image: 'firefight',
+    image: 'untouchable',
     label: 'Half Heart',
     rarity: 'rare',
     portrait: 'any',
@@ -722,7 +722,7 @@ export const CONTRACT_DEFS = {
   }),
   rare_pressure_test: _kill({
     id: 'rare_pressure_test',
-    image: 'extract',
+    image: 'time_crunch',
     label: 'Pressure Test',
     rarity: 'rare',
     portrait: 'any',
@@ -733,7 +733,7 @@ export const CONTRACT_DEFS = {
   }),
   rare_tweakers: _kill({
     id: 'rare_tweakers',
-    image: 'dasher_hunt',
+    image: 'chaos',
     label: 'Tweaker Den',
     rarity: 'rare',
     portrait: 'any',
@@ -744,7 +744,7 @@ export const CONTRACT_DEFS = {
   }),
   rare_bloodbath: _kill({
     id: 'rare_bloodbath',
-    image: 'firefight',
+    image: 'chaos',
     label: 'Bloodbath',
     rarity: 'rare',
     portrait: 'any',
@@ -755,7 +755,7 @@ export const CONTRACT_DEFS = {
   }),
   rare_lifesteal: _kill({
     id: 'rare_lifesteal',
-    image: 'firefight',
+    image: 'chaos',
     label: 'They Drink',
     rarity: 'rare',
     portrait: 'any',
@@ -766,7 +766,7 @@ export const CONTRACT_DEFS = {
   }),
   rare_no_dash: _kill({
     id: 'rare_no_dash',
-    image: 'firefight',
+    image: 'chaos',
     label: 'Stand Your Ground',
     rarity: 'rare',
     portrait: 'any',
@@ -779,7 +779,7 @@ export const CONTRACT_DEFS = {
   // ---- Epic -----------------------------------------------------------
   epic_sniper: _kill({
     id: 'epic_sniper',
-    image: 'firefight',
+    image: 'precision_aim',
     label: 'The Sniper',
     rarity: 'epic',
     portrait: 'any',
@@ -790,7 +790,7 @@ export const CONTRACT_DEFS = {
   }),
   epic_spray_pray: _kill({
     id: 'epic_spray_pray',
-    image: 'firefight',
+    image: 'low_ammo',
     label: 'Spray and Pray',
     rarity: 'epic',
     portrait: 'any',
@@ -801,7 +801,7 @@ export const CONTRACT_DEFS = {
   }),
   epic_detonator: _kill({
     id: 'epic_detonator',
-    image: 'firefight',
+    image: 'chaos',
     label: 'Detonator',
     rarity: 'epic',
     portrait: 'any',
@@ -812,7 +812,7 @@ export const CONTRACT_DEFS = {
   }),
   epic_timed_warband: _kill({
     id: 'epic_timed_warband',
-    image: 'firefight',
+    image: 'time_crunch',
     label: 'Hot Zone',
     rarity: 'epic',
     portrait: 'any',
@@ -825,7 +825,7 @@ export const CONTRACT_DEFS = {
   // ---- Legendary ------------------------------------------------------
   legendary_gauntlet: _kill({
     id: 'legendary_gauntlet',
-    image: 'firefight',
+    image: 'chaos',
     label: 'The Gauntlet',
     rarity: 'legendary',
     portrait: 'any',
@@ -836,7 +836,7 @@ export const CONTRACT_DEFS = {
   }),
   legendary_pure_shot: _kill({
     id: 'legendary_pure_shot',
-    image: 'firefight',
+    image: 'precision_aim',
     label: 'Pure Shot',
     rarity: 'legendary',
     portrait: 'any',

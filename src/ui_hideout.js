@@ -138,6 +138,17 @@ const CONTRACT_BANNER_ART = {
   megaboss_hunt: 'Assets/generated/gen-contract-megaboss-hunt-via-qwen-image.png',
   pistol_only:   'Assets/generated/gen-contract-pistol-only-via-qwen-image.png',
   melee_only:    'Assets/generated/gen-contract-melee-only-via-qwen-image.png',
+  // Phase-2/3 banner buckets (added 2026-05-12). Paths point to the
+  // expected gen-art output naming; the mc auto-wire workflow will
+  // update them to the actual `-r2 / -via-flux / etc.` filenames once
+  // each render is approved. Missing entries fall through to the
+  // gradient + glyph render — no breakage if art lags.
+  precision_aim: 'Assets/generated/gen-contract-precision-aim-via-qwen-image.png',
+  untouchable:   'Assets/generated/gen-contract-untouchable-via-qwen-image.png',
+  time_crunch:   'Assets/generated/gen-contract-time-crunch-via-qwen-image.png',
+  low_ammo:      'Assets/generated/gen-contract-low-ammo-via-qwen-image.png',
+  disarm:        'Assets/generated/gen-contract-disarm-via-qwen-image.png',
+  chaos:         'Assets/generated/gen-contract-chaos-via-qwen-image.png',
 };
 
 const TAB_DEFS = [
