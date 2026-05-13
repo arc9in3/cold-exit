@@ -74,13 +74,32 @@ export const SLOT_POSITIONS = {
   boots:     { row: 7, col: 3 },
 };
 
-// Unicode glyph per slot — shown as the placeholder in empty cells and on the
-// slot label so the UI is readable at a glance without sprite art.
+// Unicode glyph per slot — shown as the placeholder in empty cells, on
+// the slot label, AND in the durability HUD column (the left-edge
+// warning glyphs that flash orange/red as gear wears down or breaks).
+// Picked for at-a-glance recognition over visual uniformity — when
+// your boots are about to fail you should see a "boot" glyph, not a
+// random abstract shape.
+//
+// History — the prior set used several characters that don't read as
+// the thing they represent (⌦ for boots = the DEL keyboard arrow,
+// ⎈ for backpack = the alchemical/electrical symbol, ⊓ for pants =
+// the "cap" math operator). Players reported broken-gear glyphs as
+// "random symbols that don't make sense" — this revision swaps them
+// for glyphs that at least gesture at the slot's real-world referent.
 export const SLOT_ICONS = {
-  head: '◑', face: '◉', ears: '◜◝',
-  chest: '◼', hands: '✋',
-  belt: '▬', pants: '⊓', boots: '⌦',
-  backpack: '⎈', melee: '⚔', weapon1: '▶', weapon2: '▶',
+  head:     '⛑',  // helmet (was ◑ half-moon)
+  face:     '◉',  // face/eye (kept — reads as a head-on eye)
+  ears:     '♫',  // sound notes — proxy for hearing/ear-protection (was ◜◝ brackets)
+  chest:    '⛨',  // shield — chest armor (was ◼ filled square)
+  hands:    '✋',  // raised hand (kept — already clear)
+  belt:     '═',  // double horizontal bar — belt-shaped (was ▬ single bar)
+  pants:    'Π',  // two-leg shape — capital pi (was ⊓ which read as math "cap")
+  boots:    '⊥',  // perpendicular — foot on ground (was ⌦ DEL-key arrow)
+  backpack: '⊞',  // strap-crossed square (was ⎈ electrical/alchemy)
+  melee:    '⚔',  // crossed swords (kept)
+  weapon1:  '▶',  // firing direction (kept)
+  weapon2:  '▶',  // firing direction (kept)
 };
 
 export const TYPE_ICONS = {
