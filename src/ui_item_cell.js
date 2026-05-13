@@ -7,15 +7,22 @@
 // offscreen WebGL canvas and cached by a stable item key. This
 // replaces the old Military icon-pack PNG stack which was too dense
 // and too similar to tell items apart at a glance.
-import { inferRarity, rarityColor, weaponImageMirrorStyle, TYPE_ICONS, SLOT_LABEL, SLOT_ICONS } from './inventory.js';
+import { inferRarity, rarityColor, weaponImageMirrorStyle, TYPE_ICONS, SLOT_LABEL, SLOT_ICONS, slotIconHTML } from './inventory.js';
 import { thumbnailFor } from './item_thumbnails.js';
 
 export function renderItemCell(item, slotId = null, opts = {}) {
   const slotLabel = slotId ? (SLOT_LABEL[slotId] || slotId) : '';
   if (!item) {
-    const icon = slotId ? (SLOT_ICONS[slotId] || '·') : '·';
+    // slotIconHTML renders a PNG silhouette if one exists for this
+    // slot (Military pack), else falls back to the unicode glyph.
+    // The `cell-empty-icon-img` class sizes the PNG to match the
+    // cell — 48px square, centered, no tint (default white silhouette
+    // on the slate background).
+    const iconHTML = slotId
+      ? slotIconHTML(slotId, { cls: 'cell-empty-ico-img', fallback: '·' })
+      : '·';
     const lbl = slotLabel ? `<div class="cell-label">${slotLabel}</div>` : '';
-    return `${lbl}<div class="cell-empty-ico">${icon}</div>`;
+    return `${lbl}<div class="cell-empty-ico">${iconHTML}</div>`;
   }
   // Cell tile background — was the rarity color directly, which
   // washed out item silhouettes (especially gen-2d images that have

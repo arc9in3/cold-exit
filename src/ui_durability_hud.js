@@ -10,7 +10,7 @@
 // item lookups + a small DOM diff) but the column is always-on, so
 // per-frame DOM writes would still be wasted work.
 
-import { SLOT_IDS, SLOT_ICONS } from './inventory.js';
+import { SLOT_IDS, SLOT_ICONS, slotIconHTML } from './inventory.js';
 
 // Tunables. WARN_THRESHOLD: ratio under which we flip from hidden to
 // orange. BROKEN: durability hits zero → red. UPDATE_INTERVAL_MS: how
@@ -57,6 +57,27 @@ export class DurabilityHud {
       el.style.lineHeight = '1';
       document.body.appendChild(el);
     }
+    // Inline stylesheet for the maskable icon cells. The mask-image
+    // path is set inline per-slot via the --slot-mask custom property
+    // (see slotIconHTML in inventory.js); the class supplies size +
+    // background-color = currentColor so the parent cell's style.color
+    // (set in _paint) flows through and tints the silhouette
+    // orange/red the same way a text glyph is tinted.
+    if (!document.getElementById('dur-hud-icon-style')) {
+      const ss = document.createElement('style');
+      ss.id = 'dur-hud-icon-style';
+      ss.textContent = `
+        .durability-hud-cell .dur-hud-icon {
+          display: inline-block;
+          width: 28px;
+          height: 28px;
+          background-color: currentColor;
+          -webkit-mask: var(--slot-mask) center / contain no-repeat;
+          mask: var(--slot-mask) center / contain no-repeat;
+        }
+      `;
+      document.head.appendChild(ss);
+    }
     this.root = el;
   }
 
@@ -66,7 +87,11 @@ export class DurabilityHud {
     cell = document.createElement('div');
     cell.className = 'durability-hud-cell';
     cell.dataset.slot = slot;
-    cell.textContent = SLOT_ICONS[slot] || '◇';
+    // slotIconHTML returns an <img> when a PNG silhouette exists for
+    // the slot (Military icon pack), else falls back to the unicode
+    // glyph from SLOT_ICONS. The CSS class lets us size + tint the
+    // image without leaning on inline style for every element.
+    cell.innerHTML = slotIconHTML(slot, { cls: 'dur-hud-icon', maskable: true, fallback: '◇' });
     cell.style.opacity = '0';            // hidden by default
     cell.style.transition = 'opacity 120ms';
     this.root.appendChild(cell);

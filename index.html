@@ -1304,6 +1304,18 @@
       font-size: 22px; color: #3c4250; text-align: center;
       line-height: 1.2; opacity: 0.75;
     }
+    /* Slot silhouette PNG — renders inside .cell-empty-ico in place of
+       the unicode glyph when a slot has an entry in SLOT_ICON_PATHS.
+       Sized to fit the empty cell at ~28px, desaturated + dimmed so
+       it reads as a placeholder rather than a real item render. */
+    .inv-slot .cell-empty-ico .cell-empty-ico-img,
+    .cell-empty-ico .cell-empty-ico-img {
+      display: inline-block;
+      width: 32px; height: 32px;
+      object-fit: contain;
+      filter: brightness(0.7) saturate(0);
+      opacity: 0.85;
+    }
     .inv-slot .cell-label { font-size: 9px; color: #7a6f54; }
     #inv-silhouette {
       /* Placed via grid into col 2 spanning all 7 rows — sits cleanly

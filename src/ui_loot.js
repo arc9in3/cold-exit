@@ -1,4 +1,4 @@
-import { inferRarity, iconForItem, rarityColor, weaponImageMirrorStyle, TYPE_ICONS, SLOT_IDS, SLOT_POSITIONS, SLOT_ICONS, SLOT_LABEL } from './inventory.js';
+import { inferRarity, iconForItem, rarityColor, weaponImageMirrorStyle, TYPE_ICONS, SLOT_IDS, SLOT_POSITIONS, SLOT_ICONS, SLOT_LABEL, slotIconHTML } from './inventory.js';
 import { renderItemCell } from './ui_item_cell.js';
 import { GridContainer, stampItemDims } from './grid_container.js';
 import { thumbnailFor } from './item_thumbnails.js';
@@ -865,9 +865,14 @@ export class LootUI {
   _cellContent(item, slotId, opts = {}) {
     const slotLabel = slotId ? (SLOT_LABEL[slotId] || slotId) : '';
     if (!item) {
-      const icon = slotId ? (SLOT_ICONS[slotId] || '·') : '·';
+      // PNG silhouette per slot when available (Military pack icons);
+      // unicode glyph fallback otherwise. Same helper as ui_item_cell
+      // so the two empty-cell surfaces stay visually in sync.
+      const iconHTML = slotId
+        ? slotIconHTML(slotId, { cls: 'cell-empty-ico-img', fallback: '·' })
+        : '·';
       const lbl = slotLabel ? `<div class="cell-label">${slotLabel}</div>` : '';
-      return `${lbl}<div class="cell-empty-ico">${icon}</div>`;
+      return `${lbl}<div class="cell-empty-ico">${iconHTML}</div>`;
     }
     // Cell background = RARITY color, not item.tint. The previous
     // tint-driven swatch was confusing because item.tint also drove

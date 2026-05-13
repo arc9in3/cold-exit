@@ -102,6 +102,56 @@ export const SLOT_ICONS = {
   weapon2:  '▶',  // firing direction (kept)
 };
 
+// PNG silhouette icons for the slot — these surface in the durability
+// HUD column, the empty-slot tag on item cells, and the loot screen
+// empty-cell placeholder. Picked from the existing Military icon pack
+// for "_Underlay" silhouette consistency (clean white fill + grey
+// outline on transparent). When a slot has no entry, render sites
+// fall back to SLOT_ICONS[slot] glyph.
+//
+// Missing slots (pants, boots, hands, belt) need silhouette renders
+// in matching style — currently fall back to the unicode glyph.
+export const SLOT_ICON_PATHS = {
+  head:     'Assets/UI/Military/ICON_MilitaryCombat_Inventory_Helmets_01_Underlay.png',
+  face:     'Assets/UI/Military/ICON_SM_Item_Goggles_01_Military.png',
+  ears:     'Assets/UI/Military/ICON_SM_Item_Earmuffs_01_Military.png',
+  chest:    'Assets/UI/Military/ICON_MilitaryCombat_Inventory_Armor_01_Underlay.png',
+  backpack: 'Assets/UI/Icons/ICON_MilitaryCombat_Inventory_Backpack_01_Underlay.png',
+  melee:    'Assets/UI/Military/ICON_SM_Wep_Knife_01_Military_Underlay.png',
+  weapon1:  'Assets/UI/Military/ICON_SM_Wep_Pistol_01_Military_Underlay.png',
+  weapon2:  'Assets/UI/Military/ICON_SM_Wep_Rifle_01_Military_Underlay.png',
+};
+
+// Returns an HTML string suitable for inline template-literal use —
+// either an icon element (mask-style span OR plain img) when a PNG
+// silhouette exists for the slot, or the unicode glyph from
+// SLOT_ICONS as the fallback. The fallback option lets the caller
+// override the missing-glyph default ('·' for item-cell empty tags,
+// '◇' for the durability HUD).
+//
+// opts.cls       — adds a CSS class so the caller can size + style.
+// opts.maskable  — true → mask-image span that picks up `currentColor`
+//   from the parent (used by the durability HUD so the icon can flash
+//   orange/red the same way a text glyph could be tinted). false → a
+//   plain `<img>` that renders with the source PNG's own coloring
+//   (used by the item-cell and loot screen empty-slot placeholders).
+export function slotIconHTML(slot, opts = {}) {
+  const path = slot && SLOT_ICON_PATHS[slot];
+  const cls = opts.cls ? ` class="${opts.cls}"` : '';
+  if (path) {
+    if (opts.maskable) {
+      // mask-image picks up the parent's `currentColor` via
+      // background-color: currentColor in the CSS for the class. The
+      // mask is set as a CSS custom property so it lives inline per
+      // slot without needing a stylesheet entry per icon.
+      return `<span${cls} style="--slot-mask:url('${path}')"></span>`;
+    }
+    return `<img${cls} src="${path}" alt="" draggable="false">`;
+  }
+  const glyph = (slot && SLOT_ICONS[slot]) || opts.fallback || '◇';
+  return `<span${cls}>${glyph}</span>`;
+}
+
 export const TYPE_ICONS = {
   ranged: '▶', melee: '⚔', armor: '⛨', gear: '✪',
   consumable: '✚', attachment: '⌬', backpack: '⎈',
