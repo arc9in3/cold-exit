@@ -1,5 +1,5 @@
 import * as THREE from 'three';
-import { inferRarity, TYPE_ICONS } from './inventory.js';
+import { inferRarity, TYPE_ICONS, SLOT_IDS, SLOT_LABEL, slotIconHTML } from './inventory.js';
 import { renderItemCell } from './ui_item_cell.js';
 import { tunables } from './tunables.js';
 import { GridContainer, stampItemDims } from './grid_container.js';
@@ -280,6 +280,8 @@ export class ShopUI {
             <div id="shop-buyback"></div>
           </div>
           <div class="shop-col">
+            <div class="inv-heading">Equipped</div>
+            <div id="shop-equipped" style="display:flex;flex-wrap:wrap;gap:4px;margin-bottom:8px;padding:6px;background:rgba(20,24,32,0.5);border:1px solid #2a2f3a;border-radius:3px;"></div>
             <div class="inv-heading">Your Backpack</div>
             <div id="shop-filter-tabs" style="display:flex;gap:4px;margin-bottom:6px;flex-wrap:wrap;"></div>
             <div id="shop-bag-actions" style="display:flex;gap:6px;margin-bottom:6px;flex-wrap:wrap;">
@@ -298,6 +300,7 @@ export class ShopUI {
     this.stockEl = this.root.querySelector('#shop-stock');
     this.bagEl = this.root.querySelector('#shop-bag');
     this.filterTabsEl = this.root.querySelector('#shop-filter-tabs');
+    this.equippedEl = this.root.querySelector('#shop-equipped');
     this._filterTab = 'all';
     this._renderFilterTabs();
     this.buybackEl = this.root.querySelector('#shop-buyback');
@@ -1030,6 +1033,10 @@ export class ShopUI {
     this._renderKeeper();
     this._renderTrade();
     this._renderSmith();
+    // Equipped paperdoll — compact row of equipment slots so the
+    // player can sell directly from equipment without bouncing to
+    // the inventory screen. Click = inspect, right-click = sell.
+    this._renderEquipped();
     // Stock — flat cell list. Shop is intentionally simpler than the
     // inventory/loot grids: left-click to inspect, right-click to buy.
     // No drag-to-rearrange, no footprint layout. Convention matches
@@ -1263,6 +1270,84 @@ export class ShopUI {
         this.cardEl.style.backgroundRepeat = '';
       }
     }
+  }
+
+  // Compact paperdoll above the backpack column. Each slot shows the
+  // equipped item with a sell-price chip. Click inspects, right-click
+  // sells (via _sellEquipped which mirrors _sell's buyback flow).
+  // Slots without an equipped item render a dim placeholder so the
+  // row stays visually stable across merchants.
+  _renderEquipped() {
+    if (!this.equippedEl) return;
+    this.equippedEl.innerHTML = '';
+    for (const slot of SLOT_IDS) {
+      const item = this.inventory.equipment?.[slot];
+      const tile = document.createElement('div');
+      tile.className = 'shop-eq-slot' + (item ? ' filled' : '');
+      tile.style.cssText = `
+        position:relative;
+        width:52px;height:62px;
+        display:flex;flex-direction:column;align-items:center;justify-content:flex-start;
+        padding:3px 2px;
+        background:rgba(15,17,22,0.7);
+        border:1px solid ${item ? '#5a4a32' : '#2a2f3a'};
+        border-radius:2px;
+        cursor:${item ? 'pointer' : 'default'};
+        font-size:9px;color:${item ? '#f2e7c9' : '#5a6470'};
+        letter-spacing:0.5px;text-align:center;
+      `;
+      if (item) {
+        const price = sellPriceFor(item);
+        tile.title = `${item.name} — right-click to sell for ${price}c`;
+        if (item.markedKeep) tile.style.borderColor = '#3a6e9e';
+        tile.innerHTML = `
+          <div style="width:38px;height:38px;display:flex;align-items:center;justify-content:center;color:#c9a87a;">
+            ${slotIconHTML(slot, { cls: 'shop-eq-icon', fallback: '◇' })}
+          </div>
+          <div style="font-size:8px;color:#bcd4ee;text-overflow:ellipsis;overflow:hidden;white-space:nowrap;width:100%;">${item.name || ''}</div>
+          <div style="font-size:8px;color:#cfe5ad;">${price}c</div>
+        `;
+        tile.addEventListener('click', () => {
+          if (window.__showDetails) window.__showDetails(item);
+        });
+        tile.addEventListener('contextmenu', (e) => {
+          e.preventDefault();
+          this._sellEquipped(slot);
+        });
+      } else {
+        tile.innerHTML = `
+          <div style="width:38px;height:38px;display:flex;align-items:center;justify-content:center;opacity:0.5;">
+            ${slotIconHTML(slot, { cls: 'shop-eq-icon-empty', fallback: '·' })}
+          </div>
+          <div style="font-size:8px;color:#5a6470;text-overflow:ellipsis;overflow:hidden;white-space:nowrap;width:100%;">${SLOT_LABEL[slot] || slot}</div>
+        `;
+      }
+      this.equippedEl.appendChild(tile);
+    }
+  }
+
+  // Sell an equipped item directly from the paperdoll row. Mirrors the
+  // _sell() flow but pulls from equipment[slot] instead of the bag
+  // index. markedKeep blocks the sale the same way; the sold item
+  // routes into the buyback list at the same price the player got.
+  _sellEquipped(slot) {
+    const item = this.inventory.equipment?.[slot];
+    if (!item) return;
+    if (item.markedKeep) {
+      this._flash(`${item.name} is marked KEEP — sale blocked.`);
+      return;
+    }
+    const price = sellPriceFor(item);
+    this.inventory.equipment[slot] = null;
+    if (typeof this.inventory._recomputeCapacity === 'function') {
+      this.inventory._recomputeCapacity();
+    }
+    this.earnCredits(price);
+    this.buyback.unshift({ item, price });
+    if (this.buyback.length > 12) this.buyback.pop();
+    this.inventory._bump?.();
+    if (typeof window.__recomputeStats === 'function') window.__recomputeStats();
+    this.render();
   }
 
   // Filter tabs above the bag column. Filter state is per-shop-session
