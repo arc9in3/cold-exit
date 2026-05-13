@@ -4,6 +4,7 @@ import { SLOT_IDS, SLOT_POSITIONS, SLOT_ICONS, TYPE_ICONS, inferRarity,
 import { SKILLS } from './skills.js';
 import { renderItemCell } from './ui_item_cell.js';
 import { thumbnailFor } from './item_thumbnails.js';
+import { openSplitModal } from './ui_split_modal.js';
 import { SPECIAL_PERKS } from './perks.js';
 import { SKILL_NODES } from './skill_tree.js';
 
@@ -698,67 +699,11 @@ export class InventoryUI {
     });
   }
 
-  // Custom split-stack modal — replaces window.prompt. Resolves to
-  // the peel count via the callback when the user clicks Split, or
-  // does nothing on Cancel / Escape / outside-click. Single-instance:
-  // dismisses any prior modal before opening so back-to-back splits
-  // don't stack overlays.
+  // Wrapper around the shared modal — kept under the same name so the
+  // existing in-class call sites stay short. Implementation moved to
+  // src/ui_split_modal.js so loot + shop can use the same overlay.
   _openSplitModal(item, count, onConfirm) {
-    if (this._splitModalEl) {
-      this._splitModalEl.remove();
-      this._splitModalEl = null;
-    }
-    const def = Math.ceil(count / 2);
-    const overlay = document.createElement('div');
-    overlay.className = 'split-modal-overlay';
-    overlay.innerHTML = `
-      <div class="split-modal-card">
-        <div class="split-modal-title">SPLIT STACK</div>
-        <div class="split-modal-name">${item.name}</div>
-        <div class="split-modal-count">Stack size: <b>${count}</b></div>
-        <div class="split-modal-row">
-          <button type="button" class="split-modal-step" data-step="-1">−</button>
-          <input type="number" class="split-modal-input"
-                 min="1" max="${count - 1}" step="1" value="${def}">
-          <button type="button" class="split-modal-step" data-step="+1">+</button>
-        </div>
-        <div class="split-modal-buttons">
-          <button type="button" class="split-modal-cancel">Cancel</button>
-          <button type="button" class="split-modal-ok">Split</button>
-        </div>
-      </div>
-    `;
-    document.body.appendChild(overlay);
-    this._splitModalEl = overlay;
-    const input = overlay.querySelector('.split-modal-input');
-    input.focus();
-    input.select();
-    const close = () => {
-      if (this._splitModalEl === overlay) this._splitModalEl = null;
-      overlay.remove();
-    };
-    const confirm = () => {
-      const n = Math.max(1, Math.min(count - 1, parseInt(input.value, 10) || 0));
-      close();
-      onConfirm(n);
-    };
-    overlay.querySelector('.split-modal-ok').addEventListener('click', confirm);
-    overlay.querySelector('.split-modal-cancel').addEventListener('click', close);
-    overlay.addEventListener('click', (ev) => {
-      if (ev.target === overlay) close();   // outside-click closes
-    });
-    overlay.querySelectorAll('.split-modal-step').forEach((btn) => {
-      btn.addEventListener('click', () => {
-        const step = parseInt(btn.dataset.step, 10) || 0;
-        const cur = parseInt(input.value, 10) || def;
-        input.value = String(Math.max(1, Math.min(count - 1, cur + step)));
-        input.focus();
-      });
-    });
-    input.addEventListener('keydown', (ev) => {
-      if (ev.key === 'Enter') { ev.preventDefault(); confirm(); }
-      else if (ev.key === 'Escape') { ev.preventDefault(); close(); }
-    });
+    openSplitModal(item, count, onConfirm);
   }
 
   // Walk up from an element to the nearest matching ancestor (inclusive).

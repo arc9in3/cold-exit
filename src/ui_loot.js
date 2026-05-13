@@ -2,6 +2,7 @@ import { inferRarity, iconForItem, rarityColor, weaponImageMirrorStyle, TYPE_ICO
 import { renderItemCell } from './ui_item_cell.js';
 import { GridContainer, stampItemDims } from './grid_container.js';
 import { thumbnailFor } from './item_thumbnails.js';
+import { openSplitModal } from './ui_split_modal.js';
 
 // Coop body-loot is per-peer (each peer rolls their own slice at
 // kill time, stored on entity.lootByPeer). The 'looted' flag is
@@ -1079,6 +1080,29 @@ export class LootUI {
     });
     cell.addEventListener('contextmenu', (e) => {
       e.preventDefault();
+      // Shift+right-click on a stack opens the split modal — take N
+      // of the stack instead of all of it. Falls through to the normal
+      // take-all path on non-stacks and on count===1.
+      if (e.shiftKey) {
+        const it = this.target?.loot?.[lootIdx];
+        const count = (it && (it.count | 0)) || 1;
+        if (it && count > 1) {
+          openSplitModal(it, count, (n) => {
+            // Peel n from the stack and route into the player's bags.
+            it.count = count - n;
+            const peeled = { ...it, count: n };
+            const r = this.inventory.add(peeled);
+            if (!r || r.placed === false) {
+              // No room — restore the source stack and warn.
+              it.count = count;
+              window.__hudMsg?.('No room to split — clear space first', 2.5);
+            }
+            this.inventory._bump?.();
+            this.render();
+          });
+          return;
+        }
+      }
       this._takeOne(lootIdx);
     });
     cell.addEventListener('dragstart', (e) => {

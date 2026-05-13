@@ -4,6 +4,7 @@ import { renderItemCell } from './ui_item_cell.js';
 import { tunables } from './tunables.js';
 import { GridContainer, stampItemDims } from './grid_container.js';
 import { thumbnailFor } from './item_thumbnails.js';
+import { openSplitModal } from './ui_split_modal.js';
 import { buildRig, initAnim, updateAnim } from './actor_rig.js';
 import { KEEPER_PALETTE } from './level.js';
 import { snapshotToDataURL } from './snapshot_renderer.js';
@@ -1109,6 +1110,28 @@ export class ShopUI {
       });
       cell.addEventListener('contextmenu', (e) => {
         e.preventDefault();
+        // Shift+right-click on a stack opens the split modal — sell
+        // N from the stack instead of the whole thing. Falls through
+        // to the normal full-stack sell on non-stacks and on count===1.
+        if (e.shiftKey) {
+          const count = (it.count | 0) || 1;
+          if (count > 1) {
+            openSplitModal(it, count, (n) => {
+              // Peel n into a separate item and sell that. The source
+              // stack retains (count - n). _sell expects a backpack
+              // index, so we temporarily replace the backpack slot
+              // with the peeled item, sell, then restore the remainder.
+              it.count = count - n;
+              const peeled = { ...it, count: n };
+              this.inventory.backpack[i] = peeled;
+              this._sell(i);
+              this.inventory.backpack[i] = it.count > 0 ? it : null;
+              this.inventory._bump?.();
+              this.render();
+            });
+            return;
+          }
+        }
         // Right-click always sells (symmetric with stock-side
         // right-click = buy). Repair stays driven by the explicit
         // "Repair…" button. Old behaviour prioritised repair on broken
