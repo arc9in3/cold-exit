@@ -109,14 +109,19 @@ export const SLOT_ICONS = {
 // outline on transparent). When a slot has no entry, render sites
 // fall back to SLOT_ICONS[slot] glyph.
 //
-// Missing slots (pants, boots, hands, belt) need silhouette renders
-// in matching style — currently fall back to the unicode glyph.
+// All 12 slots now covered — pants/boots/belt/hands filled by
+// flux-generated silhouettes in Assets/generated/ to match the
+// Military pack's white-fill + grey-outline style.
 export const SLOT_ICON_PATHS = {
   head:     'Assets/UI/Military/ICON_MilitaryCombat_Inventory_Helmets_01_Underlay.png',
   face:     'Assets/UI/Military/ICON_SM_Item_Goggles_01_Military.png',
   ears:     'Assets/UI/Military/ICON_SM_Item_Earmuffs_01_Military.png',
   chest:    'Assets/UI/Military/ICON_MilitaryCombat_Inventory_Armor_01_Underlay.png',
   backpack: 'Assets/UI/Icons/ICON_MilitaryCombat_Inventory_Backpack_01_Underlay.png',
+  belt:     'Assets/generated/gen-slot-icon-belt-v2-via-flux.png',
+  pants:    'Assets/generated/gen-slot-icon-pants-v2-via-flux-r2.png',
+  boots:    'Assets/generated/gen-slot-icon-boots-v2-via-flux.png',
+  hands:    'Assets/generated/gen-slot-icon-gloves-v2-via-flux-r3.png',
   melee:    'Assets/UI/Military/ICON_SM_Wep_Knife_01_Military_Underlay.png',
   weapon1:  'Assets/UI/Military/ICON_SM_Wep_Pistol_01_Military_Underlay.png',
   weapon2:  'Assets/UI/Military/ICON_SM_Wep_Rifle_01_Military_Underlay.png',
@@ -156,6 +161,34 @@ export const TYPE_ICONS = {
   ranged: '▶', melee: '⚔', armor: '⛨', gear: '✪',
   consumable: '✚', attachment: '⌬', backpack: '⎈',
 };
+
+// Filter-bucket classifier used by ui_shop's tab strip (and any future
+// inventory/loot filter UI). Returns one of:
+//   'weapon' | 'armor' | 'consumable' | 'junk' | 'other'
+//
+// markedJunk wins over the underlying type so a marked-junk weapon
+// still surfaces in the Junk tab. 'attachment' rides with 'other' so
+// it doesn't crowd the weapons tab (attachments aren't usable as-is).
+export const FILTER_CATEGORIES = ['all', 'weapon', 'armor', 'consumable', 'junk'];
+export const FILTER_LABELS = {
+  all:        'All',
+  weapon:     'Weapons',
+  armor:      'Armor',
+  consumable: 'Consumables',
+  junk:       'Junk',
+};
+export function classifyItemForFilter(item) {
+  if (!item) return 'other';
+  if (item.markedJunk || item.type === 'junk') return 'junk';
+  if (item.type === 'ranged' || item.type === 'melee') return 'weapon';
+  if (item.type === 'armor' || item.type === 'gear' || item.type === 'backpack') return 'armor';
+  if (item.type === 'consumable' || item.type === 'throwable' || item.type === 'repairkit') return 'consumable';
+  return 'other';
+}
+export function itemMatchesFilter(item, filter) {
+  if (!filter || filter === 'all') return true;
+  return classifyItemForFilter(item) === filter;
+}
 
 // Map items to PNG icons. The original Icons/ folder has broad category art;
 // the Military/ pack adds a much finer library (specific pistols, rifles,

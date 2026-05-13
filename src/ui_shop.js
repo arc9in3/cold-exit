@@ -5,6 +5,7 @@ import { tunables } from './tunables.js';
 import { GridContainer, stampItemDims } from './grid_container.js';
 import { thumbnailFor } from './item_thumbnails.js';
 import { openSplitModal } from './ui_split_modal.js';
+import { FILTER_CATEGORIES, FILTER_LABELS, itemMatchesFilter } from './inventory.js';
 import { buildRig, initAnim, updateAnim } from './actor_rig.js';
 import { KEEPER_PALETTE } from './level.js';
 import { snapshotToDataURL } from './snapshot_renderer.js';
@@ -280,6 +281,7 @@ export class ShopUI {
           </div>
           <div class="shop-col">
             <div class="inv-heading">Your Backpack</div>
+            <div id="shop-filter-tabs" style="display:flex;gap:4px;margin-bottom:6px;flex-wrap:wrap;"></div>
             <div id="shop-bag-actions" style="display:flex;gap:6px;margin-bottom:6px;flex-wrap:wrap;">
               <button id="shop-sell-junk" type="button" class="shop-bulk-btn" style="flex:1;min-width:130px;padding:6px 10px;font-size:11px;letter-spacing:1.5px;text-transform:uppercase;background:rgba(143,191,112,0.18);color:#cfe5ad;border:1px solid rgba(143,191,112,0.55);border-radius:2px;cursor:pointer;font-family:inherit;font-weight:700;">Sell All Junk</button>
               <button id="shop-repair-item" type="button" class="shop-bulk-btn" style="flex:1;min-width:130px;padding:6px 10px;font-size:11px;letter-spacing:1.5px;text-transform:uppercase;background:rgba(255,160,80,0.18);color:#ffd8a0;border:1px solid rgba(255,160,80,0.55);border-radius:2px;cursor:pointer;font-family:inherit;font-weight:700;">Repair Item</button>
@@ -295,6 +297,9 @@ export class ShopUI {
     this.cardEl = this.root.querySelector('#shop-card');
     this.stockEl = this.root.querySelector('#shop-stock');
     this.bagEl = this.root.querySelector('#shop-bag');
+    this.filterTabsEl = this.root.querySelector('#shop-filter-tabs');
+    this._filterTab = 'all';
+    this._renderFilterTabs();
     this.buybackEl = this.root.querySelector('#shop-buyback');
     this.buybackHeadEl = this.root.querySelector('#shop-buyback-heading');
     this.creditsEl = this.root.querySelector('#shop-credits');
@@ -1042,6 +1047,8 @@ export class ShopUI {
     } else {
       stock.forEach((it, idx) => {
         if (!it) return;
+        // Filter tab — hide items outside the active category.
+        if (!itemMatchesFilter(it, this._filterTab)) return;
         const cell = this._buildCell(it, priceFor(it, this.getShopMult()), 'buy');
         cell.addEventListener('click', () => {
           if (window.__showDetails) window.__showDetails(it);
@@ -1071,6 +1078,7 @@ export class ShopUI {
     this.buybackEl.style.width = '';
     this.buybackEl.style.minHeight = '';
     this.buyback.forEach((entry, i) => {
+      if (!itemMatchesFilter(entry.item, this._filterTab)) return;
       const cell = this._buildCell(entry.item, entry.price, 'buy');
       cell.classList.add('buyback-cell');
       cell.addEventListener('click', () => {
@@ -1096,11 +1104,19 @@ export class ShopUI {
     for (let i = 0; i < this.inventory.backpack.length; i++) {
       const it = this.inventory.backpack[i];
       if (!it) continue;
+      // Track "has any" + "has junk" / "has repairable" against the
+      // UNFILTERED bag so the bulk-action button states reflect the
+      // real backpack contents, not the filtered view.
       hasAny = true;
       if (it.type === 'junk') anyJunk = true;
       const isBroken = it.durability && it.durability.current <= 0;
       const canRepair = isBroken && this._canRepair(it);
       if (canRepair) anyRepairable = true;
+      // Filter gate AFTER the bulk-action flags above — Repair All /
+      // Sell All Junk operate on the entire backpack regardless of
+      // which filter tab is active, so their button enable state must
+      // reflect the unfiltered bag.
+      if (!itemMatchesFilter(it, this._filterTab)) continue;
       const action = canRepair ? 'repair' : 'sell';
       const price = canRepair ? repairPriceFor(it, this.getShopMult()) : sellPriceFor(it);
       const cell = this._buildCell(it, price, action);
@@ -1246,6 +1262,36 @@ export class ShopUI {
         this.cardEl.style.backgroundPosition = '';
         this.cardEl.style.backgroundRepeat = '';
       }
+    }
+  }
+
+  // Filter tabs above the bag column. Filter state is per-shop-session
+  // (resets when the modal opens fresh from the hideout). Applies to
+  // stock / buyback / bag uniformly so the player can "show me only
+  // weapons" and see weapon stock alongside their weapon bag items.
+  _renderFilterTabs() {
+    if (!this.filterTabsEl) return;
+    this.filterTabsEl.innerHTML = '';
+    for (const key of FILTER_CATEGORIES) {
+      const btn = document.createElement('button');
+      btn.type = 'button';
+      btn.className = `shop-filter-tab${this._filterTab === key ? ' active' : ''}`;
+      btn.textContent = FILTER_LABELS[key] || key;
+      btn.style.cssText = `
+        padding:4px 10px;font-size:10px;letter-spacing:1.5px;
+        text-transform:uppercase;font-family:inherit;font-weight:700;
+        background:${this._filterTab === key ? 'rgba(201,168,122,0.30)' : 'rgba(40,44,52,0.6)'};
+        color:${this._filterTab === key ? '#f2e7c9' : '#8a8270'};
+        border:1px solid ${this._filterTab === key ? 'rgba(201,168,122,0.7)' : 'rgba(80,80,80,0.55)'};
+        border-radius:2px;cursor:pointer;
+      `;
+      btn.addEventListener('click', () => {
+        if (this._filterTab === key) return;
+        this._filterTab = key;
+        this._renderFilterTabs();
+        this.render();
+      });
+      this.filterTabsEl.appendChild(btn);
     }
   }
 
