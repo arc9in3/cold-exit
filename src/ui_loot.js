@@ -272,6 +272,13 @@ export class LootUI {
     this.root.querySelector('#loot-take-all').addEventListener('click', () => this._takeAll());
     this.root.addEventListener('mousedown', (e) => { if (e.target === this.root) this.hide(); });
     this._drag = null;
+    // Hover-tracking state for the keyboard shortcuts below (1-8 / E /
+    // J / K). Mirrors ui_inventory.js. Each cell's wire method sets
+    // these on pointerenter and clears on pointerleave so the keydown
+    // handler can read "what is the user currently hovering."
+    this._hoveredItem = null;
+    this._hoverSource = null;
+    this._wireLootKeyboard();
 
   }
 
@@ -446,16 +453,40 @@ export class LootUI {
       //   click       = inspect (verbose item view)
       //   shift+click = move item to opponent's pockets (body must be open)
       //   right-click = unequip into player inventory grids
+      cell.addEventListener('pointerenter', () => {
+        this._setHoveredItem(this.inventory.equipment[slot], cell);
+      });
+      cell.addEventListener('pointerleave', () => this._clearHoveredItemIf(cell));
       cell.addEventListener('click', (e) => {
         const it = this.inventory.equipment[slot];
         if (!it) return;
-        if (e.shiftKey && this.target && !this.bodyHidden) {
+        if (e.shiftKey) {
+          // Shift+click semantics: send the item AWAY from its current
+          // location. Body open + visible → into the loot pile. Body
+          // closed → drop to the ground. Same rule as the bag cell
+          // below (line ~1049) so the gesture is uniform across the
+          // loot modal regardless of which side the player clicked.
+          // Honors markedKeep on the ground-drop branch.
+          if (it.markedKeep && (this.bodyHidden || !this.target)) {
+            window.__hudMsg?.(`${it.name} is marked KEEP — drop blocked.`, 2.0);
+            return;
+          }
           this.inventory.equipment[slot] = null;
           this.inventory._recomputeCapacity?.();
-          it._lootForcedPile = true;
-          this.target.loot = this.target.loot || [];
-          this.target.loot.push(it);
-          this.inventory._bump();
+          if (this.target && !this.bodyHidden) {
+            it._lootForcedPile = true;
+            this.target.loot = this.target.loot || [];
+            this.target.loot.push(it);
+            this.inventory._bump();
+          } else if (this.onDrop) {
+            this.onDrop(it);
+            this.inventory._bump();
+          } else {
+            // No drop sink + no body — restore the equip and warn.
+            this.inventory.equipment[slot] = it;
+            this.inventory._recomputeCapacity?.();
+            window.__hudMsg?.('Nowhere to send this item.', 1.8);
+          }
           this.render();
           return;
         }
@@ -598,6 +629,11 @@ export class LootUI {
       //   click             = inspect (verbose item view)
       //   right-click       = take into player inventory
       //   shift+right-click = take and force-equip on the player
+      cell.addEventListener('pointerenter', () => {
+        const p = this._bySlot?.[slot];
+        this._setHoveredItem(p?.item || null, cell);
+      });
+      cell.addEventListener('pointerleave', () => this._clearHoveredItemIf(cell));
       cell.addEventListener('click', () => {
         const p = this._bySlot?.[slot];
         if (p?.item && window.__showDetails) window.__showDetails(p.item);
@@ -930,6 +966,90 @@ export class LootUI {
     `;
   }
 
+  // Keyboard shortcuts available while the loot modal is open. Mirrors
+  // ui_inventory.js:_wireQuickslotKeys so the gestures the player
+  // learned in the inventory screen work here too:
+  //
+  //   1-8     bind hovered item to action-bar slot N
+  //   E       use a hovered consumable / throwable in place
+  //   J       toggle markedJunk on hovered item
+  //   K       toggle markedKeep on hovered item
+  //
+  // Capture-phase so we win against the gameplay handler the way the
+  // inventory listener does. Gated on visibility + no text input
+  // focused so the player can still type names if a field appears.
+  _wireLootKeyboard() {
+    window.addEventListener('keydown', (e) => {
+      if (!this.isOpen()) return;
+      if (e.repeat) return;
+      const ae = document.activeElement;
+      if (ae && (ae.tagName === 'INPUT' || ae.tagName === 'TEXTAREA' || ae.isContentEditable)) return;
+      const it = this._hoveredItem;
+      if (e.code === 'KeyE' && it) {
+        if (it.type === 'consumable' || it.type === 'throwable') {
+          if (window.__useInventoryItem?.(it)) {
+            e.preventDefault(); e.stopPropagation();
+            this.render();
+          }
+        }
+        return;
+      }
+      if (e.code === 'KeyK' && it) {
+        it.markedKeep = !it.markedKeep;
+        if (it.markedKeep) it.markedJunk = false;
+        e.preventDefault(); e.stopPropagation();
+        this.inventory._bump?.();
+        this.render();
+        return;
+      }
+      if (e.code === 'KeyJ' && it) {
+        it.markedJunk = !it.markedJunk;
+        if (it.markedJunk) it.markedKeep = false;
+        e.preventDefault(); e.stopPropagation();
+        this.inventory._bump?.();
+        this.render();
+        return;
+      }
+      let slotIdx = -1;
+      switch (e.code) {
+        case 'Digit1': slotIdx = 0; break;
+        case 'Digit2': slotIdx = 1; break;
+        case 'Digit3': slotIdx = 2; break;
+        case 'Digit4': slotIdx = 3; break;
+        case 'Digit5': slotIdx = 4; break;
+        case 'Digit6': slotIdx = 5; break;
+        case 'Digit7': slotIdx = 6; break;
+        case 'Digit8': slotIdx = 7; break;
+        default: return;
+      }
+      if (!it) return;
+      const ok = this.inventory.assignActionSlot(slotIdx, it);
+      if (ok) {
+        e.preventDefault(); e.stopPropagation();
+        window.__renderActionBar?.();
+        if (typeof window.__renderWeaponBar === 'function') window.__renderWeaponBar();
+        this.render();
+      } else {
+        window.__hudMsg?.(`Cannot bind ${it.name} to that slot`, 1.8);
+      }
+    }, /* capture */ true);
+  }
+
+  // Helper used by cell wire methods — sets the hover ref + source
+  // tag. The source tag lets pointerleave clear only when the cursor
+  // actually left this cell (so hopping cell-to-cell doesn't blank
+  // between the leave of cell A and the enter of cell B).
+  _setHoveredItem(item, source) {
+    this._hoveredItem = item || null;
+    this._hoverSource = source;
+  }
+  _clearHoveredItemIf(source) {
+    if (this._hoverSource === source) {
+      this._hoveredItem = null;
+      this._hoverSource = null;
+    }
+  }
+
   _wireCustBtn(cellEl, item) {
     const btn = cellEl.querySelector('.cust-btn');
     if (!btn || !item) return;
@@ -949,6 +1069,10 @@ export class LootUI {
   }
 
   _wireMiscCell(cell, lootIdx) {
+    cell.addEventListener('pointerenter', () => {
+      this._setHoveredItem(this.target?.loot?.[lootIdx] || null, cell);
+    });
+    cell.addEventListener('pointerleave', () => this._clearHoveredItemIf(cell));
     cell.addEventListener('click', () => {
       const it = this.target?.loot?.[lootIdx];
       if (it && window.__showDetails) window.__showDetails(it);
@@ -1506,6 +1630,22 @@ export class LootUI {
   // grid, body misc grid, body paperdoll slots.
   _wirePlayerGridCustomDrag(wrap, grid) {
     const DRAG_THRESHOLD = 4;
+    // Hover tracking — feeds the J/K/E/1-8 keyboard listener. Same
+    // grid-coord lookup the pointerdown handler uses below, just
+    // updates _hoveredItem instead of starting a drag.
+    wrap.addEventListener('pointermove', (e) => {
+      if (!this.isOpen()) return;
+      const rect = wrap.getBoundingClientRect();
+      const gx = Math.floor((e.clientX - rect.left) / (PL_CELL_PX + PL_CELL_GAP));
+      const gy = Math.floor((e.clientY - rect.top)  / (PL_CELL_PX + PL_CELL_GAP));
+      if (gx < 0 || gy < 0 || gx >= grid.w || gy >= grid.h) {
+        this._clearHoveredItemIf(wrap);
+        return;
+      }
+      const entry = grid.at(gx, gy);
+      this._setHoveredItem(entry ? entry.item : null, wrap);
+    });
+    wrap.addEventListener('pointerleave', () => this._clearHoveredItemIf(wrap));
     wrap.addEventListener('pointerdown', (e) => {
       if (e.button !== 0) return;
       const rect = wrap.getBoundingClientRect();
@@ -1865,6 +2005,20 @@ export class LootUI {
     if (!wrap || wrap._bodyCustomWired) return;
     wrap._bodyCustomWired = true;
     const DRAG_THRESHOLD = 4;
+    // Hover tracking — same pattern as the player grid above.
+    wrap.addEventListener('pointermove', (e) => {
+      if (!this.isOpen()) return;
+      const rect = wrap.getBoundingClientRect();
+      const gx = Math.floor((e.clientX - rect.left) / (BG_CELL_PX + BG_CELL_GAP));
+      const gy = Math.floor((e.clientY - rect.top)  / (BG_CELL_PX + BG_CELL_GAP));
+      if (gx < 0 || gy < 0 || gx >= this.bodyGrid.w || gy >= this.bodyGrid.h) {
+        this._clearHoveredItemIf(wrap);
+        return;
+      }
+      const entry = this.bodyGrid.at(gx, gy);
+      this._setHoveredItem(entry ? entry.item : null, wrap);
+    });
+    wrap.addEventListener('pointerleave', () => this._clearHoveredItemIf(wrap));
     wrap.addEventListener('pointerdown', (e) => {
       if (e.button !== 0) return;
       const rect = wrap.getBoundingClientRect();
@@ -2397,6 +2551,22 @@ export class LootUI {
     const wrap = this.workspaceEl;
     if (wrap._wrapWired) return;
     wrap._wrapWired = true;
+    // Hover tracking — feeds the keyboard handler. Workspace items
+    // can be marked, used, or bound from here the same as any other
+    // surface inside the loot modal.
+    wrap.addEventListener('pointermove', (e) => {
+      if (!this.isOpen()) return;
+      const rect = wrap.getBoundingClientRect();
+      const gx = Math.floor((e.clientX - rect.left) / (WS_CELL_PX + WS_CELL_GAP));
+      const gy = Math.floor((e.clientY - rect.top)  / (WS_CELL_PX + WS_CELL_GAP));
+      if (gx < 0 || gy < 0 || gx >= this.workspaceGrid.w || gy >= this.workspaceGrid.h) {
+        this._clearHoveredItemIf(wrap);
+        return;
+      }
+      const entry = this.workspaceGrid.at(gx, gy);
+      this._setHoveredItem(entry ? entry.item : null, wrap);
+    });
+    wrap.addEventListener('pointerleave', () => this._clearHoveredItemIf(wrap));
     const cellFromEvent = (e) => {
       const rect = wrap.getBoundingClientRect();
       const x = Math.floor((e.clientX - rect.left) / (WS_CELL_PX + WS_CELL_GAP));
