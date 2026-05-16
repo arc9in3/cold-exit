@@ -35,7 +35,8 @@ export const ANIM_TUNE = {
   // ~0.42-0.50 keeps the back from clipping into the chest. Long
   // guns sit near 0.0-0.20 so the stock overlaps wrist + forearm.
   gripZScale: {
-    pistol: 0.00, smg: 0.22, rifle: -0.10, shotgun: -0.10,
+    // pistol: -0.30 for lowpoly_v2 pistols (2026-05-13, M1911 anchor).
+    pistol: -0.30, smg: 0.22, rifle: -0.10, shotgun: -0.10,
     sniper: 0.00, lmg: -0.10, flame: 0.24, melee: -0.10,
   },
   // Per-class size multiplier — applied as inHandModel.scale.setScalar
@@ -43,7 +44,10 @@ export const ANIM_TUNE = {
   // and SMG were undersized post-fit and got bumped via the tuner
   // pass to match the class-uniform diameter targets.
   sizeMul: {
-    pistol: 2.4, smg: 1.5, rifle: 1.0, shotgun: 1.8,
+    // lowpoly_v2 pack tunes (2026-05-13):
+    //   rifle  0.4  (fusil_5 anchor — AK47)
+    //   pistol 0.5  (pistol_2 anchor — M1911)
+    pistol: 0.5, smg: 1.5, rifle: 0.4, shotgun: 1.8,
     sniper: 1.0, lmg: 1.0, flame: 1.25, melee: 0.85,
   },
   // Per-class GRIP X/Y offset — applied to gunMesh.position (X, Y).
@@ -51,8 +55,10 @@ export const ANIM_TUNE = {
   // gun left/right/up/down relative to the dominant hand bone. Units
   // are world meters (post weapon-scale).
   gripOffset: {
-    pistol:  { x: -0.16, y:  0.04 }, smg:     { x: -0.15, y:  0.20 },
-    rifle:   { x: -0.13, y:  0.17 }, shotgun: { x: -0.17, y:  0.24 },
+    // pistol: tuned for lowpoly_v2 pack (2026-05-13, M1911 anchor).
+    pistol:  { x: -0.26, y:  0.02 }, smg:     { x: -0.15, y:  0.20 },
+    // rifle: tuned for lowpoly_v2 pack (2026-05-13, fusil_5 anchor).
+    rifle:   { x: -0.17, y:  0.07 }, shotgun: { x: -0.17, y:  0.24 },
     sniper:  { x: -0.11, y:  0.24 }, lmg:     { x: -0.13, y:  0.17 },
     flame:   { x:  0.00, y:  0.00 }, melee:   { x: -0.15, y:  0.02 },
   },
