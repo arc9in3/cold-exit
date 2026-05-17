@@ -427,7 +427,49 @@ const PACK_SCALE_DEFAULTS = {
 // tune can't absorb the correction without breaking siblings.
 export const MODEL_SCALE_OVERRIDE = {
   // ── lowpoly_v2 pack per-mesh size overrides ──
-  'lowpoly_v2/pistol_3.glb':                0.50,  // Glock 17 — bulkier than pistol_2
+  // Computed 2026-05-17 from per-mesh visible bbox measurements taken
+  // via Playwright. Target visible-length-along-longest-axis per class:
+  //   pistol 0.22m, smg 0.45m, rifle 0.60m, shotgun 0.60m, sniper 0.80m,
+  //   lmg 0.65m, exotic 0.60-0.65m. Each entry = target / measured
+  //   (×prior scale where present). Tunes for the DOMINANT class user
+  //   of each mesh — shared-mesh secondary classes (e.g. RX-* exotics
+  //   on pistol_4.glb, GR-* exotics on fusil_4.glb) get the same
+  //   scaleForModelPath and end up smaller because their sizeMul is
+  //   lower. Touch up via per-name overrides if needed later.
+  // PISTOLS — tune target 0.22m visible length
+  'lowpoly_v2/pistol_2.glb':                0.42,  // M1911 (anchor)
+  'lowpoly_v2/pistol_3.glb':                1.01,  // Glock 17
+  'lowpoly_v2/pistol_4.glb':                0.79,  // Colt revolvers + RX-* (exotic, smaller)
+  'lowpoly_v2/pistol_5.glb':                0.86,  // AR-15 Pistol
+  'lowpoly_v2/pistol_6.glb':                1.05,  // Makarov
+  'lowpoly_v2/fusil_3.glb':                 0.76,  // Desert Eagle / Jessica's Rage (pistol-class)
+  // SMGs — target 0.45m
+  'lowpoly_v2/subfusil_1.glb':              0.88,  // Spectre CQB
+  'lowpoly_v2/subfusil_2.glb':              0.69,  // Spectre
+  'lowpoly_v2/subfusil_3.glb':              0.63,  // PDW / SPC9
+  'lowpoly_v2/subfusil_4.glb':              0.58,  // SPCA3
+  'lowpoly_v2/subfusil_5.glb':              1.91,  // Draco NAK9 (small mesh, big bump)
+  'lowpoly_v2/subfusil_6.glb':              0.65,  // UMP45 / Kriss Vector
+  'lowpoly_v2/subfusil_8.glb':              0.54,  // SPC223
+  'lowpoly_v2/subfusil_10.glb':             0.76,  // P90
+  // RIFLES — target 0.60m
+  'lowpoly_v2/fusil_5.glb':                 0.89,  // AK family
+  'lowpoly_v2/fusil_6.glb':                 0.92,  // M16 / M4 / AR-15 SBR / CAR-15
+  'lowpoly_v2/fusil_7.glb':                 0.96,  // AUG / JARD family
+  'lowpoly_v2/subfusil_7.glb':              0.95,  // AS VAL / VSS (rifle-class on SMG mesh)
+  // LMGs — target 0.65m
+  'lowpoly_v2/fusil_2.glb':                 0.81,  // Type 80 LMG
+  'lowpoly_v2/fusil_4.glb':                 0.86,  // M249 / GR-* exotics (smaller)
+  // SNIPERS — target 0.80m
+  'lowpoly_v2/sniper_0.glb':                0.71,  // Cheytac / VC-* exotics (smaller)
+  'lowpoly_v2/sniper_1.glb':                0.81,  // Remington 700 / AWP / Hunting Rifle
+  'lowpoly_v2/sniper_2.glb':                0.94,  // SVD / .338 Lapua / EX-* exotics (smaller)
+  // SHOTGUNS — target 0.60m
+  'lowpoly_v2/shotgun_1.glb':               0.84,  // Sawed-Off / Henry Slug Rifle
+  'lowpoly_v2/shotgun_2.glb':               0.46,  // Mossberg / Benelli / AA-12 / etc (long pump)
+  // EXOTICS — long-arm shapes, target 0.60m
+  'lowpoly_v2/flamethrower.glb':            0.92,  // Flamethrower
+  'lowpoly_v2/subfusil_9.glb':              0.68,  // Widowmaker Rocket Launcher
 };
 export function scaleForModelPath(fullPath) {
   if (!fullPath) return 1.0;
