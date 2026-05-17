@@ -1,6 +1,6 @@
 import * as THREE from 'three';
 import { tunables } from './tunables.js';
-import { modelForItem, gripOffsetForModelPath, rotationOverrideForModelPath, shouldMirrorInHand, scaleForModelPath } from './model_manifest.js';
+import { modelForItem, gripOffsetForModelPath, rotationOverrideForModelPath, shouldMirrorInHand, scaleForModelPath, muzzleOffsetForModelPath } from './model_manifest.js';
 import { getCharacterStyle } from './prefs.js';
 import { loadModelClone, fitToRadius } from './gltf_cache.js';
 import { buildRig, initAnim, updateAnim, pokeHit, pokeRecoil, pokeDeath,
@@ -1250,7 +1250,14 @@ export function createPlayer(scene) {
       // by gripZScale.
       const go = ANIM_TUNE.gripOffset[cls] || { x: 0, y: 0 };
       gunMesh.position.set(go.x, go.y, gripZ * ws);
-      muzzle.position.set(go.x, go.y, muzzleZ * ws);
+      // Per-mesh muzzle override — when MODEL_MUZZLE_OFFSET has an
+      // entry for this path, the absolute (x, y, z) wins so the pose
+      // editor's gizmo can drag the muzzle onto an off-axis barrel
+      // without fighting the class-level formula. Z is stored
+      // pre-pack-scale (same convention as gripZ).
+      const mo = muzzleOffsetForModelPath(modelUrl);
+      if (mo) muzzle.position.set(mo.x, mo.y, mo.z * ws);
+      else    muzzle.position.set(go.x, go.y, muzzleZ * ws);
       inHandModel.position.copy(gunMesh.position);
       // Per-class size multiplier — applied on top of the clone's
       // existing fitToRadius scale. Default 1.0 = no change.
