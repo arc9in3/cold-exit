@@ -284,7 +284,100 @@ function _updateGunFollow(rig, state) {
 // Public hook so a future handedness flip / rig swap can clear the
 // captured reference and re-establish it on the next update tick.
 export function resetGunFollowReference(rig) {
-  if (rig) rig._gunFollowRef = null;
+  if (rig) {
+    rig._gunFollowRef = null;
+    rig._idleArmPose = null;
+  }
+}
+
+// Walk the rig once to find named bones the adapter doesn't expose
+// directly (clavicles + upper chest). Cached on rig so subsequent
+// freezes are O(1).
+function _resolveExtraFreezeBones(rig) {
+  if (rig._freezeBones) return rig._freezeBones;
+  const map = {};
+  const visit = (o) => {
+    if (!o.name) return;
+    if (o.name === 'mixamorigRightShoulder') map.rClav = o;
+    else if (o.name === 'mixamorigLeftShoulder') map.lClav = o;
+    else if (o.name === 'mixamorigSpine2')     map.chest = o;
+    if (o.children) for (const c of o.children) visit(c);
+  };
+  if (rig.group) visit(rig.group);
+  rig._freezeBones = map;
+  return map;
+}
+
+// Capture the dominant + support arm chain's local quaternions from
+// the idle-aiming clip the first time it's playing at full weight.
+// This snapshot is what _applyLocomotionArmFreeze writes back during
+// run/sprint so the gun stays aimed forward instead of swinging with
+// the run-cycle arm motion. Captured once per rig load.
+function _captureIdleArmPose(rig) {
+  if (rig._idleArmPose) return;
+  const fbx = rig._fbx;
+  const clipName = fbx?.currentClipName;
+  if (!clipName?.includes('idle-aiming')) return;
+  const action = fbx.actions?.get(clipName);
+  const weight = action?.getEffectiveWeight?.() ?? 0;
+  if (!action || weight < 0.99) return;
+  const extra = _resolveExtraFreezeBones(rig);
+  const cap = (bone) => bone ? bone.quaternion.clone() : null;
+  rig._idleArmPose = {
+    rClav:    cap(extra.rClav),
+    lClav:    cap(extra.lClav),
+    rArm:     cap(rig.rightArm?.shoulder?.pivot),
+    rForeArm: cap(rig.rightArm?.elbow),
+    rHand:    cap(rig.rightArm?.wrist),
+    lArm:     cap(rig.leftArm?.shoulder?.pivot),
+    lForeArm: cap(rig.leftArm?.elbow),
+    lHand:    cap(rig.leftArm?.wrist),
+  };
+}
+
+// Override the dominant + support arm chain rotations with the captured
+// idle-aiming pose during run/sprint locomotion. The legs / hips / spine
+// remain clip-driven so the run cycle (foot placement, body lean) plays
+// normally — only the arms freeze. Skip when an active layered combat
+// clip wants to animate the arms (reload, fire, melee swing, hit react).
+//
+// Why this is OK despite the 2026-05-08 "mixer track strip failed"
+// memo: we are NOT stripping tracks from clips, we are NOT swapping
+// clip selection, we are NOT adding always-on layered actions. The
+// mixer plays the clip normally — we just overwrite a 6-bone slice of
+// the result before the gun-follow read.  Per-class gripOffsets stay
+// valid (they were tuned against the idle-aiming wrist pose; this
+// freeze restores exactly that pose during locomotion).
+function _applyLocomotionArmFreeze(rig) {
+  const pose = rig._idleArmPose;
+  if (!pose) return;
+  const fbx = rig._fbx;
+  const clipName = fbx?.currentClipName;
+  if (!clipName) return;
+  // Match base locomotion run/sprint clips only — walk's authored arm
+  // pose is already gun-forward, idle/crouching don't have the issue.
+  if (!/(^|\/)(run|sprint)-/.test(clipName)) return;
+  if (fbx.currentLayeredClipName) {
+    const layered = fbx.actions?.get(fbx.currentLayeredClipName);
+    if (layered && (layered.getEffectiveWeight?.() ?? 0) > 0.05) return;
+  }
+  const extra = _resolveExtraFreezeBones(rig);
+  const apply = (bone, q) => { if (bone && q) bone.quaternion.copy(q); };
+  // Clavicles first — they're the upper-arm's parent in the mixamo
+  // rig (Spine2 → Shoulder → Arm). If we leave them clip-driven, the
+  // arm-swing pumps the whole shoulder forward/back even though the
+  // upper-arm rotation is frozen. Override here zeroes that pump.
+  apply(extra.rClav,                   pose.rClav);
+  apply(extra.lClav,                   pose.lClav);
+  apply(rig.rightArm?.shoulder?.pivot, pose.rArm);
+  apply(rig.rightArm?.elbow,           pose.rForeArm);
+  apply(rig.rightArm?.wrist,           pose.rHand);
+  apply(rig.leftArm?.shoulder?.pivot,  pose.lArm);
+  apply(rig.leftArm?.elbow,            pose.lForeArm);
+  apply(rig.leftArm?.wrist,            pose.lHand);
+  // Refresh world matrices so _updateGunFollow's read of the wrist
+  // sees the frozen pose, not the just-overwritten clip-driven pose.
+  rig.group.updateMatrixWorld(true);
 }
 
 // Upper-body aim for the GASP rig — the locomotion clips already
@@ -2964,6 +3057,12 @@ export function createPlayer(scene) {
             if (layeredAction) layeredAction.timeScale = layeredTimeScale;
           }
           rig.update(dt);
+          // Capture the idle-aiming arm pose once it's fully blended
+          // in (first-call no-op afterwards). Pose is reused by the
+          // locomotion freeze below so the gun stays aimed during
+          // run/sprint cycles instead of swinging with the arms.
+          _captureIdleArmPose(rig);
+          _applyLocomotionArmFreeze(rig);
           // Upper body IK — point the wrists at the aim target. The
           // arms came from the locomotion clip (which is a gun-pose
           // clip with arms forward); IK overwrites the arm bones to
