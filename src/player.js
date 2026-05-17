@@ -28,6 +28,7 @@ export const ANIM_TUNE = {
   visibleFactor: {
     pistol: 0.20, smg: 0.20, rifle: 0.40, shotgun: 0.45,
     sniper: 0.20, lmg: 0.35, flame: 1.50, melee: 0.90,
+    exotic: 0.30,
   },
   // Per-class grip Z offset multiplier (applied as `gripZScale * len`).
   // 0 = grip-end clones (pistol used to want this; tuner pass moved
@@ -38,17 +39,28 @@ export const ANIM_TUNE = {
     // pistol: -0.30 for lowpoly_v2 pistols (2026-05-13, M1911 anchor).
     pistol: -0.30, smg: 0.22, rifle: -0.10, shotgun: -0.10,
     sniper: 0.00, lmg: -0.10, flame: 0.24, melee: -0.10,
+    exotic: -0.10,
   },
   // Per-class size multiplier — applied as inHandModel.scale.setScalar
-  // on top of the fitToRadius initial fit. 1.0 = no change. Pistol
-  // and SMG were undersized post-fit and got bumped via the tuner
-  // pass to match the class-uniform diameter targets.
+  // on top of the fitToRadius initial fit. 1.0 = no change.
+  //
+  // Calibrated 2026-05-17 against the lowpoly_v2 pack on the GASP rig
+  // (via Playwright: equip class anchor, screenshot, compare against
+  // character silhouette). Prior values (rifle 0.4, sniper 1.0, etc.)
+  // were tuned against the old pack and rendered most rifles invisibly
+  // small or most long-arms huge after the swap.
+  // Anchors used:
+  //   pistol  M1911  (pistol_2.glb)
+  //   smg     UMP45  (subfusil_6.glb)
+  //   rifle   AK47   (fusil_5.glb)
+  //   shotgun Mossberg 500 (shotgun_2.glb)
+  //   sniper  AWP    (sniper_1.glb)
+  //   lmg     M249   (fusil_4.glb stand-in)
+  //   exotic  Flamethrower + Widowmaker (long-arm shapes win the avg)
   sizeMul: {
-    // lowpoly_v2 pack tunes (2026-05-13):
-    //   rifle  0.4  (fusil_5 anchor — AK47)
-    //   pistol 0.5  (pistol_2 anchor — M1911)
-    pistol: 0.5, smg: 1.5, rifle: 0.4, shotgun: 1.8,
-    sniper: 1.0, lmg: 1.0, flame: 1.25, melee: 0.85,
+    pistol: 1.0, smg: 0.8, rifle: 0.5, shotgun: 1.0,
+    sniper: 0.4, lmg: 0.5, flame: 0.3, melee: 0.85,
+    exotic: 0.4,
   },
   // Per-class GRIP X/Y offset — applied to gunMesh.position (X, Y).
   // Z is driven by gripZScale × len. Use this to nudge the visible
@@ -61,6 +73,7 @@ export const ANIM_TUNE = {
     rifle:   { x: -0.17, y:  0.07 }, shotgun: { x: -0.17, y:  0.24 },
     sniper:  { x: -0.11, y:  0.24 }, lmg:     { x: -0.13, y:  0.17 },
     flame:   { x:  0.00, y:  0.00 }, melee:   { x: -0.15, y:  0.02 },
+    exotic:  { x: -0.15, y:  0.10 },
   },
   // Per-class SUPPORT-HAND grip fraction along the grip→muzzle line.
   // 0 = skip support-arm IK (pistol / melee — single-handed); larger
@@ -69,6 +82,7 @@ export const ANIM_TUNE = {
   supportGrip: {
     pistol: 0.00, smg: 0.35, rifle: 1.00, shotgun: 0.50,
     sniper: 0.65, lmg: 0.45, flame: 0.50, melee:   0.00,
+    exotic: 0.45,
   },
   // Arm + body pose tunables read by _runUpperBodyIK per frame.
   // anchorOffset is a DIRECT additive shift on the gun-anchor lerp
@@ -115,6 +129,7 @@ export const ANIM_TUNE = {
     stanceYaw: {
       rifle: 0.26, shotgun: 0.26, sniper: 0.26, lmg: 0.00,
       smg: -0.63, pistol: -0.10, flame: 0.0, melee: 0.0,
+      exotic: 0.26,
     },
     // When ON, the gun-anchor inherits the dominant hand bone's
     // position + rotation DELTAS each frame — gun visibly tracks the
