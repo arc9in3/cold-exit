@@ -110,26 +110,12 @@
     <div id="weapon-diag" style="font-size:10px;color:#9aa;background:#0f1014;padding:6px 8px;margin:4px 0;border:1px solid #2a2d34;border-radius:3px;word-break:break-all">
       (no weapon loaded yet — pick one in the dropdown)
     </div>
-    <div class="row-buttons">
-      <button id="wt-undo" title="Undo last edit (Ctrl-Z)">↶ Undo</button>
-      <button id="wt-redo" title="Redo (Ctrl-Shift-Z / Ctrl-Y)">↷ Redo</button>
-    </div>
-    <label>Gizmo (drag handles on the gun in 3D)</label>
-    <div class="row-buttons">
-      <button id="wt-giz-move"   title="Translate (T)">Move</button>
-      <button id="wt-giz-rotate" title="Rotate (R)">Rotate</button>
-      <button id="wt-giz-scale"  title="Scale (S)">Scale</button>
-      <button id="wt-giz-muzzle" title="Move the orange muzzle dot (M)">Muzzle</button>
-      <button id="wt-giz-off"    title="Hide gizmo (Esc)">Off</button>
-    </div>
     <div class="legend" style="margin:4px 0">
-      Drag sliders or the 3D gizmo to dial grip offset (meters in gun-anchor
-      local space), rotation (radians, applied to the wrap), and scale
-      (multiplier on the manifest's per-path scale). Keys: <strong>T</strong>=move,
-      <strong>R</strong>=rotate, <strong>S</strong>=scale, <strong>M</strong>=muzzle,
-      <strong>Esc</strong>=hide, <strong>Ctrl-Z</strong>=undo, <strong>Ctrl-Shift-Z</strong>=redo.
-      Reset returns to the manifest defaults. The change is live — no reload.
-      Copy-patch emits a JS snippet for <code>src/model_manifest.js</code>.
+      Drag sliders to dial grip offset (meters in gun-anchor local space),
+      rotation (radians, applied to the wrap), and scale (multiplier on the
+      manifest's per-path scale). Reset returns to the manifest defaults.
+      The change is live — no reload. Copy-patch button at the bottom of
+      this section emits a JS snippet for <code>src/model_manifest.js</code>.
     </div>
     <h3 style="color:#9aa;font-size:10px;margin:8px 0 2px;text-transform:uppercase;letter-spacing:0.04em">Grip offset (m)</h3>
     <div class="row">
@@ -168,24 +154,6 @@
       <span class="axis">×</span>
       <input type="range" id="wt-scale" min="0.2" max="3.0" step="0.01" value="1.0">
       <span class="val" id="wt-scale-v">1.00</span>
-    </div>
-    <h3 style="color:#9aa;font-size:10px;margin:8px 0 2px;text-transform:uppercase;letter-spacing:0.04em">
-      Muzzle (orange dot) <span style="color:#6a7;font-weight:normal">— press M for gizmo</span>
-    </h3>
-    <div class="row">
-      <span class="axis">X</span>
-      <input type="range" id="wt-muz-x" min="-0.6" max="0.6" step="0.005" value="0">
-      <span class="val" id="wt-muz-x-v">0.000</span>
-    </div>
-    <div class="row">
-      <span class="axis">Y</span>
-      <input type="range" id="wt-muz-y" min="-0.6" max="0.6" step="0.005" value="0">
-      <span class="val" id="wt-muz-y-v">0.000</span>
-    </div>
-    <div class="row">
-      <span class="axis">Z</span>
-      <input type="range" id="wt-muz-z" min="-0.8" max="1.2" step="0.005" value="0">
-      <span class="val" id="wt-muz-z-v">0.000</span>
     </div>
     <div class="row-buttons">
       <button id="wt-reset">Reset to manifest</button>
@@ -288,7 +256,6 @@ import { TransformControls } from 'three/addons/controls/TransformControls.js';
 import { GLTFLoader } from 'three/addons/loaders/GLTFLoader.js';
 import { MODEL_BY_WEAPON_NAME, gripOffsetForModelPath,
          rotationOverrideForModelPath, scaleForModelPath,
-         muzzleOffsetForModelPath,
          shouldMirrorInHand } from '../src/model_manifest.js';
 import { tunables } from '../src/tunables.js';
 
@@ -533,32 +500,17 @@ function captureRest() {
 
 // ---------- weapon picker (in-game transforms) ---------------------
 const weaponSel = document.getElementById('weapon');
-// Derived from tunables.weapons + MODEL_BY_WEAPON_NAME so every
-// modelled weapon shows up in the picker, not just a hardcoded subset.
-// The UI splits 'revolver' and 'flame' off from their tunables classes
-// ('pistol' / 'exotic') so the tuner can apply the matching stance.
-const REVOLVER_RE = /(revolver|anaconda|python|six.?shooter|colt 357|\.38 special|snub|^rx-\d)/i;
-const PICKS_BY_CLASS = (() => {
-  const buckets = { rifle:[], shotgun:[], sniper:[], lmg:[], pistol:[],
-                    revolver:[], smg:[], flame:[], melee:[] };
-  for (const w of (tunables.weapons || [])) {
-    if (!MODEL_BY_WEAPON_NAME[w.name]) continue;
-    if (w.name === 'Flamethrower') { buckets.flame.push(w.name); continue; }
-    if (REVOLVER_RE.test(w.name))   { buckets.revolver.push(w.name); continue; }
-    if (buckets[w.class])           { buckets[w.class].push(w.name); continue; }
-    // exotic class with no specific bucket → drop into rifle (long-arm read)
-    if (w.class === 'exotic')       { buckets.rifle.push(w.name); }
-  }
-  // Melee weapons aren't all in tunables.weapons — scan the manifest
-  // for melee/* and weapons/SM_*Knife*/SM_*Axe* paths instead.
-  for (const [name, path] of Object.entries(MODEL_BY_WEAPON_NAME)) {
-    if (/^(melee|tools)\//.test(path) || /knife|axe|katana|knuckles|crowbar|tomahawk|sledge|chainsaw|bayonet|scimitar/i.test(path)) {
-      if (!buckets.melee.includes(name)) buckets.melee.push(name);
-    }
-  }
-  for (const k of Object.keys(buckets)) buckets[k].sort();
-  return buckets;
-})();
+const PICKS_BY_CLASS = {
+  rifle:    ['AK47','M16','M4','AS VAL','AKS-74','AR-15 SBR','CAR-15'],
+  shotgun:  ['Mossberg 500','Benelli M4','AA-12','Sawed-Off Shotgun'],
+  sniper:   ['Remington 700','SVD Dragunov','AWP','Cheytac Intervention'],
+  lmg:      ['M249','Type 80 LMG'],
+  pistol:   ['M1911','Glock 17','Desert Eagle .50','Makarov'],
+  revolver: ['Colt Python','.38 Special','Colt Six Shooter'],
+  smg:      ['UMP45','P90','Kriss Vector','PDW'],
+  flame:    ['Flamethrower'],
+  melee:    ['Combat Knife','Hammer','katana','Crowbar'],
+};
 function rebuildWeaponPicker() {
   const cls = clsSel.value;
   const list = PICKS_BY_CLASS[cls] || [];
@@ -578,11 +530,6 @@ weaponSel.addEventListener('change', loadWeaponForClass);
 // Per-weapon tuning state. Keyed by manifest path. Stores absolute
 // (post-edit) values; manifest defaults form the initial population.
 const weaponTunings = new Map();
-// Per-path muzzle baseline (manifest entry, or the formula default
-// captured at first load). Kept outside weaponTunings so buildTuningDiff
-// can compare every loaded weapon — not just the currently active one —
-// when emitting MODEL_MUZZLE_OFFSET diffs.
-const manifestMuzzleByPath = new Map();
 // Cached load context for the currently loaded weapon — re-used by
 // applyWeaponTuning() so slider drags don't reload the GLB.
 let weaponBase = null;
@@ -630,12 +577,22 @@ async function loadWeaponForClass() {
   const ctr = new THREE.Vector3(); bbox.getCenter(ctr);
   clone.position.sub(ctr);
 
-  // Use authored materials (no more debug-green override). Disable
-  // frustum culling because a tight bbox combined with the mirror
-  // sign-flip on clone.scale.x can place the mesh outside its own
-  // computed frustum on some weapons.
+  // DEBUG: replace every material with a bright unlit basic
+  // material, side=DoubleSide, so we see geometry regardless of
+  // lighting / shaders / culling. Once visible we'll restore
+  // proper materials.
   clone.traverse(o => {
-    if (o.isMesh) o.frustumCulled = false;
+    if (o.isMesh) {
+      o.material = new THREE.MeshBasicMaterial({
+        color: 0x40ff80,
+        side: THREE.DoubleSide,
+        wireframe: false,
+      });
+      // Also drop any frustum culling — a tight bbox after
+      // negative scale can place the mesh outside its own
+      // computed frustum.
+      o.frustumCulled = false;
+    }
   });
 
   const wrap = new THREE.Group();
@@ -652,19 +609,10 @@ async function loadWeaponForClass() {
   // of facing 90° to the side. Manifest overrides win when set.
   const manifestRot  = rotationOverrideForModelPath(path) || { x: 0, y: Math.PI / 2, z: 0 };
   const manifestMirror = shouldMirrorInHand({ name });
-  // Muzzle: default Z derived from the same formula the editor used
-  // pre-override (fwd + len/2) — once stored, both the slider and the
-  // Muzzle gizmo edit that absolute position. Player.js reads
-  // MODEL_MUZZLE_OFFSET as absolute too, so what you see is what the
-  // game gets.
-  const manifestMuzzle = muzzleOffsetForModelPath(path) || { x: 0, y: 0, z: fwd + len / 2 };
-  // Stash the baseline so buildTuningDiff can compare against it for
-  // any path the user has touched (not just the active weapon).
-  if (!manifestMuzzleByPath.has(path)) manifestMuzzleByPath.set(path, manifestMuzzle);
   weaponBase = {
     name, path, cls, len, cs, fwd, baseFit, wsManifest,
     clone, wrap,
-    manifestGrip, manifestRot, manifestMirror, manifestMuzzle,
+    manifestGrip, manifestRot, manifestMirror,
   };
 
   // Seed slider state from prior tuning OR manifest defaults.
@@ -673,13 +621,12 @@ async function loadWeaponForClass() {
     rotX:  manifestRot.x  || 0, rotY:  manifestRot.y  || 0, rotZ:  manifestRot.z  || 0,
     scaleMul: 1.0,
     mirror: manifestMirror,
-    muzX: manifestMuzzle.x || 0,
-    muzY: manifestMuzzle.y || 0,
-    muzZ: manifestMuzzle.z,
   };
   weaponTunings.set(path, t);
   refreshTuningUI();
   applyWeaponTuning();
+
+  muzzle.position.set(0, 0, (fwd + len / 2) * wsManifest);
 
   // Count meshes / materials in the clone so 'invisible weapon'
   // failure modes can be diagnosed without devtools.
@@ -696,20 +643,52 @@ async function loadWeaponForClass() {
     }
   });
 
-  // Old debug locators (magenta wireframe sphere parented to
-  // gunAnchor + cyan scene-level box) removed — they were diagnostic
-  // for an 'invisible weapon' failure mode that's long since fixed.
-  if (gunAnchor._locator) { gunAnchor.remove(gunAnchor._locator); gunAnchor._locator = null; }
-  if (scene._weaponWorldLocator) { scene.remove(scene._weaponWorldLocator); scene._weaponWorldLocator = null; }
+  // Drop a magenta wireframe locator sphere at wrap.position
+  // (parented to gunAnchor — same local frame as the weapon).
+  if (gunAnchor._locator) gunAnchor.remove(gunAnchor._locator);
+  const locator = new THREE.Mesh(
+    new THREE.SphereGeometry(0.08, 12, 8),
+    new THREE.MeshBasicMaterial({
+      color: 0xff00aa, wireframe: true, depthTest: false,
+    }),
+  );
+  locator.renderOrder = 999;
+  locator.position.copy(wrap.position);
+  gunAnchor.add(locator);
+  gunAnchor._locator = locator;
+
+  // Also drop a SCENE-LEVEL locator at the gun's world position
+  // computed forward through the entire matrix chain. If the
+  // scene-level locator is visible but the gunAnchor-parented one
+  // isn't, the gunAnchor hierarchy is broken (gunAnchor not in
+  // scene, or its matrixWorld got corrupted somehow).
+  if (scene._weaponWorldLocator) scene.remove(scene._weaponWorldLocator);
+  rigGroup.updateWorldMatrix(true, true);
+  const worldPos = new THREE.Vector3();
+  wrap.getWorldPosition(worldPos);
+  const sceneLoc = new THREE.Mesh(
+    new THREE.BoxGeometry(0.15, 0.15, 0.15),
+    new THREE.MeshBasicMaterial({
+      color: 0x00ffff, wireframe: true, depthTest: false,
+    }),
+  );
+  sceneLoc.renderOrder = 999;
+  sceneLoc.position.copy(worldPos);
+  scene.add(sceneLoc);
+  scene._weaponWorldLocator = sceneLoc;
 
   const diag = document.getElementById('weapon-diag');
   if (diag) {
     const wp = wrap.position.toArray().map(v => v.toFixed(3)).join(',');
     const cs2 = clone.scale.toArray().map(v => v.toFixed(3)).join(',');
     diag.textContent =
-      `loaded ${name}  →  ${path}\n` +
-      `wsManifest=${wsManifest}  baseFit=${baseFit.toFixed(4)}  meshes=${meshCount}\n` +
-      `wrap.position=(${wp})  clone.scale=(${cs2})`;
+      `loaded ${name}  path=${path}\n` +
+      `wsManifest=${wsManifest}  baseFit=${baseFit.toFixed(4)}  longest(native)=${longest.toFixed(3)}\n` +
+      `wrap.position=(${wp})  clone.scale=(${cs2})\n` +
+      `meshes=${meshCount}  materials=${matCount}  withGeom=${hasGeom}  transparent=${transparentCount}\n` +
+      `magenta sphere (parented to gunAnchor) + cyan box (scene-level) = where the weapon should be.\n` +
+      `world pos = (${worldPos.x.toFixed(3)}, ${worldPos.y.toFixed(3)}, ${worldPos.z.toFixed(3)})\n` +
+      `clone forced GREEN UNLIT material + frustumCulled=false. If still invisible after refresh, paste this whole panel back.`;
     diag.style.whiteSpace = 'pre-wrap';
   }
   console.log(`[pose-editor] loaded weapon ${name} → ${path}`,
@@ -720,15 +699,6 @@ async function loadWeaponForClass() {
       'gunAnchor.scale': gunAnchor.scale.toArray(),
       meshCount, matCount, hasGeom, transparentCount,
     });
-  // Re-align the undo baseline with the now-active weapon. Swapping
-  // weapons isn't itself an undoable edit; the next slider/gizmo change
-  // should undo back to *this* weapon's pre-edit state, not the prior
-  // weapon's state.
-  if (typeof refreshBaseline === 'function') refreshBaseline();
-  // Auto-attach the move gizmo so the user can immediately drag the
-  // gun without first clicking 'Move' or pressing T. They can still
-  // hit Esc to hide it, or switch modes via T/R/S/M or the buttons.
-  if (typeof setGizmoMode === 'function') setGizmoMode('translate');
 }
 
 function applyWeaponTuning() {
@@ -747,20 +717,8 @@ function applyWeaponTuning() {
     t.gripY * wsManifest,
     t.gripZ * wsManifest + fwd * wsManifest,
   );
-  // Muzzle stored as absolute (x, y, z) in inHandModel-local meters;
-  // Z follows the gripZ convention of pre-pack-scale, so multiply by
-  // wsManifest to land in the world-units used by gunAnchor children.
-  muzzle.position.set(t.muzX, t.muzY, t.muzZ * wsManifest);
 }
 function clearWeapon() {
-  // Detach the gizmo first — TransformControls holds a ref to the
-  // attached object, and leaving it attached to a disposed mesh
-  // causes raycast errors on the next pointer move.
-  if (typeof weaponGizmo !== 'undefined') {
-    weaponGizmo.detach();
-    weaponGizmo.enabled = false;
-    weaponGizmo.visible = false;
-  }
   if (weaponMesh) {
     gunAnchor.remove(weaponMesh);
     weaponMesh.traverse(o => {
@@ -1026,13 +984,6 @@ function buildBoneUI() {
   }
 }
 function selectBone(name) {
-  // Detach the weapon gizmo first so the two transform handles
-  // don't both grab clicks on overlapping screen regions.
-  if (typeof weaponGizmo !== 'undefined') {
-    weaponGizmo.detach();
-    weaponGizmo.enabled = false;
-    weaponGizmo.visible = false;
-  }
   selectedBone = name;
   document.getElementById('selected-bone-label').textContent = name;
   for (const [n, refs] of sliderRefs) {
@@ -1076,28 +1027,12 @@ function syncSlidersFromBone() {
 const raycaster = new THREE.Raycaster();
 const mouseNDC = new THREE.Vector2();
 renderer.domElement.addEventListener('pointerdown', (e) => {
-  // Drag-in-progress on either gizmo — let the gizmo own the event so
-  // its handles keep tracking the cursor.
   if (tcontrols.dragging) return;
-  if (typeof weaponGizmo !== 'undefined' && weaponGizmo.dragging) return;
   const rect = renderer.domElement.getBoundingClientRect();
   mouseNDC.x = ((e.clientX - rect.left) / rect.width) * 2 - 1;
   mouseNDC.y = -((e.clientY - rect.top) / rect.height) * 2 + 1;
   raycaster.setFromCamera(mouseNDC, camera);
-  // 1) Muzzle marker (orange dot) — click to attach the muzzle gizmo.
-  //    Highest priority so a click near the barrel grabs the muzzle
-  //    instead of the bone behind it.
-  if (typeof muzzleMarker !== 'undefined' && weaponBase) {
-    const muzHit = raycaster.intersectObject(muzzleMarker, false);
-    if (muzHit.length) { setGizmoMode('muzzle'); return; }
-  }
-  // 2) Gun mesh — click anywhere on the weapon to attach the move
-  //    gizmo. Recursive intersect catches every sub-mesh of the GLB.
-  if (weaponMesh && weaponBase) {
-    const gunHit = raycaster.intersectObject(weaponMesh, true);
-    if (gunHit.length) { setGizmoMode('translate'); return; }
-  }
-  // 3) Bone proxies — fall through to bone editing.
+  // Intersect against bone proxies (small spheres rendered alongside bones).
   const hits = raycaster.intersectObjects(boneProxies, false);
   if (hits.length) {
     const name = hits[0].object.userData.boneName;
@@ -1180,9 +1115,6 @@ const wtSliders = {
   rotY:  document.getElementById('wt-rot-y'),
   rotZ:  document.getElementById('wt-rot-z'),
   scaleMul: document.getElementById('wt-scale'),
-  muzX:  document.getElementById('wt-muz-x'),
-  muzY:  document.getElementById('wt-muz-y'),
-  muzZ:  document.getElementById('wt-muz-z'),
 };
 const wtVals = {
   gripX: document.getElementById('wt-grip-x-v'),
@@ -1192,23 +1124,15 @@ const wtVals = {
   rotY:  document.getElementById('wt-rot-y-v'),
   rotZ:  document.getElementById('wt-rot-z-v'),
   scaleMul: document.getElementById('wt-scale-v'),
-  muzX:  document.getElementById('wt-muz-x-v'),
-  muzY:  document.getElementById('wt-muz-y-v'),
-  muzZ:  document.getElementById('wt-muz-z-v'),
 };
-function _fmt(k, v) {
-  if (k === 'scaleMul') return v.toFixed(2);
-  if (k.startsWith('rot')) return v.toFixed(2);
-  return v.toFixed(3);   // grip + muzzle in meters, 3 decimals
-}
 function refreshTuningUI() {
   const label = document.getElementById('weapon-tune-label');
   if (!weaponBase) {
     label.textContent = '—';
     for (const k of Object.keys(wtSliders)) {
-      const v = (k === 'scaleMul') ? 1.0 : 0;
-      wtSliders[k].value = v;
-      wtVals[k].textContent = _fmt(k, v);
+      wtSliders[k].value = (k === 'scaleMul') ? 1.0 : 0;
+      wtVals[k].textContent = (k === 'scaleMul') ? '1.00' :
+        (k.startsWith('grip') ? '0.000' : '0.00');
     }
     return;
   }
@@ -1216,210 +1140,39 @@ function refreshTuningUI() {
   const t = weaponTunings.get(weaponBase.path);
   for (const k of Object.keys(wtSliders)) {
     wtSliders[k].value = t[k];
-    wtVals[k].textContent = _fmt(k, t[k]);
+    wtVals[k].textContent = (k === 'scaleMul')
+      ? t[k].toFixed(2)
+      : (k.startsWith('grip') ? t[k].toFixed(3) : t[k].toFixed(2));
   }
 }
 for (const k of Object.keys(wtSliders)) {
-  // 'input' fires every frame during a drag — live preview only.
   wtSliders[k].addEventListener('input', () => {
     if (!weaponBase) return;
     const t = weaponTunings.get(weaponBase.path);
     t[k] = +wtSliders[k].value;
-    wtVals[k].textContent = _fmt(k, t[k]);
+    wtVals[k].textContent = (k === 'scaleMul')
+      ? t[k].toFixed(2)
+      : (k.startsWith('grip') ? t[k].toFixed(3) : t[k].toFixed(2));
     applyWeaponTuning();
   });
-  // 'change' fires once on release — one undo entry per slider drag.
-  wtSliders[k].addEventListener('change', commitChange);
 }
 document.getElementById('wt-reset').addEventListener('click', () => {
   if (!weaponBase) return;
-  const { path, manifestGrip, manifestRot, manifestMirror, manifestMuzzle } = weaponBase;
+  const { path, manifestGrip, manifestRot, manifestMirror } = weaponBase;
   weaponTunings.set(path, {
     gripX: manifestGrip.x || 0, gripY: manifestGrip.y || 0, gripZ: manifestGrip.z || 0,
     rotX:  manifestRot.x  || 0, rotY:  manifestRot.y  || 0, rotZ:  manifestRot.z  || 0,
     scaleMul: 1.0,
     mirror: manifestMirror,
-    muzX: manifestMuzzle.x || 0, muzY: manifestMuzzle.y || 0, muzZ: manifestMuzzle.z,
   });
   refreshTuningUI();
   applyWeaponTuning();
-  commitChange();
 });
 document.getElementById('wt-flip-mirror').addEventListener('click', () => {
   if (!weaponBase) return;
   const t = weaponTunings.get(weaponBase.path);
   t.mirror = !t.mirror;
   applyWeaponTuning();
-  commitChange();
-});
-
-// ---------- weapon gizmo (TransformControls on the wrap) -------------
-// Separate from the bone-editing tcontrols so the two don't fight over
-// the camera/orbit toggle or the attached object. The gizmo writes back
-// to weaponTunings on drag end, then re-applies through applyWeaponTuning
-// so the math (wsManifest, baseFit, mirror) stays consistent with sliders.
-const weaponGizmo = new TransformControls(camera, renderer.domElement);
-weaponGizmo.size = 0.9;
-weaponGizmo.enabled = false;
-weaponGizmo.visible = false;
-scene.add(weaponGizmo);
-weaponGizmo.addEventListener('dragging-changed', (e) => {
-  controls.enabled = !e.value;
-  if (!e.value && weaponBase) {
-    syncTuningFromGizmo();
-    applyWeaponTuning();
-    refreshTuningUI();
-    commitChange();
-  }
-});
-// Gizmo target tracks which Object3D is attached so syncTuningFromGizmo
-// knows whether to write back weapon-wrap fields or muzzle fields.
-let gizmoTarget = null;   // 'wrap' | 'muzzle' | null
-function setGizmoMode(mode) {
-  if (!weaponBase || !mode) {
-    weaponGizmo.detach();
-    weaponGizmo.enabled = false;
-    weaponGizmo.visible = false;
-    gizmoTarget = null;
-    return;
-  }
-  // Mutually exclusive with the bone gizmo — having both attached at
-  // once caused click priority to flip between handles, which felt
-  // like 'multiple gizmos getting selected'. Releasing the bone
-  // selection first guarantees clicks only hit the weapon gizmo.
-  tcontrols.detach();
-  tcontrols.visible = false;
-  selectedBone = null;
-  document.getElementById('selected-bone-label').textContent = 'none';
-  for (const [, refs] of sliderRefs) refs.root?.classList?.remove('selected');
-  if (mode === 'muzzle') {
-    weaponGizmo.setMode('translate');
-    weaponGizmo.attach(muzzle);
-    gizmoTarget = 'muzzle';
-  } else {
-    weaponGizmo.setMode(mode);          // 'translate' | 'rotate' | 'scale'
-    weaponGizmo.attach(weaponMesh);
-    gizmoTarget = 'wrap';
-  }
-  weaponGizmo.enabled = true;
-  weaponGizmo.visible = true;
-}
-function syncTuningFromGizmo() {
-  const t = weaponTunings.get(weaponBase.path);
-  if (!t) return;
-  const { wrap, wsManifest, fwd } = weaponBase;
-  if (gizmoTarget === 'muzzle') {
-    // Muzzle is parented to gunAnchor (same local frame as wrap).
-    // X/Y go directly to t.muz*. Z is stored pre-pack-scale so the
-    // value matches what the manifest table expects.
-    t.muzX = muzzle.position.x;
-    t.muzY = muzzle.position.y;
-    t.muzZ = muzzle.position.z / wsManifest;
-    return;
-  }
-  // Weapon wrap — translate/rotate read straight off the wrap.
-  t.gripX = wrap.position.x / wsManifest;
-  t.gripY = wrap.position.y / wsManifest;
-  t.gripZ = wrap.position.z / wsManifest - fwd;
-  t.rotX = wrap.rotation.x;
-  t.rotY = wrap.rotation.y;
-  t.rotZ = wrap.rotation.z;
-  // Scale gizmo modifies wrap.scale; bake into scaleMul and zero it so
-  // applyWeaponTuning's clone.scale = baseFit * scaleMul stays the source
-  // of truth (otherwise the wrap.scale would compound on the next drag).
-  if (wrap.scale.y !== 1) {
-    t.scaleMul *= wrap.scale.y;
-    wrap.scale.set(1, 1, 1);
-  }
-}
-document.getElementById('wt-giz-move'  ).addEventListener('click', () => setGizmoMode('translate'));
-document.getElementById('wt-giz-rotate').addEventListener('click', () => setGizmoMode('rotate'));
-document.getElementById('wt-giz-scale' ).addEventListener('click', () => setGizmoMode('scale'));
-document.getElementById('wt-giz-muzzle').addEventListener('click', () => setGizmoMode('muzzle'));
-document.getElementById('wt-giz-off'   ).addEventListener('click', () => setGizmoMode(null));
-
-// ---------- undo / redo ----------------------------------------------
-// Strategy: keep a "baseline" snapshot of weaponTunings + active weapon.
-// Every committed edit pushes the *prior* baseline onto undoStack, then
-// updates the baseline. Undo restores the most recent baseline; redo
-// re-applies. Switching weapons doesn't push (navigation isn't an edit)
-// but does refresh the baseline so the next edit's undo is correct.
-const undoStack = [];
-const redoStack = [];
-const MAX_UNDO = 50;
-function snapshot() {
-  const tunings = {};
-  for (const [path, t] of weaponTunings) tunings[path] = { ...t };
-  return { tunings, activeName: weaponSel.value };
-}
-let _baseline = snapshot();
-function commitChange() {
-  undoStack.push(_baseline);
-  if (undoStack.length > MAX_UNDO) undoStack.shift();
-  redoStack.length = 0;
-  _baseline = snapshot();
-  updateUndoButtons();
-}
-function refreshBaseline() {
-  // Called on weapon switch — keeps the baseline aligned with what the
-  // user sees so the next edit's undo points at the right state.
-  _baseline = snapshot();
-  updateUndoButtons();
-}
-function restoreSnapshot(s) {
-  weaponTunings.clear();
-  for (const [path, t] of Object.entries(s.tunings)) weaponTunings.set(path, { ...t });
-  if (weaponSel.value !== s.activeName) {
-    weaponSel.value = s.activeName;
-    loadWeaponForClass();   // reapplies tuning from the map
-  } else {
-    refreshTuningUI();
-    applyWeaponTuning();
-  }
-}
-function undo() {
-  if (!undoStack.length) return;
-  redoStack.push(snapshot());
-  restoreSnapshot(undoStack.pop());
-  _baseline = snapshot();
-  updateUndoButtons();
-}
-function redo() {
-  if (!redoStack.length) return;
-  undoStack.push(_baseline);
-  restoreSnapshot(redoStack.pop());
-  _baseline = snapshot();
-  updateUndoButtons();
-}
-function updateUndoButtons() {
-  document.getElementById('wt-undo').disabled = !undoStack.length;
-  document.getElementById('wt-redo').disabled = !redoStack.length;
-}
-document.getElementById('wt-undo').addEventListener('click', undo);
-document.getElementById('wt-redo').addEventListener('click', redo);
-updateUndoButtons();
-
-// Keyboard: T/R/S/Esc for gizmo, Ctrl-Z / Ctrl-Shift-Z (or Ctrl-Y) for undo/redo.
-// Bail when the user is typing in an input/textarea/select so we don't steal keys.
-window.addEventListener('keydown', (e) => {
-  const tag = e.target?.tagName;
-  if (tag === 'INPUT' || tag === 'TEXTAREA' || tag === 'SELECT') return;
-  const mod = e.ctrlKey || e.metaKey;
-  const k = e.key.toLowerCase();
-  if (mod && k === 'z' && !e.shiftKey) { e.preventDefault(); undo(); return; }
-  if (mod && (k === 'y' || (k === 'z' && e.shiftKey))) { e.preventDefault(); redo(); return; }
-  if (!mod) {
-    // If a bone is currently selected, leave T/R/S/M to the bone-editing
-    // listener below so the user can adjust the bone gizmo without
-    // accidentally yanking the weapon gizmo over it. Esc still clears
-    // the weapon gizmo regardless.
-    if (k === 'escape') { setGizmoMode(null); return; }
-    if (selectedBone) return;
-    if (k === 't') setGizmoMode('translate');
-    else if (k === 'r') setGizmoMode('rotate');
-    else if (k === 's') setGizmoMode('scale');
-    else if (k === 'm') setGizmoMode('muzzle');
-  }
 });
 document.getElementById('weap-prev').addEventListener('click', () => cycleWeapon(-1));
 document.getElementById('weap-next').addEventListener('click', () => cycleWeapon(+1));
@@ -1437,7 +1190,6 @@ function buildTuningDiff() {
   const gripOffsets = {};
   const rotationOverrides = {};
   const scaleOverrides = {};
-  const muzzleOffsets = {};
   for (const [path, t] of weaponTunings) {
     const mg = gripOffsetForModelPath(path) || { x: 0, y: 0, z: 0 };
     // Match the editor's load-time fallback: when no rotation
@@ -1446,7 +1198,6 @@ function buildTuningDiff() {
     // don't emit a redundant override for every weapon.
     const mr = rotationOverrideForModelPath(path) || { x: 0, y: Math.PI / 2, z: 0 };
     const ms = scaleForModelPath(path) || 1.0;
-    const mm = muzzleOffsetForModelPath(path);   // null = use class formula
     if (Math.abs(t.gripX - (mg.x || 0)) > 1e-4
      || Math.abs(t.gripY - (mg.y || 0)) > 1e-4
      || Math.abs(t.gripZ - (mg.z || 0)) > 1e-4) {
@@ -1461,18 +1212,8 @@ function buildTuningDiff() {
     if (Math.abs(scaleNew - ms) > 1e-4) {
       scaleOverrides[path] = scaleNew;
     }
-    // Muzzle is only emitted once it diverges from either the existing
-    // manifest override OR (if none) the editor's formula default
-    // captured into manifestMuzzleByPath at first load of that path.
-    const mmRef = mm || manifestMuzzleByPath.get(path);
-    if (mmRef && (
-        Math.abs(t.muzX - (mmRef.x || 0)) > 1e-4
-     || Math.abs(t.muzY - (mmRef.y || 0)) > 1e-4
-     || Math.abs(t.muzZ - mmRef.z)        > 1e-4)) {
-      muzzleOffsets[path] = { x: t.muzX, y: t.muzY, z: t.muzZ };
-    }
   }
-  return { gripOffsets, rotationOverrides, scaleOverrides, muzzleOffsets };
+  return { gripOffsets, rotationOverrides, scaleOverrides };
 }
 
 document.getElementById('wt-save-disk').addEventListener('click', async () => {
@@ -1480,8 +1221,7 @@ document.getElementById('wt-save-disk').addEventListener('click', async () => {
   const payload = buildTuningDiff();
   const totalChanged = Object.keys(payload.gripOffsets).length
                      + Object.keys(payload.rotationOverrides).length
-                     + Object.keys(payload.scaleOverrides).length
-                     + Object.keys(payload.muzzleOffsets).length;
+                     + Object.keys(payload.scaleOverrides).length;
   if (totalChanged === 0) {
     ta.value = '// no tuning changes from manifest defaults';
     return;
@@ -1502,8 +1242,7 @@ document.getElementById('wt-save-disk').addEventListener('click', async () => {
     ta.value = `// saved ${data.entriesPatched} entries to ${data.path}\n`
              + `// (${Object.keys(payload.gripOffsets).length} grip, `
              + `${Object.keys(payload.rotationOverrides).length} rotation, `
-             + `${Object.keys(payload.scaleOverrides).length} scale, `
-             + `${Object.keys(payload.muzzleOffsets).length} muzzle)`;
+             + `${Object.keys(payload.scaleOverrides).length} scale)`;
   } catch (e) {
     ta.value = `// save FAILED: ${e.message}\n// open via http://localhost:8080/tools/pose_editor.html (run "node tools/serve.mjs")`;
   }
@@ -1516,12 +1255,10 @@ document.getElementById('wt-copy-patch').addEventListener('click', () => {
   const gripLines = [];
   const rotLines  = [];
   const scaleLines = [];
-  const muzLines = [];
   for (const [path, t] of weaponTunings) {
     const mg = gripOffsetForModelPath(path) || { x: 0, y: 0, z: 0 };
     const mr = rotationOverrideForModelPath(path) || { x: 0, y: 0, z: 0 };
     const ms = scaleForModelPath(path) || 1.0;
-    const mm = muzzleOffsetForModelPath(path);
     const gripChanged = Math.abs(t.gripX - (mg.x || 0)) > 1e-4
                      || Math.abs(t.gripY - (mg.y || 0)) > 1e-4
                      || Math.abs(t.gripZ - (mg.z || 0)) > 1e-4;
@@ -1530,11 +1267,6 @@ document.getElementById('wt-copy-patch').addEventListener('click', () => {
                      || Math.abs(t.rotZ  - (mr.z || 0)) > 1e-4;
     const scaleNew = +(ms * t.scaleMul).toFixed(4);
     const scaleChanged = Math.abs(scaleNew - ms) > 1e-4;
-    const mmRef = mm || manifestMuzzleByPath.get(path);
-    const muzChanged = mmRef && (
-        Math.abs(t.muzX - (mmRef.x || 0)) > 1e-4
-     || Math.abs(t.muzY - (mmRef.y || 0)) > 1e-4
-     || Math.abs(t.muzZ - mmRef.z)        > 1e-4);
     if (gripChanged) {
       gripLines.push(`  '${path}': { x: ${(+t.gripX).toFixed(3)}, y: ${(+t.gripY).toFixed(3)}, z: ${(+t.gripZ).toFixed(3)} },`);
     }
@@ -1543,9 +1275,6 @@ document.getElementById('wt-copy-patch').addEventListener('click', () => {
     }
     if (scaleChanged) {
       scaleLines.push(`  '${path}': ${scaleNew},`);
-    }
-    if (muzChanged) {
-      muzLines.push(`  '${path}': { x: ${(+t.muzX).toFixed(3)}, y: ${(+t.muzY).toFixed(3)}, z: ${(+t.muzZ).toFixed(3)} },`);
     }
   }
   const parts = [];
@@ -1562,11 +1291,6 @@ document.getElementById('wt-copy-patch').addEventListener('click', () => {
   if (scaleLines.length) {
     parts.push('// MODEL_SCALE_OVERRIDE — paste into the existing object');
     parts.push(...scaleLines);
-    parts.push('');
-  }
-  if (muzLines.length) {
-    parts.push('// MODEL_MUZZLE_OFFSET — paste into the existing object');
-    parts.push(...muzLines);
     parts.push('');
   }
   const out = parts.length ? parts.join('\n') : '// no tuning changes from manifest defaults';

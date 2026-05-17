@@ -143,10 +143,9 @@ async function handleSaveWeaponTuning(req, res) {
   } catch {
     res.writeHead(400); res.end('Bad JSON'); return;
   }
-  const grip   = payload.gripOffsets       || {};
-  const rot    = payload.rotationOverrides || {};
-  const scale  = payload.scaleOverrides    || {};
-  const muzzle = payload.muzzleOffsets     || {};
+  const grip  = payload.gripOffsets       || {};
+  const rot   = payload.rotationOverrides || {};
+  const scale = payload.scaleOverrides    || {};
   let content;
   try {
     content = await readFile(MANIFEST_PATH, 'utf8');
@@ -156,10 +155,9 @@ async function handleSaveWeaponTuning(req, res) {
   let report;
   try {
     let n = 0;
-    let r = patchManifestObject(content, 'MODEL_GRIP_OFFSET',       grip,   fmtVec3); content = r.content; n += r.changed;
-    r     = patchManifestObject(content, 'MODEL_ROTATION_OVERRIDE', rot,    fmtVec3); content = r.content; n += r.changed;
-    r     = patchManifestObject(content, 'MODEL_SCALE_OVERRIDE',    scale,  fmtScale); content = r.content; n += r.changed;
-    r     = patchManifestObject(content, 'MODEL_MUZZLE_OFFSET',     muzzle, fmtVec3); content = r.content; n += r.changed;
+    let r = patchManifestObject(content, 'MODEL_GRIP_OFFSET',       grip,  fmtVec3); content = r.content; n += r.changed;
+    r     = patchManifestObject(content, 'MODEL_ROTATION_OVERRIDE', rot,   fmtVec3); content = r.content; n += r.changed;
+    r     = patchManifestObject(content, 'MODEL_SCALE_OVERRIDE',    scale, fmtScale); content = r.content; n += r.changed;
     report = { entriesPatched: n };
   } catch (e) {
     res.writeHead(500); res.end(`patch failed: ${e.message}`); return;

@@ -322,7 +322,7 @@ export const MODEL_GRIP_OFFSET = {
   // mesh length away. Negative Z shifts the model back so the grip
   // lands on the hand. Use `__debug.tuneWeapon(...)` live to refine.
   'melee/SM_Tire_iron.glb':                    { x: 0, y: 0, z: -0.28 },  // crowbar
-  'melee/SM_Baseball_bat_Nails_reinforced_.glb': { x: -0.246, y: 0.260, z: -0.378 },
+  'melee/SM_Baseball_bat_Nails_reinforced_.glb': { x: 0, y: 0, z: -0.32 },
   'melee/SM_Katana.glb':                       { x: 0, y: 0, z: -0.30 },
   'melee/SM_Fire_Axe.glb':                     { x: 0, y: 0, z: -0.26 },
   'melee/SM_Hammer.glb':                       { x: 0, y: 0, z: -0.20 },  // club
@@ -332,33 +332,7 @@ export const MODEL_GRIP_OFFSET = {
   // Pack-uniform alignment falls out of class gripOffset; per-mesh
   // entries here only correct meshes whose pivot differs from the
   // pack's typical pistol_2 baseline.
-  'lowpoly_v2/pistol_3.glb': { x: -0.455, y: 0.298, z: 0.039 },  // Glock 17
-  'lowpoly_v2/fusil_5.glb': { x: -0.125, y: 0.043, z: -0.242 },
-  'lowpoly_v2/fusil_6.glb': { x: -0.090, y: 0.025, z: -0.193 },
-  'lowpoly_v2/subfusil_7.glb': { x: -0.132, y: 0.061, z: -0.226 },
-  'lowpoly_v2/fusil_7.glb': { x: -0.130, y: 0.058, z: -0.220 },
-  'lowpoly_v2/sniper_2.glb': { x: -0.097, y: 0.037, z: -0.158 },
-  'lowpoly_v2/fusil_4.glb': { x: -0.145, y: 0.058, z: -0.235 },
-  'lowpoly_v2/sniper_0.glb': { x: -0.086, y: 0.018, z: -0.264 },
-  'lowpoly_v2/subfusil_9.glb': { x: -0.129, y: 0.081, z: -0.274 },
-  'lowpoly_v2/shotgun_2.glb': { x: -0.147, y: 0.030, z: -0.042 },
-  'lowpoly_v2/shotgun_1.glb': { x: -0.145, y: 0.014, z: -0.240 },
-  'lowpoly_v2/sniper_1.glb': { x: -0.147, y: 0.042, z: -0.241 },
-  'lowpoly_v2/fusil_2.glb': { x: -0.162, y: 0.053, z: -0.287 },
-  'lowpoly_v2/pistol_2.glb': { x: -0.237, y: 0.131, z: -0.142 },
-  'lowpoly_v2/pistol_6.glb': { x: -0.229, y: 0.168, z: -0.190 },
-  'lowpoly_v2/pistol_5.glb': { x: -0.216, y: 0.156, z: -0.155 },
-  'lowpoly_v2/fusil_3.glb': { x: -0.233, y: 0.165, z: -0.231 },
-  'lowpoly_v2/subfusil_5.glb': { x: -0.239, y: 0.145, z: -0.089 },
-  'lowpoly_v2/pistol_4.glb': { x: -0.242, y: 0.139, z: -0.080 },
-  'lowpoly_v2/subfusil_6.glb': { x: -0.239, y: 0.154, z: -0.162 },
-  'lowpoly_v2/subfusil_10.glb': { x: -0.240, y: 0.182, z: -0.089 },
-  'lowpoly_v2/subfusil_3.glb': { x: -0.212, y: 0.130, z: -0.195 },
-  'lowpoly_v2/subfusil_8.glb': { x: -0.247, y: 0.188, z: -0.204 },
-  'lowpoly_v2/subfusil_4.glb': { x: -0.246, y: 0.173, z: -0.151 },
-  'lowpoly_v2/subfusil_2.glb': { x: -0.220, y: 0.159, z: -0.097 },
-  'lowpoly_v2/subfusil_1.glb': { x: -0.242, y: 0.158, z: -0.071 },
-  'lowpoly_v2/flamethrower.glb': { x: -0.196, y: 0.162, z: -0.286 },
+  'lowpoly_v2/pistol_3.glb':   { x: -0.03, y: 0.00, z: -0.08 },  // Glock 17
 };
 
 export const MODEL_ROTATION_OVERRIDE = {
@@ -453,29 +427,7 @@ const PACK_SCALE_DEFAULTS = {
 // tune can't absorb the correction without breaking siblings.
 export const MODEL_SCALE_OVERRIDE = {
   // ── lowpoly_v2 pack per-mesh size overrides ──
-  'lowpoly_v2/pistol_3.glb': 1.255,  // Glock 17 — bulkier than pistol_2
-  'lowpoly_v2/fusil_6.glb': 1.4104,
-  'lowpoly_v2/subfusil_7.glb': 1.15,
-  'lowpoly_v2/fusil_7.glb': 1.28,
-  'lowpoly_v2/sniper_2.glb': 1.326,
-  'lowpoly_v2/sniper_0.glb': 0.8428,
-  'lowpoly_v2/subfusil_9.glb': 0.82,
-  'lowpoly_v2/shotgun_2.glb': 1.34,
-  'lowpoly_v2/shotgun_1.glb': 1.28,
-  'lowpoly_v2/sniper_1.glb': 1.11,
-  'lowpoly_v2/pistol_6.glb': 1.88,
-  'lowpoly_v2/pistol_5.glb': 1.57,
-  'lowpoly_v2/fusil_3.glb': 2.04,
-  'lowpoly_v2/subfusil_5.glb': 1.98,
-  'lowpoly_v2/pistol_4.glb': 1.05,
-  'lowpoly_v2/subfusil_6.glb': 1.86,
-  'lowpoly_v2/subfusil_10.glb': 2.47,
-  'lowpoly_v2/subfusil_3.glb': 2.18,
-  'lowpoly_v2/subfusil_8.glb': 1.64,
-  'lowpoly_v2/subfusil_4.glb': 1.92,
-  'lowpoly_v2/subfusil_2.glb': 1.99,
-  'lowpoly_v2/subfusil_1.glb': 2.5,
-  'lowpoly_v2/flamethrower.glb': 2.4,
+  'lowpoly_v2/pistol_3.glb':                0.50,  // Glock 17 — bulkier than pistol_2
 };
 export function scaleForModelPath(fullPath) {
   if (!fullPath) return 1.0;
@@ -485,46 +437,6 @@ export function scaleForModelPath(fullPath) {
     if (key.startsWith(prefix)) return PACK_SCALE_DEFAULTS[prefix];
   }
   return 1.0;
-}
-
-// Per-mesh muzzle-position delta — added on top of the class-level
-// muzzle computed in player.js setWeapon (`muzzleZ = gripZ + len * vf`).
-// X/Y nudge the muzzle in inHandModel-local meters; Z is in the same
-// units as gripZ (pre-pack-scale, multiplied by ws at apply time).
-// Default zero means the class formula wins. Populated by the pose
-// editor's Muzzle gizmo + slider via tools/serve.mjs.
-export const MODEL_MUZZLE_OFFSET = {
-  'lowpoly_v2/sniper_0.glb': { x: -0.147, y: 0.078, z: 0.266 },
-  'lowpoly_v2/fusil_5.glb': { x: -0.125, y: 0.112, z: 0.292 },
-  'lowpoly_v2/fusil_6.glb': { x: -0.156, y: 0.074, z: 0.291 },
-  'lowpoly_v2/subfusil_7.glb': { x: -0.142, y: 0.099, z: 0.268 },
-  'lowpoly_v2/fusil_7.glb': { x: -0.166, y: 0.108, z: 0.291 },
-  'lowpoly_v2/sniper_2.glb': { x: -0.154, y: 0.114, z: 0.440 },
-  'lowpoly_v2/fusil_4.glb': { x: -0.142, y: 0.133, z: 0.289 },
-  'lowpoly_v2/shotgun_2.glb': { x: -0.145, y: 0.080, z: 0.574 },
-  'lowpoly_v2/shotgun_1.glb': { x: -0.139, y: 0.097, z: 0.343 },
-  'lowpoly_v2/sniper_1.glb': { x: -0.147, y: 0.092, z: 0.481 },
-  'lowpoly_v2/fusil_2.glb': { x: -0.145, y: 0.141, z: 0.329 },
-  'lowpoly_v2/pistol_2.glb': { x: -0.231, y: 0.193, z: 0.235 },
-  'lowpoly_v2/pistol_6.glb': { x: -0.216, y: 0.195, z: 0.253 },
-  'lowpoly_v2/pistol_5.glb': { x: -0.225, y: 0.196, z: 0.383 },
-  'lowpoly_v2/fusil_3.glb': { x: -0.225, y: 0.193, z: 0.436 },
-  'lowpoly_v2/subfusil_5.glb': { x: -0.236, y: 0.181, z: 0.453 },
-  'lowpoly_v2/pistol_3.glb': { x: -0.221, y: 0.186, z: 0.567 },
-  'lowpoly_v2/pistol_4.glb': { x: -0.210, y: 0.179, z: 0.321 },
-  'lowpoly_v2/subfusil_6.glb': { x: -0.223, y: 0.220, z: 0.446 },
-  'lowpoly_v2/subfusil_10.glb': { x: -0.231, y: 0.225, z: 0.591 },
-  'lowpoly_v2/subfusil_3.glb': { x: -0.187, y: 0.207, z: 0.569 },
-  'lowpoly_v2/subfusil_8.glb': { x: -0.248, y: 0.197, z: 0.527 },
-  'lowpoly_v2/subfusil_4.glb': { x: -0.247, y: 0.202, z: 0.568 },
-  'lowpoly_v2/subfusil_2.glb': { x: -0.221, y: 0.214, z: 0.534 },
-  'lowpoly_v2/subfusil_1.glb': { x: -0.230, y: 0.165, z: 0.467 },
-  'lowpoly_v2/flamethrower.glb': { x: -0.192, y: 0.221, z: 0.762 },
-};
-export function muzzleOffsetForModelPath(fullPath) {
-  if (!fullPath) return null;
-  const key = fullPath.startsWith(MODEL_BASE) ? fullPath.slice(MODEL_BASE.length) : fullPath;
-  return MODEL_MUZZLE_OFFSET[key] || null;
 }
 
 // Per-weapon-name PNG render — drives both the inventory icon AND
