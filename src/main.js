@@ -20928,6 +20928,10 @@ function tick() {
     if (shopUI.isOpen()) { shopUI.hide(); return true; }
     if (perkUI.isOpen()) { perkUI.toggle(); return true; }
     if (lootUI.isOpen()) { lootUI.hide(); return true; }
+    // Relics standalone (V) — previously missing from this list, so
+    // Escape silently opened the game menu over the still-visible
+    // relics panel. Routes through hide().
+    if (relicsUI?.isOpen?.()) { relicsUI.hide(); return true; }
     if (inventoryUI.visible) { inventoryUI.hide(); return true; }
     return false;
   };

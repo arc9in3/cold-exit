@@ -1011,14 +1011,9 @@ export class LootUI {
         this.render();
         return;
       }
-      // Escape closes the loot modal — same as the explicit close
-      // button. Players expect Escape to back out of any overlay; the
-      // dual-pane loot UI didn't honor it.
-      if (e.key === 'Escape') {
-        e.preventDefault(); e.stopPropagation();
-        this.hide();
-        return;
-      }
+      // Escape closes via main.js's dismissTopModal — single source
+      // of truth for the modal stack avoids racing the game's pause-
+      // menu open.
       let slotIdx = -1;
       switch (e.code) {
         case 'Digit1': slotIdx = 0; break;

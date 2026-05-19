@@ -77,15 +77,9 @@ export class RelicsUI {
     this.root.addEventListener('mousedown', (e) => {
       if (e.target === this.root) this.hide();
     });
-    // Escape closes the panel — capture phase so we beat the game's
-    // own Escape handler (which would otherwise open the in-game
-    // pause menu on top of us).
-    window.addEventListener('keydown', (e) => {
-      if (this.visible && e.key === 'Escape') {
-        e.stopPropagation();
-        this.hide();
-      }
-    }, true);
+    // Escape is routed through main.js's dismissTopModal — that
+    // walks the modal stack in priority order and prevents the
+    // game's pause-menu open from racing with this hide().
   }
 
   toggle() {

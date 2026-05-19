@@ -68,14 +68,9 @@ export class CustomizeUI {
     this.root.addEventListener('mousedown', (e) => {
       if (e.target === this.root) this.hide();
     });
-    // Escape closes the customize modal — capture phase so the game's
-    // pause menu doesn't fire on top of us when we're visible.
-    window.addEventListener('keydown', (e) => {
-      if (this.root.style.display !== 'none' && e.key === 'Escape') {
-        e.stopPropagation();
-        this.hide();
-      }
-    }, true);
+    // Escape routes through main.js's dismissTopModal — that calls
+    // customizeUI.hide() when the modal is the top of the stack,
+    // without racing the game's pause-menu open.
   }
 
   open(weapon) {

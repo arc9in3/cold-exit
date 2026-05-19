@@ -26,14 +26,9 @@ export class PerkUI {
     this.root.style.display = 'none';
     document.body.appendChild(this.root);
     this.root.addEventListener('mousedown', (e) => { if (e.target === this.root) this.hide(); });
-    // Escape closes the perk panel — capture phase so the game's
-    // pause-menu handler doesn't fire on top of us.
-    window.addEventListener('keydown', (e) => {
-      if (this.visible && e.key === 'Escape') {
-        e.stopPropagation();
-        this.hide();
-      }
-    }, true);
+    // Escape closes via main.js's dismissTopModal — that walks the
+    // modal stack in priority order and prevents the game's pause-
+    // menu open from racing with the modal close.
   }
 
   toggle() {
