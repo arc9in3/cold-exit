@@ -145,10 +145,10 @@ const CONTRACT_BANNER_ART = {
   // gradient + glyph render — no breakage if art lags.
   precision_aim: 'Assets/generated/gen-contract-precision-aim-via-qwen-image.png',
   untouchable:   'Assets/generated/gen-contract-untouchable-via-qwen-image.png',
-  time_crunch:   'Assets/generated/gen-contract-time-crunch-via-qwen-image.png',
-  low_ammo:      'Assets/generated/gen-contract-low-ammo-via-qwen-image.png',
-  disarm:        'Assets/generated/gen-contract-disarm-via-qwen-image.png',
-  chaos:         'Assets/generated/gen-contract-chaos-via-qwen-image.png',
+  time_crunch:   'Assets/generated/gen-contract-time-crunch-via-qwen-image-r2.png',
+  low_ammo:      'Assets/generated/gen-contract-low-ammo-via-qwen-image-r3.png',
+  disarm:        'Assets/generated/gen-contract-disarm-via-qwen-image-r4.png',
+  chaos:         'Assets/generated/gen-contract-chaos-via-qwen-image-r2.png',
 };
 
 const TAB_DEFS = [
@@ -5031,7 +5031,19 @@ export class HideoutUI {
         transform: translateX(-50%) scale(1.04);
         box-shadow: 0 0 60px rgba(90,138,207,0.6), 0 12px 28px rgba(0,0,0,0.7);
       }
-      .loadout-confirm:disabled { opacity: 0.45; cursor: not-allowed; }
+      /* Disabled state — opacity alone wasn't distinct enough; the
+         bright blue gradient still read as live + clickable. Wash
+         out the gradient + drop the blue glow + flatten the border
+         so the button visibly reads "not yet". The "PICK A WEAPON"
+         hint text still tells the player WHY. */
+      .loadout-confirm:disabled {
+        background: linear-gradient(180deg, #2a2e36 0%, #1a1e26 100%);
+        border-color: #3a3e46;
+        color: #6f7484;
+        box-shadow: none;
+        opacity: 0.85;
+        cursor: not-allowed;
+      }
 
       /* Cards positioned just below center — bigger, more present.
          Wrap when there are too many to fit in a single row. */

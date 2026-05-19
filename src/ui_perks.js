@@ -26,6 +26,14 @@ export class PerkUI {
     this.root.style.display = 'none';
     document.body.appendChild(this.root);
     this.root.addEventListener('mousedown', (e) => { if (e.target === this.root) this.hide(); });
+    // Escape closes the perk panel — capture phase so the game's
+    // pause-menu handler doesn't fire on top of us.
+    window.addEventListener('keydown', (e) => {
+      if (this.visible && e.key === 'Escape') {
+        e.stopPropagation();
+        this.hide();
+      }
+    }, true);
   }
 
   toggle() {

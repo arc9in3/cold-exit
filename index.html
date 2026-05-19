@@ -621,12 +621,15 @@
     #menu-card {
       /* box-sizing fixes a 1px sub-pixel mismatch where the card's
          content-box width + padding overflowed its own clientWidth
-         by 1px, surfacing a phantom horizontal scrollbar even with
-         tiny content (Resume / Settings / Leaderboard / Quit). The
-         vertical-only auto means tall settings panels still scroll. */
+         by 1px, surfacing a phantom scrollbar even with tiny content
+         (Resume / Settings / Leaderboard / Quit). Both axes hidden
+         because the menu always fits: 4 buttons + title + footer.
+         Settings + Controls + Leaderboard each open their OWN
+         full-screen overlay, so the card itself never needs to
+         scroll its own contents. */
       box-sizing: border-box;
       width: 480px; max-width: 92vw; max-height: 88vh;
-      overflow-x: hidden; overflow-y: auto;
+      overflow: hidden;
       background: var(--ce-navy);
       border: 1px solid var(--ce-ice-25);
       border-radius: 2px;
@@ -4021,6 +4024,12 @@
       font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
     }
     #skill-pick-card {
+      /* Card was width-uncapped — at small viewports the three skill
+         columns could spill past the visible area. max-width + box-
+         sizing matches the rest of the modal cards in this stylesheet. */
+      box-sizing: border-box;
+      max-width: 96vw; max-height: 92vh;
+      overflow: hidden;
       background: rgba(20, 22, 26, 0.88);
       backdrop-filter: blur(6px);
       -webkit-backdrop-filter: blur(6px);

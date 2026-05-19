@@ -26,7 +26,11 @@ const STYLE = `
   display: none;
   background: rgba(8, 8, 12, 0.82);
   backdrop-filter: blur(4px);
-  z-index: 6000;
+  /* Normalized to the 20-25 tier used by every other modal overlay
+     (menu=20, perks=14, relics=15, cust=19, skill-pick=20). Was 6000
+     which made it un-layerable — opening perks/inventory while the
+     recruiter was up would render them BEHIND the recruiter. */
+  z-index: 25;
   align-items: center; justify-content: center;
   font-family: 'Inter', system-ui, sans-serif;
   color: #d8d4cc;
@@ -270,6 +274,16 @@ export class RecruiterUI {
     this.closeBtn   = this.root.querySelector('#recruiter-close');
     this.refreshBtn.addEventListener('click', () => this._refreshPaid());
     this.closeBtn.addEventListener('click', () => this._dismiss(null));
+    // Escape closes the recruiter (same as "Walk away"). Capture
+    // phase + visibility gate so we don't trigger when the panel
+    // isn't showing, and so the game's pause menu doesn't fire on
+    // top of us.
+    window.addEventListener('keydown', (e) => {
+      if (this.root.classList.contains('show') && e.key === 'Escape') {
+        e.stopPropagation();
+        this._dismiss(null);
+      }
+    }, true);
     this.roster = [];
     this._resolve = null;
   }

@@ -77,6 +77,15 @@ export class RelicsUI {
     this.root.addEventListener('mousedown', (e) => {
       if (e.target === this.root) this.hide();
     });
+    // Escape closes the panel — capture phase so we beat the game's
+    // own Escape handler (which would otherwise open the in-game
+    // pause menu on top of us).
+    window.addEventListener('keydown', (e) => {
+      if (this.visible && e.key === 'Escape') {
+        e.stopPropagation();
+        this.hide();
+      }
+    }, true);
   }
 
   toggle() {
