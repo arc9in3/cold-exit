@@ -268,7 +268,7 @@ export class PerkUI {
     const header = document.createElement('div');
     header.id = 'perk-header';
     header.innerHTML = `
-      <div id="perk-title">Skills</div>
+      <div id="perk-title">Perks</div>
       <div id="perk-points"><span>SP</span> <b>${this.getPoints()}</b></div>
       <button id="perk-close" type="button">✕</button>
     `;
