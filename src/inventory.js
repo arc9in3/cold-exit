@@ -1340,7 +1340,7 @@ export const ARMOR_DEFS = {
   // armor for pocket count and a small reload bump from the front mag rack.
   chest_rig: { id: 'chest_rig', name: 'Chest Rig', slot: 'chest', type: 'gear',
     tint: 0x6f7a3a, durability: dur(70, 0.94), pockets: 2,
-    description: '+2 pockets · −5% reload, no armor', rarity: 'common',
+    description: '+2 pockets · −5% reload', rarity: 'common',
     apply(s) { s.reloadSpeedMult *= 1.05; } },
   chest_spetsnaz: { id: 'chest_spetsnaz', name: 'Spetsnaz Plate Carrier', slot: 'chest', type: 'armor',
     tint: 0x2a3a2a, reduction: 0.32, speedMult: 0.93, stealthMult: 0.92, pockets: 2,
@@ -1580,6 +1580,104 @@ export const GEAR_DEFS = {
     description: '+15% dmg reduction, −5% move',
     apply(s) { s.dmgReduction += 0.15; s.moveSpeedMult *= 0.95; } },
 };
+
+// Inherent armor baseline (2026-05-18) — every equippable non-weapon
+// item carries some damage reduction so a build with no dedicated
+// armor pieces isn't paper-thin. Classification follows the rule:
+//   * Items with offensive buffs (damage, fire rate, crit, stealth,
+//     speed-up, knockback, etc.) → "combat tier", 3–5% reduction
+//   * Items focused on protection / resists / max HP / utility
+//     (hearing, pockets, regen, balanced) → "protective tier", 6–10%
+//   * Dedicated `type: 'armor'` pieces keep their existing reduction
+//     (already 5–38%); this table only stamps items that LACK a
+//     reduction value, so it's additive, not destructive.
+// Tuning lives in this single table — to rebalance, edit a number
+// here rather than chasing it through 50+ defs above.
+const _INHERENT_ARMOR = {
+  // GEAR_DEFS (artifact-style gear, all type:'gear')
+  gear_vampiric:   0.04, // melee lifesteal — combat
+  gear_juggernaut: 0.10, // +max HP, slow — protective
+  gear_zephyr:     0.03, // speed buff — combat
+  gear_stonefist:  0.04, // melee dmg/knockback — combat
+  gear_focus:      0.03, // ranged dmg/spread — combat
+  // gear_thorns already grants +15% via apply()
+
+  // ARMOR_DEFS entries that are type:'gear' (no native reduction)
+  brians_hat:           0.06, // fire resist — protective
+  mask_respirator:      0.04, // stam regen — combat-ish
+  ears_comtacs:         0.04, // hearing + stam — combat
+  gloves_tac:           0.03, // knockback — combat
+  belt_rig:             0.04, // max stam — utility
+  boots_light:          0.03, // move — combat
+  backpack_small:       0.03,
+  backpack_satchel:     0.03,
+  backpack_med:         0.04,
+  backpack_assault:     0.04,
+  backpack_large:       0.04,
+  backpack_ranger:      0.05,
+  backpack_expedition:  0.05,
+  helmet_ghillie:       0.04, // stealth — combat
+  mask_gas:             0.07, // fire resist + stam — protective
+  face_warpaint:        0.03, // crit + move — combat
+  ears_plugs:           0.04, // stealth + stam — combat
+  ears_trinket:         0.03, // crit — combat
+  ears_amp:             0.04, // hearing — utility
+  ears_surveil:         0.04, // hearing — utility
+  ears_wraith:          0.05, // hearing — utility/epic
+  belt_quickdraw:       0.04, // reload — combat
+  chest_ghillie:        0.06, // stealth — combat (heavy gear)
+  chest_rig:            0.04, // pockets + reload — utility
+  hands_trigger:        0.03, // fire rate — combat
+  // hands_climber already grants +5% via apply()
+  belt_ammo:            0.03, // mag — combat
+  belt_utility:         0.04, // reload — combat
+  pants_runner:         0.03, // move — combat
+  boots_silent:         0.04, // stealth + move — combat
+  // helmet_tac_nvg already grants +18% via apply()
+  face_tac_goggles:     0.04, // flash resist + hearing — protective
+  hat_captain:          0.04, // credits + hearing — utility
+  face_shades:          0.03, // flash + crit — combat
+  face_nvg_rig:         0.04, // hearing + detection — utility
+  ears_earmuffs:        0.05, // flash resist + stam — protective
+  belt_mag_pouch:       0.03, // mag — combat
+  belt_grenade_pouch:   0.04, // throwables — combat
+  pants_stalker:        0.04, // stealth — combat
+  pants_marathon:       0.05, // max stam — utility
+  pants_cargo:          0.03, // pockets + credits — utility
+  boots_tracker:        0.03, // hearing + move — combat
+  boots_treasure:       0.03, // credits + move — combat
+  boots_dancer:         0.03, // move + stam — combat
+  hands_loader:         0.03, // reload — combat
+  hands_hunter:         0.03, // crit — combat
+  hands_wraith:         0.04, // stealth — combat
+  hands_pickpocket:     0.03, // credits + pockets — utility
+  hands_stim:           0.06, // health regen — protective
+  belt_bandolier:       0.04, // pockets — utility
+  belt_coinpouch:       0.03, // credits — utility
+  belt_penetrator:      0.04, // ranged + pierce — combat
+  belt_demolition:      0.04, // throwables — combat
+  belt_generalist:      0.05, // balanced — utility
+  belt_silent:          0.04, // stealth — combat
+};
+(function _stampInherentArmor() {
+  for (const id in _INHERENT_ARMOR) {
+    const amount = _INHERENT_ARMOR[id];
+    let stamped = false;
+    for (const defs of [ARMOR_DEFS, GEAR_DEFS]) {
+      for (const key in defs) {
+        const def = defs[key];
+        if (def?.id !== id) continue;
+        // Never overwrite an existing reduction — dedicated armor
+        // pieces already carry tuned values from their definition.
+        if (typeof def.reduction !== 'number') def.reduction = amount;
+        stamped = true;
+      }
+    }
+    // No console.warn here — silent skip if an id was renamed and the
+    // table fell out of sync. The full-stat regen pass next playtest
+    // will surface the gap via the dmgReduction stat panel.
+  }
+})();
 
 // Junk items — pure loot; drops in combat and sells to merchants. `sellValue`
 // is a base; dropped copies fluctuate ±15% so identical items sell for

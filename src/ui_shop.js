@@ -1298,7 +1298,7 @@ export class ShopUI {
       `;
       if (item) {
         const price = sellPriceFor(item);
-        tile.title = `${item.name} — right-click to sell for ${price}c`;
+        tile.title = `${item.name} — right-click to sell for ${price}c · drag a compatible item here to swap`;
         if (item.markedKeep) tile.style.borderColor = '#3a6e9e';
         tile.innerHTML = `
           <div style="width:38px;height:38px;display:flex;align-items:center;justify-content:center;color:#c9a87a;">
@@ -1315,6 +1315,7 @@ export class ShopUI {
           this._sellEquipped(slot);
         });
       } else {
+        tile.title = `${SLOT_LABEL[slot] || slot} — drag a compatible item here to equip`;
         tile.innerHTML = `
           <div style="width:38px;height:38px;display:flex;align-items:center;justify-content:center;opacity:0.5;">
             ${slotIconHTML(slot, { cls: 'shop-eq-icon-empty', fallback: '·' })}
@@ -1322,8 +1323,62 @@ export class ShopUI {
           <div style="font-size:8px;color:#5a6470;text-overflow:ellipsis;overflow:hidden;white-space:nowrap;width:100%;">${SLOT_LABEL[slot] || slot}</div>
         `;
       }
+      // Drop target — accepts a drag from the backpack (this._drag.from
+      // === 'bag') when the dragged item's type matches this slot.
+      // dragover must call preventDefault() to mark the slot as a valid
+      // drop zone; without it the drop event never fires.
+      tile.addEventListener('dragover', (e) => {
+        const d = this._drag;
+        if (!d || d.from !== 'bag' || !d.item) return;
+        if (!this.inventory.canSlotHold(slot, d.item)) return;
+        e.preventDefault();
+        tile.classList.add('drop-ok');
+      });
+      tile.addEventListener('dragleave', () => tile.classList.remove('drop-ok'));
+      tile.addEventListener('drop', (e) => {
+        e.preventDefault();
+        tile.classList.remove('drop-ok');
+        const d = this._drag;
+        if (!d || d.from !== 'bag' || !d.item) return;
+        this._drag = null;
+        this._equipFromBag(slot, d.item);
+      });
       this.equippedEl.appendChild(tile);
     }
+  }
+
+  // Move `item` from the backpack into the paperdoll `slot`, swapping
+  // whatever was already equipped back into the bag. Mirrors the inv
+  // paperdoll equip path (ui_inventory.js:872) — same canSlotHold +
+  // placeOrOverflow + rollback rules, so the shop swap can't silently
+  // duplicate or destroy a slot's previous occupant.
+  _equipFromBag(slot, item) {
+    if (!item) return;
+    if (!this.inventory.canSlotHold(slot, item)) {
+      this._flash(`${item.name} doesn't fit the ${SLOT_LABEL[slot] || slot} slot.`);
+      return;
+    }
+    // Broken-item gate stays implicit — the player CAN equip a broken
+    // item (matches the inv paperdoll), they just won't get any of
+    // its stats until they repair. No flash needed.
+    const prev = this.inventory.equipment[slot] || null;
+    // Pull the dragged item out of whichever grid currently holds it.
+    const removed = this.inventory.takeFromBackpack(item);
+    if (!removed) return;
+    this.inventory.equipment[slot] = item;
+    this.inventory._recomputeCapacity?.();
+    if (prev && !this.inventory.placeOrOverflow(prev)) {
+      // No room for the displaced item — roll back so we don't
+      // accidentally drop it on the floor.
+      this.inventory.equipment[slot] = prev;
+      this.inventory._recomputeCapacity?.();
+      this.inventory.autoPlaceAnywhere(item);
+      this._flash('No bag space to swap — equip cancelled.');
+      this.render();
+      return;
+    }
+    this.inventory._bump();
+    this.render();
   }
 
   // Sell an equipped item directly from the paperdoll row. Mirrors the

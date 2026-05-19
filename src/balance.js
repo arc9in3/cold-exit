@@ -199,23 +199,30 @@ export const BALANCE = {
     general: {
       baseHp:                 5000,
       hpScalePerEncounter:    0.4,    // hp = base × (1 + slope·k)
-      // Phalanx — 3 heavy shield bearers between player and General.
-      phalanxCount:           3,
+      // Phalanx — 9 heavy shield bearers ringed around the General.
+      // Bearers occupy fixed angular slots on a circle of radius
+      // `phalanxRingRadius`; survivors redistribute evenly when one
+      // dies. Each bearer faces outward (away from General) so the
+      // shield arc covers 360° — flanking is harder than the prior
+      // straight-line phalanx.
+      phalanxCount:           9,
       phalanxHpMult:          3.0,    // 100 base × 3 = 300 HP each
-      phalanxStandoffDist:    6.0,    // m in front of General
-      phalanxSlotSpacing:     1.6,    // m between adjacent slots on the perpendicular line
-      phalanxJitterAmp:       0.4,    // small breathing jitter
+      phalanxRingRadius:      3.6,    // m — orbit radius around General
+      phalanxJitterAmp:       0.35,   // radial breathing jitter (m)
       phalanxJitterHz:        0.4,    // slow oscillation
-      phalanxFollowRate:      1.4,    // m/s lerp toward target slot
-      phalanxTurnRate:        1.0,    // rad/s — slow facing toward player
+      phalanxFollowRate:      1.6,    // m/s lerp toward target slot
+      phalanxTurnRate:        1.4,    // rad/s — facing slew toward outward yaw
+      phalanxRingDriftHz:     0.05,   // rad/s — slow ring rotation (alive feel)
       // Wave system — melee grunts streaming from behind The General.
+      // Counts doubled (2026-05-18) to keep the wave threat scaling
+      // with the new 9-bearer ring + tripled-Shinigami difficulty pass.
       firstWaveDelay:         3.0,    // first wave fires this many seconds after intro
       waveIntervalSec:        9.0,    // gap between waves
-      waveBaseCount:          3,      // first wave size
-      wavePerWaveBump:        1,      // count grows by this per wave
-      waveBaseCap:            10,     // soft cap at first encounter
-      waveCapPerEncounter:    2,      // +2 grunts/wave per re-encounter
-      waveMaxCap:             20,     // hard cap regardless of difficulty
+      waveBaseCount:          6,      // first wave size (was 3)
+      wavePerWaveBump:        2,      // count grows by this per wave (was 1)
+      waveBaseCap:            20,     // soft cap at first encounter (was 10)
+      waveCapPerEncounter:    4,      // +4 grunts/wave per re-encounter (was 2)
+      waveMaxCap:             40,     // hard cap regardless of difficulty (was 20)
       troopHpMult:            0.6,    // 100 base × 0.6 = 60 HP grunts
       troopHpScalePerEncounter: 0.3,  // troops scale alongside the General
       troopDamageMult:        0.8,

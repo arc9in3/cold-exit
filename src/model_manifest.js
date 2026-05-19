@@ -99,6 +99,11 @@ export const MODEL_BY_WEAPON_NAME = {
   // Exotic
   'Flamethrower':       'lowpoly_v2/flamethrower.glb', // direct match
   'Widowmaker Rocket Launcher': 'lowpoly_v2/subfusil_9.glb', // heavy weapon read
+  // Grenade Launcher — shares the heavy-weapon read with Widowmaker;
+  // scale override (line ~472) already tuned for subfusil_9. Without
+  // this entry the weapon falls through to a primitive box placeholder
+  // when equipped.
+  'Grenade Launcher':   'lowpoly_v2/subfusil_9.glb',
   // Ricochet Revolver — share revolver stand-in across family
   'RX-1 Rebound':       'lowpoly_v2/pistol_4.glb',
   'RX-2 Caroma':        'lowpoly_v2/pistol_4.glb',

@@ -155,6 +155,17 @@ function _encodeMegaBoss(megaBoss) {
     const ghosts = megaBoss._coopEncodeGhosts();
     if (ghosts && ghosts.length) out.eg = ghosts;
   }
+  // Jailer-specific: floor hazards (mines + grenades) and the active
+  // chain hook live in host-only state. Without this sync the joiner
+  // sees the boss move but invisible hazards detonate / pull —
+  // coop-unfair. Each megaboss class can optionally expose a
+  // `_coopEncodeHazards()` method returning a compact extras object
+  // that lands on `out.hz`; the joiner's apply path mirrors it via
+  // `_coopApplyHazardMirrors` (if implemented).
+  if (typeof megaBoss._coopEncodeHazards === 'function') {
+    const hz = megaBoss._coopEncodeHazards();
+    if (hz) out.hz = hz;
+  }
   return out;
 }
 
@@ -588,6 +599,13 @@ export function applyMegaBossSnapshot(snap, megaBoss) {
   // local rig pool. No-op on Arboter / General (no method).
   if (typeof megaBoss._coopApplyGhostMirrors === 'function') {
     megaBoss._coopApplyGhostMirrors(b.eg || []);
+  }
+  // Jailer hazard mirrors — `b.hz` carries mine + grenade + chain
+  // state. Joiner's _coopApplyHazardMirrors reconciles local visual
+  // proxies so the player can see what to avoid. No-op on bosses
+  // that don't expose hazards.
+  if (typeof megaBoss._coopApplyHazardMirrors === 'function') {
+    megaBoss._coopApplyHazardMirrors(b.hz || null);
   }
 }
 

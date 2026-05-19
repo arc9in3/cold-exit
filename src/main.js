@@ -31,6 +31,7 @@ import {
 } from './megaboss.js';
 import { MegaBossEcho, buildEchoLoot } from './megaboss_echo.js';
 import { MegaBossGeneral, buildGeneralLoot } from './megaboss_general.js';
+import { MegaBossJailer, buildJailerLoot } from './megaboss_jailer.js';
 import { ProjectileManager } from './projectiles.js';
 // Warmup imports — theme materials (per-floor walls + room-accent
 // floor emissive) compile lazily on first use; without seeding them
@@ -6579,6 +6580,20 @@ function _regenerateLevelImpl() {
   // Placed claymores live in their own _claymores list (not in the
   // projectile manager), so they need a separate sweep on regen.
   _removeAllClaymores();
+  // Kill-coin VFX live in a module-level _coinFx array; previously
+  // they were only cleaned up when their per-coin animation finished
+  // (see _updateCoinFx). If regen fires while coins are mid-flight,
+  // the meshes + per-instance materials were leaking — they kept
+  // their scene parent but level cleared, so they ended up orphaned
+  // and the array kept growing run-over-run. Sweep here to dispose.
+  if (_coinFx.length) {
+    for (let i = 0; i < _coinFx.length; i++) {
+      const c = _coinFx[i];
+      if (c?.mesh) scene.remove(c.mesh);
+      if (c?.mat?.dispose) c.mat.dispose();
+    }
+    _coinFx.length = 0;
+  }
   playerKeys.clear();
   // Pre-warm the FBX clone for every weapon currently in the player's
   // rotation. The clone+fit+rotate pass takes a few frames per
@@ -6594,25 +6609,29 @@ function _regenerateLevelImpl() {
   // attack FSM, hazards, and HUD bar. The dormant intro ritual runs
   // first, leaving the player free to position before combat starts.
   if (isMegaFloor) {
-    // Pick which mega-boss runs this floor. Three-way rotation
-    // across mega-floors (10/15/20/25/...) cycling Arboter → Echo →
-    // General. `idx` indexes successive mega-floors so the cycle
-    // works regardless of whether the player skipped any.
+    // Pick which mega-boss runs this floor. Four-way rotation across
+    // mega-floors (10/15/20/25/30/...) cycling Arboter → Echo →
+    // General → Jailer. `idx` indexes successive mega-floors so the
+    // cycle works regardless of whether the player skipped any.
     //   floor 10 = idx 0 = ARBOTER
     //   floor 15 = idx 1 = ECHO
     //   floor 20 = idx 2 = GENERAL
-    //   floor 25 = idx 3 = ARBOTER (cycle)
+    //   floor 25 = idx 3 = JAILER
+    //   floor 30 = idx 4 = ARBOTER (cycle)
     //   ...
     const _megaIdx = Math.max(0, Math.floor(((level.index | 0) - 10) / 5));
-    const _megaPick = _megaIdx % 3;
+    const _megaPick = _megaIdx % 4;
     const useEcho    = _megaPick === 1;
     const useGeneral = _megaPick === 2;
-    const MegaCtor = useGeneral ? MegaBossGeneral
-                  : useEcho     ? MegaBossEcho
-                  :               MegaBoss;
-    const lootFn   = useGeneral ? buildGeneralLoot
-                  : useEcho     ? buildEchoLoot
-                  :               buildMegaBossLoot;
+    const useJailer  = _megaPick === 3;
+    const MegaCtor = useJailer  ? MegaBossJailer
+                  : useGeneral ? MegaBossGeneral
+                  : useEcho    ? MegaBossEcho
+                  :              MegaBoss;
+    const lootFn   = useJailer  ? buildJailerLoot
+                  : useGeneral ? buildGeneralLoot
+                  : useEcho    ? buildEchoLoot
+                  :              buildMegaBossLoot;
     megaBoss = new MegaCtor({
       scene, camera,
       combat, loot, sfx, projectiles,
@@ -6725,6 +6744,14 @@ function _regenerateLevelImpl() {
           player.mesh.position.x += dx * 0.5;
           player.mesh.position.z += dz * 0.5;
         }
+      },
+      // Lock the player out of input for `seconds`. Stacks (max) with
+      // any existing stun timer (e.g. flash, prior mine) so multiple
+      // concurrent stuns don't reset to the smaller value. Used by
+      // MegaBossJailer mines.
+      stunPlayer: (seconds) => {
+        if (typeof seconds !== 'number' || seconds <= 0) return;
+        playerStunT = Math.max(playerStunT, seconds);
       },
       shake: (m, d) => triggerShake(m, d),
       onMegaBossDead: (boss) => {
@@ -10801,34 +10828,57 @@ function firePlayerCharge(playerInfo, weapon, aimPoint, tierIdx) {
   // tuned to enemy collision radius (≈0.4) plus a small margin so a
   // glancing line still scores; the visual tier.beamWidth is the
   // *display* thickness and not used for gameplay hit-detection.
+  //
+  // BUGFIX (2026-05-18): allHittables() returns hit MESHES, not entities.
+  // The prior loop treated each mesh as an entity (checking .alive +
+  // .group on the mesh), which is undefined on a Mesh — every candidate
+  // was silently skipped and beam weapons did zero damage. Resolve to
+  // owners via userData.owner, dedupe (a single enemy has many meshes:
+  // head, torso, limbs, blade), then run the projection check on the
+  // owner's group position.
   const BEAM_HALF_WIDTH = 0.7;
-  const candidates = allHittables();
-  // Sort by distance-along-beam so impacts trigger near→far visually.
+  const meshes = allHittables();
+  const seenOwners = new Set();
   const ordered = [];
-  for (const c of candidates) {
-    if (!c || !c.alive || !c.group) continue;
-    const dx = c.group.position.x - _vc_origin.x;
-    const dz = c.group.position.z - _vc_origin.z;
+  for (const mesh of meshes) {
+    const owner = mesh?.userData?.owner;
+    if (!owner || seenOwners.has(owner)) continue;
+    if (owner.alive === false) continue;
+    // Owner center — Echo + General store position on .group; Arboter
+    // uses .boss. Regular entities (gunmen, melees, drones, dummies)
+    // all live on .group. Skip anything without a queryable position.
+    const root = owner.group || owner.boss;
+    if (!root?.position) continue;
+    const dx = root.position.x - _vc_origin.x;
+    const dz = root.position.z - _vc_origin.z;
     const along = dx * _vc_dir.x + dz * _vc_dir.z;       // projection onto beam
     if (along < 0 || along > beamLen) continue;
     const perpX = dx - along * _vc_dir.x;
     const perpZ = dz - along * _vc_dir.z;
-    const perpDist = Math.hypot(perpX, perpZ);
-    if (perpDist > BEAM_HALF_WIDTH) continue;
-    ordered.push({ c, along });
+    if (Math.hypot(perpX, perpZ) > BEAM_HALF_WIDTH) continue;
+    seenOwners.add(owner);
+    ordered.push({ owner, root, along });
   }
   ordered.sort((a, b) => a.along - b.along);
-  for (const { c, along } of ordered) {
+  for (const { owner, root, along } of ordered) {
     runStats.addDamage(dmg);
-    const wasAlive = c.alive;
-    c.manager.applyHit(c, dmg, 'torso', _vc_dir, { weaponClass: 'exotic' });
-    if (wasAlive && !c.alive) onEnemyKilled(c);
+    const wasAlive = owner.alive !== false;
+    if (owner.manager?.applyHit) {
+      owner.manager.applyHit(owner, dmg, 'torso', _vc_dir, { weaponClass: 'exotic' });
+    } else if (typeof owner.applyHit === 'function') {
+      // Mega-boss path — owner IS the boss instance; applyHit takes
+      // a scalar damage amount.
+      owner.applyHit(dmg);
+    } else {
+      continue;
+    }
+    if (wasAlive && owner.alive === false) onEnemyKilled(owner);
     // Impact burst on every enemy hit. Anchor the burst at the
     // closest-point-on-beam to the enemy centre so the spark reads
     // as connected to the beam line rather than floating mid-enemy.
     _vc_hitPt.set(
       _vc_origin.x + _vc_dir.x * along,
-      c.group.position.y + 1.0,
+      root.position.y + 1.0,
       _vc_origin.z + _vc_dir.z * along,
     );
     combat.spawnImpact(_vc_hitPt);
@@ -17830,24 +17880,86 @@ function _spawnGasCloudPuff(zone) {
     peakOpacity: 0.45 + Math.random() * 0.30,
   });
 }
+// Cached hazard-zone assets — shared materials + radius-keyed
+// geometries so spawnGasZone / spawnSmokeZone don't allocate (and
+// don't trigger a shader compile) on every call. The 4 base materials
+// are stamped skipDispose so disposeZone() leaves them in the
+// WebGLPrograms cache for re-use across zones / levels. First
+// instantiation happens during _warmShaders so the compile cost lands
+// at boot, not on the first grenade throw in a fresh biome.
+const _hazardCache = {
+  gasRingMat: null, gasDomeMat: null,
+  smokeRingMat: null, smokeDomeMat: null,
+  ringGeom: new Map(), domeGeom: new Map(),
+};
+function _hazardMats(kind) {
+  const c = _hazardCache;
+  if (kind === 'gas') {
+    if (!c.gasRingMat) {
+      c.gasRingMat = new THREE.MeshBasicMaterial({
+        color: 0x60d040, transparent: true, opacity: 0.22,
+        depthWrite: false, side: THREE.DoubleSide,
+      });
+      c.gasRingMat.userData.skipDispose = true;
+      c.gasDomeMat = new THREE.MeshBasicMaterial({
+        color: 0x80e060, transparent: true, opacity: 0.18,
+        depthWrite: false,
+      });
+      c.gasDomeMat.userData.skipDispose = true;
+    }
+    return { ringMat: c.gasRingMat, domeMat: c.gasDomeMat };
+  }
+  if (!c.smokeRingMat) {
+    c.smokeRingMat = new THREE.MeshBasicMaterial({
+      color: 0x9aa4ad, transparent: true, opacity: 0.18,
+      depthWrite: false, side: THREE.DoubleSide,
+    });
+    c.smokeRingMat.userData.skipDispose = true;
+    c.smokeDomeMat = new THREE.MeshBasicMaterial({
+      color: 0xb8c0c8, transparent: true, opacity: 0.15,
+      depthWrite: false,
+    });
+    c.smokeDomeMat.userData.skipDispose = true;
+  }
+  return { ringMat: c.smokeRingMat, domeMat: c.smokeDomeMat };
+}
+function _hazardRingGeom(radius) {
+  // Quantize to 0.1 m so 3.0 / 3.0001 / 3.05 collapse to a single
+  // buffer — caps the cache at a handful of entries even if callers
+  // pass slightly-varying radii.
+  const key = Math.round(radius * 10) / 10;
+  let g = _hazardCache.ringGeom.get(key);
+  if (!g) {
+    g = new THREE.CircleGeometry(radius, 24);
+    g.userData = g.userData || {};
+    g.userData.skipDispose = true;
+    _hazardCache.ringGeom.set(key, g);
+  }
+  return g;
+}
+function _hazardDomeGeom(radius) {
+  const key = Math.round(radius * 10) / 10;
+  let g = _hazardCache.domeGeom.get(key);
+  if (!g) {
+    g = new THREE.SphereGeometry(radius, 16, 8, 0, Math.PI * 2, 0, Math.PI / 2);
+    g.userData = g.userData || {};
+    g.userData.skipDispose = true;
+    _hazardCache.domeGeom.set(key, g);
+  }
+  return g;
+}
+
 function spawnGasZone(pos, radius, duration, owner = 'player') {
   // Static dome + ring dialled down to match the smoke-grenade
   // treatment — the puff emitter (see _tickThrowableZones gas loop)
   // carries the bulk of the visual now, so the static base is just
   // a soft tint marking the zone radius.
-  const baseMat = new THREE.MeshBasicMaterial({
-    color: 0x60d040, transparent: true, opacity: 0.22,
-    depthWrite: false, side: THREE.DoubleSide,
-  });
-  const ring = new THREE.Mesh(new THREE.CircleGeometry(radius, 24), baseMat);
+  const { ringMat, domeMat } = _hazardMats('gas');
+  const ring = new THREE.Mesh(_hazardRingGeom(radius), ringMat);
   ring.rotation.x = -Math.PI / 2;
   ring.position.set(pos.x, 0.05, pos.z);
   scene.add(ring);
-  const domeMat = new THREE.MeshBasicMaterial({
-    color: 0x80e060, transparent: true, opacity: 0.18,
-    depthWrite: false,
-  });
-  const dome = new THREE.Mesh(new THREE.SphereGeometry(radius, 16, 8, 0, Math.PI * 2, 0, Math.PI / 2), domeMat);
+  const dome = new THREE.Mesh(_hazardDomeGeom(radius), domeMat);
   dome.position.set(pos.x, 0, pos.z);
   scene.add(dome);
   _gasZones.push({
@@ -17870,19 +17982,12 @@ function spawnSmokeZone(pos, radius, duration) {
   // _tickThrowableZones below) ride on top for the "actual smoke is
   // billowing" read. Opacity is dialled down vs. the old pure-static
   // version because the puffs now do the heavy visual lifting.
-  const baseMat = new THREE.MeshBasicMaterial({
-    color: 0x9aa4ad, transparent: true, opacity: 0.18,
-    depthWrite: false, side: THREE.DoubleSide,
-  });
-  const ring = new THREE.Mesh(new THREE.CircleGeometry(radius, 24), baseMat);
+  const { ringMat, domeMat } = _hazardMats('smoke');
+  const ring = new THREE.Mesh(_hazardRingGeom(radius), ringMat);
   ring.rotation.x = -Math.PI / 2;
   ring.position.set(pos.x, 0.05, pos.z);
   scene.add(ring);
-  const domeMat = new THREE.MeshBasicMaterial({
-    color: 0xb8c0c8, transparent: true, opacity: 0.15,
-    depthWrite: false,
-  });
-  const dome = new THREE.Mesh(new THREE.SphereGeometry(radius, 16, 8, 0, Math.PI * 2, 0, Math.PI / 2), domeMat);
+  const dome = new THREE.Mesh(_hazardDomeGeom(radius), domeMat);
   dome.position.set(pos.x, 0, pos.z);
   scene.add(dome);
   // Per-zone particle state — emit a fresh puff every PUFF_INTERVAL
@@ -17998,8 +18103,15 @@ function _tickThrowableZones(dt) {
       }
     }
     if (z.t >= z.life) {
-      scene.remove(z.ring); z.ring.geometry.dispose(); z.ring.material.dispose();
-      scene.remove(z.dome); z.dome.geometry.dispose(); z.dome.material.dispose();
+      // Ring/dome share the pooled _hazardCache assets (skipDispose) —
+      // remove from scene but leave the geom+mat live so the next
+      // grenade reuses the compiled program.
+      scene.remove(z.ring);
+      if (!z.ring.geometry?.userData?.skipDispose) z.ring.geometry.dispose();
+      if (!z.ring.material?.userData?.skipDispose) z.ring.material.dispose();
+      scene.remove(z.dome);
+      if (!z.dome.geometry?.userData?.skipDispose) z.dome.geometry.dispose();
+      if (!z.dome.material?.userData?.skipDispose) z.dome.material.dispose();
       // Clean up any remaining puffs at zone end (rare — the last-25%
       // emit gate should keep this empty by zone-end, but safety).
       for (const p of z.puffs) _releaseCloudPuffSlot(p.slot);
@@ -18117,8 +18229,13 @@ function _tickThrowableZones(dt) {
       sweep(melees.enemies);
     }
     if (z.t >= z.life) {
-      scene.remove(z.ring); z.ring.geometry.dispose(); z.ring.material.dispose();
-      scene.remove(z.dome); z.dome.geometry.dispose(); z.dome.material.dispose();
+      // Ring/dome share the pooled _hazardCache assets (skipDispose).
+      scene.remove(z.ring);
+      if (!z.ring.geometry?.userData?.skipDispose) z.ring.geometry.dispose();
+      if (!z.ring.material?.userData?.skipDispose) z.ring.material.dispose();
+      scene.remove(z.dome);
+      if (!z.dome.geometry?.userData?.skipDispose) z.dome.geometry.dispose();
+      if (!z.dome.material?.userData?.skipDispose) z.dome.material.dispose();
       // Clean up any remaining puffs (rare — the last-25% emit gate
       // should keep this empty by zone-end, but defensive).
       for (const p of z.puffs) _releaseCloudPuffSlot(p.slot);
@@ -22397,6 +22514,19 @@ function _warmShaders() {
       }
     }
   } catch (_) { /* warmup is best-effort */ }
+  // Hazard-zone shader pre-warm — gas + smoke ring/dome materials
+  // are created lazily on first spawn, which means the first grenade
+  // throw on a new biome currently stutters as the MeshBasicMaterial
+  // variants compile inline. Spawn a throwaway zone of each kind far
+  // off-screen so the compile lands during the renderer.compile pass
+  // below. The warmup teardown block (_smokeZones / _gasZones sweep)
+  // tears them down; pooled _hazardCache assets carry skipDispose so
+  // their programs persist in the WebGLPrograms cache.
+  try {
+    const FAR = new THREE.Vector3(99999, 0, 99999);
+    spawnSmokeZone(FAR, 4.0, 0.001);
+    spawnGasZone(FAR, 4.0, 0.001, 'player');
+  } catch (_) { /* warmup is best-effort */ }
   // Compile every material currently in the scene. Costs the same
   // ~100-300ms hitch we wanted to avoid in gameplay, but here it
   // happens at boot before the player can interact, so it reads as
@@ -22454,9 +22584,20 @@ function _warmShaders() {
     _fireOrbs.length = 0;
     _fireZones.length = 0;
     const disposeZone = (z) => {
-      if (z.ring) { scene.remove(z.ring); z.ring.geometry.dispose(); z.ring.material.dispose(); }
-      if (z.dome) { scene.remove(z.dome); z.dome.geometry.dispose(); z.dome.material.dispose(); }
-      if (z.rod)  { scene.remove(z.rod);  z.rod.geometry.dispose();  z.rod.material.dispose(); }
+      // Hazard ring/dome/rod assets are pooled via _hazardCache —
+      // their geom + materials carry skipDispose so the WebGLPrograms
+      // entry survives teardown for the next spawn. Disposing them
+      // here would tank the warmup. Disposal still happens for any
+      // legacy zone that doesn't carry the flag.
+      const safeDispose = (o) => {
+        if (!o) return;
+        scene.remove(o);
+        if (o.geometry && !o.geometry.userData?.skipDispose) o.geometry.dispose();
+        if (o.material && !o.material.userData?.skipDispose) o.material.dispose();
+      };
+      safeDispose(z.ring);
+      safeDispose(z.dome);
+      safeDispose(z.rod);
       // Release pooled cloud-puff slots so they're available on the
       // next level (instead of staying flagged inUse forever, which
       // would silently shrink the effective pool over multi-level

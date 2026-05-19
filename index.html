@@ -1316,6 +1316,21 @@
       filter: brightness(0.7) saturate(0);
       opacity: 0.85;
     }
+    /* Shop equipped paperdoll icons — paired with .shop-eq-slot tiles
+       in ui_shop.js. Without these constraints the slotIconHTML <img>
+       renders at the PNG's natural size (~256px), overflowing the 38px
+       cell and visually colliding with adjacent tiles + covering the
+       Repair / Sell-All-Junk action row below. */
+    .shop-eq-icon,
+    .shop-eq-icon-empty {
+      display: inline-block;
+      width: 38px; height: 38px;
+      object-fit: contain;
+    }
+    .shop-eq-icon-empty {
+      filter: brightness(0.7) saturate(0);
+      opacity: 0.85;
+    }
     .inv-slot .cell-label { font-size: 9px; color: #7a6f54; }
     #inv-silhouette {
       /* Placed via grid into col 2 spanning all 7 rows — sits cleanly
@@ -2074,6 +2089,19 @@
       pointer-events: none;
     }
     .cell-dur-text { font-size: 9px; color: #6f6754; margin-top: 1px; }
+    /* Affix overflow chip — appears when an item rolls more affixes
+       than the cell can show (legendary commonly rolls 3). Compact,
+       muted, with a tooltip listing every affix. Without this the
+       3rd affix was silently dropped and players had no signal that
+       hidden rolls existed. */
+    .cell-affix-overflow {
+      display: inline-block;
+      margin-top: 2px;
+      font-size: 9px;
+      color: #c9a87a;
+      letter-spacing: 0.5px;
+      opacity: 0.8;
+    }
     .cell-affixes {
       font-size: 10px;
       color: #8fbf70;
@@ -3205,6 +3233,14 @@
     .shop-col.drop-ok {
       outline: 2px dashed #c9a87a;
       outline-offset: 2px;
+    }
+    /* Equipped-paperdoll tile in the shop becomes a drop target when
+       a compatible item is being dragged from the bag (see ui_shop.js
+       _renderEquipped). Same gold ring the other slot drop targets
+       use, slightly tighter than the column outline. */
+    .shop-eq-slot.drop-ok {
+      border-color: #c9a87a !important;
+      box-shadow: 0 0 8px rgba(201,168,122,0.5);
     }
     .shop-price {
       position: absolute;
