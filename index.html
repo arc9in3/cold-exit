@@ -375,8 +375,13 @@
       font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
     }
     #details-card {
+      /* See #menu-card: padding-induced 1px sub-pixel overflow trips
+         a phantom horizontal scrollbar without border-box. Vertical
+         auto stays so wide comparison panels still scroll on tiny
+         viewports. */
+      box-sizing: border-box;
       max-width: 96vw; max-height: 88vh;
-      overflow-y: auto;
+      overflow-x: hidden; overflow-y: auto;
       background: linear-gradient(180deg, #181b21 0%, #10121a 100%);
       border: 1px solid #c9a87a;
       border-radius: 8px;
@@ -614,7 +619,14 @@
       font-family: var(--ce-font-tech);
     }
     #menu-card {
-      width: 480px; max-width: 92vw; max-height: 88vh; overflow-y: auto;
+      /* box-sizing fixes a 1px sub-pixel mismatch where the card's
+         content-box width + padding overflowed its own clientWidth
+         by 1px, surfacing a phantom horizontal scrollbar even with
+         tiny content (Resume / Settings / Leaderboard / Quit). The
+         vertical-only auto means tall settings panels still scroll. */
+      box-sizing: border-box;
+      width: 480px; max-width: 92vw; max-height: 88vh;
+      overflow-x: hidden; overflow-y: auto;
       background: var(--ce-navy);
       border: 1px solid var(--ce-ice-25);
       border-radius: 2px;
@@ -1079,7 +1091,10 @@
       font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
     }
     #store-upgrade-card {
-      width: 640px; max-width: 94vw; max-height: 88vh; overflow-y: auto;
+      /* box-sizing + explicit overflow-x:hidden — see #menu-card. */
+      box-sizing: border-box;
+      width: 640px; max-width: 94vw; max-height: 88vh;
+      overflow-x: hidden; overflow-y: auto;
       background: linear-gradient(180deg, #181b21 0%, #0e1018 100%);
       border: 1px solid #c9a87a; border-radius: 4px;
       padding: 22px 26px; color: #e8dfc8;
@@ -1288,7 +1303,10 @@
       position: relative;
       display: grid;
       grid-template-columns: 200px 290px 200px;
-      grid-template-rows: repeat(7, 70px);
+      /* Row height bumped 70px -> 78px so weapon cells with affixes
+         + perks + durability bar don't clip the bottom row of stats
+         (overflow:hidden was eating the last ~7px of dense rolls). */
+      grid-template-rows: repeat(7, 78px);
       gap: 5px;
     }
     /* Equipment slot cells are sized to fill the 62px row — swatch on
@@ -2526,7 +2544,9 @@
     #loot-body.body-hidden .loot-col-left { width: 520px; }
     #loot-body.body-hidden #loot-player-slots {
       grid-template-columns: 150px 200px 150px;
-      grid-template-rows: repeat(7, 68px);
+      /* Solo-pane variant inherits the same 78px row height as the
+         main #inv-grid since the cell render is identical. */
+      grid-template-rows: repeat(7, 78px);
       gap: 5px;
     }
     .loot-col { min-width: 0; }
@@ -2587,7 +2607,10 @@
       position: relative;
       display: grid;
       grid-template-columns: 115px 160px 115px;
-      grid-template-rows: repeat(7, 62px);
+      /* See #inv-grid — 62px was tight enough to clip dense weapon
+         cells. 70px gives a row of breathing room without pushing
+         the bottom edge into the dual-pane footer. */
+      grid-template-rows: repeat(7, 70px);
       gap: 4px;
       margin-bottom: 6px;
     }
@@ -2948,7 +2971,10 @@
       position: relative;
       display: grid;
       grid-template-columns: 115px 160px 115px;
-      grid-template-rows: repeat(7, 62px);
+      /* Row height bumped 62px -> 70px so weapon/armor cells with
+         affixes + perks + durability bar don't clip. Mirrors the
+         #loot-slots tuning above so both panes feel consistent. */
+      grid-template-rows: repeat(7, 70px);
       gap: 4px;
       margin-bottom: 6px;
     }
@@ -3633,7 +3659,10 @@
       font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
     }
     #relics-card {
-      width: 720px; max-width: 96vw; max-height: 88vh; overflow-y: auto;
+      /* box-sizing + explicit overflow-x:hidden — see #menu-card. */
+      box-sizing: border-box;
+      width: 720px; max-width: 96vw; max-height: 88vh;
+      overflow-x: hidden; overflow-y: auto;
       background: linear-gradient(180deg, #181b21 0%, #10121a 100%);
       border: 1px solid rgba(170, 130, 200, 0.55);
       border-radius: 8px; color: #e8dfc8;
