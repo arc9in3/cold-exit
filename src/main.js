@@ -22034,7 +22034,13 @@ function tick() {
         if (sorted.length === 0 && fatal) {
           const row = document.createElement('div');
           row.className = 'death-stat-row';
-          row.innerHTML = `<span class="death-stat-label">${fatal.name || 'Unknown'}</span><span class="death-stat-val">${Math.round(fatal.amount || 0)} dmg</span>`;
+          // Truncate the fatal-attacker name in case a modded enemy
+          // or megaboss carries a very long display name — long
+          // strings would push the dmg column off the row.
+          const rawName = fatal.name || 'Unknown';
+          const dispName = rawName.length > 28 ? rawName.slice(0, 27) + '…' : rawName;
+          const safeName = dispName.replace(/&/g, '&amp;').replace(/</g, '&lt;');
+          row.innerHTML = `<span class="death-stat-label" title="${rawName.replace(/"/g, '&quot;')}">${safeName}</span><span class="death-stat-val">${Math.round(fatal.amount || 0)} dmg</span>`;
           listEl.appendChild(row);
         }
       }

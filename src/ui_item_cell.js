@@ -163,7 +163,7 @@ export function renderItemCell(item, slotId = null, opts = {}) {
       ${artInner}
       ${brokenTag}
       ${markTag}
-      <div class="cell-name-overlay">${item.name}</div>
+      <div class="cell-name-overlay" title="${(item.name || '').replace(/<[^>]*>/g, '').replace(/"/g, '&quot;')}">${item.name}</div>
     </div>
     <div class="cell-stats">
       ${stats.join('')}

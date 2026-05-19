@@ -1027,6 +1027,19 @@ export class LootUI {
         default: return;
       }
       if (!it) return;
+      // Eligibility gate — assignActionSlot would silently fail with
+      // a generic "Cannot bind" message for any non-quickslot-eligible
+      // item (weapons, armor). Surface a clearer message earlier so
+      // the player knows WHY their click didn't work, not just that
+      // it didn't.
+      const isEligible = window.__isQuickslotEligible
+        ? window.__isQuickslotEligible(it)
+        : (it.type === 'consumable' || it.type === 'throwable');
+      if (!isEligible) {
+        e.preventDefault(); e.stopPropagation();
+        window.__hudMsg?.('Only consumables / throwables can bind to action slots', 1.8);
+        return;
+      }
       const ok = this.inventory.assignActionSlot(slotIdx, it);
       if (ok) {
         e.preventDefault(); e.stopPropagation();

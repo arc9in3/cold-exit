@@ -555,7 +555,17 @@ export class ShopUI {
       this.smithConfirmBtn.disabled = true;
       this.smithConfirmBtn.style.opacity = '0.55';
       this.smithConfirmBtn.style.cursor = 'default';
-      this.smithConfirmBtn.textContent = reason || 'Pick target + affix';
+      // Stage the prompt so the player knows what's missing rather
+      // than always reading "Pick target + affix" even when one is
+      // already selected.
+      let hint;
+      if (reason) hint = reason;
+      else if (!target && !source) hint = 'Pick target + material';
+      else if (!target) hint = 'Pick a target';
+      else if (!source) hint = 'Pick a material';
+      else if (!this.smith.affix) hint = 'Pick an affix';
+      else hint = 'Pick target + affix';
+      this.smithConfirmBtn.textContent = hint;
     }
   }
 
@@ -939,11 +949,32 @@ export class ShopUI {
       if (typeof window.__recomputeStats === 'function') window.__recomputeStats();
       this._flash(`Repaired ${repaired} · −${totalCost}c`);
     } else {
-      this._flash(this.merchant?.kind === 'gunsmith' ? 'No broken weapons to repair'
-                : this.merchant?.kind === 'armorer'  ? 'No broken armor to repair'
-                : 'This merchant doesn\'t repair gear');
+      // Distinguish three cases: no damaged items at all, can't
+      // afford anything, or wrong merchant. The old text always said
+      // "no broken X" even when items existed but the player was
+      // broke, which felt buggy.
+      const anyDamaged = this._damagedRepairables().length > 0;
+      this._flash(
+        !this._canRepairAny()
+          ? 'This merchant doesn\'t repair gear'
+        : anyDamaged
+          ? 'Not enough credits to repair anything'
+        : this.merchant?.kind === 'gunsmith'
+          ? 'No damaged weapons to repair'
+        : this.merchant?.kind === 'armorer'
+          ? 'No damaged armor to repair'
+        : 'Nothing to repair'
+      );
     }
     this.render();
+  }
+
+  // Quick check used by the Repair All flash — does this merchant
+  // handle ANY type at all? Independent of whether the player owns
+  // damaged items.
+  _canRepairAny() {
+    const k = this.merchant?.kind;
+    return k === 'gunsmith' || k === 'armorer';
   }
 
   // Brief on-screen toast — surfaces bulk-action results without
@@ -1115,7 +1146,10 @@ export class ShopUI {
       // UNFILTERED bag so the bulk-action button states reflect the
       // real backpack contents, not the filtered view.
       hasAny = true;
-      if (it.type === 'junk') anyJunk = true;
+      // Mirror _sellAllJunk's selection: type==='junk' OR markedJunk,
+      // ignoring markedKeep. The button must read the same set to
+      // honestly reflect what would happen on click.
+      if (!it.markedKeep && (it.type === 'junk' || it.markedJunk)) anyJunk = true;
       const isBroken = it.durability && it.durability.current <= 0;
       const canRepair = isBroken && this._canRepair(it);
       if (canRepair) anyRepairable = true;
@@ -1179,6 +1213,20 @@ export class ShopUI {
       empty.className = 'shop-empty';
       empty.textContent = 'Nothing to sell.';
       this.bagEl.appendChild(empty);
+    }
+
+    // Sell-All-Junk button state — was previously never updated,
+    // staying fully enabled even when the bag had nothing junk-typed
+    // or marked-junk. Clicking did nothing but the button gave no
+    // visual signal. Now grays out + tooltip when there's nothing to
+    // sell, matching the disabled treatment used by Repair All.
+    if (this.sellJunkBtn) {
+      this.sellJunkBtn.disabled = !anyJunk;
+      this.sellJunkBtn.style.opacity = anyJunk ? '1' : '0.55';
+      this.sellJunkBtn.style.cursor = anyJunk ? 'pointer' : 'default';
+      this.sellJunkBtn.title = anyJunk
+        ? 'Sell every junk item + anything you marked as junk'
+        : 'No junk to sell — mark items with J or pick up some scrap';
     }
 
     // Drop targets: drag from bag onto stock column = sell; from stock
