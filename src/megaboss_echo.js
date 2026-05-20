@@ -373,6 +373,32 @@ export class MegaBossEcho {
     const targetHex = hpRatio > 0.75 ? 0xb892f0 : hpRatio > 0.35 ? 0xff70d0 : 0xff5070;
     if (this.eyeMat) this.eyeMat.color.setHex(targetHex);
     if (this.beamMat) this.beamMat.opacity = this.phase === 3 ? 0.65 : 0;
+    // Sweep beam rotation — driven by sweepAngle, which on the joiner
+    // is updated by _coopApplyHazardMirrors (snapshot-synced). Without
+    // this the joiner beam stayed at angle 0 even though the host had
+    // rotated it through phase 3.
+    if (this.phase === 3 && this.beamMesh) {
+      this.beamMesh.rotation.y = this.sweepAngle;
+    }
+  }
+
+  // Coop encode: phase-3 sweep beam angle. Host-authoritative. Echo
+  // ghosts are handled by the separate _coopEncodeGhosts; this is
+  // the BEAM portion. Returning null when phase < 3 keeps the
+  // snapshot compact for the entire first 65% of the fight.
+  _coopEncodeHazards() {
+    if (this.phase !== 3) return null;
+    return { sa: +this.sweepAngle.toFixed(3) };
+  }
+
+  // Coop apply: writes synced sweep angle so tickVisuals' beam
+  // rotation lands on the same value the host is rendering. Player-
+  // damage cone (_sweepDamageCheck on host) routes through
+  // damageRemotePlayersInCone using the host's authoritative angle,
+  // so the joiner's mirrored beam reads as "where you'll get hit".
+  _coopApplyHazardMirrors(hz) {
+    if (!hz) return;
+    if (typeof hz.sa === 'number') this.sweepAngle = hz.sa;
   }
 
   // Slow orbital drift around the spawn-time arena center. Host-only

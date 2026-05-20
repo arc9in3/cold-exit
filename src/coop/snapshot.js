@@ -319,7 +319,10 @@ export function encodeEnemySnapshot(gunmen, melees, seq, t, loot = null, droneMg
       // Burn DoT visual — sent only when active (>0) so the typical
       // snapshot stays small. Joiner reads this in _applyInterp to
       // pose flame particles on the right enemy.
-      ...(g.burnT > 0 ? { bt: +g.burnT.toFixed(2), bs: g.burnStacks | 0 } : {}),
+      // Burn-stack bound — clamp 0-10 so a host-side NaN / runaway
+      // counter (rare but possible if a burn-tick reentrancy bug
+      // ever lands) can't propagate weird values to the joiner.
+      ...(g.burnT > 0 ? { bt: +g.burnT.toFixed(2), bs: Math.max(0, Math.min(10, g.burnStacks | 0)) } : {}),
     });
   }
   for (const e of melees.enemies) {
@@ -334,7 +337,7 @@ export function encodeEnemySnapshot(gunmen, melees, seq, t, loot = null, droneMg
       s: e.state || 'idle',
       ...(e.tier && e.tier !== 'normal' ? { t: e.tier } : {}),
       ...(e.variant ? { v: e.variant } : {}),
-      ...(e.burnT > 0 ? { bt: +e.burnT.toFixed(2), bs: e.burnStacks | 0 } : {}),
+      ...(e.burnT > 0 ? { bt: +e.burnT.toFixed(2), bs: Math.max(0, Math.min(10, e.burnStacks | 0)) } : {}),
     });
   }
   return {
@@ -671,7 +674,11 @@ function _applyInterp(entity, a, b, alpha) {
   // same flame pose as a host-side burning enemy. Decays naturally
   // in the next snapshot when the host clears burnT.
   entity.burnT = +b.bt || 0;
-  entity.burnStacks = b.bs | 0;
+  // Defensive clamp on apply too — host now bounds the encoded value
+  // to 0..10, but mirroring also clamps so a stale snapshot from an
+  // older host build can't push a runaway stack count into the
+  // joiner's per-frame visual code.
+  entity.burnStacks = Math.max(0, Math.min(10, b.bs | 0));
 }
 
 // Per-list netId → entity cache. Rebuilt when the list length
