@@ -1660,7 +1660,16 @@ export class MegaBoss {
     if (this.boss) {
       this.scene.remove(this.boss);
       this.boss.traverse(o => {
-        if (o.geometry && !o.geometry.userData?.sharedRigGeom) o.geometry.dispose?.();
+        // Two skip flags now: `sharedRigGeom` is the rig pool used
+        // by the player + enemies; `skipDispose` is for the module-
+        // level shared geoms I added (smoke puffs, fire patches,
+        // embers — all parented under boss). Without checking the
+        // second flag, this traverse disposed those shared geoms on
+        // boss death and the next Arboter spawn rendered as empty.
+        if (!o.geometry) return;
+        const ud = o.geometry.userData;
+        if (ud?.sharedRigGeom || ud?.skipDispose) return;
+        o.geometry.dispose?.();
       });
     }
     if (this._barEl) {
