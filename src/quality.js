@@ -135,15 +135,19 @@ export function applyQuality(mode, ctx = {}) {
   // adding fuzzy dark edges across every cel-band cliff. Bloom + grade
   // on top combined into "muddier than the raw render."
   //
-  // Flipped to OFF on every tier so high == low visually for the post
-  // chain; the rest of the high-tier upgrades (shadows, side lights,
-  // higher pixel ratio, muzzle lights) still apply. Re-enable per-
-  // session via `localStorage.coldExitPostFx = '1'` once the chain is
-  // re-tuned (planned: outline → 0.30, grade → 0.15, bloom → 0.20).
-  let _postFxOptIn = false;
-  try { _postFxOptIn = localStorage.getItem('coldExitPostFx') === '1'; }
-  catch (_) {}
-  qualityFlags.postFx = _postFxOptIn && !low;
+  // 2026-05-28: re-tuned + re-enabled for high tier. The loud Sobel
+  // outline (0.78) is down to 0.30, grade 0.40 → 0.15, bloom 0.40 →
+  // 0.20, and ACES tone mapping now sits in front so bloom reads as
+  // light instead of white clip. Default ON for high; opt OUT per
+  // session via `localStorage.coldExitPostFx = '0'` if it regresses
+  // (opt IN with '1' still forces it on a low tier for testing).
+  let _postFxPref = null;
+  try {
+    const v = localStorage.getItem('coldExitPostFx');
+    if (v === '0') _postFxPref = false;
+    else if (v === '1') _postFxPref = true;
+  } catch (_) {}
+  qualityFlags.postFx = (_postFxPref !== null ? _postFxPref : true) && !low;
   // Off on low + potato: pure visual fluff with no gameplay signal.
   qualityFlags.combatVfx = !low;
   // muzzleFlashSprites + tracerParticles stay TRUE on every tier
