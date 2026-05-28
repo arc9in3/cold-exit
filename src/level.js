@@ -4715,6 +4715,15 @@ export class Level {
       return 'standard';
     };
 
+    // 2026-05-23: SPAWN_MULT was briefly set to 2 for coop testing.
+    // Reverted to 1 — the 2x doubled the Math.random() call count per
+    // room (variant picks), amplifying any host/joiner RNG divergence
+    // (e.g. contract modifiers, cached JS) and breaking determinism
+    // that keyAssignments + netId-based snapshot sync rely on.
+    // Symptoms when out of sync: floating dead bodies on joiner,
+    // doors visible to host but not joiner, melee kills not syncing.
+    const SPAWN_MULT = 1;
+
     if (room.type === 'combat') {
       // Enemy count ramps continuously past L4 instead of flatlining.
       // Past L4 we layer +1 melee per 3 levels and +1 gunman per 4
@@ -4744,13 +4753,13 @@ export class Level {
         }
         return entry;
       };
-      const meleesN = Math.round((meleeBase + meleeBonus + meleeLevelExtra) * densityMult);
+      const meleesN = Math.round((meleeBase + meleeBonus + meleeLevelExtra) * densityMult * SPAWN_MULT);
       const gunmanChance = lv <= 1 ? 0.35 : lv <= 3 ? 0.65 : 0.85;
       const baseGunmen = Math.random() < gunmanChance
         ? (lv >= 4 && Math.random() < 0.25 ? 2 : 1)
         : 0;
       const gunmenLevelExtra = Math.min(2, Math.floor(Math.max(0, lv - 5) / 4));
-      const gunmenN = Math.round((baseGunmen + gunmenLevelExtra) * densityMult);
+      const gunmenN = Math.round((baseGunmen + gunmenLevelExtra) * densityMult * SPAWN_MULT);
       for (let i = 0; i < meleesN; i++) {
         const p = pickOpen();
         this.enemySpawns.push(_maybePromote({
@@ -4774,7 +4783,7 @@ export class Level {
         variant: subVariant,
       });
       // Level 1 sub-bosses solo; later levels get escorts.
-      const escorts = lv <= 1 ? 0 : (lv <= 3 ? 1 : 2);
+      const escorts = (lv <= 1 ? 0 : (lv <= 3 ? 1 : 2)) * SPAWN_MULT;
       for (let i = 0; i < escorts; i++) {
         const pi = pickOpen();
         this.enemySpawns.push({
@@ -4854,8 +4863,8 @@ export class Level {
       });
       // Boss room escorts scale with level — level 1 boss is the boss
       // and a single melee so the final fight is tight but survivable.
-      const bossMelees = lv <= 1 ? 1 : 2;
-      const bossDashers = lv <= 1 ? 0 : 1;
+      const bossMelees = (lv <= 1 ? 1 : 2) * SPAWN_MULT;
+      const bossDashers = (lv <= 1 ? 0 : 1) * SPAWN_MULT;
       for (let i = 0; i < bossDashers; i++) {
         const pEscort = pickOpen(2);
         this.enemySpawns.push({

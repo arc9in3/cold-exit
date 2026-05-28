@@ -3777,11 +3777,29 @@ function _coopNeuterThrowOpts(opts) {
 // peer's enc.state — they can talk to their own copy independently.
 let _coopHostEncounterIds = [];
 let _coopForcedEncounterQueue = [];
+// Host's spawn-affecting modifiers (spawnDensityMult, eliteChanceMult),
+// stashed from level-seed broadcasts. Used to override the joiner's
+// local _activeModifiers during regen so spawn determinism holds
+// regardless of whether the joiner picked the same contract. Without
+// this, host with "Press Wave" (sdm=1.3) and joiner with no contract
+// (sdm=1) consume different Math.random counts during spawn — netIds
+// desync, joiner sees frozen enemies + lingering corpses + broken
+// snapshot apply. Other modifier fields stay per-peer (damage taken,
+// run timer, etc. — those are personal challenges, not shared world state).
+let _coopHostSpawnModifiers = null;
 function _coopPickEncounter(levelIndex) {
   const t = getCoopTransport();
   if (t.isOpen && !t.isHost && _coopForcedEncounterQueue.length > 0) {
     const id = _coopForcedEncounterQueue.shift();
-    if (id && ENCOUNTER_DEFS[id]) return ENCOUNTER_DEFS[id];
+    // Empty-string sentinel = host's pickEncounterForLevel returned
+    // null for this slot, so the slot should demote to combat on the
+    // joiner too. Without honoring this, the queue drifted by one
+    // every time host saw an exhausted-pool slot, mis-mapping every
+    // subsequent encounter on the joiner side.
+    if (!id) return null;
+    if (ENCOUNTER_DEFS[id]) return ENCOUNTER_DEFS[id];
+    // Unknown id (probably build mismatch) — fall through to local
+    // pick rather than break the slot entirely.
   }
   // Isolate the pick from the outer seeded RNG. Without this, host's
   // pickEncounterForLevel consumes Math.random calls that the joiner
@@ -3793,7 +3811,9 @@ function _coopPickEncounter(levelIndex) {
   const def = _withOriginalRandom(() => pickEncounterForLevel(
     levelIndex, _runCompletedEncounters, runStats, artifacts, inventory,
   ));
-  if (t.isOpen && t.isHost && def) _coopHostEncounterIds.push(def.id);
+  // Push EVERY slot's pick (including nulls as ''), so the joiner's
+  // queue length matches the host's slot count — keeps pops aligned.
+  if (t.isOpen && t.isHost) _coopHostEncounterIds.push(def ? def.id : '');
   return def;
 }
 
@@ -4566,6 +4586,10 @@ function _ensureCoopLobby() {
     transport.send('level-seed', {
       seed: _runSeed, levelIndex: lv,
       enc: _coopHostEncounterIds.slice(),
+      mod: {
+        sdm: +(_activeModifiers?.spawnDensityMult || 1),
+        ecm: +(_activeModifiers?.eliteChanceMult || 1),
+      },
     });
     console.log('[coop] re-broadcasting level-seed on peer-in',
       { seed: _runSeed, levelIndex: lv, encounters: _coopHostEncounterIds });
@@ -4953,8 +4977,56 @@ function _ensureCoopLobby() {
       try {
         const fp = new THREE.Vector3(body.x1 || 0, body.y1 || 1, body.z1 || 0);
         const tp = new THREE.Vector3(body.x2 || 0, body.y2 || 1, body.z2 || 0);
-        combat.spawnShot(fp, tp, body.c | 0xffd040, { light: false, flash: true });
+        const opts = { light: false, flash: true };
+        if (typeof body.th === 'number') opts.thickness = body.th;
+        combat.spawnShot(fp, tp, body.c | 0xffd040, opts);
       } catch (_) {}
+      return;
+    }
+    if (kind === 'fx-flame') {
+      // A peer fired a flamethrower tick (player or host's AI flamer).
+      // Spawn visual flame particles locally so the cone is visible to
+      // teammates. Damage is host-authoritative (player flame applies
+      // via the normal applyHit → rpc-shoot pipeline; AI flame applies
+      // via the per-tick coop damage send already in aiFireFlame).
+      if (!body || from === transport.peerId) return;
+      try {
+        const origin = new THREE.Vector3(+body.ox || 0, +body.oy || 1, +body.oz || 0);
+        const dir = new THREE.Vector3(+body.dx || 0, 0, +body.dz || 0);
+        if (dir.lengthSq() < 0.0001) return;
+        dir.normalize();
+        combat.spawnFlameParticles(origin, dir, +body.r || 6.5, +body.a || 0.6);
+      } catch (e) { console.warn('[coop] fx-flame apply failed', e); }
+      return;
+    }
+    if (kind === 'fx-projectile') {
+      // A peer fired a non-grenade projectile (e.g. explosive crossbow
+      // bolt). Spawn a visual-only mirror — owner='remote', explosion
+      // damage 0 — so the bolt flies, sticks, and pops with FX, but
+      // damage stays host-authoritative via the normal AoE pipeline +
+      // snapshot kill flags.
+      if (!body || from === transport.peerId) return;
+      try {
+        const pos = new THREE.Vector3(+body.px || 0, +body.py || 1, +body.pz || 0);
+        const vel = new THREE.Vector3(+body.vx || 0, +body.vy || 0, +body.vz || 0);
+        const isSticky = body.ty === 'sticky';
+        projectiles.spawn({
+          pos, vel,
+          type: 'rocket',
+          lifetime: +body.lt || 5.0,
+          radius: +body.r || 0.14,
+          color: (body.c | 0) || 0xff6020,
+          explosion: {
+            radius: +body.er || 3.0,
+            damage: 0,                  // visual mirror — host applies real damage
+            shake: 0.4,
+          },
+          owner: 'remote',
+          gravity: 0,                   // flat-flying bolt
+          bounciness: 0,
+          ...(isSticky ? { stickyImpact: true, fuseSec: +body.fs || 0.6 } : {}),
+        });
+      } catch (e) { console.warn('[coop] fx-projectile apply failed', e); }
       return;
     }
     if (kind === 'rpc-team-kill') {
@@ -4994,6 +5066,14 @@ function _ensureCoopLobby() {
         if (arch) {
           runStats.noteArchetypeKill(arch);
           _applyContractPerKillReward(arch);
+        }
+        // Mastery XP — host attributed the kill to us; advance OUR
+        // local classMastery so the joiner's mastery ladder + pick
+        // queue progress on their own kills. Without this, joiners
+        // never level a weapon class in coop.
+        if (body.w) {
+          try { awardClassXp(body.w, body.ti || 'normal', null); }
+          catch (err) { console.warn('[coop] rpc-grant-rewards mastery xp failed', err); }
         }
         _refreshSkillPointPip();
         // Coin burst at the kill position (host included it in the
@@ -5244,10 +5324,18 @@ function _ensureCoopLobby() {
         // applyHit can't leak ownership into subsequent host-local
         // spawns.
         const _prevClaimer = (typeof window !== 'undefined') ? window.__coopCurrentClaimer : null;
+        const _prevWeaponClass = (typeof window !== 'undefined') ? window.__coopCurrentWeaponClass : null;
         const wasAlive = target.alive;
         let result = null;
         try {
-          if (typeof window !== 'undefined') window.__coopCurrentClaimer = from;
+          if (typeof window !== 'undefined') {
+            window.__coopCurrentClaimer = from;
+            // Carries the joiner's weapon class through onEnemyKilled →
+            // rpc-grant-rewards so the joiner's classMastery ladder
+            // can advance for their own kills. Without this, joiner
+            // kills awarded no mastery XP on either side.
+            window.__coopCurrentWeaponClass = body.w || null;
+          }
           result = target.manager.applyHit(target, dmg, zone, null,
             { weaponClass: body.w || 'rpc', shieldBreaker: !!body.sb });
           // Fire the local kill pipeline if this hit dropped the
@@ -5273,7 +5361,10 @@ function _ensureCoopLobby() {
         } catch (err) {
           console.warn('[coop] rpc-shoot apply failed', err);
         } finally {
-          if (typeof window !== 'undefined') window.__coopCurrentClaimer = _prevClaimer;
+          if (typeof window !== 'undefined') {
+            window.__coopCurrentClaimer = _prevClaimer;
+            window.__coopCurrentWeaponClass = _prevWeaponClass;
+          }
         }
       }
       return;
@@ -5300,6 +5391,22 @@ function _ensureCoopLobby() {
     // queue here (vs preserving across messages) means a duplicate
     // level-seed broadcast doesn't double-stack the queue.
     _coopForcedEncounterQueue = Array.isArray(body.enc) ? body.enc.slice() : [];
+    // Spawn-affecting modifiers from host — applied via
+    // _withHostSpawnModifiers during regen so spawn RNG consumption
+    // matches host's (which depends on contract sdm/ecm). Without
+    // this, peers with different contracts get different spawn
+    // counts → netIds desync → frozen melees + lingering corpses
+    // + door/key state drift on joiner.
+    if (body.mod && typeof body.mod === 'object') {
+      _coopHostSpawnModifiers = {
+        sdm: +body.mod.sdm || 1,
+        ecm: +body.mod.ecm || 1,
+      };
+    } else {
+      // Legacy host build without mod field — clear so we don't
+      // apply stale values from a previous broadcast.
+      _coopHostSpawnModifiers = null;
+    }
     if (needsRegen && level) {
       // Drop-in mid-run — joiner connected from the menu without
       // having clicked Play first. Auto-start a default run so they
@@ -6434,6 +6541,24 @@ function _withRunSeed(seed, fn) {
   finally { Math.random = orig; }
 }
 
+// Joiner-only: temporarily override _activeModifiers' spawn fields
+// with host's values from the latest level-seed broadcast, so spawn
+// determinism doesn't break when peers have different active
+// contracts. Returns an undo function (no-op on host or when no
+// stash is available).
+function _withHostSpawnModifiers(fn) {
+  const t = getCoopTransport();
+  if (!t.isOpen || t.isHost || !_coopHostSpawnModifiers) return fn();
+  const saved = _activeModifiers;
+  _activeModifiers = {
+    ...saved,
+    spawnDensityMult: _coopHostSpawnModifiers.sdm ?? 1,
+    eliteChanceMult:  _coopHostSpawnModifiers.ecm ?? 1,
+  };
+  try { return fn(); }
+  finally { _activeModifiers = saved; }
+}
+
 function regenerateLevel() {
   // Active contract: Pressure resets per-floor. Reset here (the
   // single funnel for "start a fresh floor") rather than at the
@@ -6482,7 +6607,8 @@ function regenerateLevel() {
   // Coop encounter sync — reset the host's per-floor pick log before
   // regen runs so it accumulates only this floor's choices.
   if (transport.isOpen && transport.isHost) _coopHostEncounterIds = [];
-  const result = _withRunSeed(_getEffectiveSeed(), () => _regenerateLevelImpl());
+  const result = _withRunSeed(_getEffectiveSeed(),
+    () => _withHostSpawnModifiers(() => _regenerateLevelImpl()));
   // Broadcast AFTER generation so joiners apply the seed for their
   // own regen call. Encounter ids attached so both peers see the
   // SAME encounter (interaction state stays per-peer locally).
@@ -6491,6 +6617,14 @@ function regenerateLevel() {
     transport.send('level-seed', {
       seed: _runSeed, levelIndex: lv,
       enc: _coopHostEncounterIds.slice(),
+      // Spawn-affecting modifiers from the host's active contract.
+      // Joiner stashes these and overrides its local _activeModifiers
+      // spawn fields for the duration of regen so spawn determinism
+      // holds even when peers have different contracts.
+      mod: {
+        sdm: +(_activeModifiers?.spawnDensityMult || 1),
+        ecm: +(_activeModifiers?.eliteChanceMult || 1),
+      },
     });
     console.log('[coop] broadcasting level-seed',
       { seed: _runSeed, levelIndex: lv, encounters: _coopHostEncounterIds });
@@ -10139,6 +10273,20 @@ function tickFlame(dt, playerInfo, weapon, inputState, aimInfo) {
   alertEnemiesFromShot(origin);
 
   combat.spawnFlameParticles(origin, dir, range, angleRad);
+  // Coop: broadcast the flame tick so peers see our flamethrower.
+  // Per-tick send (max ~20/sec while LMB held) — small wire payload
+  // and the receiver just spawns visual particles, no damage.
+  {
+    const _coopT = getCoopTransport();
+    if (_coopT.isOpen && _coopT.peers && _coopT.peers.size > 0) {
+      _coopT.send('fx-flame', {
+        ox: +origin.x.toFixed(2), oy: +origin.y.toFixed(2), oz: +origin.z.toFixed(2),
+        dx: +dir.x.toFixed(3), dz: +dir.z.toFixed(3),
+        r: +range.toFixed(2),
+        a: +angleRad.toFixed(3),
+      });
+    }
+  }
 
   // Snapshot the flame cone so encounters can detect "fire reached me"
   // without parsing projectiles. Path of Fire uses this to accept a
@@ -10510,8 +10658,20 @@ function firePlayerRicochet(playerInfo, weapon, aimPoint) {
           _rx_origin.y,
           _rx_origin.z + _rx_dir.z * range,
         );
-    combat.spawnShot(_rx_origin, endPoint, weapon.tracerColor || 0xffd8a0,
+    const _rxColor = weapon.tracerColor || 0xffd8a0;
+    combat.spawnShot(_rx_origin, endPoint, _rxColor,
       { light: false, flash: bounceIdx === 0 });
+    // Coop: broadcast each bounce leg so peers see the full ricochet path.
+    {
+      const _coopT = getCoopTransport();
+      if (_coopT.isOpen && _coopT.peers && _coopT.peers.size > 0) {
+        _coopT.send('fx-tracer-self', {
+          x1: +_rx_origin.x.toFixed(2), y1: +_rx_origin.y.toFixed(2), z1: +_rx_origin.z.toFixed(2),
+          x2: +endPoint.x.toFixed(2),   y2: +endPoint.y.toFixed(2),   z2: +endPoint.z.toFixed(2),
+          c: _rxColor | 0,
+        });
+      }
+    }
     if (!hit) return;     // open-air miss ends the shot
     const isEnemy = !!(hit.owner && hit.owner.manager && hit.owner.alive);
     if (isEnemy) {
@@ -10603,8 +10763,20 @@ function firePlayerGauss(playerInfo, weapon, aimPoint) {
         _gr_origin.y,
         _gr_origin.z + _gr_dir.z * range,
       );
-  combat.spawnShot(_gr_origin, endPoint, weapon.tracerColor || 0xa0e0ff,
+  const _grColor = weapon.tracerColor || 0xa0e0ff;
+  combat.spawnShot(_gr_origin, endPoint, _grColor,
     { light: false, flash: true });
+  // Coop: broadcast the gauss tracer so peers see the shot.
+  {
+    const _coopT = getCoopTransport();
+    if (_coopT.isOpen && _coopT.peers && _coopT.peers.size > 0) {
+      _coopT.send('fx-tracer-self', {
+        x1: +_gr_origin.x.toFixed(2), y1: +_gr_origin.y.toFixed(2), z1: +_gr_origin.z.toFixed(2),
+        x2: +endPoint.x.toFixed(2),   y2: +endPoint.y.toFixed(2),   z2: +endPoint.z.toFixed(2),
+        c: _grColor | 0,
+      });
+    }
+  }
   if (!hit) return;
   const isEnemy = !!(hit.owner && hit.owner.manager && hit.owner.alive);
   if (!isEnemy) return;
@@ -10684,15 +10856,18 @@ function firePlayerStickyExplosive(playerInfo, weapon, aimPoint) {
   const explosionDmg = (weapon.explosionDmg || 50) * (derivedStats.rangedDmgMult || 1);
   const stuckBonus  = (weapon.stuckBonusDmg || 35) * (derivedStats.rangedDmgMult || 1);
   const tracerColor = weapon.tracerColor || 0xff6020;
+  const radius = 0.14;
+  const explosionRadius = weapon.explosionRadius || 3.0;
+  const fuseSec = weapon.fuseSec || 0.6;
   projectiles.spawn({
     pos: origin,
     vel: new THREE.Vector3(dir.x * speed, 0, dir.z * speed),
     type: 'rocket',
     lifetime: 5.0,             // safety cap — sticky path overrides via fuseSec
-    radius: 0.14,
+    radius,
     color: tracerColor,
     explosion: {
-      radius: weapon.explosionRadius || 3.0,
+      radius: explosionRadius,
       damage: explosionDmg,
       shake: 0.6,
     },
@@ -10701,7 +10876,7 @@ function firePlayerStickyExplosive(playerInfo, weapon, aimPoint) {
     bounciness: 0,
     // Sticky behaviour — see projectiles.js update() for the handler.
     stickyImpact: true,
-    fuseSec: weapon.fuseSec || 0.6,
+    fuseSec,
     // Closure: applies bonus damage to the stuck enemy at detonation
     // time, BEFORE the AoE explosion fans out. Kept on the spec so
     // projectiles.js can call it without needing a damage-pipeline ref.
@@ -10734,6 +10909,26 @@ function firePlayerStickyExplosive(playerInfo, weapon, aimPoint) {
   if (sfx.fire) sfx.fire('exotic');
   runStats.noteFireWeaponClass('exotic');
   alertEnemiesFromShot(origin);
+  // Coop: broadcast a visual-only mirror projectile so other peers see
+  // the bolt fly, stick, and detonate. Damage is host-authoritative
+  // (the host's own sim applies it via the normal AoE pipeline + the
+  // snapshot then carries the kill flag). The mirror runs locally on
+  // remote peers with damage=0 and owner='remote'.
+  {
+    const _coopT = getCoopTransport();
+    if (_coopT.isOpen && _coopT.peers && _coopT.peers.size > 0) {
+      _coopT.send('fx-projectile', {
+        px: +origin.x.toFixed(2), py: +origin.y.toFixed(2), pz: +origin.z.toFixed(2),
+        vx: +(dir.x * speed).toFixed(2), vy: 0, vz: +(dir.z * speed).toFixed(2),
+        ty: 'sticky',                 // crossbow bolt — sticky+fuse profile
+        r: radius,
+        c: tracerColor | 0,
+        er: explosionRadius,
+        fs: fuseSec,
+        lt: 5.0,
+      });
+    }
+  }
 }
 
 // Charge Cannon — hold LMB to charge, release to fire at the achieved
@@ -10820,8 +11015,23 @@ function firePlayerCharge(playerInfo, weapon, aimPoint, tierIdx) {
     _vc_origin.y,
     _vc_origin.z + _vc_dir.z * beamLen,
   );
-  combat.spawnShot(_vc_origin, _vc_endPt, weapon.tracerColor || 0x40d0ff,
+  const _vcColor = weapon.tracerColor || 0x40d0ff;
+  combat.spawnShot(_vc_origin, _vc_endPt, _vcColor,
     { light: false, flash: true, thickness: tier.beamWidth });
+  // Coop: broadcast the beam tracer (with thickness) so peers see the
+  // charge cannon shot. Thickness travels on `th`; receiver passes it
+  // to combat.spawnShot so the beam reads at the right gauge.
+  {
+    const _coopT = getCoopTransport();
+    if (_coopT.isOpen && _coopT.peers && _coopT.peers.size > 0) {
+      _coopT.send('fx-tracer-self', {
+        x1: +_vc_origin.x.toFixed(2), y1: +_vc_origin.y.toFixed(2), z1: +_vc_origin.z.toFixed(2),
+        x2: +_vc_endPt.x.toFixed(2),  y2: +_vc_endPt.y.toFixed(2),  z2: +_vc_endPt.z.toFixed(2),
+        c: _vcColor | 0,
+        ...(tier.beamWidth ? { th: +tier.beamWidth.toFixed(3) } : {}),
+      });
+    }
+  }
   // Enemy-segment scan — every alive enemy whose XZ centre lies within
   // BEAM_HALF_WIDTH of the beam line AND projects onto the segment
   // (t in [0, beamLen]) takes a full-damage hit. BEAM_HALF_WIDTH is
@@ -12794,6 +13004,12 @@ function _onEnemyKilledImpl(enemy, opts = {}) {
       : 0;
     const credits = _baseCredits + _luckyBonus;
     const skillPts = enemy.tier === 'subBoss' ? 1 : 0;
+    // Joiner's weapon class — set by the rpc-shoot handler before
+    // applyHit dispatched the damage that produced this kill. Lets
+    // the joiner's classMastery advance on their own kills (without
+    // this, only the host's classMastery advanced, and the joiner
+    // never got mastery picks in coop).
+    const _coopWeaponClass = (typeof window !== 'undefined') ? window.__coopCurrentWeaponClass : null;
     try {
       _coopT_kill.send('rpc-grant-rewards', {
         c: credits | 0,
@@ -12804,6 +13020,9 @@ function _onEnemyKilledImpl(enemy, opts = {}) {
         // coin burst at the corpse, not at their own player.
         x: +(enemy.group?.position?.x?.toFixed(2) ?? 0),
         z: +(enemy.group?.position?.z?.toFixed(2) ?? 0),
+        // Weapon class + enemy tier so the joiner can award class XP
+        // locally — mirrors awardClassXp's tier→xp lookup.
+        ...(_coopWeaponClass ? { w: _coopWeaponClass, ti: enemy.tier || 'normal' } : {}),
       }, _coopClaimer);
     } catch (_) {}
     // Host-side team-progress for the joiner kill.
@@ -13157,6 +13376,17 @@ function _tickCoop(dt) {
   // ally rig can read them, plus a firing-event flag that fires a
   // muzzle flash + tracer on the receiver. _coopFiredThisTick is
   // set by the local fire path and consumed (cleared) here.
+  // Refresh `_localInExit` every frame from real player position so
+  // the `xt` bit on the position packet reflects current state, not
+  // "what it was the last time the player pressed E". The old behavior
+  // required peers to press E to register as in-exit, so two
+  // peers walking into the exit zone weren't both recognized as ready
+  // until BOTH had pressed E (and sometimes the host had to press
+  // again to re-check). With this update, just standing in the zone
+  // is enough; the host's first E press immediately advances.
+  if (level && level.isPlayerInExit && player?.mesh?.position) {
+    _localInExit = level.isPlayerInExit(player.mesh.position) && exitCooldown <= 0;
+  }
   _coopBroadcastT -= dt;
   if (_coopBroadcastT <= 0) {
     _coopBroadcastT = 0.2;
@@ -15357,6 +15587,20 @@ function aiFireFlame(origin, dir, weapon, damageMult = 1, source = null) {
     }
   }
   combat.spawnFlameParticles(origin, dir, drawRange, angleRad);
+  // Coop: broadcast the AI's flame cone so joiners see "The Burn"
+  // (and any other AI flamer) instead of taking invisible flame damage.
+  // Per-tick send is fine — only THE BURN tends to flame this hot.
+  {
+    const _coopT = getCoopTransport();
+    if (_coopT.isOpen && _coopT.peers && _coopT.peers.size > 0) {
+      _coopT.send('fx-flame', {
+        ox: +origin.x.toFixed(2), oy: +origin.y.toFixed(2), oz: +origin.z.toFixed(2),
+        dx: +dir.x.toFixed(3), dz: +dir.z.toFixed(3),
+        r: +drawRange.toFixed(2),
+        a: +angleRad.toFixed(3),
+      });
+    }
+  }
   // Coop — joiners caught in the cone (with LoS) also take a flame
   // tick. Same cap formula as the host below; per-tick send so the
   // joiner's `damagePlayer` accumulates the fire stack the same way
