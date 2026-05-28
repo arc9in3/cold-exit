@@ -402,13 +402,13 @@ export class MeleeEnemyManager {
       } catch (_) { /* materials may be shared via the rig pool */ }
     }
 
-    // SHINIGAMI override — 24000 HP baseline plus a per-floor ramp
+    // SHINIGAMI override — 12000 HP baseline plus a per-floor ramp
     // (15% per level past 8). Slightly larger silhouette so the
     // megaboss reads as a distinct named encounter at a glance,
     // not just "another cloaked assassin major boss".
     if (opts.archetype === 'shinigami') {
       const lvIdx = Math.max(8, opts.gearLevel | 0);
-      e.hp = 24000 * (1 + 0.15 * (lvIdx - 8));
+      e.hp = 12000 * (1 + 0.15 * (lvIdx - 8));
       e.maxHp = e.hp;
       // Bump silhouette ~12% above the boss-tier base scale.
       group.scale.set(scale * 1.12, scale * 1.12, scale * 1.12);
