@@ -1,6 +1,6 @@
 import * as THREE from 'three';
 import { tunables } from './tunables.js';
-import { modelForItem, gripOffsetForModelPath, rotationOverrideForModelPath, shouldMirrorInHand, scaleForModelPath } from './model_manifest.js';
+import { modelForItem, gripOffsetForModelPath, rotationOverrideForModelPath, shouldMirrorInHand, scaleForModelPath, scaleForWeapon } from './model_manifest.js';
 import { getCharacterStyle } from './prefs.js';
 import { loadModelClone, fitToRadius } from './gltf_cache.js';
 import { buildRig, initAnim, updateAnim, pokeHit, pokeRecoil, pokeDeath,
@@ -1062,7 +1062,7 @@ export function createPlayer(scene) {
         lmg: 0.75, flame: 0.7, melee: 0.7,
       };
       const cs = CLASS_SCALE[weapon.class] ?? 0.9;
-      fitToRadius(clone, len * cs * scaleForModelPath(modelUrl));
+      fitToRadius(clone, len * cs * scaleForWeapon(weapon, modelUrl));
       const r = weapon.modelRotation;
       const rotOverride = rotationOverrideForModelPath(modelUrl);
       if (rotOverride) {
@@ -1434,7 +1434,7 @@ export function createPlayer(scene) {
         // animpic and lowpoly packs were authored at different
         // baseline scales; per-FBX overrides catch outliers like
         // Makarov (too big) and P90 (too small).
-        fitToRadius(clone, len * cs * scaleForModelPath(modelUrl));
+        fitToRadius(clone, len * cs * scaleForWeapon(weapon, modelUrl));
         // Animpic weapons are authored pointing along -X in their local
         // frame, so a +90° yaw points the barrel along +Z (aim axis).
         // Per-weapon modelRotation on the tunable overrides, then a
@@ -3692,7 +3692,7 @@ export function createPlayer(scene) {
         lmg: 0.75, flame: 0.7, melee: 0.7,
       };
       const cs = CLASS_SCALE[weapon.class] ?? 0.9;
-      fitToRadius(clone, len * cs * scaleForModelPath(modelUrl));
+      fitToRadius(clone, len * cs * scaleForWeapon(weapon, modelUrl));
       const r = weapon.modelRotation;
       const rotOverride = rotationOverrideForModelPath(modelUrl);
       if (rotOverride) {

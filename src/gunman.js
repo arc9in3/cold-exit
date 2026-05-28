@@ -5,7 +5,7 @@ import { buildRig, initAnim, updateAnim, pokeHit, pokeRecoil, pokeDeath } from '
 import { spawnSpeechBubble } from './hud.js';
 import { loadModelClone, fitToRadius } from './gltf_cache.js';
 import { modelForItem, shouldMirrorInHand,
-         rotationOverrideForModelPath, scaleForModelPath,
+         rotationOverrideForModelPath, scaleForModelPath, scaleForWeapon,
          gripOffsetForModelPath } from './model_manifest.js';
 import { buildMeleePrimitive } from './melee_primitives.js';
 import { swapInBakedCorpse } from './corpse_bake.js';
@@ -676,7 +676,7 @@ export class GunmanManager {
           // mirror flag for lowpolyguns, and grip offset. Without
           // these, lowpoly weapons (AK, Spectre, SPC*) showed up
           // backwards in enemy hands.
-          fitToRadius(clone, chosen.muzzleLength * cs * scaleForModelPath(modelUrl));
+          fitToRadius(clone, chosen.muzzleLength * cs * scaleForWeapon(chosen, modelUrl));
           const r = chosen.modelRotation;
           const rotOverride = rotationOverrideForModelPath(modelUrl);
           if (rotOverride) {
