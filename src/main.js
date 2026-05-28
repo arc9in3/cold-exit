@@ -674,6 +674,40 @@ const { scene, camera, updateCamera, resize, groundPlane,
   hemiLight, keyLight, fillLight, rimLight, gridHelper, ground } = createScene();
 applyQuality(initialQuality, { renderer, scene, keyLight, fillLight, rimLight, gridHelper });
 
+// Environment map for subtle PBR specular. The scene is lit by
+// directional lights + hemisphere only — no env reflections — so
+// MeshStandard metal/floor read as flat matte plastic. A DIM gradient
+// environment (cool sky, faint warm horizon band, dark floor) gives
+// standard materials a soft specular sheen + a touch of IBL without
+// flattening the dramatic key/rim lighting. Kept deliberately dark so
+// the noir mood holds: roughness-0.85 walls barely pick it up, the
+// metalness-bearing ground + metal props get a gentle gleam. Toon
+// (character) materials ignore envMap, so enemies are unaffected.
+// One-time PMREM bake at boot; scene.environment auto-applies to every
+// PBR material.
+try {
+  const _envCanvas = document.createElement('canvas');
+  _envCanvas.width = 16; _envCanvas.height = 128;
+  const _ictx = _envCanvas.getContext('2d');
+  const _grad = _ictx.createLinearGradient(0, 0, 0, 128);
+  _grad.addColorStop(0.00, '#2a3050'); // cool sky
+  _grad.addColorStop(0.50, '#191a26'); // mid
+  _grad.addColorStop(0.62, '#382a30'); // faint warm horizon band
+  _grad.addColorStop(1.00, '#0a0a10'); // dark floor
+  _ictx.fillStyle = _grad;
+  _ictx.fillRect(0, 0, 16, 128);
+  const _envTex = new THREE.CanvasTexture(_envCanvas);
+  _envTex.mapping = THREE.EquirectangularReflectionMapping;
+  _envTex.colorSpace = THREE.SRGBColorSpace;
+  const _pmrem = new THREE.PMREMGenerator(renderer);
+  _pmrem.compileEquirectangularShader();
+  scene.environment = _pmrem.fromEquirectangular(_envTex).texture;
+  _envTex.dispose();
+  _pmrem.dispose();
+} catch (e) {
+  console.warn('[gfx] env map bake failed (non-fatal):', e);
+}
+
 // Post-FX composer — bloom + vignette/grain. Only rendered through
 // when qualityFlags.postFx is on; low mode falls back to a direct
 // renderer.render call.
