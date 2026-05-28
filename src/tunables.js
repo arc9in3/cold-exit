@@ -29,9 +29,9 @@ export const tunables = {
   // frame so console edits take effect without a reload. Press F3
   // in-game to dump the current values to the browser console.
   lighting: {
-    hemiSky:             0x4a1575,
-    hemiGround:          0x1e1f25,
-    hemiIntensity:       0.000,
+    hemiSky:             0x6a78a0,
+    hemiGround:          0x2a2230,
+    hemiIntensity:       0.350,
     keyColor:            0xaec4d8,
     keyIntensity:        3.000,
     fillColor:           0x191a48,
@@ -39,7 +39,13 @@ export const tunables = {
     rimColor:            0xf358df,
     rimIntensity:        2.000,
     fogColor:            0x22252a,
-    fogDensity:          0.0000,
+    fogDensity:          0.0220,
+    // ACES filmic tone curve exposure. Renderer toneMapping is set to
+    // ACESFilmicToneMapping at boot; this scales scene luminance into
+    // the curve. ACES darkens midtones vs the old NoToneMapping path,
+    // so exposure typically rides >1.0 to compensate for the existing
+    // light-intensity tuning. Live-tunable via F3 / console.
+    toneMappingExposure: 1.250,
     playerAuraColor:     0xffffff,
     playerAuraIntensity: 0.000,
     playerAuraDistance:  15.00,

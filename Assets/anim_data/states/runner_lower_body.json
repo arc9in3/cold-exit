@@ -6,9 +6,10 @@
 
   "thresholds": {
     "moving":    0.2,
-    "walkMax":   1.6,
-    "runMax":    3.5,
-    "sprintMax": 6.0,
+    "_speedNote": "Thresholds match tunables.move speeds (walkSpeed 5, sprintSpeed 7), NOT the clip authoring speeds. Default WASD movement (5 m/s) lands in the 'run' bucket (8-way arms-up clips, consistent across directions); sprint (7 m/s) stays in 'run' too but timeScale (speed/speedRef) drives a faster cadence (~1.4x) so it reads as a sprint without a separate clip set. ADS forces 'walk' regardless of speed (see selectGaspLocomotion). Previously walkMax 1.6 / runMax 3.5 were calibrated for older ~1.4/4.0 speeds, so every standing move fell into 'sprint' and walk/run cycles never played.",
+    "walkMax":   4.0,
+    "runMax":    8.0,
+    "sprintMax": 9.0,
     "crouched":  "from playerState"
   },
 
@@ -23,12 +24,12 @@
     "walk_BL": { "clip": "rifle-8way/walk-backward-right", "loop": true, "speedRef": 1.4 },
     "walk_BR": { "clip": "rifle-8way/walk-backward-left",  "loop": true, "speedRef": 1.4 },
 
-    "run_F":   { "clip": "rifle-8way/run-forward",         "loop": true, "speedRef": 4.0 },
-    "run_B":   { "clip": "rifle-8way/run-backward",        "loop": true, "speedRef": 4.0 },
-    "run_FL":  { "clip": "rifle-8way/run-forward-right",   "loop": true, "speedRef": 4.0 },
-    "run_FR":  { "clip": "rifle-8way/run-forward-left",    "loop": true, "speedRef": 4.0 },
-    "run_BL":  { "clip": "rifle-8way/run-backward-right",  "loop": true, "speedRef": 4.0 },
-    "run_BR":  { "clip": "rifle-8way/run-backward-left",   "loop": true, "speedRef": 4.0 },
+    "run_F":   { "clip": "rifle-8way/run-forward",         "loop": true, "speedRef": 5.0 },
+    "run_B":   { "clip": "rifle-8way/run-backward",        "loop": true, "speedRef": 5.0 },
+    "run_FL":  { "clip": "rifle-8way/run-forward-right",   "loop": true, "speedRef": 5.0 },
+    "run_FR":  { "clip": "rifle-8way/run-forward-left",    "loop": true, "speedRef": 5.0 },
+    "run_BL":  { "clip": "rifle-8way/run-backward-right",  "loop": true, "speedRef": 5.0 },
+    "run_BR":  { "clip": "rifle-8way/run-backward-left",   "loop": true, "speedRef": 5.0 },
 
     "sprint_F": { "clip": "rifle-8way/sprint-forward",     "loop": true, "speedRef": 6.0 },
 

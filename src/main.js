@@ -588,6 +588,16 @@ renderer.shadowMap.type = THREE.PCFSoftShadowMap;
 // error in practice).
 renderer.debug.checkShaderErrors = true;
 renderer.outputColorSpace = THREE.SRGBColorSpace;
+// ACES filmic tone mapping. Previously NoToneMapping (raw linear→sRGB),
+// which let bright lights / emissives clip to flat white and gave the
+// scene a hard, plasticky read. ACES rolls off highlights into a
+// filmic shoulder so emissives read as light instead of blown-out
+// white, and gives the whole frame a cohesive cinematic curve.
+// Exposure is live-tunable via tunables.lighting (synced in
+// syncLighting). When postFx is enabled the composer's OutputPass
+// applies this same tone mapping at the end of the chain.
+renderer.toneMapping = THREE.ACESFilmicToneMapping;
+renderer.toneMappingExposure = tunables.lighting.toneMappingExposure ?? 1.0;
 appEl.appendChild(renderer.domElement);
 attachUnlock(renderer.domElement);
 
@@ -8937,6 +8947,9 @@ function syncLighting() {
     scene.fog.density = L.fogDensity;
   }
   scene.background.setHex(L.fogColor);
+  if (typeof L.toneMappingExposure === 'number') {
+    renderer.toneMappingExposure = L.toneMappingExposure;
+  }
   const aura = player?.mesh?.userData?.auraLight;
   if (aura) {
     aura.color.setHex(L.playerAuraColor);
