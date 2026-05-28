@@ -175,21 +175,33 @@ export function priceFor(item, shopMult = 1) {
     const mult = item.priceMult ?? 1;
     return Math.max(1, Math.round(item.sellValue * mult * shopMult));
   }
-  const base = tunables.currency.basePrice[inferRarity(item)] ?? 25;
+  const _rarity = inferRarity(item);
+  const base = tunables.currency.basePrice[_rarity] ?? 25;
   let price = base;
   if (item.type === 'consumable') price = Math.round(base * 0.5);
   else if (item.type === 'attachment') price = Math.round(base * 1.2);
+  else if (item.type === 'repairkit') {
+    // Repair kits use to use the full rarity base, which made
+    // rare/epic/legendary kits punishingly expensive (32k for an epic,
+    // 80k for a legendary — same as buying the gear new). Half-price
+    // the top three rarities so they're a real option instead of a
+    // taxidermy display. Common/uncommon kits unchanged.
+    // 2026-05-23: user tuning.
+    const cut = (_rarity === 'rare' || _rarity === 'epic' || _rarity === 'legendary') ? 0.5 : 1.0;
+    price = Math.round(base * cut);
+  }
   const mult = (item.priceMult ?? 1) * (1 + _affixPerkPremium(item));
   return Math.max(1, Math.round(price * mult * shopMult));
 }
 // Cost to repair a broken item. Scales with the item's full buy price
 // (including the floor's shop multiplier) so a rare epic costs serious
-// credits to bring back to working condition. ~30% of buy is the
-// pricing target — cheaper than re-buying, but a real economic dent.
+// credits to bring back to working condition. ~22.5% of buy is the
+// pricing target — cheaper than re-buying, with a real (but not punishing)
+// economic dent. Reduced from 30% on 2026-05-23 (user tuning).
 export function repairPriceFor(item, shopMult = 1) {
   if (!item) return 0;
   const base = priceFor(item, shopMult);
-  return Math.max(1, Math.round(base * 0.30));
+  return Math.max(1, Math.round(base * 0.225));
 }
 
 // Sell price uses the unfluxed base so selling is predictable. Junk
