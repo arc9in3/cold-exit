@@ -2541,7 +2541,13 @@ export class Level {
     const _doorBands = [];
     {
       const halfBand = DOOR_WIDTH / 2 + 1.0;
-      const inwardDepth = 2.5;   // band reach into both rooms
+      // Match _clearDoorCorridors' 3.5m reach (was 2.5m). The shorter
+      // band let props land in the 2.5-3.5m ring, pass placement, then
+      // get retroactively hidden by the corridor clear — a disappearing-
+      // prop artifact that also failed open if any later phase skipped
+      // the clear pass. Rejecting placement up front is prevention, not
+      // cure: nothing ever sits in the door approach.
+      const inwardDepth = 3.5;   // band reach into both rooms
       for (const o of this.obstacles) {
         if (!o.userData?.isDoor) continue;
         const dx = o.userData.cx, dz = o.userData.cz;
@@ -2557,6 +2563,50 @@ export class Level {
             minX: dx - inwardDepth, maxX: dx + inwardDepth,
             minZ: dz - halfBand, maxZ: dz + halfBand,
           });
+        }
+      }
+    }
+    // Through-path lanes — keep the straight line between every pair of
+    // doors in a room clear of collision/footprint props so the player
+    // and AI can always walk door-to-door. The door bands above only
+    // protect each door's immediate mouth; a chunky prop dropped in the
+    // middle of a room could still wall off the lane connecting two
+    // doorways (the "pathways blocked by props" report). Approximated as
+    // a tube of small AABB keepouts sampled along each segment so the
+    // existing axis-aligned overlap test in _propFootprintFree catches
+    // them. Gen-time only; a handful of extra bands per room.
+    {
+      const LANE_HALF = 1.4;   // half-width of the guaranteed walk lane
+      const STEP = 1.5;        // sample spacing along the door-to-door line
+      const byRoom = new Map();
+      for (const o of this.obstacles) {
+        if (!o.userData?.isDoor) continue;
+        const conn = o.userData.connects;
+        if (!conn) continue;
+        for (const rid of conn) {
+          let list = byRoom.get(rid);
+          if (!list) { list = []; byRoom.set(rid, list); }
+          list.push(o);
+        }
+      }
+      for (const list of byRoom.values()) {
+        for (let i = 0; i < list.length; i++) {
+          for (let j = i + 1; j < list.length; j++) {
+            const ax = list[i].userData.cx, az = list[i].userData.cz;
+            const bx = list[j].userData.cx, bz = list[j].userData.cz;
+            const dx = bx - ax, dz = bz - az;
+            const len = Math.hypot(dx, dz);
+            if (len < 0.001) continue;
+            const steps = Math.max(1, Math.round(len / STEP));
+            for (let k = 0; k <= steps; k++) {
+              const t = k / steps;
+              const px = ax + dx * t, pz = az + dz * t;
+              _doorBands.push({
+                minX: px - LANE_HALF, maxX: px + LANE_HALF,
+                minZ: pz - LANE_HALF, maxZ: pz + LANE_HALF,
+              });
+            }
+          }
         }
       }
     }
