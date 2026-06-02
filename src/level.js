@@ -5633,20 +5633,39 @@ export class Level {
         // produced visible gaps + odd geometry there. checkRadius
         // already suppresses redundant plugs next to existing
         // walls, so re-sampling the corners is safe.
+        // Coalesce consecutive uncovered samples into ONE merged plug
+        // wall rather than dropping a separate PLUG_LEN box at every
+        // sample. The old per-sample loop turned a fully-missing edge
+        // into a row of ~1.25m blocks spaced 1m apart — precisely the
+        // "wall segments made of multiple squares instead of a long
+        // rectangle" report. The merged box has the same extent at the
+        // run's endpoints (so door keepouts + the later clear/repair
+        // passes behave identically) but fills the middle as a single
+        // span. Bonus: far fewer collision boxes + wall instances.
+        let runStart = null, runEnd = null;
+        const flushRun = () => {
+          if (runStart === null) return;
+          const center = (runStart + runEnd) / 2;
+          const len = (runEnd - runStart) + PLUG_LEN;
+          if (side.fixed === 'x') {
+            this._addObstacle(side.fxv, WALL_HEIGHT / 2, center,
+              WALL_THICK, WALL_HEIGHT, len, OUTER_WALL_COLOR);
+          } else {
+            this._addObstacle(center, WALL_HEIGHT / 2, side.fxv,
+              len, WALL_HEIGHT, WALL_THICK, OUTER_WALL_COLOR);
+          }
+          runStart = runEnd = null;
+        };
         for (let s = side.from; s <= side.to + 0.001; s += STEP) {
           const sc = Math.min(s, side.to);    // clamp final sample
           const x = side.fixed === 'x' ? side.fxv : sc;
           const z = side.fixed === 'z' ? side.fxv : sc;
-          if (inDoorKeepout(x, z)) continue;
-          if (hasWallAt(x, z)) continue;
-          if (side.fixed === 'x') {
-            this._addObstacle(x, WALL_HEIGHT / 2, z,
-              WALL_THICK, WALL_HEIGHT, PLUG_LEN, OUTER_WALL_COLOR);
-          } else {
-            this._addObstacle(x, WALL_HEIGHT / 2, z,
-              PLUG_LEN, WALL_HEIGHT, WALL_THICK, OUTER_WALL_COLOR);
-          }
+          // A covered sample or a door corridor breaks the current run.
+          if (inDoorKeepout(x, z) || hasWallAt(x, z)) { flushRun(); continue; }
+          if (runStart === null) runStart = sc;
+          runEnd = sc;
         }
+        flushRun();
       }
       // Explicit 4-corner caps. After the side sweep, the corner
       // CELL (b.minX/maxX × b.minZ/maxZ) is the most failure-prone
