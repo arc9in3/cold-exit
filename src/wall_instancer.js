@@ -72,7 +72,16 @@ class WallInstancer {
       const opaqueMat = new THREE.MeshStandardMaterial({ color, roughness });
       const opaqueInst = new THREE.InstancedMesh(unitCubeGeometry(), opaqueMat, INITIAL_CAP);
       opaqueInst.instanceMatrix.setUsage(THREE.DynamicDrawUsage);
-      opaqueInst.castShadow = false;
+      // Walls cast shadows again. This is the single biggest fix for the
+      // "whole level looks flat" report: with no architectural shadows,
+      // the key directional only shaded the floor and actors, leaving
+      // walls evenly lit with zero self-shadowing depth. Because every
+      // wall lives in this ONE InstancedMesh, re-enabling cast adds only
+      // a single extra draw call to the shadow pass — cheap. The shadow
+      // frustum now follows the player (see scene.js key.target +
+      // syncLighting), so walls cast across the whole level, not just
+      // near the origin.
+      opaqueInst.castShadow = true;
       opaqueInst.receiveShadow = true;
       opaqueInst.frustumCulled = false;
       // GHOST twin — same geometry pool, alpha-blended material with

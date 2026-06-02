@@ -8973,7 +8973,19 @@ function syncLighting() {
     hemiLight.groundColor.setHex(L.hemiGround);
     hemiLight.intensity = L.hemiIntensity;
   }
-  if (keyLight)  { keyLight.color.setHex(L.keyColor);   keyLight.intensity  = L.keyIntensity; }
+  if (keyLight)  {
+    keyLight.color.setHex(L.keyColor);   keyLight.intensity  = L.keyIntensity;
+    // Slide the shadow-casting key light + its target with the player so
+    // the (fixed-size) shadow frustum stays centred on the action. The
+    // light keeps its original direction by holding the (30,40,20) offset
+    // from the target. Without this, walls only cast shadows within ±40
+    // of the world origin and the rest of the level read flat.
+    const pp = player?.mesh?.position;
+    if (pp) {
+      keyLight.target.position.set(pp.x, 0, pp.z);
+      keyLight.position.set(pp.x + 30, 40, pp.z + 20);
+    }
+  }
   if (fillLight) { fillLight.color.setHex(L.fillColor); fillLight.intensity = L.fillIntensity; }
   if (rimLight)  { rimLight.color.setHex(L.rimColor);   rimLight.intensity  = L.rimIntensity; }
   if (scene.fog) {

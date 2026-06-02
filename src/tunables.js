@@ -31,11 +31,18 @@ export const tunables = {
   lighting: {
     hemiSky:             0x6a78a0,
     hemiGround:          0x2a2230,
-    hemiIntensity:       0.350,
+    // Ambient/fill dialled down so the key directional's shadows read.
+    // hemi 0.35 + fill 2.0 = 2.35 of directionless fill was washing out
+    // the key's contrast and flattening the scene (the code's own design
+    // comment in scene.js wants walls to fall to near-black between
+    // light sources). Now that walls cast shadows again, the key carries
+    // the depth; fill only keeps shadow sides from crushing to pure
+    // black. See the "flat look" fix 2026-06.
+    hemiIntensity:       0.220,
     keyColor:            0xaec4d8,
-    keyIntensity:        3.000,
+    keyIntensity:        4.000,
     fillColor:           0x191a48,
-    fillIntensity:       2.000,
+    fillIntensity:       1.100,
     rimColor:            0xf358df,
     rimIntensity:        2.000,
     fogColor:            0x22252a,
