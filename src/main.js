@@ -17,6 +17,7 @@ import { DummyManager } from './enemy.js';
 import { GunmanManager } from './gunman.js';
 import { MeleeEnemyManager } from './melee_enemy.js';
 import { initRigInstancer, rigInstancer } from './rig_instancer.js';
+import { pendingModelCount } from './gltf_cache.js';
 import { separateEnemies } from './ai_separation.js';
 import { LootManager } from './loot.js';
 import { ENCOUNTER_DEFS, pickEncounterForLevel } from './encounters.js';
@@ -6702,9 +6703,99 @@ function regenerateLevel() {
   // dripping into the first ~30s of gameplay as 100-3000ms render
   // hitches when each new material first hits the camera frustum.
   // Wrapped in try/catch so a renderer/scene glitch can't break the
-  // load flow. Cheap on subsequent calls for materials already cached.
-  try { renderer?.compile?.(scene, camera); } catch (_) {}
+  // load flow. _prewarmGpuUpload both compiles shaders AND draws the
+  // scene once (culling off) so geometry/texture buffers upload now,
+  // killing the per-room entry hitch — compile() alone left the buffers
+  // to upload on first draw during gameplay.
+  try { _schedulePrewarm(); } catch (_) {}
   return result;
+}
+// Tiny offscreen target for the GPU pre-warm below. A real draw to a 2×2
+// buffer forces buffer/texture upload + driver shader-link with no visible
+// canvas flash.
+let _prewarmRT = null;
+// Force every mesh spawned this floor to be GPU-resident BEFORE the player
+// can walk into the room that holds it. renderer.compile() (called in the
+// regenerateLevel wrapper) only LINKS shader programs — the geometry,
+// index, and texture buffers still upload on the first real DRAW of each
+// mesh. That first draw happens the frame a room's enemies + weapon GLBs
+// enter the camera frustum, which is exactly the "huge hitch on entering a
+// new room" the player reported (and which the 2× horde density made
+// worse, since twice the bodies upload at once). Drawing the whole scene
+// once here — frustum culling disabled so off-screen rooms draw too, into
+// a 2×2 target so fragment cost is nil — moves that upload into the level-
+// load window where a brief stall reads as loading.
+function _prewarmGpuUpload() {
+  if (!renderer || !scene || !camera) return;
+  // Temporarily disable frustum culling so off-screen rooms draw (and
+  // upload) too. We do NOT force-show invisible objects: rendering the
+  // scene's intentionally-hidden meshes (pool slots, reveal-gated arena
+  // geometry, disposed placeholders) can throw and abort the whole pass.
+  // Visible-but-off-screen content — every spawned enemy + weapon — is
+  // what causes the per-room hitch and is covered here.
+  const culled = [];
+  scene.traverse((o) => {
+    if ((o.isMesh || o.isInstancedMesh) && o.frustumCulled) {
+      o.frustumCulled = false; culled.push(o);
+    }
+  });
+  // Force-show enemy rigs that are hidden until a trigger (ambush rooms,
+  // boss-arena pre-reveal) so their weapon meshes upload NOW instead of on
+  // the reveal/entry frame. Scoped to actual enemy groups — not the whole
+  // scene — so we never render FX/pool/placeholder hidden meshes that could
+  // throw and abort the pass.
+  const shown = [];
+  const _forceShow = (c) => {
+    if (c && c.group && !c.group.visible) { c.group.visible = true; shown.push(c.group); }
+  };
+  try {
+    if (gunmen?.gunmen) for (const g of gunmen.gunmen) _forceShow(g);
+    if (melees?.enemies) for (const m of melees.enemies) _forceShow(m);
+    // Vendor / recruiter / encounter NPCs (shop, gunsmith, healer rooms)
+    // and dummy actors also live off the enemy lists and can be hidden or
+    // off-screen at load — show their groups too. Items without a .group
+    // are skipped by _forceShow.
+    if (level?.npcs) for (const npc of level.npcs) _forceShow(npc);
+    if (dummies?.dummies) for (const d of dummies.dummies) _forceShow(d);
+  } catch (_) {}
+  try {
+    const _ri = rigInstancer && rigInstancer();
+    if (_ri && _ri.syncFrame) _ri.syncFrame();   // position instanced rigs
+    if (!_prewarmRT) _prewarmRT = new THREE.WebGLRenderTarget(2, 2);
+    renderer.compile(scene, camera);
+    const prev = renderer.getRenderTarget();
+    renderer.setRenderTarget(_prewarmRT);
+    renderer.render(scene, camera);               // real draw → uploads buffers
+    renderer.setRenderTarget(prev);
+  } catch (_) {}
+  for (let i = 0; i < culled.length; i++) culled[i].frustumCulled = true;
+  for (let i = 0; i < shown.length; i++) shown[i].visible = false;
+}
+// Enemy weapon models (and the boss / encounter props) load + clone
+// ASYNC, so a single prewarm at end-of-regen misses anything still
+// resolving — those meshes then upload on first room entry anyway (the
+// reported hitch). Prewarm once immediately for content already in scene,
+// then poll gltf_cache's pending-load count and prewarm again once loads
+// have been idle for ~2 ticks — that final pass catches every async clone
+// no matter how late its GLB finishes (a boss model that lands at 2s+ is
+// still covered). A generation token cancels pending polls if another
+// floor regenerates first, so we never prewarm a half-torn-down scene.
+let _prewarmGen = 0;
+function _schedulePrewarm() {
+  const gen = ++_prewarmGen;
+  _prewarmGpuUpload();                 // sync: walls, props, rigs in scene now
+  let idle = 0, ticks = 0;
+  const poll = () => {
+    if (gen !== _prewarmGen) return;   // a newer regen took over
+    let pending = 1;
+    try { pending = pendingModelCount(); } catch (_) { pending = 0; }
+    idle = pending === 0 ? idle + 1 : 0;
+    // Final upload pass once async loads have settled (or a hard cap so a
+    // stuck load can't keep us polling forever).
+    if (idle >= 2 || ++ticks > 50) { _prewarmGpuUpload(); return; }
+    setTimeout(poll, 200);
+  };
+  setTimeout(poll, 200);
 }
 function _regenerateLevelImpl() {
   // Coop net-ID counter reset — must run BEFORE the spawn loop in

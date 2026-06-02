@@ -87,6 +87,12 @@ const OUTLINE_DEFAULT = 1.025;
 let _useCelShading = true;
 export function setCelShading(enabled) { _useCelShading = !!enabled; }
 
+// Number of model loads still in flight (templates being fetched/parsed).
+// The level-load GPU prewarm in main.js polls this so it can draw the
+// scene once AFTER async weapon / boss GLB clones have landed — uploading
+// their buffers in the load window instead of on first room entry.
+export function pendingModelCount() { return _pending.size; }
+
 function _makeToonMaterial(atlas, hasUV, hasVC, color = 0xffffff) {
   return new THREE.MeshToonMaterial({
     color,
