@@ -162,7 +162,13 @@ export function buildVase(opts = {}) {
   const neck = cyl(r * 0.55, h * 0.25, color);
   neck.position.y = h * 0.87;
   group.add(neck);
-  return { group, collision: null };
+  // A 55cm free-standing floor vase reads as solid — it now blocks so the
+  // player/AI can't walk through it (the walk-through-prop complaint). The
+  // other collision:null props stay walkable on purpose: rugs are flat
+  // floor decals, windows/sconces are wall-mounted above the floor, the
+  // door frame wraps the doorway (blocking it would block the door), and
+  // pallets/grates sit below step height by design.
+  return { group, collision: { w: r * 2.4, d: r * 2.4 } };
 }
 
 export function buildTable(opts = {}) {
