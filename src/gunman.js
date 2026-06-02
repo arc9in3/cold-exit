@@ -2689,7 +2689,16 @@ export class GunmanManager {
       // g.hunkered for the smoke harness / future cower pose.
       g.hunkered = hpFrac < 0.5;
       const deepHunker = hpFrac < 0.25;
+      // Don't let enemies flee to cover when they're already in the
+      // player's face. Scrambling for cover at 4m every time the player
+      // pulls the trigger reads as panic and is the other half of the
+      // "they just run away" complaint. Enemies inside coverDist commit
+      // to the fight (hold + strafe + fire). Defenders and deeply-hunkered
+      // (sub-25% HP) enemies still take cover at any range.
+      const coverDist = 12.0;
+      const closeCommit = dist < coverDist && !isDefender && !deepHunker;
       const shouldSeekCover = (isDefender || g.hunkered || recentlyHit || playerShooting)
+        && !closeCommit
         && !tuckTarget
         && !escortTarget;
       if (shouldSeekCover) {
@@ -2852,8 +2861,19 @@ export class GunmanManager {
         // pressure. Approach until inside preferredRange, then stand
         // and strafe / fire rather than back-pedaling.
         const isBoss = g.tier === 'boss' || g.tier === 'subBoss';
+        // Kiting policy. The old rule backed EVERY non-boss away whenever
+        // the player closed inside (pref - tol). With preferred ranges of
+        // 13-22m that meant enemies spent most of a fight walking
+        // backwards — exactly the "they just run back/away" complaint.
+        // Now only dedicated snipers kite to hold range; everyone else
+        // stands at preferred range and strafes/fires, backpedalling only
+        // when the player is right on top of them (so bodies don't overlap
+        // but they never disengage from a winnable fight).
+        const isKiter = g.variant === 'sniper';
+        const tooClose = dist < Math.min(pref - tol, 3.0);
         if (dist > pref + tol) moveSign = 1;
-        else if (!isBoss && dist < pref - tol) moveSign = -1;
+        else if (isKiter && dist < pref - tol) moveSign = -1;
+        else if (tooClose) moveSign = -1;
         // Flow-field bias — when neither door / tuck / escort is
         // overriding the approach, swap the straight-line dir2d for
         // a flow-field sample toward the player. The flow field
@@ -3179,7 +3199,22 @@ export class GunmanManager {
         const actualLen = Math.hypot(res.x - beforeX, res.z - beforeZ);
         if (wantedLen > 0.01 && actualLen < wantedLen * 0.3 && g.stuckT <= 0) {
           g.stuckT = 0.8;
-          g.stuckSide = Math.random() < 0.5 ? -1 : 1;
+          // Pick the deflection side that actually has open space rather
+          // than flipping a coin — a random side sent enemies oscillating
+          // back into the same corner/doorjamb (the "stuck at corners"
+          // complaint). Probe ~1m along each perpendicular and prefer the
+          // clear one; the deflection at the top of the move block uses
+          // dir (-approachDir.z, approachDir.x) * side, so side +1 maps to
+          // the (-adz, adx) probe.
+          let side = Math.random() < 0.5 ? -1 : 1;
+          if (ctx.level && typeof ctx.level._collidesAt === 'function') {
+            const pr = tunables.ai.collisionRadius;
+            const adx = approachDir.x, adz = approachDir.z, probe = 1.0;
+            const leftBlocked  = ctx.level._collidesAt(beforeX + (-adz) * probe, beforeZ + (adx) * probe, pr);
+            const rightBlocked = ctx.level._collidesAt(beforeX + (adz) * probe, beforeZ + (-adx) * probe, pr);
+            if (leftBlocked !== rightBlocked) side = leftBlocked ? -1 : 1;
+          }
+          g.stuckSide = side;
         }
       }
 

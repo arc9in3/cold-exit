@@ -1477,9 +1477,19 @@ export class MeleeEnemyManager {
       const actualLen = Math.hypot(res.x - beforeX, res.z - beforeZ);
       if (wantedLen > 0.01 && actualLen < wantedLen * 0.3 && e.stuckT <= 0) {
         e.stuckT = 1.1;
-        // Flip sides on each stuck-cycle so a melee that bounces off a
-        // wall on one perpendicular tries the other axis next.
-        e.stuckSide = (e.stuckSide || 1) * -1;
+        // Probe both perpendiculars and deflect toward open space instead
+        // of blindly alternating — the old flip sent melees ping-ponging
+        // against the same doorjamb. Deflection uses dir (-dir2d.z,
+        // dir2d.x) * side, so side +1 maps to the (-dz, dx) probe.
+        let side = (e.stuckSide || 1) * -1;
+        if (ctx.level && typeof ctx.level._collidesAt === 'function') {
+          const pr = tunables.meleeEnemy.collisionRadius;
+          const dx = dir2d.x, dz = dir2d.z, probe = 1.0;
+          const leftBlocked  = ctx.level._collidesAt(beforeX + (-dz) * probe, beforeZ + (dx) * probe, pr);
+          const rightBlocked = ctx.level._collidesAt(beforeX + (dz) * probe, beforeZ + (-dx) * probe, pr);
+          if (leftBlocked !== rightBlocked) side = leftBlocked ? -1 : 1;
+        }
+        e.stuckSide = side;
       }
 
       // Skip windup while disengaging — the assassin is in escape
