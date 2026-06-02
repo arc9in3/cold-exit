@@ -1645,6 +1645,11 @@ if (typeof window !== 'undefined') {
 }
 const loot = new LootManager(scene);
 const level = new Level(scene, { ground });
+// Give the loot manager a handle on the level so spawnItem can nudge
+// drops out of walls/props (see LootManager._resolveDropXZ). The Level
+// instance is stable across floor regens (generate() mutates in place),
+// so this single wire stays valid.
+loot.level = level;
 // Phase M step 9 — expose the level + run-seed handle so the in-game
 // bug-report tool (src/bug_report.js, ] keybind) can serialise full
 // repro state without a circular import.

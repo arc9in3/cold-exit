@@ -217,12 +217,22 @@ export class LootManager {
       : (_coopClaimer || null);
     const tint = item.tint ?? 0xaaaaaa;
 
+    // Nudge the drop out of any obstacle it landed in. A kill against a
+    // wall (or loot that rolled onto a prop / container) previously left
+    // the item embedded in geometry where the player could never reach
+    // it — in-game that reads as "an item with no collision": you walk up
+    // and simply can't grab it. Only adjusts when the requested spot is
+    // actually blocked, so open-floor drops and the off-map pool warm-up
+    // are untouched. Deterministic (no RNG) so host + joiner agree.
+    const _free = this._resolveDropXZ(position.x, position.z);
+    const drop = { x: _free.x, y: position.y, z: _free.z };
+
     // Bear / duck toys keep the hand-built primitive path — they're
     // rare, decorative, not a hitch concern. Pool is only for the
     // common "colored box" drops (weapons / gear / consumables /
     // disarmed weapons).
     if (item.shape === 'bear' || item.shape === 'duck') {
-      const e = this._spawnToy(position, item, tint);
+      const e = this._spawnToy(drop, item, tint);
       this._maybeAttachBeacon(e, item);
       return e;
     }
@@ -258,7 +268,7 @@ export class LootManager {
     // but always hidden, and `nameTag: null` skips the per-frame
     // proximity check + lazy paint.
     slot.sprite.visible = false;
-    slot.group.position.set(position.x, 0.45, position.z);
+    slot.group.position.set(drop.x, 0.45, drop.z);
     // Coop: hide the local mesh on the host when the loot is claimed
     // by a specific peer (instanced drops). The entry stays in
     // this.items so the per-peer snapshot still includes it for the
@@ -293,6 +303,31 @@ export class LootManager {
     this._maybeAttachBeacon(entry, item);
     this.items.push(entry);
     return entry;
+  }
+
+  // Find a loot resting spot at or near (x,z) that isn't inside an
+  // obstacle. Returns the original coords when no level is wired or the
+  // spot is already clear. Searches outward in fixed rings so the nudge
+  // is minimal (items stay near where they dropped) and deterministic
+  // (no RNG — host and joiner resolve to the same spot). `level` is set
+  // once in main.js after the Level is constructed; the same instance is
+  // reused across floor regens.
+  _resolveDropXZ(x, z) {
+    const lv = this.level;
+    if (!lv || typeof lv._collidesAt !== 'function') return { x, z };
+    const R = 0.4;                 // item half-extent for the clearance test
+    if (!lv._collidesAt(x, z, R)) return { x, z };
+    const rings = [0.6, 1.0, 1.5, 2.2, 3.0];
+    for (let r = 0; r < rings.length; r++) {
+      const rad = rings[r];
+      for (let a = 0; a < 8; a++) {
+        const ang = (a / 8) * Math.PI * 2;
+        const nx = x + Math.cos(ang) * rad;
+        const nz = z + Math.sin(ang) * rad;
+        if (!lv._collidesAt(nx, nz, R)) return { x: nx, z: nz };
+      }
+    }
+    return { x, z };               // give up — better than dropping nothing
   }
 
   // Rare-tier ground beacon — re-tints the pre-allocated beam mesh
