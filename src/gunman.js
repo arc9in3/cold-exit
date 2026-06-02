@@ -1,5 +1,6 @@
 import * as THREE from 'three';
 import { tunables } from './tunables.js';
+import { BALANCE } from './balance.js';
 import { isWeaponUnlocked } from './prefs.js';
 import { buildRig, initAnim, updateAnim, pokeHit, pokeRecoil, pokeDeath } from './actor_rig.js';
 import { spawnSpeechBubble } from './hud.js';
@@ -775,8 +776,13 @@ export class GunmanManager {
       snipLaser,                  // null on non-snipers
       snipPhase: 'idle',          // 'idle' | 'paint' | 'cool'
       snipPhaseT: 0,
-      hp: tunables.ai.maxHealth * hpMult * (window.__activeModifiers?.()?.enemyHpMult || 1),
-      maxHp: tunables.ai.maxHealth * hpMult * (window.__activeModifiers?.()?.enemyHpMult || 1),
+      // BALANCE.horde.hpMult trims per-enemy HP to offset the higher
+      // spawn density (see balance.js) so a packed room stays a similar
+      // total time-to-clear instead of becoming a bullet-sponge slog.
+      // Gated to normal tier only — sub-boss / boss counts don't scale
+      // with density, so they keep full HP.
+      hp: tunables.ai.maxHealth * hpMult * (window.__activeModifiers?.()?.enemyHpMult || 1) * (tier === 'normal' ? (BALANCE.horde?.hpMult || 1) : 1),
+      maxHp: tunables.ai.maxHealth * hpMult * (window.__activeModifiers?.()?.enemyHpMult || 1) * (tier === 'normal' ? (BALANCE.horde?.hpMult || 1) : 1),
       alive: true,
       state: STATE.IDLE,
       role,

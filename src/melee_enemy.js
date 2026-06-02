@@ -1,5 +1,6 @@
 import * as THREE from 'three';
 import { tunables } from './tunables.js';
+import { BALANCE } from './balance.js';
 import { buildRig, initAnim, updateAnim, pokeHit, pokeDeath } from './actor_rig.js';
 import { _nextNetId } from './gunman.js';
 import { spawnSpeechBubble } from './hud.js';
@@ -267,8 +268,11 @@ export class MeleeEnemyManager {
       variant,
       roomId,
       damageMult,
-      hp: tunables.meleeEnemy.maxHealth * hpMult,
-      maxHp: tunables.meleeEnemy.maxHealth * hpMult,
+      // Horde-lite HP trim (see balance.js), normal tier only — sub-boss
+      // melee counts don't scale with density, and true bosses override
+      // hp explicitly further below.
+      hp: tunables.meleeEnemy.maxHealth * hpMult * (tier === 'normal' ? (BALANCE.horde?.hpMult || 1) : 1),
+      maxHp: tunables.meleeEnemy.maxHealth * hpMult * (tier === 'normal' ? (BALANCE.horde?.hpMult || 1) : 1),
       alive: true,
       state: STATE.IDLE,
       swingT: 0,

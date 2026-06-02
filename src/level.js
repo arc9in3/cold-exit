@@ -1,5 +1,6 @@
 import * as THREE from 'three';
 import { tunables } from './tunables.js';
+import { BALANCE } from './balance.js';
 import { buildProp, getLevelTheme, INWARD_FACING_KINDS, DESTRUCTIBLE_HP } from './props.js';
 import { buildRig, initAnim, updateAnim } from './actor_rig.js';
 import { makeContainer, pickContainerType, pickContainerSize, buildContainerMesh } from './containers.js';
@@ -4787,7 +4788,13 @@ export class Level {
       const meleeLevelExtra = Math.min(3, Math.floor(Math.max(0, lv - 4) / 3));
       // Active contract spawnDensityMult — Risky 'Press Wave' multiplies
       // counts. Read live so the modifier kicks in for the current run.
-      const densityMult = window.__activeModifiers?.()?.spawnDensityMult || 1;
+      // BALANCE.horde.densityMult layers the global horde-lite baseline on
+      // top (a build constant, so coop peers stay RNG-deterministic — see
+      // balance.js). Per-enemy HP is trimmed proportionally in gunman.js /
+      // melee_enemy.js, and buildBodyLoot divides the drop rate so the
+      // extra bodies don't inflate floor loot.
+      const densityMult = (window.__activeModifiers?.()?.spawnDensityMult || 1)
+        * (BALANCE.horde?.densityMult || 1);
       // Active contract eliteChanceMult — promotes normal spawns to
       // subBoss tier with a per-enemy roll. Capped at 1 promotion per
       // 4 spawns so a 2x mult doesn't fill the room with mini-bosses.

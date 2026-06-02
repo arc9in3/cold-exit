@@ -12738,7 +12738,16 @@ function buildBodyLoot(enemy) {
   // surfaces the weapon-drop is now a chance roll (60%) instead
   // of a guarantee. Net: most grunts surface 0 items, the rest
   // surface a single meaningful drop.
-  const isEmptyBody = tier === 'normal' && Math.random() < 0.88;
+  // Decouple loot from horde density: divide the normal-grunt non-empty
+  // rate by BALANCE.horde.densityMult so cramming 2x the bodies into a
+  // room drops the same total loot (each grunt is half as likely to carry
+  // anything). This single gate fronts ALL normal-grunt drops below
+  // (weapon, melee, armor), so scaling it here decouples everything at
+  // once. One Math.random() call either way → coop RNG count unchanged.
+  // Boss / sub-boss tiers don't scale with density and are unaffected.
+  const _hordeMult = BALANCE.horde?.densityMult || 1;
+  const _normalNonEmpty = 0.12 / _hordeMult;   // 0.12 = base non-empty rate (1 - 0.88)
+  const isEmptyBody = tier === 'normal' && Math.random() >= _normalNonEmpty;
 
   if (!isEmptyBody) {
     // Weapon drop: 60% chance for normal grunts, 90% for sub-bosses,

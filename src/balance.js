@@ -187,6 +187,29 @@ export const BALANCE = {
     },
   },
 
+  // Horde-lite density. Multiplies per-room COMBAT spawn counts and
+  // proportionally trims per-enemy HP so a packed room stays a similar
+  // total time-to-clear while feeling far more daunting (more incoming
+  // fire, more targets). Loot is decoupled: buildBodyLoot divides the
+  // normal-grunt drop rate by densityMult, so cramming in more bodies
+  // does NOT inflate floor loot. Boss / sub-boss counts, HP, and loot are
+  // untouched (their spawns don't scale with this).
+  //
+  // COOP: densityMult MUST stay a build constant — the same value ships to
+  // every peer, so host + joiner spawn identical counts and the seeded
+  // RNG stays in lock-step. Do NOT tier-scale or drive it from per-client
+  // state (that's what broke determinism when SPAWN_MULT was bumped; see
+  // level.js). Weak hardware is handled by quality.maxConcurrentEnemies,
+  // not by changing this number per client.
+  //
+  //   densityMult 1.0 = vanilla. 2.0 ≈ "room full of guards" without going
+  //   full bullet-heaven. hpMult 0.55 keeps total room HP ~1.1x: squishy
+  //   individual grunts you can mow through, but the swarm is dangerous.
+  horde: {
+    densityMult: 2.0,
+    hpMult: 0.55,
+  },
+
   // Mega-boss tuning that's NEW (existing Arboter HP / damage / phase
   // thresholds still live in tunables.megabossArboter — touched there
   // when the system was extracted; new attacks land here per the
