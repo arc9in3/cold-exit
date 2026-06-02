@@ -3367,6 +3367,19 @@ const gameMenuUI = new GameMenuUI({
     setQualityPref(mode);
     applyQuality(mode, { renderer, scene, keyLight, fillLight, rimLight, gridHelper });
   },
+  // Music on/off from the in-game pause menu — mirrors the main-menu
+  // Options toggle so the player can kill the background track mid-run
+  // without leaving to the title. SFX are unaffected.
+  getMusicEnabled,
+  setMusicEnabled: (on) => {
+    setMusicEnabled(on);
+    setAudioMusicEnabled(on);
+    if (on) {
+      try { sfx.musicPlay(_currentMusicTrack || 'menu'); } catch (_) {}
+    } else {
+      try { sfx.musicStop(); } catch (_) {}
+    }
+  },
   onSave: () => {
     // Saving disqualifies this run from the leaderboard — the post-save
     // reload would be a second chance at the same state. Flip once;

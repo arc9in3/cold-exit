@@ -444,7 +444,7 @@ export const sfx = {
       const ref = musicNodes;
       setTimeout(() => {
         try { for (const o of ref.oscs) o.stop(); } catch (_) {}
-        try { clearInterval(ref.intervalId); } catch (_) {}
+        try { (ref.intervalIds || []).forEach((id) => clearInterval(id)); } catch (_) {}
       }, 700);
       musicNodes = null;
     } catch (_) { musicNodes = null; }
@@ -453,40 +453,59 @@ export const sfx = {
 
 // ---- Music track definitions ----
 let musicNodes = null;
+// Each track is now a CHORD PROGRESSION, not a single static chord. The
+// old version held one chord forever with an eternal sustained pad — that
+// constant unchanging tone is what read as a "drone" and grated. The pad
+// now glides between the chords below (slow portamento + a gain "breath"
+// on each change) so the bed evolves instead of sitting on one note. The
+// arpeggio follows the current chord so it stays consonant as it moves.
 const MUSIC_TRACKS = {
-  // Sparse minor-key pad. Contemplative; suits the hideout / menu.
+  // Hideout / menu — slow, contemplative vi–IV–I–V in C (A-minor feel).
   menu: {
-    tempo: 70,
-    chord: [220.00, 261.63, 329.63],   // A3 / C4 / E4 — A minor
-    arp:   [440.00, 523.25, 659.25, 523.25],
-    busGain: 0.16,
+    chords: [
+      [220.00, 261.63, 329.63],   // Am  — A3 C4 E4
+      [174.61, 220.00, 261.63],   // F   — F3 A3 C4
+      [196.00, 261.63, 329.63],   // C   — G3 C4 E4
+      [196.00, 246.94, 293.66],   // G   — G3 B3 D4
+    ],
+    chordDurSec: 6.5,
+    busGain: 0.14,
     padGain: 0.06,
-    arpGain: 0.045,
-    arpInterval: 0.85,
+    arpGain: 0.04,
+    arpInterval: 0.95,
   },
-  // Low-key tension. In-run combat; restrained so it doesn't fight
-  // with gunfire SFX.
+  // In-run tension — i–VI–III–VII in D-minor, a touch more motion.
+  // Restrained so it sits under gunfire rather than fighting it.
   run: {
-    tempo: 95,
-    chord: [196.00, 246.94, 293.66],   // G3 / B3 / D4 — G major
-    arp:   [392.00, 493.88, 587.33, 783.99],
-    busGain: 0.12,
+    chords: [
+      [146.83, 174.61, 220.00],   // Dm  — D3 F3 A3
+      [174.61, 233.08, 293.66],   // Bb  — F3 Bb3 D4
+      [174.61, 220.00, 261.63],   // F   — F3 A3 C4
+      [196.00, 261.63, 329.63],   // C   — G3 C4 E4
+    ],
+    chordDurSec: 4.0,
+    busGain: 0.11,
     padGain: 0.045,
-    arpGain: 0.05,
-    arpInterval: 0.55,
+    arpGain: 0.045,
+    arpInterval: 0.6,
   },
-  // Faster + brighter for boss fights.
+  // Boss — driving i–iv–V–i in D-minor, faster chord turnover + arp.
   boss: {
-    tempo: 130,
-    chord: [146.83, 174.61, 220.00],   // D3 / F3 / A3 — D minor
-    arp:   [293.66, 349.23, 440.00, 523.25],
-    busGain: 0.18,
-    padGain: 0.055,
-    arpGain: 0.07,
-    arpInterval: 0.32,
+    chords: [
+      [146.83, 174.61, 220.00],   // Dm  — D3 F3 A3
+      [196.00, 233.08, 293.66],   // Gm  — G3 Bb3 D4
+      [220.00, 277.18, 329.63],   // A    — A3 C#4 E4 (dominant tension)
+      [146.83, 174.61, 220.00],   // Dm  — resolve
+    ],
+    chordDurSec: 2.4,
+    busGain: 0.16,
+    padGain: 0.05,
+    arpGain: 0.06,
+    arpInterval: 0.34,
   },
 };
 function _buildMusicNodes(cfg) {
+  const now = ctx.currentTime;
   // Bus — single output gain so musicStop fades cleanly.
   const bus = ctx.createGain();
   bus.gain.value = cfg.busGain;
@@ -499,48 +518,90 @@ function _buildMusicNodes(cfg) {
     send.connect(wet._input);
   }
   const oscs = [];
-  // Pad — sustained chord. Each note is a sine + slightly detuned
-  // saw mixed for warmth. Long attack/release for "drift" feel.
+  const intervalIds = [];
+
+  // ---- Pad: a fixed pool of voices that GLIDE between the chords in the
+  // progression rather than one static sustained chord (the old drone).
+  // A slow filter wobble + a per-chord-change gain "breath" keep it alive.
   const padG = ctx.createGain();
   padG.gain.value = cfg.padGain;
   const padLP = ctx.createBiquadFilter();
   padLP.type = 'lowpass';
-  padLP.frequency.value = 1200;
+  padLP.frequency.value = 1050;
   padG.connect(padLP).connect(bus);
-  for (const f of cfg.chord) {
-    const o1 = ctx.createOscillator(); o1.type = 'sine'; o1.frequency.value = f;
-    const o2 = ctx.createOscillator(); o2.type = 'triangle'; o2.frequency.value = f * 1.005;
-    const ng = ctx.createGain(); ng.gain.value = 0;
-    o1.connect(ng); o2.connect(ng); ng.connect(padG);
-    // Slow attack for swell feel.
-    ng.gain.linearRampToValueAtTime(1.0, ctx.currentTime + 1.2);
+  const padLfo = ctx.createOscillator();
+  padLfo.frequency.value = 0.05;           // ~20s cutoff sweep
+  const padLfoG = ctx.createGain();
+  padLfoG.gain.value = 320;
+  padLfo.connect(padLfoG).connect(padLP.frequency);
+  padLfo.start();
+  oscs.push(padLfo);
+
+  const chords = cfg.chords;
+  const voices = [];
+  const first = chords[0];
+  for (let i = 0; i < first.length; i++) {
+    const o1 = ctx.createOscillator(); o1.type = 'sine';     o1.frequency.value = first[i];
+    const o2 = ctx.createOscillator(); o2.type = 'triangle'; o2.frequency.value = first[i] * 1.006;
+    const vg = ctx.createGain(); vg.gain.value = 0;
+    o1.connect(vg); o2.connect(vg); vg.connect(padG);
+    vg.gain.linearRampToValueAtTime(1.0, now + 1.5);   // initial swell-in
     o1.start(); o2.start();
+    voices.push({ o1, o2 });
     oscs.push(o1, o2);
   }
-  // Arpeggio — single oscillator that re-pitches via a JS interval.
-  // Uses a short envelope per note to keep it from droning.
-  const arpG = ctx.createGain();
-  arpG.gain.value = 0;
-  const arpFilter = ctx.createBiquadFilter();
-  arpFilter.type = 'lowpass';
-  arpFilter.frequency.value = 2400;
-  arpG.connect(arpFilter).connect(bus);
-  const arpO = ctx.createOscillator();
-  arpO.type = 'triangle';
-  arpO.frequency.value = cfg.arp[0];
-  arpO.connect(arpG);
-  arpO.start();
+
+  // ---- Arp: one oscillator re-pitched per step, following whatever chord
+  // is currently playing (octave up) so it never clashes with the pad.
+  const arpG = ctx.createGain(); arpG.gain.value = 0;
+  const arpLP = ctx.createBiquadFilter();
+  arpLP.type = 'lowpass'; arpLP.frequency.value = 2600;
+  arpG.connect(arpLP).connect(bus);
+  const arpO = ctx.createOscillator(); arpO.type = 'triangle';
+  arpO.frequency.value = first[0] * 2;
+  arpO.connect(arpG); arpO.start();
   oscs.push(arpO);
+
+  let chordIdx = 0;
   let arpStep = 0;
-  const intervalId = setInterval(() => {
-    if (!ctx) return;
-    arpStep = (arpStep + 1) % cfg.arp.length;
-    arpO.frequency.setValueAtTime(cfg.arp[arpStep], ctx.currentTime);
+
+  // Move the pad voices to a new chord with a slow glide + a gain breath.
+  const applyChord = (chord) => {
     const t = ctx.currentTime;
+    for (let i = 0; i < voices.length && i < chord.length; i++) {
+      const v = voices[i], f = chord[i];
+      v.o1.frequency.cancelScheduledValues(t);
+      v.o2.frequency.cancelScheduledValues(t);
+      v.o1.frequency.setValueAtTime(v.o1.frequency.value, t);
+      v.o2.frequency.setValueAtTime(v.o2.frequency.value, t);
+      v.o1.frequency.linearRampToValueAtTime(f, t + 0.6);
+      v.o2.frequency.linearRampToValueAtTime(f * 1.006, t + 0.6);
+    }
+    padG.gain.cancelScheduledValues(t);
+    padG.gain.setValueAtTime(padG.gain.value, t);
+    padG.gain.linearRampToValueAtTime(cfg.padGain * 0.5, t + 0.6);          // dip
+    padG.gain.linearRampToValueAtTime(cfg.padGain, t + cfg.chordDurSec * 0.6); // swell back
+  };
+
+  intervalIds.push(setInterval(() => {
+    if (!ctx) return;
+    chordIdx = (chordIdx + 1) % chords.length;
+    applyChord(chords[chordIdx]);
+  }, cfg.chordDurSec * 1000));
+
+  intervalIds.push(setInterval(() => {
+    if (!ctx) return;
+    const chord = chords[chordIdx];
+    const pattern = [chord[0], chord[1], chord[2], chord[1]];
+    const note = pattern[arpStep % pattern.length] * 2;   // octave up
+    arpStep++;
+    const t = ctx.currentTime;
+    arpO.frequency.setValueAtTime(note, t);
     arpG.gain.cancelScheduledValues(t);
     arpG.gain.setValueAtTime(0, t);
     arpG.gain.linearRampToValueAtTime(cfg.arpGain, t + 0.02);
     arpG.gain.exponentialRampToValueAtTime(0.0001, t + cfg.arpInterval * 0.85);
-  }, cfg.arpInterval * 1000);
-  return { bus, oscs, intervalId };
+  }, cfg.arpInterval * 1000));
+
+  return { bus, oscs, intervalIds };
 }

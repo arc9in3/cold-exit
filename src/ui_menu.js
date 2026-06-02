@@ -10,7 +10,8 @@ const SAVE_KEY = 'tacticalrogue_save_v1';
 export class GameMenuUI {
   constructor({ onSave, onLoad, onQuit, getVolume, setVolume, getQuality, setQuality, getLeaderboard,
                 getDevTools, setDevTools, getPlayerName: gpn, setPlayerName: spn,
-                getCharacterStyle: gcs, setCharacterStyle: scs }) {
+                getCharacterStyle: gcs, setCharacterStyle: scs,
+                getMusicEnabled, setMusicEnabled }) {
     this.onSave = onSave;
     this.onLoad = onLoad;
     this.onQuit = onQuit;
@@ -18,6 +19,8 @@ export class GameMenuUI {
     this.setVolume = setVolume || (() => {});
     this.getQuality = getQuality || (() => 'high');
     this.setQuality = setQuality || (() => {});
+    this.getMusicEnabled = getMusicEnabled || (() => true);
+    this.setMusicEnabled = setMusicEnabled || (() => {});
     this.getLeaderboard = getLeaderboard || (() => null);
     this.getDevTools = getDevTools || (() => false);
     this.setDevTools = setDevTools || (() => {});
@@ -124,8 +127,55 @@ export class GameMenuUI {
       const v = +slider.value / 100;
       this.setVolume(v);
       valEl.textContent = `${slider.value}%`;
+      muteVal.textContent = v <= 0.0001 ? 'On' : 'Off';
+      muteCheck.checked = v <= 0.0001;
     });
     this.bodyEl.appendChild(row);
+
+    // Mute — drops master volume to 0 and restores the prior level when
+    // unchecked. Lives next to the slider so it stays in sync with it.
+    const muteRow = document.createElement('div');
+    muteRow.className = 'menu-row';
+    const muted = this.getVolume() <= 0.0001;
+    muteRow.innerHTML = `
+      <label>Mute All <span class="menu-row-val">${muted ? 'On' : 'Off'}</span></label>
+      <input type="checkbox" class="menu-check" ${muted ? 'checked' : ''}>
+    `;
+    const muteCheck = muteRow.querySelector('input');
+    const muteVal = muteRow.querySelector('.menu-row-val');
+    muteCheck.addEventListener('change', () => {
+      if (muteCheck.checked) {
+        this._savedVol = this.getVolume() || 0.7;
+        this.setVolume(0);
+        slider.value = 0; valEl.textContent = '0%'; muteVal.textContent = 'On';
+      } else {
+        const restore = this._savedVol || 0.7;
+        this.setVolume(restore);
+        slider.value = Math.round(restore * 100);
+        valEl.textContent = `${slider.value}%`; muteVal.textContent = 'Off';
+      }
+    });
+    this.bodyEl.appendChild(muteRow);
+
+    // Music toggle — independent of master volume. Off = the procedural
+    // background track is faded out and won't restart on context changes.
+    // Sound effects keep playing. This is the "kill the music but keep
+    // the gunfire" switch.
+    const musicOn = this.getMusicEnabled();
+    const musicRow = document.createElement('div');
+    musicRow.className = 'menu-row';
+    musicRow.innerHTML = `
+      <label>Music <span class="menu-row-val">${musicOn ? 'On' : 'Off'}</span></label>
+      <input type="checkbox" class="menu-check" ${musicOn ? 'checked' : ''}>
+    `;
+    const musicCheck = musicRow.querySelector('input');
+    const musicVal = musicRow.querySelector('.menu-row-val');
+    musicCheck.addEventListener('change', () => {
+      const on = musicCheck.checked;
+      this.setMusicEnabled(on);
+      musicVal.textContent = on ? 'On' : 'Off';
+    });
+    this.bodyEl.appendChild(musicRow);
 
     // Quality toggle — applies live for everything except antialiasing
     // (which requires reload since it's a WebGLRenderer construction
