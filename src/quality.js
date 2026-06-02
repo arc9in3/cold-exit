@@ -19,9 +19,42 @@ import { setCelShading } from './gltf_cache.js';
 const STORAGE_KEY = 'tacticalrogue_quality';
 const VALID = new Set(['potato', 'low', 'high']);
 
+// GPU-class sniff via the WebGL unmasked-renderer string. The RAM + UA
+// heuristic below misses the most common "massive perf hit" case: a weak
+// integrated DESKTOP GPU (Intel UHD laptop, software fallback) with >4GB
+// RAM and a desktop UA still defaulted to 'high' and got crushed by the
+// post-FX chain + shadow pass. Sampling the renderer name catches them so
+// they boot onto a tier their GPU can actually sustain. Best-effort: many
+// browsers mask the string for privacy (returns a generic value) — when
+// we can't tell, we don't downgrade. One throwaway context at module load.
+//   'potato' — software rasterizers (no real GPU)
+//   'low'    — integrated Intel HD/UHD, mobile GPU families
+//   null     — unknown / capable; defer to the RAM+UA heuristic
+function _detectGpuTier() {
+  try {
+    if (typeof document === 'undefined') return null;
+    const cv = document.createElement('canvas');
+    const gl = cv.getContext('webgl') || cv.getContext('experimental-webgl');
+    if (!gl) return 'potato';                 // no WebGL at all → weakest
+    const ext = gl.getExtension('WEBGL_debug_renderer_info');
+    const r = ext ? String(gl.getParameter(ext.UNMASKED_RENDERER_WEBGL) || '') : '';
+    // Release the context promptly so it isn't counted against the page's
+    // live-context budget when the real renderer is built.
+    const lose = gl.getExtension('WEBGL_lose_context');
+    if (lose) lose.loseContext();
+    if (!r) return null;
+    if (/SwiftShader|llvmpipe|Software|Microsoft Basic|ANGLE \(Google/i.test(r)) return 'potato';
+    // Integrated Intel (HD/UHD/older) — weak. Iris Xe / Arc are capable,
+    // so exclude them. Mobile GPU families that slipped past the UA test.
+    if (/Intel.*(HD|UHD) Graphics/i.test(r) && !/Iris|Arc/i.test(r)) return 'low';
+    if (/Mali|Adreno|PowerVR|Apple GPU/i.test(r)) return 'low';
+  } catch (_) {}
+  return null;
+}
+
 // Heuristic — best guess at whether we're running on a phone-class
-// target. Two signals: UA "Mobile" string + navigator.deviceMemory <= 4.
-// Either alone defaults to potato; both together is high confidence.
+// target. Signals: UA "Mobile" string, navigator.deviceMemory <= 4, and
+// the GPU renderer string. Any strong weak-signal downgrades the default.
 // User can always override via setQualityPref. Returns the suggested
 // default tier when no explicit pref exists.
 function _detectDefault() {
@@ -32,6 +65,9 @@ function _detectDefault() {
     if (isMobileUA && mem && mem <= 4) return 'potato';
     if (isMobileUA) return 'low';
     if (mem && mem <= 4) return 'low';
+    // Weak/integrated desktop GPU — the case the RAM+UA test misses.
+    const gpu = _detectGpuTier();
+    if (gpu) return gpu;
   } catch (_) {}
   return 'high';
 }
