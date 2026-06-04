@@ -207,6 +207,105 @@ function _addCornerPillars(level, room) {
   }
 }
 
+// Theme accent color helper — prefers the live accent getter, falls
+// back to the theme object's accent, then a neutral brass. Used by the
+// cosmetic floor-decal helpers below so each biome's floor dressing
+// picks up its own hue.
+function _shapeAccent(level) {
+  if (level._accentColor) return level._accentColor();
+  if (level.theme && level.theme.accent != null) return level.theme.accent;
+  return 0xc9a464;
+}
+
+// Cosmetic floor border — a thin inset accent frame painted a hair
+// above the floor, hugging the cell perimeter. PURELY VISUAL via the
+// same contract as _addCornerPillars: each strip is a THREE.Mesh
+// added to level.scene + tracked in level.decorations, NEVER given a
+// userData.collisionXZ and NEVER routed through level._addObstacle.
+// It cannot enter level.obstacles and so cannot touch collision,
+// raycasts, the navmesh, or the walkableBounds flood-fill.
+//
+// The frame is an OPEN rectangle (four border strips, hollow center)
+// inset ~1.2m from the walls, so it never overlaps a doorway gap
+// (doors sit at wall centers, the frame is set in from the wall) and
+// the floor stays fully readable. Flat (1.5cm tall) → no z-fighting,
+// nothing to walk into.
+function _addFloorBorder(level, room, opts = {}) {
+  if (level.decorations == null) return;
+  const d = _dims(room);
+  const inset = opts.inset ?? 1.4;       // pull in from the wall face
+  const t = opts.t ?? 0.16;              // strip width
+  const y = 0.015;                       // flat decal height
+  const color = opts.color ?? _shapeAccent(level);
+  // Skip tiny rooms where the inset frame would collapse.
+  if (d.w - inset * 2 < 2 || d.d - inset * 2 < 2) return;
+  const minX = d.minX + inset, maxX = d.maxX - inset;
+  const minZ = d.minZ + inset, maxZ = d.maxZ - inset;
+  const fw = maxX - minX, fd = maxZ - minZ;
+  const m = sharedMaterial({ color, roughness: 0.5, metalness: 0.15 });
+  // Each strip carries its footprint directly as (sw on X, sd on Z).
+  const strips = [
+    // two along X (north + south edges of the frame)
+    { sw: fw, sd: t, x: (minX + maxX) / 2, z: minZ },
+    { sw: fw, sd: t, x: (minX + maxX) / 2, z: maxZ },
+    // two along Z (east + west edges), trimmed so corners don't double
+    { sw: t, sd: fd - t * 2, x: minX, z: (minZ + maxZ) / 2 },
+    { sw: t, sd: fd - t * 2, x: maxX, z: (minZ + maxZ) / 2 },
+  ];
+  for (const s of strips) {
+    const mesh = new THREE.Mesh(new THREE.BoxGeometry(s.sw, 0.03, s.sd), m);
+    mesh.position.set(s.x, y, s.z);
+    mesh.castShadow = false;
+    mesh.receiveShadow = true;
+    mesh.userData.kind = 'floor-border-accent';
+    mesh.matrixAutoUpdate = false;
+    mesh.updateMatrix();
+    level.scene.add(mesh);
+    level.decorations.push(mesh);
+  }
+}
+
+// Cosmetic center medallion — a flat accent disc + inner ring painted
+// at the room center, a hair above the floor. Same decoration-only
+// contract as above (scene.add + decorations.push, no collisionXZ, no
+// _addObstacle). Gives open shapes (rotunda, plaza) a deliberate
+// "centerpiece" read without any free-standing geometry that could
+// trap the player. Flat → fully walkable across.
+function _addCenterMedallion(level, room, opts = {}) {
+  if (level.decorations == null) return;
+  const d = _dims(room);
+  const r = opts.r ?? Math.min(d.w, d.d) * 0.18;
+  if (r < 1) return;
+  const color = opts.color ?? _shapeAccent(level);
+  const floorColor = (level.theme && level.theme.floor != null)
+    ? level.theme.floor : 0x2a2a2e;
+  // Outer disc — tinted toward the floor so it reads as inlaid stone.
+  const discMat = sharedMaterial({ color: floorColor, roughness: 0.7 });
+  const disc = new THREE.Mesh(new THREE.CylinderGeometry(r, r, 0.03, 32), discMat);
+  disc.position.set(d.cx, 0.012, d.cz);
+  disc.castShadow = false;
+  disc.receiveShadow = true;
+  disc.userData.kind = 'center-medallion';
+  disc.matrixAutoUpdate = false;
+  disc.updateMatrix();
+  level.scene.add(disc);
+  level.decorations.push(disc);
+  // Accent ring just inside the disc edge.
+  const ringMat = sharedMaterial({ color, roughness: 0.45, metalness: 0.2,
+    side: THREE.DoubleSide });
+  const ring = new THREE.Mesh(
+    new THREE.RingGeometry(r * 0.78, r * 0.9, 40), ringMat);
+  ring.rotation.x = -Math.PI / 2;
+  ring.position.set(d.cx, 0.02, d.cz);
+  ring.castShadow = false;
+  ring.receiveShadow = false;
+  ring.userData.kind = 'center-medallion-ring';
+  ring.matrixAutoUpdate = false;
+  ring.updateMatrix();
+  level.scene.add(ring);
+  level.decorations.push(ring);
+}
+
 // Helper — emit the four perimeter walls with door gaps. Mirrors
 // level.js _buildRoomPerimeter exactly so shapes can reuse the
 // "rectangle with door gaps" base when they only need partial
@@ -278,6 +377,11 @@ const rectShape = {
     // Cosmetic corner pillars — soften the 90° corners. Decoration-only,
     // does NOT touch walkableBounds (see _addCornerPillars).
     _addCornerPillars(level, room);
+    // Cosmetic floor border — a thin inset accent frame. Flat decal,
+    // decoration-only (see _addFloorBorder); never touches collision
+    // or walkableBounds. ~55% of rect rooms get one so the floor
+    // dressing reads varied rather than uniform.
+    if (Math.random() < 0.55) _addFloorBorder(level, room);
     const d = _dims(room);
     return {
       walls: [],
@@ -651,6 +755,11 @@ const rotunda = {
       _box(d.cx - DOOR_WIDTH / 2 - 0.5, d.minZ, d.cx + DOOR_WIDTH / 2 + 0.5, d.maxZ),
       _box(d.minX, d.cz - DOOR_WIDTH / 2 - 0.5, d.maxX, d.cz + DOOR_WIDTH / 2 + 0.5),
     ];
+    // Cosmetic center medallion — a flat inlaid disc. The octagon's
+    // center is walkable (inscribed square above), and the medallion is
+    // a flat decal (see _addCenterMedallion): no collision, no
+    // walkableBounds change. Gives the rotunda a deliberate centerpiece.
+    _addCenterMedallion(level, room);
     return { walls: [], walkableBounds: wb, props: [] };
   },
 };
@@ -878,6 +987,11 @@ const plaza = {
       _box(d.minX, daisFp.minZ, daisFp.minX, daisFp.maxZ),
       _box(daisFp.maxX, daisFp.minZ, d.maxX, daisFp.maxZ),
     ] : [_box(d.minX, d.minZ, d.maxX, d.maxZ)];
+    // Cosmetic center medallion — ONLY when there's no raised dais
+    // (the dais is a real platform; a flat decal on top would clip).
+    // Flat decal, decoration-only (see _addCenterMedallion): no
+    // collision, no walkableBounds change. Anchors the open plaza floor.
+    if (!daisFp) _addCenterMedallion(level, room);
     return { walls: [], walkableBounds: wb, props: [] };
   },
 };

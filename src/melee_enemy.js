@@ -1,7 +1,7 @@
 import * as THREE from 'three';
 import { tunables } from './tunables.js';
 import { BALANCE } from './balance.js';
-import { buildRig, initAnim, updateAnim, pokeHit, pokeDeath } from './actor_rig.js';
+import { buildRig, initAnim, updateAnim, pokeHit, pokeDeath, addGearOverlay } from './actor_rig.js';
 import { _nextNetId } from './gunman.js';
 import { spawnSpeechBubble } from './hud.js';
 import { aiSpatial } from './ai_spatial.js';
@@ -206,46 +206,21 @@ export class MeleeEnemyManager {
     // Off-arm is just the rig's left arm meshes — already built in.
     const offArm = rig.leftArm.shoulder.mesh;
 
-    // Visible gear cues — helmet / chest plate parented to the rig's
-    // head + chest so they track animation pose.
+    // Tactical kit overlay — helmet/visor, plate carrier, bandolier,
+    // pauldrons, hip pouches, gated by tier/variant/gearLevel. Same
+    // shared builder as gunmen (actor_rig.addGearOverlay). shieldBearer
+    // counts as a heavy variant inside the builder, so it forces the
+    // pauldron + plate-carrier read to match its bulwark silhouette.
+    // Overlay meshes parent to rig bones under group; no actor pool
+    // exists (buildRig runs fresh per spawn) so removeAll()'s
+    // group.traverse disposal cleans them up on level regen.
     const gearLevel = opts.gearLevel ?? 0;
-    // Helmet + chest plate cues sized for the slimmer cylindrical
-    // rig (half-sphere helmet, narrower plate).
-    if (tier === 'boss' || Math.random() < 0.30 + gearLevel * 0.08) {
-      const helmet = new THREE.Mesh(
-        new THREE.SphereGeometry(0.18, 14, 8, 0, Math.PI * 2, 0, Math.PI * 0.55),
-        new THREE.MeshStandardMaterial({
-          color: tier === 'boss' ? 0x6a1a1a : 0x3f4028,
-          roughness: 0.6, metalness: 0.3,
-        }),
-      );
-      helmet.position.y = 0.18;
-      helmet.castShadow = true;
-      rig.head.add(helmet);
-    }
-    if (tier === 'boss' || variant === 'shieldBearer' || Math.random() < 0.25 + gearLevel * 0.08) {
-      // Curved heavy plate matching the rig's tapered chest. Arc
-      // covers the front ~150°, stands proud of the built-in plate.
-      const plate = new THREE.Mesh(
-        new THREE.CylinderGeometry(
-          0.34, 0.30,
-          0.42,
-          14, 1,
-          true,
-          -Math.PI / 2.4,
-          Math.PI / 1.2,
-        ),
-        new THREE.MeshStandardMaterial({
-          color: tier === 'boss' ? 0x7a2222 : 0x3f4028,
-          roughness: 0.65, metalness: 0.3,
-          side: THREE.DoubleSide,
-        }),
-      );
-      plate.position.set(0, 0.24, 0);
-      plate.scale.z = 0.72;
-      plate.castShadow = true;
-      rig.chest.add(plate);
-    }
+    addGearOverlay(rig, {
+      tier,
+      variant,
+      gearLevel,
+      gearColor: gearHex,
+    });
 
     const alertMat = new THREE.MeshBasicMaterial({
       color: 0xffa030, transparent: true, opacity: 0, depthTest: false,

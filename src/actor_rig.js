@@ -1646,6 +1646,201 @@ export function buildRig(opts = {}) {
   };
 }
 
+// =====================================================================
+// Gear overlay — tactical kit added ON TOP of a built rig so enemies
+// read as kitted-out operators (helmets/visors, plate carriers,
+// bandoliers, pauldrons, hip pouches) instead of plain colored bodies.
+//
+// LIFECYCLE NOTE (important): these meshes are parented to the rig's
+// bones (rig.head / rig.chest / shoulder pivots / rig.hips), which all
+// live under rig.group. There is NO actor/rig pool in this codebase —
+// buildRig() runs fresh on every GunmanManager.spawn / MeleeEnemyManager
+// .spawn, and on level regen the managers' removeAll() walks
+// `g.group.traverse(...)` disposing every geometry/material that isn't
+// flagged `sharedRigGeom`. Because these overlay meshes hang under
+// g.group and their geometries are freshly allocated here (NOT the
+// shared _cyl/_box/_sph cache, so NOT stamped sharedRigGeom), they are
+// disposed correctly by that same traversal. They are added AFTER
+// buildRig returns and are NOT pushed into rig.meshes, so the rig
+// instancer (which only iterates rig.meshes in register()) never pools
+// them — they render as ordinary direct-draw meshes exactly like the
+// pre-existing helmet/chestPlate cues this replaces. No leak, no
+// duplication across recycles because there is no recycle.
+//
+// Geometry here is intentionally allocated per-actor (not via the
+// _geomCache helpers) so each actor's gear can be disposed
+// independently and so we never accidentally tag a gear buffer as a
+// shared rig buffer. Per-actor overlay mesh count is kept modest
+// (helmet + optional visor + at most one chest layer + optional strap
+// + optional pauldrons + optional pouch ≈ 1-7 small meshes) so a
+// 20-40 enemy horde stays within draw budget.
+//
+// Gating: pass tier ('normal'|'subBoss'|'boss'), variant id, and
+// gearLevel. Probabilities scale with gearLevel so deeper floors look
+// more kitted; bosses force the full set; specific variants (tank,
+// shieldBearer) get pauldrons.
+// =====================================================================
+export function addGearOverlay(rig, opts = {}) {
+  if (!rig || !rig.head || !rig.chest) return;
+  const tier      = opts.tier || 'normal';
+  const variant   = opts.variant || 'standard';
+  const gearLevel = opts.gearLevel | 0;
+  const isBoss    = tier === 'boss';
+  const isSubBoss = tier === 'subBoss';
+  const heavy     = variant === 'tank' || variant === 'shieldBearer';
+  // Scale all overlay geometry by the rig's own build scale so kit
+  // sized for the ~1.85m primitive body tracks any actor scale. The
+  // outer group.scale (tier/variant size) multiplies on top for free.
+  const s = rig.scale || 1.0;
+  const rng = opts.rng || Math.random;
+
+  // Palette — gearColor drives the metal kit; accent drives the visor
+  // glow / strap pop. Bosses get an authoritative bronze; sub-bosses
+  // burgundy; otherwise the caller's gearColor (variant role tone).
+  const gearHex = opts.gearColor != null ? opts.gearColor
+    : (isBoss ? 0x7a5020 : isSubBoss ? 0x6a1e2a : 0x3a4a5c);
+  const trimHex = _darken(gearHex, 0.45);
+  const accentHex = opts.accentColor != null ? opts.accentColor
+    : (isBoss ? 0xffb24a : isSubBoss ? 0xff5a6a : 0x39d6ff);
+  // Slightly metallic standard material, matching the existing chest
+  // plate / shield kit look (neon-noir, muted metal).
+  const mkGearMat = (hex, rough = 0.6, metal = 0.35) =>
+    new THREE.MeshStandardMaterial({ color: hex, roughness: rough, metalness: metal });
+
+  // ---- 1) Helmet (taller dome) + optional visor band ----------------
+  // Built on the existing half-sphere helmet but taller, with a tier-
+  // distinct color and an optional emissive visor band for higher kit.
+  if (isBoss || rng() < 0.40 + gearLevel * 0.08) {
+    const helmetColor = isBoss ? 0x6a1a1a : isSubBoss ? 0x3a1e44 : gearHex;
+    const helmet = new THREE.Mesh(
+      // Taller dome — phi sweep 0..0.62π (was 0.55π) reads as a fuller
+      // combat helmet rather than a skullcap.
+      new THREE.SphereGeometry(0.175 * s, 14, 9, 0, Math.PI * 2, 0, Math.PI * 0.62),
+      mkGearMat(helmetColor, 0.55, 0.3),
+    );
+    helmet.position.y = 0.175 * s;
+    helmet.scale.set(1.0, 1.08, 1.04);   // slight vertical stretch
+    helmet.castShadow = true;
+    helmet.userData.zone = 'head';
+    rig.head.add(helmet);
+
+    // Visor band — thin emissive arc across the brow. Higher gear /
+    // boss / sub-boss only, so basic grunts stay bare-domed.
+    if (isBoss || isSubBoss || rng() < 0.30 + gearLevel * 0.06) {
+      const vR = 0.16 * s;
+      const visor = new THREE.Mesh(
+        new THREE.CylinderGeometry(vR * 1.02, vR * 1.02, 0.05 * s, 16, 1, true,
+          -Math.PI * 0.5, Math.PI),
+        new THREE.MeshStandardMaterial({
+          color: 0x0a0e14, roughness: 0.3, metalness: 0.5,
+          emissive: accentHex, emissiveIntensity: isBoss ? 0.9 : 0.55,
+          side: THREE.DoubleSide,
+        }),
+      );
+      visor.position.set(0, 0.12 * s, 0.02 * s);
+      visor.userData.zone = 'head';
+      rig.head.add(visor);
+    }
+  }
+
+  // ---- 2) Tactical vest / chest rig --------------------------------
+  // ONE chest layer max (keeps mesh count low). Heavy variants + bosses
+  // get a plate carrier (two stacked plates + webbing strap read); mid
+  // kit gets a lighter webbing vest. Sits proud of the rig's built-in
+  // chestPlate. Parented to rig.chest so it tracks aim/recoil twist.
+  const wantVest = isBoss || heavy || rng() < 0.30 + gearLevel * 0.08;
+  if (wantVest) {
+    const vestColor = isBoss ? 0x7a2222 : isSubBoss ? 0x5a1f2a : gearHex;
+    // Curved front plate — open-ended cylinder arc over the ribcage,
+    // matching the rig's tapered torso (same arc math as chestPlate).
+    const plate = new THREE.Mesh(
+      new THREE.CylinderGeometry(
+        0.33 * s, 0.29 * s, 0.42 * s, 16, 1, true,
+        -Math.PI / 2.4, Math.PI / 1.2,
+      ),
+      mkGearMat(vestColor, 0.6, 0.35),
+    );
+    plate.position.set(0, 0.24 * s, 0);
+    plate.scale.z = 0.72;
+    plate.castShadow = true;
+    plate.userData.zone = 'torso';
+    rig.chest.add(plate);
+
+    // Heavy/boss carriers get a second lower plate + a horizontal
+    // webbing band so the torso reads as a layered plate carrier.
+    if (isBoss || heavy) {
+      const lower = new THREE.Mesh(
+        new THREE.CylinderGeometry(
+          0.31 * s, 0.30 * s, 0.16 * s, 16, 1, true,
+          -Math.PI / 2.6, Math.PI / 1.3,
+        ),
+        mkGearMat(trimHex, 0.65, 0.3),
+      );
+      lower.position.set(0, 0.06 * s, 0);
+      lower.scale.z = 0.72;
+      lower.userData.zone = 'torso';
+      rig.chest.add(lower);
+    }
+  }
+
+  // ---- 3) Bandolier / diagonal strap (asymmetric silhouette) -------
+  // Thin tilted box from shoulder to opposite hip — breaks the
+  // bilateral grunt read. Skipped when a heavy carrier already covers
+  // the chest (would clip). Mirrors the player's signature strap build
+  // but enemy-tinted (gear/trim, not a character color).
+  if (!heavy && (isBoss || rng() < 0.22 + gearLevel * 0.06)) {
+    const strap = new THREE.Mesh(
+      new THREE.BoxGeometry(0.04 * s, 0.55 * s, 0.05 * s),
+      mkGearMat(trimHex, 0.7, 0.2),
+    );
+    strap.position.set(0, 0.18 * s, 0.30 * s);
+    strap.rotation.z = (rng() < 0.5 ? 1 : -1) * 0.55;   // L→hip or R→hip
+    strap.userData.zone = 'torso';
+    rig.chest.add(strap);
+  }
+
+  // ---- 4) Shoulder pads / pauldrons (heavy variants) ---------------
+  // Capped domes on each shoulder pivot so they track arm swing.
+  // Forced for tank / shieldBearer / boss; otherwise a small chance on
+  // geared units. Parented to the shoulder pivots (already exist).
+  if (isBoss || heavy || rng() < 0.18 + gearLevel * 0.05) {
+    const padMat = mkGearMat(isBoss ? 0x6a4018 : gearHex, 0.55, 0.4);
+    const padGeom = () => new THREE.SphereGeometry(
+      0.135 * s, 12, 7, 0, Math.PI * 2, 0, Math.PI * 0.6);
+    for (const arm of [rig.leftArm, rig.rightArm]) {
+      if (!arm || !arm.shoulder || !arm.shoulder.pivot) continue;
+      const pad = new THREE.Mesh(padGeom(), padMat);
+      // Sit on top of the deltoid; slight outward push.
+      pad.position.set(0, 0.02 * s, 0);
+      pad.scale.set(1.15, 0.9, 1.15);
+      pad.castShadow = true;
+      pad.userData.zone = 'arm';
+      arm.shoulder.pivot.add(pad);
+    }
+  }
+
+  // ---- 5) Hip pouches / belt kit -----------------------------------
+  // Small gear boxes at the belt line, parented to rig.hips so they
+  // ride with the lower body. One or two small pouches for geared
+  // units; bosses always get them.
+  if (isBoss || rng() < 0.28 + gearLevel * 0.07) {
+    const pouchMat = mkGearMat(trimHex, 0.7, 0.2);
+    const beltY = 1.02 * s;   // ~belt height in rig-local (hips at hipY)
+    // Front-left pouch always; front-right added for heavier kit.
+    const sides = (isBoss || heavy || rng() < 0.5) ? [-1, 1] : [-1];
+    for (const sx of sides) {
+      const pouch = new THREE.Mesh(
+        new THREE.BoxGeometry(0.10 * s, 0.12 * s, 0.07 * s),
+        pouchMat,
+      );
+      pouch.position.set(sx * 0.16 * s, beltY, 0.16 * s);
+      pouch.castShadow = true;
+      pouch.userData.zone = 'torso';
+      rig.hips.add(pouch);
+    }
+  }
+}
+
 // --- Procedural animation ----------------------------------------------
 // All state lives on a small `rig.anim` bag attached by `initAnim`; per
 // frame `updateAnim(rig, state, dt)` reads `state.speed` (horizontal

@@ -2,7 +2,7 @@ import * as THREE from 'three';
 import { tunables } from './tunables.js';
 import { BALANCE } from './balance.js';
 import { isWeaponUnlocked } from './prefs.js';
-import { buildRig, initAnim, updateAnim, pokeHit, pokeRecoil, pokeDeath } from './actor_rig.js';
+import { buildRig, initAnim, updateAnim, pokeHit, pokeRecoil, pokeDeath, addGearOverlay } from './actor_rig.js';
 import { spawnSpeechBubble } from './hud.js';
 import { loadModelClone, fitToRadius } from './gltf_cache.js';
 import { modelForItem, shouldMirrorInHand,
@@ -601,46 +601,21 @@ export class GunmanManager {
     // clothing, and the primitive gear cues are sized for the primitive
     // 1.85m body so they'd float around the skinned model.
     const gearLevel = opts.gearLevel ?? 0;
-    // Helmet + chest plate cues sized for the slimmer cylindrical
-    // rig. Helmet is a half-sphere sitting just above the head
-    // sphere; chest plate mirrors the rig's own chestPlate bounds.
-    if (tier === 'boss' || Math.random() < 0.35 + gearLevel * 0.08) {
-      const helmet = new THREE.Mesh(
-        new THREE.SphereGeometry(0.17, 14, 8, 0, Math.PI * 2, 0, Math.PI * 0.55),
-        new THREE.MeshStandardMaterial({
-          color: tier === 'boss' ? 0x6a1a1a : 0x3f4a54,
-          roughness: 0.55, metalness: 0.3,
-        }),
-      );
-      helmet.position.y = 0.18;
-      helmet.castShadow = true;
-      rig.head.add(helmet);
-    }
-    if (tier === 'boss' || variantId === 'tank' || Math.random() < 0.28 + gearLevel * 0.08) {
-      // Curved heavy plate sitting OVER the rig's default chestPlate —
-      // open-ended cylinder arc centred on the front, slightly larger
-      // radius than the chest so it stands proud. Matches the new
-      // tapered cylindrical torso instead of a flat slab.
-      const plate = new THREE.Mesh(
-        new THREE.CylinderGeometry(
-          0.32, 0.28,       // match chest taper + stand-off
-          0.4,
-          14, 1,
-          true,
-          -Math.PI / 2.4,   // -75°, centred on +Z front
-          Math.PI / 1.2,    // 150° arc
-        ),
-        new THREE.MeshStandardMaterial({
-          color: tier === 'boss' ? 0x7a2222 : 0x3a4a5c,
-          roughness: 0.6, metalness: 0.35,
-          side: THREE.DoubleSide,
-        }),
-      );
-      plate.position.set(0, 0.24, 0);
-      plate.scale.z = 0.72;         // match rig's torsoDepthRatio
-      plate.castShadow = true;
-      rig.chest.add(plate);
-    }
+    // Tactical kit overlay — helmet/visor, plate carrier, bandolier,
+    // pauldrons, hip pouches. Gated by tier/variant/gearLevel inside
+    // addGearOverlay so a room reads with variety, not uniformity.
+    // These overlay meshes parent to rig bones (head/chest/shoulders/
+    // hips) under g.group; there is no actor pool here (buildRig runs
+    // fresh per spawn) so removeAll()'s group.traverse disposal tears
+    // them down on level regen — no leak, no cross-spawn duplication.
+    // gearColor is the variant/tier accent computed above so kit tone
+    // matches the silhouette palette.
+    addGearOverlay(rig, {
+      tier,
+      variant: variantId,
+      gearLevel,
+      gearColor: gearHex,
+    });
 
     const chosen = weapon || this._pickWeapon();
     const gunMat = new THREE.MeshStandardMaterial({

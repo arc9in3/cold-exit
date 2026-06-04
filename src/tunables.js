@@ -38,21 +38,25 @@ export const tunables = {
     // light sources). Now that walls cast shadows again, the key carries
     // the depth; fill only keeps shadow sides from crushing to pure
     // black. See the "flat look" fix 2026-06.
-    hemiIntensity:       0.220,
+    // Pass-2 lighting tune (2026-06): lifted ambient + exposure so the
+    // real CC0 PBR surface textures actually read instead of falling to
+    // near-black, and the world stops feeling uniformly dark. Key stays
+    // dominant (4.0) so the flat-look fix's contrast is preserved.
+    hemiIntensity:       0.420,
     keyColor:            0xaec4d8,
     keyIntensity:        4.000,
     fillColor:           0x191a48,
-    fillIntensity:       1.100,
+    fillIntensity:       1.600,
     rimColor:            0xf358df,
     rimIntensity:        2.000,
     fogColor:            0x22252a,
-    fogDensity:          0.0220,
+    fogDensity:          0.0170,
     // ACES filmic tone curve exposure. Renderer toneMapping is set to
     // ACESFilmicToneMapping at boot; this scales scene luminance into
     // the curve. ACES darkens midtones vs the old NoToneMapping path,
     // so exposure typically rides >1.0 to compensate for the existing
     // light-intensity tuning. Live-tunable via F3 / console.
-    toneMappingExposure: 1.250,
+    toneMappingExposure: 1.450,
     playerAuraColor:     0xffffff,
     playerAuraIntensity: 0.000,
     playerAuraDistance:  15.00,

@@ -218,7 +218,7 @@ const FinisherShader = {
     // 1.0 where the player can see, 0.0 where occluded.
     tLosMask:  { value: null },
     uLosOn:    { value: 0.0 },     // 0 disables the LoS pass entirely (toggle / saves)
-    uLosDark:  { value: 0.30 },    // floor brightness applied outside LoS
+    uLosDark:  { value: 0.40 },    // floor brightness applied outside LoS (pass-2: 0.30->0.40, softens the fog-of-war crush so out-of-sight areas read as dim, not black)
     uLosSoft:  { value: 0.06 },    // smoothstep edge width on the mask
     // Hurt vignette — two channels.
     //   uHurt      — transient hit flash; wide radial with a center
