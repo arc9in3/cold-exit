@@ -25,6 +25,8 @@ import * as THREE from 'three';
 const LEDGE_DEPTH = 0.6;       // perpendicular thickness (player walks along)
 const LEDGE_HEIGHT_DEFAULT = 1.0;
 const LEDGE_TOP_THICK = 0.18;  // visible slab thickness
+const LEDGE_LIP_H = 0.16;      // height of the cosmetic outer-edge lip
+const LEDGE_LIP_T = 0.06;      // thickness of the lip rail
 
 // Add a ledge to the level along the segment (x1,z1)→(x2,z2). The
 // ledge is centered on the segment; players walk on top at `height`.
@@ -67,6 +69,39 @@ export function addLedge(level, x1, z1, x2, z2, height = LEDGE_HEIGHT_DEFAULT, o
   slab.updateMatrix();
   level.scene.add(slab);
   level.decorations.push(slab);
+
+  // Cosmetic edge lips — a slim raised rail along BOTH long edges of
+  // the ledge top so it reads as a window sill / parapet rather than a
+  // bare slab. PURELY VISUAL: same decoration path as the slab itself
+  // (scene.add + level.decorations, no collisionXZ). It does NOT change
+  // walkability — the ledge top is already non-colliding (the player
+  // teleports up via mantle) and the lip carries no collision proxy, so
+  // movement, drop-off, and mantle behaviour are identical to today.
+  const lipMat = new THREE.MeshStandardMaterial({
+    color: 0x5a5a66, roughness: 0.7, metalness: 0.1,
+  });
+  const lipTopY = height + LEDGE_TOP_THICK + LEDGE_LIP_H / 2;
+  const lipW = isHoriz ? length : LEDGE_LIP_T;
+  const lipD = isHoriz ? LEDGE_LIP_T : length;
+  const edgeOff = LEDGE_DEPTH / 2 - LEDGE_LIP_T / 2;
+  const lipOffsets = isHoriz
+    ? [[0, -edgeOff], [0, edgeOff]]
+    : [[-edgeOff, 0], [edgeOff, 0]];
+  for (const [ox, oz] of lipOffsets) {
+    const lip = new THREE.Mesh(
+      new THREE.BoxGeometry(lipW, LEDGE_LIP_H, lipD),
+      lipMat,
+    );
+    lip.position.set(cx + ox, lipTopY, cz + oz);
+    lip.castShadow = false;
+    lip.receiveShadow = true;
+    lip.userData.kind = 'ledge-lip';
+    lip.userData.collisionXZ = null;
+    lip.matrixAutoUpdate = false;
+    lip.updateMatrix();
+    level.scene.add(lip);
+    level.decorations.push(lip);
+  }
 
   // Inside / outside the room for drop-off. For a ledge along a
   // wall, the inside drop-off lands the player one body-radius INTO

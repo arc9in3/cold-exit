@@ -227,6 +227,29 @@ const VARIANT_PROFILES = {
   },
 };
 
+// Per-variant silhouette palette — drives bodyColor / headColor /
+// gearColor (which renders on chest plate / pauldrons / knee pads) so
+// each combat ROLE reads at a glance from its tint alone, before the
+// player parses behaviour. Tier (boss/subBoss) overrides body+head
+// below; variants still set their own gear tone so a "tank boss" reads
+// as both heavy AND authoritative. Mobile / specialist roles get a
+// brighter gear pop so they pre-read as threats; the heavy / tactical
+// roles stay muted-metal.
+//   tank        — dark gunmetal body + cold steel gear (reads "armoured")
+//   dasher      — teal body + bright cyan gear (reads "fast / electric")
+//   runner      — violet body + magenta gear (reads "aggressive rusher")
+//   coverSeeker — olive body + muted khaki gear (reads "tactical")
+//   shieldedPistol — sand body + brass gear (reads "heavy bulwark")
+//   sniper      — dark tan body + amber gear (reads "marksman")
+const VARIANT_PALETTE = {
+  tank:           { body: 0x2b2e33, head: 0x16181b, gear: 0x4a525a },
+  dasher:         { body: 0x16323d, head: 0x0c1c24, gear: 0x2f9ab0 },
+  runner:         { body: 0x331a44, head: 0x1a0d24, gear: 0x9a3ab0 },
+  coverSeeker:    { body: 0x2a3320, head: 0x161c10, gear: 0x4a5230 },
+  shieldedPistol: { body: 0x554328, head: 0x2c2214, gear: 0x9a7430 },
+  sniper:         { body: 0x3a2f1c, head: 0x1e180e, gear: 0xc08a28 },
+};
+
 // Per-run net ID counter — bumped on every spawn so each gunman /
 // melee gets a stable handle for coop snapshot reconciliation. Reset
 // on regenerateLevel via resetNetIds().
@@ -521,16 +544,28 @@ export class GunmanManager {
     const scaleXZ = Math.min(MAX_SCALE, tierScale * profile.scale);
     const scaleY  = Math.min(MAX_SCALE, tierScale * (profile.scaleY ?? profile.scale));
 
-    const baseBodyHex = profile.tint ?? this._normalBodyColor.getHex();
-    const baseHeadHex = profile.tint ? (profile.tint & 0x555555) : this._normalHeadColor.getHex();
+    // Per-variant palette drives the at-rest tint so each combat role
+    // reads from its silhouette colour alone. Falls back to the legacy
+    // profile.tint / normal colours when a variant has no palette entry
+    // (e.g. 'standard').
+    const pal = VARIANT_PALETTE[variantId] || null;
+    const baseBodyHex = pal ? pal.body : (profile.tint ?? this._normalBodyColor.getHex());
+    const baseHeadHex = pal ? pal.head : (profile.tint ? (profile.tint & 0x555555) : this._normalHeadColor.getHex());
     const bodyHex = tier === 'boss' ? 0x5a1a1a : (tier === 'subBoss' ? 0x3a1e58 : baseBodyHex);
     const headHex = tier === 'boss' ? 0x3a0f10 : (tier === 'subBoss' ? 0x22103e : baseHeadHex);
-    // Per-tier gear accent — bosses get bronze kit, sub-bosses red,
-    // variants pick up their profile tint. Makes tier readable at a
-    // glance via the chest-plate / pauldrons / knee-pads alone.
+    // Per-tier gear accent — bosses get authoritative bronze kit,
+    // sub-bosses burgundy; otherwise the variant's own gear tone reads
+    // the role via the chest-plate / pauldrons / knee-pads alone.
     const gearHex = tier === 'boss' ? 0x7a5020
                   : tier === 'subBoss' ? 0x6a1e2a
-                  : (profile.tint ? ((profile.tint & 0xf8f8f8) >> 1) : 0x2a2a30);
+                  : (pal ? pal.gear
+                    : (profile.tint ? ((profile.tint & 0xf8f8f8) >> 1) : 0x2a2a30));
+    // Legs pick up a darkened version of the variant body so the lower
+    // silhouette isn't identical grey across every role. >>1 halves each
+    // channel — cheap inline darken (no _darken import in this file).
+    const legHex = tier === 'boss' ? 0x2a0c0c
+                 : tier === 'subBoss' ? 0x1c0e2c
+                 : (pal ? ((pal.body & 0xfefefe) >> 1) : 0x231418);
 
     // Jointed rig (shared actor_rig). The rig's root group is what we
     // position/scale; all hit-zone meshes already carry userData.zone
@@ -540,7 +575,7 @@ export class GunmanManager {
       scale: 0.77,          // ~1.85m baseline; outer scaleXZ/scaleY drives actor size
       bodyColor: bodyHex,
       headColor: headHex,
-      legColor: 0x231418,
+      legColor: legHex,
       armColor: bodyHex,
       handColor: 0x2a1f1a,
       gearColor: gearHex,

@@ -284,7 +284,7 @@ export const DEFAULT_DIMS = {
     // V-taper silhouette — wider top, narrower waist. Bumped chestTopR
     // and slimmed chestBotR so the cylinder reads with shoulders-out
     // and a defined waistline. Hip cylinder slightly slimmed to match.
-    pelvisH: 0.17, pelvisTopR: 0.18, pelvisBotR: 0.21, pelvisY: 0.12,
+    pelvisH: 0.17, pelvisTopR: 0.185, pelvisBotR: 0.225, pelvisY: 0.12,
     // Crotch wedge — small downward-tapering cylinder filling the
     // inverted-V gap between pelvis bottom and the inner-thigh tops.
     // Top (crotchTopR) should roughly match the inner-edge of the
@@ -294,13 +294,13 @@ export const DEFAULT_DIMS = {
     // within the hips group (m, scaled by rig.scale).
     crotchTopR: 0.13, crotchBotR: 0.07, crotchH: 0.06,
     crotchX: 0, crotchY: 0.005, crotchZ: 0,
-    stomachH: 0.235, stomachTopR: 0.24, stomachBotR: 0.18, stomachY: 0.22,
+    stomachH: 0.235, stomachTopR: 0.25, stomachBotR: 0.165, stomachY: 0.22,
     // Single chest cylinder. The ribs split was an experiment that
     // added complexity without payoff — torso reads as one taper
     // anyway and the seam was just one more thing to align. Reverted
     // to the original chestH so this DIM block matches all the legacy
     // call sites.
-    chestH: 0.345, chestTopR: 0.32, chestBotR: 0.22,
+    chestH: 0.345, chestTopR: 0.345, chestBotR: 0.21,
     collarH: 0.055, collarTopR: 0.11, collarBotR: 0.32, collarDY: 0.057,
     // Bottom radius lifted from 0.22 → 0.28 so the cone tapers less
     // aggressively — the previous value created a visible polygon ring
@@ -315,19 +315,19 @@ export const DEFAULT_DIMS = {
     // pitch/twist. Bridges the visual gap between the shoulder line
     // and the neck base; without it the shoulders look like two
     // pegged-on spheres at the corners of a flat chest top.
-    trapezius: { r: 0.20, y: 0.34, z: 0, scaleY: 0.40, scaleX: 1.50, scaleZ: 1.00 },
+    trapezius: { r: 0.21, y: 0.34, z: 0, scaleY: 0.40, scaleX: 1.55, scaleZ: 1.00 },
   },
   legs: {
     hipX: 0.18, hipJointY: 0.002,
-    thighH: 0.42, thighTopR: 0.135, thighBotR: 0.095,
-    calfH: 0.59, calfTopR: 0.10, calfBotR: 0.075,
+    thighH: 0.42, thighTopR: 0.148, thighBotR: 0.088,
+    calfH: 0.59, calfTopR: 0.105, calfBotR: 0.068,
     footH: 0.08, footW: 0.16, footD: 0.30, footZ: 0.06,
-    hipBulgeR: 0.14,
-    kneeBulgeR: 0.11,
+    hipBulgeR: 0.155,
+    kneeBulgeR: 0.10,
     kneePadW: 0.20, kneePadH: 0.11, kneePadD: 0.11, kneePadZ: 0.065,
     thighRigW: 0.06, thighRigH: 0.18, thighRigD: 0.22,
     thighRigX: 0.11, thighRigYK: 0, // * thighH
-    bootTopR: 0.10, bootTopH: 0.08, bootTopYK: -0.9, // * calfH
+    bootTopR: 0.105, bootTopH: 0.105, bootTopYK: -0.85, // * calfH
     // Ankle blend — small sphere at the ankle pivot bridging the calf
     // bottom into the boot top. Parented to the ankle Group so it
     // moves with the foot during walks. Fills the visible gap that
@@ -344,11 +344,11 @@ export const DEFAULT_DIMS = {
   arms: {
     // Shoulders pushed outboard for the V-silhouette. Bigger
     // shoulderBulge + shoulderPad reads as muscled / armored.
-    shoulderInset: 0.34, shoulderYK: 0.80, // * chestH
-    upperArmH: 0.35, upperArmTopR: 0.105, upperArmBotR: 0.08,
-    forearmH: 0.30, forearmTopR: 0.09, forearmBotR: 0.065,
-    shoulderBulgeR: 0.15,
-    elbowBulgeR: 0.08,
+    shoulderInset: 0.36, shoulderYK: 0.80, // * chestH
+    upperArmH: 0.35, upperArmTopR: 0.115, upperArmBotR: 0.078,
+    forearmH: 0.30, forearmTopR: 0.092, forearmBotR: 0.058,
+    shoulderBulgeR: 0.16,
+    elbowBulgeR: 0.078,
     // Pauldron — sized to sit *on* the deltoid, not swallow it. Was 0.18
     // (read bigger than the head from front-3/4); 0.11 keeps the
     // armoured-shoulder read without the visor-helmet-pauldron silhouette.
@@ -360,7 +360,7 @@ export const DEFAULT_DIMS = {
     // archetype overrides push it bigger for male / smaller for
     // female. Sells "this arm has muscle" instead of reading as
     // a tube of pixels.
-    bicep: { r: 0.10, yK: 0.45, z: 0.04, scaleY: 0.85, scaleX: 1.05, scaleZ: 1.10 },
+    bicep: { r: 0.11, yK: 0.45, z: 0.04, scaleY: 0.90, scaleX: 1.08, scaleZ: 1.12 },
   },
   rifleAnchor: {
     x: 0.23, yK: 0.82, z: 0.04, // yK * chestH
@@ -370,9 +370,9 @@ export const DEFAULT_DIMS = {
     // there's a visible neck segment between the chest cap and the
     // cranium. Previously the head sat directly on the chest plate /
     // collar and read Lego-figure-ish.
-    neckTopR: 0.08, neckBotR: 0.09, neckH: 0.22, neckMeshY: 0.09,
-    headY: 0.14,
-    craniumR: 0.15, craniumStretchY: 1.15, craniumStretchZ: 1.05, craniumY: 0.18,
+    neckTopR: 0.075, neckBotR: 0.092, neckH: 0.245, neckMeshY: 0.10,
+    headY: 0.155,
+    craniumR: 0.155, craniumStretchY: 1.20, craniumStretchZ: 1.08, craniumY: 0.18,
     jawW: 0.075, jawH: 0.10, jawD: 0.22, jawY: 0.06,
   },
 };
@@ -392,11 +392,11 @@ export const DEFAULT_DIMS_FEMALE = {
     // stomachTopR so chest + stomach read as one continuous taper
     // from shoulder to waist.
     stomachH: 0.26,
-    stomachTopR: 0.18,
-    stomachBotR: 0.11,   // wasp waist
+    stomachTopR: 0.175,
+    stomachBotR: 0.105,  // wasp waist
     chestH: 0.34,
-    chestTopR: 0.27,
-    chestBotR: 0.18,
+    chestTopR: 0.285,
+    chestBotR: 0.175,
     chestPlateTopR: 0.29,
     chestPlateBotR: 0.20,
     // Collar + belt SKIPPED on female: the bodyshapes ref shows a
@@ -473,8 +473,8 @@ export const DEFAULT_DIMS_FEMALE = {
     // the femur head is inside the hip bone.
     hipX: 0.13,
     thighH: 0.54,        // longer legs (push for the eve-ratio look)
-    thighTopR: 0.13,     // top retains volume so iliac shelf seamless
-    thighBotR: 0.075,    // tapers tighter at the knee
+    thighTopR: 0.138,    // top retains volume so iliac shelf seamless
+    thighBotR: 0.070,    // tapers tighter at the knee
     calfH: 0.70,         // longer + tapered
     calfTopR: 0.082,
     calfBotR: 0.045,     // very narrow at ankle (athletic calf taper)
@@ -551,7 +551,8 @@ export const DEFAULT_DIMS_FEMALE = {
     neckTopR: 0.06,
     neckBotR: 0.07,
     craniumR: 0.13,         // smaller head — anime proportions
-    craniumStretchY: 1.10,
+    craniumStretchY: 1.14,
+    craniumStretchZ: 1.06,
     jawW: 0.06, jawH: 0.08, jawD: 0.18,
     // Bust geometry — two flattened spheres on the chest plate. Pushed
     // up + forward and given more volume to match the prominent eve

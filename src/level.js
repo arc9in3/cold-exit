@@ -44,6 +44,15 @@ export const KEEPER_PALETTE = {
 let FULL_WALL_COLOR = 0x2a2e38;
 let LOW_COVER_COLOR = 0x3a3a34;
 let OUTER_WALL_COLOR = 0x1a1e24;
+// Theme accent — wired into cosmetic architectural trim (perimeter
+// accent bands, pilaster strips, room-corner pillars). Re-tinted per
+// floor in generate() from theme.accent so each biome reads distinct.
+// Defaults to a muted brass that suits the pre-theme dark palette.
+let ACCENT_COLOR = 0xc9a464;
+// Slightly lifted accent for raised highlight edges (top lip of bands /
+// pilaster caps). Brightening the accent keeps the neon-noir read —
+// the band glints under the key light without a second pool color.
+let ACCENT_HI_COLOR = 0xddb878;
 const DOOR_COLOR = 0x8a3a2a;
 const DOOR_OPEN_COLOR = 0x3a5a3a;
 const EXIT_COLOR = 0x00ff88;
@@ -57,6 +66,17 @@ function _darkenHex(hex, k) {
   const b = hex & 0xff;
   const m = 1 - k;
   return ((Math.round(r * m)) << 16) | ((Math.round(g * m)) << 8) | (Math.round(b * m));
+}
+
+// Lighten a hex colour by `k` (0..1) toward white. Used for accent-
+// trim highlight edges (the lit top lip of a perimeter band reads
+// brighter than the band body).
+function _lightenHex(hex, k) {
+  const r = (hex >> 16) & 0xff;
+  const g = (hex >> 8) & 0xff;
+  const b = hex & 0xff;
+  const lift = (c) => Math.round(c + (255 - c) * k);
+  return (lift(r) << 16) | (lift(g) << 8) | lift(b);
 }
 
 const ROOM_W = 18;
@@ -350,6 +370,13 @@ export class Level {
       FULL_WALL_COLOR  = this.theme.wall;
       OUTER_WALL_COLOR = _darkenHex(this.theme.wall, 0.55);
       LOW_COVER_COLOR  = _darkenHex(this.theme.wall, 0.30);
+      // Wire theme.accent into the architectural trim. The band body
+      // sits a touch darker than the raw accent so it doesn't blow out
+      // against the dark walls; the highlight lip lifts toward white.
+      if (this.theme.accent != null) {
+        ACCENT_COLOR    = _darkenHex(this.theme.accent, 0.20);
+        ACCENT_HI_COLOR = _lightenHex(this.theme.accent, 0.25);
+      }
       if (this.ground && this.ground.material && this.ground.material.color) {
         // Hold the ground at near-black regardless of biome — the
         // void underneath the level. Per-room patches paint the
@@ -1578,6 +1605,11 @@ export class Level {
   // means a shape built mid-generate uses the same tint as the rect
   // walls placed in the same pass.
   _outerWallColor() { return OUTER_WALL_COLOR; }
+
+  // Live theme-accent readers for shape templates (level_shapes.js) so
+  // their cosmetic corner detailing matches the per-floor accent tint.
+  _accentColor() { return ACCENT_COLOR; }
+  _accentHiColor() { return ACCENT_HI_COLOR; }
 
   // Return the list of doorway centers (in world coords) that are
   // NOT covered by at least one walkableBounds box. Used to verify a
@@ -5696,6 +5728,83 @@ export class Level {
     }
   }
 
+  // Purely-cosmetic architectural detail mesh. Routes around the
+  // obstacle/instancer path entirely: the mesh is added straight to
+  // the scene and tracked in `this.decorations` (disposed in clear()),
+  // and NO `userData.collisionXZ` is ever set — so it never enters
+  // `this.obstacles`, never affects collision, raycasts (bullets / AI
+  // LoS), the navmesh, or the flood-fill connectivity invariant. This
+  // mirrors the existing decoration path used by ledges, lamps, and
+  // the rotunda chamfer accent. Returns the mesh (or null if disabled).
+  _addAccentDeco(x, y, z, w, h, d, color, opts = {}) {
+    const mat = sharedMaterial({
+      color,
+      roughness: opts.roughness ?? 0.55,
+      metalness: opts.metalness ?? 0.15,
+    });
+    const mesh = new THREE.Mesh(new THREE.BoxGeometry(w, h, d), mat);
+    mesh.position.set(x, y, z);
+    // Trim catches the key light for depth but doesn't need to cast —
+    // it's flush against a wall that already self-shadows.
+    mesh.castShadow = false;
+    mesh.receiveShadow = true;
+    mesh.userData.kind = opts.kind || 'wall-trim';
+    // Deliberately leave collisionXZ unset so solidObstacles() / the
+    // collision sweep never see this geometry.
+    mesh.matrixAutoUpdate = false;
+    mesh.updateMatrix();
+    this.scene.add(mesh);
+    this.decorations.push(mesh);
+    return mesh;
+  }
+
+  // Lay cosmetic trim onto one boundary wall span: a thin horizontal
+  // accent band partway up, a brighter highlight lip just above it,
+  // and evenly-spaced vertical pilaster strips. All decoration-only
+  // (see _addAccentDeco). `isHoriz` = the wall runs along X (its long
+  // axis is width `w`); otherwise it runs along Z (long axis `d`).
+  _addPerimeterTrim(cx, cz, w, d, isHoriz, faceThick) {
+    const len = isHoriz ? w : d;
+    if (len < 4) return;
+    // Push the trim just proud of the wall's interior face so it reads
+    // as applied moulding and never z-fights the slab.
+    const proud = 0.06;
+    const bandH = 0.28;             // band height
+    const bandY = WALL_HEIGHT * 0.62;
+    const half = faceThick / 2 + proud;
+    // Horizontal band — spans the full wall length, both interior faces.
+    // (A boundary wall is only seen from inside the map, but stamping
+    // both faces is cheap geometry and avoids a facing calculation.)
+    const bandLen = len - 0.4;
+    if (isHoriz) {
+      this._addAccentDeco(cx, bandY, cz - half, bandLen, bandH, 0.05, ACCENT_COLOR, { kind: 'wall-band' });
+      this._addAccentDeco(cx, bandY, cz + half, bandLen, bandH, 0.05, ACCENT_COLOR, { kind: 'wall-band' });
+      this._addAccentDeco(cx, bandY + bandH / 2 + 0.02, cz - half, bandLen, 0.05, 0.06, ACCENT_HI_COLOR, { kind: 'wall-band-hi' });
+      this._addAccentDeco(cx, bandY + bandH / 2 + 0.02, cz + half, bandLen, 0.05, 0.06, ACCENT_HI_COLOR, { kind: 'wall-band-hi' });
+    } else {
+      this._addAccentDeco(cx - half, bandY, cz, 0.05, bandH, bandLen, ACCENT_COLOR, { kind: 'wall-band' });
+      this._addAccentDeco(cx + half, bandY, cz, 0.05, bandH, bandLen, ACCENT_COLOR, { kind: 'wall-band' });
+      this._addAccentDeco(cx - half, bandY + bandH / 2 + 0.02, cz, 0.06, 0.05, bandLen, ACCENT_HI_COLOR, { kind: 'wall-band-hi' });
+      this._addAccentDeco(cx + half, bandY + bandH / 2 + 0.02, cz, 0.06, 0.05, bandLen, ACCENT_HI_COLOR, { kind: 'wall-band-hi' });
+    }
+    // Vertical pilaster strips at ~6m intervals — thin full-height
+    // ribs that break the slab into bays. Only on the interior face.
+    const spacing = 6;
+    const count = Math.max(1, Math.floor(len / spacing));
+    const step = len / (count + 1);
+    const pilW = 0.5, pilT = 0.07;
+    for (let i = 1; i <= count; i++) {
+      const off = -len / 2 + step * i;
+      if (isHoriz) {
+        this._addAccentDeco(cx + off, WALL_HEIGHT / 2, cz - half, pilW, WALL_HEIGHT - 0.06, pilT, OUTER_WALL_COLOR, { kind: 'pilaster', roughness: 0.8, metalness: 0.0 });
+        this._addAccentDeco(cx + off, WALL_HEIGHT / 2, cz + half, pilW, WALL_HEIGHT - 0.06, pilT, OUTER_WALL_COLOR, { kind: 'pilaster', roughness: 0.8, metalness: 0.0 });
+      } else {
+        this._addAccentDeco(cx - half, WALL_HEIGHT / 2, cz + off, pilT, WALL_HEIGHT - 0.06, pilW, OUTER_WALL_COLOR, { kind: 'pilaster', roughness: 0.8, metalness: 0.0 });
+        this._addAccentDeco(cx + half, WALL_HEIGHT / 2, cz + off, pilT, WALL_HEIGHT - 0.06, pilW, OUTER_WALL_COLOR, { kind: 'pilaster', roughness: 0.8, metalness: 0.0 });
+      }
+    }
+  }
+
   _buildOuterPerimeter() {
     if (!this.rooms || this.rooms.length === 0) return;
     // Aggregate bounds across every room — the "map box".
@@ -5725,6 +5834,12 @@ export class Level {
       const m = this._addObstacle(cx, WALL_HEIGHT / 2, cz,
         w, WALL_HEIGHT, d, OUTER_WALL_COLOR);
       if (m) m.userData.isOuter = true;
+      // Architectural trim — cosmetic band + pilasters on the four
+      // boundary slabs so they don't read as featureless walls. Pure
+      // decoration; zero collision impact (see _addPerimeterTrim /
+      // _addAccentDeco). isHoriz = the wall's long axis is X.
+      const isHoriz = w >= d;
+      this._addPerimeterTrim(cx, cz, w, d, isHoriz, isHoriz ? d : w);
     };
     spawn((x0 + x1) / 2, z0 - thick / 2, width + thick * 2, thick);  // north
     spawn((x0 + x1) / 2, z1 + thick / 2, width + thick * 2, thick);  // south
@@ -6844,6 +6959,10 @@ export class Level {
       FULL_WALL_COLOR  = this.theme.wall;
       OUTER_WALL_COLOR = _darkenHex(this.theme.wall, 0.55);
       LOW_COVER_COLOR  = _darkenHex(this.theme.wall, 0.30);
+      if (this.theme.accent != null) {
+        ACCENT_COLOR    = _darkenHex(this.theme.accent, 0.20);
+        ACCENT_HI_COLOR = _lightenHex(this.theme.accent, 0.25);
+      }
       if (this.ground && this.ground.material && this.ground.material.color) {
         this.ground.material.color.setHex(this.theme.floor);
       }

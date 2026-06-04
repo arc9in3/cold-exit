@@ -130,25 +130,39 @@ export class MeleeEnemyManager {
     const scale = Math.min(MAX_MELEE_SCALE,
       tierScale * (shieldProfile ? shieldProfile.scale : 1));
 
-    const bodyHex = tier === 'boss' ? 0x5a1a1a : (tier === 'subBoss' ? 0x3a1e58 : this._baseBody.getHex());
-    const headHex = tier === 'boss' ? 0x3a0f10 : (tier === 'subBoss' ? 0x22103e : this._baseHead.getHex());
+    // Shield-bearers read as a heavier steel bulwark; standard rushers
+    // keep the feral olive flesh tone. Tier overrides body+head with the
+    // authoritative boss-red / subBoss-violet palette shared with gunmen.
+    const isShield = variant === 'shieldBearer';
+    const bodyHex = tier === 'boss' ? 0x5a1a1a
+                  : tier === 'subBoss' ? 0x3a1e58
+                  : (isShield ? 0x33363c : this._baseBody.getHex());
+    const headHex = tier === 'boss' ? 0x3a0f10
+                  : tier === 'subBoss' ? 0x22103e
+                  : (isShield ? 0x1a1c20 : this._baseHead.getHex());
     const gearHex = tier === 'boss' ? 0x7a3020
                   : tier === 'subBoss' ? 0x5a1f28
-                  : (variant === 'shieldBearer' ? 0x606060 : 0x26221c);
+                  : (isShield ? 0x808a94 : 0x26221c);
+    // Legs darken from the body so shield bulwarks vs feral rushers
+    // differ from the knees down too. >>1 halves each channel.
+    const legHex = isShield ? 0x191a1d
+                 : (tier === 'boss' ? 0x2a0c0c
+                   : tier === 'subBoss' ? 0x1c0e2c : 0x1a2212);
 
     // Jointed rig — shared with gunmen + player. Melee rushers are a
     // touch stouter than gunmen so bodyColor/legColor push darker and
     // headColor picks up the tier tint.
-    const rig = buildRig({
+    const rigOpts = {
       scale: 0.77,          // matches player baseline (~1.85m)
       bodyColor: bodyHex,
       headColor: headHex,
-      legColor: 0x1a2212,
+      legColor: legHex,
       armColor: 0x141012,
       handColor: 0x2a1612,
       gearColor: gearHex,
       bootColor: 0x0a0a08,
-    });
+    };
+    const rig = buildRig(rigOpts);
     initAnim(rig);
     const group = rig.group;
     group.position.set(x, 0, z);

@@ -125,6 +125,88 @@ function _tagShapeWall(mesh) {
   return mesh;
 }
 
+// Cosmetic corner detailing — softens the harsh 90° meeting of two
+// perimeter walls with a slim accent-tinted corner pillar plus a small
+// chamfer fillet, consistent with how the rotunda shape overlays a
+// decorative diagonal accent. PURELY VISUAL: the mesh is added via
+// level.scene.add + level.decorations (disposed in level.clear()) and
+// NEVER gets a userData.collisionXZ, so it never enters level.obstacles
+// and cannot affect collision, raycasts, the navmesh, or the
+// walkableBounds flood-fill invariant.
+//
+// Pillars hug the inside corner of the cell footprint. They're inset
+// against the wall faces and kept thin (0.45m) + short of the door
+// gaps (doors are at wall centers; corners are far from any doorway),
+// so they read as architecture without crowding the play space.
+function _addCornerPillars(level, room) {
+  const d = _dims(room);
+  if (level.decorations == null) return;
+  const inset = WALL_THICK / 2;          // sit just inside the wall face
+  const pillarT = 0.45;                  // footprint of the pillar
+  const half = pillarT / 2;
+  const accent = level._accentColor ? level._accentColor() : 0xc9a464;
+  const accentHi = level._accentHiColor ? level._accentHiColor() : 0xddb878;
+  const corners = [
+    { x: d.minX + inset, z: d.minZ + inset },
+    { x: d.maxX - inset, z: d.minZ + inset },
+    { x: d.minX + inset, z: d.maxZ - inset },
+    { x: d.maxX - inset, z: d.maxZ - inset },
+  ];
+  const matBody = sharedMaterial({
+    color: level._outerWallColor(), roughness: 0.8, metalness: 0.0,
+  });
+  const matCap = sharedMaterial({
+    color: accent, roughness: 0.5, metalness: 0.2,
+  });
+  const matCrown = sharedMaterial({
+    color: accentHi, roughness: 0.45, metalness: 0.25,
+  });
+  for (const c of corners) {
+    // Pillar body — full-height thin rib at the corner.
+    const body = new THREE.Mesh(
+      new THREE.BoxGeometry(pillarT, WALL_HEIGHT - 0.04, pillarT),
+      matBody,
+    );
+    body.position.set(c.x, WALL_HEIGHT / 2, c.z);
+    body.castShadow = false;
+    body.receiveShadow = true;
+    body.userData.kind = 'corner-pillar';
+    body.matrixAutoUpdate = false;
+    body.updateMatrix();
+    level.scene.add(body);
+    level.decorations.push(body);
+
+    // Accent capital band near the top — ties the pillar into the
+    // perimeter accent band visually.
+    const cap = new THREE.Mesh(
+      new THREE.BoxGeometry(pillarT + 0.06, 0.22, pillarT + 0.06),
+      matCap,
+    );
+    cap.position.set(c.x, WALL_HEIGHT * 0.62, c.z);
+    cap.castShadow = false;
+    cap.receiveShadow = true;
+    cap.userData.kind = 'corner-pillar-cap';
+    cap.matrixAutoUpdate = false;
+    cap.updateMatrix();
+    level.scene.add(cap);
+    level.decorations.push(cap);
+
+    // Bright crown at the very top — a small chamfered glint.
+    const crown = new THREE.Mesh(
+      new THREE.BoxGeometry(pillarT + 0.1, 0.06, pillarT + 0.1),
+      matCrown,
+    );
+    crown.position.set(c.x, WALL_HEIGHT - 0.06, c.z);
+    crown.castShadow = false;
+    crown.receiveShadow = true;
+    crown.userData.kind = 'corner-pillar-crown';
+    crown.matrixAutoUpdate = false;
+    crown.updateMatrix();
+    level.scene.add(crown);
+    level.decorations.push(crown);
+  }
+}
+
 // Helper — emit the four perimeter walls with door gaps. Mirrors
 // level.js _buildRoomPerimeter exactly so shapes can reuse the
 // "rectangle with door gaps" base when they only need partial
@@ -193,6 +275,9 @@ const rectShape = {
   pickFootprint: (cellX, cellZ, pitch) => 1,
   build(level, room) {
     _addRectPerimeter(level, room);
+    // Cosmetic corner pillars — soften the 90° corners. Decoration-only,
+    // does NOT touch walkableBounds (see _addCornerPillars).
+    _addCornerPillars(level, room);
     const d = _dims(room);
     return {
       walls: [],
@@ -332,6 +417,7 @@ const tJunction = {
     const closedSide = sidesWithoutDoors[Math.floor(Math.random() * sidesWithoutDoors.length)];
 
     _addRectPerimeter(level, room);
+    _addCornerPillars(level, room);
 
     // Central hub — a 7×7 region the three stubs converge on.
     const hubR = 3.5;
@@ -380,6 +466,7 @@ const crossShape = {
   build(level, room) {
     const d = _dims(room);
     _addRectPerimeter(level, room);
+    _addCornerPillars(level, room);
     // Four "corner blocker" interior walls — one per corner, forming
     // an L that closes off the diagonal. The result is a + shape:
     // a central plaza with a corridor stub running to each cardinal.
@@ -687,6 +774,7 @@ const courtyard = {
     }
     const side = candidates[Math.floor(Math.random() * candidates.length)];
     _addRectPerimeter(level, room, { skip: { [side]: true } });
+    _addCornerPillars(level, room);
     // Parapet — a chest-high (1.0m) low wall replacing the full
     // wall. Acts as cover but visually opens the cell.
     let p1x, p1z, p2x, p2z;
@@ -768,6 +856,7 @@ const plaza = {
   build(level, room) {
     const d = _dims(room);
     _addRectPerimeter(level, room);
+    _addCornerPillars(level, room);
     // No interior walls — plaza is intentionally open. A 1m raised
     // dais at center signals "this is a plaza, not just an empty
     // room", and gives the boss-arena variant a visual anchor.

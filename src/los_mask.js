@@ -56,6 +56,13 @@ export function createLosMask(renderer, sourceCamera) {
   fan.frustumCulled = false;
   scene.add(fan);
 
+  // White override used when stamping the player silhouette into the
+  // mask (see update()). Everything rendered with this comes out pure
+  // white = "visible", regardless of the object's real materials.
+  const whiteMat = new THREE.MeshBasicMaterial({
+    color: 0xffffff, depthWrite: false, depthTest: false,
+  });
+
   // Render target — half-res because the mask will be smoothstep'd in
   // the finisher anyway, and a 1× target doubles GPU bandwidth for no
   // perceptual gain. R-only would be ideal but RGBA stays portable.
@@ -71,7 +78,7 @@ export function createLosMask(renderer, sourceCamera) {
   const _ray    = new THREE.Raycaster();
 
   let _frame = 0;
-  function update(playerPos, blockers) {
+  function update(playerPos, blockers, playerObj) {
     if (!playerPos) return;
     // Skip the raycast + render most frames. The mask texture stays
     // valid on intermediate frames (the postFx finisher samples
@@ -122,6 +129,32 @@ export function createLosMask(renderer, sourceCamera) {
     renderer.autoClear = true;
     renderer.setRenderTarget(renderTarget);
     renderer.render(scene, sourceCamera);
+
+    // Stamp the player's actual silhouette as "visible". The flat floor
+    // fan can't protect the player's own body: at the iso angle the
+    // upper body projects onto the floor BEHIND the feet, and the
+    // finisher darkens any pixel whose floor sample is occluded (see the
+    // postfx "tall objects inherit darkening" note) — so standing with a
+    // wall on the far side crushed the top half of the character to
+    // uLosDark. A flat quad stamp fixed that but lit a bright RECTANGLE
+    // of surrounding floor. Rendering the player mesh itself in white,
+    // on top of the fan without clearing, marks exactly the player's
+    // pixels visible — the bright region matches the silhouette, so it
+    // reads as "the player is lit" with no surrounding patch.
+    // REGRESSION: los-darkens-player-near-wall — keep this silhouette
+    // pass or the upper body crushes to LoS-dark again near walls.
+    if (playerObj) {
+      const prevParent  = playerObj.parent;
+      const prevOverride = scene.overrideMaterial;
+      scene.add(playerObj);            // moves player into the mask scene
+      scene.overrideMaterial = whiteMat;
+      renderer.autoClear = false;      // keep the fan already drawn
+      renderer.render(scene, sourceCamera);
+      scene.overrideMaterial = prevOverride;
+      scene.remove(playerObj);
+      if (prevParent) prevParent.add(playerObj);   // restore original parent
+    }
+
     renderer.setRenderTarget(prev);
     renderer.autoClear = prevAutoClear;
   }

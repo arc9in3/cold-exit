@@ -22712,7 +22712,7 @@ function _safeRender(rawDt, modalPaused = false) {
                    && !mainMenuUI?.isOpen?.();
     if (losActive) {
       _perf.start('losMask');
-      losMask.update(player.mesh.position, level.visionBlockers());
+      losMask.update(player.mesh.position, level.visionBlockers(), player.mesh);
       postFx.setLosMask(losMask.texture, true);
       _perf.end('losMask');
     } else if (!modalPaused) {
