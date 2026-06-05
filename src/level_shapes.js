@@ -52,14 +52,21 @@ const SHAPE_WEIGHTS = {
     // Main path. Only shapes whose entire interior is ground-walkable.
     // Removed: multiTier (platform), plaza (dais). Weight redistributed
     // toward rect / lShape / courtyard / gallery.
-    rect: 0.35, lShape: 0.20, tJunction: 0.10, cross: 0.05,
-    gallery: 0.15, rotunda: 0.05,
-    courtyard: 0.10,
+    // New geometry pass: twoBay / alcove / hexHall added at MODEST weight
+    // so they appear sometimes (lowers blast radius if any has an issue).
+    // All three are fully ground-walkable (twoBay's divider has a center
+    // doorway gap; alcove only adds an inward pocket; hexHall only bevels
+    // two corners on a doorless edge).
+    rect: 0.30, lShape: 0.18, tJunction: 0.10, cross: 0.05,
+    gallery: 0.13, rotunda: 0.05,
+    courtyard: 0.09,
+    twoBay: 0.05, alcove: 0.03, hexHall: 0.02,
   },
   subBoss: {
     // Branch — multiTier + plaza fine here.
-    rotunda: 0.30, multiTier: 0.20, gallery: 0.15,
-    plaza: 0.20, lShape: 0.15,
+    rotunda: 0.28, multiTier: 0.18, gallery: 0.14,
+    plaza: 0.18, lShape: 0.14,
+    twoBay: 0.04, hexHall: 0.04,
   },
   boss: {
     // Main path — boss arena must be fully ground-walkable so player
@@ -68,7 +75,7 @@ const SHAPE_WEIGHTS = {
     // Replaced with weight-balanced open shapes.
     rotunda: 0.55, courtyard: 0.30, lShape: 0.15,
   },
-  shop: { rect: 0.50, rotunda: 0.30, lShape: 0.20 },
+  shop: { rect: 0.46, rotunda: 0.28, lShape: 0.18, alcove: 0.05, hexHall: 0.03 },
   // Catwalk lives as a separate per-cell variant rolled inside combat
   // when the room has 2+ neighbors. It's not part of the default
   // weight table because it's geometrically heavier.
@@ -996,6 +1003,297 @@ const plaza = {
   },
 };
 
+// ----- twoBay — divided room, single interior wall with a CENTER GAP -----
+// Splits the cell into two bays with one full-span interior divider that
+// has a centered doorway-width gap, so the two bays stay connected through
+// the middle. The divider runs PERPENDICULAR to the axis that has doorways
+// when possible, so it never lands on a real outer doorway. If doorways
+// exist on both axes (so any divider would risk crossing a door line) we
+// degrade to rect.
+//
+// CONNECTIVITY: the divider has a DOOR_WIDTH gap dead-center, exactly like
+// the perimeter door gaps. walkableBounds is modelled as the two bay boxes
+// PLUS a connector box spanning the gap, so the flood-fill sees one
+// connected region that contains every doorway. The gap is centered on the
+// room (d.cx / d.cz), which is interior — never near a perimeter doorway —
+// so no outer door can be sealed by the divider stubs.
+const twoBay = {
+  id: 'twoBay',
+  allowedTypes: ['combat', 'subBoss', 'shop'],
+  pickFootprint: (cellX, cellZ, pitch) => 1,
+  build(level, room) {
+    const d = _dims(room);
+    const doors = _doorCenters(level, room);
+    const ewDoors = doors.east != null || doors.west != null;
+    const nsDoors = doors.north != null || doors.south != null;
+    // Need at least one axis CLEAR of doors so the divider can run along it
+    // without overlapping an outer door gap. If both axes have doors, any
+    // full-span divider risks a door line — degrade to rect.
+    if (ewDoors && nsDoors) return rectShape.build(level, room);
+
+    _addRectPerimeter(level, room);
+    _addCornerPillars(level, room);
+
+    const halfGap = DOOR_WIDTH / 2;
+    // Divider runs perpendicular to the door axis. Doors on E/W (traffic
+    // flows along X) → divider is a VERTICAL wall at cx splitting E/W bays.
+    // Doors on N/S (traffic along Z) → divider is HORIZONTAL at cz.
+    // No doors at all → default to a vertical divider.
+    const dividerVertical = !nsDoors;   // true → wall along Z at x=cx
+    if (dividerVertical) {
+      // Vertical divider at x = cx, gap centered at z = cz.
+      const topFrom = d.minZ, topTo = d.cz - halfGap;
+      const botFrom = d.cz + halfGap, botTo = d.maxZ;
+      if (topTo > topFrom + 0.05) {
+        level._addObstacle(d.cx, WALL_HEIGHT / 2, (topFrom + topTo) / 2,
+          WALL_THICK, WALL_HEIGHT, topTo - topFrom, level._outerWallColor());
+      }
+      if (botTo > botFrom + 0.05) {
+        level._addObstacle(d.cx, WALL_HEIGHT / 2, (botFrom + botTo) / 2,
+          WALL_THICK, WALL_HEIGHT, botTo - botFrom, level._outerWallColor());
+      }
+      const wb = [
+        _box(d.minX, d.minZ, d.cx, d.maxZ),   // west bay (full)
+        _box(d.cx, d.minZ, d.maxX, d.maxZ),   // east bay (full)
+        // connector through the gap — overlaps both bays at center
+        _box(d.cx - WALL_THICK, d.cz - halfGap, d.cx + WALL_THICK, d.cz + halfGap),
+      ];
+      return { walls: [], walkableBounds: wb, props: [] };
+    } else {
+      // Horizontal divider at z = cz, gap centered at x = cx.
+      const leftFrom = d.minX, leftTo = d.cx - halfGap;
+      const rightFrom = d.cx + halfGap, rightTo = d.maxX;
+      if (leftTo > leftFrom + 0.05) {
+        level._addObstacle((leftFrom + leftTo) / 2, WALL_HEIGHT / 2, d.cz,
+          leftTo - leftFrom, WALL_HEIGHT, WALL_THICK, level._outerWallColor());
+      }
+      if (rightTo > rightFrom + 0.05) {
+        level._addObstacle((rightFrom + rightTo) / 2, WALL_HEIGHT / 2, d.cz,
+          rightTo - rightFrom, WALL_HEIGHT, WALL_THICK, level._outerWallColor());
+      }
+      const wb = [
+        _box(d.minX, d.minZ, d.maxX, d.cz),   // north bay (full)
+        _box(d.minX, d.cz, d.maxX, d.maxZ),   // south bay (full)
+        _box(d.cx - halfGap, d.cz - WALL_THICK, d.cx + halfGap, d.cz + WALL_THICK),
+      ];
+      return { walls: [], walkableBounds: wb, props: [] };
+    }
+  },
+};
+
+// ----- alcove — rect with a recessed interior niche on a doorless side ---
+// Adds two short return walls that bracket a shallow recess against one
+// outer wall, reading as a built-in alcove / display niche. The recess is
+// PART of the walkable cell (it's open toward the room interior), so it
+// only ADDS shape, never subtracts reachable floor. The niche is always
+// placed on a side WITHOUT a doorway, and the return walls are short
+// (kept well clear of the room center and the perimeter door gaps), so no
+// doorway is touched and no region is severed.
+//
+// CONNECTIVITY: walkableBounds is the full cell footprint (the niche is an
+// inward-open pocket of that same footprint — the return walls are thin and
+// the recess mouth stays open to the room). The return walls are interior
+// stubs flush against the chosen doorless outer wall; the open mouth faces
+// the room center which is always reachable. Falls back to rect if every
+// side has a doorway.
+const alcove = {
+  id: 'alcove',
+  allowedTypes: ['combat', 'subBoss', 'shop'],
+  pickFootprint: (cellX, cellZ, pitch) => 1,
+  build(level, room) {
+    const d = _dims(room);
+    const doors = _doorCenters(level, room);
+    const candidates = ['north', 'south', 'east', 'west'].filter(s => doors[s] == null);
+    if (!candidates.length) return rectShape.build(level, room);
+
+    _addRectPerimeter(level, room);
+    _addCornerPillars(level, room);
+
+    const side = candidates[Math.floor(Math.random() * candidates.length)];
+    const depth = 2.6;           // how deep the recess returns reach in
+    const nicheHalf = 2.4;       // half-width of the niche mouth
+    const isHoriz = (side === 'north' || side === 'south');
+    if (isHoriz) {
+      // Niche on a north/south wall — two short walls run inward (along Z)
+      // from the outer wall, bracketing a centered recess on X.
+      const cz = side === 'north' ? d.minZ : d.maxZ;
+      const dir = side === 'north' ? 1 : -1;   // +Z into the room from north
+      const innerZ = cz + dir * depth;
+      const segMidZ = (cz + innerZ) / 2;
+      const segLen = depth;
+      // Left return wall
+      level._addObstacle(d.cx - nicheHalf, WALL_HEIGHT / 2, segMidZ,
+        WALL_THICK, WALL_HEIGHT, segLen, level._outerWallColor());
+      // Right return wall
+      level._addObstacle(d.cx + nicheHalf, WALL_HEIGHT / 2, segMidZ,
+        WALL_THICK, WALL_HEIGHT, segLen, level._outerWallColor());
+    } else {
+      const cx = side === 'east' ? d.maxX : d.minX;
+      const dir = side === 'east' ? -1 : 1;    // into the room
+      const innerX = cx + dir * depth;
+      const segMidX = (cx + innerX) / 2;
+      const segLen = depth;
+      level._addObstacle(segMidX, WALL_HEIGHT / 2, d.cz - nicheHalf,
+        segLen, WALL_HEIGHT, WALL_THICK, level._outerWallColor());
+      level._addObstacle(segMidX, WALL_HEIGHT / 2, d.cz + nicheHalf,
+        segLen, WALL_HEIGHT, WALL_THICK, level._outerWallColor());
+    }
+    // Cosmetic floor border to dress the niche read.
+    if (Math.random() < 0.5) _addFloorBorder(level, room);
+    // walkableBounds — full cell. The niche is an inward-open pocket of the
+    // same footprint; the recess mouth faces room center (always reachable),
+    // and the return walls are thin stubs that don't sever any region.
+    return {
+      walls: [],
+      walkableBounds: [_box(d.minX, d.minZ, d.maxX, d.maxZ)],
+      props: [],
+    };
+  },
+};
+
+// ----- hexHall — twin chamfered corners on ONE doorless edge -------------
+// A lighter, distinct cousin of rotunda: instead of chamfering all four
+// corners, it bevels the TWO corners that share a single doorless outer
+// edge, giving that end a hexagonal / bay-window read while the rest of the
+// room stays rectangular. Cheaper + visually different from both lShape
+// (single right-angle notch) and rotunda (full octagon). Uses the same
+// solid-corner-block + diagonal-accent technique rotunda uses so the
+// collision matches the visual exactly.
+//
+// CONNECTIVITY: the two chamfered corners share ONE edge that has NO
+// doorway (we only pick an edge whose own door is null AND whose two
+// flanking perpendicular sides' doors don't fall inside the chamfered
+// span). walkableBounds is the full cell minus the two corner cut boxes,
+// decomposed into axis-aligned boxes that still contain every doorway and
+// connect through the room center. Falls back to rect if no safe edge.
+const hexHall = {
+  id: 'hexHall',
+  allowedTypes: ['combat', 'subBoss', 'shop'],
+  pickFootprint: (cellX, cellZ, pitch) => 1,
+  build(level, room) {
+    const d = _dims(room);
+    const doors = _doorCenters(level, room);
+    const chamfer = Math.min(d.w, d.d) * 0.22;   // ~4m corner cut
+
+    // Candidate edges: pick a doorless outer edge. Its two flanking
+    // perpendicular sides must not have a door that lands within `chamfer`
+    // of the shared corner (else the chamfer block would seal that door).
+    // Build the list of safe edges.
+    const edges = [
+      { side: 'north', cz: d.minZ, perp: ['west', 'east'],
+        // corners at (minX,minZ) and (maxX,minZ)
+        cuts: [{ x: d.minX, z: d.minZ, dx: 1, dz: 1 },
+               { x: d.maxX, z: d.minZ, dx: -1, dz: 1 }] },
+      { side: 'south', cz: d.maxZ, perp: ['west', 'east'],
+        cuts: [{ x: d.minX, z: d.maxZ, dx: 1, dz: -1 },
+               { x: d.maxX, z: d.maxZ, dx: -1, dz: -1 }] },
+      { side: 'west', cx: d.minX, perp: ['north', 'south'],
+        cuts: [{ x: d.minX, z: d.minZ, dx: 1, dz: 1 },
+               { x: d.minX, z: d.maxZ, dx: 1, dz: -1 }] },
+      { side: 'east', cx: d.maxX, perp: ['north', 'south'],
+        cuts: [{ x: d.maxX, z: d.minZ, dx: -1, dz: 1 },
+               { x: d.maxX, z: d.maxZ, dx: -1, dz: -1 }] },
+    ];
+    const isHorizEdge = (e) => e.side === 'north' || e.side === 'south';
+    const safe = edges.filter(e => {
+      if (doors[e.side] != null) return false;             // edge itself has a door
+      // Check flanking perpendicular door positions don't fall in the
+      // chamfered band near either shared corner.
+      for (const p of e.perp) {
+        const dc = doors[p];
+        if (dc == null) continue;
+        if (isHorizEdge(e)) {
+          // perp sides are west/east (vertical walls); their door is a Z
+          // coord. The chamfer near this horizontal edge occupies
+          // z within `chamfer` of e.cz on those vertical walls.
+          if (Math.abs(dc - e.cz) < chamfer + DOOR_WIDTH / 2) return false;
+        } else {
+          // perp sides are north/south (horizontal walls); their door is
+          // an X coord. The chamfer occupies x within `chamfer` of e.cx.
+          if (Math.abs(dc - e.cx) < chamfer + DOOR_WIDTH / 2) return false;
+        }
+      }
+      return true;
+    });
+    if (!safe.length) return rectShape.build(level, room);
+    const edge = safe[Math.floor(Math.random() * safe.length)];
+
+    _addRectPerimeter(level, room);
+    _addCornerPillars(level, room);
+
+    // Build the two chamfer corners as solid blocks + diagonal accents,
+    // mirroring rotunda's collision-matches-visual approach.
+    for (const c of edge.cuts) {
+      const minXc = Math.min(c.x, c.x + c.dx * chamfer);
+      const maxXc = Math.max(c.x, c.x + c.dx * chamfer);
+      const minZc = Math.min(c.z, c.z + c.dz * chamfer);
+      const maxZc = Math.max(c.z, c.z + c.dz * chamfer);
+      const cornerW = maxXc - minXc;
+      const cornerD = maxZc - minZc;
+      const blockMat = sharedMaterial({
+        color: level._outerWallColor(), roughness: 0.85,
+      });
+      const block = new THREE.Mesh(
+        new THREE.BoxGeometry(cornerW, WALL_HEIGHT, cornerD), blockMat);
+      block.position.set((minXc + maxXc) / 2, WALL_HEIGHT / 2, (minZc + maxZc) / 2);
+      block.castShadow = false;
+      block.receiveShadow = true;
+      block.userData.collisionXZ = { minX: minXc, maxX: maxXc, minZ: minZc, maxZ: maxZc };
+      block.userData.isHexChamfer = true;
+      block.matrixAutoUpdate = false;
+      block.updateMatrix();
+      level.scene.add(block);
+      level.obstacles.push(block);
+      level._dirtySolid();
+
+      // Diagonal accent over the block face — reads as a beveled corner.
+      const length = chamfer * Math.SQRT2;
+      const midX = c.x + c.dx * chamfer / 2;
+      const midZ = c.z + c.dz * chamfer / 2;
+      const accentMat = sharedMaterial({
+        color: level._outerWallColor(), roughness: 0.6, metalness: 0.05,
+      });
+      const accent = new THREE.Mesh(
+        new THREE.BoxGeometry(length, WALL_HEIGHT - 0.04, 0.18), accentMat);
+      accent.position.set(midX, WALL_HEIGHT / 2, midZ);
+      accent.rotation.y = Math.atan2(-c.dz, c.dx) - Math.PI / 4;
+      accent.castShadow = false;
+      accent.receiveShadow = true;
+      accent.userData.kind = 'hex-chamfer-accent';
+      if (level.decorations) level.decorations.push(accent);
+      level.scene.add(accent);
+    }
+
+    // walkableBounds — full cell minus the two chamfer corner boxes,
+    // decomposed into axis-aligned boxes. The two cuts sit on one edge,
+    // so the remaining floor is: a full-width band away from that edge,
+    // plus the un-chamfered middle strip along the chamfered edge.
+    let wb;
+    if (isHorizEdge(edge)) {
+      // chamfers at the two X-extremes of edge.cz (a north or south edge).
+      // Middle (un-cut) span of the chamfered edge band: from minX+chamfer
+      // to maxX-chamfer, full depth of the band.
+      const edgeBand = edge.side === 'north'
+        ? _box(d.minX + chamfer, d.minZ, d.maxX - chamfer, d.minZ + chamfer)
+        : _box(d.minX + chamfer, d.maxZ - chamfer, d.maxX - chamfer, d.maxZ);
+      // Big rectangle covering everything away from the chamfered edge.
+      const body = edge.side === 'north'
+        ? _box(d.minX, d.minZ + chamfer, d.maxX, d.maxZ)
+        : _box(d.minX, d.minZ, d.maxX, d.maxZ - chamfer);
+      wb = [body, edgeBand];
+    } else {
+      const edgeBand = edge.side === 'west'
+        ? _box(d.minX, d.minZ + chamfer, d.minX + chamfer, d.maxZ - chamfer)
+        : _box(d.maxX - chamfer, d.minZ + chamfer, d.maxX, d.maxZ - chamfer);
+      const body = edge.side === 'west'
+        ? _box(d.minX + chamfer, d.minZ, d.maxX, d.maxZ)
+        : _box(d.minX, d.minZ, d.maxX - chamfer, d.maxZ);
+      wb = [body, edgeBand];
+    }
+    return { walls: [], walkableBounds: wb, props: [] };
+  },
+};
+
 export const SHAPE_REGISTRY = {
   rect: rectShape,
   lShape,
@@ -1007,6 +1305,9 @@ export const SHAPE_REGISTRY = {
   courtyard,
   catwalk,
   plaza,
+  twoBay,
+  alcove,
+  hexHall,
 };
 
 // Pick a shape ID for this room based on its type. Returns 'rect' if

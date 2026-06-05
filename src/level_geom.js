@@ -10,11 +10,105 @@
 // imports level_shapes which would import level.js).
 
 import * as THREE from 'three';
+import { mergeGeometries } from 'three/addons/utils/BufferGeometryUtils.js';
 import { sharedMaterial, disposeIfNotShared } from './material_pool.js';
 
 export const WALL_HEIGHT = 3.0;
 export const WALL_THICK = 1.2;
 export const DOOR_WIDTH = 4;
+
+// ---------------------------------------------------------------------------
+// Architectural wall profile — shared, instanced unit geometry.
+//
+// The wall instancer used to feed every wall a plain THREE.BoxGeometry(1,1,1)
+// scaled per-instance. That reads as a featureless extruded slab at the iso
+// camera. This builds a richer SHARED profile — a baseboard lip at the floor,
+// a slightly inset panel face on the long sides, and a chamfered cornice cap
+// at the top — and bakes it into ONE BufferGeometry normalised to the exact
+// same 1×1×1 footprint (centered at the origin, spanning -0.5..0.5 on every
+// axis). Because the footprint is unchanged, the existing per-instance
+// (translation + scale = w,h,d) matrices keep mapping correctly, the
+// collision AABB (which is computed independently in level._addObstacle from
+// position+dims) still lines up with the visual, and the instancer stays one
+// InstancedMesh per color.
+//
+// IMPORTANT invariants this profile preserves:
+//   * Outer extent is still exactly [-0.5, 0.5] on X/Y/Z. The baseboard and
+//     cornice bands span the FULL footprint so the wall still reads solid at
+//     the floor line and the top line (no gaps where collision is). Only the
+//     mid-shaft face is inset, and only by a hair (~4% of thickness), so the
+//     silhouette is unchanged — it just gains a panel shadow line.
+//   * Vertical band proportions are keyed off the unit height. Every wall in
+//     this game is WALL_HEIGHT (3.0m) tall, so after the per-instance Y scale
+//     the baseboard / cornice land at consistent WORLD heights (~0.27m base,
+//     ~0.24m cornice) across all walls.
+//   * It is a single geometry shared by every instance (merged once, cached).
+//
+// Proportions (in unit space, full height = 1.0):
+//   base band   : y ∈ [-0.50, -0.41]  full 1.0 footprint (baseboard lip)
+//   shaft       : y ∈ [-0.41,  0.41]  inset face (0.92 on the thin axis)
+//   cornice     : y ∈ [ 0.41,  0.50]  full footprint, top edge chamfered in
+const PROFILE = {
+  baseTop:    -0.41,   // top of the baseboard band
+  shaftTop:    0.41,   // top of the main shaft / bottom of the cornice
+  faceInset:   0.04,   // how far the shaft face pulls in from 0.5 (per side)
+  corniceChamfer: 0.03, // how far the very top edge pulls in (the bevel)
+};
+
+let _wallProfileGeom = null;
+
+// Build (once) and return the shared architectural wall profile geometry.
+// Normalised to the unit cube footprint; safe to feed straight into the
+// wall InstancedMesh in place of BoxGeometry(1,1,1).
+export function wallProfileGeometry() {
+  if (_wallProfileGeom) return _wallProfileGeom;
+  const half = 0.5;
+  const { baseTop, shaftTop, faceInset, corniceChamfer } = PROFILE;
+  const parts = [];
+
+  // Helper — an axis-aligned box spanning [x0,x1]×[y0,y1]×[z0,z1].
+  const box = (x0, x1, y0, y1, z0, z1) => {
+    const g = new THREE.BoxGeometry(x1 - x0, y1 - y0, z1 - z0);
+    g.translate((x0 + x1) / 2, (y0 + y1) / 2, (z0 + z1) / 2);
+    return g;
+  };
+
+  // 1. Baseboard lip — full footprint, bottom band. Reads as a plinth.
+  parts.push(box(-half, half, -half, baseTop, -half, half));
+
+  // 2. Main shaft — full height between base and cornice, but the face is
+  //    pulled in slightly on BOTH planar axes so the wall gets a recessed
+  //    panel read (a thin shadow line at the base + cornice reveals).
+  const s = half - faceInset;
+  parts.push(box(-s, s, baseTop, shaftTop, -s, s));
+
+  // 3. Cornice base — full footprint band at the top (caps the shaft, gives
+  //    the wall a defined top edge / crown).
+  parts.push(box(-half, half, shaftTop, half - corniceChamfer, -half, half));
+
+  // 4. Cornice chamfer — the very top edge, pulled in by `corniceChamfer`
+  //    on the planar axes, so the top reads as a beveled crown rather than a
+  //    sharp slab edge. Still inside the unit footprint (extent never exceeds
+  //    0.5), so collision/footprint invariants hold.
+  const c = half - corniceChamfer;
+  parts.push(box(-c, c, half - corniceChamfer, half, -c, c));
+
+  let merged = mergeGeometries(parts, false);
+  // Defensive: if the merge ever fails (attribute mismatch), fall back to a
+  // plain unit cube so walls still render solid rather than vanishing.
+  if (!merged) {
+    for (const p of parts) p.dispose();
+    merged = new THREE.BoxGeometry(1, 1, 1);
+  } else {
+    for (const p of parts) p.dispose();
+  }
+  merged.userData = merged.userData || {};
+  // Stamp matches the dispose-skip flag used everywhere else for shared geo
+  // (PROJECT.md critical interaction): never dispose this from a traversal.
+  merged.userData.sharedRigGeom = true;
+  _wallProfileGeom = merged;
+  return _wallProfileGeom;
+}
 
 // Ramp — sloped walkable surface from (x1, z1) at floor height to
 // (x2, z2) at `height`. We approximate with a slanted box (rotated

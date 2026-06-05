@@ -31,6 +31,7 @@
 //     this.obstacles.
 
 import * as THREE from 'three';
+import { wallProfileGeometry } from './level_geom.js';
 
 // Initial per-color pool capacity. Walls per level peak around 280-320
 // outer walls + ~50 interior walls per single-color theme, but most
@@ -38,16 +39,17 @@ import * as THREE from 'three';
 // upper bound that avoids any reallocation churn during generation.
 const INITIAL_CAP = 512;
 
-// One shared unit-cube geometry. Per-instance matrices scale it to
-// each wall's (w, h, d). Stamp shared so any traversal-based dispose
-// loop skips it.
-let _unitCube = null;
+// One shared architectural wall profile geometry, normalised to the same
+// 1×1×1 footprint the old unit cube used. Per-instance matrices scale it to
+// each wall's (w, h, d) exactly as before — the profile adds a baseboard lip,
+// an inset panel face, and a chamfered cornice cap within that footprint so
+// walls read as built surfaces, not extruded blocks, without changing the
+// instancing model (still ONE geometry shared across every instance) or the
+// collision footprint (computed separately in level._addObstacle). The shared
+// geometry stamps userData.sharedRigGeom so traversal-based dispose loops skip
+// it. See wallProfileGeometry() in level_geom.js for the profile spec.
 function unitCubeGeometry() {
-  if (_unitCube) return _unitCube;
-  _unitCube = new THREE.BoxGeometry(1, 1, 1);
-  _unitCube.userData = _unitCube.userData || {};
-  _unitCube.userData.sharedRigGeom = true;
-  return _unitCube;
+  return wallProfileGeometry();
 }
 
 const _zero = new THREE.Matrix4().makeScale(0, 0, 0);
