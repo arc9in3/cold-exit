@@ -49,24 +49,31 @@ import { sharedMaterial } from './material_pool.js';
 const SHAPE_WEIGHTS = {
   start:   { rect: 1.0 },
   combat:  {
-    // Main path. Only shapes whose entire interior is ground-walkable.
-    // Removed: multiTier (platform), plaza (dais). Weight redistributed
-    // toward rect / lShape / courtyard / gallery.
-    // New geometry pass: twoBay / alcove / hexHall added at MODEST weight
-    // so they appear sometimes (lowers blast radius if any has an issue).
-    // All three are fully ground-walkable (twoBay's divider has a center
-    // doorway gap; alcove only adds an inward pocket; hexHall only bevels
-    // two corners on a doorless edge).
-    rect: 0.30, lShape: 0.18, tJunction: 0.10, cross: 0.05,
-    gallery: 0.13, rotunda: 0.05,
+    // Main path. Only shapes whose entire interior is ground-walkable,
+    // each earning its slot with a distinct gameplay read:
+    //   rect      — open baseline.
+    //   lShape    — corner cover + a flanking elbow.
+    //   tJunction — 3-way hub / ambush chokepoint.
+    //   cross     — 4-way crossfire plaza (rare).
+    //   gallery   — long sightline / ranged lane.
+    //   rotunda   — chamfered arena, cover at the bevels.
+    //   courtyard — glazed window wall + balcony rail (sealed; see build).
+    //   twoBay    — two bays split by a centre-doorway divider.
+    //   vault     — sealed inner strongroom, single entrance, GUARANTEED
+    //               loot: a risk/reward "crack the vault" detour (NEW).
+    //   alcove    — minor inward cover pocket.
+    // Curated: hexHall dropped (redundant with rotunda's chamfer read).
+    rect: 0.26, lShape: 0.16, tJunction: 0.10, cross: 0.05,
+    gallery: 0.13, rotunda: 0.08,
     courtyard: 0.09,
-    twoBay: 0.05, alcove: 0.03, hexHall: 0.02,
+    twoBay: 0.05, vault: 0.06, alcove: 0.02,
   },
   subBoss: {
-    // Branch — multiTier + plaza fine here.
-    rotunda: 0.28, multiTier: 0.18, gallery: 0.14,
-    plaza: 0.18, lShape: 0.14,
-    twoBay: 0.04, hexHall: 0.04,
+    // Branch — multiTier + plaza fine here. hexHall dropped; vault added
+    // (a strongroom branch is a natural high-value side objective).
+    rotunda: 0.26, multiTier: 0.16, gallery: 0.14,
+    plaza: 0.16, lShape: 0.14,
+    twoBay: 0.06, vault: 0.08,
   },
   boss: {
     // Main path — boss arena must be fully ground-walkable so player
@@ -75,7 +82,7 @@ const SHAPE_WEIGHTS = {
     // Replaced with weight-balanced open shapes.
     rotunda: 0.55, courtyard: 0.30, lShape: 0.15,
   },
-  shop: { rect: 0.46, rotunda: 0.28, lShape: 0.18, alcove: 0.05, hexHall: 0.03 },
+  shop: { rect: 0.49, rotunda: 0.28, lShape: 0.18, alcove: 0.05 },
   // Catwalk lives as a separate per-cell variant rolled inside combat
   // when the room has 2+ neighbors. It's not part of the default
   // weight table because it's geometrically heavier.
@@ -1332,6 +1339,89 @@ const hexHall = {
   },
 };
 
+// ----- vault — a sealed inner strongroom with ONE entrance -------------
+// Gameplay purpose (risk/reward): a small enclosed room-within-the-room
+// tucked into a corner, holding a GUARANTEED container, reachable only
+// through a single doorway facing the room centre. The player commits to
+// a chokepoint to grab the loot — a deliberate "crack the vault" detour
+// rather than free pickups. Fully ground-walkable (the vault interior is
+// reachable via its door gap); the cell perimeter seals normally.
+//
+// Safety: only builds in a corner whose TWO perimeter sides are both
+// doorless, so the inner box never sits on an outer doorway approach.
+// Degrades to rect if no safe corner or the cell is too small. The
+// guaranteed container is requested via room._forceContainerAt, which
+// _scatterContainers honours (force-spawns one crate at that point).
+const vault = {
+  id: 'vault',
+  allowedTypes: ['combat', 'subBoss'],
+  pickFootprint: (cellX, cellZ, pitch) => 1,
+  build(level, room) {
+    const d = _dims(room);
+    if (d.w < 14 || d.d < 14) return rectShape.build(level, room);
+    const doors = _doorCenters(level, room);
+    // Corner safe = both its perimeter sides are doorless.
+    const corners = [
+      { id: 'NW', x: d.minX, z: d.minZ, sides: ['north', 'west'], sx: 1, sz: 1, doorWall: 'eastOrSouth' },
+      { id: 'NE', x: d.maxX, z: d.minZ, sides: ['north', 'east'], sx: -1, sz: 1 },
+      { id: 'SW', x: d.minX, z: d.maxZ, sides: ['south', 'west'], sx: 1, sz: -1 },
+      { id: 'SE', x: d.maxX, z: d.maxZ, sides: ['south', 'east'], sx: -1, sz: -1 },
+    ].filter(c => doors[c.sides[0]] == null && doors[c.sides[1]] == null);
+    if (!corners.length) return rectShape.build(level, room);
+
+    _addRectPerimeter(level, room);
+    _addCornerPillars(level, room);
+
+    const c = corners[Math.floor(Math.random() * corners.length)];
+    const V = Math.min(7, Math.min(d.w, d.d) * 0.42);   // vault interior span
+    const INSET = 0.6;                                  // gap from perimeter
+    const T = WALL_THICK, H = WALL_HEIGHT, halfGap = DOOR_WIDTH / 2;
+    const col = level._outerWallColor();
+    // Inner box corner anchored at the room corner, inset from perimeter.
+    const x0 = c.x + c.sx * INSET;
+    const z0 = c.z + c.sz * INSET;
+    const x1 = x0 + c.sx * V;     // toward room centre on X
+    const z1 = z0 + c.sz * V;     // toward room centre on Z
+    const minX = Math.min(x0, x1), maxX = Math.max(x0, x1);
+    const minZ = Math.min(z0, z1), maxZ = Math.max(z0, z1);
+    const vcx = (minX + maxX) / 2, vcz = (minZ + maxZ) / 2;
+    // The two walls nearest the perimeter (outer faces) are solid; the two
+    // facing the room centre carry the entrance. Entrance goes on the
+    // longer-reach centre-facing wall (we pick the X-facing one), centred.
+    const seg = (cx, cz, w, dd) => level._addObstacle(cx, H / 2, cz, w, H, dd, col);
+    // North & south walls of the vault (horizontal spans).
+    const northZ = minZ, southZ = maxZ;
+    // West & east walls (vertical spans).
+    const westX = minX, eastX = maxX;
+    // Which vertical wall faces room centre? For W-corners it's the east
+    // wall (eastX), for E-corners the west wall (westX).
+    const centreVerticalX = (c.sx > 0) ? eastX : westX;   // c.sx>0 means corner on west side → centre wall is east
+    const outerVerticalX  = (c.sx > 0) ? westX : eastX;
+    const centreHorizZ    = (c.sz > 0) ? southZ : northZ;
+    const outerHorizZ     = (c.sz > 0) ? northZ : southZ;
+    // Outer (perimeter-facing) walls: solid full spans.
+    seg(vcx, outerHorizZ, (maxX - minX) + T, T);                 // horizontal outer
+    seg(outerVerticalX, vcz, T, (maxZ - minZ) + T);              // vertical outer
+    // Centre-facing horizontal wall: solid (entrance is on the vertical one).
+    seg(vcx, centreHorizZ, (maxX - minX) + T, T);
+    // Centre-facing vertical wall: split with a DOOR_WIDTH entrance gap at vcz.
+    const topFrom = minZ - T / 2, topTo = vcz - halfGap;
+    const botFrom = vcz + halfGap, botTo = maxZ + T / 2;
+    if (topTo > topFrom + 0.05) seg(centreVerticalX, (topFrom + topTo) / 2, T, topTo - topFrom);
+    if (botTo > botFrom + 0.05) seg(centreVerticalX, (botFrom + botTo) / 2, T, botTo - botFrom);
+    // Guaranteed loot inside the vault — _scatterContainers force-spawns here.
+    room._forceContainerAt = { x: vcx, z: vcz };
+    // Walkable = full cell. The vault interior is reachable through the
+    // entrance gap; the thin (~0.6m) dead band between the vault outer
+    // walls and the perimeter is too narrow to place anything in.
+    return {
+      walls: [],
+      walkableBounds: [_box(d.minX, d.minZ, d.maxX, d.maxZ)],
+      props: [],
+    };
+  },
+};
+
 export const SHAPE_REGISTRY = {
   rect: rectShape,
   lShape,
@@ -1346,6 +1436,7 @@ export const SHAPE_REGISTRY = {
   twoBay,
   alcove,
   hexHall,
+  vault,
 };
 
 // Pick a shape ID for this room based on its type. Returns 'rect' if

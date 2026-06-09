@@ -2261,6 +2261,30 @@ export class Level {
     const b = room.bounds;
     const area = (b.maxX - b.minX) * (b.maxZ - b.minZ);
     const wbList = room._walkableBounds;
+    // Vault shape requests one guaranteed crate at its centre (risk/reward
+    // strongroom loot). Force-spawn it before the normal scatter, bypassing
+    // the per-room spawn-chance gate. See the `vault` shape in level_shapes.
+    if (room._forceContainerAt) {
+      const { x, z } = room._forceContainerAt;
+      try {
+        const container = makeContainer(pickContainerType(), 'm', this.index, { forceFull: true, rarityBias: 1.25 });
+        const group = buildContainerMesh(container, x, 0, z);
+        this.scene.add(group);
+        const { w, h, d } = container.geo;
+        const proxy = new THREE.Mesh(
+          new THREE.BoxGeometry(w, h, d),
+          sharedMaterial({ type: 'basic', color: 0xffffff, transparent: true, opacity: 0, depthWrite: false }),
+        );
+        proxy.position.set(x, h / 2, z);
+        proxy.userData.collisionXZ = { minX: x - w / 2, maxX: x + w / 2, minZ: z - d / 2, maxZ: z + d / 2 };
+        proxy.userData.isProp = true;
+        proxy.userData.containerRef = container;
+        proxy.userData.propGroup = group;
+        this.scene.add(proxy);
+        this.obstacles.push(proxy);
+        this.containers.push({ container, group, x, z, r: 1.8 });
+      } catch (err) { console.warn('[level] vault container spawn failed:', err); }
+    }
     const outsideWalkable = (x, z) => {
       if (!wbList || !wbList.length) return false;
       for (const wb of wbList) {
