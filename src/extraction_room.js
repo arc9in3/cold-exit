@@ -19,7 +19,7 @@
 // for `revealExit()` to flip the door + reveal the room visuals.
 
 import * as THREE from 'three';
-import { sharedMaterial } from './material_pool.js';
+import { sharedMaterial, cloneForTint } from './material_pool.js';
 
 // Same constants as level.js — kept in sync. If level.js ever tweaks
 // these, this file needs to follow. They're const there too, so this
@@ -160,7 +160,7 @@ export function buildExtractionRoom(level, bossRoom, opts = {}) {
     // wall using the same color goes translucent — including walls
     // outside the chamber. Mirrors the door-material clone
     // (commit da74988) for the same reason.
-    const matObj = sharedMaterial({ color, roughness: 0.85 }).clone();
+    const matObj = cloneForTint(sharedMaterial({ color, roughness: 0.85 }));
     const mesh = new THREE.Mesh(new THREE.BoxGeometry(w, h, d), matObj);
     mesh.position.set(x, y, z);
     mesh.castShadow = false;
@@ -294,13 +294,13 @@ export function buildExtractionRoom(level, bossRoom, opts = {}) {
   // level.js): _openDoor mutates color + opacity, and a shared
   // material would leak that across every door in the level.
   const EXIT_DOOR_COLOR = 0xe8b22a;       // keycard-yellow family, slightly warmer
-  const doorMat = sharedMaterial({
+  const doorMat = cloneForTint(sharedMaterial({
     color: EXIT_DOOR_COLOR,
     roughness: 0.55,
     metalness: 0.20,
     emissive: 0x6a3d05,
     emissiveIntensity: 0.45,
-  }).clone();
+  }));
   const doorMesh = new THREE.Mesh(
     new THREE.BoxGeometry(doorW, WALL_HEIGHT, doorD),
     doorMat,
@@ -366,7 +366,7 @@ export function buildExtractionRoom(level, bossRoom, opts = {}) {
   // door-corridor sweeps (_clearDoorCorridors / _repairDoorOverlaps)
   // never hide a car panel, exactly like the entrance elevator's walls.
   const addCarPanel = (px, pz, w, d, color, kind) => {
-    const matObj = sharedMaterial({ color, roughness: 0.8, metalness: 0.15 }).clone();
+    const matObj = cloneForTint(sharedMaterial({ color, roughness: 0.8, metalness: 0.15 }));
     const mesh = new THREE.Mesh(new THREE.BoxGeometry(w, WALL_HEIGHT, d), matObj);
     mesh.position.set(px, WALL_HEIGHT / 2, pz);
     mesh.castShadow = false;

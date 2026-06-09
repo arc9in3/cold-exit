@@ -13,7 +13,7 @@ import { buildWindow } from './windows.js';
 import { buildSkybridge } from './skybridges.js';
 import { addLedge } from './ledges.js';
 import { initWallInstancer, wallInstancer } from './wall_instancer.js';
-import { sharedMaterial, disposeIfNotShared, disposeMaterialIfNotShared } from './material_pool.js';
+import { sharedMaterial, disposeIfNotShared, disposeMaterialIfNotShared, cloneForTint } from './material_pool.js';
 
 // Shopkeeper palette per kind — body / head / pants / gear tint so
 // each shop's NPC reads as a distinct role in the world. Exported so
@@ -2063,7 +2063,7 @@ export class Level {
     // red" playtest report. Cost is negligible: ~10 doors per level,
     // each material is a small MeshStandardMaterial instance.
     if (mesh.material && typeof mesh.material.clone === 'function') {
-      mesh.material = mesh.material.clone();
+      mesh.material = cloneForTint(mesh.material);
     }
     mesh.userData.isDoor = true;
     mesh.userData.connects = [a.id, b.id];
@@ -6929,7 +6929,7 @@ export class Level {
         // _openDoor mutates color/opacity here and we don't want
         // those changes leaking into other doors via shared mat.
         if (mesh.material && typeof mesh.material.clone === 'function') {
-          mesh.material = mesh.material.clone();
+          mesh.material = cloneForTint(mesh.material);
         }
       }
     };

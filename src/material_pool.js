@@ -826,6 +826,32 @@ export function sharedMaterial(opts = {}) {
   return m;
 }
 
+// Cheap per-instance clone for meshes that only need an INDEPENDENT
+// color/opacity (doors that tint on lock/open, walls that fade on
+// occlusion). THREE's Material.clone() deep-copies userData via
+// JSON.parse(JSON.stringify(...)); our detail/real overlay stashes
+// THREE.Texture refs in userData.real, which serialize at ~30ms each.
+// With ~30 door/extraction-wall clones per floor that turned level
+// generation into a ~900ms freeze (the "gameplay hitches" report).
+//
+// Fix: blank userData during the clone so the JSON copy is trivial,
+// then point the clone at the ORIGINAL's userData refs. The overlay
+// reads its state through the onBeforeCompile CLOSURE (the original
+// material's captured locals — copied by reference into the clone), so
+// the clone renders identically and stays wired to live-tune; only its
+// `color`/`opacity` are independent, which is all the tint/fade callers
+// touch. Falls back to a plain clone if anything unexpected shows up.
+const _EMPTY_UD = Object.freeze({});
+export function cloneForTint(m) {
+  if (!m || typeof m.clone !== 'function') return m;
+  const ud = m.userData;
+  m.userData = _EMPTY_UD;
+  let c;
+  try { c = m.clone(); } finally { m.userData = ud; }
+  c.userData = ud;
+  return c;
+}
+
 // Public — pool stats for the perf probe. Returns { size, byType }.
 export function poolStats() {
   const byType = { standard: 0, basic: 0, lambert: 0, toon: 0 };
