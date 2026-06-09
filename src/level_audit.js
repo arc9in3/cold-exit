@@ -145,12 +145,17 @@ export function auditLevel(level) {
     }
   }
 
-  // props clipping walls
+  // props EMBEDDED in walls — only count meaningful penetration, not a
+  // desk/locker sitting flush against a wall (which is normal + desired).
+  const EMBED_MIN = 0.35;
   for (const p of props) {
     const pb = p.userData.collisionXZ;
     for (const w of walls) {
-      if (aabbOverlap(pb, w.userData.collisionXZ, 0.05)) {
-        report.propsInWalls.push({ kind: p.userData.kind || 'prop' });
+      const wb = w.userData.collisionXZ;
+      const ox = Math.min(pb.maxX, wb.maxX) - Math.max(pb.minX, wb.minX);
+      const oz = Math.min(pb.maxZ, wb.maxZ) - Math.max(pb.minZ, wb.minZ);
+      if (ox > 0 && oz > 0 && Math.min(ox, oz) > EMBED_MIN) {
+        report.propsInWalls.push({ kind: p.userData.kind || 'prop', pen: +Math.min(ox, oz).toFixed(2) });
         break;
       }
     }

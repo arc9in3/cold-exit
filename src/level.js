@@ -2232,6 +2232,31 @@ export class Level {
   // boss rooms occasionally roll a second. No tier gets a bonus
   // masterwork — masterwork lives at ~0.3% in pickContainerType()
   // so it stays exceptional regardless of where the spawn lands.
+  // Shared door-corridor test (R2/R3). True if (x,z) lies in any door's
+  // keep-clear band — DOOR_WIDTH/2+1 across the mouth, 3.5m into the
+  // room — matching _clearDoorCorridors / _themeRoom's _doorBands. Every
+  // placer that drops collidable clutter (containers, cover, columns)
+  // calls this so nothing lands on a doorway approach. `pad` widens the
+  // band by the object's own half-extent so its FOOTPRINT (not just its
+  // centre) stays out of the corridor.
+  _inDoorBand(x, z, pad = 0) {
+    const halfBand = DOOR_WIDTH / 2 + 1.0 + pad;
+    const depth = 3.5 + pad;
+    for (const o of this.obstacles) {
+      if (!o.userData.isDoor) continue;
+      const dx = o.userData.cx, dz = o.userData.cz;
+      if (dx == null) continue;
+      const g = o.geometry?.parameters;
+      const horiz = (g?.width || 0) > (g?.depth || 0);
+      if (horiz) {
+        if (Math.abs(x - dx) <= halfBand && Math.abs(z - dz) <= depth) return true;
+      } else {
+        if (Math.abs(x - dx) <= depth && Math.abs(z - dz) <= halfBand) return true;
+      }
+    }
+    return false;
+  }
+
   _scatterContainers(room) {
     const b = room.bounds;
     const area = (b.maxX - b.minX) * (b.maxZ - b.minZ);
@@ -2283,6 +2308,11 @@ export class Level {
         const z = b.minZ + inset + Math.random() * usableD;
         if (outsideWalkable(x, z)) continue;
         if (this._collidesAt(x, z, 1.6)) continue;
+        // Keep crates/chests out of every door corridor — they used to
+        // skip this entirely and land in a doorway approach (the "props
+        // in front of the exit" report). Pad by the container half-width
+        // so its footprint, not just its centre, clears the band.
+        if (this._inDoorBand(x, z, Math.max(cw, cd) / 2)) continue;
         // Honor keep-outs (boss exit, encounter spawn) so the chest
         // doesn't materialise where the exit ring will appear.
         let blocked = false;
@@ -2309,6 +2339,15 @@ export class Level {
         };
         proxy.userData.isProp = true;
         proxy.userData.containerRef = container;
+        // Link the proxy to its VISIBLE mesh so _clearDoorCorridors hides
+        // the crate (not just nulls its collision) when it lands in a
+        // door corridor. Without this, a container in the boss-exit door
+        // band had its collision cleared but the mesh stayed rendered in
+        // the doorway — the boss-exit "props in front of the door" bug.
+        // (The extraction door is built AFTER containers, so the band
+        // check above can't see it; the post-build _clearDoorCorridors
+        // is the catch, and it needs this linkage to actually hide it.)
+        proxy.userData.propGroup = group;
         this.scene.add(proxy);
         this.obstacles.push(proxy);
         // Interact radius — a generous 1.8m so the prompt doesn't feel
@@ -2751,6 +2790,33 @@ export class Level {
       return true;
     };
 
+    // Reject a wall-hugging candidate whose footprint punches THROUGH a
+    // wall (perimeter OR an inset shape interior wall) past a flush
+    // margin. The along/back-to-wall placers position relative to the
+    // rect bounds and _wallPropOverlap deliberately ignores walls (to
+    // allow flush contact), so in a shape room a bed/couch/pillar could
+    // bury 0.6–1.2m into a shape-wall — the "walls sometimes have props
+    // in them" report. Flush contact (penetration <= ALLOW) stays legal.
+    const WALL_EMBED_ALLOW = 0.4;
+    const _embedsWall = (px, pz, pw, pd, pyaw) => {
+      const yawAbs = Math.abs(pyaw || 0) % Math.PI;
+      let aw = pw, ad = pd;
+      const axisAligned = yawAbs < 0.05 || Math.abs(yawAbs - Math.PI / 2) < 0.05;
+      if (!axisAligned) { const m = Math.max(aw, ad); aw = m; ad = m; }
+      else if (Math.abs(yawAbs - Math.PI / 2) < 0.05) { const t = aw; aw = ad; ad = t; }
+      const minX = px - aw / 2, maxX = px + aw / 2, minZ = pz - ad / 2, maxZ = pz + ad / 2;
+      for (const o of this.obstacles) {
+        const ud = o.userData;
+        if (!ud || !ud.collisionXZ) continue;
+        if (ud.isProp || ud.isDoor || ud.containerRef) continue;   // only solid walls/cover
+        const ob = ud.collisionXZ;
+        const ox = Math.min(maxX, ob.maxX) - Math.max(minX, ob.minX);
+        const oz = Math.min(maxZ, ob.maxZ) - Math.max(minZ, ob.minZ);
+        if (ox > 0 && oz > 0 && Math.min(ox, oz) > WALL_EMBED_ALLOW) return true;
+      }
+      return false;
+    };
+
     const placeAlongWall = (prop, opts = {}) => {
       const yaw = opts.yaw;       // if provided, override rotation
       const col = prop.collision;
@@ -2781,6 +2847,7 @@ export class Level {
         const finalYaw = yaw ?? facing;
         if (!_propFitsInBounds(prop, x, z, finalYaw)) continue;
         if (col && !_wallPropOverlap(x, z, col.w, col.d, finalYaw)) continue;
+        if (col && _embedsWall(x, z, col.w, col.d, finalYaw)) continue;
         prop.group.position.set(x, 0, z);
         prop.group.rotation.y = finalYaw;
         return this._registerProp(prop);
@@ -2821,6 +2888,7 @@ export class Level {
         const finalYaw = yaw ?? facing;
         if (!_propFitsInBounds(prop, x, z, finalYaw)) continue;
         if (!_wallPropOverlap(x, z, col.w, col.d, finalYaw)) continue;
+        if (_embedsWall(x, z, col.w, col.d, finalYaw)) continue;
         prop.group.position.set(x, 0, z);
         prop.group.rotation.y = finalYaw;
         return this._registerProp(prop);
