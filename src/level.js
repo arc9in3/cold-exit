@@ -1172,8 +1172,13 @@ export class Level {
   // verified walkable centroid on it via `_encounterSpawn` for the
   // encounter visuals to anchor to.
   _pickAndMarkEncounterRoom() {
+    // Exclude 'vault' shapes — _clearEncounterRoom strips all interior
+    // geometry, which would gut the vault's strongroom (and its inner
+    // walls) into an empty shell with a stray guaranteed-loot flag. The
+    // vault's enclosed-loot-room IS that room's gameplay, so it must not
+    // be repurposed as an encounter arena.
     const eligible = this.rooms.filter(r =>
-      r.type === 'combat' && !r.giant && r.bounds);
+      r.type === 'combat' && !r.giant && r.bounds && r.shape !== 'vault');
     if (!eligible.length) return;
     // Encounter spawn chance — base 80% per level (raised from 30%
     // because the pool is large and levels run longer than original
