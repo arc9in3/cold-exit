@@ -926,13 +926,11 @@ export class Level {
     // doors themselves are excluded.
     this._clearDoorCorridors();
 
-    // Perimeter-seal pass — walk every room's 4 outer edges with a
-    // sample step and verify there's a wall/door obstacle at each
-    // sample. Missed segments get plugged with a short outer-wall
-    // block. Catches the "gap that leads outside" case that could
-    // otherwise happen when a giant-room extension, perimeter-gap
-    // and interior-layout combination leaves an uncovered span.
-    this._sealRoomPerimeters();
+    // NOTE: the perimeter-seal pass moved to run LAST (after the second
+    // corridor clear, the door-overlap repair, AND the extraction build)
+    // so its void-facing plugs can never be re-nulled by a later sweep.
+    // See the _sealRoomPerimeters() call lower down, just before
+    // _buildOuterPerimeter().
 
     // Second corridor clear — the seal pass *should* honor door
     // keepouts, but if any pass after the first _clearDoorCorridors
@@ -1000,6 +998,14 @@ export class Level {
       // throws, log and fall back to the legacy ring marker.
       console.warn('[level] extraction-room build failed; falling back to legacy ring:', err);
     }
+
+    // Perimeter-seal pass (R1). Runs HERE — after every door clear,
+    // overlap repair, and the extraction build — so its void-facing
+    // plugs are the final word on the map boundary and nothing nulls
+    // them afterward. Seals any edge that faces the void (incl. gaps
+    // left by a misaligned neighbour or a perimeter wall an earlier
+    // door-clear over-cleared). See _sealRoomPerimeters().
+    this._sealRoomPerimeters();
 
     // Outer bounding wall — a ring of tall outer-colour walls just
     // past the aggregate room bounds so the player can't escape to
@@ -5609,83 +5615,78 @@ export class Level {
   // wall/door obstacle within ~0.8m; if nothing is there, a plug
   // wall block fills the gap. Door gaps and their approach corridors
   // are explicitly excluded so the seal can never wall off a doorway.
+  // R1 — sealing invariant. Every room edge segment that faces the VOID
+  // (no other room beyond it) must be covered by a wall, except where a
+  // doorway gap legitimately sits. This runs LAST in generate() (after
+  // every door-clear / repair / extraction pass) so its plugs can never
+  // be re-nulled by a later sweep — that ordering bug was why even rect
+  // rooms ended up with a fully-open edge: a perimeter wall got cleared
+  // as "in a door corridor" and the old seal (which ran BEFORE the final
+  // clears) couldn't catch it.
+  //
+  // Why void-facing only: a SHARED edge (another room beyond it) is
+  // either a doorway connection or a back-to-back wall the perimeter
+  // builder already owns — sealing it would wall off a connection or
+  // double-wall. By probing PROBE_OUT past the edge for a neighbour we
+  // touch only the true map boundary. Void-facing edges never carry a
+  // legitimate door (doors live between rooms), so no door bookkeeping
+  // is needed beyond a defensive skip for a door touching a misaligned
+  // boundary.
+  //
+  // Shape rooms seal against their BOUNDS rectangle (not the inset shape
+  // outline): the bounding box becomes the watertight boundary and the
+  // shape's own interior walls partition the unreachable cut-outs off
+  // from play space. That's correct and far simpler than tracing every
+  // shape's silhouette.
   _sealRoomPerimeters() {
-    const STEP = 1.0;
-    const HALF_STEP = STEP / 2;
-    // checkRadius must satisfy: PLUG_LEN/2 + checkRadius < STEP, so
-    // freshly-placed plugs don't skip their own next-sample slot
-    // (which produced a picket-fence with walkable gaps).
-    //
-    // Bumped checkRadius to 0.35 so plugs are suppressed near actual
-    // existing walls, eliminating the "extra segment next to the
-    // wall" artifact — a short plug placed right against a full wall
-    // was visually reading as a separate block. With PLUG_LEN=1.25,
-    // 0.35 is the maximum that still lets adjacent plugs (1m apart)
-    // both place.
-    const checkRadius = 0.35;
-    const PLUG_LEN = STEP + 0.25;
-    // Pre-gather door centres so the sampler can skip any sample
-    // landing inside a door corridor. This is belt-and-braces: the
-    // hasWallAt check already detects door collision boxes, but if
-    // _clearDoorCorridors or a future pass nulled the door somehow,
-    // the skip keeps us from plugging a real doorway.
-    const doorKeepouts = [];
-    for (const o of this.obstacles) {
-      if (!o.userData.isDoor) continue;
-      const g = o.geometry?.parameters;
-      const halfW = (g?.width || 4) / 2 + 0.8;
-      const halfD = (g?.depth || 1.2) / 2 + 0.8;
-      doorKeepouts.push({ x: o.position.x, z: o.position.z, halfW, halfD });
-    }
-    const inDoorKeepout = (x, z) => {
-      for (const k of doorKeepouts) {
-        if (Math.abs(x - k.x) < k.halfW && Math.abs(z - k.z) < k.halfD) return true;
+    const STEP = 0.5;
+    const COVER_TOL = 0.3;
+    const PLUG_PAD = 0.25;                 // extend a merged plug past its run ends
+    const PROBE_OUT = WALL_THICK + 0.6;    // outward distance to test for a neighbour room
+    const realRooms = this.rooms.filter(r => r.id >= 0 && r.bounds);
+    const inAnotherRoom = (x, z, self) => {
+      for (const r of realRooms) {
+        if (r === self) continue;
+        const rb = r.bounds;
+        if (x >= rb.minX - 0.2 && x <= rb.maxX + 0.2 && z >= rb.minZ - 0.2 && z <= rb.maxZ + 0.2) return true;
       }
       return false;
     };
-    const hasWallAt = (x, z) => {
+    const coveredByWall = (x, z) => {
       for (const o of this.obstacles) {
-        const b = o.userData.collisionXZ;
-        if (!b) continue;
-        // Only count real perimeter-style obstacles, not tiny props
-        // / cover blocks in the room interior.
-        if (o.userData.isProp) continue;
-        if (x > b.minX - checkRadius && x < b.maxX + checkRadius
-         && z > b.minZ - checkRadius && z < b.maxZ + checkRadius) return true;
+        const cb = o.userData.collisionXZ;
+        if (!cb) continue;
+        if (o.userData.isProp) continue;   // props/cover don't count as a seal
+        if (x > cb.minX - COVER_TOL && x < cb.maxX + COVER_TOL
+         && z > cb.minZ - COVER_TOL && z < cb.maxZ + COVER_TOL) return true;
       }
       return false;
     };
-    for (const room of this.rooms) {
+    const nearDoor = (x, z) => {
+      for (const o of this.obstacles) {
+        if (!o.userData.isDoor) continue;
+        const cx = o.userData.cx, cz = o.userData.cz;
+        if (cx == null) continue;
+        if (Math.abs(x - cx) < DOOR_WIDTH / 2 + 0.8 && Math.abs(z - cz) < DOOR_WIDTH / 2 + 0.8) return true;
+      }
+      return false;
+    };
+    for (const room of realRooms) {
       const b = room.bounds;
       const sides = [
-        { fixed: 'z', fxv: b.minZ, stepAxis: 'x', from: b.minX, to: b.maxX },
-        { fixed: 'z', fxv: b.maxZ, stepAxis: 'x', from: b.minX, to: b.maxX },
-        { fixed: 'x', fxv: b.minX, stepAxis: 'z', from: b.minZ, to: b.maxZ },
-        { fixed: 'x', fxv: b.maxX, stepAxis: 'z', from: b.minZ, to: b.maxZ },
+        { fixed: 'z', fxv: b.minZ, from: b.minX, to: b.maxX, out: [0, -1] },
+        { fixed: 'z', fxv: b.maxZ, from: b.minX, to: b.maxX, out: [0, 1] },
+        { fixed: 'x', fxv: b.minX, from: b.minZ, to: b.maxZ, out: [-1, 0] },
+        { fixed: 'x', fxv: b.maxX, from: b.minZ, to: b.maxZ, out: [1, 0] },
       ];
       for (const side of sides) {
-        // Range now goes from `from` to `to` inclusive (was
-        // `from + HALF_STEP` to `< to`), so the corner endpoints
-        // are sampled. Old version skipped the first/last 0.5m of
-        // every side, leaving four corners-per-room unverified —
-        // shape-room chamfers + neighbour-room misalignments
-        // produced visible gaps + odd geometry there. checkRadius
-        // already suppresses redundant plugs next to existing
-        // walls, so re-sampling the corners is safe.
-        // Coalesce consecutive uncovered samples into ONE merged plug
-        // wall rather than dropping a separate PLUG_LEN box at every
-        // sample. The old per-sample loop turned a fully-missing edge
-        // into a row of ~1.25m blocks spaced 1m apart — precisely the
-        // "wall segments made of multiple squares instead of a long
-        // rectangle" report. The merged box has the same extent at the
-        // run's endpoints (so door keepouts + the later clear/repair
-        // passes behave identically) but fills the middle as a single
-        // span. Bonus: far fewer collision boxes + wall instances.
+        // Coalesce consecutive uncovered void samples into ONE merged
+        // plug wall (a long rectangle, not a row of squares).
         let runStart = null, runEnd = null;
         const flushRun = () => {
           if (runStart === null) return;
           const center = (runStart + runEnd) / 2;
-          const len = (runEnd - runStart) + PLUG_LEN;
+          const len = (runEnd - runStart) + STEP + PLUG_PAD;
           if (side.fixed === 'x') {
             this._addObstacle(side.fxv, WALL_HEIGHT / 2, center,
               WALL_THICK, WALL_HEIGHT, len, OUTER_WALL_COLOR);
@@ -5695,35 +5696,19 @@ export class Level {
           }
           runStart = runEnd = null;
         };
-        for (let s = side.from; s <= side.to + 0.001; s += STEP) {
-          const sc = Math.min(s, side.to);    // clamp final sample
+        for (let s = side.from; s <= side.to + 1e-6; s += STEP) {
+          const sc = Math.min(s, side.to);
           const x = side.fixed === 'x' ? side.fxv : sc;
           const z = side.fixed === 'z' ? side.fxv : sc;
-          // A covered sample or a door corridor breaks the current run.
-          if (inDoorKeepout(x, z) || hasWallAt(x, z)) { flushRun(); continue; }
+          const px = x + side.out[0] * PROBE_OUT;
+          const pz = z + side.out[1] * PROBE_OUT;
+          // Shared edge (neighbour beyond) — leave the perimeter+door
+          // geometry alone. Covered or door-adjacent samples break the run.
+          if (inAnotherRoom(px, pz, room) || coveredByWall(x, z) || nearDoor(x, z)) { flushRun(); continue; }
           if (runStart === null) runStart = sc;
           runEnd = sc;
         }
         flushRun();
-      }
-      // Explicit 4-corner caps. After the side sweep, the corner
-      // CELL (b.minX/maxX × b.minZ/maxZ) is the most failure-prone
-      // spot: shape templates often end their perimeter walls just
-      // short of the corner, and adjacent rooms with different
-      // shapes can leave a tiny diagonal gap at the meeting cell.
-      // Drop a WALL_THICK × WALL_THICK pillar block at each corner
-      // unless something else is already there.
-      const corners = [
-        { x: b.minX, z: b.minZ },
-        { x: b.maxX, z: b.minZ },
-        { x: b.minX, z: b.maxZ },
-        { x: b.maxX, z: b.maxZ },
-      ];
-      for (const c of corners) {
-        if (inDoorKeepout(c.x, c.z)) continue;
-        if (hasWallAt(c.x, c.z)) continue;
-        this._addObstacle(c.x, WALL_HEIGHT / 2, c.z,
-          WALL_THICK, WALL_HEIGHT, WALL_THICK, OUTER_WALL_COLOR);
       }
     }
   }

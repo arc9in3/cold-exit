@@ -872,10 +872,15 @@ const multiTier = {
   },
 };
 
-// ----- courtyard — replace one wall with a parapet-style fence ----------
-// Visually distinct because the missing wall reads as "outside". We
-// don't actually open the cell — there's a low parapet line to keep
-// the player in. The "removed" wall must be one without a neighbor.
+// ----- courtyard — glazed "window wall" on one doorless side -----------
+// Reads as open/airy without breaking encapsulation. The OLD version
+// deleted the outer wall on a doorless side and dropped a 1m parapet,
+// which left the cell visually open to the void (the doorless side
+// almost always faces the map edge, not a neighbour) — that was the
+// "rooms no longer encapsulating the gameplay area" report. Now the
+// side stays a FULL-HEIGHT sealed wall, dressed with tall recessed
+// glazing panels so it reads as a window wall, and the chest-high
+// parapet rail moves a few metres inboard as a balcony rail + cover.
 const courtyard = {
   id: 'courtyard',
   allowedTypes: ['combat', 'subBoss', 'boss'],
@@ -889,17 +894,50 @@ const courtyard = {
       return rectShape.build(level, room);
     }
     const side = candidates[Math.floor(Math.random() * candidates.length)];
-    _addRectPerimeter(level, room, { skip: { [side]: true } });
+    // FULL perimeter — every side sealed (no skip). Encapsulation first.
+    _addRectPerimeter(level, room);
     _addCornerPillars(level, room);
-    // Parapet — a chest-high (1.0m) low wall replacing the full
-    // wall. Acts as cover but visually opens the cell.
+    const horiz = (side === 'north' || side === 'south');
+    // Glazing decoration on the interior face of the window wall —
+    // a cool recessed panel + vertical mullions. Decoration-only
+    // (level._addAccentDeco never sets collisionXZ), so it changes
+    // nothing about sealing / pathing / raycasts. Cheap flavour.
+    const GLASS = 0x223040, MULLION = 0x10151c;
+    const proud = WALL_THICK / 2 + 0.06;
+    const panelH = WALL_HEIGHT - 0.7, panelY = WALL_HEIGHT / 2;
+    if (typeof level._addAccentDeco === 'function') {
+      if (horiz) {
+        const z = (side === 'north' ? d.minZ : d.maxZ) + (side === 'north' ? proud : -proud);
+        const len = (d.maxX - d.minX) - 1.0;
+        level._addAccentDeco((d.minX + d.maxX) / 2, panelY, z, len, panelH, 0.06, GLASS,
+          { kind: 'window-glass', roughness: 0.25, metalness: 0.4 });
+        const bays = 4;
+        for (let i = 1; i < bays; i++) {
+          const mx = d.minX + (d.maxX - d.minX) * (i / bays);
+          level._addAccentDeco(mx, panelY, z, 0.18, panelH, 0.1, MULLION, { kind: 'window-mullion' });
+        }
+      } else {
+        const x = (side === 'west' ? d.minX : d.maxX) + (side === 'west' ? proud : -proud);
+        const len = (d.maxZ - d.minZ) - 1.0;
+        level._addAccentDeco(x, panelY, (d.minZ + d.maxZ) / 2, 0.06, panelH, len, GLASS,
+          { kind: 'window-glass', roughness: 0.25, metalness: 0.4 });
+        const bays = 4;
+        for (let i = 1; i < bays; i++) {
+          const mz = d.minZ + (d.maxZ - d.minZ) * (i / bays);
+          level._addAccentDeco(x, panelY, mz, 0.1, panelH, 0.18, MULLION, { kind: 'window-mullion' });
+        }
+      }
+    }
+    // Balcony parapet — chest-high rail set ~3m inboard from the window
+    // wall: cover + a "you're looking out over an edge" read, without
+    // touching the sealed perimeter.
+    const inset = 3.0;
     let p1x, p1z, p2x, p2z;
-    if (side === 'north') { p1x = d.minX; p1z = d.minZ; p2x = d.maxX; p2z = d.minZ; }
-    else if (side === 'south') { p1x = d.minX; p1z = d.maxZ; p2x = d.maxX; p2z = d.maxZ; }
-    else if (side === 'east') { p1x = d.maxX; p1z = d.minZ; p2x = d.maxX; p2z = d.maxZ; }
-    else { p1x = d.minX; p1z = d.minZ; p2x = d.minX; p2z = d.maxZ; }
+    if (side === 'north') { const z = d.minZ + inset; p1x = d.minX + 1.5; p1z = z; p2x = d.maxX - 1.5; p2z = z; }
+    else if (side === 'south') { const z = d.maxZ - inset; p1x = d.minX + 1.5; p1z = z; p2x = d.maxX - 1.5; p2z = z; }
+    else if (side === 'east') { const x = d.maxX - inset; p1x = x; p1z = d.minZ + 1.5; p2x = x; p2z = d.maxZ - 1.5; }
+    else { const x = d.minX + inset; p1x = x; p1z = d.minZ + 1.5; p2x = x; p2z = d.maxZ - 1.5; }
     addRailing(level, p1x, p1z, p2x, p2z);
-    // Walkable bounds — full cell footprint.
     return {
       walls: [],
       walkableBounds: [_box(d.minX, d.minZ, d.maxX, d.maxZ)],

@@ -24,6 +24,7 @@ import { ENCOUNTER_DEFS, pickEncounterForLevel } from './encounters.js';
 import { spawnSpeechBubble } from './hud.js';
 import { makeContainer, buildContainerMesh, pickContainerType, pickContainerSize } from './containers.js';
 import { Level } from './level.js';
+import { auditLevel, auditSeeds } from './level_audit.js';
 import {
   MegaBoss, isMegaBossLevel, buildMegaBossLoot,
   getEncounterCount as getMegaBossEncounterCount,
@@ -230,7 +231,7 @@ const toastEl = (() => {
     zIndex: 260, pointerEvents: 'none',
     fontFamily: 'ui-monospace, SFMono-Regular, Menlo, Consolas, monospace',
     fontSize: '13px', fontWeight: '700',
-    color: '#f2e7c9', textShadow: '0 0 8px rgba(0,0,0,0.9)',
+    color: 'var(--cy-amber)', textShadow: '0 0 8px rgba(0,0,0,0.9)',
     letterSpacing: '1.5px', padding: '6px 16px',
     background: 'rgba(0,0,0,0.55)', border: '1px solid rgba(201,168,122,0.5)',
     borderRadius: '3px', opacity: '0', transition: 'opacity 0.25s',
@@ -260,9 +261,9 @@ const skillPointPipEl = (() => {
     right: '24px',
     padding: '6px 12px',
     background: 'rgba(40, 20, 70, 0.85)',
-    border: '1px solid #b894ff',
+    border: '1px solid var(--cy-violet)',
     borderRadius: '4px',
-    color: '#e0c8ff',
+    color: 'var(--cy-violet)',
     fontFamily: 'ui-monospace, Menlo, Consolas, monospace',
     fontSize: '12px',
     letterSpacing: '1px',
@@ -331,7 +332,7 @@ const bossBarRoot = (() => {
   const name = document.createElement('div');
   name.id = 'boss-bar-name';
   Object.assign(name.style, {
-    color: '#c9a87a', fontSize: '12px', fontWeight: '700',
+    color: 'var(--cy-amber)', fontSize: '12px', fontWeight: '700',
     textTransform: 'uppercase',
     textShadow: '0 0 6px rgba(0,0,0,0.9)',
     marginBottom: '4px',
@@ -340,7 +341,7 @@ const bossBarRoot = (() => {
   fill.id = 'boss-bar-fill';
   Object.assign(fill.style, {
     width: '0%', height: '100%',
-    background: 'linear-gradient(90deg, #7a1f1f, #d23030)',
+    background: 'linear-gradient(90deg, var(--ce-red), var(--ce-red))',
     transition: 'width 0.15s',
   });
   const track = document.createElement('div');
@@ -622,7 +623,7 @@ function _showCtxLostOverlay() {
   el.style.cssText = `
     position: fixed; inset: 0; z-index: 99999;
     background: rgba(5,6,7,0.92);
-    color: #00e6ff;
+    color: var(--cy-cyan);
     display: flex; flex-direction: column;
     align-items: center; justify-content: center;
     font: 14px ui-monospace, Menlo, Consolas, monospace;
@@ -630,9 +631,9 @@ function _showCtxLostOverlay() {
     pointer-events: auto;
   `;
   el.innerHTML = `
-    <div style="font-size:18px; color:#ff3a3a; letter-spacing:2px;">GRAPHICS CONTEXT LOST</div>
-    <div style="color:#8a97a8;">Reloading in <b style="color:#00e6ff;" id="ctx-lost-secs">3</b>…</div>
-    <div style="color:#6f6754; font-size:11px; max-width:380px; line-height:1.5;">
+    <div style="font-size:18px; color:var(--ce-red); letter-spacing:2px;">GRAPHICS CONTEXT LOST</div>
+    <div style="color:var(--ce-soft);">Reloading in <b style="color:var(--cy-cyan);" id="ctx-lost-secs">3</b>…</div>
+    <div style="color:var(--ce-steel); font-size:11px; max-width:380px; line-height:1.5;">
       Your browser ran out of WebGL contexts after a long session.
       Reloading recovers the renderer; your run state is saved at the
       last level start.
@@ -1656,6 +1657,11 @@ loot.level = level;
 // repro state without a circular import.
 if (typeof window !== 'undefined') {
   window.__level = level;
+  // Dev gate for the room-gen overhaul — window.__auditLevel() reports the
+  // current floor; window.__auditLevel(n) regenerates n times and aggregates
+  // (void leaks / path blocks / props-in-walls / door-band props). See
+  // src/level_audit.js. Read-only; safe to call between runs.
+  window.__auditLevel = (n) => (n && n > 1) ? auditSeeds(level, n) : auditLevel(level);
   Object.defineProperty(window, '__runSeed', {
     configurable: true,
     get() { return _runSeed || null; },
@@ -2188,9 +2194,9 @@ function _showActiveContractReminder() {
         }
         .contract-reminder-card {
           padding: 14px 22px 12px;
-          background: linear-gradient(180deg, #1a2228 0%, #0c1014 100%);
-          border: 1.5px solid #c9a87a; border-radius: 6px;
-          color: #f2e7c9;
+          background: linear-gradient(180deg, var(--ce-navy) 0%, var(--ce-black) 100%);
+          border: 1.5px solid var(--cy-amber); border-radius: 6px;
+          color: var(--cy-amber);
           min-width: 380px; max-width: 640px;
           box-shadow: 0 0 28px rgba(201, 168, 122, 0.45),
                       0 6px 24px rgba(0, 0, 0, 0.6);
@@ -2206,17 +2212,17 @@ function _showActiveContractReminder() {
           to { opacity: 0; transform: translateY(-12px) scale(0.96); }
         }
         .cr-eyebrow {
-          color: #c9a87a; font-weight: 800;
+          color: var(--cy-amber); font-weight: 800;
           font-size: 10px; letter-spacing: 4px; text-transform: uppercase;
           text-align: center; margin-bottom: 4px;
         }
         .cr-title {
-          color: #f2c060; font-weight: 800; font-size: 17px;
+          color: var(--cy-amber); font-weight: 800; font-size: 17px;
           letter-spacing: 1.2px; text-align: center;
           margin-bottom: 4px;
         }
         .cr-conds {
-          color: #c9a87a; font-size: 12px; letter-spacing: 0.8px;
+          color: var(--cy-amber); font-size: 12px; letter-spacing: 0.8px;
           text-align: center; margin-bottom: 6px;
         }
         .cr-mods {
@@ -2346,9 +2352,9 @@ function _showContractCompleteToast(def, result, completionRank) {
         z-index: 25;
         min-width: 380px; max-width: 720px;
         padding: 12px 22px;
-        background: linear-gradient(180deg, #2a2418 0%, #1a1408 100%);
-        border: 2px solid #f2c060; border-radius: 6px;
-        color: #f2e7c9;
+        background: linear-gradient(180deg, var(--ce-navy) 0%, var(--ce-black) 100%);
+        border: 2px solid var(--cy-amber); border-radius: 6px;
+        color: var(--cy-amber);
         font: 13px 'Inter', system-ui, sans-serif;
         letter-spacing: 0.5px;
         cursor: pointer;
@@ -2367,30 +2373,30 @@ function _showContractCompleteToast(def, result, completionRank) {
         to { opacity: 0; transform: translateX(-50%) translateY(12px) scale(0.96); }
       }
       .contract-toast .ct-eyebrow {
-        color: #f2c060; font-weight: 800;
+        color: var(--cy-amber); font-weight: 800;
         font-size: 10px; letter-spacing: 3.5px; text-transform: uppercase;
         text-shadow: 0 0 10px rgba(242, 192, 96, 0.55);
       }
       .contract-toast .ct-title {
-        font-size: 16px; font-weight: 800; color: #ffe8ad;
+        font-size: 16px; font-weight: 800; color: var(--cy-amber);
         letter-spacing: 1.2px; line-height: 1.2;
         margin-top: 2px;
       }
       .contract-toast .ct-rewards {
         margin-top: 4px;
-        font-size: 12px; color: #c9a87a;
+        font-size: 12px; color: var(--cy-amber);
         letter-spacing: 0.8px;
       }
-      .contract-toast .ct-rewards b { color: #f2c060; font-weight: 800; }
+      .contract-toast .ct-rewards b { color: var(--cy-amber); font-weight: 800; }
       .contract-toast .ct-cta {
         margin-left: auto;
         font-size: 11px; font-weight: 800; letter-spacing: 2px;
-        color: #0c1014; background: #f2c060;
+        color: var(--ce-black); background: var(--cy-amber);
         padding: 8px 14px; border-radius: 3px;
         text-transform: uppercase;
         white-space: nowrap;
       }
-      .contract-toast:hover .ct-cta { background: #ffd070; }
+      .contract-toast:hover .ct-cta { background: var(--cy-amber); }
       /* Persistent HUD pip — sits below the skill-point pip when both
          are active. Pulses gently so it pulls a glance without
          shouting. Click → drains the queue head + plays the full
@@ -2399,8 +2405,8 @@ function _showContractCompleteToast(def, result, completionRank) {
         position: fixed; top: 102px; right: 24px;
         padding: 6px 12px;
         background: rgba(60, 40, 16, 0.85);
-        border: 1px solid #f2c060; border-radius: 4px;
-        color: #ffe8ad;
+        border: 1px solid var(--cy-amber); border-radius: 4px;
+        color: var(--cy-amber);
         font: 12px 'Inter', system-ui, sans-serif;
         letter-spacing: 1px; text-transform: uppercase;
         z-index: 18;
@@ -2523,11 +2529,11 @@ function _showContractCompletionPresentation(def, result, completionRank, balanc
           to   { background: rgba(8,12,16,0);    opacity: 0; }
         }
         #contract-celebration-frame {
-          background: linear-gradient(180deg, #1a2228, #0c1014);
-          border: 2px solid #f2c060; border-radius: 8px;
+          background: linear-gradient(180deg, var(--ce-navy), var(--ce-black));
+          border: 2px solid var(--cy-amber); border-radius: 8px;
           padding: 22px 26px;
           width: 480px; max-width: 92%;
-          color: #f2e7c9;
+          color: var(--cy-amber);
           box-shadow: 0 0 64px rgba(242, 192, 96, 0.5),
                       0 14px 40px rgba(0,0,0,0.7);
           pointer-events: auto;
@@ -2546,7 +2552,7 @@ function _showContractCompletionPresentation(def, result, completionRank, balanc
           to { transform: translateY(-12px) scale(0.95); opacity: 0; }
         }
         .cc-eyebrow {
-          color: #f2c060; font-weight: 800;
+          color: var(--cy-amber); font-weight: 800;
           font-size: 11px; letter-spacing: 4px;
           text-align: center; margin-bottom: 10px;
           text-transform: uppercase;
@@ -2561,7 +2567,7 @@ function _showContractCompletionPresentation(def, result, completionRank, balanc
           position: absolute; top: 10px; right: 10px;
           padding: 4px 10px;
           background: rgba(106, 191, 120, 0.9);
-          color: #0c1014;
+          color: var(--ce-black);
           font-size: 11px; font-weight: 800; letter-spacing: 2px;
           border-radius: 3px; transform: rotate(8deg);
           box-shadow: 0 0 16px rgba(106, 191, 120, 0.6);
@@ -2585,22 +2591,22 @@ function _showContractCompletionPresentation(def, result, completionRank, balanc
           display: contents;
         }
         .cc-row .cc-row-label {
-          color: #c9a87a; font-size: 12px; letter-spacing: 1px;
+          color: var(--cy-amber); font-size: 12px; letter-spacing: 1px;
           text-transform: uppercase;
         }
         .cc-row .cc-row-value {
           font-weight: 800; letter-spacing: 0.4px;
           font-variant-numeric: tabular-nums;
         }
-        .cc-row.chips  .cc-row-value { color: #f2c060; }
-        .cc-row.rank   .cc-row-value { color: #5a8acf; }
-        .cc-row.marks  .cc-row-value { color: #6abf78; }
-        .cc-row.sigils .cc-row-value { color: #b870e0; }
+        .cc-row.chips  .cc-row-value { color: var(--cy-amber); }
+        .cc-row.rank   .cc-row-value { color: var(--cy-cyan); }
+        .cc-row.marks  .cc-row-value { color: var(--cy-mint); }
+        .cc-row.sigils .cc-row-value { color: var(--cy-violet); }
         .cc-tagline {
           text-align: center;
           font-size: 12px; letter-spacing: 3px;
           font-weight: 700;
-          color: #f2c060;
+          color: var(--cy-amber);
           padding: 10px 0 4px;
           opacity: 0;
           animation: cc-tag-in 320ms ease-out 2400ms both;
@@ -2614,7 +2620,7 @@ function _showContractCompletionPresentation(def, result, completionRank, balanc
           text-align: center;
           font-size: 18px; font-weight: 900;
           letter-spacing: 1.6px;
-          color: #ffd070;
+          color: var(--cy-amber);
           padding: 6px 0 0;
           opacity: 0;
           animation: cc-balance-in 360ms cubic-bezier(0.22, 1.2, 0.36, 1) 2700ms both;
@@ -4261,15 +4267,15 @@ function _openMedicalMenu(targetPeer) {
   root.innerHTML = '';
   const card = document.createElement('div');
   Object.assign(card.style, {
-    background: 'linear-gradient(180deg, #1a2228, #0c1014)',
-    border: '1px solid #c0e0ff', borderRadius: '6px',
+    background: 'linear-gradient(180deg, var(--ce-navy), var(--ce-black))',
+    border: '1px solid var(--cy-cyan)', borderRadius: '6px',
     padding: '20px 24px', maxWidth: '520px', width: '90%',
     boxShadow: '0 0 36px rgba(120,200,255,0.35)',
-    color: '#f2e7c9',
+    color: 'var(--cy-amber)',
   });
   const title = document.createElement('div');
   Object.assign(title.style, {
-    color: '#a0d8ff', fontWeight: '700', fontSize: '14px',
+    color: 'var(--cy-cyan)', fontWeight: '700', fontSize: '14px',
     letterSpacing: '3px', textTransform: 'uppercase',
     textAlign: 'center', marginBottom: '4px',
   });
@@ -4277,7 +4283,7 @@ function _openMedicalMenu(targetPeer) {
   card.appendChild(title);
   const sub = document.createElement('div');
   Object.assign(sub.style, {
-    color: '#a89070', fontSize: '11px', textAlign: 'center',
+    color: 'var(--cy-amber)', fontSize: '11px', textAlign: 'center',
     marginBottom: '14px', letterSpacing: '1.5px',
   });
   sub.textContent = 'Pick a revive item — auto-revive continues meanwhile';
@@ -4287,7 +4293,7 @@ function _openMedicalMenu(targetPeer) {
   const sectionTitle = (label, count) => {
     const el = document.createElement('div');
     Object.assign(el.style, {
-      color: '#80c0e0', fontSize: '11px', letterSpacing: '2px',
+      color: 'var(--cy-cyan)', fontSize: '11px', letterSpacing: '2px',
       textTransform: 'uppercase', margin: '10px 0 6px',
       borderBottom: '1px solid rgba(120,200,255,0.25)', paddingBottom: '3px',
     });
@@ -4308,16 +4314,16 @@ function _openMedicalMenu(targetPeer) {
       width: '100%', textAlign: 'left',
       padding: '10px 14px', marginBottom: '6px',
       background: 'rgba(20,36,52,0.55)',
-      border: '1px solid #4a6a82', borderRadius: '4px',
-      color: '#f2e7c9', font: 'inherit', cursor: 'pointer',
+      border: '1px solid var(--cy-cyan)', borderRadius: '4px',
+      color: 'var(--cy-amber)', font: 'inherit', cursor: 'pointer',
     });
-    btn.onmouseenter = () => { btn.style.background = 'rgba(40,72,104,0.75)'; btn.style.borderColor = '#a0d8ff'; };
-    btn.onmouseleave = () => { btn.style.background = 'rgba(20,36,52,0.55)'; btn.style.borderColor = '#4a6a82'; };
+    btn.onmouseenter = () => { btn.style.background = 'rgba(40,72,104,0.75)'; btn.style.borderColor = 'var(--cy-cyan)'; };
+    btn.onmouseleave = () => { btn.style.background = 'rgba(20,36,52,0.55)'; btn.style.borderColor = 'var(--cy-cyan)'; };
     const left = document.createElement('span');
-    Object.assign(left.style, { fontWeight: '700', color: '#ffd070' });
+    Object.assign(left.style, { fontWeight: '700', color: 'var(--cy-amber)' });
     left.textContent = `${meta.label}${count > 1 ? ` × ${count}` : ''}`;
     const right = document.createElement('span');
-    Object.assign(right.style, { fontSize: '11px', color: '#b8a890' });
+    Object.assign(right.style, { fontSize: '11px', color: 'var(--ce-soft)' });
     right.textContent = meta.kind === 'tourniquet'
       ? 'Reset bleedout'
       : `Revive ${Math.round(meta.hpPct * 100)}%`;
@@ -4330,7 +4336,7 @@ function _openMedicalMenu(targetPeer) {
   if (myMeds.length) card.appendChild(sectionTitle('Your pack', myMeds.length));
   else {
     const empty = document.createElement('div');
-    Object.assign(empty.style, { color: '#7a6650', fontSize: '11px', fontStyle: 'italic', marginBottom: '6px' });
+    Object.assign(empty.style, { color: 'var(--cy-amber)', fontSize: '11px', fontStyle: 'italic', marginBottom: '6px' });
     empty.textContent = 'Your pack — empty';
     card.appendChild(empty);
   }
@@ -4342,7 +4348,7 @@ function _openMedicalMenu(targetPeer) {
   if (theirMeds.length) card.appendChild(sectionTitle('Their pack', theirMeds.length));
   else {
     const empty = document.createElement('div');
-    Object.assign(empty.style, { color: '#7a6650', fontSize: '11px', fontStyle: 'italic', margin: '6px 0' });
+    Object.assign(empty.style, { color: 'var(--cy-amber)', fontSize: '11px', fontStyle: 'italic', margin: '6px 0' });
     empty.textContent = 'Their pack — empty';
     card.appendChild(empty);
   }
@@ -4353,8 +4359,8 @@ function _openMedicalMenu(targetPeer) {
   const closeBtn = document.createElement('button');
   Object.assign(closeBtn.style, {
     display: 'block', width: '100%', marginTop: '8px', padding: '8px',
-    background: 'transparent', border: '1px solid #4a3a2a',
-    borderRadius: '3px', color: '#a89070', font: 'inherit',
+    background: 'transparent', border: '1px solid var(--ce-navy)',
+    borderRadius: '3px', color: 'var(--cy-amber)', font: 'inherit',
     cursor: 'pointer', letterSpacing: '1.5px', textTransform: 'uppercase',
     fontSize: '11px',
   });
@@ -8086,10 +8092,10 @@ const _encounterPromptEl = (() => {
     // panel scrolls if a future encounter exceeds the cap.
     minWidth: '380px', maxWidth: 'min(640px, 92vw)',
     maxHeight: '82vh', overflowY: 'auto', boxSizing: 'border-box',
-    background: 'linear-gradient(180deg, #181b21 0%, #0e1018 100%)',
-    border: '1px solid #c9a87a', borderRadius: '4px',
+    background: 'linear-gradient(180deg, var(--ce-black) 0%, var(--ce-black) 100%)',
+    border: '1px solid var(--cy-amber)', borderRadius: '4px',
     padding: '22px 26px', zIndex: '60',
-    color: '#e8dfc8', display: 'none',
+    color: 'var(--ce-soft)', display: 'none',
     fontFamily: 'ui-monospace, SFMono-Regular, Menlo, Consolas, monospace',
     boxShadow: '0 14px 50px rgba(0,0,0,0.85)',
   });
@@ -8097,8 +8103,8 @@ const _encounterPromptEl = (() => {
   // letter-spacing + uppercase on the title made long names overhang
   // the right edge before this rule.
   el.innerHTML = `
-    <div id="enc-prompt-title" style="font-size:18px;font-weight:700;letter-spacing:4px;color:#c9a87a;text-transform:uppercase;margin-bottom:10px;text-align:center;overflow-wrap:break-word;word-break:break-word;"></div>
-    <div id="enc-prompt-body" style="font-size:13px;color:#bcb8a8;line-height:1.5;margin-bottom:18px;text-align:center;overflow-wrap:break-word;word-break:break-word;white-space:pre-wrap;"></div>
+    <div id="enc-prompt-title" style="font-size:18px;font-weight:700;letter-spacing:4px;color:var(--cy-amber);text-transform:uppercase;margin-bottom:10px;text-align:center;overflow-wrap:break-word;word-break:break-word;"></div>
+    <div id="enc-prompt-body" style="font-size:13px;color:var(--ce-soft-50);line-height:1.5;margin-bottom:18px;text-align:center;overflow-wrap:break-word;word-break:break-word;white-space:pre-wrap;"></div>
     <div id="enc-prompt-options" style="display:flex;flex-direction:column;gap:6px;"></div>
   `;
   document.body.appendChild(el);
@@ -8119,7 +8125,7 @@ function showEncounterPrompt({ title, body, options }) {
       padding: '10px 16px', fontSize: '12px',
       letterSpacing: '2px', textTransform: 'uppercase',
       background: btn.disabled ? 'rgba(80,80,80,0.18)' : 'rgba(125,167,200,0.15)',
-      color: btn.disabled ? '#6a7280' : '#cbd6e2',
+      color: btn.disabled ? 'var(--ce-soft-50)' : 'var(--ce-soft)',
       border: '1px solid ' + (btn.disabled ? 'rgba(80,80,80,0.3)' : 'rgba(125,167,200,0.55)'),
       borderRadius: '3px',
       cursor: btn.disabled ? 'default' : 'pointer',
@@ -8395,7 +8401,7 @@ const _perf = (() => {
       el.id = 'perf-overlay';
       el.style.cssText = `
         position: fixed; top: 12px; right: 12px; z-index: 9999;
-        background: rgba(5,6,7,0.85); color: #00e6ff;
+        background: rgba(5,6,7,0.85); color: var(--cy-cyan);
         font: 11px ui-monospace, Menlo, Consolas, monospace;
         padding: 8px 10px; border: 1px solid rgba(0,230,255,0.3);
         border-radius: 4px; pointer-events: none; min-width: 180px;
@@ -8529,7 +8535,7 @@ function _refreshRestartSlotsUI() {
   const label = document.createElement('div');
   label.textContent = 'RESTART FROM:';
   Object.assign(label.style, {
-    fontSize: '10px', letterSpacing: '1.2px', color: '#9b8b6a',
+    fontSize: '10px', letterSpacing: '1.2px', color: 'var(--cy-amber)',
     width: '100%', textAlign: 'center', marginBottom: '2px',
   });
   root.appendChild(label);
@@ -8539,9 +8545,9 @@ function _refreshRestartSlotsUI() {
     btn.textContent = `F${(snap.levelIndex | 0) + 1}`;
     const isActive = idx === _activeRestartSlot;
     Object.assign(btn.style, {
-      background: isActive ? '#3a1520' : '#1a1d24',
-      border: `1px solid ${isActive ? '#cf5a5a' : '#4a505a'}`,
-      color: isActive ? '#f2c060' : '#c9a87a',
+      background: isActive ? 'var(--ce-black)' : 'var(--ce-black)',
+      border: `1px solid ${isActive ? 'var(--ce-red)' : 'var(--ce-steel)'}`,
+      color: isActive ? 'var(--cy-amber)' : 'var(--cy-amber)',
       padding: '4px 10px', borderRadius: '3px',
       font: 'inherit', fontSize: '11px', letterSpacing: '1px',
       cursor: 'pointer', textTransform: 'uppercase',
@@ -13907,9 +13913,9 @@ function _renderCoopHud() {
     el.id = 'coop-hud';
     Object.assign(el.style, {
       position: 'fixed', right: '10px', top: '60px', zIndex: '6',
-      background: 'rgba(12,14,20,0.85)', border: '1px solid #4a8acf',
+      background: 'rgba(12,14,20,0.85)', border: '1px solid var(--cy-cyan)',
       borderRadius: '4px', padding: '8px 12px',
-      color: '#a0c0ff', font: '12px ui-monospace, Menlo, Consolas, monospace',
+      color: 'var(--cy-cyan)', font: '12px ui-monospace, Menlo, Consolas, monospace',
       letterSpacing: '0.6px', lineHeight: '1.5', pointerEvents: 'none',
       minWidth: '200px', maxWidth: '260px', display: 'none',
       boxShadow: '0 2px 12px rgba(0,0,0,0.6), 0 0 8px rgba(80,140,255,0.3)',
@@ -13943,10 +13949,10 @@ function _renderCoopHud() {
   const room = transport.roomCode || '—';
   const role = transport.isHost ? 'HOST' : (transport.peerId ? 'JOIN' : '?');
   const lines = [
-    `<div style="color:#f2c060;font-weight:700;letter-spacing:1.4px">CO-OP · ${role} · room ${room}</div>`,
-    `<div style="color:#9b8b6a;font-size:10px">peers: ${transport.peers.size}, you=${transport.peerId || '?'}, host=${transport.hostId || '?'}</div>`,
-    `<div style="color:#6f7990;font-size:10px">you @ ${px.toFixed(1)}, ${pz.toFixed(1)} · F${lvIdx}</div>`,
-    `<div style="color:${_runSeed ? '#a0c0a0' : '#f08080'};font-size:10px">seed: ${seedHex}</div>`,
+    `<div style="color:var(--cy-amber);font-weight:700;letter-spacing:1.4px">CO-OP · ${role} · room ${room}</div>`,
+    `<div style="color:var(--cy-amber);font-size:10px">peers: ${transport.peers.size}, you=${transport.peerId || '?'}, host=${transport.hostId || '?'}</div>`,
+    `<div style="color:var(--ce-soft);font-size:10px">you @ ${px.toFixed(1)}, ${pz.toFixed(1)} · F${lvIdx}</div>`,
+    `<div style="color:${_runSeed ? 'var(--cy-mint)' : 'var(--ce-red)'};font-size:10px">seed: ${seedHex}</div>`,
   ];
   const seen = new Set();
   for (const [peerId, ghost] of coopLobby.ghosts) {
@@ -13960,14 +13966,14 @@ function _renderCoopHud() {
     const arrow = _arrowForAngle(angWorld);
     const name = transport.peers.get(peerId)?.name || 'peer';
     lines.push(
-      `<div><span style="color:#6abfff;font-size:14px">${arrow}</span> `
-      + `${_escHtml(name)} <span style="color:#6f7990">${dist.toFixed(1)}m</span> `
-      + `<span style="color:#3a4458;font-size:10px">@ ${ghost.x.toFixed(1)}, ${ghost.z.toFixed(1)}</span></div>`,
+      `<div><span style="color:var(--cy-cyan);font-size:14px">${arrow}</span> `
+      + `${_escHtml(name)} <span style="color:var(--ce-soft)">${dist.toFixed(1)}m</span> `
+      + `<span style="color:var(--ce-navy);font-size:10px">@ ${ghost.x.toFixed(1)}, ${ghost.z.toFixed(1)}</span></div>`,
     );
     _updatePeerEdgeArrow(peerId, name, dx, dz, dist);
   }
   if (transport.rtt != null) {
-    lines.push(`<div style="color:#6f7990;margin-top:2px;font-size:10px">rtt ${transport.rtt}ms</div>`);
+    lines.push(`<div style="color:var(--ce-soft);margin-top:2px;font-size:10px">rtt ${transport.rtt}ms</div>`);
   }
   // Prune stale edge arrows for peers that left.
   for (const peerId of [..._coopPeerArrows.keys()]) {
@@ -13992,8 +13998,8 @@ function _updatePeerEdgeArrow(peerId, name, dx, dz, dist) {
       position: 'absolute', transform: 'translate(-50%, -50%)',
       padding: '4px 8px',
       background: 'rgba(12,14,20,0.85)',
-      border: '1px solid #6abfff', borderRadius: '14px',
-      color: '#a0d0ff', font: '11px ui-monospace, Menlo, Consolas, monospace',
+      border: '1px solid var(--cy-cyan)', borderRadius: '14px',
+      color: 'var(--cy-cyan)', font: '11px ui-monospace, Menlo, Consolas, monospace',
       letterSpacing: '0.6px', whiteSpace: 'nowrap',
       boxShadow: '0 0 10px rgba(80,180,255,0.5)',
       pointerEvents: 'none', display: 'none',
@@ -14046,7 +14052,7 @@ function _updatePeerEdgeArrow(peerId, name, dx, dz, dist) {
   const py = cy + vy * t;
   const ang = Math.atan2(vy, vx);
   const arrow = _arrowForAngle(Math.atan2(vx, -vy));   // world-aligned 8-way glyph
-  el.innerHTML = `${arrow} <strong>${_escHtml(name)}</strong> <span style="color:#6f7990">${dist.toFixed(1)}m</span>`;
+  el.innerHTML = `${arrow} <strong>${_escHtml(name)}</strong> <span style="color:var(--ce-soft)">${dist.toFixed(1)}m</span>`;
   el.style.left = `${px}px`;
   el.style.top = `${py}px`;
   el.style.display = 'block';
@@ -14096,11 +14102,11 @@ function _renderDownedHud() {
       transform: 'translateX(-50%)', zIndex: '8',
       pointerEvents: 'none', display: 'none',
       font: '12px ui-monospace, Menlo, Consolas, monospace',
-      color: '#f0a0a0', textAlign: 'center',
+      color: 'var(--ce-red)', textAlign: 'center',
       letterSpacing: '1px', minWidth: '320px',
       padding: '10px 16px',
       background: 'rgba(20,8,10,0.85)',
-      border: '1px solid #a03038', borderRadius: '4px',
+      border: '1px solid var(--ce-red)', borderRadius: '4px',
       boxShadow: '0 0 28px rgba(208,72,104,0.45)',
     });
     document.body.appendChild(el);
@@ -14113,17 +14119,17 @@ function _renderDownedHud() {
     const rvPct = Math.max(0, Math.min(1, _localReviveT / holdTotal));
     const rvActive = _localReviveActive ? 'TEAMMATE REVIVING' : 'TEAMMATE NEEDED';
     _coopDownedHudEl.innerHTML = `
-      <div style="font-size:18px;color:#e04848;letter-spacing:4px;margin-bottom:4px">DOWN</div>
-      <div style="font-size:10px;color:#9b6a6a">${rvActive}</div>
-      <div style="margin-top:6px;background:#2a0e10;height:6px;border-radius:3px;overflow:hidden">
-        <div style="width:${(blPct * 100).toFixed(1)}%;height:100%;background:linear-gradient(90deg,#a03038,#e04848);transition:width 200ms linear"></div>
+      <div style="font-size:18px;color:var(--ce-red);letter-spacing:4px;margin-bottom:4px">DOWN</div>
+      <div style="font-size:10px;color:var(--ce-red)">${rvActive}</div>
+      <div style="margin-top:6px;background:var(--ce-black);height:6px;border-radius:3px;overflow:hidden">
+        <div style="width:${(blPct * 100).toFixed(1)}%;height:100%;background:linear-gradient(90deg,var(--ce-red),var(--ce-red));transition:width 200ms linear"></div>
       </div>
-      <div style="font-size:9px;color:#6a4040;margin-top:2px">bleedout ${_localBleedoutT.toFixed(1)}s</div>
+      <div style="font-size:9px;color:var(--ce-steel);margin-top:2px">bleedout ${_localBleedoutT.toFixed(1)}s</div>
       ${rvPct > 0 ? `
-      <div style="margin-top:8px;background:#0e2a18;height:6px;border-radius:3px;overflow:hidden">
-        <div style="width:${(rvPct * 100).toFixed(1)}%;height:100%;background:linear-gradient(90deg,#3a7a48,#6abf78);transition:width 200ms linear"></div>
+      <div style="margin-top:8px;background:var(--ce-black);height:6px;border-radius:3px;overflow:hidden">
+        <div style="width:${(rvPct * 100).toFixed(1)}%;height:100%;background:linear-gradient(90deg,var(--cy-mint),var(--cy-mint));transition:width 200ms linear"></div>
       </div>
-      <div style="font-size:9px;color:#406040;margin-top:2px">revive ${(_reviveHoldT).toFixed(1)}s / ${holdTotal}s</div>
+      <div style="font-size:9px;color:var(--ce-steel);margin-top:2px">revive ${(_reviveHoldT).toFixed(1)}s / ${holdTotal}s</div>
       ` : ''}
     `;
     _coopDownedHudEl.style.display = 'block';
@@ -14141,17 +14147,17 @@ function _renderDownedHud() {
       ? Math.max(0, Math.min(1, (targetSt.bleedoutT || 0) / total))
       : 0;
     _coopDownedHudEl.innerHTML = `
-      <div style="font-size:14px;color:#6abf78;letter-spacing:3px;margin-bottom:4px">REVIVING ${_escHtml(peerName)}</div>
-      <div style="font-size:9px;color:#406040">hold INTERACT — release to pause</div>
-      <div style="margin-top:6px;background:#0e2a18;height:8px;border-radius:3px;overflow:hidden">
-        <div style="width:${(rvPct * 100).toFixed(1)}%;height:100%;background:linear-gradient(90deg,#3a7a48,#6abf78);transition:width 100ms linear"></div>
+      <div style="font-size:14px;color:var(--cy-mint);letter-spacing:3px;margin-bottom:4px">REVIVING ${_escHtml(peerName)}</div>
+      <div style="font-size:9px;color:var(--ce-steel)">hold INTERACT — release to pause</div>
+      <div style="margin-top:6px;background:var(--ce-black);height:8px;border-radius:3px;overflow:hidden">
+        <div style="width:${(rvPct * 100).toFixed(1)}%;height:100%;background:linear-gradient(90deg,var(--cy-mint),var(--cy-mint));transition:width 100ms linear"></div>
       </div>
-      <div style="font-size:9px;color:#406040;margin-top:2px">revive ${_reviveHoldT.toFixed(1)}s / ${holdTotal}s</div>
+      <div style="font-size:9px;color:var(--ce-steel);margin-top:2px">revive ${_reviveHoldT.toFixed(1)}s / ${holdTotal}s</div>
       ${targetSt ? `
-      <div style="margin-top:6px;background:#2a0e10;height:5px;border-radius:3px;overflow:hidden">
-        <div style="width:${(blPct * 100).toFixed(1)}%;height:100%;background:linear-gradient(90deg,#a03038,#e04848);transition:width 200ms linear"></div>
+      <div style="margin-top:6px;background:var(--ce-black);height:5px;border-radius:3px;overflow:hidden">
+        <div style="width:${(blPct * 100).toFixed(1)}%;height:100%;background:linear-gradient(90deg,var(--ce-red),var(--ce-red));transition:width 200ms linear"></div>
       </div>
-      <div style="font-size:9px;color:#9b6a6a;margin-top:2px">bleedout ${(targetSt.bleedoutT || 0).toFixed(1)}s</div>
+      <div style="font-size:9px;color:var(--ce-red);margin-top:2px">bleedout ${(targetSt.bleedoutT || 0).toFixed(1)}s</div>
       ` : ''}
     `;
     _coopDownedHudEl.style.display = 'block';
@@ -14175,10 +14181,10 @@ function _renderDownedHud() {
     const range = tunables.coop?.reviveRange ?? 1.6;
     const inRange = nearDist <= range;
     _coopDownedHudEl.innerHTML = `
-      <div style="font-size:13px;color:${inRange ? '#f2c060' : '#9b8b6a'};letter-spacing:3px;margin-bottom:2px">
+      <div style="font-size:13px;color:${inRange ? 'var(--cy-amber)' : 'var(--cy-amber)'};letter-spacing:3px;margin-bottom:2px">
         ${inRange ? 'HOLD E TO REVIVE' : `${_escHtml(peerName)} DOWN — ${nearDist.toFixed(1)}m`}
       </div>
-      <div style="font-size:9px;color:#6a5a3a">bleedout ${nearPeer.st.bleedoutT.toFixed(1)}s</div>
+      <div style="font-size:9px;color:var(--ce-steel)">bleedout ${nearPeer.st.bleedoutT.toFixed(1)}s</div>
     `;
     _coopDownedHudEl.style.display = 'block';
     return;
@@ -15901,7 +15907,7 @@ function updateHealthHud(playerInfo) {
     }
     const bucket = pct > 0.6 ? 'g' : pct > 0.3 ? 'y' : 'r';
     if (hpFillEl._lastBucket !== bucket) {
-      hpFillEl.style.background = bucket === 'g' ? '#6abe5a' : bucket === 'y' ? '#d0a030' : '#c94a3a';
+      hpFillEl.style.background = bucket === 'g' ? 'var(--cy-mint)' : bucket === 'y' ? 'var(--cy-amber)' : 'var(--cy-amber)';
       hpFillEl._lastBucket = bucket;
     }
     if (hpRegenEl) {
@@ -15951,9 +15957,9 @@ function updateHealthHud(playerInfo) {
   if (staFillEl) {
     const pct = Math.max(0, Math.min(1, playerInfo.stamina / playerInfo.maxStamina));
     staFillEl.style.width = `${pct * 100}%`;
-    if (playerInfo.blocking) staFillEl.style.background = '#d07acc';
-    else if (pct > 0.3) staFillEl.style.background = '#6aaedc';
-    else staFillEl.style.background = '#c97a5a';
+    if (playerInfo.blocking) staFillEl.style.background = 'var(--cy-magenta)';
+    else if (pct > 0.3) staFillEl.style.background = 'var(--cy-cyan)';
+    else staFillEl.style.background = 'var(--cy-amber)';
     if (staTextEl) {
       const parry = playerInfo.parryActive ? ' · parry!' : '';
       staTextEl.textContent =
@@ -17071,7 +17077,7 @@ function updateReloadHud(weapon, effWeapon) {
       if (weapon.infiniteAmmo) {
         label = 'READY'; text = '∞'; labelColor = '';
       } else if (weapon.ammo === 0) {
-        label = 'EMPTY'; text = `${weapon.ammo}/${magSize}`; labelColor = '#c94a3a';
+        label = 'EMPTY'; text = `${weapon.ammo}/${magSize}`; labelColor = 'var(--cy-amber)';
       } else {
         label = 'READY'; text = `${weapon.ammo}/${magSize}`; labelColor = '';
       }
@@ -17634,9 +17640,9 @@ function _refreshDefibHint(targetPeerId) {
       font: '12px ui-monospace, Menlo, Consolas, monospace',
       letterSpacing: '2px', textTransform: 'uppercase',
       padding: '7px 14px',
-      background: 'linear-gradient(180deg, #2a1c08, #100a02)',
-      border: '1px solid #ffd060', borderRadius: '4px',
-      color: '#ffe080',
+      background: 'linear-gradient(180deg, var(--ce-black), var(--ce-black))',
+      border: '1px solid var(--cy-amber)', borderRadius: '4px',
+      color: 'var(--cy-amber)',
       boxShadow: '0 0 18px rgba(255,200,80,0.45)',
     });
     document.body.appendChild(el);
@@ -17690,9 +17696,9 @@ function _refreshExitWaitHud() {
       font: '12px ui-monospace, Menlo, Consolas, monospace',
       letterSpacing: '2px', textTransform: 'uppercase',
       padding: '8px 16px',
-      background: 'linear-gradient(180deg, #1a2228, #0c1014)',
-      border: '1px solid #60c0f2', borderRadius: '4px',
-      color: '#a0d8ff',
+      background: 'linear-gradient(180deg, var(--ce-navy), var(--ce-black))',
+      border: '1px solid var(--cy-cyan)', borderRadius: '4px',
+      color: 'var(--cy-cyan)',
       boxShadow: '0 0 24px rgba(80,200,255,0.4)',
       animation: 'exit-wait-pulse 1.6s ease-in-out infinite',
     });
@@ -19364,7 +19370,7 @@ const _flashOverlayEl = (() => {
   el.id = 'flash-overlay';
   Object.assign(el.style, {
     position: 'fixed', inset: '0', zIndex: 49,
-    background: '#ffffff', opacity: '0', pointerEvents: 'none',
+    background: 'var(--ce-white)', opacity: '0', pointerEvents: 'none',
     transition: 'opacity 0.05s linear',
   });
   document.body.appendChild(el);
@@ -19987,20 +19993,20 @@ function _showMidRunContractOffer() {
             font: 13px 'Inter', system-ui, sans-serif;
           }
           #mid-run-contract-card {
-            background: linear-gradient(180deg, #1a2228, #0c1014);
-            border: 1px solid #f2c060; border-radius: 6px;
+            background: linear-gradient(180deg, var(--ce-navy), var(--ce-black));
+            border: 1px solid var(--cy-amber); border-radius: 6px;
             padding: 24px 28px 18px;
             max-width: 880px; width: 92%;
             box-shadow: 0 0 48px rgba(242, 192, 96, 0.35);
-            color: #f2e7c9;
+            color: var(--cy-amber);
           }
           #mid-run-contract-title {
-            color: #f2c060; font-weight: 700; font-size: 14px;
+            color: var(--cy-amber); font-weight: 700; font-size: 14px;
             letter-spacing: 3px; text-transform: uppercase;
             text-align: center; margin-bottom: 4px;
           }
           #mid-run-contract-sub {
-            color: #a89070; font-size: 11px; text-align: center;
+            color: var(--cy-amber); font-size: 11px; text-align: center;
             margin-bottom: 18px; letter-spacing: 1.5px;
           }
           #mid-run-contract-cards {
@@ -20012,13 +20018,13 @@ function _showMidRunContractOffer() {
           }
           #mid-run-contract-skip {
             display: block; width: 100%; padding: 9px;
-            background: transparent; border: 1px solid #4a3a2a;
-            border-radius: 3px; color: #a89070; font: inherit;
+            background: transparent; border: 1px solid var(--ce-navy);
+            border-radius: 3px; color: var(--cy-amber); font: inherit;
             cursor: pointer; letter-spacing: 1.5px;
             text-transform: uppercase; font-size: 11px;
           }
           #mid-run-contract-skip:hover {
-            border-color: #6a4a2a; color: #c9a87a;
+            border-color: var(--ce-steel); color: var(--cy-amber);
           }
         `;
         document.head.appendChild(ss);
@@ -20307,19 +20313,19 @@ function _maybeShowLockedTrialPrompt() {
     Object.assign(prompt.style, {
       position: 'fixed', top: '50%', left: '50%',
       transform: 'translate(-50%, calc(-50% + 180px))', zIndex: '100',
-      background: 'linear-gradient(180deg, #1a1d24, #0c0e14)',
-      border: '1px solid #5a8acf', borderRadius: '4px',
+      background: 'linear-gradient(180deg, var(--ce-black), var(--ce-black))',
+      border: '1px solid var(--cy-cyan)', borderRadius: '4px',
       padding: '16px 22px', minWidth: '320px', textAlign: 'center',
-      color: '#e8dfc8', fontFamily: 'ui-monospace, SFMono-Regular, Menlo, Consolas, monospace',
+      color: 'var(--ce-soft)', fontFamily: 'ui-monospace, SFMono-Regular, Menlo, Consolas, monospace',
       boxShadow: '0 8px 24px rgba(0,0,0,0.6)',
     });
     prompt.innerHTML = `
-      <div style="font-size:11px; letter-spacing:1.4px; color:#9b8b6a; margin-bottom:6px;">FIELD TRIAL</div>
-      <div style="font-size:14px; color:#f2c060; margin-bottom:4px;">${trial.name}</div>
-      <div style="font-size:11px; color:#c9a87a; margin-bottom:12px;">Unlock permanently? Adds it to your stash and the world drop pool.</div>
+      <div style="font-size:11px; letter-spacing:1.4px; color:var(--cy-amber); margin-bottom:6px;">FIELD TRIAL</div>
+      <div style="font-size:14px; color:var(--cy-amber); margin-bottom:4px;">${trial.name}</div>
+      <div style="font-size:11px; color:var(--cy-amber); margin-bottom:12px;">Unlock permanently? Adds it to your stash and the world drop pool.</div>
       <div style="display:flex; gap:8px; justify-content:center;">
-        <button id="dup-buy" type="button" style="background:linear-gradient(180deg,#2a4a6e,#1e3450);border:1px solid #5a8acf;color:#e8dfc8;padding:6px 14px;border-radius:3px;font:inherit;font-size:11px;letter-spacing:1px;cursor:pointer;text-transform:uppercase;">Unlock — ${cost}c</button>
-        <button id="dup-skip" type="button" style="background:#1a1d24;border:1px solid #4a505a;color:#9b8b6a;padding:6px 14px;border-radius:3px;font:inherit;font-size:11px;letter-spacing:1px;cursor:pointer;text-transform:uppercase;">Skip</button>
+        <button id="dup-buy" type="button" style="background:linear-gradient(180deg,var(--ce-steel),var(--ce-navy));border:1px solid var(--cy-cyan);color:var(--ce-soft);padding:6px 14px;border-radius:3px;font:inherit;font-size:11px;letter-spacing:1px;cursor:pointer;text-transform:uppercase;">Unlock — ${cost}c</button>
+        <button id="dup-skip" type="button" style="background:var(--ce-black);border:1px solid var(--ce-steel);color:var(--cy-amber);padding:6px 14px;border-radius:3px;font:inherit;font-size:11px;letter-spacing:1px;cursor:pointer;text-transform:uppercase;">Skip</button>
       </div>
     `;
     document.body.appendChild(prompt);
@@ -21021,9 +21027,9 @@ function _refreshPickQueueHud() {
       font: '12px ui-monospace, Menlo, Consolas, monospace',
       letterSpacing: '2px', textTransform: 'uppercase',
       padding: '8px 16px',
-      background: 'linear-gradient(180deg, #1a2228, #0c1014)',
-      border: '1px solid #f2c060', borderRadius: '4px',
-      color: '#f2c060',
+      background: 'linear-gradient(180deg, var(--ce-navy), var(--ce-black))',
+      border: '1px solid var(--cy-amber)', borderRadius: '4px',
+      color: 'var(--cy-amber)',
       boxShadow: '0 0 24px rgba(255,200,80,0.4)',
       animation: 'pick-queue-pulse 2.4s ease-in-out infinite',
     });
@@ -21051,10 +21057,10 @@ function _refreshPickQueueHud() {
   }
   const parts = [];
   if (_pendingLevelUpPicks > 0) {
-    parts.push(`<span style="color:#ffe070">${_pendingLevelUpPicks}× SKILL</span>`);
+    parts.push(`<span style="color:var(--cy-amber)">${_pendingLevelUpPicks}× SKILL</span>`);
   }
   if (_pendingMasteryPicks.length > 0) {
-    parts.push(`<span style="color:#d090ff">${_pendingMasteryPicks.length}× MASTERY</span>`);
+    parts.push(`<span style="color:var(--cy-violet)">${_pendingMasteryPicks.length}× MASTERY</span>`);
   }
   _pickQueueHudEl.innerHTML = `${parts.join(' · ')} <span style="opacity:0.7;font-size:10px">— click or [K]</span>`;
   _pickQueueHudEl.style.display = 'block';
@@ -21073,11 +21079,11 @@ function _ensureLevelUpBanner() {
     style.id = 'level-up-banner-style';
     style.textContent = `
       @keyframes lvlup-glow {
-        0%   { text-shadow: 0 0 12px #ffe070, 0 0 28px #ffd040, 0 0 60px #ff9020; transform: translate(-50%, -50%) scale(0.85); opacity: 0; }
+        0%   { text-shadow: 0 0 12px var(--cy-amber), 0 0 28px var(--cy-amber), 0 0 60px var(--cy-amber); transform: translate(-50%, -50%) scale(0.85); opacity: 0; }
         12%  { transform: translate(-50%, -50%) scale(1.06); opacity: 1; }
         20%  { transform: translate(-50%, -50%) scale(1.0); }
-        80%  { text-shadow: 0 0 14px #ffe070, 0 0 32px #ffd040, 0 0 70px #ff9020; opacity: 1; }
-        100% { text-shadow: 0 0 12px #ffe070, 0 0 28px #ffd040, 0 0 60px #ff9020; transform: translate(-50%, -50%) scale(1.04); opacity: 0; }
+        80%  { text-shadow: 0 0 14px var(--cy-amber), 0 0 32px var(--cy-amber), 0 0 70px var(--cy-amber); opacity: 1; }
+        100% { text-shadow: 0 0 12px var(--cy-amber), 0 0 28px var(--cy-amber), 0 0 60px var(--cy-amber); transform: translate(-50%, -50%) scale(1.04); opacity: 0; }
       }
       /* 2026-05-06: shrunk + relocated. Banner used to sit at 38%
          center of the screen at 96px — too big, blocked the play
@@ -21092,16 +21098,16 @@ function _ensureLevelUpBanner() {
         z-index: 60; pointer-events: none;
         font-family: ui-monospace, Menlo, Consolas, monospace;
         font-weight: 700; font-size: 48px; letter-spacing: 8px;
-        color: #fff5b8;
+        color: var(--cy-amber);
         opacity: 0; display: none; user-select: none;
         text-align: center;
-        text-shadow: 0 0 12px #ffe070, 0 0 28px #ffd040, 0 0 60px #ff9020;
+        text-shadow: 0 0 12px var(--cy-amber), 0 0 28px var(--cy-amber), 0 0 60px var(--cy-amber);
       }
       #level-up-banner.show { display: block; }
       #level-up-banner .sub {
         display: block; margin-top: 4px;
         font-size: 14px; letter-spacing: 4px;
-        color: #ffd070; text-shadow: 0 0 8px #ffb030;
+        color: var(--cy-amber); text-shadow: 0 0 8px var(--cy-amber);
       }
     `;
     document.head.appendChild(style);
@@ -21158,11 +21164,11 @@ function _ensureClassLevelUpBanner() {
     style.id = 'class-level-up-banner-style';
     style.textContent = `
       @keyframes classlvlup-glow {
-        0%   { text-shadow: 0 0 12px #d090ff, 0 0 28px #a040e0, 0 0 60px #6020a0; transform: translate(-50%, -50%) scale(0.85); opacity: 0; }
+        0%   { text-shadow: 0 0 12px var(--cy-violet), 0 0 28px var(--cy-violet), 0 0 60px var(--cy-violet); transform: translate(-50%, -50%) scale(0.85); opacity: 0; }
         12%  { transform: translate(-50%, -50%) scale(1.06); opacity: 1; }
         20%  { transform: translate(-50%, -50%) scale(1.0); }
-        80%  { text-shadow: 0 0 14px #e0a0ff, 0 0 32px #a040e0, 0 0 70px #6020a0; opacity: 1; }
-        100% { text-shadow: 0 0 12px #d090ff, 0 0 28px #a040e0, 0 0 60px #6020a0; transform: translate(-50%, -50%) scale(1.04); opacity: 0; }
+        80%  { text-shadow: 0 0 14px var(--cy-violet), 0 0 32px var(--cy-violet), 0 0 70px var(--cy-violet); opacity: 1; }
+        100% { text-shadow: 0 0 12px var(--cy-violet), 0 0 28px var(--cy-violet), 0 0 60px var(--cy-violet); transform: translate(-50%, -50%) scale(1.04); opacity: 0; }
       }
       /* Same 2026-05-06 shrink as #level-up-banner — was 76px at
          38% center, now 42px at 18% top so it doesn't block the
@@ -21173,16 +21179,16 @@ function _ensureClassLevelUpBanner() {
         z-index: 60; pointer-events: none;
         font-family: ui-monospace, Menlo, Consolas, monospace;
         font-weight: 700; font-size: 42px; letter-spacing: 7px;
-        color: #f0d8ff;
+        color: var(--cy-violet);
         opacity: 0; display: none; user-select: none;
         text-align: center;
-        text-shadow: 0 0 12px #d090ff, 0 0 28px #a040e0, 0 0 60px #6020a0;
+        text-shadow: 0 0 12px var(--cy-violet), 0 0 28px var(--cy-violet), 0 0 60px var(--cy-violet);
       }
       #class-level-up-banner.show { display: block; }
       #class-level-up-banner .sub {
         display: block; margin-top: 4px;
         font-size: 13px; letter-spacing: 4px;
-        color: #d8a8ff; text-shadow: 0 0 8px #8030c0;
+        color: var(--cy-violet); text-shadow: 0 0 8px var(--cy-violet);
       }
     `;
     document.head.appendChild(style);
@@ -22508,7 +22514,7 @@ function tick() {
           breakdownEl.className = 'death-marks-breakdown';
           breakdownEl.style.cssText = `
             grid-column: 1 / -1;
-            font-size: 10px; color: #a89070;
+            font-size: 10px; color: var(--cy-amber);
             letter-spacing: 0.4px; padding-top: 2px;
           `;
           marksRow.appendChild(breakdownEl);
@@ -22516,7 +22522,7 @@ function tick() {
         const bd = runStats.marksBreakdown;
         if (bd && bd.restarted) {
           breakdownEl.innerHTML = `
-            <span style="color:#d24868;">— Restart penalty: 0 marks (would have been ${bd.raw}: ${bd.floor} floor + ${bd.damage} damage + ${bd.kills} kills, min 5)</span>
+            <span style="color:var(--ce-red);">— Restart penalty: 0 marks (would have been ${bd.raw}: ${bd.floor} floor + ${bd.damage} damage + ${bd.kills} kills, min 5)</span>
           `;
         } else if (bd) {
           breakdownEl.innerHTML = `
@@ -22538,7 +22544,7 @@ function tick() {
             bd.className = 'death-sigils-note';
             bd.style.cssText = `
               grid-column: 1 / -1;
-              font-size: 10px; color: #d24868;
+              font-size: 10px; color: var(--ce-red);
               letter-spacing: 0.4px; padding-top: 2px;
             `;
             sigilsRow.appendChild(bd);
