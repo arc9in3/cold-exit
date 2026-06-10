@@ -1369,8 +1369,23 @@ export class Level {
     const minX = b.minX + insetX, maxX = b.maxX - insetX;
     const minZ = b.minZ + insetZ, maxZ = b.maxZ - insetZ;
     const inBounds = (x, z) => x >= minX && x <= maxX && z >= minZ && z <= maxZ;
+    // Shape rooms (lShape, gallery, tJunction…) carve cut-outs out of
+    // the bounds AABB; the AABB centre can land inside a cut-out where
+    // _collidesAt passes (no wall nearby) but the player can never
+    // reach. Same gate _populateRoom uses for enemy spawns.
+    // REGRESSION: encounter disc anchored in a shape room's void.
+    const wbList = room._walkableBounds;
+    const inWalkable = (x, z) => {
+      if (!wbList || !wbList.length) return true;
+      for (let i = 0; i < wbList.length; i++) {
+        const w = wbList[i];
+        if (x >= w.minX && x <= w.maxX && z >= w.minZ && z <= w.maxZ) return true;
+      }
+      return false;
+    };
     const CLEAR = 2.0;
-    if (inBounds(baseX, baseZ) && !this._collidesAt(baseX, baseZ, CLEAR)) {
+    if (inBounds(baseX, baseZ) && inWalkable(baseX, baseZ)
+        && !this._collidesAt(baseX, baseZ, CLEAR)) {
       return { x: baseX, z: baseZ };
     }
     // Spiral outward in 1m steps + 8 angular samples. ~6m radius is
@@ -1381,6 +1396,7 @@ export class Level {
         const x = baseX + Math.cos(ang) * r;
         const z = baseZ + Math.sin(ang) * r;
         if (!inBounds(x, z)) continue;
+        if (!inWalkable(x, z)) continue;
         if (this._collidesAt(x, z, CLEAR)) continue;
         return { x, z };
       }
@@ -2287,6 +2303,10 @@ export class Level {
         proxy.userData.propGroup = group;
         this.scene.add(proxy);
         this.obstacles.push(proxy);
+        // Refresh the solid-grid cache so the normal scatter below (and
+        // later placement passes) see the vault crate in _collidesAt —
+        // without this a scattered container could overlap it.
+        this._dirtySolid();
         this.containers.push({ container, group, x, z, r: 1.8 });
       } catch (err) { console.warn('[level] vault container spawn failed:', err); }
     }
@@ -2379,6 +2399,10 @@ export class Level {
         proxy.userData.propGroup = group;
         this.scene.add(proxy);
         this.obstacles.push(proxy);
+        // Mark the solid grid dirty so the NEXT container's _collidesAt
+        // sees this one. Treasure rooms place 4-6 chests in a loop; with
+        // a stale grid they couldn't see each other and could overlap.
+        this._dirtySolid();
         // Interact radius — a generous 1.8m so the prompt doesn't feel
         // pixel-hunty against the visible mesh.
         this.containers.push({ container, group, x, z, r: 1.8 });
