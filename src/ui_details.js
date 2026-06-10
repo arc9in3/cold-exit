@@ -214,11 +214,11 @@ export const ITEM_LORE = {
 };
 
 const RARITY_COLORS = {
-  common:    '#b9b9b9',
-  uncommon:  '#6abe5a',
-  rare:      '#6aaedc',
-  epic:      '#c97a5a',
-  legendary: '#e6b94a',
+  common:    'var(--ce-soft-50)',
+  uncommon:  'var(--cy-mint)',
+  rare:      'var(--cy-cyan)',
+  epic:      'var(--cy-amber)',
+  legendary: 'var(--cy-amber)',
 };
 
 // Stat key → render config for the apply()-driven effect surfacer below.
@@ -723,7 +723,7 @@ export class DetailsUI {
   // stat the comparison has that this item doesn't.
   _renderPane(item, { compareTo, isEquipped }) {
     const rarity = inferRarity(item);
-    const rColor = RARITY_COLORS[rarity] || '#b9b9b9';
+    const rColor = RARITY_COLORS[rarity] || 'var(--ce-soft-50)';
     const icon = thumbnailFor(item);
     // Lore is purely flavor — only ever the curated ITEM_LORE entry.
     // The raw item.description field on most gear is a stat summary

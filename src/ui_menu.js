@@ -404,7 +404,7 @@ export class GameMenuUI {
     // Source badge — flips to GLOBAL or LOCAL once the remote
     // fetches resolve. Same flow as the main-menu leaderboard.
     const badge = document.createElement('div');
-    badge.style.cssText = 'font-size:10px;letter-spacing:1.5px;color:#9b8b6a;margin-bottom:6px;text-align:center;';
+    badge.style.cssText = 'font-size:10px;letter-spacing:1.5px;color:var(--ce-soft);margin-bottom:6px;text-align:center;';
     badge.textContent = 'loading global scores…';
     this.bodyEl.appendChild(badge);
     const wrap = document.createElement('div');
@@ -429,7 +429,7 @@ export class GameMenuUI {
           row.textContent = `${i + 1}. ${fmt(e)} — ${who}${tag}`;
         } else {
           row.textContent = `${i + 1}. —`;
-          row.style.color = '#6a7280';
+          row.style.color = 'var(--ce-soft-50)';
         }
         col.appendChild(row);
       }
@@ -452,7 +452,7 @@ export class GameMenuUI {
       if (resolved !== cats.length || !badge.parentNode) return;
       badge.textContent = anyRemote ? 'GLOBAL · live scores from cold-exit.pages.dev'
                                     : 'LOCAL · global service unavailable';
-      badge.style.color = anyRemote ? '#6abe5a' : '#a88070';
+      badge.style.color = anyRemote ? 'var(--cy-mint)' : 'var(--cy-amber)';
     };
     for (const c of cats) {
       const col = colByKey.get(c.key);

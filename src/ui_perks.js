@@ -123,7 +123,7 @@ export class PerkUI {
     const nodes = this._discNodes(discId);
     if (!nodes.length) {
       const empty = document.createElement('div');
-      empty.style.cssText = 'color:#6f6754;padding:40px;text-align:center;font-size:12px';
+      empty.style.cssText = 'color:var(--ce-soft-50);padding:40px;text-align:center;font-size:12px';
       empty.textContent = 'No nodes in this discipline.';
       return empty;
     }
@@ -186,7 +186,7 @@ export class PerkUI {
       const my = (fy + ty) / 2;
       const path = document.createElementNS('http://www.w3.org/2000/svg', 'path');
       path.setAttribute('d', `M${fx},${fy} C${fx},${my} ${tx},${my} ${tx},${ty}`);
-      path.setAttribute('stroke', '#4a3a6a');
+      path.setAttribute('stroke', 'var(--ce-steel)');
       path.setAttribute('stroke-width', '2');
       path.setAttribute('stroke-dasharray', '5 3');
       path.setAttribute('fill', 'none');

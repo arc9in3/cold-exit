@@ -225,8 +225,8 @@ export class InventoryUI {
     svg.innerHTML = `
       <defs>
         <linearGradient id="body-grad" x1="0" y1="0" x2="0" y2="1">
-          <stop offset="0" stop-color="#2d333e"/>
-          <stop offset="1" stop-color="#1c2128"/>
+          <stop offset="0" stop-color="var(--ce-navy)"/>
+          <stop offset="1" stop-color="var(--ce-navy)"/>
         </linearGradient>
         <radialGradient id="body-glow" cx="0.5" cy="0.3" r="0.7">
           <stop offset="0" stop-color="rgba(201,168,122,0.12)"/>
@@ -234,37 +234,37 @@ export class InventoryUI {
         </radialGradient>
       </defs>
       <rect width="240" height="470" fill="url(#body-glow)"/>
-      <ellipse cx="120" cy="40" rx="22" ry="26" fill="url(#body-grad)" stroke="#3a414c" stroke-width="1.2"/>
+      <ellipse cx="120" cy="40" rx="22" ry="26" fill="url(#body-grad)" stroke="var(--ce-steel)" stroke-width="1.2"/>
       <path d="M104,58 Q120,68 136,58 L132,74 L108,74 Z"
-            fill="url(#body-grad)" stroke="#3a414c" stroke-width="1"/>
-      <rect x="112" y="72" width="16" height="14" rx="2" fill="url(#body-grad)" stroke="#3a414c"/>
-      <circle cx="78" cy="96" r="14" fill="url(#body-grad)" stroke="#3a414c" stroke-width="1.2"/>
-      <circle cx="162" cy="96" r="14" fill="url(#body-grad)" stroke="#3a414c" stroke-width="1.2"/>
+            fill="url(#body-grad)" stroke="var(--ce-steel)" stroke-width="1"/>
+      <rect x="112" y="72" width="16" height="14" rx="2" fill="url(#body-grad)" stroke="var(--ce-steel)"/>
+      <circle cx="78" cy="96" r="14" fill="url(#body-grad)" stroke="var(--ce-steel)" stroke-width="1.2"/>
+      <circle cx="162" cy="96" r="14" fill="url(#body-grad)" stroke="var(--ce-steel)" stroke-width="1.2"/>
       <path d="M82,90 Q120,82 158,90 L168,160 Q170,180 156,190 L84,190 Q70,180 72,160 Z"
-            fill="url(#body-grad)" stroke="#3a414c" stroke-width="1.2"/>
-      <rect x="78" y="188" width="84" height="8" rx="2" fill="#1a1d24" stroke="#3a414c" stroke-width="0.8"/>
+            fill="url(#body-grad)" stroke="var(--ce-steel)" stroke-width="1.2"/>
+      <rect x="78" y="188" width="84" height="8" rx="2" fill="var(--ce-navy)" stroke="var(--ce-steel)" stroke-width="0.8"/>
       <path d="M78,196 L82,240 Q120,248 158,240 L162,196 Z"
-            fill="url(#body-grad)" stroke="#3a414c" stroke-width="1.2"/>
+            fill="url(#body-grad)" stroke="var(--ce-steel)" stroke-width="1.2"/>
       <path d="M64,96 Q58,104 60,160 L76,162 Q78,104 76,96 Z"
-            fill="url(#body-grad)" stroke="#3a414c" stroke-width="1"/>
+            fill="url(#body-grad)" stroke="var(--ce-steel)" stroke-width="1"/>
       <path d="M164,96 Q162,104 164,162 L180,160 Q182,104 176,96 Z"
-            fill="url(#body-grad)" stroke="#3a414c" stroke-width="1"/>
-      <circle cx="68" cy="162" r="8" fill="url(#body-grad)" stroke="#3a414c" stroke-width="0.9"/>
-      <circle cx="172" cy="162" r="8" fill="url(#body-grad)" stroke="#3a414c" stroke-width="0.9"/>
+            fill="url(#body-grad)" stroke="var(--ce-steel)" stroke-width="1"/>
+      <circle cx="68" cy="162" r="8" fill="url(#body-grad)" stroke="var(--ce-steel)" stroke-width="0.9"/>
+      <circle cx="172" cy="162" r="8" fill="url(#body-grad)" stroke="var(--ce-steel)" stroke-width="0.9"/>
       <path d="M62,168 Q60,200 64,228 L74,228 Q76,200 74,168 Z"
-            fill="url(#body-grad)" stroke="#3a414c" stroke-width="1"/>
+            fill="url(#body-grad)" stroke="var(--ce-steel)" stroke-width="1"/>
       <path d="M166,168 Q164,200 166,228 L176,228 Q178,200 178,168 Z"
-            fill="url(#body-grad)" stroke="#3a414c" stroke-width="1"/>
+            fill="url(#body-grad)" stroke="var(--ce-steel)" stroke-width="1"/>
       <path d="M84,242 Q82,320 92,382 L114,382 Q116,320 114,242 Z"
-            fill="url(#body-grad)" stroke="#3a414c" stroke-width="1"/>
+            fill="url(#body-grad)" stroke="var(--ce-steel)" stroke-width="1"/>
       <path d="M126,242 Q124,320 126,382 L148,382 Q158,320 156,242 Z"
-            fill="url(#body-grad)" stroke="#3a414c" stroke-width="1"/>
-      <circle cx="103" cy="382" r="7" fill="url(#body-grad)" stroke="#3a414c" stroke-width="0.9"/>
-      <circle cx="137" cy="382" r="7" fill="url(#body-grad)" stroke="#3a414c" stroke-width="0.9"/>
+            fill="url(#body-grad)" stroke="var(--ce-steel)" stroke-width="1"/>
+      <circle cx="103" cy="382" r="7" fill="url(#body-grad)" stroke="var(--ce-steel)" stroke-width="0.9"/>
+      <circle cx="137" cy="382" r="7" fill="url(#body-grad)" stroke="var(--ce-steel)" stroke-width="0.9"/>
       <path d="M92,388 Q92,420 96,446 L110,446 Q112,420 112,388 Z"
-            fill="url(#body-grad)" stroke="#3a414c" stroke-width="1"/>
+            fill="url(#body-grad)" stroke="var(--ce-steel)" stroke-width="1"/>
       <path d="M128,388 Q128,420 130,446 L144,446 Q148,420 148,388 Z"
-            fill="url(#body-grad)" stroke="#3a414c" stroke-width="1"/>
+            fill="url(#body-grad)" stroke="var(--ce-steel)" stroke-width="1"/>
     `;
     this.gridEl.appendChild(svg);
 
@@ -519,7 +519,7 @@ export class InventoryUI {
       ${stackBadge}
       ${markBadge}
       <div class="pkt-name">${label}</div>
-      ${durPct >= 0 ? `<div class="pkt-dur"><div class="pkt-dur-fill" style="width:${durPct.toFixed(0)}%;background:${durPct > 60 ? '#6abe8a' : durPct > 30 ? '#e0c040' : '#d24040'}"></div></div>` : ''}
+      ${durPct >= 0 ? `<div class="pkt-dur"><div class="pkt-dur-fill" style="width:${durPct.toFixed(0)}%;background:${durPct > 60 ? 'var(--cy-mint)' : durPct > 30 ? 'var(--cy-amber)' : 'var(--ce-red)'}"></div></div>` : ''}
       ${ammoLine}
     `;
     return tile;
@@ -1142,9 +1142,9 @@ export class InventoryUI {
       // why a listed perk isn't doing anything (#31).
       const inactive = activeCount === 0;
       const inactiveTag = inactive
-        ? ' <span class="inv-prog-perk-stack" style="color:#a06060">INACTIVE</span>'
+        ? ' <span class="inv-prog-perk-stack" style="color:var(--ce-red)">INACTIVE</span>'
         : (activeCount < count
-            ? ` <span class="inv-prog-perk-stack" style="color:#a08060">${activeCount}/${count} ACTIVE</span>`
+            ? ` <span class="inv-prog-perk-stack" style="color:var(--cy-amber)">${activeCount}/${count} ACTIVE</span>`
             : '');
       const dimStyle = inactive ? ' style="opacity:0.55"' : '';
       perkRows.push(`<div class="inv-prog-perk"${dimStyle}>
@@ -1207,7 +1207,7 @@ export class InventoryUI {
       const desc = it.description || '';
       const broken = it.durability && it.durability.current <= 0;
       const brokenTag = broken
-        ? ' <span class="inv-prog-perk-stack" style="color:#d04040">BROKEN</span>'
+        ? ' <span class="inv-prog-perk-stack" style="color:var(--ce-red)">BROKEN</span>'
         : '';
       inherentRows.push(`<div class="inv-prog-affix">• <strong>${it.baseName || it.name}</strong>${desc ? ` — ${desc}` : ''}${brokenTag}</div>`);
     }

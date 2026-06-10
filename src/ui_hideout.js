@@ -767,12 +767,19 @@ export class HideoutUI {
   // the main menu landing page). Click outside dismisses.
   _toggleSysMenu() {
     let panel = document.getElementById('hideout-sysmenu-panel');
-    if (panel) { panel.remove(); return; }
+    if (panel) {
+      // Detach the click-outside handler on toggle-close — every dismissal
+      // path must remove it or stale capture-phase listeners accumulate
+      // on document (one per open/dismiss cycle).
+      if (panel._onAway) document.removeEventListener('mousedown', panel._onAway, true);
+      panel.remove();
+      return;
+    }
     panel = document.createElement('div');
     panel.id = 'hideout-sysmenu-panel';
     Object.assign(panel.style, {
       position: 'fixed', top: '60px', left: '24px', zIndex: '210',
-      background: '#1a1d24', border: '1px solid #5a8acf', borderRadius: '4px',
+      background: 'var(--ce-navy)', border: '1px solid var(--ce-ice-25)', borderRadius: '4px',
       padding: '8px 0', minWidth: '200px',
       fontFamily: 'ui-monospace, SFMono-Regular, Menlo, Consolas, monospace',
       boxShadow: '0 8px 24px rgba(0,0,0,0.6)',
@@ -788,13 +795,14 @@ export class HideoutUI {
       Object.assign(b.style, {
         display: 'block', width: '100%', textAlign: 'left',
         padding: '8px 16px', background: 'transparent', border: 0,
-        color: '#c9a87a', font: 'inherit', fontSize: '12px',
+        color: 'var(--cy-amber)', font: 'inherit', fontSize: '12px',
         letterSpacing: '1px', textTransform: 'uppercase', cursor: 'pointer',
       });
       b.textContent = it.label;
-      b.addEventListener('mouseenter', () => { b.style.background = '#2a2f3a'; b.style.color = '#e8dfc8'; });
-      b.addEventListener('mouseleave', () => { b.style.background = 'transparent'; b.style.color = '#c9a87a'; });
+      b.addEventListener('mouseenter', () => { b.style.background = 'var(--ce-steel)'; b.style.color = 'var(--ce-soft)'; });
+      b.addEventListener('mouseleave', () => { b.style.background = 'transparent'; b.style.color = 'var(--cy-amber)'; });
       b.addEventListener('click', () => {
+        if (panel._onAway) document.removeEventListener('mousedown', panel._onAway, true);
         panel.remove();
         // Hide the hideout's panel so the sub-menu reads cleanly
         // (the existing MainMenuUI uses the full screen). Pre-stash
@@ -811,15 +819,21 @@ export class HideoutUI {
       panel.appendChild(b);
     }
     document.body.appendChild(panel);
-    // Click-outside dismiss.
+    // Click-outside dismiss. The handler ref is stored on the panel so
+    // the toggle-close + item-click paths above can detach it too —
+    // the old inline version leaked one document listener per item
+    // click (it only self-removed on a LATER away-click).
+    const onAway = (ev) => {
+      if (!panel.contains(ev.target)) {
+        document.removeEventListener('mousedown', onAway, true);
+        panel.remove();
+      }
+    };
+    panel._onAway = onAway;
+    // Defer the attach one tick so the opening click doesn't instantly
+    // dismiss; skip if the panel was already closed before the tick.
     setTimeout(() => {
-      const onAway = (ev) => {
-        if (!panel.contains(ev.target)) {
-          panel.remove();
-          document.removeEventListener('mousedown', onAway, true);
-        }
-      };
-      document.addEventListener('mousedown', onAway, true);
+      if (panel.isConnected) document.addEventListener('mousedown', onAway, true);
     }, 0);
   }
 
@@ -862,8 +876,8 @@ export class HideoutUI {
       Object.assign(hint.style, {
         position: 'fixed', top: '24px', left: '50%',
         transform: 'translateX(-50%)', zIndex: '200',
-        background: '#1a1d24', border: '1px solid #f2c060',
-        color: '#f2c060', padding: '8px 16px', borderRadius: '4px',
+        background: 'var(--ce-navy)', border: '1px solid var(--cy-amber)',
+        color: 'var(--cy-amber)', padding: '8px 16px', borderRadius: '4px',
         fontSize: '12px', letterSpacing: '1px',
         fontFamily: 'ui-monospace, SFMono-Regular, Menlo, Consolas, monospace',
       });
@@ -982,15 +996,15 @@ export class HideoutUI {
       const err = document.createElement('div');
       Object.assign(err.style, {
         margin: 'auto', padding: '24px',
-        background: '#1a1d24', border: '1px solid #d24868',
-        borderRadius: '6px', color: '#e8dfc8', maxWidth: '600px',
+        background: 'var(--ce-navy)', border: '1px solid var(--ce-red)',
+        borderRadius: '6px', color: 'var(--ce-soft)', maxWidth: '600px',
         fontFamily: 'ui-monospace, SFMono-Regular, Menlo, Consolas, monospace',
         fontSize: '12px', lineHeight: '1.6',
       });
       err.innerHTML = `
-        <div style="color:#d24868; font-weight:700; margin-bottom:8px;">HIDEOUT RENDER FAILED</div>
-        <div style="margin-bottom:12px; color:#c9a87a;">${(e?.message || String(e)).replace(/</g, '&lt;')}</div>
-        <button id="hideout-err-back" type="button" style="background:#2a2f3a;border:1px solid #4a505a;color:#e8dfc8;padding:6px 14px;cursor:pointer;border-radius:3px;">Back to Title</button>
+        <div style="color:var(--ce-red); font-weight:700; margin-bottom:8px;">HIDEOUT RENDER FAILED</div>
+        <div style="margin-bottom:12px; color:var(--cy-amber);">${(e?.message || String(e)).replace(/</g, '&lt;')}</div>
+        <button id="hideout-err-back" type="button" style="background:var(--ce-steel);border:1px solid var(--ce-steel);color:var(--ce-soft);padding:6px 14px;cursor:pointer;border-radius:3px;">Back to Title</button>
       `;
       this.root.appendChild(err);
       err.querySelector('#hideout-err-back').addEventListener('click', () => this._exitToTitle());
@@ -1368,7 +1382,7 @@ export class HideoutUI {
       <div class="hideout-section-portrait" data-npc="vault"></div>
       <div class="hideout-section-text">
         <div class="hideout-section-title">VAULT</div>
-        <div class="hideout-section-sub">Persistent item storage between runs. Tap "Take" on a tile to queue it for next run.${queuedTakes ? ` <b style="color:#6abf78">${queuedTakes} queued</b>.` : ''}</div>
+        <div class="hideout-section-sub">Persistent item storage between runs. Tap "Take" on a tile to queue it for next run.${queuedTakes ? ` <b style="color:var(--cy-mint)">${queuedTakes} queued</b>.` : ''}</div>
       </div>
       ${queuedTakes ? `<button type="button" class="hideout-btn vault-clear-takes">Clear queued (${queuedTakes})</button>` : ''}
     `;
@@ -1709,24 +1723,24 @@ export class HideoutUI {
     armoryUpRow.style.cssText = `
       display: flex; align-items: center; gap: 16px;
       padding: 14px 18px;
-      background: linear-gradient(180deg, #2a2418 0%, #1a1408 100%);
-      border: 1px solid #c9a87a; border-radius: 6px;
+      background: linear-gradient(180deg, var(--ce-navy) 0%, var(--ce-black) 100%);
+      border: 1px solid var(--cy-amber); border-radius: 6px;
       box-shadow: 0 0 12px rgba(201, 168, 122, 0.25);
     `;
     if (armoryTier >= ARMORY_TIER_MAX) {
       armoryUpRow.innerHTML = `
-        <div style="flex:1; color:#f2e7c9;">
-          <div style="font-weight:800; color:#f2c060; letter-spacing:1.2px;">ARMORY · TIER ${armoryTier} (MAX)</div>
-          <div style="font-size:11px; color:#a89070; margin-top:4px;">Every weapon can be upgraded up to LEGENDARY. The full Armory has been unlocked.</div>
+        <div style="flex:1; color:var(--ce-white);">
+          <div style="font-weight:800; color:var(--cy-amber); letter-spacing:1.2px;">ARMORY · TIER ${armoryTier} (MAX)</div>
+          <div style="font-size:11px; color:var(--cy-amber); margin-top:4px;">Every weapon can be upgraded up to LEGENDARY. The full Armory has been unlocked.</div>
         </div>
       `;
     } else {
       const nextCost = armoryTierNextCost();
       const nextCap = ARMORY_TIER_MAX_RARITY[armoryTier + 1];
       armoryUpRow.innerHTML = `
-        <div style="flex:1; color:#f2e7c9;">
-          <div style="font-weight:800; color:#f2c060; letter-spacing:1.2px;">UPGRADE TO TIER ${armoryTier + 1}</div>
-          <div style="font-size:11px; color:#c9a87a; margin-top:4px; line-height:1.5;">
+        <div style="flex:1; color:var(--ce-white);">
+          <div style="font-weight:800; color:var(--cy-amber); letter-spacing:1.2px;">UPGRADE TO TIER ${armoryTier + 1}</div>
+          <div style="font-size:11px; color:var(--cy-amber); margin-top:4px; line-height:1.5;">
             • Unlocks more weapons in the Armory<br>
             • Raises starting-weapon rarity cap to <b style="color:${rarityColor({ rarity: nextCap })}">${nextCap.toUpperCase()}</b>
           </div>
@@ -1828,7 +1842,7 @@ export class HideoutUI {
     const pouchHead = document.createElement('div');
     pouchHead.className = 'hideout-tier-head';
     pouchHead.style.marginTop = '14px';
-    pouchHead.innerHTML = `<span class="t" style="color:#c9a87a">POUCH SLOTS</span><span class="s">Permanent ammo / consumable hotbar slots, persists across runs.</span>`;
+    pouchHead.innerHTML = `<span class="t" style="color:var(--cy-amber)">POUCH SLOTS</span><span class="s">Permanent ammo / consumable hotbar slots, persists across runs.</span>`;
     wrap.appendChild(pouchHead);
     const pouch = getPouchSlots();
     const pouchRow = document.createElement('div');
@@ -1858,7 +1872,7 @@ export class HideoutUI {
     const ssHead = document.createElement('div');
     ssHead.className = 'hideout-tier-head';
     ssHead.style.marginTop = '14px';
-    ssHead.innerHTML = `<span class="t" style="color:#c9a87a">STARTING STORE</span><span class="s">Per-run store offered when you pick a class. More slots / higher rarity ramp.</span>`;
+    ssHead.innerHTML = `<span class="t" style="color:var(--cy-amber)">STARTING STORE</span><span class="s">Per-run store offered when you pick a class. More slots / higher rarity ramp.</span>`;
     wrap.appendChild(ssHead);
     const ss = getStartingStoreState();
     const ssRow = document.createElement('div');
@@ -1924,7 +1938,7 @@ export class HideoutUI {
     const rrRow = document.createElement('div');
     rrRow.className = 'hideout-upgrade-row';
     if (rerollOwned) {
-      rrRow.innerHTML = `<span>Reroll-any-shop: <b style="color:#6abf78">UNLOCKED</b></span>`;
+      rrRow.innerHTML = `<span>Reroll-any-shop: <b style="color:var(--cy-mint)">UNLOCKED</b></span>`;
     } else {
       rrRow.innerHTML = `
         <span>Reroll-any-shop unlock — costs in-run chips to use: <b>${REROLL_UNLOCK_COST}</b> chips</span>
@@ -1959,7 +1973,7 @@ export class HideoutUI {
     const grpHead = document.createElement('div');
     grpHead.className = 'hideout-tier-head';
     grpHead.style.marginTop = '8px';
-    grpHead.innerHTML = `<span class="t" style="color:#c9a87a">MERCHANT STOCK SIZES</span>`;
+    grpHead.innerHTML = `<span class="t" style="color:var(--cy-amber)">MERCHANT STOCK SIZES</span>`;
     wrap.appendChild(grpHead);
     for (const kind of MERCHANT_KINDS) {
       const lvl = upgrades[kind] | 0;
@@ -2015,7 +2029,7 @@ export class HideoutUI {
     const permits = getRelicPermits();
     const permitGroup = document.createElement('div');
     permitGroup.style.marginTop = '8px';
-    permitGroup.innerHTML = `<div class="hideout-tier-head"><span class="t" style="color:#b870e0">PERMITS</span><span class="s">Permanent — adds the relic to the in-run merchant rotation.</span></div>`;
+    permitGroup.innerHTML = `<div class="hideout-tier-head"><span class="t" style="color:var(--cy-violet)">PERMITS</span><span class="s">Permanent — adds the relic to the in-run merchant rotation.</span></div>`;
     for (const def of Object.values(RELIC_PERMITS)) {
       permitGroup.appendChild(this._buildSigilRow(def, permits.has(def.id), sigils, () => {
         if (!spendSigils(def.cost)) return;
@@ -2032,7 +2046,7 @@ export class HideoutUI {
     const queueSet = new Set(queue);
     const ksGroup = document.createElement('div');
     ksGroup.style.marginTop = '14px';
-    ksGroup.innerHTML = `<div class="hideout-tier-head"><span class="t" style="color:#b870e0">KEYSTONES</span><span class="s">One-shot run modifiers — consumed at next run start. ${queue.length} queued.</span></div>`;
+    ksGroup.innerHTML = `<div class="hideout-tier-head"><span class="t" style="color:var(--cy-violet)">KEYSTONES</span><span class="s">One-shot run modifiers — consumed at next run start. ${queue.length} queued.</span></div>`;
     for (const def of Object.values(KEYSTONES)) {
       const isOwned = owned.has(def.id);
       const isQueued = queueSet.has(def.id);
@@ -2055,7 +2069,7 @@ export class HideoutUI {
     row.innerHTML = `
       <div class="row-head">
         <span class="label">${def.label}</span>
-        <span class="reward" style="color:#b870e0">${def.cost} sigils</span>
+        <span class="reward" style="color:var(--cy-violet)">${def.cost} sigils</span>
       </div>
       <div class="row-blurb">${def.blurb}</div>
       <div class="row-actions"></div>
@@ -2522,11 +2536,11 @@ export class HideoutUI {
         if (def.perKillReward) rewardBits.push(`<b>${def.perKillReward}c</b> / kill`);
         if (def.marksReward) rewardBits.push(`<b>${def.marksReward}</b> marks`);
       }
-      const rarityHex = def?.rarity === 'legendary' ? '#f6b53b'
-        : def?.rarity === 'epic' ? '#b061d9'
-        : def?.rarity === 'rare' ? '#5fa8ff'
-        : def?.rarity === 'uncommon' ? '#6abf78'
-        : '#9aa0a8';
+      const rarityHex = def?.rarity === 'legendary' ? 'var(--cy-amber)'
+        : def?.rarity === 'epic' ? 'var(--cy-violet)'
+        : def?.rarity === 'rare' ? 'var(--cy-cyan)'
+        : def?.rarity === 'uncommon' ? 'var(--cy-mint)'
+        : 'var(--ce-soft-50)';
       banner.innerHTML = `
         <div class="prep-eyebrow">LOADOUT${def?.rarity ? ` · <span style="color:${rarityHex}">${def.rarity.toUpperCase()}</span>` : ''}</div>
         <div class="prep-title">${def ? def.label.toUpperCase() : 'NO CONTRACT ACTIVE'}</div>
@@ -3745,7 +3759,7 @@ export class HideoutUI {
           width: 96px; height: 96px; flex: 0 0 auto;
           object-fit: cover; object-position: center 18%;
           border: 1px solid rgba(155,139,106,0.4); border-radius: 4px;
-          background: radial-gradient(circle at 50% 35%, #2a2018 0%, #0a0a14 90%);
+          background: radial-gradient(circle at 50% 35%, var(--ce-navy) 0%, var(--ce-black) 90%);
           box-shadow: 0 4px 16px rgba(0,0,0,0.6);
         }
         /* Trainer track row — notches and per-tier text live on their
@@ -3754,7 +3768,7 @@ export class HideoutUI {
         .trainer-row .row-head { flex-wrap: wrap; row-gap: 4px; }
         .trainer-row .row-head .label { display: inline-block; max-width: 100%; }
         .trainer-row .track-lv {
-          font-size: 10px; color: #9b8b6a; margin-left: 8px;
+          font-size: 10px; color: var(--ce-soft); margin-left: 8px;
           letter-spacing: 1.2px; font-weight: 600;
         }
         .trainer-row .trainer-notch-block {
@@ -3765,15 +3779,15 @@ export class HideoutUI {
         .trainer-row .trainer-notch-row { display: inline-flex; gap: 4px; }
         .trainer-row .trainer-notch {
           width: 10px; height: 10px; border-radius: 50%;
-          border: 1px solid #4a505a; background: #0c0e14;
+          border: 1px solid var(--ce-steel); background: var(--ce-black);
           transition: all 0.15s ease; flex: 0 0 auto;
         }
         .trainer-row .trainer-notch.filled {
-          background: #f2c060; border-color: #ffd070;
+          background: var(--cy-amber); border-color: var(--cy-amber);
           box-shadow: 0 0 6px rgba(255,200,80,0.55);
         }
         .trainer-row .trainer-notch.next {
-          border-color: #a0c0ff; box-shadow: 0 0 4px rgba(120,180,255,0.35);
+          border-color: var(--cy-cyan); box-shadow: 0 0 4px rgba(120,180,255,0.35);
         }
         /* Move blurbs to their own areas so each effect line gets its
            own row. We claim the unused 'mods' grid area for current and
@@ -3781,16 +3795,16 @@ export class HideoutUI {
            hideout-contract-row template. */
         .trainer-row .track-current {
           grid-area: mods;
-          color: #a0c0a0; font-size: 11px;
+          color: var(--cy-mint); font-size: 11px;
           margin: 4px 0 0; padding: 0; letter-spacing: 0.4px;
         }
         .trainer-row .track-next {
           grid-area: offset;
-          color: #c9a87a; font-size: 11px;
+          color: var(--cy-amber); font-size: 11px;
           margin: 2px 0 0; letter-spacing: 0.4px;
         }
-        .trainer-row.maxed .row-head .label { color: #ffd070; }
-        .trainer-row.maxed .track-next { color: #6abf78; }
+        .trainer-row.maxed .row-head .label { color: var(--cy-amber); }
+        .trainer-row.maxed .track-next { color: var(--cy-mint); }
       `;
       document.head.appendChild(style);
     }
@@ -3811,7 +3825,7 @@ export class HideoutUI {
       sec.style.marginTop = '10px';
       const t = document.createElement('div');
       t.className = 'hideout-tier-head';
-      t.innerHTML = `<span class="t" style="color:#c9a87a">${cat.title}</span>`;
+      t.innerHTML = `<span class="t" style="color:var(--cy-amber)">${cat.title}</span>`;
       sec.appendChild(t);
       for (const track of tracks) {
         sec.appendChild(this._renderTrainerTrackRow(track, owned, marks));
@@ -3824,7 +3838,7 @@ export class HideoutUI {
     classSec.style.marginTop = '14px';
     const ch = document.createElement('div');
     ch.className = 'hideout-tier-head';
-    ch.innerHTML = `<span class="t" style="color:#c9a87a">CLASS UNLOCKS</span>`;
+    ch.innerHTML = `<span class="t" style="color:var(--cy-amber)">CLASS UNLOCKS</span>`;
     classSec.appendChild(ch);
     for (const id of TRAINER_CLASS_UNLOCKS) {
       const def = RECRUITER_UNLOCKS[id];
@@ -3971,7 +3985,7 @@ export class HideoutUI {
     // Player name row.
     const nameSec = document.createElement('div');
     nameSec.className = 'hideout-tier-group';
-    nameSec.innerHTML = `<div class="hideout-tier-head"><span class="t" style="color:#c9a87a">CALLSIGN</span></div>`;
+    nameSec.innerHTML = `<div class="hideout-tier-head"><span class="t" style="color:var(--cy-amber)">CALLSIGN</span></div>`;
     const nameRow = document.createElement('div');
     nameRow.className = 'hideout-contract-row';
     nameRow.innerHTML = `
@@ -3985,8 +3999,8 @@ export class HideoutUI {
     input.value = getPlayerName();
     input.placeholder = 'anon';
     Object.assign(input.style, {
-      background: '#0c0e14', border: '1px solid #2a2f3a',
-      color: '#e8dfc8', padding: '6px 10px', fontSize: '12px',
+      background: 'var(--ce-black)', border: '1px solid var(--ce-steel)',
+      color: 'var(--ce-soft)', padding: '6px 10px', fontSize: '12px',
       letterSpacing: '0.6px', borderRadius: '3px', minWidth: '160px',
     });
     // Toast on commit (change/blur), but only when the value actually
@@ -4007,7 +4021,7 @@ export class HideoutUI {
     // Silhouette style row.
     const styleSec = document.createElement('div');
     styleSec.className = 'hideout-tier-group';
-    styleSec.innerHTML = `<div class="hideout-tier-head"><span class="t" style="color:#c9a87a">SILHOUETTE</span></div>`;
+    styleSec.innerHTML = `<div class="hideout-tier-head"><span class="t" style="color:var(--cy-amber)">SILHOUETTE</span></div>`;
     // Five rig styles total (see STYLE_PALETTE in player.js). Tailor
     // surfaces them all so anything the rig can render is pickable
     // here — no hidden gating today.
@@ -4056,7 +4070,7 @@ export class HideoutUI {
     const appearance = getCharacterAppearance();
     const colorSec = document.createElement('div');
     colorSec.className = 'hideout-tier-group';
-    colorSec.innerHTML = `<div class="hideout-tier-head"><span class="t" style="color:#c9a87a">COLORS</span></div>`;
+    colorSec.innerHTML = `<div class="hideout-tier-head"><span class="t" style="color:var(--cy-amber)">COLORS</span></div>`;
     const colorFields = [
       { key: 'primary', label: 'Primary',  blurb: 'Jacket / armor body color.' },
       { key: 'accent',  label: 'Accent',   blurb: 'Straps, trim, accent stitching.' },
@@ -4076,8 +4090,8 @@ export class HideoutUI {
       swatch.type = 'color';
       swatch.value = appearance[f.key] || APPEARANCE_DEFAULTS[f.key];
       Object.assign(swatch.style, {
-        width: '52px', height: '32px', border: '1px solid #2a2f3a',
-        background: '#0c0e14', cursor: 'pointer', padding: '0', borderRadius: '3px',
+        width: '52px', height: '32px', border: '1px solid var(--ce-steel)',
+        background: 'var(--ce-black)', cursor: 'pointer', padding: '0', borderRadius: '3px',
       });
       swatch.addEventListener('input', () => {
         setCharacterAppearance({ [f.key]: swatch.value });
@@ -4091,7 +4105,7 @@ export class HideoutUI {
     // Accessory toggles — helmet on/off, vest overlay on/off.
     const toggleSec = document.createElement('div');
     toggleSec.className = 'hideout-tier-group';
-    toggleSec.innerHTML = `<div class="hideout-tier-head"><span class="t" style="color:#c9a87a">ACCESSORIES</span></div>`;
+    toggleSec.innerHTML = `<div class="hideout-tier-head"><span class="t" style="color:var(--cy-amber)">ACCESSORIES</span></div>`;
     const toggles = [
       { key: 'helmet',   label: 'Helmet',        blurb: 'Wear a helmet by default. Run pickups can override.' },
       { key: 'vestOver', label: 'Tactical Vest', blurb: 'Visible plate carrier overlay on the rig.' },
@@ -4203,7 +4217,7 @@ export class HideoutUI {
         background: rgba(14,16,24,0.85);
         border: 1px solid rgba(42,47,58,0.9); border-radius: 2px;
         backdrop-filter: blur(4px);
-        color: #e8dfc8;
+        color: var(--ce-soft);
       }
 
       /* BOTTOM-RIGHT ACTION CLUSTER — Quick Start + Start Run buttons
@@ -4244,14 +4258,14 @@ export class HideoutUI {
         border: 1px solid rgba(42,47,58,0.9); border-radius: 2px;
         padding: 16px 16px;
         overflow-y: auto;
-        color: #e8dfc8;
+        color: var(--ce-soft);
         box-shadow: 0 12px 32px rgba(0,0,0,0.6);
         backdrop-filter: blur(3px);
       }
       #hideout-panel::-webkit-scrollbar { width: 8px; }
       #hideout-panel::-webkit-scrollbar-track { background: transparent; }
-      #hideout-panel::-webkit-scrollbar-thumb { background: #2a2f3a; border-radius: 2px; }
-      #hideout-panel::-webkit-scrollbar-thumb:hover { background: #3a3f4a; }
+      #hideout-panel::-webkit-scrollbar-thumb { background: var(--ce-steel); border-radius: 2px; }
+      #hideout-panel::-webkit-scrollbar-thumb:hover { background: var(--ce-navy); }
 
       /* Stash twocol — natural twocol layout from .hideout-stash-twocol
          applies now that #hideout-panel runs full-width. The compress-
@@ -4280,7 +4294,7 @@ export class HideoutUI {
              top so the head is at the top of the viewport and the
              table sits naturally above where the cards will land. */
           url('/Assets/contractor.png') center top / contain no-repeat,
-          #0c0e16;
+          var(--ce-black);
         overflow: hidden;
       }
 
@@ -4295,7 +4309,7 @@ export class HideoutUI {
         padding: 12px 12px; overflow-y: auto;
       }
       .contractor-feed .feed-head {
-        font-size: 10px; letter-spacing: 1.6px; color: #5a8acf;
+        font-size: 10px; letter-spacing: 1.6px; color: var(--ce-ice-25);
         margin-bottom: 8px; padding-bottom: 8px;
         border-bottom: 1px solid rgba(42,47,58,0.9);
       }
@@ -4304,14 +4318,14 @@ export class HideoutUI {
         gap: 4px; padding: 4px 0;
         font-size: 10px; line-height: 1.3;
       }
-      .feed-row .feed-name { color: #c9a87a; letter-spacing: 0.6px; }
-      .feed-row .feed-val { color: #9b8b6a; }
+      .feed-row .feed-name { color: var(--cy-amber); letter-spacing: 0.6px; }
+      .feed-row .feed-val { color: var(--ce-soft); }
       .feed-row .feed-status {
-        grid-column: 1/-1; font-size: 8px; letter-spacing: 1.2px; color: #6f6754;
+        grid-column: 1/-1; font-size: 8px; letter-spacing: 1.2px; color: var(--ce-soft-50);
       }
-      .feed-row.closed .feed-status { color: #d24868; }
-      .feed-row.claimed .feed-status { color: #6abf78; }
-      .feed-row.open .feed-status { color: #f2c060; }
+      .feed-row.closed .feed-status { color: var(--ce-red); }
+      .feed-row.claimed .feed-status { color: var(--cy-mint); }
+      .feed-row.open .feed-status { color: var(--cy-amber); }
 
       .contractor-board {
         position: absolute; top: 14px; right: 14px;
@@ -4321,7 +4335,7 @@ export class HideoutUI {
         padding: 12px 12px;
       }
       .contractor-board .board-head {
-        font-size: 10px; letter-spacing: 1.6px; color: #5a8acf;
+        font-size: 10px; letter-spacing: 1.6px; color: var(--ce-ice-25);
         margin-bottom: 8px; padding-bottom: 8px;
         border-bottom: 1px solid rgba(42,47,58,0.9);
       }
@@ -4329,8 +4343,8 @@ export class HideoutUI {
         display: flex; justify-content: space-between;
         padding: 4px 0; font-size: 11px;
       }
-      .board-row .board-name { color: #c9a87a; letter-spacing: 0.4px; }
-      .board-row .board-val { color: #f2c060; font-weight: 700; }
+      .board-row .board-name { color: var(--cy-amber); letter-spacing: 0.4px; }
+      .board-row .board-val { color: var(--cy-amber); font-weight: 700; }
 
       .contractor-host {
         /* Speech bubble sits just above the "SELECT A CONTRACT"
@@ -4360,7 +4374,7 @@ export class HideoutUI {
         max-width: 460px;
       }
       .host-quote {
-        font-size: 12px; color: #c9a87a; font-style: italic;
+        font-size: 12px; color: var(--cy-amber); font-style: italic;
         line-height: 1.5; letter-spacing: 0.4px;
       }
 
@@ -4368,9 +4382,9 @@ export class HideoutUI {
       #contractor-cta {
         position: absolute; left: 50%; bottom: 48px;
         transform: translateX(-50%);
-        background: #f2c060;
-        border: 1px solid #f2c060;
-        color: #0c0e14; font-weight: 700;
+        background: var(--cy-amber);
+        border: 1px solid var(--cy-amber);
+        color: var(--ce-black); font-weight: 700;
         font-size: 22px; letter-spacing: 4px;
         padding: 16px 48px; border-radius: 2px;
         cursor: pointer;
@@ -4380,13 +4394,13 @@ export class HideoutUI {
         transition: background-color 120ms ease-out, box-shadow 120ms ease-out, color 120ms ease-out;
       }
       #contractor-cta:hover {
-        background: #ffd070;
+        background: var(--cy-amber);
         box-shadow: 0 0 60px rgba(242,192,96,0.7);
       }
       .contractor-cta-sub {
         position: absolute; left: 50%; bottom: 30px;
         transform: translateX(-50%);
-        font-size: 11px; color: #c9a87a; letter-spacing: 2px;
+        font-size: 11px; color: var(--cy-amber); letter-spacing: 2px;
         text-transform: uppercase;
       }
       /* Cards step — host shifts up so cards have room at the bottom. */
@@ -4400,7 +4414,7 @@ export class HideoutUI {
         position: absolute; bottom: 18px; left: 24px;
         background: rgba(20,24,32,0.85);
         border: 1px solid rgba(155,139,106,0.4);
-        color: #c9a87a; font: inherit; font-size: 11px;
+        color: var(--cy-amber); font: inherit; font-size: 11px;
         letter-spacing: 1.4px; padding: 8px 16px;
         border-radius: 2px; cursor: pointer;
         transition: background 0.15s, color 0.15s;
@@ -4408,7 +4422,7 @@ export class HideoutUI {
       }
       .global-back-btn:hover {
         background: rgba(40,46,58,0.9);
-        color: #e8dfc8; border-color: rgba(201,168,122,0.6);
+        color: var(--ce-soft); border-color: rgba(201,168,122,0.6);
       }
 
       /* Live-feed pulse animation when a row is updated */
@@ -4439,7 +4453,7 @@ export class HideoutUI {
         border-top: 1px solid rgba(42,47,58,0.9);
       }
       .lb-block-head {
-        font-size: 10px; letter-spacing: 1.6px; color: #5a8acf;
+        font-size: 10px; letter-spacing: 1.6px; color: var(--ce-ice-25);
         margin-bottom: 8px;
       }
       .lb-block-row {
@@ -4447,21 +4461,21 @@ export class HideoutUI {
         gap: 4px; padding: 3px 0;
         font-size: 10px; line-height: 1.3;
       }
-      .lb-block-row .lb-rank { color: #6f6754; }
-      .lb-block-row .lb-name { color: #c9a87a; }
-      .lb-block-row .lb-val  { color: #f2c060; font-weight: 700; }
+      .lb-block-row .lb-rank { color: var(--ce-soft-50); }
+      .lb-block-row .lb-name { color: var(--cy-amber); }
+      .lb-block-row .lb-val  { color: var(--cy-amber); font-weight: 700; }
       .lb-block-empty {
-        font-size: 10px; color: #6f6754; font-style: italic;
+        font-size: 10px; color: var(--ce-soft-50); font-style: italic;
         padding: 4px 0;
       }
       .lb-view-all {
         margin-top: 8px; width: 100%;
         background: transparent; border: 1px solid rgba(90,138,207,0.4);
-        color: #5a8acf; font: inherit; font-size: 10px;
+        color: var(--ce-ice-25); font: inherit; font-size: 10px;
         letter-spacing: 1.4px; padding: 6px;
         border-radius: 3px; cursor: pointer;
       }
-      .lb-view-all:hover { background: rgba(90,138,207,0.1); color: #e8dfc8; }
+      .lb-view-all:hover { background: rgba(90,138,207,0.1); color: var(--ce-soft); }
 
       /* FULL-SCREEN LEADERBOARDS */
       .contractor-leaderboard-full {
@@ -4472,15 +4486,15 @@ export class HideoutUI {
       }
       .lb-full-head { text-align: center; margin-bottom: 18px; }
       .lb-eyebrow {
-        font-size: 10px; letter-spacing: 2.4px; color: #5a8acf;
+        font-size: 10px; letter-spacing: 2.4px; color: var(--ce-ice-25);
         margin-bottom: 4px;
       }
       .lb-title {
         font-size: 22px; font-weight: 900; letter-spacing: 2.4px;
-        color: #f2c060;
+        color: var(--cy-amber);
       }
       .lb-sub {
-        font-size: 11px; color: #c9a87a; margin-top: 4px; letter-spacing: 1px;
+        font-size: 11px; color: var(--cy-amber); margin-top: 4px; letter-spacing: 1px;
       }
       .lb-full-cols {
         display: grid; grid-template-columns: repeat(4, 1fr);
@@ -4494,7 +4508,7 @@ export class HideoutUI {
         overflow-y: auto;
       }
       .lb-col-head {
-        font-size: 10px; letter-spacing: 1.6px; color: #5a8acf;
+        font-size: 10px; letter-spacing: 1.6px; color: var(--ce-ice-25);
         text-align: center; padding-bottom: 6px;
         border-bottom: 1px solid rgba(90,138,207,0.2);
         margin-bottom: 4px;
@@ -4505,10 +4519,10 @@ export class HideoutUI {
         font-size: 11px; border-radius: 2px;
       }
       .lb-full-row:nth-child(even) { background: rgba(255,255,255,0.02); }
-      .lb-full-row.empty { color: #4a505a; opacity: 0.6; }
-      .lb-full-row .lb-rank { color: #6f6754; font-weight: 700; }
-      .lb-full-row .lb-name { color: #c9a87a; }
-      .lb-full-row .lb-val  { color: #f2c060; font-weight: 700; }
+      .lb-full-row.empty { color: var(--ce-steel); opacity: 0.6; }
+      .lb-full-row .lb-rank { color: var(--ce-soft-50); font-weight: 700; }
+      .lb-full-row .lb-name { color: var(--cy-amber); }
+      .lb-full-row .lb-val  { color: var(--cy-amber); font-weight: 700; }
 
       /* === MISSION PREP / STASH === */
       .prep-banner {
@@ -4517,15 +4531,15 @@ export class HideoutUI {
         text-align: center; pointer-events: none;
       }
       .prep-eyebrow {
-        font-size: 10px; letter-spacing: 2.4px; color: #5a8acf;
+        font-size: 10px; letter-spacing: 2.4px; color: var(--ce-ice-25);
         margin-bottom: 4px;
       }
       .prep-title {
         font-size: 22px; font-weight: 900; letter-spacing: 2.4px;
-        color: #f2c060;
+        color: var(--cy-amber);
       }
       .prep-sub {
-        font-size: 11px; color: #c9a87a; margin-top: 4px; letter-spacing: 1px;
+        font-size: 11px; color: var(--cy-amber); margin-top: 4px; letter-spacing: 1px;
       }
       /* Mission-prep three-column grid. With the panel now running
          full-width, the pre-run store column gets more breathing room
@@ -4548,7 +4562,7 @@ export class HideoutUI {
       .loadout-storecol { overflow-y: auto; }
       .loadout-armorycol { overflow-y: auto; }
       .prep-section-head {
-        font-size: 10px; letter-spacing: 1.6px; color: #5a8acf;
+        font-size: 10px; letter-spacing: 1.6px; color: var(--ce-ice-25);
         margin-bottom: 8px; padding-bottom: 6px;
         border-bottom: 1px solid rgba(90,138,207,0.2);
       }
@@ -4564,16 +4578,16 @@ export class HideoutUI {
         text-align: center; margin-bottom: 14px;
       }
       .armory-eyebrow {
-        font-size: 10px; letter-spacing: 2.4px; color: #5a8acf;
+        font-size: 10px; letter-spacing: 2.4px; color: var(--ce-ice-25);
       }
       .armory-title {
         font-size: 16px; font-weight: 900; letter-spacing: 2px;
-        color: #f2c060; margin-top: 2px;
+        color: var(--cy-amber); margin-top: 2px;
       }
       .armory-count {
-        font-size: 11px; color: #c9a87a; margin-top: 4px; letter-spacing: 0.8px;
+        font-size: 11px; color: var(--cy-amber); margin-top: 4px; letter-spacing: 0.8px;
       }
-      .armory-count b { color: #f2c060; font-weight: 700; }
+      .armory-count b { color: var(--cy-amber); font-weight: 700; }
       /* Armory two-column split — AVAILABLE | LOCKED. Both halves
          use the same compact tile size for visual consistency with
          the pre-mission store. */
@@ -4587,12 +4601,12 @@ export class HideoutUI {
         min-height: 0; overflow: hidden;
       }
       .armory-half-head {
-        font-size: 10px; letter-spacing: 1.6px; color: #5a8acf;
+        font-size: 10px; letter-spacing: 1.6px; color: var(--ce-ice-25);
         margin-bottom: 8px; padding-bottom: 6px;
         border-bottom: 1px solid rgba(90,138,207,0.2);
       }
       .armory-half-empty {
-        font-size: 10px; color: #6f6754; font-style: italic;
+        font-size: 10px; color: var(--ce-soft-50); font-style: italic;
         padding: 16px 8px; text-align: center;
         grid-column: 1 / -1;
       }
@@ -4609,10 +4623,10 @@ export class HideoutUI {
       /* Mini tile — same shape + scale as the pre-mission store
          tiles. Icon on top, name, meta, stat snippet, action CTA. */
       .armory-mini {
-        background: linear-gradient(180deg, #1a1d24, #131720);
-        border: 1px solid #2a2f3a; border-radius: 4px;
+        background: linear-gradient(180deg, var(--ce-navy), var(--ce-black));
+        border: 1px solid var(--ce-steel); border-radius: 4px;
         padding: 8px;
-        font: inherit; color: #e8dfc8;
+        font: inherit; color: var(--ce-soft);
         display: flex; flex-direction: column; gap: 4px;
       }
       .armory-mini.state-taking {
@@ -4643,52 +4657,52 @@ export class HideoutUI {
         max-width: 100%; overflow: hidden;
         white-space: nowrap; text-overflow: ellipsis;
       }
-      .armory-mini.rarity-uncommon  .amini-name { color: #6abf78; }
-      .armory-mini.rarity-rare      .amini-name { color: #5a8acf; }
-      .armory-mini.rarity-epic      .amini-name { color: #b870e0; }
-      .armory-mini.rarity-legendary .amini-name { color: #f2a040; }
+      .armory-mini.rarity-uncommon  .amini-name { color: var(--cy-mint); }
+      .armory-mini.rarity-rare      .amini-name { color: var(--ce-ice-25); }
+      .armory-mini.rarity-epic      .amini-name { color: var(--cy-violet); }
+      .armory-mini.rarity-legendary .amini-name { color: var(--cy-amber); }
       .amini-meta {
-        font-size: 9px; color: #9b8b6a; letter-spacing: 0.4px;
+        font-size: 9px; color: var(--ce-soft); letter-spacing: 0.4px;
         text-transform: uppercase;
       }
       .amini-stats {
         display: flex; gap: 6px; flex-wrap: wrap;
         font-size: 10px; min-height: 13px;
       }
-      .amini-stat { color: #c9a87a; }
+      .amini-stat { color: var(--cy-amber); }
       .amini-cta {
         margin-top: 2px; padding: 5px;
         font: inherit; font-size: 10px; font-weight: 700;
         letter-spacing: 1px; text-transform: uppercase;
-        border: 1px solid #4a505a; border-radius: 3px;
+        border: 1px solid var(--ce-steel); border-radius: 3px;
         text-align: center; cursor: pointer;
-        background: linear-gradient(180deg, #2a2f3a, #1a1d24);
-        color: #c9a87a;
+        background: linear-gradient(180deg, var(--ce-steel), var(--ce-navy));
+        color: var(--cy-amber);
       }
       button.amini-cta:hover:not(:disabled) {
-        background: linear-gradient(180deg, #3a3f4a, #2a2d34);
-        color: #e8dfc8;
+        background: linear-gradient(180deg, var(--ce-navy), var(--ce-steel));
+        color: var(--ce-soft);
       }
       button.amini-cta:disabled { opacity: 0.45; cursor: not-allowed; }
       .amini-cta.taking {
-        background: linear-gradient(180deg, #f2c060, #c98a3a);
-        color: #1a1408; border-color: #f2c060;
+        background: linear-gradient(180deg, var(--cy-amber), var(--cy-amber));
+        color: var(--ce-black); border-color: var(--cy-amber);
       }
       .amini-cta.buy {
-        background: linear-gradient(180deg, #2a4a6e, #1e3450);
-        color: #e8dfc8; border-color: #5a8acf;
+        background: linear-gradient(180deg, var(--ce-steel), var(--ce-navy));
+        color: var(--ce-soft); border-color: var(--ce-ice-25);
       }
       button.amini-cta.buy:hover:not(:disabled) {
-        background: linear-gradient(180deg, #3a5a7e, #2e4460);
+        background: linear-gradient(180deg, var(--cy-cyan), var(--ce-steel));
       }
       .amini-cta.locked {
-        background: rgba(20,24,32,0.5); color: #6f6754;
+        background: rgba(20,24,32,0.5); color: var(--ce-soft-50);
         border-style: dashed;
       }
 
       /* Store sub-blurb */
       .store-blurb {
-        font-size: 10px; color: #9b8b6a; line-height: 1.4;
+        font-size: 10px; color: var(--ce-soft); line-height: 1.4;
         margin-bottom: 10px;
       }
       .loadout-storecol {
@@ -4699,23 +4713,23 @@ export class HideoutUI {
         margin-bottom: 10px;
       }
       .store-upgrade-tile {
-        background: linear-gradient(180deg, #1a1d24, #131720);
+        background: linear-gradient(180deg, var(--ce-navy), var(--ce-black));
         border: 1px solid rgba(90,138,207,0.4);
         border-radius: 4px; padding: 8px 12px;
-        text-align: left; font: inherit; color: #e8dfc8;
+        text-align: left; font: inherit; color: var(--ce-soft);
         cursor: pointer;
         transition: background 0.12s;
       }
       .store-upgrade-tile:hover:not(:disabled) {
-        background: linear-gradient(180deg, #232730, #181c25);
+        background: linear-gradient(180deg, var(--ce-navy), var(--ce-black));
       }
       .store-upgrade-tile:disabled { opacity: 0.45; cursor: not-allowed; }
       .sut-title {
         font-size: 11px; font-weight: 700; letter-spacing: 1.2px;
-        color: #c9a87a;
+        color: var(--cy-amber);
       }
       .sut-sub {
-        font-size: 10px; color: #f2c060; margin-top: 2px; letter-spacing: 0.4px;
+        font-size: 10px; color: var(--cy-amber); margin-top: 2px; letter-spacing: 0.4px;
       }
       .store-stock {
         flex: 1; min-height: 0;
@@ -4723,7 +4737,7 @@ export class HideoutUI {
         margin-bottom: 10px;
       }
       .store-stock-label {
-        font-size: 10px; letter-spacing: 1.4px; color: #5a8acf;
+        font-size: 10px; letter-spacing: 1.4px; color: var(--ce-ice-25);
         margin-bottom: 6px;
       }
       .store-stock-list {
@@ -4738,50 +4752,50 @@ export class HideoutUI {
         border-top: 1px dashed rgba(90,138,207,0.3);
       }
       .store-refresh-btn {
-        background: linear-gradient(180deg, #f2c060 0%, #c98a3a 100%);
-        border: 1px solid #f2c060; color: #1a1408;
+        background: linear-gradient(180deg, var(--cy-amber) 0%, var(--cy-amber) 100%);
+        border: 1px solid var(--cy-amber); color: var(--ce-black);
         font: inherit; font-size: 12px; font-weight: 700;
         letter-spacing: 1.4px; padding: 10px;
         border-radius: 3px; cursor: pointer; text-transform: uppercase;
       }
       .store-refresh-btn:hover:not(:disabled) {
-        background: linear-gradient(180deg, #ffd070 0%, #d99a4a 100%);
+        background: linear-gradient(180deg, var(--cy-amber) 0%, var(--cy-amber) 100%);
       }
       .store-refresh-btn:disabled { opacity: 0.5; cursor: not-allowed; }
       .store-faster-btn {
         background: rgba(20,24,32,0.85);
-        border: 1px solid rgba(155,139,106,0.4); color: #c9a87a;
+        border: 1px solid rgba(155,139,106,0.4); color: var(--cy-amber);
         font: inherit; font-size: 10px; letter-spacing: 1px;
         padding: 6px; border-radius: 3px; cursor: pointer;
       }
       .store-faster-btn:hover:not(:disabled) {
-        background: rgba(40,46,58,0.85); color: #e8dfc8;
+        background: rgba(40,46,58,0.85); color: var(--ce-soft);
       }
       .store-faster-btn:disabled { opacity: 0.4; cursor: not-allowed; }
       .store-timer {
         text-align: center; font-size: 9px; letter-spacing: 1.4px;
-        color: #6f6754;
+        color: var(--ce-soft-50);
       }
 
       /* Inventory-style tile for weapons + store items */
       .loadout-collabel {
         display: flex; justify-content: space-between; align-items: baseline;
-        font-size: 11px; letter-spacing: 1.6px; color: #5a8acf;
+        font-size: 11px; letter-spacing: 1.6px; color: var(--ce-ice-25);
         margin-bottom: 8px; padding-bottom: 6px;
         border-bottom: 1px solid rgba(90,138,207,0.2);
       }
       .store-refresh-meta {
-        font-size: 9px; color: #6f6754; letter-spacing: 1px;
+        font-size: 9px; color: var(--ce-soft-50); letter-spacing: 1px;
       }
       .loadout-tile-grid {
         display: grid; grid-template-columns: repeat(2, 1fr);
         gap: 8px;
       }
       .loadout-tile {
-        background: linear-gradient(180deg, #1a1d24, #131720);
-        border: 1px solid #2a2f3a; border-radius: 4px;
+        background: linear-gradient(180deg, var(--ce-navy), var(--ce-black));
+        border: 1px solid var(--ce-steel); border-radius: 4px;
         padding: 8px; cursor: pointer;
-        text-align: left; font: inherit; color: #e8dfc8;
+        text-align: left; font: inherit; color: var(--ce-soft);
         display: flex; flex-direction: column; gap: 4px;
         transition: transform 0.12s, box-shadow 0.12s;
       }
@@ -4790,11 +4804,11 @@ export class HideoutUI {
         box-shadow: 0 6px 14px rgba(0,0,0,0.5);
       }
       .loadout-tile.selected {
-        background: linear-gradient(180deg, #221f12, #16140a);
-        border-color: #f2c060;
+        background: linear-gradient(180deg, var(--ce-black), var(--ce-black));
+        border-color: var(--cy-amber);
       }
       .loadout-tile.empty {
-        text-align: center; color: #4a505a;
+        text-align: center; color: var(--ce-steel);
         align-items: center; justify-content: center; min-height: 80px;
       }
       .loadout-tile.sold { opacity: 0.55; }
@@ -4805,7 +4819,7 @@ export class HideoutUI {
          (see _renderStashTab) so the player can browse the rest. */
       .store-tile-focused {
         animation: store-focus-pulse 1.6s ease-out 1;
-        outline: 2px solid #f2c060;
+        outline: 2px solid var(--cy-amber);
         outline-offset: 2px;
       }
       .store-tile-dim {
@@ -4831,32 +4845,32 @@ export class HideoutUI {
       }
       .lt-icon-fallback {
         width: 36px; height: 36px;
-        background: #2a2f3a; border-radius: 3px;
+        background: var(--ce-steel); border-radius: 3px;
       }
       .lt-name {
         font-size: 12px; font-weight: 700; letter-spacing: 0.4px;
         line-height: 1.2;
       }
-      .lt-meta { font-size: 9px; color: #9b8b6a; letter-spacing: 0.4px; }
+      .lt-meta { font-size: 9px; color: var(--ce-soft); letter-spacing: 0.4px; }
       .lt-stats {
         display: flex; gap: 8px; flex-wrap: wrap;
         font-size: 10px;
       }
-      .lt-stat { color: #c9a87a; }
-      .lt-stat.lt-cost { color: #f2c060; font-weight: 700; }
+      .lt-stat { color: var(--cy-amber); }
+      .lt-stat.lt-cost { color: var(--cy-amber); font-weight: 700; }
       .lt-sold {
         text-align: center; font-weight: 700; letter-spacing: 1.2px;
-        color: #6abf78; font-size: 11px; padding: 8px 0;
+        color: var(--cy-mint); font-size: 11px; padding: 8px 0;
       }
       .lt-buy {
         margin-top: 4px;
-        background: linear-gradient(180deg, #2a4a6e, #1e3450);
-        border: 1px solid #5a8acf; color: #e8dfc8;
+        background: linear-gradient(180deg, var(--ce-steel), var(--ce-navy));
+        border: 1px solid var(--ce-ice-25); color: var(--ce-soft);
         font: inherit; font-size: 10px; letter-spacing: 1px;
         padding: 5px; border-radius: 3px; cursor: pointer;
         text-transform: uppercase; font-weight: 700;
       }
-      .lt-buy:hover:not(:disabled) { background: linear-gradient(180deg, #3a5a7e, #2e4460); }
+      .lt-buy:hover:not(:disabled) { background: linear-gradient(180deg, var(--cy-cyan), var(--ce-steel)); }
       .lt-buy:disabled { opacity: 0.45; cursor: not-allowed; }
 
       .loadout-charcol {
@@ -4876,7 +4890,7 @@ export class HideoutUI {
       .pd-tile {
         position: relative;
         background: linear-gradient(180deg, rgba(27,30,36,0.82), rgba(20,23,29,0.82));
-        border: 1px solid #2c323c; border-radius: 5px;
+        border: 1px solid var(--ce-steel); border-radius: 5px;
         padding: 6px 4px;
         display: flex; flex-direction: column; align-items: center;
         gap: 4px;
@@ -4884,27 +4898,27 @@ export class HideoutUI {
       }
       .pd-tile.filled {
         background: linear-gradient(180deg, rgba(38,43,52,0.95), rgba(28,32,40,0.95));
-        border-color: #4a5968;
+        border-color: var(--ce-steel);
       }
-      .pd-tile.pd-weapon1.filled { border-color: #f2c060; }
+      .pd-tile.pd-weapon1.filled { border-color: var(--cy-amber); }
       .pd-tile-label {
-        font-size: 9px; letter-spacing: 1.4px; color: #7a6f54;
+        font-size: 9px; letter-spacing: 1.4px; color: var(--ce-soft);
       }
-      .pd-tile.filled .pd-tile-label { color: #c9a87a; }
+      .pd-tile.filled .pd-tile-label { color: var(--cy-amber); }
       .pd-tile-icon {
         flex: 1;
         display: flex; align-items: center; justify-content: center;
         min-height: 26px; max-height: 36px;
       }
       .pd-tile-glyph {
-        font-size: 16px; color: #4a505a; opacity: 0.7;
+        font-size: 16px; color: var(--ce-steel); opacity: 0.7;
       }
       .pd-tile-art {
         max-width: 100%; max-height: 100%;
         object-fit: contain; image-rendering: pixelated;
       }
       .pd-tile-name {
-        font-size: 10px; color: #e8dfc8; font-weight: 700;
+        font-size: 10px; color: var(--ce-soft); font-weight: 700;
         letter-spacing: 0.4px; text-align: center;
         overflow: hidden; white-space: nowrap; text-overflow: ellipsis;
         max-width: 100%;
@@ -4914,8 +4928,8 @@ export class HideoutUI {
       .pd-col-center { gap: 6px; }
       .pd-figure-frame {
         flex: 1; min-height: 140px;
-        background: radial-gradient(ellipse at 50% 35%, #20232c 0%, #0c0f15 80%);
-        border: 1px solid #2c323c; border-radius: 5px;
+        background: radial-gradient(ellipse at 50% 35%, var(--ce-navy) 0%, var(--ce-black) 80%);
+        border: 1px solid var(--ce-steel); border-radius: 5px;
         display: flex; flex-direction: column;
         align-items: center; justify-content: center;
         gap: 8px;
@@ -4925,21 +4939,21 @@ export class HideoutUI {
       }
       .pd-figure-caption {
         font-size: 11px; letter-spacing: 2.2px; font-weight: 700;
-        color: #c9a87a; text-shadow: 0 1px 0 #000;
+        color: var(--cy-amber); text-shadow: 0 1px 0 #000;
       }
       .pd-callout {
         background: rgba(20,23,29,0.85);
-        border: 1px solid #2c323c; border-radius: 5px;
+        border: 1px solid var(--ce-steel); border-radius: 5px;
         padding: 6px 8px; text-align: center;
       }
       .pd-callout-label {
         font-size: 10px; letter-spacing: 1.6px; font-weight: 700;
-        color: #c9a87a; margin-bottom: 2px;
+        color: var(--cy-amber); margin-bottom: 2px;
       }
-      .pd-callout-relics .pd-callout-label { color: #b870e0; }
-      .pd-callout-skills .pd-callout-label { color: #6abf78; }
+      .pd-callout-relics .pd-callout-label { color: var(--cy-violet); }
+      .pd-callout-skills .pd-callout-label { color: var(--cy-mint); }
       .pd-callout-body {
-        font-size: 9px; color: #6f6754; line-height: 1.35;
+        font-size: 9px; color: var(--ce-soft-50); line-height: 1.35;
         font-style: italic;
       }
 
@@ -4950,20 +4964,20 @@ export class HideoutUI {
         border-top: 1px dashed rgba(90,138,207,0.25);
       }
       .pd-starter-label {
-        font-size: 9px; letter-spacing: 1.6px; color: #5a8acf;
+        font-size: 9px; letter-spacing: 1.6px; color: var(--ce-ice-25);
         margin-bottom: 6px;
       }
       .pd-starter-icons { display: flex; gap: 6px; }
       .pd-starter-ico {
         width: 36px; height: 36px;
-        background: rgba(20,30,46,0.85); border: 1px solid #2a2f3a;
+        background: rgba(20,30,46,0.85); border: 1px solid var(--ce-steel);
         border-radius: 3px;
         display: flex; align-items: center; justify-content: center;
       }
       .pd-starter-ico img { max-width: 80%; max-height: 80%; image-rendering: pixelated; }
-      .pd-starter-ico.empty { color: #6f6754; font-size: 10px; }
+      .pd-starter-ico.empty { color: var(--ce-soft-50); font-size: 10px; }
       .pd-starter-ico.throwable {
-        color: #c98a3a; font-size: 18px; font-weight: 700;
+        color: var(--cy-amber); font-size: 18px; font-weight: 700;
         background: rgba(40,28,16,0.85); border-color: rgba(201,138,58,0.4);
       }
       /* Loadout summary — compact horizontal grid of what's being
@@ -4978,7 +4992,7 @@ export class HideoutUI {
         border-radius: 4px;
       }
       .loadout-summary-head {
-        font-size: 9px; letter-spacing: 2.5px; color: #6f6754;
+        font-size: 9px; letter-spacing: 2.5px; color: var(--ce-soft-50);
         margin-bottom: 6px;
         text-transform: uppercase;
       }
@@ -4986,7 +5000,7 @@ export class HideoutUI {
         display: flex; flex-wrap: wrap; gap: 4px 14px;
       }
       .lsum-hint {
-        color: #6f6754; font-weight: 400;
+        color: var(--ce-soft-50); font-weight: 400;
         font-size: 8px; letter-spacing: 1px;
         text-transform: none;
         margin-left: 6px;
@@ -5006,11 +5020,11 @@ export class HideoutUI {
       }
       .lsum-row:not(.lsum-clickable) { cursor: default; }
       .lsum-lbl {
-        color: #6f6754; letter-spacing: 1.2px;
+        color: var(--ce-soft-50); letter-spacing: 1.2px;
         font-size: 9px; font-weight: 700;
       }
       .lsum-val {
-        color: #e8dfc8; font-weight: 700;
+        color: var(--ce-soft); font-weight: 700;
       }
       .lsum-clickable .lsum-val {
         text-decoration: underline; text-decoration-color: rgba(201, 168, 122, 0.35);
@@ -5019,8 +5033,8 @@ export class HideoutUI {
       .loadout-confirm {
         position: absolute; left: 50%; bottom: 44px;
         transform: translateX(-50%);
-        background: linear-gradient(180deg, #4a8acf 0%, #2a6aaf 100%);
-        border: 2px solid #5a8acf; color: #fff;
+        background: linear-gradient(180deg, var(--cy-cyan) 0%, var(--cy-cyan) 100%);
+        border: 2px solid var(--ce-ice-25); color: #fff;
         font-weight: 900; font-size: 18px; letter-spacing: 3px;
         padding: 14px 48px; border-radius: 4px; cursor: pointer;
         box-shadow: 0 0 40px rgba(90,138,207,0.45), 0 8px 24px rgba(0,0,0,0.6);
@@ -5037,9 +5051,9 @@ export class HideoutUI {
          so the button visibly reads "not yet". The "PICK A WEAPON"
          hint text still tells the player WHY. */
       .loadout-confirm:disabled {
-        background: linear-gradient(180deg, #2a2e36 0%, #1a1e26 100%);
-        border-color: #3a3e46;
-        color: #6f7484;
+        background: linear-gradient(180deg, var(--ce-navy) 0%, var(--ce-navy) 100%);
+        border-color: var(--ce-navy);
+        color: var(--ce-soft-50);
         box-shadow: none;
         opacity: 0.85;
         cursor: not-allowed;
@@ -5064,7 +5078,7 @@ export class HideoutUI {
         flex-wrap: nowrap; overflow: hidden;
       }
       .contractor-empty {
-        color: #6f6754; font-style: italic; padding: 16px;
+        color: var(--ce-soft-50); font-style: italic; padding: 16px;
       }
       /* Section heading above the contract cards. */
       @keyframes contracts-heading-glow {
@@ -5079,7 +5093,7 @@ export class HideoutUI {
         text-align: center;
         font-family: ui-monospace, Menlo, Consolas, monospace;
         font-size: 18px; font-weight: 700; letter-spacing: 6px;
-        color: #f2c060;
+        color: var(--cy-amber);
         text-shadow: 0 0 14px rgba(255,200,80,0.45);
         pointer-events: none;
         animation: contracts-heading-glow 3.6s ease-in-out infinite;
@@ -5087,12 +5101,12 @@ export class HideoutUI {
       .contracts-heading::before {
         content: '◆';
         margin-right: 14px; font-size: 12px; vertical-align: 3px;
-        color: #c98a3a;
+        color: var(--cy-amber);
       }
       .contracts-heading::after {
         content: '◆';
         margin-left: 14px; font-size: 12px; vertical-align: 3px;
-        color: #c98a3a;
+        color: var(--cy-amber);
       }
       /* Refresh + expand-slots button row — pinned BELOW the cards
          at the very bottom of the stage. Cards bottom edge is at
@@ -5115,8 +5129,8 @@ export class HideoutUI {
       .wanted-card {
         flex: 1 1 220px;
         min-width: 200px; max-width: 280px;
-        background: linear-gradient(180deg, #1a1d24 0%, #0c0e14 100%);
-        border: 2px solid #2a2f3a; border-radius: 6px;
+        background: linear-gradient(180deg, var(--ce-navy) 0%, var(--ce-black) 100%);
+        border: 2px solid var(--ce-steel); border-radius: 6px;
         padding: 12px; display: flex; flex-direction: column; gap: 8px;
         text-align: center;
         box-shadow: 0 4px 16px rgba(0,0,0,0.6);
@@ -5148,21 +5162,21 @@ export class HideoutUI {
       .wanted-card:disabled { cursor: not-allowed; }
       /* Rarity tint — border PLUS a soft outer glow that reads even
          when the card isn't hovered. Scales with rarity. */
-      .wanted-card.rarity-common    { border-color: #c9a87a; }
+      .wanted-card.rarity-common    { border-color: var(--cy-amber); }
       .wanted-card.rarity-uncommon  {
-        border-color: #6abf78;
+        border-color: var(--cy-mint);
         box-shadow: 0 4px 16px rgba(0,0,0,0.6), 0 0 12px rgba(106,191,120,0.18);
       }
       .wanted-card.rarity-rare      {
-        border-color: #5a8acf;
+        border-color: var(--ce-ice-25);
         box-shadow: 0 4px 16px rgba(0,0,0,0.6), 0 0 16px rgba(90,138,207,0.25);
       }
       .wanted-card.rarity-epic      {
-        border-color: #b870e0;
+        border-color: var(--cy-violet);
         box-shadow: 0 4px 16px rgba(0,0,0,0.6), 0 0 22px rgba(184,112,224,0.32);
       }
       .wanted-card.rarity-legendary {
-        border-color: #f2a040;
+        border-color: var(--cy-amber);
         box-shadow: 0 4px 16px rgba(0,0,0,0.6), 0 0 28px rgba(242,160,64,0.4);
         animation: wanted-deal 380ms cubic-bezier(0.22, 0.85, 0.36, 1) both,
                    legendary-pulse 2400ms ease-in-out 700ms infinite;
@@ -5171,24 +5185,24 @@ export class HideoutUI {
         0%, 100% { box-shadow: 0 4px 16px rgba(0,0,0,0.6), 0 0 28px rgba(242,160,64,0.4); }
         50%      { box-shadow: 0 4px 16px rgba(0,0,0,0.6), 0 0 44px rgba(242,160,64,0.65); }
       }
-      .wanted-card.active   { background: linear-gradient(180deg, #2a2418 0%, #1a1408 100%); }
+      .wanted-card.active   { background: linear-gradient(180deg, var(--ce-navy) 0%, var(--ce-black) 100%); }
       .wanted-card.claimed  { opacity: 0.55; }
 
       .wanted-portrait {
         width: calc(100% + 24px);
         height: 110px; flex: 0 0 110px;
-        background: radial-gradient(circle at 50% 40%, #1a1d24 0%, #0a0a10 100%);
-        border-bottom: 1px solid #2a2f3a;
+        background: radial-gradient(circle at 50% 40%, var(--ce-navy) 0%, var(--ce-black) 100%);
+        border-bottom: 1px solid var(--ce-steel);
         display: flex; align-items: center; justify-content: center;
-        font-size: 56px; color: #c9a87a;
+        font-size: 56px; color: var(--cy-amber);
         margin: -12px -12px 0; border-radius: 4px 4px 0 0;
       }
-      .wanted-portrait[data-portrait="dasher"]   { color: #6abf78; }
-      .wanted-portrait[data-portrait="tank"]     { color: #c98a3a; }
-      .wanted-portrait[data-portrait="gunman"]   { color: #5a8acf; }
-      .wanted-portrait[data-portrait="melee"]    { color: #d24868; }
-      .wanted-portrait[data-portrait="boss"]     { color: #f2c060; }
-      .wanted-portrait[data-portrait="megaboss"] { color: #f2a040; }
+      .wanted-portrait[data-portrait="dasher"]   { color: var(--cy-mint); }
+      .wanted-portrait[data-portrait="tank"]     { color: var(--cy-amber); }
+      .wanted-portrait[data-portrait="gunman"]   { color: var(--ce-ice-25); }
+      .wanted-portrait[data-portrait="melee"]    { color: var(--ce-red); }
+      .wanted-portrait[data-portrait="boss"]     { color: var(--cy-amber); }
+      .wanted-portrait[data-portrait="megaboss"] { color: var(--cy-amber); }
       /* has-banner: a contract has gen-art set via CONTRACT_BANNER_ART;
          render the image as a cover-fit background instead of the
          CSS-gradient + glyph fallback. Subtle dark gradient stays on
@@ -5216,11 +5230,11 @@ export class HideoutUI {
         margin-top: 4px;
       }
       .wanted-name {
-        font-size: 16px; font-weight: 700; color: #e8dfc8;
+        font-size: 16px; font-weight: 700; color: var(--ce-soft);
         letter-spacing: 1.4px;
       }
       .wanted-conds {
-        font-size: 11px; color: #c9a87a; font-weight: 600;
+        font-size: 11px; color: var(--cy-amber); font-weight: 600;
         letter-spacing: 0.6px;
       }
       /* Modifier chips — iconified pills with tone-coded backgrounds.
@@ -5239,17 +5253,17 @@ export class HideoutUI {
         background: rgba(20, 22, 28, 0.7);
         border: 1px solid rgba(155, 139, 106, 0.25);
       }
-      .row-mod.restrict { color: #c4b89a; }
-      .row-mod.threat   { color: #e89860; border-color: rgba(232, 152, 96, 0.4); background: rgba(60, 28, 16, 0.4); }
-      .row-mod.penalty  { color: #d24868; border-color: rgba(210, 72, 104, 0.4); background: rgba(60, 16, 28, 0.4); }
-      .row-mod.buff     { color: #6abf78; border-color: rgba(106, 191, 120, 0.4); background: rgba(20, 50, 28, 0.4); }
+      .row-mod.restrict { color: var(--cy-amber); }
+      .row-mod.threat   { color: var(--cy-amber); border-color: rgba(232, 152, 96, 0.4); background: rgba(60, 28, 16, 0.4); }
+      .row-mod.penalty  { color: var(--ce-red); border-color: rgba(210, 72, 104, 0.4); background: rgba(60, 16, 28, 0.4); }
+      .row-mod.buff     { color: var(--cy-mint); border-color: rgba(106, 191, 120, 0.4); background: rgba(20, 50, 28, 0.4); }
       /* Reward strip — single horizontal row of chips. Compact +
          readable at a glance vs the old labeled rows. */
       .wanted-rewards {
         display: flex; flex-wrap: wrap; gap: 4px;
         justify-content: center;
         margin-top: 6px; padding-top: 8px;
-        border-top: 1px solid #2a2f3a;
+        border-top: 1px solid var(--ce-steel);
       }
       .rwd {
         display: inline-flex; align-items: center;
@@ -5259,10 +5273,10 @@ export class HideoutUI {
         border: 1px solid rgba(155, 139, 106, 0.18);
       }
       .rwd.small  { font-size: 10px; padding: 2px 5px; opacity: 0.85; }
-      .rwd.chips  { color: #f2c060; }
-      .rwd.rank   { color: #5a8acf; }
-      .rwd.marks  { color: #6abf78; }
-      .rwd.sigils { color: #b870e0; }
+      .rwd.chips  { color: var(--cy-amber); }
+      .rwd.rank   { color: var(--ce-ice-25); }
+      .rwd.marks  { color: var(--cy-mint); }
+      .rwd.sigils { color: var(--cy-violet); }
       .wanted-actions { display: flex; justify-content: center; gap: 6px; }
       .wanted-actions .hideout-btn { width: 100%; }
 
@@ -5271,9 +5285,9 @@ export class HideoutUI {
         background: rgba(10,12,18,0.7);
         border: 1px solid rgba(90,138,207,0.25); border-radius: 4px;
         padding: 10px 14px; min-width: 220px;
-        font-size: 11px; letter-spacing: 0.8px; color: #9b8b6a;
+        font-size: 11px; letter-spacing: 0.8px; color: var(--ce-soft);
       }
-      .contractor-corner b { color: #f2c060; }
+      .contractor-corner b { color: var(--cy-amber); }
       .corner-line { padding: 2px 0; }
       /* Full-height right-rail variant — used on the 'cards' step
          where the right edge is dedicated to the player profile.
@@ -5287,7 +5301,7 @@ export class HideoutUI {
       }
       .corner-section { display: flex; flex-direction: column; gap: 4px; }
       .corner-section-head {
-        font-size: 10px; letter-spacing: 1.6px; color: #5a8acf;
+        font-size: 10px; letter-spacing: 1.6px; color: var(--ce-ice-25);
         padding-bottom: 6px;
         border-bottom: 1px solid rgba(42,47,58,0.9);
         margin-bottom: 2px;
@@ -5299,12 +5313,12 @@ export class HideoutUI {
         gap: 6px; padding: 2px 0;
         font-size: 11px; line-height: 1.3;
       }
-      .corner-stat .cs-label { color: #c9a87a; letter-spacing: 0.6px; }
-      .corner-stat b { color: #f2c060; font-weight: 700; }
+      .corner-stat .cs-label { color: var(--cy-amber); letter-spacing: 0.6px; }
+      .corner-stat b { color: var(--cy-amber); font-weight: 700; }
       /* Rank line — bigger so the player notices their progress
          immediately when they walk up to the contracts board. */
       .corner-rank {
-        font-size: 14px; letter-spacing: 1.2px; color: #c9a87a;
+        font-size: 14px; letter-spacing: 1.2px; color: var(--cy-amber);
         padding: 4px 0;
       }
       .corner-rank b { font-size: 16px; }
@@ -5313,19 +5327,19 @@ export class HideoutUI {
          render once the player has crossed every threshold. */
       .corner-next {
         font-size: 10px; letter-spacing: 1.3px;
-        color: #5a8acf; opacity: 0.85;
+        color: var(--ce-ice-25); opacity: 0.85;
         padding: 2px 0 4px;
       }
       .corner-refresh {
         margin-top: 6px; padding-top: 6px;
         border-top: 1px solid rgba(90,138,207,0.2);
-        color: #6f6754; font-size: 9px; letter-spacing: 1.4px;
+        color: var(--ce-soft-50); font-size: 9px; letter-spacing: 1.4px;
       }
-      .refresh-time { color: #5a8acf; font-size: 13px; font-weight: 700; }
+      .refresh-time { color: var(--ce-ice-25); font-size: 13px; font-weight: 700; }
 
       #hideout-header {
         display: flex; align-items: center; gap: 16px;
-        padding: 14px 22px; border-bottom: 1px solid #1f2530;
+        padding: 14px 22px; border-bottom: 1px solid var(--ce-navy);
       }
       /* Title styled to match the COLD EXIT wordmark from the
          splash composition (Assets/coldexit.png): clean white COLD,
@@ -5339,71 +5353,71 @@ export class HideoutUI {
         letter-spacing: 6px; text-transform: uppercase;
         font-family: 'Inter', system-ui, sans-serif;
       }
-      #hideout-title .title-cold { color: #ffffff; }
-      #hideout-title .title-exit { color: #6f93b4; }
+      #hideout-title .title-cold { color: var(--ce-white); }
+      #hideout-title .title-exit { color: var(--cy-cyan); }
       #hideout-title .title-sep {
-        color: #4ec9d4;
+        color: var(--cy-cyan);
         font-size: 14px; line-height: 1;
         transform: translateY(-1px);
         text-shadow: 0 0 12px rgba(78,201,212,0.65);
       }
       #hideout-wallets {
-        flex: 1; text-align: right; color: #c9a87a; font-size: 13px;
+        flex: 1; text-align: right; color: var(--cy-amber); font-size: 13px;
         display: flex; gap: 18px; justify-content: flex-end; align-items: baseline;
       }
       #hideout-wallets .wallet { white-space: nowrap; }
-      #hideout-wallets .lbl { color: #9b8b6a; font-size: 10px; letter-spacing: 1.5px; margin-right: 6px; }
-      #hideout-wallets b { font-size: 17px; color: #f2c060; }
-      #hideout-wallets .wallet.sigils b { color: #b870e0; }
+      #hideout-wallets .lbl { color: var(--ce-soft); font-size: 10px; letter-spacing: 1.5px; margin-right: 6px; }
+      #hideout-wallets b { font-size: 17px; color: var(--cy-amber); }
+      #hideout-wallets .wallet.sigils b { color: var(--cy-violet); }
       #hideout-sysmenu {
-        background: #2a2f3a; border: 1px solid #4a505a;
-        color: #c9a87a; padding: 6px 12px; border-radius: 4px;
+        background: var(--ce-steel); border: 1px solid var(--ce-steel);
+        color: var(--cy-amber); padding: 6px 12px; border-radius: 4px;
         font: inherit; font-size: 16px; cursor: pointer;
         line-height: 1;
       }
-      #hideout-sysmenu:hover { background: #3a3f4a; color: #e8dfc8; }
+      #hideout-sysmenu:hover { background: var(--ce-navy); color: var(--ce-soft); }
       #hideout-back, #hideout-startrun, #hideout-quickstart {
-        background: linear-gradient(180deg, #2a2f3a, #1a1d24);
-        border: 1px solid #4a505a; color: #c9a87a;
+        background: linear-gradient(180deg, var(--ce-steel), var(--ce-navy));
+        border: 1px solid var(--ce-steel); color: var(--cy-amber);
         padding: 8px 14px; border-radius: 4px;
         font: inherit; font-size: 11px; letter-spacing: 1.4px;
         text-transform: uppercase; cursor: pointer;
       }
-      #hideout-back:hover, #hideout-quickstart:hover { background: linear-gradient(180deg, #3a3f4a, #2a2d34); }
+      #hideout-back:hover, #hideout-quickstart:hover { background: linear-gradient(180deg, var(--ce-navy), var(--ce-steel)); }
       #hideout-startrun {
-        background: linear-gradient(180deg, #2a4a6e, #1e3450);
-        border: 1px solid #5a8acf; color: #e8dfc8;
+        background: linear-gradient(180deg, var(--ce-steel), var(--ce-navy));
+        border: 1px solid var(--ce-ice-25); color: var(--ce-soft);
         font-size: 12px; letter-spacing: 1.5px;
       }
-      #hideout-startrun:hover { background: linear-gradient(180deg, #3a5a7e, #2e4460); }
+      #hideout-startrun:hover { background: linear-gradient(180deg, var(--cy-cyan), var(--ce-steel)); }
 
       #hideout-tabs {
         display: flex; gap: 2px; padding: 8px 18px 0;
-        border-bottom: 1px solid #1f2530;
+        border-bottom: 1px solid var(--ce-navy);
       }
       .hideout-tab {
         background: transparent; border: 1px solid transparent; border-bottom: none;
-        border-radius: 4px 4px 0 0; color: #6f6754;
+        border-radius: 4px 4px 0 0; color: var(--ce-soft-50);
         font: inherit; font-size: 11px; letter-spacing: 1.5px;
         text-transform: uppercase; padding: 7px 16px; cursor: pointer;
       }
-      .hideout-tab:hover { color: #c9a87a; border-color: #2a3040; }
+      .hideout-tab:hover { color: var(--cy-amber); border-color: var(--ce-navy); }
       .hideout-tab.active {
-        color: #e8dfc8; border-color: #5a8acf;
-        background: linear-gradient(180deg, #1a2230, #131820);
+        color: var(--ce-soft); border-color: var(--ce-ice-25);
+        background: linear-gradient(180deg, var(--ce-navy), var(--ce-black));
       }
       /* NEW glow on freshly-revealed onboarding tabs. Cleared on
          click via markOnboardSeen → next render drops .is-new. */
       .hideout-tab.is-new {
-        color: #f2c060;
+        color: var(--cy-amber);
         text-shadow: 0 0 6px rgba(242, 192, 96, 0.55);
         animation: tab-new-pulse 2200ms ease-in-out infinite;
       }
       .hideout-tab.is-new::after {
         content: 'NEW';
         margin-left: 6px; font-size: 8px; letter-spacing: 1px;
-        color: #f2c060; padding: 1px 4px;
-        border: 1px solid #f2c060; border-radius: 2px;
+        color: var(--cy-amber); padding: 1px 4px;
+        border: 1px solid var(--cy-amber); border-radius: 2px;
         opacity: 0.85;
       }
       @keyframes tab-new-pulse {
@@ -5443,7 +5457,7 @@ export class HideoutUI {
       .hideout-section-portrait {
         width: 72px; height: 72px; flex: 0 0 72px;
         border: 1px solid rgba(178,112,224,0.3); border-radius: 4px;
-        background-color: #11141d;
+        background-color: var(--ce-black);
         background-repeat: no-repeat; background-position: center top;
         background-size: cover;
         box-shadow: inset 0 -20px 30px rgba(0,0,0,0.55);
@@ -5461,29 +5475,29 @@ export class HideoutUI {
         background-image: url('/Assets/generated/gen-art-vault-keeper-portrait-via-qwen-image-bg-1777845441426.png');
       }
       .hideout-section-title {
-        font-size: 13px; color: #5a8acf; letter-spacing: 2px;
+        font-size: 13px; color: var(--ce-ice-25); letter-spacing: 2px;
         text-transform: uppercase; font-weight: 700;
       }
-      .hideout-section-sub { font-size: 10px; color: #6f6754; letter-spacing: 1px; }
+      .hideout-section-sub { font-size: 10px; color: var(--ce-soft-50); letter-spacing: 1px; }
       .hideout-blurb {
-        color: #9b8b6a; font-size: 12px; line-height: 1.45;
+        color: var(--ce-soft); font-size: 12px; line-height: 1.45;
         margin-bottom: 14px; max-width: 540px;
       }
       .hideout-placeholder {
         padding: 20px 24px;
         background: rgba(20, 24, 32, 0.4);
-        border: 1px dashed #2a3040; border-radius: 4px;
-        color: #9b8b6a; font-size: 12px; line-height: 1.55; max-width: 540px;
+        border: 1px dashed var(--ce-navy); border-radius: 4px;
+        color: var(--ce-soft); font-size: 12px; line-height: 1.55; max-width: 540px;
       }
-      .hideout-placeholder em { color: #c9a87a; font-style: italic; }
-      .muted { color: #5a5448; }
+      .hideout-placeholder em { color: var(--cy-amber); font-style: italic; }
+      .muted { color: var(--ce-steel); }
 
       .hideout-stash-cols {
         display: grid; grid-template-columns: 1fr 1fr; gap: 18px;
       }
       .hideout-stash-col { display: flex; flex-direction: column; gap: 8px; }
       .hideout-col-title {
-        font-size: 11px; color: #c9a87a;
+        font-size: 11px; color: var(--cy-amber);
         letter-spacing: 1.5px; text-transform: uppercase;
         margin-bottom: 4px;
       }
@@ -5492,20 +5506,20 @@ export class HideoutUI {
         max-height: 460px; overflow-y: auto;
       }
       .hideout-extract-tile {
-        padding: 8px 10px; background: linear-gradient(180deg, #1a1d24, #131720);
-        border: 1px solid #2a3040; border-left-width: 3px; border-radius: 4px;
+        padding: 8px 10px; background: linear-gradient(180deg, var(--ce-navy), var(--ce-black));
+        border: 1px solid var(--ce-navy); border-left-width: 3px; border-radius: 4px;
       }
-      .hideout-extract-name { font-weight: 700; color: #e8dfc8; font-size: 12px; }
-      .hideout-extract-meta { font-size: 10px; color: #9b8b6a; margin: 2px 0 6px; }
+      .hideout-extract-name { font-weight: 700; color: var(--ce-soft); font-size: 12px; }
+      .hideout-extract-meta { font-size: 10px; color: var(--ce-soft); margin: 2px 0 6px; }
       .hideout-extract-actions { display: flex; gap: 6px; }
       .hideout-extract-actions button {
-        flex: 1; background: linear-gradient(180deg, #1f3a5c, #16283f);
-        border: 1px solid #2a4a70; color: #cbd2dc;
+        flex: 1; background: linear-gradient(180deg, var(--ce-steel), var(--ce-black));
+        border: 1px solid var(--ce-steel); color: var(--ce-soft);
         padding: 4px 8px; font: inherit; font-size: 10px; letter-spacing: 1px;
         text-transform: uppercase; cursor: pointer; border-radius: 3px;
       }
       .hideout-extract-actions button:hover:not(:disabled) {
-        background: linear-gradient(180deg, #2f4a6c, #26384f);
+        background: linear-gradient(180deg, var(--ce-steel), var(--ce-navy));
       }
       .hideout-extract-actions button:disabled {
         opacity: 0.4; cursor: not-allowed;
@@ -5515,22 +5529,22 @@ export class HideoutUI {
         display: grid; grid-template-columns: repeat(4, 1fr); gap: 6px;
       }
       .hideout-stash-slot {
-        aspect-ratio: 1 / 1; border: 1px dashed #2a3040; border-radius: 4px;
+        aspect-ratio: 1 / 1; border: 1px dashed var(--ce-navy); border-radius: 4px;
         display: flex; align-items: center; justify-content: center;
         background: rgba(20, 24, 32, 0.3);
-        color: #5a5448; font-size: 14px;
+        color: var(--ce-steel); font-size: 14px;
       }
       .hideout-stash-slot.empty { border-style: dashed; }
       .hideout-stash-tile {
         width: 100%; height: 100%;
         display: flex; flex-direction: column; align-items: center; justify-content: space-between;
         padding: 4px; box-sizing: border-box;
-        background: linear-gradient(180deg, #1a1d24, #131720);
+        background: linear-gradient(180deg, var(--ce-navy), var(--ce-black));
         border: 2px solid; border-radius: 4px;
       }
       .hideout-stash-icon { width: 60%; height: auto; image-rendering: pixelated; }
       .hideout-stash-name {
-        font-size: 9px; color: #e8dfc8; text-align: center;
+        font-size: 9px; color: var(--ce-soft); text-align: center;
         max-height: 24px; overflow: hidden; line-height: 1.2;
       }
       .hideout-stash-actions {
@@ -5538,18 +5552,18 @@ export class HideoutUI {
       }
       .hideout-stash-actions button {
         width: 100%; background: rgba(40, 30, 50, 0.6);
-        border: 1px solid #4a3060; color: #c9a87a;
+        border: 1px solid var(--ce-steel); color: var(--cy-amber);
         padding: 2px 4px; font: inherit; font-size: 9px;
         cursor: pointer; border-radius: 2px;
       }
       /* Take-into-next-run button — gold-accented when not yet
          queued, green-accented when already queued for the run. */
       .hideout-stash-actions .take {
-        border-color: #6a5a30; color: #f2c060;
+        border-color: var(--ce-steel); color: var(--cy-amber);
         background: rgba(60, 50, 25, 0.4);
       }
       .hideout-stash-actions .take.queued {
-        border-color: #2c6a3a; color: #6abf78;
+        border-color: var(--ce-steel); color: var(--cy-mint);
         background: rgba(20, 50, 28, 0.5);
       }
       /* Vault tile gets a subtle gold outline when its item is
@@ -5561,20 +5575,20 @@ export class HideoutUI {
         display: flex; align-items: center; justify-content: space-between;
         margin-top: 12px; padding: 10px 14px;
         background: rgba(40, 32, 20, 0.3);
-        border: 1px solid #3a3020; border-radius: 4px;
-        color: #c9a87a; font-size: 12px;
+        border: 1px solid var(--ce-black); border-radius: 4px;
+        color: var(--cy-amber); font-size: 12px;
       }
-      .hideout-upgrade-row b, .hideout-quart-buy-row b { color: #f2c060; }
+      .hideout-upgrade-row b, .hideout-quart-buy-row b { color: var(--cy-amber); }
       .hideout-upgrade-row .muted { font-size: 11px; }
       .hideout-buy {
-        background: linear-gradient(180deg, #4a6a3a, #2e4626);
-        border: 1px solid #6a8a4a; color: #e8efd8;
+        background: linear-gradient(180deg, var(--ce-steel), var(--ce-navy));
+        border: 1px solid var(--cy-mint); color: var(--ce-white);
         padding: 5px 14px; font: inherit; font-size: 11px;
         letter-spacing: 1px; text-transform: uppercase;
         cursor: pointer; border-radius: 3px;
       }
       .hideout-buy:hover:not(:disabled) {
-        background: linear-gradient(180deg, #5a7a4a, #3e5636);
+        background: linear-gradient(180deg, var(--cy-mint), var(--ce-navy));
       }
       .hideout-buy:disabled { opacity: 0.4; cursor: not-allowed; }
 
@@ -5586,19 +5600,19 @@ export class HideoutUI {
       .hideout-tier-head {
         display: flex; align-items: baseline; gap: 10px;
         margin: 14px 0 6px; padding: 4px 0;
-        border-bottom: 1px solid #2a2f3a;
+        border-bottom: 1px solid var(--ce-steel);
       }
       .hideout-tier-head .t {
         font-size: 12px; font-weight: 700; letter-spacing: 1.4px;
       }
       .hideout-tier-head .s {
-        font-size: 10px; color: #6f6754; letter-spacing: 0.5px;
+        font-size: 10px; color: var(--ce-soft-50); letter-spacing: 0.5px;
       }
 
       .hideout-contract-row {
         padding: 10px 14px; margin-bottom: 6px;
-        background: linear-gradient(180deg, #1a1d24, #131720);
-        border-left: 3px solid #5a8acf;
+        background: linear-gradient(180deg, var(--ce-navy), var(--ce-black));
+        border-left: 3px solid var(--ce-ice-25);
         border-radius: 3px;
         display: grid;
         grid-template-columns: 1fr auto;
@@ -5611,31 +5625,31 @@ export class HideoutUI {
         column-gap: 12px;
       }
       .hideout-contract-row.locked { opacity: 0.55; }
-      .hideout-contract-row.active { border-left-color: #f2c060; background: linear-gradient(180deg, #221f12, #16140a); }
-      .hideout-contract-row.claimed { border-left-color: #6abf78; }
+      .hideout-contract-row.active { border-left-color: var(--cy-amber); background: linear-gradient(180deg, var(--ce-black), var(--ce-black)); }
+      .hideout-contract-row.claimed { border-left-color: var(--cy-mint); }
       .hideout-contract-row .row-head {
         grid-area: head;
         display: flex; align-items: baseline; gap: 8px;
       }
       .hideout-contract-row .label {
-        font-size: 13px; font-weight: 700; color: #e8dfc8; letter-spacing: 0.6px;
+        font-size: 13px; font-weight: 700; color: var(--ce-soft); letter-spacing: 0.6px;
       }
       .hideout-contract-row .reward {
-        margin-left: auto; font-size: 11px; color: #f2c060; font-weight: 700; letter-spacing: 0.6px;
+        margin-left: auto; font-size: 11px; color: var(--cy-amber); font-weight: 700; letter-spacing: 0.6px;
       }
       .hideout-contract-row .row-blurb {
         grid-area: blurb;
-        font-size: 11px; color: #c9a87a; margin: 3px 0 0;
+        font-size: 11px; color: var(--cy-amber); margin: 3px 0 0;
       }
       .hideout-contract-row .row-mods {
         grid-area: mods;
         margin: 6px 0 0; padding: 0 0 0 16px;
-        font-size: 10px; color: #d4a060; letter-spacing: 0.4px;
+        font-size: 10px; color: var(--cy-amber); letter-spacing: 0.4px;
       }
       .hideout-contract-row .row-mods li { line-height: 1.5; }
       .hideout-contract-row .row-offset {
         grid-area: offset; margin-top: 4px;
-        font-size: 10px; color: #6abf78; letter-spacing: 0.4px;
+        font-size: 10px; color: var(--cy-mint); letter-spacing: 0.4px;
       }
       .hideout-contract-row .row-lock {
         grid-area: lock; margin-top: 4px;
@@ -5648,39 +5662,39 @@ export class HideoutUI {
       .tier-badge {
         font-size: 9px; font-weight: 700; letter-spacing: 1px;
         padding: 2px 6px; border-radius: 2px;
-        background: #2a2f3a; color: #c9a87a;
+        background: var(--ce-steel); color: var(--cy-amber);
       }
-      .tier-badge.risky { background: #4a2a16; color: #ffb060; }
-      .tier-badge.lethal { background: #4a1622; color: #ff7080; }
+      .tier-badge.risky { background: var(--ce-navy); color: var(--cy-amber); }
+      .tier-badge.lethal { background: var(--ce-navy); color: var(--ce-red); }
       .hideout-tag {
         font-size: 10px; font-weight: 700; letter-spacing: 1px;
         padding: 4px 10px; border-radius: 2px;
       }
-      .hideout-tag.active { background: #2a2418; color: #f2c060; }
-      .hideout-tag.claimed { background: #1a2a1c; color: #6abf78; }
+      .hideout-tag.active { background: var(--ce-navy); color: var(--cy-amber); }
+      .hideout-tag.claimed { background: var(--ce-navy); color: var(--cy-mint); }
       .hideout-btn.primary {
-        background: linear-gradient(180deg, #4a6a3a, #2e4626);
-        border: 1px solid #6a8a4a; color: #e8efd8;
+        background: linear-gradient(180deg, var(--ce-steel), var(--ce-navy));
+        border: 1px solid var(--cy-mint); color: var(--ce-white);
         padding: 5px 14px; font: inherit; font-size: 11px;
         letter-spacing: 1px; text-transform: uppercase;
         cursor: pointer; border-radius: 3px;
       }
-      .hideout-btn.primary:hover { background: linear-gradient(180deg, #5a7a4a, #3e5636); }
+      .hideout-btn.primary:hover { background: linear-gradient(180deg, var(--cy-mint), var(--ce-navy)); }
 
       /* Stash sub-tabs + two-column layout */
       .hideout-stash-root { display: flex; flex-direction: column; gap: 12px; }
       .hideout-substabs {
-        display: flex; gap: 2px; border-bottom: 1px solid #1f2530;
+        display: flex; gap: 2px; border-bottom: 1px solid var(--ce-navy);
         padding-bottom: 2px;
       }
       .hideout-subtab {
-        background: transparent; border: 0; color: #9b8b6a;
+        background: transparent; border: 0; color: var(--ce-soft);
         padding: 6px 14px; font: inherit; font-size: 11px;
         letter-spacing: 1.2px; text-transform: uppercase; cursor: pointer;
         border-bottom: 2px solid transparent;
       }
-      .hideout-subtab:hover { color: #c9a87a; }
-      .hideout-subtab.active { color: #f2c060; border-bottom-color: #f2c060; }
+      .hideout-subtab:hover { color: var(--cy-amber); }
+      .hideout-subtab.active { color: var(--cy-amber); border-bottom-color: var(--cy-amber); }
       .hideout-stash-twocol {
         display: grid; grid-template-columns: 1fr 280px; gap: 18px;
         align-items: start;
@@ -5691,7 +5705,7 @@ export class HideoutUI {
       /* TAKE / ARMORY tiles */
       .hideout-take-classgroup { margin-top: 8px; }
       .hideout-take-classlabel {
-        font-size: 10px; color: #6f6754; letter-spacing: 1.4px;
+        font-size: 10px; color: var(--ce-soft-50); letter-spacing: 1.4px;
         margin-bottom: 4px;
       }
       .hideout-take-row {
@@ -5700,16 +5714,16 @@ export class HideoutUI {
       }
       .hideout-take-tile {
         position: relative;
-        background: linear-gradient(180deg, #1a1d24, #131720);
-        border: 1px solid #2a2f3a; border-left: 3px solid #5a8acf;
+        background: linear-gradient(180deg, var(--ce-navy), var(--ce-black));
+        border: 1px solid var(--ce-steel); border-left: 3px solid var(--ce-ice-25);
         border-radius: 3px; padding: 8px 10px;
         cursor: pointer; user-select: none;
         display: flex; flex-direction: column; gap: 2px;
       }
-      .hideout-take-tile:hover { background: linear-gradient(180deg, #232730, #181c25); }
+      .hideout-take-tile:hover { background: linear-gradient(180deg, var(--ce-navy), var(--ce-black)); }
       .hideout-take-tile.selected {
-        background: linear-gradient(180deg, #2a2418, #16140a);
-        border-color: #f2c060;
+        background: linear-gradient(180deg, var(--ce-navy), var(--ce-black));
+        border-color: var(--cy-amber);
       }
       .hideout-take-tile.locked { cursor: default; }
       .hideout-take-icon {
@@ -5718,17 +5732,17 @@ export class HideoutUI {
       }
       .hideout-take-icon-fallback {
         width: 36px; height: 36px; align-self: center;
-        background: #2a2f3a; border-radius: 3px; margin: 2px 0 4px;
+        background: var(--ce-steel); border-radius: 3px; margin: 2px 0 4px;
       }
       .hideout-take-name {
-        font-size: 12px; color: #e8dfc8; font-weight: 700; letter-spacing: 0.4px;
+        font-size: 12px; color: var(--ce-soft); font-weight: 700; letter-spacing: 0.4px;
       }
-      .hideout-take-meta { font-size: 10px; color: #9b8b6a; letter-spacing: 0.4px; }
+      .hideout-take-meta { font-size: 10px; color: var(--ce-soft); letter-spacing: 0.4px; }
       .hideout-take-tag {
         position: absolute; top: 6px; right: 6px;
         font-size: 8px; font-weight: 700; letter-spacing: 1px;
         padding: 2px 5px; border-radius: 2px;
-        background: #2a2f3a; color: #c9a87a;
+        background: var(--ce-steel); color: var(--cy-amber);
       }
       .hideout-take-actions { margin-top: 6px; }
       .hideout-take-actions .hideout-buy { width: 100%; }
@@ -5740,82 +5754,82 @@ export class HideoutUI {
         gap: 8px; margin-top: 6px;
       }
       .hideout-store-slot {
-        background: linear-gradient(180deg, #1a1d24, #131720);
-        border: 1px solid #2a2f3a; border-left: 3px solid #5a8acf;
+        background: linear-gradient(180deg, var(--ce-navy), var(--ce-black));
+        border: 1px solid var(--ce-steel); border-left: 3px solid var(--ce-ice-25);
         border-radius: 4px; padding: 8px;
         display: flex; flex-direction: column; gap: 4px;
       }
-      .hideout-store-slot.empty { color: #4a505a; text-align: center;
+      .hideout-store-slot.empty { color: var(--ce-steel); text-align: center;
         padding: 16px 0; }
       .hideout-store-slot.sold { opacity: 0.5; }
       .hideout-store-slot.sold .hideout-store-status {
         margin-top: auto; text-align: center; font-size: 11px;
-        font-weight: 700; letter-spacing: 1.2px; color: #6abf78;
+        font-weight: 700; letter-spacing: 1.2px; color: var(--cy-mint);
       }
       .hideout-store-kind {
-        font-size: 9px; color: #6f6754; letter-spacing: 1.4px;
+        font-size: 9px; color: var(--ce-soft-50); letter-spacing: 1.4px;
       }
       .hideout-store-name {
-        font-size: 12px; color: #e8dfc8; font-weight: 700;
+        font-size: 12px; color: var(--ce-soft); font-weight: 700;
       }
-      .hideout-store-meta { font-size: 10px; color: #9b8b6a; }
+      .hideout-store-meta { font-size: 10px; color: var(--ce-soft); }
       .hideout-store-actions { margin-top: auto; padding-top: 4px; }
       .hideout-store-actions .hideout-buy { width: 100%; }
 
       /* PAPERDOLL */
       .hideout-paperdoll {
-        background: linear-gradient(180deg, #14171e, #0c0e14);
-        border: 1px solid #2a2f3a; border-radius: 4px;
+        background: linear-gradient(180deg, var(--ce-black), var(--ce-black));
+        border: 1px solid var(--ce-steel); border-radius: 4px;
         padding: 14px; display: flex; flex-direction: column; gap: 8px;
         position: sticky; top: 8px;
       }
       .hideout-paperdoll-title {
-        font-size: 11px; font-weight: 700; color: #5a8acf;
+        font-size: 11px; font-weight: 700; color: var(--ce-ice-25);
         letter-spacing: 1.6px; padding-bottom: 6px;
-        border-bottom: 1px solid #1f2530; margin-bottom: 4px;
+        border-bottom: 1px solid var(--ce-navy); margin-bottom: 4px;
       }
       .hideout-paperdoll-row {
         display: flex; justify-content: space-between; align-items: baseline;
         font-size: 11px; gap: 8px;
       }
       .hideout-paperdoll-row .lbl {
-        color: #9b8b6a; letter-spacing: 1px; font-size: 10px;
+        color: var(--ce-soft); letter-spacing: 1px; font-size: 10px;
       }
-      .hideout-paperdoll-row .val { color: #e8dfc8; font-weight: 700; }
-      .hideout-paperdoll-row .val.muted { color: #6f6754; font-weight: 400; }
+      .hideout-paperdoll-row .val { color: var(--ce-soft); font-weight: 700; }
+      .hideout-paperdoll-row .val.muted { color: var(--ce-soft-50); font-weight: 400; }
       .hideout-paperdoll-empty {
-        font-size: 10px; color: #6f6754; font-style: italic;
+        font-size: 10px; color: var(--ce-soft-50); font-style: italic;
         text-align: center; padding: 8px 0;
       }
       .hideout-paperdoll-entry {
         display: grid; grid-template-columns: 32px 1fr 22px;
         gap: 6px; align-items: center;
-        padding: 4px 6px; background: #1a1d24; border-radius: 3px;
+        padding: 4px 6px; background: var(--ce-navy); border-radius: 3px;
         font-size: 11px;
       }
       .hideout-paperdoll-entry .kind {
-        font-size: 9px; color: #5a8acf; font-weight: 700; letter-spacing: 0.8px;
+        font-size: 9px; color: var(--ce-ice-25); font-weight: 700; letter-spacing: 0.8px;
       }
-      .hideout-paperdoll-entry .name { color: #c9a87a; }
+      .hideout-paperdoll-entry .name { color: var(--cy-amber); }
       .hideout-paperdoll-entry .rem {
-        background: transparent; border: 0; color: #6f6754;
+        background: transparent; border: 0; color: var(--ce-soft-50);
         font-size: 16px; cursor: pointer; padding: 0;
       }
-      .hideout-paperdoll-entry .rem:hover { color: #d24868; }
+      .hideout-paperdoll-entry .rem:hover { color: var(--ce-red); }
 
       /* New rarity-grouped contract cards */
       .hideout-rarity-group { margin-top: 14px; }
       .hideout-rarity-group:first-of-type { margin-top: 0; }
       .hideout-rarity-head {
         margin: 0 0 6px; padding: 4px 0;
-        border-bottom: 1px solid #2a2f3a;
+        border-bottom: 1px solid var(--ce-steel);
         font-size: 11px; font-weight: 700; letter-spacing: 1.6px;
       }
-      .hideout-rarity-head.common    { color: #c9a87a; }
-      .hideout-rarity-head.uncommon  { color: #6abf78; }
-      .hideout-rarity-head.rare      { color: #5a8acf; }
-      .hideout-rarity-head.epic      { color: #b870e0; }
-      .hideout-rarity-head.legendary { color: #f2a040; }
+      .hideout-rarity-head.common    { color: var(--cy-amber); }
+      .hideout-rarity-head.uncommon  { color: var(--cy-mint); }
+      .hideout-rarity-head.rare      { color: var(--ce-ice-25); }
+      .hideout-rarity-head.epic      { color: var(--cy-violet); }
+      .hideout-rarity-head.legendary { color: var(--cy-amber); }
 
     `;
     document.head.appendChild(style);

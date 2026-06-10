@@ -52,9 +52,9 @@ export class TutorialUI {
       overflowY: 'auto',
       padding: '12px 14px',
       background: 'rgba(20, 24, 32, 0.92)',
-      border: '1px solid #c9a87a',
+      border: '1px solid var(--cy-amber)',
       borderRadius: '4px',
-      color: '#f2e7c9',
+      color: 'var(--ce-white)',
       fontFamily: 'ui-monospace, SFMono-Regular, Menlo, Consolas, monospace',
       fontSize: '11px',
       letterSpacing: '1px',
@@ -92,11 +92,11 @@ export class TutorialUI {
     // The overlay flashes green and a centred toast names the step.
     if (this.root) {
       this.root.style.boxShadow = '0 0 28px rgba(106,190,90,0.85), 0 6px 24px rgba(0,0,0,0.7)';
-      this.root.style.borderColor = '#6abe5a';
+      this.root.style.borderColor = 'var(--cy-mint)';
       setTimeout(() => {
         if (!this.root) return;
         this.root.style.boxShadow = '0 0 18px rgba(201,168,122,0.30), 0 6px 24px rgba(0,0,0,0.7)';
-        this.root.style.borderColor = '#c9a87a';
+        this.root.style.borderColor = 'var(--cy-amber)';
       }, 320);
       this._showToast(id);
     }
@@ -112,9 +112,9 @@ export class TutorialUI {
         transform: 'translateX(-50%)',
         padding: '8px 18px',
         background: 'rgba(20,28,18,0.92)',
-        border: '1px solid #6abe5a',
+        border: '1px solid var(--cy-mint)',
         borderRadius: '4px',
-        color: '#bfe9a8', fontSize: '12px',
+        color: 'var(--cy-mint)', fontSize: '12px',
         fontFamily: 'ui-monospace, SFMono-Regular, Menlo, Consolas, monospace',
         letterSpacing: '2px', textTransform: 'uppercase',
         opacity: '0', transition: 'opacity 0.18s',
@@ -143,14 +143,14 @@ export class TutorialUI {
     // Find the first unticked step — that's the active focus.
     const focusIdx = STEPS.findIndex(s => !this._done.has(s.id));
     const allDone = focusIdx === -1;
-    const head = `<div style="font-size: 11px; color: #c9a87a; letter-spacing: 2px; text-transform: uppercase; font-weight: 700; margin-bottom: 8px; text-align: center;">Tutorial</div>`;
+    const head = `<div style="font-size: 11px; color: var(--cy-amber); letter-spacing: 2px; text-transform: uppercase; font-weight: 700; margin-bottom: 8px; text-align: center;">Tutorial</div>`;
     const rows = STEPS.map((s, i) => {
       const done = this._done.has(s.id);
       const focus = !done && i === focusIdx;
       const mark = done ? '✓' : (focus ? '▸' : '·');
-      const color = done ? '#6abe5a'
-                  : focus ? '#ffd27a'
-                  : '#6f6754';
+      const color = done ? 'var(--cy-mint)'
+                  : focus ? 'var(--cy-amber)'
+                  : 'var(--ce-soft-50)';
       const fontWeight = focus ? '700' : '400';
       return `<div style="display:flex; gap:8px; padding:2px 0; color:${color}; font-weight:${fontWeight};">
         <span style="width:14px; text-align:center;">${mark}</span>
@@ -158,8 +158,8 @@ export class TutorialUI {
       </div>`;
     }).join('');
     const footer = allDone
-      ? `<div style="margin-top: 10px; padding: 6px 8px; background: rgba(106,190,90,0.15); border: 1px solid #6abe5a; border-radius: 3px; color: #6abe5a; text-align: center; font-weight: 700;">All steps done — extract!</div>`
-      : `<div style="margin-top: 10px; font-size: 9px; color: #6f6754; text-align: center;">Esc to skip · returns to main menu</div>`;
+      ? `<div style="margin-top: 10px; padding: 6px 8px; background: rgba(106,190,90,0.15); border: 1px solid var(--cy-mint); border-radius: 3px; color: var(--cy-mint); text-align: center; font-weight: 700;">All steps done — extract!</div>`
+      : `<div style="margin-top: 10px; font-size: 9px; color: var(--ce-soft-50); text-align: center;">Esc to skip · returns to main menu</div>`;
     this.root.innerHTML = head + rows + footer;
   }
 }
