@@ -1064,8 +1064,9 @@ export class Combat {
           mesh.position.z = nz;
         }
         mesh.position.y += fp.vy * dt;
-        fp.vx *= 1 - Math.min(1, 1.8 * dt);
-        fp.vz *= 1 - Math.min(1, 1.8 * dt);
+        const damp = Math.exp(-1.8 * dt);   // frame-rate-independent decay
+        fp.vx *= damp;
+        fp.vz *= damp;
       }
       const k = Math.max(0, 1 - fp.t / fp.life);
       const scale = baseScale * (1 + (fp.grow * (1 - k) * 0.6));

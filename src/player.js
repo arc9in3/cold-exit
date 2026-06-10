@@ -2484,10 +2484,12 @@ export function createPlayer(scene) {
       state._rollPivotY =  HIP_H * (1 - c) - 0.22 * Math.sin(t * Math.PI);
       state._rollPivotZ = -HIP_H * s * Math.cos(yaw);
     } else {
-      group.rotation.x = THREE.MathUtils.lerp(group.rotation.x, 0, Math.min(1, dt * 14));
-      state._rollPivotX = THREE.MathUtils.lerp(state._rollPivotX || 0, 0, Math.min(1, dt * 14));
-      state._rollPivotY = THREE.MathUtils.lerp(state._rollPivotY || 0, 0, Math.min(1, dt * 14));
-      state._rollPivotZ = THREE.MathUtils.lerp(state._rollPivotZ || 0, 0, Math.min(1, dt * 14));
+      // dt-correct exponential ease — frame-rate independent recovery.
+      const rollK = 1 - Math.exp(-14 * dt);
+      group.rotation.x = THREE.MathUtils.lerp(group.rotation.x, 0, rollK);
+      state._rollPivotX = THREE.MathUtils.lerp(state._rollPivotX || 0, 0, rollK);
+      state._rollPivotY = THREE.MathUtils.lerp(state._rollPivotY || 0, 0, rollK);
+      state._rollPivotZ = THREE.MathUtils.lerp(state._rollPivotZ || 0, 0, rollK);
     }
     group.position.x += state._rollPivotX || 0;
     group.position.y += state._rollPivotY || 0;
@@ -2498,7 +2500,7 @@ export function createPlayer(scene) {
     const stanceY =
       state.mode === MODE.SLIDE ? 0.65 :
       1.0;
-    group.scale.y = THREE.MathUtils.lerp(group.scale.y, stanceY, Math.min(1, dt * 15));
+    group.scale.y = THREE.MathUtils.lerp(group.scale.y, stanceY, 1 - Math.exp(-15 * dt));
 
     // Lower the muzzle when crouched so the player can shoot under low gaps /
     // lose the line over regular low cover.

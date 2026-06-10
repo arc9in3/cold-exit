@@ -797,7 +797,7 @@ export class MeleeEnemyManager {
         const dp = e.deathPhys;
         if (dp && !dp.settled) {
           dp.vy -= 18 * dt;
-          const drag = 1 - Math.min(1, 3.5 * dt);
+          const drag = Math.exp(-3.5 * dt);   // frame-rate-independent decay
           dp.vx *= drag; dp.vz *= drag;
           const nx = e.group.position.x + dp.vx * dt;
           const nz = e.group.position.z + dp.vz * dt;
@@ -837,8 +837,10 @@ export class MeleeEnemyManager {
 
       if (!tunables.ai.active) {
         e.state = STATE.IDLE;
-        e.alertMat.opacity = THREE.MathUtils.lerp(e.alertMat.opacity, 0, Math.min(1, dt * 10));
-        e.telMat.opacity = THREE.MathUtils.lerp(e.telMat.opacity, 0, Math.min(1, dt * 10));
+        // dt-correct exponential ease (frame-rate independent) — the old
+        // `Math.min(1, dt * k)` alpha converged 4× slower at 120Hz than 30Hz.
+        e.alertMat.opacity = THREE.MathUtils.lerp(e.alertMat.opacity, 0, 1 - Math.exp(-10 * dt));
+        e.telMat.opacity = THREE.MathUtils.lerp(e.telMat.opacity, 0, 1 - Math.exp(-10 * dt));
         if (e.rig && !e._animSkip) updateAnim(e.rig, { speed: 0, meleeStance: true }, dt);
         continue;
       }
@@ -849,7 +851,7 @@ export class MeleeEnemyManager {
       // feel properly cancelled.
       if ((e.staggerT || 0) > 0) {
         e.staggerT = Math.max(0, e.staggerT - dt);
-        e.telMat.opacity = THREE.MathUtils.lerp(e.telMat.opacity, 0, Math.min(1, dt * 12));
+        e.telMat.opacity = THREE.MathUtils.lerp(e.telMat.opacity, 0, 1 - Math.exp(-12 * dt));
         if (e.rig && !e._animSkip) updateAnim(e.rig, { speed: 0, meleeStance: true }, dt);
         continue;
       }
@@ -857,7 +859,7 @@ export class MeleeEnemyManager {
       // Stun grenade lockdown — fully frozen for the stunT window.
       if ((e.stunT || 0) > 0) {
         e.stunT = Math.max(0, e.stunT - dt);
-        e.telMat.opacity = THREE.MathUtils.lerp(e.telMat.opacity, 0, Math.min(1, dt * 12));
+        e.telMat.opacity = THREE.MathUtils.lerp(e.telMat.opacity, 0, 1 - Math.exp(-12 * dt));
         if (e.rig && !e._animSkip) updateAnim(e.rig, { speed: 0, meleeStance: false }, dt);
         continue;
       }
@@ -990,7 +992,7 @@ export class MeleeEnemyManager {
       if (e.deepSleepT <= 0) e.deepSleepT = 0;
       // Drop the alert ring so it visually reads as un-aggroed.
       if (e.alertMat) {
-        e.alertMat.opacity = THREE.MathUtils.lerp(e.alertMat.opacity, 0, Math.min(1, dt * 10));
+        e.alertMat.opacity = THREE.MathUtils.lerp(e.alertMat.opacity, 0, 1 - Math.exp(-10 * dt));
       }
       if (e.rig && !e._animSkip) updateAnim(e.rig, { speed: 0, meleeStance: true }, dt);
       return;
@@ -1269,7 +1271,7 @@ export class MeleeEnemyManager {
     }
 
     const targetAlpha = e.state === STATE.IDLE ? 0 : (e.state === STATE.WINDUP ? 1 : 0.6);
-    e.alertMat.opacity = THREE.MathUtils.lerp(e.alertMat.opacity, targetAlpha, Math.min(1, dt * 10));
+    e.alertMat.opacity = THREE.MathUtils.lerp(e.alertMat.opacity, targetAlpha, 1 - Math.exp(-10 * dt));
 
     // Face the player when engaged. Smoothly lerp toward the target
     // yaw instead of snapping — looks far more grounded and lets
@@ -1506,7 +1508,7 @@ export class MeleeEnemyManager {
     } else if (e.state === STATE.WINDUP) {
       e.swingT -= dt;
       e.telMat.opacity = THREE.MathUtils.lerp(
-        e.telMat.opacity, 0.2 + 0.6 * (1 - e.swingT / tunables.meleeEnemy.swingWindup), Math.min(1, dt * 14),
+        e.telMat.opacity, 0.2 + 0.6 * (1 - e.swingT / tunables.meleeEnemy.swingWindup), 1 - Math.exp(-14 * dt),
       );
       if (e.swingT <= 0) {
         // Strike lands. Player iFrames negate the hit.

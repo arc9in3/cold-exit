@@ -1369,7 +1369,7 @@ export class GunmanManager {
           dp.vy -= 18 * dt;          // gravity
           // Drag — slight horizontal damping each frame so the slide
           // decays into a rest rather than continuing forever.
-          const drag = 1 - Math.min(1, 3.5 * dt);
+          const drag = Math.exp(-3.5 * dt);   // frame-rate-independent decay
           dp.vx *= drag; dp.vz *= drag;
           const nx = g.group.position.x + dp.vx * dt;
           const nz = g.group.position.z + dp.vz * dt;
@@ -1436,7 +1436,9 @@ export class GunmanManager {
 
       if (!tunables.ai.active) {
         g.state = STATE.IDLE;
-        g.alertMat.opacity = THREE.MathUtils.lerp(g.alertMat.opacity, 0, Math.min(1, dt * 10));
+        // dt-correct exponential ease (frame-rate independent) — the old
+        // `Math.min(1, dt * k)` alpha converged 4× slower at 120Hz than 30Hz.
+        g.alertMat.opacity = THREE.MathUtils.lerp(g.alertMat.opacity, 0, 1 - Math.exp(-10 * dt));
         if (g.rig && !g._animSkip) updateAnim(g.rig, { speed: 0 }, dt);
         continue;
       }
@@ -1993,7 +1995,7 @@ export class GunmanManager {
       let delta = lookYaw - curYaw;
       while (delta > Math.PI) delta -= Math.PI * 2;
       while (delta < -Math.PI) delta += Math.PI * 2;
-      g.group.rotation.y += delta * Math.min(1, dt * 3);
+      g.group.rotation.y += delta * (1 - Math.exp(-3 * dt));
     }
 
     // Boss aggression overlay — bosses react faster and push closer.
@@ -2300,7 +2302,7 @@ export class GunmanManager {
           let dy = targetYaw - g.group.rotation.y;
           while (dy > Math.PI) dy -= 2 * Math.PI;
           while (dy < -Math.PI) dy += 2 * Math.PI;
-          g.group.rotation.y += dy * Math.min(1, dt * 1.4);
+          g.group.rotation.y += dy * (1 - Math.exp(-1.4 * dt));
         }
       }
     }
@@ -2422,7 +2424,7 @@ export class GunmanManager {
     const targetAlpha =
       g.state === STATE.FIRING ? 1.0 :
       g.state === STATE.ALERTED ? 0.6 : 0;
-    g.alertMat.opacity = THREE.MathUtils.lerp(g.alertMat.opacity, targetAlpha, Math.min(1, dt * 10));
+    g.alertMat.opacity = THREE.MathUtils.lerp(g.alertMat.opacity, targetAlpha, 1 - Math.exp(-10 * dt));
 
     // Face the player only when they're actually visible. Otherwise face
     // the last-known direction (or pose idle) so the AI's gun doesn't

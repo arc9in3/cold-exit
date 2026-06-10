@@ -430,7 +430,7 @@ export class MegaBossEcho {
     const moved = Math.hypot(dx, dz) / Math.max(1e-4, dt);
     // Smooth so gait doesn't twitch frame to frame.
     const prevSpeed = this._driftSpeed || 0;
-    this._driftSpeed = prevSpeed + (Math.min(1.6, moved * 0.6) - prevSpeed) * Math.min(1, dt * 6);
+    this._driftSpeed = prevSpeed + (Math.min(1.6, moved * 0.6) - prevSpeed) * (1 - Math.exp(-6 * dt));
     // Slow facing yaw toward direction of travel so legs lead the body.
     if (moved > 0.05) {
       const targetYaw = Math.atan2(dx, dz);
@@ -438,7 +438,7 @@ export class MegaBossEcho {
       let delta = targetYaw - cur;
       while (delta >  Math.PI) delta -= Math.PI * 2;
       while (delta < -Math.PI) delta += Math.PI * 2;
-      this.group.rotation.y = cur + delta * Math.min(1, dt * 2.0);
+      this.group.rotation.y = cur + delta * (1 - Math.exp(-2.0 * dt));
     }
   }
 
