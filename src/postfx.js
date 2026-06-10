@@ -199,7 +199,7 @@ const FinisherShader = {
     // top of the bloom, instead of getting smeared by it.
     uOutlinePx:        { value: new THREE.Vector2(1 / 1280, 1 / 720) },
     uOutlineColor:     { value: new THREE.Color(0x080812) },
-    uOutlineStrength:  { value: 0.78 },
+    uOutlineStrength:  { value: 0.30 },
     uOutlineThreshold: { value: 0.20 },
     uOutlineSoftness:  { value: 0.10 },
     uContrast:    { value: 1.08 }, // 1.0 = no change. >1 crushes blacks + lifts highlights
@@ -212,13 +212,13 @@ const FinisherShader = {
     // and flattened the highlight tint to a near-neutral cream.
     uShadowTint:  { value: new THREE.Color(0xc0c8d4) },
     uHighlightTint: { value: new THREE.Color(0xfff4e0) },
-    uGradeStrength: { value: 0.40 }, // overall grade mix — 0 = bypass, 1 = full
+    uGradeStrength: { value: 0.15 }, // overall grade mix — 0 = bypass, 1 = full
     // LoS mask — texture written by los_mask.js each frame. UVs match
     // the main camera's screen so we sample by vUv directly. Mask is
     // 1.0 where the player can see, 0.0 where occluded.
     tLosMask:  { value: null },
     uLosOn:    { value: 0.0 },     // 0 disables the LoS pass entirely (toggle / saves)
-    uLosDark:  { value: 0.30 },    // floor brightness applied outside LoS
+    uLosDark:  { value: 0.40 },    // floor brightness applied outside LoS (pass-2: 0.30->0.40, softens the fog-of-war crush so out-of-sight areas read as dim, not black)
     uLosSoft:  { value: 0.06 },    // smoothstep edge width on the mask
     // Hurt vignette — two channels.
     //   uHurt      — transient hit flash; wide radial with a center
@@ -403,7 +403,7 @@ export function createPostFx(renderer, scene, camera) {
   // surfaces don't bleed white into adjacent pixels. The cel-shaded
   // look reads cleaner without heavy bloom; the highlights still
   // glow but they no longer wash out outlines + UI edges nearby.
-  const bloom = new KawaseBloomPass(sw, sh, 0.40, 0.90);
+  const bloom = new KawaseBloomPass(sw, sh, 0.20, 0.90);
   composer.addPass(bloom);
 
   const finisher = new ShaderPass(FinisherShader);

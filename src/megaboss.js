@@ -132,6 +132,29 @@ const _flameMat = new THREE.MeshBasicMaterial({
   depthWrite: false, blending: THREE.AdditiveBlending, side: THREE.DoubleSide,
 });
 
+// Module-level shared geometries for hot spawners. Each bullet,
+// smoke puff, flame tongue, ember, etc. used to allocate a fresh
+// SphereGeometry per spawn — at sweep-attack cadence that's ~30
+// allocations per second on a 3-phase Arboter fight. Sharing the
+// geometry costs nothing (same shape every time) and lets the GPU
+// keep one buffer for the whole fight. Stamped skipDispose-style
+// implicitly: the destroy() loop disposes anything not flagged, so
+// these LIVE module-level past any single boss lifetime and never
+// get disposed.
+const _bulletGeom    = new THREE.SphereGeometry(0.25, 8, 6);
+const _smokePuffGeom = new THREE.SphereGeometry(0.5, 8, 6);
+const _flamePuffGeom = new THREE.SphereGeometry(0.55, 10, 6);
+const _emberGeom     = new THREE.SphereGeometry(0.12, 6, 4);
+const _grenadeGeom   = new THREE.SphereGeometry(0.18, 8, 6);
+const _fuseGeom      = new THREE.SphereGeometry(0.08, 6, 4);
+// Mark all the shared geoms so the destroy path can skip them — we
+// never want to dispose a geometry that's still referenced by other
+// megaboss instances or by bullets still in flight.
+for (const g of [_bulletGeom, _smokePuffGeom, _flamePuffGeom, _emberGeom, _grenadeGeom, _fuseGeom]) {
+  g.userData = g.userData || {};
+  g.userData.skipDispose = true;
+}
+
 // --- Tunables ------------------------------------------------------
 const _BOSS_RADIUS = 2.4;
 const _HIT_GRACE_SEC = 0.55;
@@ -478,7 +501,7 @@ export class MegaBoss {
     if (!this._smokePuffPool) {
       this._smokePuffPool = [];
       for (let i = 0; i < 14; i++) {
-        const m = new THREE.Mesh(new THREE.SphereGeometry(0.5, 8, 6), _smokeMat.clone());
+        const m = new THREE.Mesh(_smokePuffGeom, _smokeMat.clone());
         m.material.opacity = 0;
         m.material.color.setHex(0x141414);
         m.visible = false;
@@ -509,7 +532,7 @@ export class MegaBoss {
         { x:  0.0, y: 1.8, z: -1.6 },
       ];
       for (const p of patchPositions) {
-        const m = new THREE.Mesh(new THREE.SphereGeometry(0.55, 10, 6), _flameMat.clone());
+        const m = new THREE.Mesh(_flamePuffGeom, _flameMat.clone());
         m.material.color.setHex(0xff4020);
         m.material.opacity = 0;
         m.position.set(p.x, p.y, p.z);
@@ -526,7 +549,7 @@ export class MegaBoss {
         depthWrite: false, blending: THREE.AdditiveBlending,
       });
       for (let i = 0; i < 16; i++) {
-        const m = new THREE.Mesh(new THREE.SphereGeometry(0.12, 6, 4), emberMat.clone());
+        const m = new THREE.Mesh(_emberGeom, emberMat.clone());
         m.visible = false;
         m.frustumCulled = false;
         this.boss.add(m);
@@ -1018,7 +1041,7 @@ export class MegaBoss {
     const jitter = (Math.random() - 0.5) * 0.05 * this.spreadScale;
     const dirX = Math.sin(ang + jitter);
     const dirZ = Math.cos(ang + jitter);
-    const m = new THREE.Mesh(new THREE.SphereGeometry(0.25, 8, 6), _bulletMat);
+    const m = new THREE.Mesh(_bulletGeom, _bulletMat);
     m.position.set(
       this.boss.position.x + dirX * 2.5, 1.6,
       this.boss.position.z + dirZ * 2.5,
@@ -1211,10 +1234,7 @@ export class MegaBoss {
   }
 
   _launchGrenade(playerPos, isGas = false) {
-    const m = new THREE.Mesh(
-      new THREE.SphereGeometry(0.18, 8, 6),
-      isGas ? _gasGrenadeMat : _grenadeMat,
-    );
+    const m = new THREE.Mesh(_grenadeGeom, isGas ? _gasGrenadeMat : _grenadeMat);
     const ox = this.boss.position.x;
     const oz = this.boss.position.z;
     m.position.set(ox - 1.2, 3.4, oz);
@@ -1225,7 +1245,7 @@ export class MegaBoss {
     const dz = aimZ - m.position.z;
     const vy = (0.5 - m.position.y) / flightTime + 0.5 * 9.8 * flightTime;
     const fuse = isGas ? 0.4 : (0.8 + Math.random() * 1.7);
-    const fuseMesh = new THREE.Mesh(new THREE.SphereGeometry(0.08, 6, 4), _grenadeFuseMat);
+    const fuseMesh = new THREE.Mesh(_fuseGeom, _grenadeFuseMat);
     fuseMesh.position.y = 0.18;
     m.add(fuseMesh);
     this.scene.add(m);
@@ -1298,7 +1318,12 @@ export class MegaBoss {
       }
       if (b.t >= b.life) {
         this.scene.remove(b.mesh);
-        b.mesh.geometry.dispose();
+        // Bullet geometry is module-shared (skipDispose) — never call
+        // dispose here or subsequent bullets render as invisible / GL
+        // errors. Material is also shared (_bulletMat); same rule.
+        if (b.mesh.geometry && !b.mesh.geometry.userData?.skipDispose) {
+          b.mesh.geometry.dispose();
+        }
         this.bullets.splice(i, 1);
       }
     }
@@ -1441,6 +1466,15 @@ export class MegaBoss {
             life: 6.5, t: 0, lastTick: 0,
             dmg: g.dmg,
           });
+          // Coop: the grenade-landing ring already broadcast covered
+          // just the fuse window (1-3s). The gas cloud itself persists
+          // and ticks damage for 6.5s after detonation — broadcast a
+          // second green ring so the joiner can see the ongoing zone,
+          // not just the impact moment.
+          this.ctx.coopBroadcastRing?.(
+            g.mesh.position.x, g.mesh.position.z,
+            g.radius, 6.5, 0x40ff40,
+          );
         } else {
           if (this.ctx.combat?.spawnExplosion) {
             this.ctx.combat.spawnExplosion(g.mesh.position.clone(), g.radius);
@@ -1459,7 +1493,13 @@ export class MegaBoss {
         }
         if (this.ctx.sfx?.explode) this.ctx.sfx.explode();
         this.scene.remove(g.mesh);
-        g.mesh.geometry.dispose();
+        // Grenade body geometry is module-shared (skipDispose); the
+        // fuse child shares its own pool. Removing the parent from
+        // the scene is enough — disposing here would orphan the
+        // shared GL buffer for every subsequent grenade.
+        if (g.mesh.geometry && !g.mesh.geometry.userData?.skipDispose) {
+          g.mesh.geometry.dispose();
+        }
         g._dead = true;
       }
     }
@@ -1502,12 +1542,29 @@ export class MegaBoss {
   }
 
   _cleanupHazards() {
-    for (const b of this.bullets) { this.scene.remove(b.mesh); b.mesh.geometry.dispose(); }
-    for (const s of this.shells)  { this.scene.remove(s.ringMesh); s.ringMesh.geometry.dispose(); s.ringMat.dispose(); }
-    for (const g of this.grenades){ this.scene.remove(g.mesh); g.mesh.geometry.dispose(); }
-    for (const g of this.gasGrenades){ this.scene.remove(g.mesh); g.mesh.geometry.dispose(); }
-    for (const f of this.firePools){ this.scene.remove(f.mesh); f.mesh.geometry.dispose(); f.mat.dispose(); }
-    for (const c of this.gasClouds){ this.scene.remove(c.mesh); c.mesh.geometry.dispose(); c.mat.dispose(); }
+    // safeDisposeGeom — bullets, grenades, fuses now use module-level
+    // shared geometries flagged skipDispose. The previous unconditional
+    // dispose() here freed those shared geoms; the next Arboter spawn
+    // (or even the next bullet in the SAME fight) then tried to render
+    // a disposed buffer. Guard the dispose so shared geoms survive.
+    const safeDispose = (mesh) => {
+      if (!mesh) return;
+      this.scene.remove(mesh);
+      if (mesh.geometry && !mesh.geometry.userData?.skipDispose) {
+        mesh.geometry.dispose();
+      }
+    };
+    for (const b of this.bullets)     safeDispose(b.mesh);
+    for (const s of this.shells)    { safeDispose(s.ringMesh); s.ringMat?.dispose(); }
+    // Grenades carry a child fuse mesh; the fuse also uses a shared
+    // geom but lives under the grenade group, so removing the parent
+    // takes the fuse out of the scene tree without disposing.
+    for (const g of this.grenades)    safeDispose(g.mesh);
+    for (const g of this.gasGrenades) safeDispose(g.mesh);
+    // Fire pools and gas clouds DO own per-instance geometries
+    // (variable radius); dispose normally + drop the material clone.
+    for (const f of this.firePools)  { safeDispose(f.mesh); f.mat?.dispose(); }
+    for (const c of this.gasClouds)  { safeDispose(c.mesh); c.mat?.dispose(); }
     this.bullets.length = 0;
     this.shells.length = 0;
     this.grenades.length = 0;
@@ -1603,7 +1660,16 @@ export class MegaBoss {
     if (this.boss) {
       this.scene.remove(this.boss);
       this.boss.traverse(o => {
-        if (o.geometry && !o.geometry.userData?.sharedRigGeom) o.geometry.dispose?.();
+        // Two skip flags now: `sharedRigGeom` is the rig pool used
+        // by the player + enemies; `skipDispose` is for the module-
+        // level shared geoms I added (smoke puffs, fire patches,
+        // embers — all parented under boss). Without checking the
+        // second flag, this traverse disposed those shared geoms on
+        // boss death and the next Arboter spawn rendered as empty.
+        if (!o.geometry) return;
+        const ud = o.geometry.userData;
+        if (ud?.sharedRigGeom || ud?.skipDispose) return;
+        o.geometry.dispose?.();
       });
     }
     if (this._barEl) {

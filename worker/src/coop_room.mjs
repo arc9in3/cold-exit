@@ -53,6 +53,7 @@ const KIND_ALLOWED_FROM_HOST = new Set([
   'rpc-downed',       // peer entered downed state
   'rpc-revived',      // peer left downed state (revived/full HP)
   'rpc-revive-progress', // periodic broadcast of an active revive bar
+  'rpc-team-kill',    // host broadcasts team kill-count + contract progress for an enemy kill
 ]);
 const KIND_ALLOWED_FROM_JOINER = new Set([
   'rpc-shoot',
@@ -71,6 +72,10 @@ const KIND_ALLOWED_FROM_ANY = new Set([
   'fx-tracer-self',   // a peer fired their gun — purely visual
   'rpc-peer-died',    // a peer's player truly died (post-bleedout / solo)
   'fx-throwable',     // a peer threw a grenade/molotov/etc. (visual only)
+  'fx-projectile',    // a peer fired a non-grenade projectile (e.g. crossbow bolt) — visual only
+  'rpc-keycard-grant',// either peer killed a key-holder — team-grant the keycard color
+  'rpc-door-open',    // either peer used a keycard to unlock a door — mirror the open
+  'fx-flame',         // a peer fired a flamethrower tick (player or host's AI flamer) — visual only
 ]);
 
 export class CoopRoom {

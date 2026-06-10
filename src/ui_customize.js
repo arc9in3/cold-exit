@@ -68,6 +68,9 @@ export class CustomizeUI {
     this.root.addEventListener('mousedown', (e) => {
       if (e.target === this.root) this.hide();
     });
+    // Escape routes through main.js's dismissTopModal — that calls
+    // customizeUI.hide() when the modal is the top of the stack,
+    // without racing the game's pause-menu open.
   }
 
   open(weapon) {

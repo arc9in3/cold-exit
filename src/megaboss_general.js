@@ -278,16 +278,15 @@ export class MegaBossGeneral {
     if (!this.ctx.spawnPhalanxBearer) return;
     const gx = this.group.position.x;
     const gz = this.group.position.z;
-    // Initial stand-off — straight forward (toward player at SW).
-    const fx = -1, fz = -1;
-    const fd = Math.SQRT2;
-    const baseX = gx + (fx / fd) * T.phalanxStandoffDist;
-    const baseZ = gz + (fz / fd) * T.phalanxStandoffDist;
-    const px = -fz / fd, pz = fx / fd;
-    for (let i = 0; i < T.phalanxCount; i++) {
-      const slot = (i - (T.phalanxCount - 1) / 2) * T.phalanxSlotSpacing;
-      const sx = baseX + px * slot;
-      const sz = baseZ + pz * slot;
+    // Ring layout — bearers stand on a circle of `phalanxRingRadius`
+    // around the General. Each gets a fixed angular slot 2π/count
+    // apart; the entire ring drifts slowly at runtime so it doesn't
+    // read as a static rig.
+    const count = T.phalanxCount;
+    for (let i = 0; i < count; i++) {
+      const theta = (i / count) * Math.PI * 2;
+      const sx = gx + Math.cos(theta) * T.phalanxRingRadius;
+      const sz = gz + Math.sin(theta) * T.phalanxRingRadius;
       const e = this.ctx.spawnPhalanxBearer(sx, sz, T.phalanxHpMult);
       if (e) this.phalanx.push(e);
     }
@@ -338,33 +337,22 @@ export class MegaBossGeneral {
 
   _tickPhalanx(dt) {
     if (!this.phalanx.length) return;
-    const playerPos = this.ctx.getPlayerPos?.();
-    if (!playerPos) return;
     const T = _T();
     const gx = this.group.position.x;
     const gz = this.group.position.z;
-    // Unit vector from General toward player. Phalanx sits between
-    // them, `phalanxStandoffDist` m from the General, on a line
-    // perpendicular to that direction.
-    const toPlayerX = playerPos.x - gx;
-    const toPlayerZ = playerPos.z - gz;
-    const d = Math.hypot(toPlayerX, toPlayerZ);
-    if (d < 0.01) return;
-    const fx = toPlayerX / d;
-    const fz = toPlayerZ / d;
-    const baseX = gx + fx * T.phalanxStandoffDist;
-    const baseZ = gz + fz * T.phalanxStandoffDist;
-    const px = -fz, pz = fx;
     const liveCount = this.phalanx.length;
+    // Survivors redistribute evenly around the full circle so a hole
+    // never lets the player walk in. Ring also drifts slowly so the
+    // formation breathes rather than reading as a static prop.
+    const driftPhase = (this._t || 0) * (T.phalanxRingDriftHz || 0);
     for (let i = 0; i < liveCount; i++) {
       const e = this.phalanx[i];
       if (!e || !e.alive) continue;
-      // Slot index across the LIVE count so a fallen bearer doesn't
-      // leave a gap — survivors re-center across the line.
-      const slot = (i - (liveCount - 1) / 2) * T.phalanxSlotSpacing;
-      const jitter = Math.sin(this._t * T.phalanxJitterHz + i * 1.3) * T.phalanxJitterAmp;
-      const tx = baseX + px * (slot + jitter);
-      const tz = baseZ + pz * (slot + jitter);
+      const theta = driftPhase + (i / liveCount) * Math.PI * 2;
+      const radial = T.phalanxRingRadius
+        + Math.sin(this._t * T.phalanxJitterHz + i * 1.3) * T.phalanxJitterAmp;
+      const tx = gx + Math.cos(theta) * radial;
+      const tz = gz + Math.sin(theta) * radial;
       const cx = e.group.position.x;
       const cz = e.group.position.z;
       const ddx = tx - cx;
@@ -375,9 +363,13 @@ export class MegaBossGeneral {
         e.group.position.x = cx + (ddx / dd) * step;
         e.group.position.z = cz + (ddz / dd) * step;
       }
-      // Slow facing toward the player. Standard shortest-arc lerp.
-      const targetYaw = Math.atan2(playerPos.x - e.group.position.x,
-                                    playerPos.z - e.group.position.z);
+      // Face OUTWARD — away from General. Every bearer's shield arc
+      // points at the perimeter, so no matter what angle the player
+      // approaches from there's a shield covering it.
+      const outX = e.group.position.x - gx;
+      const outZ = e.group.position.z - gz;
+      // Match the slot-yaw convention used elsewhere: atan2(x, z).
+      const targetYaw = Math.atan2(outX, outZ);
       const cur = e.group.rotation.y;
       let delta = targetYaw - cur;
       while (delta >  Math.PI) delta -= Math.PI * 2;

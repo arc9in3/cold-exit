@@ -284,7 +284,7 @@ export const DEFAULT_DIMS = {
     // V-taper silhouette — wider top, narrower waist. Bumped chestTopR
     // and slimmed chestBotR so the cylinder reads with shoulders-out
     // and a defined waistline. Hip cylinder slightly slimmed to match.
-    pelvisH: 0.17, pelvisTopR: 0.18, pelvisBotR: 0.21, pelvisY: 0.12,
+    pelvisH: 0.17, pelvisTopR: 0.185, pelvisBotR: 0.225, pelvisY: 0.12,
     // Crotch wedge — small downward-tapering cylinder filling the
     // inverted-V gap between pelvis bottom and the inner-thigh tops.
     // Top (crotchTopR) should roughly match the inner-edge of the
@@ -294,13 +294,13 @@ export const DEFAULT_DIMS = {
     // within the hips group (m, scaled by rig.scale).
     crotchTopR: 0.13, crotchBotR: 0.07, crotchH: 0.06,
     crotchX: 0, crotchY: 0.005, crotchZ: 0,
-    stomachH: 0.235, stomachTopR: 0.24, stomachBotR: 0.18, stomachY: 0.22,
+    stomachH: 0.235, stomachTopR: 0.25, stomachBotR: 0.165, stomachY: 0.22,
     // Single chest cylinder. The ribs split was an experiment that
     // added complexity without payoff — torso reads as one taper
     // anyway and the seam was just one more thing to align. Reverted
     // to the original chestH so this DIM block matches all the legacy
     // call sites.
-    chestH: 0.345, chestTopR: 0.32, chestBotR: 0.22,
+    chestH: 0.345, chestTopR: 0.345, chestBotR: 0.21,
     collarH: 0.055, collarTopR: 0.11, collarBotR: 0.32, collarDY: 0.057,
     // Bottom radius lifted from 0.22 → 0.28 so the cone tapers less
     // aggressively — the previous value created a visible polygon ring
@@ -315,19 +315,19 @@ export const DEFAULT_DIMS = {
     // pitch/twist. Bridges the visual gap between the shoulder line
     // and the neck base; without it the shoulders look like two
     // pegged-on spheres at the corners of a flat chest top.
-    trapezius: { r: 0.20, y: 0.34, z: 0, scaleY: 0.40, scaleX: 1.50, scaleZ: 1.00 },
+    trapezius: { r: 0.21, y: 0.34, z: 0, scaleY: 0.40, scaleX: 1.55, scaleZ: 1.00 },
   },
   legs: {
     hipX: 0.18, hipJointY: 0.002,
-    thighH: 0.42, thighTopR: 0.135, thighBotR: 0.095,
-    calfH: 0.59, calfTopR: 0.10, calfBotR: 0.075,
+    thighH: 0.42, thighTopR: 0.148, thighBotR: 0.088,
+    calfH: 0.59, calfTopR: 0.105, calfBotR: 0.068,
     footH: 0.08, footW: 0.16, footD: 0.30, footZ: 0.06,
-    hipBulgeR: 0.14,
-    kneeBulgeR: 0.11,
+    hipBulgeR: 0.155,
+    kneeBulgeR: 0.10,
     kneePadW: 0.20, kneePadH: 0.11, kneePadD: 0.11, kneePadZ: 0.065,
     thighRigW: 0.06, thighRigH: 0.18, thighRigD: 0.22,
     thighRigX: 0.11, thighRigYK: 0, // * thighH
-    bootTopR: 0.10, bootTopH: 0.08, bootTopYK: -0.9, // * calfH
+    bootTopR: 0.105, bootTopH: 0.105, bootTopYK: -0.85, // * calfH
     // Ankle blend — small sphere at the ankle pivot bridging the calf
     // bottom into the boot top. Parented to the ankle Group so it
     // moves with the foot during walks. Fills the visible gap that
@@ -344,11 +344,11 @@ export const DEFAULT_DIMS = {
   arms: {
     // Shoulders pushed outboard for the V-silhouette. Bigger
     // shoulderBulge + shoulderPad reads as muscled / armored.
-    shoulderInset: 0.34, shoulderYK: 0.80, // * chestH
-    upperArmH: 0.35, upperArmTopR: 0.105, upperArmBotR: 0.08,
-    forearmH: 0.30, forearmTopR: 0.09, forearmBotR: 0.065,
-    shoulderBulgeR: 0.15,
-    elbowBulgeR: 0.08,
+    shoulderInset: 0.36, shoulderYK: 0.80, // * chestH
+    upperArmH: 0.35, upperArmTopR: 0.115, upperArmBotR: 0.078,
+    forearmH: 0.30, forearmTopR: 0.092, forearmBotR: 0.058,
+    shoulderBulgeR: 0.16,
+    elbowBulgeR: 0.078,
     // Pauldron — sized to sit *on* the deltoid, not swallow it. Was 0.18
     // (read bigger than the head from front-3/4); 0.11 keeps the
     // armoured-shoulder read without the visor-helmet-pauldron silhouette.
@@ -360,7 +360,7 @@ export const DEFAULT_DIMS = {
     // archetype overrides push it bigger for male / smaller for
     // female. Sells "this arm has muscle" instead of reading as
     // a tube of pixels.
-    bicep: { r: 0.10, yK: 0.45, z: 0.04, scaleY: 0.85, scaleX: 1.05, scaleZ: 1.10 },
+    bicep: { r: 0.11, yK: 0.45, z: 0.04, scaleY: 0.90, scaleX: 1.08, scaleZ: 1.12 },
   },
   rifleAnchor: {
     x: 0.23, yK: 0.82, z: 0.04, // yK * chestH
@@ -370,9 +370,9 @@ export const DEFAULT_DIMS = {
     // there's a visible neck segment between the chest cap and the
     // cranium. Previously the head sat directly on the chest plate /
     // collar and read Lego-figure-ish.
-    neckTopR: 0.08, neckBotR: 0.09, neckH: 0.22, neckMeshY: 0.09,
-    headY: 0.14,
-    craniumR: 0.15, craniumStretchY: 1.15, craniumStretchZ: 1.05, craniumY: 0.18,
+    neckTopR: 0.075, neckBotR: 0.092, neckH: 0.245, neckMeshY: 0.10,
+    headY: 0.155,
+    craniumR: 0.155, craniumStretchY: 1.20, craniumStretchZ: 1.08, craniumY: 0.18,
     jawW: 0.075, jawH: 0.10, jawD: 0.22, jawY: 0.06,
   },
 };
@@ -392,11 +392,11 @@ export const DEFAULT_DIMS_FEMALE = {
     // stomachTopR so chest + stomach read as one continuous taper
     // from shoulder to waist.
     stomachH: 0.26,
-    stomachTopR: 0.18,
-    stomachBotR: 0.11,   // wasp waist
+    stomachTopR: 0.175,
+    stomachBotR: 0.105,  // wasp waist
     chestH: 0.34,
-    chestTopR: 0.27,
-    chestBotR: 0.18,
+    chestTopR: 0.285,
+    chestBotR: 0.175,
     chestPlateTopR: 0.29,
     chestPlateBotR: 0.20,
     // Collar + belt SKIPPED on female: the bodyshapes ref shows a
@@ -473,8 +473,8 @@ export const DEFAULT_DIMS_FEMALE = {
     // the femur head is inside the hip bone.
     hipX: 0.13,
     thighH: 0.54,        // longer legs (push for the eve-ratio look)
-    thighTopR: 0.13,     // top retains volume so iliac shelf seamless
-    thighBotR: 0.075,    // tapers tighter at the knee
+    thighTopR: 0.138,    // top retains volume so iliac shelf seamless
+    thighBotR: 0.070,    // tapers tighter at the knee
     calfH: 0.70,         // longer + tapered
     calfTopR: 0.082,
     calfBotR: 0.045,     // very narrow at ankle (athletic calf taper)
@@ -551,7 +551,8 @@ export const DEFAULT_DIMS_FEMALE = {
     neckTopR: 0.06,
     neckBotR: 0.07,
     craniumR: 0.13,         // smaller head — anime proportions
-    craniumStretchY: 1.10,
+    craniumStretchY: 1.14,
+    craniumStretchZ: 1.06,
     jawW: 0.06, jawH: 0.08, jawD: 0.18,
     // Bust geometry — two flattened spheres on the chest plate. Pushed
     // up + forward and given more volume to match the prominent eve
@@ -1643,6 +1644,201 @@ export function buildRig(opts = {}) {
     scale,
     dims,
   };
+}
+
+// =====================================================================
+// Gear overlay — tactical kit added ON TOP of a built rig so enemies
+// read as kitted-out operators (helmets/visors, plate carriers,
+// bandoliers, pauldrons, hip pouches) instead of plain colored bodies.
+//
+// LIFECYCLE NOTE (important): these meshes are parented to the rig's
+// bones (rig.head / rig.chest / shoulder pivots / rig.hips), which all
+// live under rig.group. There is NO actor/rig pool in this codebase —
+// buildRig() runs fresh on every GunmanManager.spawn / MeleeEnemyManager
+// .spawn, and on level regen the managers' removeAll() walks
+// `g.group.traverse(...)` disposing every geometry/material that isn't
+// flagged `sharedRigGeom`. Because these overlay meshes hang under
+// g.group and their geometries are freshly allocated here (NOT the
+// shared _cyl/_box/_sph cache, so NOT stamped sharedRigGeom), they are
+// disposed correctly by that same traversal. They are added AFTER
+// buildRig returns and are NOT pushed into rig.meshes, so the rig
+// instancer (which only iterates rig.meshes in register()) never pools
+// them — they render as ordinary direct-draw meshes exactly like the
+// pre-existing helmet/chestPlate cues this replaces. No leak, no
+// duplication across recycles because there is no recycle.
+//
+// Geometry here is intentionally allocated per-actor (not via the
+// _geomCache helpers) so each actor's gear can be disposed
+// independently and so we never accidentally tag a gear buffer as a
+// shared rig buffer. Per-actor overlay mesh count is kept modest
+// (helmet + optional visor + at most one chest layer + optional strap
+// + optional pauldrons + optional pouch ≈ 1-7 small meshes) so a
+// 20-40 enemy horde stays within draw budget.
+//
+// Gating: pass tier ('normal'|'subBoss'|'boss'), variant id, and
+// gearLevel. Probabilities scale with gearLevel so deeper floors look
+// more kitted; bosses force the full set; specific variants (tank,
+// shieldBearer) get pauldrons.
+// =====================================================================
+export function addGearOverlay(rig, opts = {}) {
+  if (!rig || !rig.head || !rig.chest) return;
+  const tier      = opts.tier || 'normal';
+  const variant   = opts.variant || 'standard';
+  const gearLevel = opts.gearLevel | 0;
+  const isBoss    = tier === 'boss';
+  const isSubBoss = tier === 'subBoss';
+  const heavy     = variant === 'tank' || variant === 'shieldBearer';
+  // Scale all overlay geometry by the rig's own build scale so kit
+  // sized for the ~1.85m primitive body tracks any actor scale. The
+  // outer group.scale (tier/variant size) multiplies on top for free.
+  const s = rig.scale || 1.0;
+  const rng = opts.rng || Math.random;
+
+  // Palette — gearColor drives the metal kit; accent drives the visor
+  // glow / strap pop. Bosses get an authoritative bronze; sub-bosses
+  // burgundy; otherwise the caller's gearColor (variant role tone).
+  const gearHex = opts.gearColor != null ? opts.gearColor
+    : (isBoss ? 0x7a5020 : isSubBoss ? 0x6a1e2a : 0x3a4a5c);
+  const trimHex = _darken(gearHex, 0.45);
+  const accentHex = opts.accentColor != null ? opts.accentColor
+    : (isBoss ? 0xffb24a : isSubBoss ? 0xff5a6a : 0x39d6ff);
+  // Slightly metallic standard material, matching the existing chest
+  // plate / shield kit look (neon-noir, muted metal).
+  const mkGearMat = (hex, rough = 0.6, metal = 0.35) =>
+    new THREE.MeshStandardMaterial({ color: hex, roughness: rough, metalness: metal });
+
+  // ---- 1) Helmet (taller dome) + optional visor band ----------------
+  // Built on the existing half-sphere helmet but taller, with a tier-
+  // distinct color and an optional emissive visor band for higher kit.
+  if (isBoss || rng() < 0.40 + gearLevel * 0.08) {
+    const helmetColor = isBoss ? 0x6a1a1a : isSubBoss ? 0x3a1e44 : gearHex;
+    const helmet = new THREE.Mesh(
+      // Taller dome — phi sweep 0..0.62π (was 0.55π) reads as a fuller
+      // combat helmet rather than a skullcap.
+      new THREE.SphereGeometry(0.175 * s, 14, 9, 0, Math.PI * 2, 0, Math.PI * 0.62),
+      mkGearMat(helmetColor, 0.55, 0.3),
+    );
+    helmet.position.y = 0.175 * s;
+    helmet.scale.set(1.0, 1.08, 1.04);   // slight vertical stretch
+    helmet.castShadow = true;
+    helmet.userData.zone = 'head';
+    rig.head.add(helmet);
+
+    // Visor band — thin emissive arc across the brow. Higher gear /
+    // boss / sub-boss only, so basic grunts stay bare-domed.
+    if (isBoss || isSubBoss || rng() < 0.30 + gearLevel * 0.06) {
+      const vR = 0.16 * s;
+      const visor = new THREE.Mesh(
+        new THREE.CylinderGeometry(vR * 1.02, vR * 1.02, 0.05 * s, 16, 1, true,
+          -Math.PI * 0.5, Math.PI),
+        new THREE.MeshStandardMaterial({
+          color: 0x0a0e14, roughness: 0.3, metalness: 0.5,
+          emissive: accentHex, emissiveIntensity: isBoss ? 0.9 : 0.55,
+          side: THREE.DoubleSide,
+        }),
+      );
+      visor.position.set(0, 0.12 * s, 0.02 * s);
+      visor.userData.zone = 'head';
+      rig.head.add(visor);
+    }
+  }
+
+  // ---- 2) Tactical vest / chest rig --------------------------------
+  // ONE chest layer max (keeps mesh count low). Heavy variants + bosses
+  // get a plate carrier (two stacked plates + webbing strap read); mid
+  // kit gets a lighter webbing vest. Sits proud of the rig's built-in
+  // chestPlate. Parented to rig.chest so it tracks aim/recoil twist.
+  const wantVest = isBoss || heavy || rng() < 0.30 + gearLevel * 0.08;
+  if (wantVest) {
+    const vestColor = isBoss ? 0x7a2222 : isSubBoss ? 0x5a1f2a : gearHex;
+    // Curved front plate — open-ended cylinder arc over the ribcage,
+    // matching the rig's tapered torso (same arc math as chestPlate).
+    const plate = new THREE.Mesh(
+      new THREE.CylinderGeometry(
+        0.33 * s, 0.29 * s, 0.42 * s, 16, 1, true,
+        -Math.PI / 2.4, Math.PI / 1.2,
+      ),
+      mkGearMat(vestColor, 0.6, 0.35),
+    );
+    plate.position.set(0, 0.24 * s, 0);
+    plate.scale.z = 0.72;
+    plate.castShadow = true;
+    plate.userData.zone = 'torso';
+    rig.chest.add(plate);
+
+    // Heavy/boss carriers get a second lower plate + a horizontal
+    // webbing band so the torso reads as a layered plate carrier.
+    if (isBoss || heavy) {
+      const lower = new THREE.Mesh(
+        new THREE.CylinderGeometry(
+          0.31 * s, 0.30 * s, 0.16 * s, 16, 1, true,
+          -Math.PI / 2.6, Math.PI / 1.3,
+        ),
+        mkGearMat(trimHex, 0.65, 0.3),
+      );
+      lower.position.set(0, 0.06 * s, 0);
+      lower.scale.z = 0.72;
+      lower.userData.zone = 'torso';
+      rig.chest.add(lower);
+    }
+  }
+
+  // ---- 3) Bandolier / diagonal strap (asymmetric silhouette) -------
+  // Thin tilted box from shoulder to opposite hip — breaks the
+  // bilateral grunt read. Skipped when a heavy carrier already covers
+  // the chest (would clip). Mirrors the player's signature strap build
+  // but enemy-tinted (gear/trim, not a character color).
+  if (!heavy && (isBoss || rng() < 0.22 + gearLevel * 0.06)) {
+    const strap = new THREE.Mesh(
+      new THREE.BoxGeometry(0.04 * s, 0.55 * s, 0.05 * s),
+      mkGearMat(trimHex, 0.7, 0.2),
+    );
+    strap.position.set(0, 0.18 * s, 0.30 * s);
+    strap.rotation.z = (rng() < 0.5 ? 1 : -1) * 0.55;   // L→hip or R→hip
+    strap.userData.zone = 'torso';
+    rig.chest.add(strap);
+  }
+
+  // ---- 4) Shoulder pads / pauldrons (heavy variants) ---------------
+  // Capped domes on each shoulder pivot so they track arm swing.
+  // Forced for tank / shieldBearer / boss; otherwise a small chance on
+  // geared units. Parented to the shoulder pivots (already exist).
+  if (isBoss || heavy || rng() < 0.18 + gearLevel * 0.05) {
+    const padMat = mkGearMat(isBoss ? 0x6a4018 : gearHex, 0.55, 0.4);
+    const padGeom = () => new THREE.SphereGeometry(
+      0.135 * s, 12, 7, 0, Math.PI * 2, 0, Math.PI * 0.6);
+    for (const arm of [rig.leftArm, rig.rightArm]) {
+      if (!arm || !arm.shoulder || !arm.shoulder.pivot) continue;
+      const pad = new THREE.Mesh(padGeom(), padMat);
+      // Sit on top of the deltoid; slight outward push.
+      pad.position.set(0, 0.02 * s, 0);
+      pad.scale.set(1.15, 0.9, 1.15);
+      pad.castShadow = true;
+      pad.userData.zone = 'arm';
+      arm.shoulder.pivot.add(pad);
+    }
+  }
+
+  // ---- 5) Hip pouches / belt kit -----------------------------------
+  // Small gear boxes at the belt line, parented to rig.hips so they
+  // ride with the lower body. One or two small pouches for geared
+  // units; bosses always get them.
+  if (isBoss || rng() < 0.28 + gearLevel * 0.07) {
+    const pouchMat = mkGearMat(trimHex, 0.7, 0.2);
+    const beltY = 1.02 * s;   // ~belt height in rig-local (hips at hipY)
+    // Front-left pouch always; front-right added for heavier kit.
+    const sides = (isBoss || heavy || rng() < 0.5) ? [-1, 1] : [-1];
+    for (const sx of sides) {
+      const pouch = new THREE.Mesh(
+        new THREE.BoxGeometry(0.10 * s, 0.12 * s, 0.07 * s),
+        pouchMat,
+      );
+      pouch.position.set(sx * 0.16 * s, beltY, 0.16 * s);
+      pouch.castShadow = true;
+      pouch.userData.zone = 'torso';
+      rig.hips.add(pouch);
+    }
+  }
 }
 
 // --- Procedural animation ----------------------------------------------

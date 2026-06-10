@@ -101,21 +101,21 @@ function playerSilhouetteSvg() {
     <svg viewBox="0 0 240 470" preserveAspectRatio="xMidYMid meet">
       <defs>
         <linearGradient id="loot-player-grad" x1="0" y1="0" x2="0" y2="1">
-          <stop offset="0" stop-color="#2d333e"/>
-          <stop offset="1" stop-color="#1c2128"/>
+          <stop offset="0" stop-color="var(--ce-navy)"/>
+          <stop offset="1" stop-color="var(--ce-navy)"/>
         </linearGradient>
       </defs>
-      <ellipse cx="120" cy="44" rx="26" ry="28" fill="url(#loot-player-grad)" stroke="#3a414c" stroke-width="1.2"/>
-      <rect x="108" y="68" width="24" height="14" fill="url(#loot-player-grad)" stroke="#3a414c"/>
-      <path d="M78,82 Q120,74 162,82 L162,228 Q162,244 148,244 L92,244 Q78,244 78,228 Z" fill="url(#loot-player-grad)" stroke="#3a414c" stroke-width="1.2"/>
-      <rect x="60" y="88" width="18" height="72" rx="9" fill="url(#loot-player-grad)" stroke="#3a414c"/>
-      <rect x="60" y="160" width="18" height="68" rx="9" fill="url(#loot-player-grad)" stroke="#3a414c"/>
-      <rect x="162" y="88" width="18" height="72" rx="9" fill="url(#loot-player-grad)" stroke="#3a414c"/>
-      <rect x="162" y="160" width="18" height="68" rx="9" fill="url(#loot-player-grad)" stroke="#3a414c"/>
-      <path d="M84,244 L88,398 L112,398 L114,244 Z" fill="url(#loot-player-grad)" stroke="#3a414c"/>
-      <path d="M126,244 L128,398 L152,398 L156,244 Z" fill="url(#loot-player-grad)" stroke="#3a414c"/>
-      <rect x="84" y="398" width="30" height="54" rx="5" fill="url(#loot-player-grad)" stroke="#3a414c"/>
-      <rect x="126" y="398" width="30" height="54" rx="5" fill="url(#loot-player-grad)" stroke="#3a414c"/>
+      <ellipse cx="120" cy="44" rx="26" ry="28" fill="url(#loot-player-grad)" stroke="var(--ce-steel)" stroke-width="1.2"/>
+      <rect x="108" y="68" width="24" height="14" fill="url(#loot-player-grad)" stroke="var(--ce-steel)"/>
+      <path d="M78,82 Q120,74 162,82 L162,228 Q162,244 148,244 L92,244 Q78,244 78,228 Z" fill="url(#loot-player-grad)" stroke="var(--ce-steel)" stroke-width="1.2"/>
+      <rect x="60" y="88" width="18" height="72" rx="9" fill="url(#loot-player-grad)" stroke="var(--ce-steel)"/>
+      <rect x="60" y="160" width="18" height="68" rx="9" fill="url(#loot-player-grad)" stroke="var(--ce-steel)"/>
+      <rect x="162" y="88" width="18" height="72" rx="9" fill="url(#loot-player-grad)" stroke="var(--ce-steel)"/>
+      <rect x="162" y="160" width="18" height="68" rx="9" fill="url(#loot-player-grad)" stroke="var(--ce-steel)"/>
+      <path d="M84,244 L88,398 L112,398 L114,244 Z" fill="url(#loot-player-grad)" stroke="var(--ce-steel)"/>
+      <path d="M126,244 L128,398 L152,398 L156,244 Z" fill="url(#loot-player-grad)" stroke="var(--ce-steel)"/>
+      <rect x="84" y="398" width="30" height="54" rx="5" fill="url(#loot-player-grad)" stroke="var(--ce-steel)"/>
+      <rect x="126" y="398" width="30" height="54" rx="5" fill="url(#loot-player-grad)" stroke="var(--ce-steel)"/>
     </svg>
   `;
 }
@@ -124,21 +124,21 @@ function bodySilhouetteSvg() {
     <svg id="loot-body-svg" viewBox="0 0 240 470" preserveAspectRatio="xMidYMid meet">
       <defs>
         <linearGradient id="loot-body-grad" x1="0" y1="0" x2="0" y2="1">
-          <stop offset="0" stop-color="#3a2828"/>
-          <stop offset="1" stop-color="#1c1214"/>
+          <stop offset="0" stop-color="var(--ce-navy)"/>
+          <stop offset="1" stop-color="var(--ce-black)"/>
         </linearGradient>
       </defs>
-      <ellipse cx="120" cy="44" rx="26" ry="28" fill="url(#loot-body-grad)" stroke="#5a3030" stroke-width="1.2"/>
-      <rect x="108" y="68" width="24" height="14" fill="url(#loot-body-grad)" stroke="#5a3030"/>
-      <path d="M78,82 Q120,74 162,82 L162,228 Q162,244 148,244 L92,244 Q78,244 78,228 Z" fill="url(#loot-body-grad)" stroke="#5a3030" stroke-width="1.2"/>
-      <rect x="60" y="88" width="18" height="72" rx="9" fill="url(#loot-body-grad)" stroke="#5a3030"/>
-      <rect x="60" y="160" width="18" height="68" rx="9" fill="url(#loot-body-grad)" stroke="#5a3030"/>
-      <rect x="162" y="88" width="18" height="72" rx="9" fill="url(#loot-body-grad)" stroke="#5a3030"/>
-      <rect x="162" y="160" width="18" height="68" rx="9" fill="url(#loot-body-grad)" stroke="#5a3030"/>
-      <path d="M84,244 L88,398 L112,398 L114,244 Z" fill="url(#loot-body-grad)" stroke="#5a3030"/>
-      <path d="M126,244 L128,398 L152,398 L156,244 Z" fill="url(#loot-body-grad)" stroke="#5a3030"/>
-      <rect x="84" y="398" width="30" height="54" rx="5" fill="url(#loot-body-grad)" stroke="#5a3030"/>
-      <rect x="126" y="398" width="30" height="54" rx="5" fill="url(#loot-body-grad)" stroke="#5a3030"/>
+      <ellipse cx="120" cy="44" rx="26" ry="28" fill="url(#loot-body-grad)" stroke="var(--ce-navy)" stroke-width="1.2"/>
+      <rect x="108" y="68" width="24" height="14" fill="url(#loot-body-grad)" stroke="var(--ce-navy)"/>
+      <path d="M78,82 Q120,74 162,82 L162,228 Q162,244 148,244 L92,244 Q78,244 78,228 Z" fill="url(#loot-body-grad)" stroke="var(--ce-navy)" stroke-width="1.2"/>
+      <rect x="60" y="88" width="18" height="72" rx="9" fill="url(#loot-body-grad)" stroke="var(--ce-navy)"/>
+      <rect x="60" y="160" width="18" height="68" rx="9" fill="url(#loot-body-grad)" stroke="var(--ce-navy)"/>
+      <rect x="162" y="88" width="18" height="72" rx="9" fill="url(#loot-body-grad)" stroke="var(--ce-navy)"/>
+      <rect x="162" y="160" width="18" height="68" rx="9" fill="url(#loot-body-grad)" stroke="var(--ce-navy)"/>
+      <path d="M84,244 L88,398 L112,398 L114,244 Z" fill="url(#loot-body-grad)" stroke="var(--ce-navy)"/>
+      <path d="M126,244 L128,398 L152,398 L156,244 Z" fill="url(#loot-body-grad)" stroke="var(--ce-navy)"/>
+      <rect x="84" y="398" width="30" height="54" rx="5" fill="url(#loot-body-grad)" stroke="var(--ce-navy)"/>
+      <rect x="126" y="398" width="30" height="54" rx="5" fill="url(#loot-body-grad)" stroke="var(--ce-navy)"/>
     </svg>
   `;
 }
@@ -1011,6 +1011,9 @@ export class LootUI {
         this.render();
         return;
       }
+      // Escape closes via main.js's dismissTopModal — single source
+      // of truth for the modal stack avoids racing the game's pause-
+      // menu open.
       let slotIdx = -1;
       switch (e.code) {
         case 'Digit1': slotIdx = 0; break;
@@ -1024,6 +1027,19 @@ export class LootUI {
         default: return;
       }
       if (!it) return;
+      // Eligibility gate — assignActionSlot would silently fail with
+      // a generic "Cannot bind" message for any non-quickslot-eligible
+      // item (weapons, armor). Surface a clearer message earlier so
+      // the player knows WHY their click didn't work, not just that
+      // it didn't.
+      const isEligible = window.__isQuickslotEligible
+        ? window.__isQuickslotEligible(it)
+        : (it.type === 'consumable' || it.type === 'throwable');
+      if (!isEligible) {
+        e.preventDefault(); e.stopPropagation();
+        window.__hudMsg?.('Only consumables / throwables can bind to action slots', 1.8);
+        return;
+      }
       const ok = this.inventory.assignActionSlot(slotIdx, it);
       if (ok) {
         e.preventDefault(); e.stopPropagation();
@@ -1640,7 +1656,7 @@ export class LootUI {
       ${stackBadge}
       ${markBadge}
       <div class="pkt-name">${label}</div>
-      ${durPct >= 0 ? `<div class="pkt-dur"><div class="pkt-dur-fill" style="width:${durPct.toFixed(0)}%;background:${durPct > 60 ? '#6abe8a' : durPct > 30 ? '#e0c040' : '#d24040'}"></div></div>` : ''}
+      ${durPct >= 0 ? `<div class="pkt-dur"><div class="pkt-dur-fill" style="width:${durPct.toFixed(0)}%;background:${durPct > 60 ? 'var(--cy-mint)' : durPct > 30 ? 'var(--cy-amber)' : 'var(--ce-red)'}"></div></div>` : ''}
       ${ammoLine}
     `;
     return tile;

@@ -26,18 +26,22 @@ const STYLE = `
   display: none;
   background: rgba(8, 8, 12, 0.82);
   backdrop-filter: blur(4px);
-  z-index: 6000;
+  /* Normalized to the 20-25 tier used by every other modal overlay
+     (menu=20, perks=14, relics=15, cust=19, skill-pick=20). Was 6000
+     which made it un-layerable — opening perks/inventory while the
+     recruiter was up would render them BEHIND the recruiter. */
+  z-index: 25;
   align-items: center; justify-content: center;
   font-family: 'Inter', system-ui, sans-serif;
-  color: #d8d4cc;
+  color: var(--ce-soft);
 }
 #recruiter-root.show { display: flex; }
 #recruiter-card {
   background:
     linear-gradient(180deg, rgba(26,24,20,0.82) 0%, rgba(16,14,10,0.92) 100%),
     url("Assets/generated/artpass-recruiter-room.png") center / cover no-repeat,
-    linear-gradient(180deg, #1a1814 0%, #100e0a 100%);
-  border: 1px solid #3a3530;
+    linear-gradient(180deg, var(--ce-black) 0%, var(--ce-black) 100%);
+  border: 1px solid var(--ce-navy);
   border-radius: 4px;
   width: min(1100px, 95vw);
   max-height: 90vh;
@@ -51,15 +55,15 @@ const STYLE = `
 }
 #recruiter-title {
   font-size: 22px; font-weight: 600;
-  color: #d8a060; letter-spacing: 0.04em;
+  color: var(--cy-amber); letter-spacing: 0.04em;
   text-transform: uppercase;
 }
 #recruiter-credits {
-  font-size: 14px; color: #8a8478;
+  font-size: 14px; color: var(--ce-soft-50);
   font-variant-numeric: tabular-nums;
 }
 #recruiter-flavor {
-  font-size: 13px; color: #8a8478;
+  font-size: 13px; color: var(--ce-soft-50);
   font-style: italic;
   margin-bottom: 24px;
 }
@@ -68,8 +72,8 @@ const STYLE = `
   gap: 16px;
 }
 .recruiter-card {
-  background: #181612;
-  border: 1px solid #2c2620;
+  background: var(--ce-black);
+  border: 1px solid var(--ce-navy);
   border-radius: 4px;
   padding: 16px;
   cursor: pointer;
@@ -80,45 +84,45 @@ const STYLE = `
   font: inherit; color: inherit;
 }
 .recruiter-card:hover {
-  border-color: #d8a060;
+  border-color: var(--cy-amber);
   transform: translateY(-2px);
 }
 .recruiter-card.disabled {
   opacity: 0.45; cursor: not-allowed;
 }
 .recruiter-card.disabled:hover {
-  border-color: #2c2620; transform: none;
+  border-color: var(--ce-navy); transform: none;
 }
 .recruiter-card.special {
-  border-color: #c08020;
-  background: linear-gradient(180deg, #221810 0%, #181612 100%);
+  border-color: var(--cy-amber);
+  background: linear-gradient(180deg, var(--ce-black) 0%, var(--ce-black) 100%);
 }
 .recruiter-card.special::before {
   content: 'RARE'; display: block;
-  font-size: 10px; color: #d8a060; letter-spacing: 0.18em;
+  font-size: 10px; color: var(--cy-amber); letter-spacing: 0.18em;
   font-weight: 700;
 }
 .rcard-portrait {
   width: 100%; aspect-ratio: 1;
-  background: #0c0a08;
+  background: var(--ce-black);
   border-radius: 2px;
   display: flex; align-items: center; justify-content: center;
-  color: #4a443c; font-size: 11px;
+  color: var(--ce-navy); font-size: 11px;
 }
 .rcard-codename {
-  font-size: 18px; font-weight: 600; color: #e8e2d8;
+  font-size: 18px; font-weight: 600; color: var(--ce-white);
   letter-spacing: 0.02em;
 }
 .rcard-class-line {
-  font-size: 11px; color: #8a8478;
+  font-size: 11px; color: var(--ce-soft-50);
   text-transform: uppercase; letter-spacing: 0.14em;
   display: flex; gap: 8px; align-items: center;
 }
 .rcard-class-line .tier {
-  padding: 1px 6px; border: 1px solid #3a3530; border-radius: 2px;
+  padding: 1px 6px; border: 1px solid var(--ce-navy); border-radius: 2px;
   font-size: 10px;
 }
-.rcard-class-line .tier.special { color: #d8a060; border-color: #c08020; }
+.rcard-class-line .tier.special { color: var(--cy-amber); border-color: var(--cy-amber); }
 .rcard-stats {
   display: grid; grid-template-columns: 60px 1fr 30px;
   gap: 4px 8px;
@@ -126,32 +130,32 @@ const STYLE = `
   align-items: center;
 }
 .rcard-stat-label {
-  color: #6a645c;
+  color: var(--ce-steel);
   text-transform: uppercase; letter-spacing: 0.10em;
 }
 .rcard-stat-bar {
-  height: 4px; background: #2a2620; border-radius: 1px;
+  height: 4px; background: var(--ce-navy); border-radius: 1px;
   overflow: hidden;
 }
 .rcard-stat-fill {
-  height: 100%; background: linear-gradient(90deg, #8a7a50, #d8a060);
+  height: 100%; background: linear-gradient(90deg, var(--cy-amber), var(--cy-amber));
 }
 .rcard-stat-val {
-  text-align: right; color: #a8a298;
+  text-align: right; color: var(--ce-soft-50);
   font-variant-numeric: tabular-nums;
 }
 .rcard-quirk {
-  font-size: 12px; color: #8a8478;
+  font-size: 12px; color: var(--ce-soft-50);
   font-style: italic;
   line-height: 1.4;
-  border-left: 2px solid #3a3530;
+  border-left: 2px solid var(--ce-navy);
   padding-left: 8px;
   margin-top: 2px;
 }
 .rcard-weapon {
-  font-size: 11px; color: #d8a060;
-  background: #1c160c;
-  border: 1px solid #4a3820;
+  font-size: 11px; color: var(--cy-amber);
+  background: var(--ce-black);
+  border: 1px solid var(--ce-navy);
   border-radius: 2px;
   padding: 6px 8px;
   margin-top: 4px;
@@ -160,13 +164,13 @@ const STYLE = `
   font-weight: 600; letter-spacing: 0.04em;
 }
 .rcard-weapon-flavor {
-  color: #a8987a; font-style: italic;
+  color: var(--cy-amber); font-style: italic;
   margin-top: 2px;
 }
 .rcard-ability {
-  font-size: 11px; color: #c0d8e0;
-  background: #0e1620;
-  border: 1px solid #2a4858;
+  font-size: 11px; color: var(--ce-soft);
+  background: var(--ce-black);
+  border: 1px solid var(--ce-navy);
   border-radius: 2px;
   padding: 6px 8px;
   margin-top: 4px;
@@ -174,11 +178,11 @@ const STYLE = `
 .rcard-ability-label {
   font-weight: 600; letter-spacing: 0.04em;
 }
-.rcard-ability-desc { color: #98a8b0; margin-top: 2px; }
+.rcard-ability-desc { color: var(--ce-soft-50); margin-top: 2px; }
 .rcard-relic {
-  font-size: 11px; color: #d4b8e8;
-  background: #161020;
-  border: 1px solid #4a3858;
+  font-size: 11px; color: var(--cy-violet);
+  background: var(--ce-black);
+  border: 1px solid var(--ce-navy);
   border-radius: 2px;
   padding: 6px 8px;
   margin-top: 4px;
@@ -186,52 +190,52 @@ const STYLE = `
 .rcard-relic-label {
   font-weight: 600; letter-spacing: 0.04em;
 }
-.rcard-relic-desc { color: #a898b8; margin-top: 2px; }
+.rcard-relic-desc { color: var(--cy-violet); margin-top: 2px; }
 .rcard-perk {
-  font-size: 11px; color: #b8d8b0;
-  background: #101810;
-  border: 1px solid #2a482a;
+  font-size: 11px; color: var(--cy-mint);
+  background: var(--ce-black);
+  border: 1px solid var(--ce-navy);
   border-radius: 2px;
   padding: 6px 8px;
   margin-top: 4px;
 }
 .rcard-loadout {
-  font-size: 10px; color: #8a8a78;
+  font-size: 10px; color: var(--ce-soft-50);
   margin-top: 4px;
   text-transform: uppercase; letter-spacing: 0.08em;
 }
 .rcard-footer {
   margin-top: auto; padding-top: 8px;
-  border-top: 1px solid #2a2620;
+  border-top: 1px solid var(--ce-navy);
   display: flex; justify-content: space-between;
   font-size: 12px;
 }
 .rcard-price {
-  color: #d8a060; font-weight: 600;
+  color: var(--cy-amber); font-weight: 600;
   font-variant-numeric: tabular-nums;
 }
-.rcard-price.unaffordable { color: #c04040; }
+.rcard-price.unaffordable { color: var(--ce-red); }
 .rcard-contract {
-  color: #6a645c;
+  color: var(--ce-steel);
   text-transform: uppercase; letter-spacing: 0.10em; font-size: 10px;
 }
 #recruiter-actions {
   display: flex; justify-content: space-between; align-items: center;
   margin-top: 24px; padding-top: 16px;
-  border-top: 1px solid #2a2620;
+  border-top: 1px solid var(--ce-navy);
 }
 .rec-btn {
-  background: #2a2620; color: #d8d4cc;
-  border: 1px solid #3a3530; border-radius: 2px;
+  background: var(--ce-navy); color: var(--ce-soft);
+  border: 1px solid var(--ce-navy); border-radius: 2px;
   padding: 8px 18px; font-size: 13px;
   cursor: pointer; font: inherit;
   letter-spacing: 0.06em; text-transform: uppercase;
   transition: background 0.12s, border-color 0.12s;
 }
-.rec-btn:hover { background: #3a3530; border-color: #d8a060; }
+.rec-btn:hover { background: var(--ce-navy); border-color: var(--cy-amber); }
 .rec-btn:disabled { opacity: 0.4; cursor: not-allowed; }
-.rec-btn.primary { background: #4a3820; border-color: #c08020; color: #f0d8a0; }
-.rec-btn.primary:hover { background: #5a4830; }
+.rec-btn.primary { background: var(--ce-navy); border-color: var(--cy-amber); color: var(--cy-amber); }
+.rec-btn.primary:hover { background: var(--ce-navy); }
 `;
 
 let _styleInjected = false;
@@ -270,6 +274,16 @@ export class RecruiterUI {
     this.closeBtn   = this.root.querySelector('#recruiter-close');
     this.refreshBtn.addEventListener('click', () => this._refreshPaid());
     this.closeBtn.addEventListener('click', () => this._dismiss(null));
+    // Escape closes the recruiter (same as "Walk away"). Capture
+    // phase + visibility gate so we don't trigger when the panel
+    // isn't showing, and so the game's pause menu doesn't fire on
+    // top of us.
+    window.addEventListener('keydown', (e) => {
+      if (this.root.classList.contains('show') && e.key === 'Escape') {
+        e.stopPropagation();
+        this._dismiss(null);
+      }
+    }, true);
     this.roster = [];
     this._resolve = null;
   }

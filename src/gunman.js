@@ -1,11 +1,12 @@
 import * as THREE from 'three';
 import { tunables } from './tunables.js';
+import { BALANCE } from './balance.js';
 import { isWeaponUnlocked } from './prefs.js';
-import { buildRig, initAnim, updateAnim, pokeHit, pokeRecoil, pokeDeath } from './actor_rig.js';
+import { buildRig, initAnim, updateAnim, pokeHit, pokeRecoil, pokeDeath, addGearOverlay } from './actor_rig.js';
 import { spawnSpeechBubble } from './hud.js';
 import { loadModelClone, fitToRadius } from './gltf_cache.js';
 import { modelForItem, shouldMirrorInHand,
-         rotationOverrideForModelPath, scaleForModelPath,
+         rotationOverrideForModelPath, scaleForModelPath, scaleForWeapon,
          gripOffsetForModelPath } from './model_manifest.js';
 import { buildMeleePrimitive } from './melee_primitives.js';
 import { swapInBakedCorpse } from './corpse_bake.js';
@@ -224,6 +225,29 @@ const VARIANT_PROFILES = {
     tint: 0x554020,
     sniper: true,
   },
+};
+
+// Per-variant silhouette palette — drives bodyColor / headColor /
+// gearColor (which renders on chest plate / pauldrons / knee pads) so
+// each combat ROLE reads at a glance from its tint alone, before the
+// player parses behaviour. Tier (boss/subBoss) overrides body+head
+// below; variants still set their own gear tone so a "tank boss" reads
+// as both heavy AND authoritative. Mobile / specialist roles get a
+// brighter gear pop so they pre-read as threats; the heavy / tactical
+// roles stay muted-metal.
+//   tank        — dark gunmetal body + cold steel gear (reads "armoured")
+//   dasher      — teal body + bright cyan gear (reads "fast / electric")
+//   runner      — violet body + magenta gear (reads "aggressive rusher")
+//   coverSeeker — olive body + muted khaki gear (reads "tactical")
+//   shieldedPistol — sand body + brass gear (reads "heavy bulwark")
+//   sniper      — dark tan body + amber gear (reads "marksman")
+const VARIANT_PALETTE = {
+  tank:           { body: 0x2b2e33, head: 0x16181b, gear: 0x4a525a },
+  dasher:         { body: 0x16323d, head: 0x0c1c24, gear: 0x2f9ab0 },
+  runner:         { body: 0x331a44, head: 0x1a0d24, gear: 0x9a3ab0 },
+  coverSeeker:    { body: 0x2a3320, head: 0x161c10, gear: 0x4a5230 },
+  shieldedPistol: { body: 0x554328, head: 0x2c2214, gear: 0x9a7430 },
+  sniper:         { body: 0x3a2f1c, head: 0x1e180e, gear: 0xc08a28 },
 };
 
 // Per-run net ID counter — bumped on every spawn so each gunman /
@@ -520,16 +544,28 @@ export class GunmanManager {
     const scaleXZ = Math.min(MAX_SCALE, tierScale * profile.scale);
     const scaleY  = Math.min(MAX_SCALE, tierScale * (profile.scaleY ?? profile.scale));
 
-    const baseBodyHex = profile.tint ?? this._normalBodyColor.getHex();
-    const baseHeadHex = profile.tint ? (profile.tint & 0x555555) : this._normalHeadColor.getHex();
+    // Per-variant palette drives the at-rest tint so each combat role
+    // reads from its silhouette colour alone. Falls back to the legacy
+    // profile.tint / normal colours when a variant has no palette entry
+    // (e.g. 'standard').
+    const pal = VARIANT_PALETTE[variantId] || null;
+    const baseBodyHex = pal ? pal.body : (profile.tint ?? this._normalBodyColor.getHex());
+    const baseHeadHex = pal ? pal.head : (profile.tint ? (profile.tint & 0x555555) : this._normalHeadColor.getHex());
     const bodyHex = tier === 'boss' ? 0x5a1a1a : (tier === 'subBoss' ? 0x3a1e58 : baseBodyHex);
     const headHex = tier === 'boss' ? 0x3a0f10 : (tier === 'subBoss' ? 0x22103e : baseHeadHex);
-    // Per-tier gear accent — bosses get bronze kit, sub-bosses red,
-    // variants pick up their profile tint. Makes tier readable at a
-    // glance via the chest-plate / pauldrons / knee-pads alone.
+    // Per-tier gear accent — bosses get authoritative bronze kit,
+    // sub-bosses burgundy; otherwise the variant's own gear tone reads
+    // the role via the chest-plate / pauldrons / knee-pads alone.
     const gearHex = tier === 'boss' ? 0x7a5020
                   : tier === 'subBoss' ? 0x6a1e2a
-                  : (profile.tint ? ((profile.tint & 0xf8f8f8) >> 1) : 0x2a2a30);
+                  : (pal ? pal.gear
+                    : (profile.tint ? ((profile.tint & 0xf8f8f8) >> 1) : 0x2a2a30));
+    // Legs pick up a darkened version of the variant body so the lower
+    // silhouette isn't identical grey across every role. >>1 halves each
+    // channel — cheap inline darken (no _darken import in this file).
+    const legHex = tier === 'boss' ? 0x2a0c0c
+                 : tier === 'subBoss' ? 0x1c0e2c
+                 : (pal ? ((pal.body & 0xfefefe) >> 1) : 0x231418);
 
     // Jointed rig (shared actor_rig). The rig's root group is what we
     // position/scale; all hit-zone meshes already carry userData.zone
@@ -539,7 +575,7 @@ export class GunmanManager {
       scale: 0.77,          // ~1.85m baseline; outer scaleXZ/scaleY drives actor size
       bodyColor: bodyHex,
       headColor: headHex,
-      legColor: 0x231418,
+      legColor: legHex,
       armColor: bodyHex,
       handColor: 0x2a1f1a,
       gearColor: gearHex,
@@ -565,46 +601,21 @@ export class GunmanManager {
     // clothing, and the primitive gear cues are sized for the primitive
     // 1.85m body so they'd float around the skinned model.
     const gearLevel = opts.gearLevel ?? 0;
-    // Helmet + chest plate cues sized for the slimmer cylindrical
-    // rig. Helmet is a half-sphere sitting just above the head
-    // sphere; chest plate mirrors the rig's own chestPlate bounds.
-    if (tier === 'boss' || Math.random() < 0.35 + gearLevel * 0.08) {
-      const helmet = new THREE.Mesh(
-        new THREE.SphereGeometry(0.17, 14, 8, 0, Math.PI * 2, 0, Math.PI * 0.55),
-        new THREE.MeshStandardMaterial({
-          color: tier === 'boss' ? 0x6a1a1a : 0x3f4a54,
-          roughness: 0.55, metalness: 0.3,
-        }),
-      );
-      helmet.position.y = 0.18;
-      helmet.castShadow = true;
-      rig.head.add(helmet);
-    }
-    if (tier === 'boss' || variantId === 'tank' || Math.random() < 0.28 + gearLevel * 0.08) {
-      // Curved heavy plate sitting OVER the rig's default chestPlate —
-      // open-ended cylinder arc centred on the front, slightly larger
-      // radius than the chest so it stands proud. Matches the new
-      // tapered cylindrical torso instead of a flat slab.
-      const plate = new THREE.Mesh(
-        new THREE.CylinderGeometry(
-          0.32, 0.28,       // match chest taper + stand-off
-          0.4,
-          14, 1,
-          true,
-          -Math.PI / 2.4,   // -75°, centred on +Z front
-          Math.PI / 1.2,    // 150° arc
-        ),
-        new THREE.MeshStandardMaterial({
-          color: tier === 'boss' ? 0x7a2222 : 0x3a4a5c,
-          roughness: 0.6, metalness: 0.35,
-          side: THREE.DoubleSide,
-        }),
-      );
-      plate.position.set(0, 0.24, 0);
-      plate.scale.z = 0.72;         // match rig's torsoDepthRatio
-      plate.castShadow = true;
-      rig.chest.add(plate);
-    }
+    // Tactical kit overlay — helmet/visor, plate carrier, bandolier,
+    // pauldrons, hip pouches. Gated by tier/variant/gearLevel inside
+    // addGearOverlay so a room reads with variety, not uniformity.
+    // These overlay meshes parent to rig bones (head/chest/shoulders/
+    // hips) under g.group; there is no actor pool here (buildRig runs
+    // fresh per spawn) so removeAll()'s group.traverse disposal tears
+    // them down on level regen — no leak, no cross-spawn duplication.
+    // gearColor is the variant/tier accent computed above so kit tone
+    // matches the silhouette palette.
+    addGearOverlay(rig, {
+      tier,
+      variant: variantId,
+      gearLevel,
+      gearColor: gearHex,
+    });
 
     const chosen = weapon || this._pickWeapon();
     const gunMat = new THREE.MeshStandardMaterial({
@@ -676,7 +687,7 @@ export class GunmanManager {
           // mirror flag for lowpolyguns, and grip offset. Without
           // these, lowpoly weapons (AK, Spectre, SPC*) showed up
           // backwards in enemy hands.
-          fitToRadius(clone, chosen.muzzleLength * cs * scaleForModelPath(modelUrl));
+          fitToRadius(clone, chosen.muzzleLength * cs * scaleForWeapon(chosen, modelUrl));
           const r = chosen.modelRotation;
           const rotOverride = rotationOverrideForModelPath(modelUrl);
           if (rotOverride) {
@@ -775,8 +786,13 @@ export class GunmanManager {
       snipLaser,                  // null on non-snipers
       snipPhase: 'idle',          // 'idle' | 'paint' | 'cool'
       snipPhaseT: 0,
-      hp: tunables.ai.maxHealth * hpMult * (window.__activeModifiers?.()?.enemyHpMult || 1),
-      maxHp: tunables.ai.maxHealth * hpMult * (window.__activeModifiers?.()?.enemyHpMult || 1),
+      // BALANCE.horde.hpMult trims per-enemy HP to offset the higher
+      // spawn density (see balance.js) so a packed room stays a similar
+      // total time-to-clear instead of becoming a bullet-sponge slog.
+      // Gated to normal tier only — sub-boss / boss counts don't scale
+      // with density, so they keep full HP.
+      hp: tunables.ai.maxHealth * hpMult * (window.__activeModifiers?.()?.enemyHpMult || 1) * (tier === 'normal' ? (BALANCE.horde?.hpMult || 1) : 1),
+      maxHp: tunables.ai.maxHealth * hpMult * (window.__activeModifiers?.()?.enemyHpMult || 1) * (tier === 'normal' ? (BALANCE.horde?.hpMult || 1) : 1),
       alive: true,
       state: STATE.IDLE,
       role,
@@ -1353,7 +1369,7 @@ export class GunmanManager {
           dp.vy -= 18 * dt;          // gravity
           // Drag — slight horizontal damping each frame so the slide
           // decays into a rest rather than continuing forever.
-          const drag = 1 - Math.min(1, 3.5 * dt);
+          const drag = Math.exp(-3.5 * dt);   // frame-rate-independent decay
           dp.vx *= drag; dp.vz *= drag;
           const nx = g.group.position.x + dp.vx * dt;
           const nz = g.group.position.z + dp.vz * dt;
@@ -1420,7 +1436,9 @@ export class GunmanManager {
 
       if (!tunables.ai.active) {
         g.state = STATE.IDLE;
-        g.alertMat.opacity = THREE.MathUtils.lerp(g.alertMat.opacity, 0, Math.min(1, dt * 10));
+        // dt-correct exponential ease (frame-rate independent) — the old
+        // `Math.min(1, dt * k)` alpha converged 4× slower at 120Hz than 30Hz.
+        g.alertMat.opacity = THREE.MathUtils.lerp(g.alertMat.opacity, 0, 1 - Math.exp(-10 * dt));
         if (g.rig && !g._animSkip) updateAnim(g.rig, { speed: 0 }, dt);
         continue;
       }
@@ -1977,7 +1995,7 @@ export class GunmanManager {
       let delta = lookYaw - curYaw;
       while (delta > Math.PI) delta -= Math.PI * 2;
       while (delta < -Math.PI) delta += Math.PI * 2;
-      g.group.rotation.y += delta * Math.min(1, dt * 3);
+      g.group.rotation.y += delta * (1 - Math.exp(-3 * dt));
     }
 
     // Boss aggression overlay — bosses react faster and push closer.
@@ -2284,7 +2302,7 @@ export class GunmanManager {
           let dy = targetYaw - g.group.rotation.y;
           while (dy > Math.PI) dy -= 2 * Math.PI;
           while (dy < -Math.PI) dy += 2 * Math.PI;
-          g.group.rotation.y += dy * Math.min(1, dt * 1.4);
+          g.group.rotation.y += dy * (1 - Math.exp(-1.4 * dt));
         }
       }
     }
@@ -2406,7 +2424,7 @@ export class GunmanManager {
     const targetAlpha =
       g.state === STATE.FIRING ? 1.0 :
       g.state === STATE.ALERTED ? 0.6 : 0;
-    g.alertMat.opacity = THREE.MathUtils.lerp(g.alertMat.opacity, targetAlpha, Math.min(1, dt * 10));
+    g.alertMat.opacity = THREE.MathUtils.lerp(g.alertMat.opacity, targetAlpha, 1 - Math.exp(-10 * dt));
 
     // Face the player only when they're actually visible. Otherwise face
     // the last-known direction (or pose idle) so the AI's gun doesn't
@@ -2689,7 +2707,16 @@ export class GunmanManager {
       // g.hunkered for the smoke harness / future cower pose.
       g.hunkered = hpFrac < 0.5;
       const deepHunker = hpFrac < 0.25;
+      // Don't let enemies flee to cover when they're already in the
+      // player's face. Scrambling for cover at 4m every time the player
+      // pulls the trigger reads as panic and is the other half of the
+      // "they just run away" complaint. Enemies inside coverDist commit
+      // to the fight (hold + strafe + fire). Defenders and deeply-hunkered
+      // (sub-25% HP) enemies still take cover at any range.
+      const coverDist = 12.0;
+      const closeCommit = dist < coverDist && !isDefender && !deepHunker;
       const shouldSeekCover = (isDefender || g.hunkered || recentlyHit || playerShooting)
+        && !closeCommit
         && !tuckTarget
         && !escortTarget;
       if (shouldSeekCover) {
@@ -2852,8 +2879,19 @@ export class GunmanManager {
         // pressure. Approach until inside preferredRange, then stand
         // and strafe / fire rather than back-pedaling.
         const isBoss = g.tier === 'boss' || g.tier === 'subBoss';
+        // Kiting policy. The old rule backed EVERY non-boss away whenever
+        // the player closed inside (pref - tol). With preferred ranges of
+        // 13-22m that meant enemies spent most of a fight walking
+        // backwards — exactly the "they just run back/away" complaint.
+        // Now only dedicated snipers kite to hold range; everyone else
+        // stands at preferred range and strafes/fires, backpedalling only
+        // when the player is right on top of them (so bodies don't overlap
+        // but they never disengage from a winnable fight).
+        const isKiter = g.variant === 'sniper';
+        const tooClose = dist < Math.min(pref - tol, 3.0);
         if (dist > pref + tol) moveSign = 1;
-        else if (!isBoss && dist < pref - tol) moveSign = -1;
+        else if (isKiter && dist < pref - tol) moveSign = -1;
+        else if (tooClose) moveSign = -1;
         // Flow-field bias — when neither door / tuck / escort is
         // overriding the approach, swap the straight-line dir2d for
         // a flow-field sample toward the player. The flow field
@@ -3179,7 +3217,22 @@ export class GunmanManager {
         const actualLen = Math.hypot(res.x - beforeX, res.z - beforeZ);
         if (wantedLen > 0.01 && actualLen < wantedLen * 0.3 && g.stuckT <= 0) {
           g.stuckT = 0.8;
-          g.stuckSide = Math.random() < 0.5 ? -1 : 1;
+          // Pick the deflection side that actually has open space rather
+          // than flipping a coin — a random side sent enemies oscillating
+          // back into the same corner/doorjamb (the "stuck at corners"
+          // complaint). Probe ~1m along each perpendicular and prefer the
+          // clear one; the deflection at the top of the move block uses
+          // dir (-approachDir.z, approachDir.x) * side, so side +1 maps to
+          // the (-adz, adx) probe.
+          let side = Math.random() < 0.5 ? -1 : 1;
+          if (ctx.level && typeof ctx.level._collidesAt === 'function') {
+            const pr = tunables.ai.collisionRadius;
+            const adx = approachDir.x, adz = approachDir.z, probe = 1.0;
+            const leftBlocked  = ctx.level._collidesAt(beforeX + (-adz) * probe, beforeZ + (adx) * probe, pr);
+            const rightBlocked = ctx.level._collidesAt(beforeX + (adz) * probe, beforeZ + (-adx) * probe, pr);
+            if (leftBlocked !== rightBlocked) side = leftBlocked ? -1 : 1;
+          }
+          g.stuckSide = side;
         }
       }
 

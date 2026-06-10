@@ -26,6 +26,9 @@ export class PerkUI {
     this.root.style.display = 'none';
     document.body.appendChild(this.root);
     this.root.addEventListener('mousedown', (e) => { if (e.target === this.root) this.hide(); });
+    // Escape closes via main.js's dismissTopModal — that walks the
+    // modal stack in priority order and prevents the game's pause-
+    // menu open from racing with the modal close.
   }
 
   toggle() {
@@ -120,7 +123,7 @@ export class PerkUI {
     const nodes = this._discNodes(discId);
     if (!nodes.length) {
       const empty = document.createElement('div');
-      empty.style.cssText = 'color:#6f6754;padding:40px;text-align:center;font-size:12px';
+      empty.style.cssText = 'color:var(--ce-soft-50);padding:40px;text-align:center;font-size:12px';
       empty.textContent = 'No nodes in this discipline.';
       return empty;
     }
@@ -183,7 +186,7 @@ export class PerkUI {
       const my = (fy + ty) / 2;
       const path = document.createElementNS('http://www.w3.org/2000/svg', 'path');
       path.setAttribute('d', `M${fx},${fy} C${fx},${my} ${tx},${my} ${tx},${ty}`);
-      path.setAttribute('stroke', '#4a3a6a');
+      path.setAttribute('stroke', 'var(--ce-steel)');
       path.setAttribute('stroke-width', '2');
       path.setAttribute('stroke-dasharray', '5 3');
       path.setAttribute('fill', 'none');
@@ -265,7 +268,7 @@ export class PerkUI {
     const header = document.createElement('div');
     header.id = 'perk-header';
     header.innerHTML = `
-      <div id="perk-title">Skills</div>
+      <div id="perk-title">Perks</div>
       <div id="perk-points"><span>SP</span> <b>${this.getPoints()}</b></div>
       <button id="perk-close" type="button">✕</button>
     `;

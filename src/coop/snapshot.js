@@ -155,6 +155,17 @@ function _encodeMegaBoss(megaBoss) {
     const ghosts = megaBoss._coopEncodeGhosts();
     if (ghosts && ghosts.length) out.eg = ghosts;
   }
+  // Jailer-specific: floor hazards (mines + grenades) and the active
+  // chain hook live in host-only state. Without this sync the joiner
+  // sees the boss move but invisible hazards detonate / pull —
+  // coop-unfair. Each megaboss class can optionally expose a
+  // `_coopEncodeHazards()` method returning a compact extras object
+  // that lands on `out.hz`; the joiner's apply path mirrors it via
+  // `_coopApplyHazardMirrors` (if implemented).
+  if (typeof megaBoss._coopEncodeHazards === 'function') {
+    const hz = megaBoss._coopEncodeHazards();
+    if (hz) out.hz = hz;
+  }
   return out;
 }
 
@@ -308,7 +319,10 @@ export function encodeEnemySnapshot(gunmen, melees, seq, t, loot = null, droneMg
       // Burn DoT visual — sent only when active (>0) so the typical
       // snapshot stays small. Joiner reads this in _applyInterp to
       // pose flame particles on the right enemy.
-      ...(g.burnT > 0 ? { bt: +g.burnT.toFixed(2), bs: g.burnStacks | 0 } : {}),
+      // Burn-stack bound — clamp 0-10 so a host-side NaN / runaway
+      // counter (rare but possible if a burn-tick reentrancy bug
+      // ever lands) can't propagate weird values to the joiner.
+      ...(g.burnT > 0 ? { bt: +g.burnT.toFixed(2), bs: Math.max(0, Math.min(10, g.burnStacks | 0)) } : {}),
     });
   }
   for (const e of melees.enemies) {
@@ -323,7 +337,7 @@ export function encodeEnemySnapshot(gunmen, melees, seq, t, loot = null, droneMg
       s: e.state || 'idle',
       ...(e.tier && e.tier !== 'normal' ? { t: e.tier } : {}),
       ...(e.variant ? { v: e.variant } : {}),
-      ...(e.burnT > 0 ? { bt: +e.burnT.toFixed(2), bs: e.burnStacks | 0 } : {}),
+      ...(e.burnT > 0 ? { bt: +e.burnT.toFixed(2), bs: Math.max(0, Math.min(10, e.burnStacks | 0)) } : {}),
     });
   }
   return {
@@ -589,6 +603,13 @@ export function applyMegaBossSnapshot(snap, megaBoss) {
   if (typeof megaBoss._coopApplyGhostMirrors === 'function') {
     megaBoss._coopApplyGhostMirrors(b.eg || []);
   }
+  // Jailer hazard mirrors — `b.hz` carries mine + grenade + chain
+  // state. Joiner's _coopApplyHazardMirrors reconciles local visual
+  // proxies so the player can see what to avoid. No-op on bosses
+  // that don't expose hazards.
+  if (typeof megaBoss._coopApplyHazardMirrors === 'function') {
+    megaBoss._coopApplyHazardMirrors(b.hz || null);
+  }
 }
 
 // Drone apply for the interpolation path. droneMgr is the joiner's
@@ -653,7 +674,11 @@ function _applyInterp(entity, a, b, alpha) {
   // same flame pose as a host-side burning enemy. Decays naturally
   // in the next snapshot when the host clears burnT.
   entity.burnT = +b.bt || 0;
-  entity.burnStacks = b.bs | 0;
+  // Defensive clamp on apply too — host now bounds the encoded value
+  // to 0..10, but mirroring also clamps so a stale snapshot from an
+  // older host build can't push a runaway stack count into the
+  // joiner's per-frame visual code.
+  entity.burnStacks = Math.max(0, Math.min(10, b.bs | 0));
 }
 
 // Per-list netId → entity cache. Rebuilt when the list length
@@ -1049,7 +1074,17 @@ function _arrEq(a, b) {
 function _quantizePosYaw(r) {
   if (typeof r.x === 'number') r.x = Math.round(r.x * POS_SCALE);
   if (typeof r.z === 'number') r.z = Math.round(r.z * POS_SCALE);
-  if (typeof r.y === 'number') r.y = Math.round(r.y * YAW_SCALE);
+  if (typeof r.y === 'number') {
+    // Normalize yaw into [-π, π] before scaling. rotation.y accumulates
+    // unbounded on the host (turn deltas add up over a long session) —
+    // without the wrap the wire integer grows without bound and the
+    // joiner's interp wrap loop (`while (dy > π) dy -= 2π`) spins
+    // O(|yaw|/π) iterations per entity per frame.
+    let y = r.y % (Math.PI * 2);
+    if (y > Math.PI) y -= Math.PI * 2;
+    else if (y < -Math.PI) y += Math.PI * 2;
+    r.y = Math.round(y * YAW_SCALE);
+  }
 }
 function _quantizePosOnly3(r) {       // drones: x/y/z all positions
   if (typeof r.x === 'number') r.x = Math.round(r.x * POS_SCALE);

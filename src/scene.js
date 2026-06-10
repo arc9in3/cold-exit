@@ -197,6 +197,13 @@ export function createScene() {
   key.shadow.camera.far = 140;
   key.shadow.bias = -0.0005;
   scene.add(key);
+  // Target added to the scene graph so main.js's syncLighting() can
+  // slide both the light and its target with the player each frame —
+  // a fixed-at-origin shadow frustum (s=40) only covered ~4 rooms
+  // around the map centre, so walls far from origin cast nothing and
+  // the level read flat. Following the player keeps the shadow frustum
+  // centred on the action across arbitrarily large levels.
+  scene.add(key.target);
 
   // Fill keeps shadow side from blocking into the fog as an
   // indistinct blob, but stays cool so it doesn't fight the warm

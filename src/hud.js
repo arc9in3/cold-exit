@@ -108,9 +108,9 @@ function _ensureBubblePool() {
   const baseStyle = {
     position: 'fixed',
     transform: 'translate(-50%, -100%)',
-    background: 'rgba(0,0,0,0.72)',
-    color: '#e8dfc8',
-    border: '1px solid rgba(201,168,122,0.35)',
+    background: 'rgba(8,11,20,0.82)',
+    color: 'var(--ce-soft)',
+    border: '1px solid var(--ce-ice-25)',
     borderRadius: '3px',
     padding: '4px 10px',
     fontSize: '11px',

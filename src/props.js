@@ -162,7 +162,13 @@ export function buildVase(opts = {}) {
   const neck = cyl(r * 0.55, h * 0.25, color);
   neck.position.y = h * 0.87;
   group.add(neck);
-  return { group, collision: null };
+  // A 55cm free-standing floor vase reads as solid — it now blocks so the
+  // player/AI can't walk through it (the walk-through-prop complaint). The
+  // other collision:null props stay walkable on purpose: rugs are flat
+  // floor decals, windows/sconces are wall-mounted above the floor, the
+  // door frame wraps the doorway (blocking it would block the door), and
+  // pallets/grates sit below step height by design.
+  return { group, collision: { w: r * 2.4, d: r * 2.4 } };
 }
 
 export function buildTable(opts = {}) {
@@ -1285,6 +1291,194 @@ export function buildConveyorBelt(opts = {}) {
   return { group, collision: { w, d }, kind: 'conveyorBelt' };
 }
 
+// =====================================================================
+// Cosmetic clutter + dressing pass — variety props that READ as
+// lived-in detail without affecting movement. EVERY builder here
+// returns `collision: null` on purpose: they're either floor decals
+// (a hair above the ground), wall-hugging fixtures (mounted above
+// foot height), or ground litter below the player's step height. They
+// follow the same decoration contract as buildRug / buildWindow /
+// buildWallSconce / buildPallet — the placement path adds them via
+// the scene + decorations list and never registers a collision proxy.
+//
+// IMPORTANT: do NOT add any of these to DESTRUCTIBLE_HP and do NOT
+// give them a footprint — they should be fully walkable so the
+// ambient sprinkle can drop them anywhere (including near doorways)
+// without ever pinching the nav space.
+// =====================================================================
+
+// Floor hazard-stripe decal — a flat painted band (alternating accent
+// + dark chevron-ish slabs). Sits 1.5cm above the floor to avoid
+// z-fighting. Pure decal; collision: null. Color driven by caller
+// (theme.accent) so each biome gets its own stripe hue.
+export function buildFloorStripe(opts = {}) {
+  const w = opts.w ?? 2.6;
+  const d = opts.d ?? 0.7;
+  const color = opts.color ?? 0xffd040;
+  const dark = opts.darkColor ?? 0x1b1b1b;
+  const group = new THREE.Group();
+  // Dark backing slab so the stripe reads even on a light floor.
+  const back = box(w + 0.06, 0.012, d + 0.06, dark, false);
+  back.position.y = 0.012;
+  group.add(back);
+  // Alternating diagonal-ish bars across the long axis.
+  const bars = Math.max(4, Math.round(w / 0.42));
+  const barW = w / bars;
+  for (let i = 0; i < bars; i++) {
+    if (i % 2) continue;
+    const bar = box(barW * 0.92, 0.016, d, color, false);
+    bar.position.set(-w / 2 + (i + 0.5) * barW, 0.016, 0);
+    group.add(bar);
+  }
+  return { group, collision: null };
+}
+
+// Floor markings — a thin painted rectangle outline (think parking
+// bay / clean-room zone marker / equipment footprint). Just four
+// flat border strips so the center stays empty and readable. Decal.
+export function buildFloorMarking(opts = {}) {
+  const w = opts.w ?? 2.4;
+  const d = opts.d ?? 2.0;
+  const color = opts.color ?? 0xc9a020;
+  const t = opts.t ?? 0.1;
+  const group = new THREE.Group();
+  // Two strips along X, two along Z, forming an open rectangle.
+  for (const sz of [-d / 2 + t / 2, d / 2 - t / 2]) {
+    const s = box(w, 0.014, t, color, false);
+    s.position.set(0, 0.014, sz);
+    group.add(s);
+  }
+  for (const sx of [-w / 2 + t / 2, w / 2 - t / 2]) {
+    const s = box(t, 0.014, d - t * 2, color, false);
+    s.position.set(sx, 0.014, 0);
+    group.add(s);
+  }
+  return { group, collision: null };
+}
+
+// Wall vent — a flat louvred grille that hugs a wall (mounted ~1.4m
+// up). Caller positions/rotates it against a wall face. Decoration
+// only; collision: null because it's flush to the wall above the
+// floor and never intrudes on the walk space.
+export function buildWallVent(opts = {}) {
+  const w = opts.w ?? 0.8;
+  const h = opts.h ?? 0.55;
+  const frameColor = opts.frameColor ?? COL.metalDark;
+  const slatColor = opts.slatColor ?? COL.metal;
+  const group = new THREE.Group();
+  const mountY = opts.mountY ?? 1.4;
+  // Recessed frame plate.
+  const frame = box(w, h, 0.04, frameColor);
+  frame.position.set(0, mountY, 0);
+  group.add(frame);
+  // Horizontal louvre slats.
+  const slats = Math.max(3, Math.round(h / 0.1));
+  for (let i = 0; i < slats; i++) {
+    const t = (i / (slats - 1) - 0.5) * (h - 0.1);
+    const slat = box(w - 0.08, 0.04, 0.03, slatColor);
+    slat.position.set(0, mountY + t, 0.025);
+    group.add(slat);
+  }
+  return { group, collision: null };
+}
+
+// Wall sign / signage panel — a flat backplate with a bright emissive
+// face (arrow / placard). Wall-hugging, mounted high. Decoration only.
+// Emissive face uses MeshBasicMaterial (no real light — light-budget
+// policy). Color driven by caller so a nightclub gets magenta signage
+// and a factory gets amber safety placards.
+export function buildWallSign(opts = {}) {
+  const w = opts.w ?? 0.9;
+  const h = opts.h ?? 0.45;
+  const color = opts.color ?? 0x4ad6ff;
+  const group = new THREE.Group();
+  const mountY = opts.mountY ?? 2.0;
+  // Dark backplate / housing.
+  const back = box(w + 0.08, h + 0.08, 0.06, COL.metalDark);
+  back.position.set(0, mountY, 0);
+  group.add(back);
+  // Emissive face.
+  const face = new THREE.Mesh(
+    new THREE.BoxGeometry(w, h, 0.02),
+    sharedMaterial({ type: 'basic', color }),
+  );
+  face.position.set(0, mountY, 0.04);
+  group.add(face);
+  // A darker inset bar across the face to suggest text / an icon.
+  const bar = new THREE.Mesh(
+    new THREE.BoxGeometry(w * 0.6, h * 0.22, 0.01),
+    sharedMaterial({ type: 'basic', color: 0x101216 }),
+  );
+  bar.position.set(0, mountY, 0.055);
+  group.add(bar);
+  return { group, collision: null };
+}
+
+// Cable spool — a loose coil of cabling on the floor. Low (under step
+// height), so collision: null keeps it walkable like a pallet. Reads
+// as industrial clutter for garage / factory / rooftop / server.
+export function buildCableSpool(opts = {}) {
+  const r = opts.r ?? 0.45;
+  const color = opts.color ?? COL.metalDark;
+  const group = new THREE.Group();
+  // Flat reel laid on its side.
+  const reel = cyl(r, 0.1, COL.woodDark, 14);
+  reel.position.y = 0.05;
+  group.add(reel);
+  // Coiled cable as two flattened torus-ish rings.
+  for (let i = 0; i < 2; i++) {
+    const ring = new THREE.Mesh(
+      new THREE.TorusGeometry(r * (0.7 - i * 0.18), 0.05, 6, 16),
+      mat(color),
+    );
+    ring.rotation.x = Math.PI / 2;
+    ring.position.y = 0.12 + i * 0.06;
+    ring.castShadow = true;
+    group.add(ring);
+  }
+  return { group, collision: null };
+}
+
+// Debris pile — a small scatter of low rubble chunks. Below step
+// height, walkable (collision: null). Adds a "weathered / abandoned"
+// read to industrial + rooftop biomes without blocking nav.
+export function buildDebris(opts = {}) {
+  const color = opts.color ?? COL.concrete;
+  const group = new THREE.Group();
+  const chunks = opts.chunks ?? 5;
+  for (let i = 0; i < chunks; i++) {
+    const s = 0.12 + Math.random() * 0.18;
+    const chunk = box(s, s * (0.5 + Math.random() * 0.4), s, color);
+    const ang = Math.random() * Math.PI * 2;
+    const rad = Math.random() * 0.45;
+    chunk.position.set(Math.cos(ang) * rad, s * 0.3, Math.sin(ang) * rad);
+    chunk.rotation.y = Math.random() * Math.PI;
+    group.add(chunk);
+  }
+  return { group, collision: null };
+}
+
+// Floor pad / accent rug variant tuned for clinical + lobby use — a
+// thin tinted mat with a contrasting border. Distinct from buildRug
+// (which is a single navy slab) by the inset border. Flat decal,
+// collision: null. Used as a deliberate "zone" pad under furnishing.
+export function buildFloorPad(opts = {}) {
+  const w = opts.w ?? 2.0;
+  const d = opts.d ?? 1.4;
+  const color = opts.color ?? 0x243a4a;
+  const borderColor = opts.borderColor ?? 0xc9a464;
+  const group = new THREE.Group();
+  // Border (slightly larger, sits lower).
+  const border = box(w, 0.014, d, borderColor, false);
+  border.position.y = 0.012;
+  group.add(border);
+  // Inner field.
+  const field = box(w - 0.18, 0.016, d - 0.18, color, false);
+  field.position.y = 0.016;
+  group.add(field);
+  return { group, collision: null };
+}
+
 // --- Catalog ---------------------------------------------------------
 // Convenience: look up a builder by key. Themed-room code will pick
 // from a curated list per theme instead of hardcoding factory names.
@@ -1332,6 +1526,17 @@ export const PROP_BUILDERS = {
   vendingMachine: buildVendingMachine,
   displayCase: buildDisplayCase,
   conveyorBelt: buildConveyorBelt,
+  // Cosmetic clutter + dressing (all collision: null — see the
+  // "Cosmetic clutter" block above). Safe for the ambient sprinkle:
+  // floor decals, wall-hugging fixtures, and below-step-height litter
+  // that never pinch the nav space.
+  floorStripe: buildFloorStripe,
+  floorMarking: buildFloorMarking,
+  wallVent: buildWallVent,
+  wallSign: buildWallSign,
+  cableSpool: buildCableSpool,
+  debris: buildDebris,
+  floorPad: buildFloorPad,
 };
 
 // --- Theme palettes --------------------------------------------------
@@ -1371,6 +1576,9 @@ export const LEVEL_THEMES = {
       // no `vase` (read as bottles on floor), no `rug` (random rugs
       // looked silly — only deliberate placement now).
       pillar: 0.6, planter: 1.0, doorFrame: 0.4,
+      // Cosmetic dressing — brass-toned floor pads + tasteful wall
+      // signage read as a refined hotel without industrial clutter.
+      floorPad: 0.5, wallSign: 0.3,
     },
     // A hotel — bedrooms, lobbies, lounges, the occasional library or
     // back-of-house security desk.
@@ -1388,6 +1596,9 @@ export const LEVEL_THEMES = {
     propWeights: {
       neonStick: 1.4, locker: 0.5, barrel: 0.5,
       doorFrame: 0.4, planter: 0.3,
+      // Cosmetic dressing — glowing wall signage + a few cable spools
+      // (back-of-house clutter) for the club's neon-noir vibe.
+      wallSign: 0.8, cableSpool: 0.4,
     },
     // Nightclub — public lobby + back-of-house mailroom (manager's
     // office) + security + the occasional storage warehouse / kitchen.
@@ -1405,6 +1616,11 @@ export const LEVEL_THEMES = {
     propWeights: {
       pillar: 1.6, locker: 0.9, crate: 0.8, barrel: 0.7,
       pallet: 0.6, neonStick: 0.4, doorFrame: 0.2,
+      // Cosmetic dressing — painted parking bays / hazard stripes +
+      // floor markings + cable spools + the odd debris pile sell the
+      // working-garage read.
+      floorStripe: 0.9, floorMarking: 0.8, cableSpool: 0.6,
+      wallVent: 0.5, debris: 0.4,
     },
     // Industrial parking — heavy on garage / warehouse / mailroom
     // with a security booth + a server room for the building.
@@ -1423,6 +1639,9 @@ export const LEVEL_THEMES = {
       // Refined skyrise — planters + windows. No random couches /
       // vases / lamps / rugs.
       planter: 1.2, window: 0.8, doorFrame: 0.4, pillar: 0.3,
+      // Cosmetic dressing — tasteful accent floor pads only; no
+      // industrial clutter in a luxury skyrise.
+      floorPad: 0.6,
     },
     // Top-floor luxury residence + executive offices + library.
     roomThemePool: {
@@ -1439,6 +1658,10 @@ export const LEVEL_THEMES = {
     propWeights: {
       railing: 1.5, crate: 0.8, barrel: 0.5, pallet: 0.5,
       neonStick: 0.6, pillar: 0.7, doorFrame: 0.3,
+      // Cosmetic dressing — helipad-style hazard stripes + service
+      // clutter (cable spools, debris, vents) for a rooftop service
+      // zone.
+      floorStripe: 0.8, cableSpool: 0.5, wallVent: 0.5, debris: 0.4,
     },
     // Rooftop service zone — utility / storage / surveillance.
     roomThemePool: {
@@ -1458,6 +1681,10 @@ export const LEVEL_THEMES = {
       // strip safety lighting on a factory line.
       pillar: 1.4, pallet: 1.2, crate: 1.0, barrel: 0.9,
       locker: 0.6, neonStick: 0.7, railing: 0.5, doorFrame: 0.2,
+      // Cosmetic dressing — heavy floor markings / hazard stripes +
+      // cable runs + vents + debris sell the working factory floor.
+      floorStripe: 1.0, floorMarking: 0.9, cableSpool: 0.7,
+      wallVent: 0.6, wallSign: 0.5, debris: 0.5,
     },
     roomThemePool: {
       garage: 1.8, warehouse: 1.8, server: 0.8, security: 0.7,
@@ -1476,6 +1703,10 @@ export const LEVEL_THEMES = {
       // because heavy industrial doesn't fit lab aesthetic.
       neonStick: 1.4, locker: 1.0, pillar: 0.8, doorFrame: 0.5,
       planter: 0.3, crate: 0.4, barrel: 0.3,
+      // Cosmetic dressing — clean-room zone floor markings + tidy
+      // wall vents + clinical floor pads + the occasional cyan
+      // wayfinding sign. No debris (a lab stays spotless).
+      floorMarking: 0.9, wallVent: 0.6, floorPad: 0.5, wallSign: 0.4,
     },
     roomThemePool: {
       lab: 2.0, infirmary: 1.5, server: 1.0, archive: 0.9,

@@ -156,8 +156,19 @@ try {
       console.warn(`[deploy] stale ${hidden} found; restoring before continuing`);
       try { renameSync(hidden, orig); } catch (_) {}
     }
-    renameSync(orig, hidden);
-    renamed.push({ orig, hidden });
+    try {
+      renameSync(orig, hidden);
+      renamed.push({ orig, hidden });
+    } catch (e) {
+      // Windows EBUSY (editor / watcher locking the dir) — skip this
+      // entry and let wrangler scan it. Logs the path so the operator
+      // can see what slipped through and clean up the deployed copy
+      // later if needed. Other errors (ENOENT, EACCES) re-thrown so
+      // they still surface.
+      if (e?.code === 'EBUSY' || e?.code === 'EPERM') {
+        console.warn(`[deploy] WARN ${path} locked (${e.code}); skipping move — wrangler will include it in upload`);
+      } else { throw e; }
+    }
   }
   console.log(`[deploy] moved ${renamed.length} entries to ${HOLD}`);
 

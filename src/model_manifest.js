@@ -17,101 +17,112 @@ const MODEL_BASE = 'Assets/models/';
 // Lowpoly entries are tagged matches from the user's weapon_assigner
 // session — see Assets/Weapons/weapon_assignments.json for the audit.
 export const MODEL_BY_WEAPON_NAME = {
-  // Pistols
-  'Makarov':            'weapons/SM_Civilian_Pistol.glb',
-  'Glock 17':           'weapons/SM_Army_Pistol.glb',
-  'M1911':              'weapons/SM_Police_Gun.glb',
-  'Desert Eagle .50':   'weapons/SM_Hunting_Pistol.glb',
-  'Colt Anaconda .44':  'lowpolyguns/Revolver_5.glb',           // user: colt six shooter (.44 visual)
-  'Colt Python':        'lowpolyguns/Revolver_3.glb',
-  'Colt 357':           'lowpolyguns/Revolver_1.glb',
-  '.38 Special':        'lowpolyguns/Revolver_4.glb',
-  'Colt Six Shooter':   'lowpolyguns/Revolver_5.glb',
+  // ===== lowpoly_v2 pack swap (gun-pack-swap branch, 2026-05-13) =====
+  // All ranged weapons repoint at the recolored low_poly_guns_fbx pack
+  // under Assets/models/lowpoly_v2/. Pack has 29 meshes — stand-ins
+  // are used where the pack has no shape match (revolvers → auto;
+  // LMG → heavy rifle). Prior mapping (animpic SM_* + lowpolyguns/)
+  // preserved in git history on main.
 
-  // SMGs
-  'PDW':                'weapons/SM_Civilian_Submachine_Gun.glb',
-  'P90':                'weapons/SM_Police_Submachine_Gun.glb',
-  'UMP45':              'weapons/SM_Army_Submachine_Gun.glb',
-  'Spectre':            'lowpolyguns/SubmachineGun_2.glb',
-  'Spectre CQB':        'lowpolyguns/SubmachineGun_1.glb',
-  'SPC9':               'lowpolyguns/SubmachineGun_3.glb',
-  'SPCA3':              'lowpolyguns/SubmachineGun_4.glb',          // SIG SPC AR-style 9mm
-  'SPC223':             'lowpolyguns/SubmachineGun_5.glb',          // SIG SPC .223 carbine
+  // Pistols — pistol_1..6
+  'Makarov':            'lowpoly_v2/pistol_6.glb',
+  'Glock 17':           'lowpoly_v2/pistol_3.glb',
+  'M1911':              'lowpoly_v2/pistol_2.glb',
+  'Desert Eagle .50':   'lowpoly_v2/fusil_3.glb',     // fusil_3 has hand-cannon bulk
+  'Sig P320':           'lowpoly_v2/pistol_1.glb',
+  'Beretta 92':         'lowpoly_v2/pistol_1.glb',
+  'AR-15 Pistol':       'lowpoly_v2/pistol_5.glb',    // pistol_5 has tactical attachments
+  'Flare Gun':          'lowpoly_v2/pistol_4.glb',
+  // Revolver family — no wheel-gun in pack. pistol_4 reads bulkiest,
+  // share across the family until a dedicated revolver mesh is sourced.
+  'Colt Anaconda .44':  'lowpoly_v2/pistol_4.glb',
+  'Colt Python':        'lowpoly_v2/pistol_4.glb',
+  'Colt 357':           'lowpoly_v2/pistol_4.glb',
+  '.38 Special':        'lowpoly_v2/pistol_4.glb',
+  'Colt Six Shooter':   'lowpoly_v2/pistol_4.glb',
+  'Snub Revolver':      'lowpoly_v2/pistol_4.glb',
 
-  // Rifles
-  'AK47':               'lowpolyguns/AssaultRifle_2.glb',
-  'AKS-47':             'lowpolyguns/AssaultRifle_3.glb',         // folding-stock AK47 sibling
-  'AKS-74':             'lowpolyguns/AssaultRifle_4.glb',
-  'AK104':              'lowpolyguns/AssaultRifle_5.glb',
-  'Draco NAK9':         'lowpolyguns/AssaultRifle_1.glb',         // 9mm AK-pattern compact
-  'AS VAL':             'weapons/SM_Assault_Rifle_9x39.glb',
-  'VSS':                'weapons/SM_Police_Sniper_Rifle.glb',     // user-tagged FBX = "VSS vintorez"
-  'M16':                'weapons/Assault_Rifle_5_56_Prototype.glb',
-  'M4':                 'lowpolyguns/AssaultRifle2_2.glb',         // Apr-26: re-introduced with proper FBX
-  'AR-15 SBR':          'lowpolyguns/AssaultRifle2_4.glb',         // short-barrel AR-15
-  'AR-15 Pistol':       'lowpolyguns/AssaultRifle2_3.glb',         // AR pistol — pistol class for size
-  'AUG A3-CQC':         'weapons/SM_Bulpam_Assault_Rifle.glb',
-  'CAR-15':             'lowpolyguns/AssaultRifle2_1.glb',
-  'JARD J67':           'lowpolyguns/Bullpup_2.glb',
-  'JARD J68':           'lowpolyguns/Bullpup_1.glb',
-  'JARD J56':           'lowpolyguns/Bullpup_3.glb',
+  // SMGs — subfusil_1..10
+  'PDW':                'lowpoly_v2/subfusil_3.glb',
+  'MP7':                'lowpoly_v2/subfusil_4.glb',
+  'UMP45':              'lowpoly_v2/subfusil_6.glb',
+  'P90':                'lowpoly_v2/subfusil_10.glb',  // bullpup-style
+  'Spectre':            'lowpoly_v2/subfusil_2.glb',
+  'Spectre CQB':        'lowpoly_v2/subfusil_1.glb',
+  'SPC9':               'lowpoly_v2/subfusil_3.glb',
+  'SPCA3':              'lowpoly_v2/subfusil_4.glb',
+  'SPC223':             'lowpoly_v2/subfusil_8.glb',
+  'AKS-74U':            'lowpoly_v2/subfusil_5.glb',   // AK-style short
+  'Kriss Vector':       'lowpoly_v2/subfusil_6.glb',
+  'Draco NAK9':         'lowpoly_v2/subfusil_5.glb',   // 9mm AK-pattern compact
 
-  // LMGs
-  'Type 80 LMG':        'weapons/SM_Heavy_Machine_Gun.glb',
-  'M249':               'weapons/SM_Light_Machine_Gun.glb',
+  // Rifles — fusil_1..7
+  'AK47':               'lowpoly_v2/fusil_5.glb',     // AK-pattern anchor
+  'AKS-47':             'lowpoly_v2/fusil_5.glb',
+  'AKS-74':             'lowpoly_v2/fusil_5.glb',
+  'AK104':              'lowpoly_v2/fusil_5.glb',
+  'AS VAL':             'lowpoly_v2/subfusil_7.glb',  // suppressed long-arm
+  'VSS':                'lowpoly_v2/subfusil_7.glb',
+  'M16':                'lowpoly_v2/fusil_6.glb',     // AR-pattern
+  'M4':                 'lowpoly_v2/fusil_6.glb',
+  'AR-15 SBR':          'lowpoly_v2/fusil_6.glb',
+  'CAR-15':             'lowpoly_v2/fusil_6.glb',
+  'AUG A3-CQC':         'lowpoly_v2/fusil_7.glb',     // bullpup
+  'JARD J67':           'lowpoly_v2/fusil_7.glb',
+  'JARD J68':           'lowpoly_v2/fusil_7.glb',
+  'JARD J56':           'lowpoly_v2/fusil_7.glb',
+  'Tavor':              'lowpoly_v2/fusil_7.glb',
 
-  // Snipers
-  // Apr-26: Remington 700's art swapped to the user-tagged
-  // SniperRifle_1 FBX. Tactical chassis variant added as a sibling.
-  'Remington 700':      'lowpolyguns/SniperRifle_1.glb',
-  'Remington 700 Tactical': 'lowpolyguns/SniperRifle_2.glb',
-  'SVD Dragunov':       'weapons/SM_Army_Sniper_Rifle.glb',
-  'Cheytac Intervention':'weapons/SM_High_Precision_Sniper_Rifle.glb',
-  'AWP':                'lowpolyguns/SniperRifle_3.glb',
-  '.338 Lapua':         'lowpolyguns/SniperRifle_5.glb',
-  'Hunting Rifle':      'lowpolyguns/SniperRifle_6.glb',
+  // LMGs — no belt-fed shape in pack; sub the heaviest rifle silhouettes.
+  'Type 80 LMG':        'lowpoly_v2/fusil_2.glb',
+  'M249':               'lowpoly_v2/fusil_4.glb',
 
-  // Shotguns
-  'AA-12':              'weapons/SM_Assault_Shotgun.glb',
-  'Benelli M4':         'weapons/SM_Army_Shotgun.glb',
-  'Mossberg 500':       'lowpolyguns/Shotgun_1.glb',
-  'Remington 870':      'lowpolyguns/Shotgun_3.glb',
-  'Sawed-Off Shotgun':  'lowpolyguns/Shotgun_SawedOff.glb',
-  'KSG-12':             'weapons/Modern_Pump_Action_Shotgun.glb',
-  // Henry single-shot 12-gauge slug rifle. Class: shotgun (slug).
-  'Henry Slug Rifle':   'lowpolyguns/Shotgun_4.glb',
+  // Snipers — sniper_0..2
+  'Remington 700':      'lowpoly_v2/sniper_1.glb',
+  'Remington 700 Tactical': 'lowpoly_v2/sniper_2.glb',
+  'SVD Dragunov':       'lowpoly_v2/sniper_2.glb',
+  'Cheytac Intervention':'lowpoly_v2/sniper_0.glb',   // sci-fi anti-material fits the top-tier rifle
+  'AWP':                'lowpoly_v2/sniper_1.glb',
+  '.338 Lapua':         'lowpoly_v2/sniper_2.glb',
+  'Hunting Rifle':      'lowpoly_v2/sniper_1.glb',
+
+  // Shotguns — shotgun_1 (lever) + shotgun_2 (pump)
+  'AA-12':              'lowpoly_v2/shotgun_2.glb',
+  'Benelli M4':         'lowpoly_v2/shotgun_2.glb',
+  'Mossberg 500':       'lowpoly_v2/shotgun_2.glb',
+  'Remington 870':      'lowpoly_v2/shotgun_2.glb',
+  'KSG-12':             'lowpoly_v2/shotgun_2.glb',
+  'Sawed-Off Shotgun':  'lowpoly_v2/shotgun_1.glb',
+  'Henry Slug Rifle':   'lowpoly_v2/shotgun_1.glb',   // lever-action shape
+  'Dragonbreath':       'lowpoly_v2/shotgun_2.glb',
 
   // Exotic
-  'Widowmaker Rocket Launcher': 'weapons/SM_Rocket_Launchers_01.glb',
-  // Ricochet Revolver family — reuses the revolver GLB across all 3
-  // variants; visual differentiation is via tracerColor + muzzle size.
-  'RX-1 Rebound':       'weapons/SM_Revolver.glb',
-  'RX-2 Caroma':        'weapons/SM_Revolver.glb',
-  'RX-3 Pinball':       'weapons/SM_Revolver.glb',
-  // Charge Cannon family — rocket-launcher shape reads as a heavy
-  // energy weapon at iso distance. Replace when bespoke GLBs land.
-  'VC-7 Volt':          'weapons/SM_Rocket_Launchers_01.glb',
-  'VC-9 Surge':         'weapons/SM_Rocket_Launchers_02.glb',
-  'VC-12 Nova':         'weapons/SM_Rocket_Launchers_01.glb',
-  // Gauss Rifle family — assault rifle prototype reads as futuristic.
-  'GR-4 Slug':          'weapons/Assault_Rifle_5_56_Prototype.glb',
-  'GR-6 Coil':          'weapons/Assault_Rifle_5_56_Prototype.glb',
-  'GR-9 Mag':           'weapons/Assault_Rifle_5_56_Prototype.glb',
-  // Explosive Crossbow family — sniper-rifle silhouette stands in
-  // (long-barrel single-shot read) until a crossbow GLB is sourced.
-  'EX-3 Bolt':          'weapons/SM_Army_Sniper_Rifle.glb',
-  'EX-5 Spike':         'weapons/SM_Army_Sniper_Rifle.glb',
-  'EX-8 Stinger':       'weapons/SM_Army_Sniper_Rifle.glb',
-  // Flamethrower — placeholder uses the heavy MG mesh (long tube +
-  // top-mounted feed reads as a fuel-tank shape from the iso angle).
-  // Replace when a real flamethrower FBX is sourced.
-  'Flamethrower':       'weapons/SM_Heavy_Machine_Gun.glb',
+  'Flamethrower':       'lowpoly_v2/flamethrower.glb', // direct match
+  'Widowmaker Rocket Launcher': 'lowpoly_v2/subfusil_9.glb', // heavy weapon read
+  // Grenade Launcher — shares the heavy-weapon read with Widowmaker;
+  // scale override (line ~472) already tuned for subfusil_9. Without
+  // this entry the weapon falls through to a primitive box placeholder
+  // when equipped.
+  'Grenade Launcher':   'lowpoly_v2/subfusil_9.glb',
+  // Ricochet Revolver — share revolver stand-in across family
+  'RX-1 Rebound':       'lowpoly_v2/pistol_4.glb',
+  'RX-2 Caroma':        'lowpoly_v2/pistol_4.glb',
+  'RX-3 Pinball':       'lowpoly_v2/pistol_4.glb',
+  // Charge Cannon family — sci-fi anti-material reads as energy heavy
+  'VC-7 Volt':          'lowpoly_v2/sniper_0.glb',
+  'VC-9 Surge':         'lowpoly_v2/sniper_0.glb',
+  'VC-12 Nova':         'lowpoly_v2/sniper_0.glb',
+  // Gauss Rifle family — heavy bullpup-style assault read
+  'GR-4 Slug':          'lowpoly_v2/fusil_4.glb',
+  'GR-6 Coil':          'lowpoly_v2/fusil_4.glb',
+  'GR-9 Mag':           'lowpoly_v2/fusil_4.glb',
+  // Explosive Crossbow — long-barrel single-shot via sniper_2
+  'EX-3 Bolt':          'lowpoly_v2/sniper_2.glb',
+  'EX-5 Spike':         'lowpoly_v2/sniper_2.glb',
+  'EX-8 Stinger':       'lowpoly_v2/sniper_2.glb',
 
-  // Legendary artifact pistol.
-  "Jessica's Rage":     'weapons/SM_Hunting_Pistol.glb',
-
-  // SMGs (cont.)
-  'Kriss Vector':       'weapons/SM_Tactical_Submachine_Gun.glb',
+  // Legendary artifact pistol — share fusil_3's hand-cannon shape
+  "Jessica's Rage":     'lowpoly_v2/fusil_3.glb',
 
   // Melee.
   // Combat Knife: per the Apr-26 dupe rule, the Bayonet_2 FBX tagged
@@ -131,9 +142,6 @@ export const MODEL_BY_WEAPON_NAME = {
   'Chainsaw':           'tools/SM_Chainsaw.glb',
   'Scimitar':           'melee/SM_Handcrafted_Curved_Sword.glb',
 
-  // Mythic kept around (Dragonbreath has no in-class shotgun model
-  // distinct from the others; reuse Benelli silhouette).
-  'Dragonbreath':       'weapons/SM_Army_Shotgun.glb',
 };
 
 // Per-item-id override — consumables, armor pieces, junk — anything with a
@@ -324,10 +332,25 @@ export const MODEL_GRIP_OFFSET = {
   'melee/SM_Fire_Axe.glb':                     { x: 0, y: 0, z: -0.26 },
   'melee/SM_Hammer.glb':                       { x: 0, y: 0, z: -0.20 },  // club
   'melee/SM_Combat_Knife.glb':                 { x: 0, y: 0, z: -0.10 },
+
+  // ── lowpoly_v2 pack per-mesh grip nudges (2026-05-13) ──
+  // Pack-uniform alignment falls out of class gripOffset; per-mesh
+  // entries here only correct meshes whose pivot differs from the
+  // pack's typical pistol_2 baseline.
+  'lowpoly_v2/pistol_3.glb':   { x: -0.03, y: 0.00, z: -0.08 },  // Glock 17
 };
 
 export const MODEL_ROTATION_OVERRIDE = {
   // Key -> { x, y, z } in radians. Replaces the default (0, π/2, 0).
+};
+
+// Per-pack rotation defaults. Applied when a model path matches the
+// prefix and no per-weapon override above wins. lowpoly_v2 pack
+// (low_poly_guns_fbx) authors muzzle along the Z axis pre-Y-up;
+// after GLB Y-up conversion the muzzle ends up along -Z, so a π yaw
+// around Y puts the muzzle on +Z = forward in the hand local frame.
+const PACK_ROTATION_DEFAULTS = {
+  'lowpoly_v2/': { x: 0, y: Math.PI, z: 0 },
 };
 
 // In-hand mirror rule, by FBX source pack. The lowpolyguns.zip pack
@@ -379,7 +402,11 @@ export function gripOffsetForModelPath(fullPath) {
 export function rotationOverrideForModelPath(fullPath) {
   if (!fullPath) return null;
   const key = fullPath.startsWith(MODEL_BASE) ? fullPath.slice(MODEL_BASE.length) : fullPath;
-  return MODEL_ROTATION_OVERRIDE[key] || null;
+  if (MODEL_ROTATION_OVERRIDE[key]) return MODEL_ROTATION_OVERRIDE[key];
+  for (const prefix of Object.keys(PACK_ROTATION_DEFAULTS)) {
+    if (key.startsWith(prefix)) return PACK_ROTATION_DEFAULTS[prefix];
+  }
+  return null;
 }
 
 // Per-pack relative size correction. fitToRadius normalizes meshes to
@@ -392,88 +419,62 @@ export function rotationOverrideForModelPath(fullPath) {
 // for outliers within a pack (Makarov is too big even by animpic
 // standards; P90 is a tad small).
 const PACK_SCALE_DEFAULTS = {
-  'weapons/':                 0.85,   // animpic POLY weapons — slightly small
-  'lowpolyguns/':             1.00,   // baseline reference
-  'lowpolyguns_accessories/': 1.00,
+  'weapons/':                 0.85,   // animpic POLY weapons (attachments + a few melee)
+  'lowpolyguns_accessories/': 1.00,   // attachment-only pack
   'melee/':                   0.95,   // animpic POLY melee
   'tools/':                   1.00,
 };
-// Per-class visible-size targets after fitToRadius. Each weapon's
-// override is computed as target / (2 × muzzleLength) so every
-// weapon in a class renders to the same on-screen diameter
-// regardless of its declared length. Anchors (validated by user):
-//   - AK47 muzzleLength=0.96 at override 0.62 ⇒ rifle visible 1.20
-//   - AWP muzzleLength=1.45 at override 0.45 ⇒ sniper visible 1.30
-//   - KSG-12 muzzleLength=0.86 at override 0.40 ⇒ shotgun visible 0.70
-// Adjust class targets here when re-tuning visual size; per-weapon
-// values follow automatically from the formula.
-//
-// Targets in rig-local units after fitToRadius; fitToRadius itself
-// produces visible_diameter = 2 × targetRadius.
-//
-// To re-derive these values, use the probe at:
-//   playwright eval → import('/src/tunables.js'), measure each
-//   model's bounding box length, override = target / rawLen.
-// (See conversation 2026-05-04 for the original sweep.)
+// Per-mesh size overrides — applied on top of fitToRadius and the
+// class-wide sizeMul in ANIM_TUNE. Reserve these for outliers: meshes
+// whose authored bounding-box proportions differ enough that the class
+// sizeMul leaves them visibly off-class. Empty by default — entries
+// land here only after eyeballing in-game and confirming the class
+// tune can't absorb the correction without breaking siblings.
 export const MODEL_SCALE_OVERRIDE = {
-  // ── Pistols (target visible 0.30) ──
-  'weapons/SM_Civilian_Pistol.glb':         0.30,  // Makarov (mL 0.50)
-  'weapons/SM_Army_Pistol.glb':             0.31,  // Glock 17 (mL 0.48)
-  'weapons/SM_Police_Gun.glb':              0.27,  // M1911 (mL 0.55)
-  'weapons/SM_Hunting_Pistol.glb':          0.21,  // Desert Eagle / Jessica's Rage (mL 0.72-0.75)
-  'lowpolyguns/Revolver_1.glb':             0.27,  // Colt 357 (mL 0.55)
-  'lowpolyguns/Revolver_3.glb':             0.24,  // Colt Python (mL 0.62)
-  'lowpolyguns/Revolver_4.glb':             0.38,  // .38 Special (mL 0.40)
-  'lowpolyguns/Revolver_5.glb':             0.24,  // Colt Anaconda / Colt Six Shooter (mL 0.62)
-  'lowpolyguns/AssaultRifle2_3.glb':        0.24,  // AR-15 Pistol (mL 0.62)
-  // ── SMGs (target visible 0.60) ──
-  'weapons/SM_Army_Submachine_Gun.glb':     0.43,  // UMP45 (mL 0.70)
-  'weapons/SM_Civilian_Submachine_Gun.glb': 0.42,  // PDW (mL 0.72)
-  'weapons/SM_Police_Submachine_Gun.glb':   0.50,  // P90 (mL 0.60)
-  'weapons/SM_Tactical_Submachine_Gun.glb': 0.45,  // Kriss Vector (mL 0.66)
-  'lowpolyguns/SubmachineGun_1.glb':        0.58,  // Spectre CQB (mL 0.52)
-  'lowpolyguns/SubmachineGun_2.glb':        0.45,  // Spectre (mL 0.66)
-  'lowpolyguns/SubmachineGun_3.glb':        0.41,  // SPC9 (mL 0.74)
-  'lowpolyguns/SubmachineGun_4.glb':        0.38,  // SPCA3 (mL 0.78)
-  'lowpolyguns/SubmachineGun_5.glb':        0.36,  // SPC223 (mL 0.84)
-  // ── Rifles (target visible 1.20 — AK47 anchor) ──
-  'lowpolyguns/AssaultRifle_1.glb':         0.62,  // Draco NAK9 (mL 0.58, but pistol-sized AR — leave at AK rate)
-  'lowpolyguns/AssaultRifle_2.glb':         0.62,  // AK47 (anchor, mL 0.96)
-  'lowpolyguns/AssaultRifle_3.glb':         0.64,  // AKS-47 (mL 0.94)
-  'lowpolyguns/AssaultRifle_4.glb':         0.65,  // AKS-74 (mL 0.92)
-  'lowpolyguns/AssaultRifle_5.glb':         0.70,  // AK104 (mL 0.86)
-  'lowpolyguns/AssaultRifle2_1.glb':        0.77,  // CAR-15 (mL 0.78)
-  'lowpolyguns/AssaultRifle2_2.glb':        0.65,  // M4 (mL 0.92)
-  'lowpolyguns/AssaultRifle2_4.glb':        0.77,  // AR-15 SBR (mL 0.78)
-  'lowpolyguns/Bullpup_1.glb':              0.71,  // JARD J68 (mL 0.84)
-  'lowpolyguns/Bullpup_2.glb':              0.73,  // JARD J67 (mL 0.82)
-  'lowpolyguns/Bullpup_3.glb':              0.68,  // JARD J56 (mL 0.88)
-  'weapons/Assault_Rifle_5_56_Prototype.glb': 0.65, // M16 (mL 0.92)
-  'weapons/SM_Assault_Rifle_9x39.glb':      0.68,  // AS VAL (mL 0.88)
-  'weapons/SM_Police_Sniper_Rifle.glb':     0.61,  // VSS (mL 0.98)
-  'weapons/SM_Bulpam_Assault_Rifle.glb':    0.68,  // AUG A3-CQC (mL 0.88)
-  // ── Shotguns (target visible 0.70 — KSG anchor) ──
-  'weapons/Modern_Pump_Action_Shotgun.glb': 0.40,  // KSG-12 (anchor, mL 0.86)
-  'weapons/SM_Army_Shotgun.glb':            0.41,  // Benelli M4 / Dragonbreath (mL 0.85/0.78)
-  'weapons/SM_Assault_Shotgun.glb':         0.43,  // AA-12 (mL 0.82)
-  'lowpolyguns/Shotgun_1.glb':              0.38,  // Mossberg 500 (mL 0.92)
-  'lowpolyguns/Shotgun_3.glb':              0.37,  // Remington 870 (mL 0.95)
-  'lowpolyguns/Shotgun_4.glb':              0.32,  // Henry Slug Rifle (mL 1.10)
-  'lowpolyguns/Shotgun_SawedOff.glb':       0.70,  // Sawed-Off (mL 0.50, short → larger override)
-  // ── Snipers (target visible 1.30 — AWP anchor) ──
-  'lowpolyguns/SniperRifle_1.glb':          0.59,  // Remington 700 (mL 1.10)
-  'lowpolyguns/SniperRifle_2.glb':          0.55,  // Remington 700 Tactical (mL 1.18)
-  'lowpolyguns/SniperRifle_3.glb':          0.45,  // AWP (anchor, mL 1.45)
-  'lowpolyguns/SniperRifle_4.glb':          0.55,  // (mL ~1.18 inferred)
-  'lowpolyguns/SniperRifle_5.glb':          0.48,  // .338 Lapua (mL 1.35)
-  'lowpolyguns/SniperRifle_6.glb':          0.57,  // Hunting Rifle (mL 1.15)
-  'weapons/SM_Army_Sniper_Rifle.glb':       0.52,  // SVD Dragunov (mL 1.25)
-  'weapons/SM_High_Precision_Sniper_Rifle.glb': 0.41, // Cheytac Intervention (mL 1.60)
-  // ── LMGs (target visible 1.30) ──
-  'weapons/SM_Light_Machine_Gun.glb':       0.62,  // M249 (mL 1.05)
-  'weapons/SM_Heavy_Machine_Gun.glb':       0.58,  // Type 80 LMG / Flamethrower (mL 1.12 / 0.95)
-  // ── Exotics (target visible 1.40) ──
-  'weapons/SM_Rocket_Launchers_01.glb':     0.50,  // Widowmaker (mL 1.40)
+  // ── lowpoly_v2 pack per-mesh size overrides ──
+  // Computed 2026-05-17 from per-mesh visible bbox measurements taken
+  // via Playwright. Target visible-length-along-longest-axis per class:
+  //   pistol 0.22m, smg 0.45m, rifle 0.60m, shotgun 0.60m, sniper 0.80m,
+  //   lmg 0.65m, exotic 0.60-0.65m. Each entry = target / measured
+  //   (×prior scale where present). Tunes for the DOMINANT class user
+  //   of each mesh — shared-mesh secondary classes (e.g. RX-* exotics
+  //   on pistol_4.glb, GR-* exotics on fusil_4.glb) get the same
+  //   scaleForModelPath and end up smaller because their sizeMul is
+  //   lower. Touch up via per-name overrides if needed later.
+  // PISTOLS — tune target 0.22m visible length
+  'lowpoly_v2/pistol_2.glb':                0.42,  // M1911 (anchor)
+  'lowpoly_v2/pistol_3.glb':                1.01,  // Glock 17
+  'lowpoly_v2/pistol_4.glb':                0.79,  // Colt revolvers + RX-* (exotic, smaller)
+  'lowpoly_v2/pistol_5.glb':                0.86,  // AR-15 Pistol
+  'lowpoly_v2/pistol_6.glb':                1.05,  // Makarov
+  'lowpoly_v2/fusil_3.glb':                 0.76,  // Desert Eagle / Jessica's Rage (pistol-class)
+  // SMGs — target 0.45m
+  'lowpoly_v2/subfusil_1.glb':              0.88,  // Spectre CQB
+  'lowpoly_v2/subfusil_2.glb':              0.69,  // Spectre
+  'lowpoly_v2/subfusil_3.glb':              0.63,  // PDW / SPC9
+  'lowpoly_v2/subfusil_4.glb':              0.58,  // SPCA3
+  'lowpoly_v2/subfusil_5.glb':              1.91,  // Draco NAK9 (small mesh, big bump)
+  'lowpoly_v2/subfusil_6.glb':              0.65,  // UMP45 / Kriss Vector
+  'lowpoly_v2/subfusil_8.glb':              0.54,  // SPC223
+  'lowpoly_v2/subfusil_10.glb':             0.76,  // P90
+  // RIFLES — target 0.60m
+  'lowpoly_v2/fusil_5.glb':                 0.89,  // AK family
+  'lowpoly_v2/fusil_6.glb':                 0.92,  // M16 / M4 / AR-15 SBR / CAR-15
+  'lowpoly_v2/fusil_7.glb':                 0.96,  // AUG / JARD family
+  'lowpoly_v2/subfusil_7.glb':              0.95,  // AS VAL / VSS (rifle-class on SMG mesh)
+  // LMGs — target 0.65m
+  'lowpoly_v2/fusil_2.glb':                 0.81,  // Type 80 LMG
+  'lowpoly_v2/fusil_4.glb':                 0.86,  // M249 / GR-* exotics (smaller)
+  // SNIPERS — target 0.80m
+  'lowpoly_v2/sniper_0.glb':                0.71,  // Cheytac / VC-* exotics (smaller)
+  'lowpoly_v2/sniper_1.glb':                0.81,  // Remington 700 / AWP / Hunting Rifle
+  'lowpoly_v2/sniper_2.glb':                0.94,  // SVD / .338 Lapua / EX-* exotics (smaller)
+  // SHOTGUNS — target 0.60m
+  'lowpoly_v2/shotgun_1.glb':               0.84,  // Sawed-Off / Henry Slug Rifle
+  'lowpoly_v2/shotgun_2.glb':               0.46,  // Mossberg / Benelli / AA-12 / etc (long pump)
+  // EXOTICS — long-arm shapes, target 0.60m
+  'lowpoly_v2/flamethrower.glb':            0.92,  // Flamethrower
+  'lowpoly_v2/subfusil_9.glb':              0.68,  // Widowmaker Rocket Launcher
 };
 export function scaleForModelPath(fullPath) {
   if (!fullPath) return 1.0;
@@ -483,6 +484,34 @@ export function scaleForModelPath(fullPath) {
     if (key.startsWith(prefix)) return PACK_SCALE_DEFAULTS[prefix];
   }
   return 1.0;
+}
+
+// Per-WEAPON-NAME scale override — wins over the per-path scale. Fixes
+// shared-mesh secondary-class users: a mesh's MODEL_SCALE_OVERRIDE is
+// tuned for its DOMINANT class, so an exotic that shares the mesh (lower
+// sizeMul) renders too small. This table replaces the path scale for the
+// named weapon so it matches its dominant-class sibling's apparent size.
+//
+// Values measured in-game 2026-05-28 (world-bbox longest axis via
+// __activeWeaponClone): for each, new = path_scale * (dominant / exotic).
+//   pistol_4: Colt 0.90 vs RX 0.31 -> 0.79*(0.90/0.31) = 2.27
+//   fusil_4:  M249 0.68 vs GR 0.54 -> 0.86*(0.68/0.54) = 1.07
+// VC-* (sniper_0) and EX-* (sniper_2) measured equal to their dominant
+// siblings already, so they need no override.
+export const MODEL_SCALE_OVERRIDE_BY_NAME = {
+  'RX-1 Rebound': 2.27, 'RX-2 Caroma': 2.27, 'RX-3 Pinball': 2.27,
+  'GR-4 Slug': 1.07,    'GR-6 Coil': 1.07,   'GR-9 Mag': 1.07,
+};
+
+// Resolve the render scale for a specific weapon: per-name override wins,
+// else falls back to the per-path scale. Pass the weapon spec (needs
+// .name) plus its resolved model path.
+export function scaleForWeapon(weapon, fullPath) {
+  const name = weapon && (weapon.baseName || weapon.name);
+  if (name && MODEL_SCALE_OVERRIDE_BY_NAME[name] != null) {
+    return MODEL_SCALE_OVERRIDE_BY_NAME[name];
+  }
+  return scaleForModelPath(fullPath);
 }
 
 // Per-weapon-name PNG render — drives both the inventory icon AND

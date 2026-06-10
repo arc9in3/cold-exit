@@ -175,21 +175,33 @@ export function priceFor(item, shopMult = 1) {
     const mult = item.priceMult ?? 1;
     return Math.max(1, Math.round(item.sellValue * mult * shopMult));
   }
-  const base = tunables.currency.basePrice[inferRarity(item)] ?? 25;
+  const _rarity = inferRarity(item);
+  const base = tunables.currency.basePrice[_rarity] ?? 25;
   let price = base;
   if (item.type === 'consumable') price = Math.round(base * 0.5);
   else if (item.type === 'attachment') price = Math.round(base * 1.2);
+  else if (item.type === 'repairkit') {
+    // Repair kits use to use the full rarity base, which made
+    // rare/epic/legendary kits punishingly expensive (32k for an epic,
+    // 80k for a legendary — same as buying the gear new). Half-price
+    // the top three rarities so they're a real option instead of a
+    // taxidermy display. Common/uncommon kits unchanged.
+    // 2026-05-23: user tuning.
+    const cut = (_rarity === 'rare' || _rarity === 'epic' || _rarity === 'legendary') ? 0.5 : 1.0;
+    price = Math.round(base * cut);
+  }
   const mult = (item.priceMult ?? 1) * (1 + _affixPerkPremium(item));
   return Math.max(1, Math.round(price * mult * shopMult));
 }
 // Cost to repair a broken item. Scales with the item's full buy price
 // (including the floor's shop multiplier) so a rare epic costs serious
-// credits to bring back to working condition. ~30% of buy is the
-// pricing target — cheaper than re-buying, but a real economic dent.
+// credits to bring back to working condition. ~22.5% of buy is the
+// pricing target — cheaper than re-buying, with a real (but not punishing)
+// economic dent. Reduced from 30% on 2026-05-23 (user tuning).
 export function repairPriceFor(item, shopMult = 1) {
   if (!item) return 0;
   const base = priceFor(item, shopMult);
-  return Math.max(1, Math.round(base * 0.30));
+  return Math.max(1, Math.round(base * 0.225));
 }
 
 // Sell price uses the unfluxed base so selling is predictable. Junk
@@ -255,8 +267,8 @@ export class ShopUI {
             <div id="shop-trade" style="display:none"></div>
           </div>
           <div class="shop-col">
-            <div id="shop-smith" style="display:none;border:1px solid #c9a87a;border-radius:4px;padding:12px;background:rgba(20,24,32,0.6);margin-bottom:10px;">
-              <div style="font-size:13px;font-weight:700;letter-spacing:2px;color:#c9a87a;text-transform:uppercase;margin-bottom:8px;text-align:center;" id="shop-smith-title">Affix Transfer</div>
+            <div id="shop-smith" style="display:none;border:1px solid var(--cy-amber);border-radius:4px;padding:12px;background:rgba(20,24,32,0.6);margin-bottom:10px;">
+              <div style="font-size:13px;font-weight:700;letter-spacing:2px;color:var(--cy-amber);text-transform:uppercase;margin-bottom:8px;text-align:center;" id="shop-smith-title">Affix Transfer</div>
               <div style="display:flex;gap:8px;margin-bottom:8px;">
                 <div id="shop-smith-target-slot" class="smith-slot" data-role="target">
                   <div class="smith-slot-label">TARGET</div>
@@ -267,13 +279,13 @@ export class ShopUI {
                   <div class="smith-slot-cell" id="shop-smith-source-cell"></div>
                 </div>
               </div>
-              <div id="shop-smith-status" style="font-size:11px;color:#a09680;text-align:center;margin-bottom:6px;min-height:14px;letter-spacing:0.5px;"></div>
+              <div id="shop-smith-status" style="font-size:11px;color:var(--ce-soft);text-align:center;margin-bottom:6px;min-height:14px;letter-spacing:0.5px;"></div>
               <div id="shop-smith-affixes" style="display:flex;flex-direction:column;gap:4px;max-height:160px;overflow-y:auto;margin-bottom:8px;"></div>
-              <button id="shop-smith-confirm" type="button" disabled style="width:100%;padding:8px;font-size:11px;letter-spacing:2px;text-transform:uppercase;background:rgba(255,160,80,0.18);color:#ffd8a0;border:1px solid rgba(255,160,80,0.55);border-radius:3px;cursor:pointer;font-family:inherit;font-weight:700;opacity:0.55;">Pick target + affix</button>
+              <button id="shop-smith-confirm" type="button" disabled style="width:100%;padding:8px;font-size:11px;letter-spacing:2px;text-transform:uppercase;background:rgba(255,160,80,0.18);color:var(--cy-amber);border:1px solid rgba(255,160,80,0.55);border-radius:3px;cursor:pointer;font-family:inherit;font-weight:700;opacity:0.55;">Pick target + affix</button>
             </div>
             <div class="inv-heading" style="display:flex;align-items:center;justify-content:space-between;gap:6px;">
               <span id="shop-stock-heading">For Sale</span>
-              <button id="shop-reroll" type="button" style="display:none;padding:4px 10px;font-size:10px;letter-spacing:1.5px;text-transform:uppercase;background:rgba(120,160,210,0.18);color:#bcd4ee;border:1px solid rgba(120,160,210,0.55);border-radius:2px;cursor:pointer;font-family:inherit;font-weight:700;">Reroll Stock</button>
+              <button id="shop-reroll" type="button" style="display:none;padding:4px 10px;font-size:10px;letter-spacing:1.5px;text-transform:uppercase;background:rgba(120,160,210,0.18);color:var(--ce-soft);border:1px solid rgba(120,160,210,0.55);border-radius:2px;cursor:pointer;font-family:inherit;font-weight:700;">Reroll Stock</button>
             </div>
             <div id="shop-stock"></div>
             <div class="inv-heading" id="shop-buyback-heading" style="display:none">Buyback</div>
@@ -281,13 +293,13 @@ export class ShopUI {
           </div>
           <div class="shop-col">
             <div class="inv-heading">Equipped</div>
-            <div id="shop-equipped" style="display:flex;flex-wrap:wrap;gap:4px;margin-bottom:8px;padding:6px;background:rgba(20,24,32,0.5);border:1px solid #2a2f3a;border-radius:3px;"></div>
+            <div id="shop-equipped" style="display:flex;flex-wrap:wrap;gap:4px;margin-bottom:8px;padding:6px;background:rgba(20,24,32,0.5);border:1px solid var(--ce-navy);border-radius:3px;"></div>
             <div class="inv-heading">Your Backpack</div>
             <div id="shop-filter-tabs" style="display:flex;gap:4px;margin-bottom:6px;flex-wrap:wrap;"></div>
             <div id="shop-bag-actions" style="display:flex;gap:6px;margin-bottom:6px;flex-wrap:wrap;">
-              <button id="shop-sell-junk" type="button" class="shop-bulk-btn" style="flex:1;min-width:130px;padding:6px 10px;font-size:11px;letter-spacing:1.5px;text-transform:uppercase;background:rgba(143,191,112,0.18);color:#cfe5ad;border:1px solid rgba(143,191,112,0.55);border-radius:2px;cursor:pointer;font-family:inherit;font-weight:700;">Sell All Junk</button>
-              <button id="shop-repair-item" type="button" class="shop-bulk-btn" style="flex:1;min-width:130px;padding:6px 10px;font-size:11px;letter-spacing:1.5px;text-transform:uppercase;background:rgba(255,160,80,0.18);color:#ffd8a0;border:1px solid rgba(255,160,80,0.55);border-radius:2px;cursor:pointer;font-family:inherit;font-weight:700;">Repair Item</button>
-              <button id="shop-repair-all" type="button" class="shop-bulk-btn" style="flex:1;min-width:130px;padding:6px 10px;font-size:11px;letter-spacing:1.5px;text-transform:uppercase;background:rgba(255,80,80,0.18);color:#ffd0d0;border:1px solid rgba(255,80,80,0.55);border-radius:2px;cursor:pointer;font-family:inherit;font-weight:700;">Repair All</button>
+              <button id="shop-sell-junk" type="button" class="shop-bulk-btn" style="flex:1;min-width:130px;padding:6px 10px;font-size:11px;letter-spacing:1.5px;text-transform:uppercase;background:rgba(143,191,112,0.18);color:var(--cy-mint);border:1px solid rgba(143,191,112,0.55);border-radius:2px;cursor:pointer;font-family:inherit;font-weight:700;">Sell All Junk</button>
+              <button id="shop-repair-item" type="button" class="shop-bulk-btn" style="flex:1;min-width:130px;padding:6px 10px;font-size:11px;letter-spacing:1.5px;text-transform:uppercase;background:rgba(255,160,80,0.18);color:var(--cy-amber);border:1px solid rgba(255,160,80,0.55);border-radius:2px;cursor:pointer;font-family:inherit;font-weight:700;">Repair Item</button>
+              <button id="shop-repair-all" type="button" class="shop-bulk-btn" style="flex:1;min-width:130px;padding:6px 10px;font-size:11px;letter-spacing:1.5px;text-transform:uppercase;background:rgba(255,80,80,0.18);color:var(--ce-soft);border:1px solid rgba(255,80,80,0.55);border-radius:2px;cursor:pointer;font-family:inherit;font-weight:700;">Repair All</button>
             </div>
             <div id="shop-bag"></div>
           </div>
@@ -420,7 +432,7 @@ export class ShopUI {
     cellEl.innerHTML = '';
     if (!item) {
       const placeholder = document.createElement('div');
-      placeholder.style.cssText = 'display:flex;align-items:center;justify-content:center;height:100%;color:#5a6470;font-size:10px;letter-spacing:1.5px;text-transform:uppercase;text-align:center;padding:0 6px;';
+      placeholder.style.cssText = 'display:flex;align-items:center;justify-content:center;height:100%;color:var(--ce-steel);font-size:10px;letter-spacing:1.5px;text-transform:uppercase;text-align:center;padding:0 6px;';
       placeholder.textContent = role === 'target'
         ? 'Drag item to upgrade'
         : 'Drag item to consume';
@@ -488,14 +500,14 @@ export class ShopUI {
     this.smithAffixesEl.innerHTML = '';
     if (!source) {
       const hint = document.createElement('div');
-      hint.style.cssText = 'font-size:10px;color:#5a6470;padding:8px;text-align:center;letter-spacing:1px;';
+      hint.style.cssText = 'font-size:10px;color:var(--ce-steel);padding:8px;text-align:center;letter-spacing:1px;';
       hint.textContent = source ? '' : 'Material slot empty';
       this.smithAffixesEl.appendChild(hint);
     } else {
       const affixes = transferableAffixes(source);
       if (affixes.length === 0) {
         const empty = document.createElement('div');
-        empty.style.cssText = 'font-size:10px;color:#5a6470;padding:8px;text-align:center;letter-spacing:1px;';
+        empty.style.cssText = 'font-size:10px;color:var(--ce-steel);padding:8px;text-align:center;letter-spacing:1px;';
         empty.textContent = 'No transferable affixes on material';
         this.smithAffixesEl.appendChild(empty);
       } else {
@@ -513,8 +525,8 @@ export class ShopUI {
           const previewLabel = def ? def.label(newV) : aff.label;
           row.style.cssText = `
             display:flex;align-items:center;justify-content:space-between;gap:8px;
-            padding:6px 8px;border:1px solid ${isSelected ? '#c9a87a' : '#2c323c'};
-            border-radius:3px;background:${isSelected ? 'rgba(201,168,122,0.15)' : '#15181f'};
+            padding:6px 8px;border:1px solid ${isSelected ? 'var(--cy-amber)' : 'var(--ce-navy)'};
+            border-radius:3px;background:${isSelected ? 'rgba(201,168,122,0.15)' : 'var(--ce-black)'};
             cursor:${canTransfer ? 'pointer' : 'default'};opacity:${canTransfer ? 1 : 0.55};
           `;
           const left = document.createElement('div');
@@ -522,13 +534,13 @@ export class ShopUI {
           const labelText = scalar !== 1.0 && target
             ? `${aff.label} → ${previewLabel}`
             : aff.label;
-          const scalarTag = scalar === 2.0 ? ' <span style="color:#ffd27a">×2</span>'
-            : scalar === 0.5 ? ' <span style="color:#d28080">×0.5</span>'
+          const scalarTag = scalar === 2.0 ? ' <span style="color:var(--cy-amber)">×2</span>'
+            : scalar === 0.5 ? ' <span style="color:var(--ce-red)">×0.5</span>'
             : '';
-          left.innerHTML = `<div style="font-size:11px;color:#cfd6e0;letter-spacing:0.5px;">${labelText}${scalarTag}</div>`;
+          left.innerHTML = `<div style="font-size:11px;color:var(--ce-soft);letter-spacing:0.5px;">${labelText}${scalarTag}</div>`;
           row.appendChild(left);
           const right = document.createElement('div');
-          right.style.cssText = `font-size:11px;font-weight:700;letter-spacing:1px;color:${target ? (canAfford ? '#ffd27a' : '#d28080') : '#5a6470'};white-space:nowrap;`;
+          right.style.cssText = `font-size:11px;font-weight:700;letter-spacing:1px;color:${target ? (canAfford ? 'var(--cy-amber)' : 'var(--ce-red)') : 'var(--ce-steel)'};white-space:nowrap;`;
           right.textContent = target ? `${cost}c` : '—';
           row.appendChild(right);
           if (canTransfer) {
@@ -555,7 +567,17 @@ export class ShopUI {
       this.smithConfirmBtn.disabled = true;
       this.smithConfirmBtn.style.opacity = '0.55';
       this.smithConfirmBtn.style.cursor = 'default';
-      this.smithConfirmBtn.textContent = reason || 'Pick target + affix';
+      // Stage the prompt so the player knows what's missing rather
+      // than always reading "Pick target + affix" even when one is
+      // already selected.
+      let hint;
+      if (reason) hint = reason;
+      else if (!target && !source) hint = 'Pick target + material';
+      else if (!target) hint = 'Pick a target';
+      else if (!source) hint = 'Pick a material';
+      else if (!this.smith.affix) hint = 'Pick an affix';
+      else hint = 'Pick target + affix';
+      this.smithConfirmBtn.textContent = hint;
     }
   }
 
@@ -750,17 +772,17 @@ export class ShopUI {
       });
       const card = document.createElement('div');
       Object.assign(card.style, {
-        background: 'linear-gradient(180deg, #181b21 0%, #0e1018 100%)',
-        border: '1px solid #c9a87a', borderRadius: '4px',
+        background: 'linear-gradient(180deg, var(--ce-black) 0%, var(--ce-black) 100%)',
+        border: '1px solid var(--cy-amber)', borderRadius: '4px',
         padding: '20px 22px', minWidth: '420px', maxWidth: '560px',
         maxHeight: '78vh', overflowY: 'auto',
-        color: '#e8dfc8',
+        color: 'var(--ce-soft)',
         fontFamily: 'ui-monospace, SFMono-Regular, Menlo, Consolas, monospace',
       });
       card.innerHTML = `
-        <div style="font-size:16px;font-weight:700;letter-spacing:3px;color:#c9a87a;text-transform:uppercase;margin-bottom:14px;text-align:center;">Repair Item</div>
+        <div style="font-size:16px;font-weight:700;letter-spacing:3px;color:var(--cy-amber);text-transform:uppercase;margin-bottom:14px;text-align:center;">Repair Item</div>
         <div id="shop-repair-list" style="display:flex;flex-direction:column;gap:6px;"></div>
-        <button id="shop-repair-close" type="button" style="margin-top:14px;width:100%;padding:8px;background:rgba(125,167,200,0.15);color:#cbd6e2;border:1px solid rgba(125,167,200,0.55);border-radius:3px;cursor:pointer;font-family:inherit;font-weight:700;letter-spacing:2px;text-transform:uppercase;">Back</button>
+        <button id="shop-repair-close" type="button" style="margin-top:14px;width:100%;padding:8px;background:rgba(125,167,200,0.15);color:var(--ce-soft);border:1px solid rgba(125,167,200,0.55);border-radius:3px;cursor:pointer;font-family:inherit;font-weight:700;letter-spacing:2px;text-transform:uppercase;">Back</button>
       `;
       root.appendChild(card);
       document.body.appendChild(root);
@@ -779,7 +801,7 @@ export class ShopUI {
     listEl.innerHTML = '';
     if (list.length === 0) {
       const empty = document.createElement('div');
-      empty.style.cssText = 'text-align:center;color:#7a8290;padding:18px 0;font-size:12px;';
+      empty.style.cssText = 'text-align:center;color:var(--ce-soft-50);padding:18px 0;font-size:12px;';
       empty.textContent = 'No damaged items to repair.';
       listEl.appendChild(empty);
       return;
@@ -789,18 +811,18 @@ export class ShopUI {
       const dur = item.durability;
       const pct = Math.max(0, Math.min(1, dur.current / dur.max));
       const row = document.createElement('div');
-      row.style.cssText = 'display:flex;align-items:center;gap:10px;padding:8px 10px;border:1px solid #2c323c;border-radius:3px;background:#15181f;';
+      row.style.cssText = 'display:flex;align-items:center;gap:10px;padding:8px 10px;border:1px solid var(--ce-navy);border-radius:3px;background:var(--ce-black);';
       const left = document.createElement('div');
       left.style.cssText = 'flex:1;min-width:0;';
       const name = document.createElement('div');
-      name.style.cssText = 'font-size:12px;color:#e8dfc8;letter-spacing:1px;margin-bottom:4px;';
+      name.style.cssText = 'font-size:12px;color:var(--ce-soft);letter-spacing:1px;margin-bottom:4px;';
       const cleanName = String(item.name || 'item').replace(/<[^>]+>/g, '');
       const sourceLabel = source === 'backpack' ? '' : ` · equipped (${source})`;
       name.textContent = cleanName + sourceLabel;
       const bar = document.createElement('div');
-      bar.style.cssText = 'height:6px;background:#1a1d24;border-radius:1px;overflow:hidden;';
+      bar.style.cssText = 'height:6px;background:var(--ce-black);border-radius:1px;overflow:hidden;';
       const fill = document.createElement('div');
-      const color = pct > 0.6 ? '#6abe8a' : pct > 0.3 ? '#e0c040' : '#d24040';
+      const color = pct > 0.6 ? 'var(--cy-cyan)' : pct > 0.3 ? 'var(--cy-amber)' : 'var(--ce-red)';
       fill.style.cssText = `width:${Math.round(pct * 100)}%;height:100%;background:${color};`;
       bar.appendChild(fill);
       left.appendChild(name);
@@ -811,7 +833,7 @@ export class ShopUI {
       const canAfford = credits >= cost;
       btn.textContent = `${cost}c`;
       btn.disabled = !canAfford;
-      btn.style.cssText = `padding:8px 14px;font-size:11px;letter-spacing:1.5px;text-transform:uppercase;background:${canAfford ? 'rgba(255,160,80,0.18)' : 'rgba(80,80,80,0.18)'};color:${canAfford ? '#ffd8a0' : '#6a7280'};border:1px solid ${canAfford ? 'rgba(255,160,80,0.55)' : 'rgba(80,80,80,0.3)'};border-radius:3px;cursor:${canAfford ? 'pointer' : 'default'};font-family:inherit;font-weight:700;min-width:64px;`;
+      btn.style.cssText = `padding:8px 14px;font-size:11px;letter-spacing:1.5px;text-transform:uppercase;background:${canAfford ? 'rgba(255,160,80,0.18)' : 'rgba(80,80,80,0.18)'};color:${canAfford ? 'var(--cy-amber)' : 'var(--ce-soft-50)'};border:1px solid ${canAfford ? 'rgba(255,160,80,0.55)' : 'rgba(80,80,80,0.3)'};border-radius:3px;cursor:${canAfford ? 'pointer' : 'default'};font-family:inherit;font-weight:700;min-width:64px;`;
       if (canAfford) {
         btn.addEventListener('click', () => {
           this._repair(item);
@@ -939,11 +961,32 @@ export class ShopUI {
       if (typeof window.__recomputeStats === 'function') window.__recomputeStats();
       this._flash(`Repaired ${repaired} · −${totalCost}c`);
     } else {
-      this._flash(this.merchant?.kind === 'gunsmith' ? 'No broken weapons to repair'
-                : this.merchant?.kind === 'armorer'  ? 'No broken armor to repair'
-                : 'This merchant doesn\'t repair gear');
+      // Distinguish three cases: no damaged items at all, can't
+      // afford anything, or wrong merchant. The old text always said
+      // "no broken X" even when items existed but the player was
+      // broke, which felt buggy.
+      const anyDamaged = this._damagedRepairables().length > 0;
+      this._flash(
+        !this._canRepairAny()
+          ? 'This merchant doesn\'t repair gear'
+        : anyDamaged
+          ? 'Not enough credits to repair anything'
+        : this.merchant?.kind === 'gunsmith'
+          ? 'No damaged weapons to repair'
+        : this.merchant?.kind === 'armorer'
+          ? 'No damaged armor to repair'
+        : 'Nothing to repair'
+      );
     }
     this.render();
+  }
+
+  // Quick check used by the Repair All flash — does this merchant
+  // handle ANY type at all? Independent of whether the player owns
+  // damaged items.
+  _canRepairAny() {
+    const k = this.merchant?.kind;
+    return k === 'gunsmith' || k === 'armorer';
   }
 
   // Brief on-screen toast — surfaces bulk-action results without
@@ -952,7 +995,7 @@ export class ShopUI {
     const el = document.createElement('div');
     el.className = 'shop-flash';
     el.textContent = text;
-    el.style.cssText = 'position:absolute;left:50%;top:36px;transform:translateX(-50%);background:rgba(20,24,32,0.92);color:#ffd27a;border:1px solid #c9a87a;padding:6px 14px;border-radius:3px;font-size:11px;letter-spacing:1.5px;z-index:5;text-transform:uppercase;font-weight:700;pointer-events:none;';
+    el.style.cssText = 'position:absolute;left:50%;top:36px;transform:translateX(-50%);background:rgba(20,24,32,0.92);color:var(--cy-amber);border:1px solid var(--cy-amber);padding:6px 14px;border-radius:3px;font-size:11px;letter-spacing:1.5px;z-index:5;text-transform:uppercase;font-weight:700;pointer-events:none;';
     this.root.querySelector('#shop-card').appendChild(el);
     setTimeout(() => el.remove(), 1800);
   }
@@ -1115,7 +1158,10 @@ export class ShopUI {
       // UNFILTERED bag so the bulk-action button states reflect the
       // real backpack contents, not the filtered view.
       hasAny = true;
-      if (it.type === 'junk') anyJunk = true;
+      // Mirror _sellAllJunk's selection: type==='junk' OR markedJunk,
+      // ignoring markedKeep. The button must read the same set to
+      // honestly reflect what would happen on click.
+      if (!it.markedKeep && (it.type === 'junk' || it.markedJunk)) anyJunk = true;
       const isBroken = it.durability && it.durability.current <= 0;
       const canRepair = isBroken && this._canRepair(it);
       if (canRepair) anyRepairable = true;
@@ -1181,6 +1227,20 @@ export class ShopUI {
       this.bagEl.appendChild(empty);
     }
 
+    // Sell-All-Junk button state — was previously never updated,
+    // staying fully enabled even when the bag had nothing junk-typed
+    // or marked-junk. Clicking did nothing but the button gave no
+    // visual signal. Now grays out + tooltip when there's nothing to
+    // sell, matching the disabled treatment used by Repair All.
+    if (this.sellJunkBtn) {
+      this.sellJunkBtn.disabled = !anyJunk;
+      this.sellJunkBtn.style.opacity = anyJunk ? '1' : '0.55';
+      this.sellJunkBtn.style.cursor = anyJunk ? 'pointer' : 'default';
+      this.sellJunkBtn.title = anyJunk
+        ? 'Sell every junk item + anything you marked as junk'
+        : 'No junk to sell — mark items with J or pick up some scrap';
+    }
+
     // Drop targets: drag from bag onto stock column = sell; from stock
     // onto bag column = buy.
     this._wireColumnDrop(this.stockEl.parentElement, 'sell');
@@ -1213,21 +1273,21 @@ export class ShopUI {
   // suitable human/robot art lands.
   _renderKeeper() {
     const KEEPERS = {
-      merchant:     { glyph: '◆', tone: '#c9a87a', name: 'The Fixer',
+      merchant:     { glyph: '◆', tone: 'var(--cy-amber)', name: 'The Fixer',
         flavor: '"Everything has a price. Some higher than others. Don\'t haggle unless you mean it."' },
-      healer:       { glyph: '✚', tone: '#d88080', name: 'The Surgeon',
+      healer:       { glyph: '✚', tone: 'var(--ce-red)', name: 'The Surgeon',
         flavor: '"You look like you\'ve seen better days. Sit. I\'ll patch what I can — the rest is on you."' },
-      bearMerchant: { glyph: '◈', tone: '#ffd27a', name: 'The Great Bear',
+      bearMerchant: { glyph: '◈', tone: 'var(--cy-amber)', name: 'The Great Bear',
         flavor: '"Bring me my little friends. All four. Then — and only then — we talk about what\'s mine to give."' },
-      gunsmith:     { glyph: '⌖', tone: '#a0b8d0', name: 'The Gunsmith',
+      gunsmith:     { glyph: '⌖', tone: 'var(--ce-soft)', name: 'The Gunsmith',
         flavor: '"Tools of the trade. Keep them oiled, keep them fed, and they\'ll keep you upright."' },
-      armorer:      { glyph: '⛨', tone: '#8a9db0', name: 'The Armorer',
+      armorer:      { glyph: '⛨', tone: 'var(--ce-soft)', name: 'The Armorer',
         flavor: '"Dead men need no armor. Buy now, while the blood is still yours to keep."' },
-      tailor:       { glyph: '✂', tone: '#b89a70', name: 'The Tailor',
+      tailor:       { glyph: '✂', tone: 'var(--cy-amber)', name: 'The Tailor',
         flavor: '"Style wins fights too. Let me see what fits — bullet-proof, of course."' },
-      relicSeller:  { glyph: '✦', tone: '#b090d0', name: 'The Curator',
+      relicSeller:  { glyph: '✦', tone: 'var(--cy-violet)', name: 'The Curator',
         flavor: '"Each piece carries a story. Most stories end badly. Choose wisely."' },
-      blackMarket:  { glyph: '☠', tone: '#70b090', name: 'The Broker',
+      blackMarket:  { glyph: '☠', tone: 'var(--cy-cyan)', name: 'The Broker',
         flavor: '"Questions cost extra. Pay, take your merchandise, and forget my face on the way out."' },
     };
     const k = KEEPERS[this.merchant?.kind] || KEEPERS.merchant;
@@ -1290,22 +1350,22 @@ export class ShopUI {
         display:flex;flex-direction:column;align-items:center;justify-content:flex-start;
         padding:3px 2px;
         background:rgba(15,17,22,0.7);
-        border:1px solid ${item ? '#5a4a32' : '#2a2f3a'};
+        border:1px solid ${item ? 'var(--ce-navy)' : 'var(--ce-navy)'};
         border-radius:2px;
         cursor:${item ? 'pointer' : 'default'};
-        font-size:9px;color:${item ? '#f2e7c9' : '#5a6470'};
+        font-size:9px;color:${item ? 'var(--cy-amber)' : 'var(--ce-steel)'};
         letter-spacing:0.5px;text-align:center;
       `;
       if (item) {
         const price = sellPriceFor(item);
-        tile.title = `${item.name} — right-click to sell for ${price}c`;
-        if (item.markedKeep) tile.style.borderColor = '#3a6e9e';
+        tile.title = `${item.name} — right-click to sell for ${price}c · drag a compatible item here to swap`;
+        if (item.markedKeep) tile.style.borderColor = 'var(--cy-cyan)';
         tile.innerHTML = `
-          <div style="width:38px;height:38px;display:flex;align-items:center;justify-content:center;color:#c9a87a;">
+          <div style="width:38px;height:38px;display:flex;align-items:center;justify-content:center;color:var(--cy-amber);">
             ${slotIconHTML(slot, { cls: 'shop-eq-icon', fallback: '◇' })}
           </div>
-          <div style="font-size:8px;color:#bcd4ee;text-overflow:ellipsis;overflow:hidden;white-space:nowrap;width:100%;">${item.name || ''}</div>
-          <div style="font-size:8px;color:#cfe5ad;">${price}c</div>
+          <div style="font-size:8px;color:var(--ce-soft);text-overflow:ellipsis;overflow:hidden;white-space:nowrap;width:100%;">${item.name || ''}</div>
+          <div style="font-size:8px;color:var(--cy-mint);">${price}c</div>
         `;
         tile.addEventListener('click', () => {
           if (window.__showDetails) window.__showDetails(item);
@@ -1315,15 +1375,70 @@ export class ShopUI {
           this._sellEquipped(slot);
         });
       } else {
+        tile.title = `${SLOT_LABEL[slot] || slot} — drag a compatible item here to equip`;
         tile.innerHTML = `
           <div style="width:38px;height:38px;display:flex;align-items:center;justify-content:center;opacity:0.5;">
             ${slotIconHTML(slot, { cls: 'shop-eq-icon-empty', fallback: '·' })}
           </div>
-          <div style="font-size:8px;color:#5a6470;text-overflow:ellipsis;overflow:hidden;white-space:nowrap;width:100%;">${SLOT_LABEL[slot] || slot}</div>
+          <div style="font-size:8px;color:var(--ce-steel);text-overflow:ellipsis;overflow:hidden;white-space:nowrap;width:100%;">${SLOT_LABEL[slot] || slot}</div>
         `;
       }
+      // Drop target — accepts a drag from the backpack (this._drag.from
+      // === 'bag') when the dragged item's type matches this slot.
+      // dragover must call preventDefault() to mark the slot as a valid
+      // drop zone; without it the drop event never fires.
+      tile.addEventListener('dragover', (e) => {
+        const d = this._drag;
+        if (!d || d.from !== 'bag' || !d.item) return;
+        if (!this.inventory.canSlotHold(slot, d.item)) return;
+        e.preventDefault();
+        tile.classList.add('drop-ok');
+      });
+      tile.addEventListener('dragleave', () => tile.classList.remove('drop-ok'));
+      tile.addEventListener('drop', (e) => {
+        e.preventDefault();
+        tile.classList.remove('drop-ok');
+        const d = this._drag;
+        if (!d || d.from !== 'bag' || !d.item) return;
+        this._drag = null;
+        this._equipFromBag(slot, d.item);
+      });
       this.equippedEl.appendChild(tile);
     }
+  }
+
+  // Move `item` from the backpack into the paperdoll `slot`, swapping
+  // whatever was already equipped back into the bag. Mirrors the inv
+  // paperdoll equip path (ui_inventory.js:872) — same canSlotHold +
+  // placeOrOverflow + rollback rules, so the shop swap can't silently
+  // duplicate or destroy a slot's previous occupant.
+  _equipFromBag(slot, item) {
+    if (!item) return;
+    if (!this.inventory.canSlotHold(slot, item)) {
+      this._flash(`${item.name} doesn't fit the ${SLOT_LABEL[slot] || slot} slot.`);
+      return;
+    }
+    // Broken-item gate stays implicit — the player CAN equip a broken
+    // item (matches the inv paperdoll), they just won't get any of
+    // its stats until they repair. No flash needed.
+    const prev = this.inventory.equipment[slot] || null;
+    // Pull the dragged item out of whichever grid currently holds it.
+    const removed = this.inventory.takeFromBackpack(item);
+    if (!removed) return;
+    this.inventory.equipment[slot] = item;
+    this.inventory._recomputeCapacity?.();
+    if (prev && !this.inventory.placeOrOverflow(prev)) {
+      // No room for the displaced item — roll back so we don't
+      // accidentally drop it on the floor.
+      this.inventory.equipment[slot] = prev;
+      this.inventory._recomputeCapacity?.();
+      this.inventory.autoPlaceAnywhere(item);
+      this._flash('No bag space to swap — equip cancelled.');
+      this.render();
+      return;
+    }
+    this.inventory._bump();
+    this.render();
   }
 
   // Sell an equipped item directly from the paperdoll row. Mirrors the
@@ -1366,7 +1481,7 @@ export class ShopUI {
         padding:4px 10px;font-size:10px;letter-spacing:1.5px;
         text-transform:uppercase;font-family:inherit;font-weight:700;
         background:${this._filterTab === key ? 'rgba(201,168,122,0.30)' : 'rgba(40,44,52,0.6)'};
-        color:${this._filterTab === key ? '#f2e7c9' : '#8a8270'};
+        color:${this._filterTab === key ? 'var(--cy-amber)' : 'var(--ce-soft)'};
         border:1px solid ${this._filterTab === key ? 'rgba(201,168,122,0.7)' : 'rgba(80,80,80,0.55)'};
         border-radius:2px;cursor:pointer;
       `;

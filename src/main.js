@@ -17,12 +17,14 @@ import { DummyManager } from './enemy.js';
 import { GunmanManager } from './gunman.js';
 import { MeleeEnemyManager } from './melee_enemy.js';
 import { initRigInstancer, rigInstancer } from './rig_instancer.js';
+import { pendingModelCount } from './gltf_cache.js';
 import { separateEnemies } from './ai_separation.js';
 import { LootManager } from './loot.js';
 import { ENCOUNTER_DEFS, pickEncounterForLevel } from './encounters.js';
 import { spawnSpeechBubble } from './hud.js';
 import { makeContainer, buildContainerMesh, pickContainerType, pickContainerSize } from './containers.js';
 import { Level } from './level.js';
+import { auditLevel, auditSeeds } from './level_audit.js';
 import {
   MegaBoss, isMegaBossLevel, buildMegaBossLoot,
   getEncounterCount as getMegaBossEncounterCount,
@@ -31,6 +33,7 @@ import {
 } from './megaboss.js';
 import { MegaBossEcho, buildEchoLoot } from './megaboss_echo.js';
 import { MegaBossGeneral, buildGeneralLoot } from './megaboss_general.js';
+import { MegaBossJailer, buildJailerLoot } from './megaboss_jailer.js';
 import { ProjectileManager } from './projectiles.js';
 // Warmup imports — theme materials (per-floor walls + room-accent
 // floor emissive) compile lazily on first use; without seeding them
@@ -228,7 +231,7 @@ const toastEl = (() => {
     zIndex: 260, pointerEvents: 'none',
     fontFamily: 'ui-monospace, SFMono-Regular, Menlo, Consolas, monospace',
     fontSize: '13px', fontWeight: '700',
-    color: '#f2e7c9', textShadow: '0 0 8px rgba(0,0,0,0.9)',
+    color: 'var(--cy-amber)', textShadow: '0 0 8px rgba(0,0,0,0.9)',
     letterSpacing: '1.5px', padding: '6px 16px',
     background: 'rgba(0,0,0,0.55)', border: '1px solid rgba(201,168,122,0.5)',
     borderRadius: '3px', opacity: '0', transition: 'opacity 0.25s',
@@ -258,9 +261,9 @@ const skillPointPipEl = (() => {
     right: '24px',
     padding: '6px 12px',
     background: 'rgba(40, 20, 70, 0.85)',
-    border: '1px solid #b894ff',
+    border: '1px solid var(--cy-violet)',
     borderRadius: '4px',
-    color: '#e0c8ff',
+    color: 'var(--cy-violet)',
     fontFamily: 'ui-monospace, Menlo, Consolas, monospace',
     fontSize: '12px',
     letterSpacing: '1px',
@@ -329,7 +332,7 @@ const bossBarRoot = (() => {
   const name = document.createElement('div');
   name.id = 'boss-bar-name';
   Object.assign(name.style, {
-    color: '#c9a87a', fontSize: '12px', fontWeight: '700',
+    color: 'var(--cy-amber)', fontSize: '12px', fontWeight: '700',
     textTransform: 'uppercase',
     textShadow: '0 0 6px rgba(0,0,0,0.9)',
     marginBottom: '4px',
@@ -338,7 +341,7 @@ const bossBarRoot = (() => {
   fill.id = 'boss-bar-fill';
   Object.assign(fill.style, {
     width: '0%', height: '100%',
-    background: 'linear-gradient(90deg, #7a1f1f, #d23030)',
+    background: 'linear-gradient(90deg, var(--ce-red), var(--ce-red))',
     transition: 'width 0.15s',
   });
   const track = document.createElement('div');
@@ -587,6 +590,16 @@ renderer.shadowMap.type = THREE.PCFSoftShadowMap;
 // error in practice).
 renderer.debug.checkShaderErrors = true;
 renderer.outputColorSpace = THREE.SRGBColorSpace;
+// ACES filmic tone mapping. Previously NoToneMapping (raw linear→sRGB),
+// which let bright lights / emissives clip to flat white and gave the
+// scene a hard, plasticky read. ACES rolls off highlights into a
+// filmic shoulder so emissives read as light instead of blown-out
+// white, and gives the whole frame a cohesive cinematic curve.
+// Exposure is live-tunable via tunables.lighting (synced in
+// syncLighting). When postFx is enabled the composer's OutputPass
+// applies this same tone mapping at the end of the chain.
+renderer.toneMapping = THREE.ACESFilmicToneMapping;
+renderer.toneMappingExposure = tunables.lighting.toneMappingExposure ?? 1.0;
 appEl.appendChild(renderer.domElement);
 attachUnlock(renderer.domElement);
 
@@ -610,7 +623,7 @@ function _showCtxLostOverlay() {
   el.style.cssText = `
     position: fixed; inset: 0; z-index: 99999;
     background: rgba(5,6,7,0.92);
-    color: #00e6ff;
+    color: var(--cy-cyan);
     display: flex; flex-direction: column;
     align-items: center; justify-content: center;
     font: 14px ui-monospace, Menlo, Consolas, monospace;
@@ -618,9 +631,9 @@ function _showCtxLostOverlay() {
     pointer-events: auto;
   `;
   el.innerHTML = `
-    <div style="font-size:18px; color:#ff3a3a; letter-spacing:2px;">GRAPHICS CONTEXT LOST</div>
-    <div style="color:#8a97a8;">Reloading in <b style="color:#00e6ff;" id="ctx-lost-secs">3</b>…</div>
-    <div style="color:#6f6754; font-size:11px; max-width:380px; line-height:1.5;">
+    <div style="font-size:18px; color:var(--ce-red); letter-spacing:2px;">GRAPHICS CONTEXT LOST</div>
+    <div style="color:var(--ce-soft);">Reloading in <b style="color:var(--cy-cyan);" id="ctx-lost-secs">3</b>…</div>
+    <div style="color:var(--ce-steel); font-size:11px; max-width:380px; line-height:1.5;">
       Your browser ran out of WebGL contexts after a long session.
       Reloading recovers the renderer; your run state is saved at the
       last level start.
@@ -662,6 +675,40 @@ renderer.domElement.addEventListener('webglcontextrestored', () => {
 const { scene, camera, updateCamera, resize, groundPlane,
   hemiLight, keyLight, fillLight, rimLight, gridHelper, ground } = createScene();
 applyQuality(initialQuality, { renderer, scene, keyLight, fillLight, rimLight, gridHelper });
+
+// Environment map for subtle PBR specular. The scene is lit by
+// directional lights + hemisphere only — no env reflections — so
+// MeshStandard metal/floor read as flat matte plastic. A DIM gradient
+// environment (cool sky, faint warm horizon band, dark floor) gives
+// standard materials a soft specular sheen + a touch of IBL without
+// flattening the dramatic key/rim lighting. Kept deliberately dark so
+// the noir mood holds: roughness-0.85 walls barely pick it up, the
+// metalness-bearing ground + metal props get a gentle gleam. Toon
+// (character) materials ignore envMap, so enemies are unaffected.
+// One-time PMREM bake at boot; scene.environment auto-applies to every
+// PBR material.
+try {
+  const _envCanvas = document.createElement('canvas');
+  _envCanvas.width = 16; _envCanvas.height = 128;
+  const _ictx = _envCanvas.getContext('2d');
+  const _grad = _ictx.createLinearGradient(0, 0, 0, 128);
+  _grad.addColorStop(0.00, '#2a3050'); // cool sky
+  _grad.addColorStop(0.50, '#191a26'); // mid
+  _grad.addColorStop(0.62, '#382a30'); // faint warm horizon band
+  _grad.addColorStop(1.00, '#0a0a10'); // dark floor
+  _ictx.fillStyle = _grad;
+  _ictx.fillRect(0, 0, 16, 128);
+  const _envTex = new THREE.CanvasTexture(_envCanvas);
+  _envTex.mapping = THREE.EquirectangularReflectionMapping;
+  _envTex.colorSpace = THREE.SRGBColorSpace;
+  const _pmrem = new THREE.PMREMGenerator(renderer);
+  _pmrem.compileEquirectangularShader();
+  scene.environment = _pmrem.fromEquirectangular(_envTex).texture;
+  _envTex.dispose();
+  _pmrem.dispose();
+} catch (e) {
+  console.warn('[gfx] env map bake failed (non-fatal):', e);
+}
 
 // Post-FX composer — bloom + vignette/grain. Only rendered through
 // when qualityFlags.postFx is on; low mode falls back to a direct
@@ -1600,11 +1647,21 @@ if (typeof window !== 'undefined') {
 }
 const loot = new LootManager(scene);
 const level = new Level(scene, { ground });
+// Give the loot manager a handle on the level so spawnItem can nudge
+// drops out of walls/props (see LootManager._resolveDropXZ). The Level
+// instance is stable across floor regens (generate() mutates in place),
+// so this single wire stays valid.
+loot.level = level;
 // Phase M step 9 — expose the level + run-seed handle so the in-game
 // bug-report tool (src/bug_report.js, ] keybind) can serialise full
 // repro state without a circular import.
 if (typeof window !== 'undefined') {
   window.__level = level;
+  // Dev gate for the room-gen overhaul — window.__auditLevel() reports the
+  // current floor; window.__auditLevel(n) regenerates n times and aggregates
+  // (void leaks / path blocks / props-in-walls / door-band props). See
+  // src/level_audit.js. Read-only; safe to call between runs.
+  window.__auditLevel = (n) => (n && n > 1) ? auditSeeds(level, n) : auditLevel(level);
   Object.defineProperty(window, '__runSeed', {
     configurable: true,
     get() { return _runSeed || null; },
@@ -2137,9 +2194,9 @@ function _showActiveContractReminder() {
         }
         .contract-reminder-card {
           padding: 14px 22px 12px;
-          background: linear-gradient(180deg, #1a2228 0%, #0c1014 100%);
-          border: 1.5px solid #c9a87a; border-radius: 6px;
-          color: #f2e7c9;
+          background: linear-gradient(180deg, var(--ce-navy) 0%, var(--ce-black) 100%);
+          border: 1.5px solid var(--cy-amber); border-radius: 6px;
+          color: var(--cy-amber);
           min-width: 380px; max-width: 640px;
           box-shadow: 0 0 28px rgba(201, 168, 122, 0.45),
                       0 6px 24px rgba(0, 0, 0, 0.6);
@@ -2155,17 +2212,17 @@ function _showActiveContractReminder() {
           to { opacity: 0; transform: translateY(-12px) scale(0.96); }
         }
         .cr-eyebrow {
-          color: #c9a87a; font-weight: 800;
+          color: var(--cy-amber); font-weight: 800;
           font-size: 10px; letter-spacing: 4px; text-transform: uppercase;
           text-align: center; margin-bottom: 4px;
         }
         .cr-title {
-          color: #f2c060; font-weight: 800; font-size: 17px;
+          color: var(--cy-amber); font-weight: 800; font-size: 17px;
           letter-spacing: 1.2px; text-align: center;
           margin-bottom: 4px;
         }
         .cr-conds {
-          color: #c9a87a; font-size: 12px; letter-spacing: 0.8px;
+          color: var(--cy-amber); font-size: 12px; letter-spacing: 0.8px;
           text-align: center; margin-bottom: 6px;
         }
         .cr-mods {
@@ -2295,9 +2352,9 @@ function _showContractCompleteToast(def, result, completionRank) {
         z-index: 25;
         min-width: 380px; max-width: 720px;
         padding: 12px 22px;
-        background: linear-gradient(180deg, #2a2418 0%, #1a1408 100%);
-        border: 2px solid #f2c060; border-radius: 6px;
-        color: #f2e7c9;
+        background: linear-gradient(180deg, var(--ce-navy) 0%, var(--ce-black) 100%);
+        border: 2px solid var(--cy-amber); border-radius: 6px;
+        color: var(--cy-amber);
         font: 13px 'Inter', system-ui, sans-serif;
         letter-spacing: 0.5px;
         cursor: pointer;
@@ -2316,30 +2373,30 @@ function _showContractCompleteToast(def, result, completionRank) {
         to { opacity: 0; transform: translateX(-50%) translateY(12px) scale(0.96); }
       }
       .contract-toast .ct-eyebrow {
-        color: #f2c060; font-weight: 800;
+        color: var(--cy-amber); font-weight: 800;
         font-size: 10px; letter-spacing: 3.5px; text-transform: uppercase;
         text-shadow: 0 0 10px rgba(242, 192, 96, 0.55);
       }
       .contract-toast .ct-title {
-        font-size: 16px; font-weight: 800; color: #ffe8ad;
+        font-size: 16px; font-weight: 800; color: var(--cy-amber);
         letter-spacing: 1.2px; line-height: 1.2;
         margin-top: 2px;
       }
       .contract-toast .ct-rewards {
         margin-top: 4px;
-        font-size: 12px; color: #c9a87a;
+        font-size: 12px; color: var(--cy-amber);
         letter-spacing: 0.8px;
       }
-      .contract-toast .ct-rewards b { color: #f2c060; font-weight: 800; }
+      .contract-toast .ct-rewards b { color: var(--cy-amber); font-weight: 800; }
       .contract-toast .ct-cta {
         margin-left: auto;
         font-size: 11px; font-weight: 800; letter-spacing: 2px;
-        color: #0c1014; background: #f2c060;
+        color: var(--ce-black); background: var(--cy-amber);
         padding: 8px 14px; border-radius: 3px;
         text-transform: uppercase;
         white-space: nowrap;
       }
-      .contract-toast:hover .ct-cta { background: #ffd070; }
+      .contract-toast:hover .ct-cta { background: var(--cy-amber); }
       /* Persistent HUD pip — sits below the skill-point pip when both
          are active. Pulses gently so it pulls a glance without
          shouting. Click → drains the queue head + plays the full
@@ -2348,8 +2405,8 @@ function _showContractCompleteToast(def, result, completionRank) {
         position: fixed; top: 102px; right: 24px;
         padding: 6px 12px;
         background: rgba(60, 40, 16, 0.85);
-        border: 1px solid #f2c060; border-radius: 4px;
-        color: #ffe8ad;
+        border: 1px solid var(--cy-amber); border-radius: 4px;
+        color: var(--cy-amber);
         font: 12px 'Inter', system-ui, sans-serif;
         letter-spacing: 1px; text-transform: uppercase;
         z-index: 18;
@@ -2472,11 +2529,11 @@ function _showContractCompletionPresentation(def, result, completionRank, balanc
           to   { background: rgba(8,12,16,0);    opacity: 0; }
         }
         #contract-celebration-frame {
-          background: linear-gradient(180deg, #1a2228, #0c1014);
-          border: 2px solid #f2c060; border-radius: 8px;
+          background: linear-gradient(180deg, var(--ce-navy), var(--ce-black));
+          border: 2px solid var(--cy-amber); border-radius: 8px;
           padding: 22px 26px;
           width: 480px; max-width: 92%;
-          color: #f2e7c9;
+          color: var(--cy-amber);
           box-shadow: 0 0 64px rgba(242, 192, 96, 0.5),
                       0 14px 40px rgba(0,0,0,0.7);
           pointer-events: auto;
@@ -2495,7 +2552,7 @@ function _showContractCompletionPresentation(def, result, completionRank, balanc
           to { transform: translateY(-12px) scale(0.95); opacity: 0; }
         }
         .cc-eyebrow {
-          color: #f2c060; font-weight: 800;
+          color: var(--cy-amber); font-weight: 800;
           font-size: 11px; letter-spacing: 4px;
           text-align: center; margin-bottom: 10px;
           text-transform: uppercase;
@@ -2510,7 +2567,7 @@ function _showContractCompletionPresentation(def, result, completionRank, balanc
           position: absolute; top: 10px; right: 10px;
           padding: 4px 10px;
           background: rgba(106, 191, 120, 0.9);
-          color: #0c1014;
+          color: var(--ce-black);
           font-size: 11px; font-weight: 800; letter-spacing: 2px;
           border-radius: 3px; transform: rotate(8deg);
           box-shadow: 0 0 16px rgba(106, 191, 120, 0.6);
@@ -2534,22 +2591,22 @@ function _showContractCompletionPresentation(def, result, completionRank, balanc
           display: contents;
         }
         .cc-row .cc-row-label {
-          color: #c9a87a; font-size: 12px; letter-spacing: 1px;
+          color: var(--cy-amber); font-size: 12px; letter-spacing: 1px;
           text-transform: uppercase;
         }
         .cc-row .cc-row-value {
           font-weight: 800; letter-spacing: 0.4px;
           font-variant-numeric: tabular-nums;
         }
-        .cc-row.chips  .cc-row-value { color: #f2c060; }
-        .cc-row.rank   .cc-row-value { color: #5a8acf; }
-        .cc-row.marks  .cc-row-value { color: #6abf78; }
-        .cc-row.sigils .cc-row-value { color: #b870e0; }
+        .cc-row.chips  .cc-row-value { color: var(--cy-amber); }
+        .cc-row.rank   .cc-row-value { color: var(--cy-cyan); }
+        .cc-row.marks  .cc-row-value { color: var(--cy-mint); }
+        .cc-row.sigils .cc-row-value { color: var(--cy-violet); }
         .cc-tagline {
           text-align: center;
           font-size: 12px; letter-spacing: 3px;
           font-weight: 700;
-          color: #f2c060;
+          color: var(--cy-amber);
           padding: 10px 0 4px;
           opacity: 0;
           animation: cc-tag-in 320ms ease-out 2400ms both;
@@ -2563,7 +2620,7 @@ function _showContractCompletionPresentation(def, result, completionRank, balanc
           text-align: center;
           font-size: 18px; font-weight: 900;
           letter-spacing: 1.6px;
-          color: #ffd070;
+          color: var(--cy-amber);
           padding: 6px 0 0;
           opacity: 0;
           animation: cc-balance-in 360ms cubic-bezier(0.22, 1.2, 0.36, 1) 2700ms both;
@@ -3317,6 +3374,19 @@ const gameMenuUI = new GameMenuUI({
     setQualityPref(mode);
     applyQuality(mode, { renderer, scene, keyLight, fillLight, rimLight, gridHelper });
   },
+  // Music on/off from the in-game pause menu — mirrors the main-menu
+  // Options toggle so the player can kill the background track mid-run
+  // without leaving to the title. SFX are unaffected.
+  getMusicEnabled,
+  setMusicEnabled: (on) => {
+    setMusicEnabled(on);
+    setAudioMusicEnabled(on);
+    if (on) {
+      try { sfx.musicPlay(_currentMusicTrack || 'menu'); } catch (_) {}
+    } else {
+      try { sfx.musicStop(); } catch (_) {}
+    }
+  },
   onSave: () => {
     // Saving disqualifies this run from the leaderboard — the post-save
     // reload would be a second chance at the same state. Flip once;
@@ -3776,11 +3846,29 @@ function _coopNeuterThrowOpts(opts) {
 // peer's enc.state — they can talk to their own copy independently.
 let _coopHostEncounterIds = [];
 let _coopForcedEncounterQueue = [];
+// Host's spawn-affecting modifiers (spawnDensityMult, eliteChanceMult),
+// stashed from level-seed broadcasts. Used to override the joiner's
+// local _activeModifiers during regen so spawn determinism holds
+// regardless of whether the joiner picked the same contract. Without
+// this, host with "Press Wave" (sdm=1.3) and joiner with no contract
+// (sdm=1) consume different Math.random counts during spawn — netIds
+// desync, joiner sees frozen enemies + lingering corpses + broken
+// snapshot apply. Other modifier fields stay per-peer (damage taken,
+// run timer, etc. — those are personal challenges, not shared world state).
+let _coopHostSpawnModifiers = null;
 function _coopPickEncounter(levelIndex) {
   const t = getCoopTransport();
   if (t.isOpen && !t.isHost && _coopForcedEncounterQueue.length > 0) {
     const id = _coopForcedEncounterQueue.shift();
-    if (id && ENCOUNTER_DEFS[id]) return ENCOUNTER_DEFS[id];
+    // Empty-string sentinel = host's pickEncounterForLevel returned
+    // null for this slot, so the slot should demote to combat on the
+    // joiner too. Without honoring this, the queue drifted by one
+    // every time host saw an exhausted-pool slot, mis-mapping every
+    // subsequent encounter on the joiner side.
+    if (!id) return null;
+    if (ENCOUNTER_DEFS[id]) return ENCOUNTER_DEFS[id];
+    // Unknown id (probably build mismatch) — fall through to local
+    // pick rather than break the slot entirely.
   }
   // Isolate the pick from the outer seeded RNG. Without this, host's
   // pickEncounterForLevel consumes Math.random calls that the joiner
@@ -3792,7 +3880,9 @@ function _coopPickEncounter(levelIndex) {
   const def = _withOriginalRandom(() => pickEncounterForLevel(
     levelIndex, _runCompletedEncounters, runStats, artifacts, inventory,
   ));
-  if (t.isOpen && t.isHost && def) _coopHostEncounterIds.push(def.id);
+  // Push EVERY slot's pick (including nulls as ''), so the joiner's
+  // queue length matches the host's slot count — keeps pops aligned.
+  if (t.isOpen && t.isHost) _coopHostEncounterIds.push(def ? def.id : '');
   return def;
 }
 
@@ -4177,15 +4267,15 @@ function _openMedicalMenu(targetPeer) {
   root.innerHTML = '';
   const card = document.createElement('div');
   Object.assign(card.style, {
-    background: 'linear-gradient(180deg, #1a2228, #0c1014)',
-    border: '1px solid #c0e0ff', borderRadius: '6px',
+    background: 'linear-gradient(180deg, var(--ce-navy), var(--ce-black))',
+    border: '1px solid var(--cy-cyan)', borderRadius: '6px',
     padding: '20px 24px', maxWidth: '520px', width: '90%',
     boxShadow: '0 0 36px rgba(120,200,255,0.35)',
-    color: '#f2e7c9',
+    color: 'var(--cy-amber)',
   });
   const title = document.createElement('div');
   Object.assign(title.style, {
-    color: '#a0d8ff', fontWeight: '700', fontSize: '14px',
+    color: 'var(--cy-cyan)', fontWeight: '700', fontSize: '14px',
     letterSpacing: '3px', textTransform: 'uppercase',
     textAlign: 'center', marginBottom: '4px',
   });
@@ -4193,7 +4283,7 @@ function _openMedicalMenu(targetPeer) {
   card.appendChild(title);
   const sub = document.createElement('div');
   Object.assign(sub.style, {
-    color: '#a89070', fontSize: '11px', textAlign: 'center',
+    color: 'var(--cy-amber)', fontSize: '11px', textAlign: 'center',
     marginBottom: '14px', letterSpacing: '1.5px',
   });
   sub.textContent = 'Pick a revive item — auto-revive continues meanwhile';
@@ -4203,7 +4293,7 @@ function _openMedicalMenu(targetPeer) {
   const sectionTitle = (label, count) => {
     const el = document.createElement('div');
     Object.assign(el.style, {
-      color: '#80c0e0', fontSize: '11px', letterSpacing: '2px',
+      color: 'var(--cy-cyan)', fontSize: '11px', letterSpacing: '2px',
       textTransform: 'uppercase', margin: '10px 0 6px',
       borderBottom: '1px solid rgba(120,200,255,0.25)', paddingBottom: '3px',
     });
@@ -4224,16 +4314,16 @@ function _openMedicalMenu(targetPeer) {
       width: '100%', textAlign: 'left',
       padding: '10px 14px', marginBottom: '6px',
       background: 'rgba(20,36,52,0.55)',
-      border: '1px solid #4a6a82', borderRadius: '4px',
-      color: '#f2e7c9', font: 'inherit', cursor: 'pointer',
+      border: '1px solid var(--cy-cyan)', borderRadius: '4px',
+      color: 'var(--cy-amber)', font: 'inherit', cursor: 'pointer',
     });
-    btn.onmouseenter = () => { btn.style.background = 'rgba(40,72,104,0.75)'; btn.style.borderColor = '#a0d8ff'; };
-    btn.onmouseleave = () => { btn.style.background = 'rgba(20,36,52,0.55)'; btn.style.borderColor = '#4a6a82'; };
+    btn.onmouseenter = () => { btn.style.background = 'rgba(40,72,104,0.75)'; btn.style.borderColor = 'var(--cy-cyan)'; };
+    btn.onmouseleave = () => { btn.style.background = 'rgba(20,36,52,0.55)'; btn.style.borderColor = 'var(--cy-cyan)'; };
     const left = document.createElement('span');
-    Object.assign(left.style, { fontWeight: '700', color: '#ffd070' });
+    Object.assign(left.style, { fontWeight: '700', color: 'var(--cy-amber)' });
     left.textContent = `${meta.label}${count > 1 ? ` × ${count}` : ''}`;
     const right = document.createElement('span');
-    Object.assign(right.style, { fontSize: '11px', color: '#b8a890' });
+    Object.assign(right.style, { fontSize: '11px', color: 'var(--ce-soft)' });
     right.textContent = meta.kind === 'tourniquet'
       ? 'Reset bleedout'
       : `Revive ${Math.round(meta.hpPct * 100)}%`;
@@ -4246,7 +4336,7 @@ function _openMedicalMenu(targetPeer) {
   if (myMeds.length) card.appendChild(sectionTitle('Your pack', myMeds.length));
   else {
     const empty = document.createElement('div');
-    Object.assign(empty.style, { color: '#7a6650', fontSize: '11px', fontStyle: 'italic', marginBottom: '6px' });
+    Object.assign(empty.style, { color: 'var(--cy-amber)', fontSize: '11px', fontStyle: 'italic', marginBottom: '6px' });
     empty.textContent = 'Your pack — empty';
     card.appendChild(empty);
   }
@@ -4258,7 +4348,7 @@ function _openMedicalMenu(targetPeer) {
   if (theirMeds.length) card.appendChild(sectionTitle('Their pack', theirMeds.length));
   else {
     const empty = document.createElement('div');
-    Object.assign(empty.style, { color: '#7a6650', fontSize: '11px', fontStyle: 'italic', margin: '6px 0' });
+    Object.assign(empty.style, { color: 'var(--cy-amber)', fontSize: '11px', fontStyle: 'italic', margin: '6px 0' });
     empty.textContent = 'Their pack — empty';
     card.appendChild(empty);
   }
@@ -4269,8 +4359,8 @@ function _openMedicalMenu(targetPeer) {
   const closeBtn = document.createElement('button');
   Object.assign(closeBtn.style, {
     display: 'block', width: '100%', marginTop: '8px', padding: '8px',
-    background: 'transparent', border: '1px solid #4a3a2a',
-    borderRadius: '3px', color: '#a89070', font: 'inherit',
+    background: 'transparent', border: '1px solid var(--ce-navy)',
+    borderRadius: '3px', color: 'var(--cy-amber)', font: 'inherit',
     cursor: 'pointer', letterSpacing: '1.5px', textTransform: 'uppercase',
     fontSize: '11px',
   });
@@ -4565,6 +4655,10 @@ function _ensureCoopLobby() {
     transport.send('level-seed', {
       seed: _runSeed, levelIndex: lv,
       enc: _coopHostEncounterIds.slice(),
+      mod: {
+        sdm: +(_activeModifiers?.spawnDensityMult || 1),
+        ecm: +(_activeModifiers?.eliteChanceMult || 1),
+      },
     });
     console.log('[coop] re-broadcasting level-seed on peer-in',
       { seed: _runSeed, levelIndex: lv, encounters: _coopHostEncounterIds });
@@ -4952,8 +5046,56 @@ function _ensureCoopLobby() {
       try {
         const fp = new THREE.Vector3(body.x1 || 0, body.y1 || 1, body.z1 || 0);
         const tp = new THREE.Vector3(body.x2 || 0, body.y2 || 1, body.z2 || 0);
-        combat.spawnShot(fp, tp, body.c | 0xffd040, { light: false, flash: true });
+        const opts = { light: false, flash: true };
+        if (typeof body.th === 'number') opts.thickness = body.th;
+        combat.spawnShot(fp, tp, body.c | 0xffd040, opts);
       } catch (_) {}
+      return;
+    }
+    if (kind === 'fx-flame') {
+      // A peer fired a flamethrower tick (player or host's AI flamer).
+      // Spawn visual flame particles locally so the cone is visible to
+      // teammates. Damage is host-authoritative (player flame applies
+      // via the normal applyHit → rpc-shoot pipeline; AI flame applies
+      // via the per-tick coop damage send already in aiFireFlame).
+      if (!body || from === transport.peerId) return;
+      try {
+        const origin = new THREE.Vector3(+body.ox || 0, +body.oy || 1, +body.oz || 0);
+        const dir = new THREE.Vector3(+body.dx || 0, 0, +body.dz || 0);
+        if (dir.lengthSq() < 0.0001) return;
+        dir.normalize();
+        combat.spawnFlameParticles(origin, dir, +body.r || 6.5, +body.a || 0.6);
+      } catch (e) { console.warn('[coop] fx-flame apply failed', e); }
+      return;
+    }
+    if (kind === 'fx-projectile') {
+      // A peer fired a non-grenade projectile (e.g. explosive crossbow
+      // bolt). Spawn a visual-only mirror — owner='remote', explosion
+      // damage 0 — so the bolt flies, sticks, and pops with FX, but
+      // damage stays host-authoritative via the normal AoE pipeline +
+      // snapshot kill flags.
+      if (!body || from === transport.peerId) return;
+      try {
+        const pos = new THREE.Vector3(+body.px || 0, +body.py || 1, +body.pz || 0);
+        const vel = new THREE.Vector3(+body.vx || 0, +body.vy || 0, +body.vz || 0);
+        const isSticky = body.ty === 'sticky';
+        projectiles.spawn({
+          pos, vel,
+          type: 'rocket',
+          lifetime: +body.lt || 5.0,
+          radius: +body.r || 0.14,
+          color: (body.c | 0) || 0xff6020,
+          explosion: {
+            radius: +body.er || 3.0,
+            damage: 0,                  // visual mirror — host applies real damage
+            shake: 0.4,
+          },
+          owner: 'remote',
+          gravity: 0,                   // flat-flying bolt
+          bounciness: 0,
+          ...(isSticky ? { stickyImpact: true, fuseSec: +body.fs || 0.6 } : {}),
+        });
+      } catch (e) { console.warn('[coop] fx-projectile apply failed', e); }
       return;
     }
     if (kind === 'rpc-team-kill') {
@@ -4993,6 +5135,14 @@ function _ensureCoopLobby() {
         if (arch) {
           runStats.noteArchetypeKill(arch);
           _applyContractPerKillReward(arch);
+        }
+        // Mastery XP — host attributed the kill to us; advance OUR
+        // local classMastery so the joiner's mastery ladder + pick
+        // queue progress on their own kills. Without this, joiners
+        // never level a weapon class in coop.
+        if (body.w) {
+          try { awardClassXp(body.w, body.ti || 'normal', null); }
+          catch (err) { console.warn('[coop] rpc-grant-rewards mastery xp failed', err); }
         }
         _refreshSkillPointPip();
         // Coin burst at the kill position (host included it in the
@@ -5243,10 +5393,18 @@ function _ensureCoopLobby() {
         // applyHit can't leak ownership into subsequent host-local
         // spawns.
         const _prevClaimer = (typeof window !== 'undefined') ? window.__coopCurrentClaimer : null;
+        const _prevWeaponClass = (typeof window !== 'undefined') ? window.__coopCurrentWeaponClass : null;
         const wasAlive = target.alive;
         let result = null;
         try {
-          if (typeof window !== 'undefined') window.__coopCurrentClaimer = from;
+          if (typeof window !== 'undefined') {
+            window.__coopCurrentClaimer = from;
+            // Carries the joiner's weapon class through onEnemyKilled →
+            // rpc-grant-rewards so the joiner's classMastery ladder
+            // can advance for their own kills. Without this, joiner
+            // kills awarded no mastery XP on either side.
+            window.__coopCurrentWeaponClass = body.w || null;
+          }
           result = target.manager.applyHit(target, dmg, zone, null,
             { weaponClass: body.w || 'rpc', shieldBreaker: !!body.sb });
           // Fire the local kill pipeline if this hit dropped the
@@ -5272,7 +5430,10 @@ function _ensureCoopLobby() {
         } catch (err) {
           console.warn('[coop] rpc-shoot apply failed', err);
         } finally {
-          if (typeof window !== 'undefined') window.__coopCurrentClaimer = _prevClaimer;
+          if (typeof window !== 'undefined') {
+            window.__coopCurrentClaimer = _prevClaimer;
+            window.__coopCurrentWeaponClass = _prevWeaponClass;
+          }
         }
       }
       return;
@@ -5299,6 +5460,22 @@ function _ensureCoopLobby() {
     // queue here (vs preserving across messages) means a duplicate
     // level-seed broadcast doesn't double-stack the queue.
     _coopForcedEncounterQueue = Array.isArray(body.enc) ? body.enc.slice() : [];
+    // Spawn-affecting modifiers from host — applied via
+    // _withHostSpawnModifiers during regen so spawn RNG consumption
+    // matches host's (which depends on contract sdm/ecm). Without
+    // this, peers with different contracts get different spawn
+    // counts → netIds desync → frozen melees + lingering corpses
+    // + door/key state drift on joiner.
+    if (body.mod && typeof body.mod === 'object') {
+      _coopHostSpawnModifiers = {
+        sdm: +body.mod.sdm || 1,
+        ecm: +body.mod.ecm || 1,
+      };
+    } else {
+      // Legacy host build without mod field — clear so we don't
+      // apply stale values from a previous broadcast.
+      _coopHostSpawnModifiers = null;
+    }
     if (needsRegen && level) {
       // Drop-in mid-run — joiner connected from the menu without
       // having clicked Play first. Auto-start a default run so they
@@ -6433,6 +6610,24 @@ function _withRunSeed(seed, fn) {
   finally { Math.random = orig; }
 }
 
+// Joiner-only: temporarily override _activeModifiers' spawn fields
+// with host's values from the latest level-seed broadcast, so spawn
+// determinism doesn't break when peers have different active
+// contracts. Returns an undo function (no-op on host or when no
+// stash is available).
+function _withHostSpawnModifiers(fn) {
+  const t = getCoopTransport();
+  if (!t.isOpen || t.isHost || !_coopHostSpawnModifiers) return fn();
+  const saved = _activeModifiers;
+  _activeModifiers = {
+    ...saved,
+    spawnDensityMult: _coopHostSpawnModifiers.sdm ?? 1,
+    eliteChanceMult:  _coopHostSpawnModifiers.ecm ?? 1,
+  };
+  try { return fn(); }
+  finally { _activeModifiers = saved; }
+}
+
 function regenerateLevel() {
   // Active contract: Pressure resets per-floor. Reset here (the
   // single funnel for "start a fresh floor") rather than at the
@@ -6481,7 +6676,8 @@ function regenerateLevel() {
   // Coop encounter sync — reset the host's per-floor pick log before
   // regen runs so it accumulates only this floor's choices.
   if (transport.isOpen && transport.isHost) _coopHostEncounterIds = [];
-  const result = _withRunSeed(_getEffectiveSeed(), () => _regenerateLevelImpl());
+  const result = _withRunSeed(_getEffectiveSeed(),
+    () => _withHostSpawnModifiers(() => _regenerateLevelImpl()));
   // Broadcast AFTER generation so joiners apply the seed for their
   // own regen call. Encounter ids attached so both peers see the
   // SAME encounter (interaction state stays per-peer locally).
@@ -6490,6 +6686,14 @@ function regenerateLevel() {
     transport.send('level-seed', {
       seed: _runSeed, levelIndex: lv,
       enc: _coopHostEncounterIds.slice(),
+      // Spawn-affecting modifiers from the host's active contract.
+      // Joiner stashes these and overrides its local _activeModifiers
+      // spawn fields for the duration of regen so spawn determinism
+      // holds even when peers have different contracts.
+      mod: {
+        sdm: +(_activeModifiers?.spawnDensityMult || 1),
+        ecm: +(_activeModifiers?.eliteChanceMult || 1),
+      },
     });
     console.log('[coop] broadcasting level-seed',
       { seed: _runSeed, levelIndex: lv, encounters: _coopHostEncounterIds });
@@ -6505,9 +6709,99 @@ function regenerateLevel() {
   // dripping into the first ~30s of gameplay as 100-3000ms render
   // hitches when each new material first hits the camera frustum.
   // Wrapped in try/catch so a renderer/scene glitch can't break the
-  // load flow. Cheap on subsequent calls for materials already cached.
-  try { renderer?.compile?.(scene, camera); } catch (_) {}
+  // load flow. _prewarmGpuUpload both compiles shaders AND draws the
+  // scene once (culling off) so geometry/texture buffers upload now,
+  // killing the per-room entry hitch — compile() alone left the buffers
+  // to upload on first draw during gameplay.
+  try { _schedulePrewarm(); } catch (_) {}
   return result;
+}
+// Tiny offscreen target for the GPU pre-warm below. A real draw to a 2×2
+// buffer forces buffer/texture upload + driver shader-link with no visible
+// canvas flash.
+let _prewarmRT = null;
+// Force every mesh spawned this floor to be GPU-resident BEFORE the player
+// can walk into the room that holds it. renderer.compile() (called in the
+// regenerateLevel wrapper) only LINKS shader programs — the geometry,
+// index, and texture buffers still upload on the first real DRAW of each
+// mesh. That first draw happens the frame a room's enemies + weapon GLBs
+// enter the camera frustum, which is exactly the "huge hitch on entering a
+// new room" the player reported (and which the 2× horde density made
+// worse, since twice the bodies upload at once). Drawing the whole scene
+// once here — frustum culling disabled so off-screen rooms draw too, into
+// a 2×2 target so fragment cost is nil — moves that upload into the level-
+// load window where a brief stall reads as loading.
+function _prewarmGpuUpload() {
+  if (!renderer || !scene || !camera) return;
+  // Temporarily disable frustum culling so off-screen rooms draw (and
+  // upload) too. We do NOT force-show invisible objects: rendering the
+  // scene's intentionally-hidden meshes (pool slots, reveal-gated arena
+  // geometry, disposed placeholders) can throw and abort the whole pass.
+  // Visible-but-off-screen content — every spawned enemy + weapon — is
+  // what causes the per-room hitch and is covered here.
+  const culled = [];
+  scene.traverse((o) => {
+    if ((o.isMesh || o.isInstancedMesh) && o.frustumCulled) {
+      o.frustumCulled = false; culled.push(o);
+    }
+  });
+  // Force-show enemy rigs that are hidden until a trigger (ambush rooms,
+  // boss-arena pre-reveal) so their weapon meshes upload NOW instead of on
+  // the reveal/entry frame. Scoped to actual enemy groups — not the whole
+  // scene — so we never render FX/pool/placeholder hidden meshes that could
+  // throw and abort the pass.
+  const shown = [];
+  const _forceShow = (c) => {
+    if (c && c.group && !c.group.visible) { c.group.visible = true; shown.push(c.group); }
+  };
+  try {
+    if (gunmen?.gunmen) for (const g of gunmen.gunmen) _forceShow(g);
+    if (melees?.enemies) for (const m of melees.enemies) _forceShow(m);
+    // Vendor / recruiter / encounter NPCs (shop, gunsmith, healer rooms)
+    // and dummy actors also live off the enemy lists and can be hidden or
+    // off-screen at load — show their groups too. Items without a .group
+    // are skipped by _forceShow.
+    if (level?.npcs) for (const npc of level.npcs) _forceShow(npc);
+    if (dummies?.dummies) for (const d of dummies.dummies) _forceShow(d);
+  } catch (_) {}
+  try {
+    const _ri = rigInstancer && rigInstancer();
+    if (_ri && _ri.syncFrame) _ri.syncFrame();   // position instanced rigs
+    if (!_prewarmRT) _prewarmRT = new THREE.WebGLRenderTarget(2, 2);
+    renderer.compile(scene, camera);
+    const prev = renderer.getRenderTarget();
+    renderer.setRenderTarget(_prewarmRT);
+    renderer.render(scene, camera);               // real draw → uploads buffers
+    renderer.setRenderTarget(prev);
+  } catch (_) {}
+  for (let i = 0; i < culled.length; i++) culled[i].frustumCulled = true;
+  for (let i = 0; i < shown.length; i++) shown[i].visible = false;
+}
+// Enemy weapon models (and the boss / encounter props) load + clone
+// ASYNC, so a single prewarm at end-of-regen misses anything still
+// resolving — those meshes then upload on first room entry anyway (the
+// reported hitch). Prewarm once immediately for content already in scene,
+// then poll gltf_cache's pending-load count and prewarm again once loads
+// have been idle for ~2 ticks — that final pass catches every async clone
+// no matter how late its GLB finishes (a boss model that lands at 2s+ is
+// still covered). A generation token cancels pending polls if another
+// floor regenerates first, so we never prewarm a half-torn-down scene.
+let _prewarmGen = 0;
+function _schedulePrewarm() {
+  const gen = ++_prewarmGen;
+  _prewarmGpuUpload();                 // sync: walls, props, rigs in scene now
+  let idle = 0, ticks = 0;
+  const poll = () => {
+    if (gen !== _prewarmGen) return;   // a newer regen took over
+    let pending = 1;
+    try { pending = pendingModelCount(); } catch (_) { pending = 0; }
+    idle = pending === 0 ? idle + 1 : 0;
+    // Final upload pass once async loads have settled (or a hard cap so a
+    // stuck load can't keep us polling forever).
+    if (idle >= 2 || ++ticks > 50) { _prewarmGpuUpload(); return; }
+    setTimeout(poll, 200);
+  };
+  setTimeout(poll, 200);
 }
 function _regenerateLevelImpl() {
   // Coop net-ID counter reset — must run BEFORE the spawn loop in
@@ -6579,6 +6873,20 @@ function _regenerateLevelImpl() {
   // Placed claymores live in their own _claymores list (not in the
   // projectile manager), so they need a separate sweep on regen.
   _removeAllClaymores();
+  // Kill-coin VFX live in a module-level _coinFx array; previously
+  // they were only cleaned up when their per-coin animation finished
+  // (see _updateCoinFx). If regen fires while coins are mid-flight,
+  // the meshes + per-instance materials were leaking — they kept
+  // their scene parent but level cleared, so they ended up orphaned
+  // and the array kept growing run-over-run. Sweep here to dispose.
+  if (_coinFx.length) {
+    for (let i = 0; i < _coinFx.length; i++) {
+      const c = _coinFx[i];
+      if (c?.mesh) scene.remove(c.mesh);
+      if (c?.mat?.dispose) c.mat.dispose();
+    }
+    _coinFx.length = 0;
+  }
   playerKeys.clear();
   // Pre-warm the FBX clone for every weapon currently in the player's
   // rotation. The clone+fit+rotate pass takes a few frames per
@@ -6594,25 +6902,29 @@ function _regenerateLevelImpl() {
   // attack FSM, hazards, and HUD bar. The dormant intro ritual runs
   // first, leaving the player free to position before combat starts.
   if (isMegaFloor) {
-    // Pick which mega-boss runs this floor. Three-way rotation
-    // across mega-floors (10/15/20/25/...) cycling Arboter → Echo →
-    // General. `idx` indexes successive mega-floors so the cycle
-    // works regardless of whether the player skipped any.
+    // Pick which mega-boss runs this floor. Four-way rotation across
+    // mega-floors (10/15/20/25/30/...) cycling Arboter → Echo →
+    // General → Jailer. `idx` indexes successive mega-floors so the
+    // cycle works regardless of whether the player skipped any.
     //   floor 10 = idx 0 = ARBOTER
     //   floor 15 = idx 1 = ECHO
     //   floor 20 = idx 2 = GENERAL
-    //   floor 25 = idx 3 = ARBOTER (cycle)
+    //   floor 25 = idx 3 = JAILER
+    //   floor 30 = idx 4 = ARBOTER (cycle)
     //   ...
     const _megaIdx = Math.max(0, Math.floor(((level.index | 0) - 10) / 5));
-    const _megaPick = _megaIdx % 3;
+    const _megaPick = _megaIdx % 4;
     const useEcho    = _megaPick === 1;
     const useGeneral = _megaPick === 2;
-    const MegaCtor = useGeneral ? MegaBossGeneral
-                  : useEcho     ? MegaBossEcho
-                  :               MegaBoss;
-    const lootFn   = useGeneral ? buildGeneralLoot
-                  : useEcho     ? buildEchoLoot
-                  :               buildMegaBossLoot;
+    const useJailer  = _megaPick === 3;
+    const MegaCtor = useJailer  ? MegaBossJailer
+                  : useGeneral ? MegaBossGeneral
+                  : useEcho    ? MegaBossEcho
+                  :              MegaBoss;
+    const lootFn   = useJailer  ? buildJailerLoot
+                  : useGeneral ? buildGeneralLoot
+                  : useEcho    ? buildEchoLoot
+                  :              buildMegaBossLoot;
     megaBoss = new MegaCtor({
       scene, camera,
       combat, loot, sfx, projectiles,
@@ -6725,6 +7037,14 @@ function _regenerateLevelImpl() {
           player.mesh.position.x += dx * 0.5;
           player.mesh.position.z += dz * 0.5;
         }
+      },
+      // Lock the player out of input for `seconds`. Stacks (max) with
+      // any existing stun timer (e.g. flash, prior mine) so multiple
+      // concurrent stuns don't reset to the smaller value. Used by
+      // MegaBossJailer mines.
+      stunPlayer: (seconds) => {
+        if (typeof seconds !== 'number' || seconds <= 0) return;
+        playerStunT = Math.max(playerStunT, seconds);
       },
       shake: (m, d) => triggerShake(m, d),
       onMegaBossDead: (boss) => {
@@ -7772,10 +8092,10 @@ const _encounterPromptEl = (() => {
     // panel scrolls if a future encounter exceeds the cap.
     minWidth: '380px', maxWidth: 'min(640px, 92vw)',
     maxHeight: '82vh', overflowY: 'auto', boxSizing: 'border-box',
-    background: 'linear-gradient(180deg, #181b21 0%, #0e1018 100%)',
-    border: '1px solid #c9a87a', borderRadius: '4px',
+    background: 'linear-gradient(180deg, var(--ce-black) 0%, var(--ce-black) 100%)',
+    border: '1px solid var(--cy-amber)', borderRadius: '4px',
     padding: '22px 26px', zIndex: '60',
-    color: '#e8dfc8', display: 'none',
+    color: 'var(--ce-soft)', display: 'none',
     fontFamily: 'ui-monospace, SFMono-Regular, Menlo, Consolas, monospace',
     boxShadow: '0 14px 50px rgba(0,0,0,0.85)',
   });
@@ -7783,8 +8103,8 @@ const _encounterPromptEl = (() => {
   // letter-spacing + uppercase on the title made long names overhang
   // the right edge before this rule.
   el.innerHTML = `
-    <div id="enc-prompt-title" style="font-size:18px;font-weight:700;letter-spacing:4px;color:#c9a87a;text-transform:uppercase;margin-bottom:10px;text-align:center;overflow-wrap:break-word;word-break:break-word;"></div>
-    <div id="enc-prompt-body" style="font-size:13px;color:#bcb8a8;line-height:1.5;margin-bottom:18px;text-align:center;overflow-wrap:break-word;word-break:break-word;white-space:pre-wrap;"></div>
+    <div id="enc-prompt-title" style="font-size:18px;font-weight:700;letter-spacing:4px;color:var(--cy-amber);text-transform:uppercase;margin-bottom:10px;text-align:center;overflow-wrap:break-word;word-break:break-word;"></div>
+    <div id="enc-prompt-body" style="font-size:13px;color:var(--ce-soft-50);line-height:1.5;margin-bottom:18px;text-align:center;overflow-wrap:break-word;word-break:break-word;white-space:pre-wrap;"></div>
     <div id="enc-prompt-options" style="display:flex;flex-direction:column;gap:6px;"></div>
   `;
   document.body.appendChild(el);
@@ -7805,7 +8125,7 @@ function showEncounterPrompt({ title, body, options }) {
       padding: '10px 16px', fontSize: '12px',
       letterSpacing: '2px', textTransform: 'uppercase',
       background: btn.disabled ? 'rgba(80,80,80,0.18)' : 'rgba(125,167,200,0.15)',
-      color: btn.disabled ? '#6a7280' : '#cbd6e2',
+      color: btn.disabled ? 'var(--ce-soft-50)' : 'var(--ce-soft)',
       border: '1px solid ' + (btn.disabled ? 'rgba(80,80,80,0.3)' : 'rgba(125,167,200,0.55)'),
       borderRadius: '3px',
       cursor: btn.disabled ? 'default' : 'pointer',
@@ -8081,7 +8401,7 @@ const _perf = (() => {
       el.id = 'perf-overlay';
       el.style.cssText = `
         position: fixed; top: 12px; right: 12px; z-index: 9999;
-        background: rgba(5,6,7,0.85); color: #00e6ff;
+        background: rgba(5,6,7,0.85); color: var(--cy-cyan);
         font: 11px ui-monospace, Menlo, Consolas, monospace;
         padding: 8px 10px; border: 1px solid rgba(0,230,255,0.3);
         border-radius: 4px; pointer-events: none; min-width: 180px;
@@ -8215,7 +8535,7 @@ function _refreshRestartSlotsUI() {
   const label = document.createElement('div');
   label.textContent = 'RESTART FROM:';
   Object.assign(label.style, {
-    fontSize: '10px', letterSpacing: '1.2px', color: '#9b8b6a',
+    fontSize: '10px', letterSpacing: '1.2px', color: 'var(--cy-amber)',
     width: '100%', textAlign: 'center', marginBottom: '2px',
   });
   root.appendChild(label);
@@ -8225,9 +8545,9 @@ function _refreshRestartSlotsUI() {
     btn.textContent = `F${(snap.levelIndex | 0) + 1}`;
     const isActive = idx === _activeRestartSlot;
     Object.assign(btn.style, {
-      background: isActive ? '#3a1520' : '#1a1d24',
-      border: `1px solid ${isActive ? '#cf5a5a' : '#4a505a'}`,
-      color: isActive ? '#f2c060' : '#c9a87a',
+      background: isActive ? 'var(--ce-black)' : 'var(--ce-black)',
+      border: `1px solid ${isActive ? 'var(--ce-red)' : 'var(--ce-steel)'}`,
+      color: isActive ? 'var(--cy-amber)' : 'var(--cy-amber)',
       padding: '4px 10px', borderRadius: '3px',
       font: 'inherit', fontSize: '11px', letterSpacing: '1px',
       cursor: 'pointer', textTransform: 'uppercase',
@@ -8768,7 +9088,19 @@ function syncLighting() {
     hemiLight.groundColor.setHex(L.hemiGround);
     hemiLight.intensity = L.hemiIntensity;
   }
-  if (keyLight)  { keyLight.color.setHex(L.keyColor);   keyLight.intensity  = L.keyIntensity; }
+  if (keyLight)  {
+    keyLight.color.setHex(L.keyColor);   keyLight.intensity  = L.keyIntensity;
+    // Slide the shadow-casting key light + its target with the player so
+    // the (fixed-size) shadow frustum stays centred on the action. The
+    // light keeps its original direction by holding the (30,40,20) offset
+    // from the target. Without this, walls only cast shadows within ±40
+    // of the world origin and the rest of the level read flat.
+    const pp = player?.mesh?.position;
+    if (pp) {
+      keyLight.target.position.set(pp.x, 0, pp.z);
+      keyLight.position.set(pp.x + 30, 40, pp.z + 20);
+    }
+  }
   if (fillLight) { fillLight.color.setHex(L.fillColor); fillLight.intensity = L.fillIntensity; }
   if (rimLight)  { rimLight.color.setHex(L.rimColor);   rimLight.intensity  = L.rimIntensity; }
   if (scene.fog) {
@@ -8776,6 +9108,9 @@ function syncLighting() {
     scene.fog.density = L.fogDensity;
   }
   scene.background.setHex(L.fogColor);
+  if (typeof L.toneMappingExposure === 'number') {
+    renderer.toneMappingExposure = L.toneMappingExposure;
+  }
   const aura = player?.mesh?.userData?.auraLight;
   if (aura) {
     aura.color.setHex(L.playerAuraColor);
@@ -10112,6 +10447,20 @@ function tickFlame(dt, playerInfo, weapon, inputState, aimInfo) {
   alertEnemiesFromShot(origin);
 
   combat.spawnFlameParticles(origin, dir, range, angleRad);
+  // Coop: broadcast the flame tick so peers see our flamethrower.
+  // Per-tick send (max ~20/sec while LMB held) — small wire payload
+  // and the receiver just spawns visual particles, no damage.
+  {
+    const _coopT = getCoopTransport();
+    if (_coopT.isOpen && _coopT.peers && _coopT.peers.size > 0) {
+      _coopT.send('fx-flame', {
+        ox: +origin.x.toFixed(2), oy: +origin.y.toFixed(2), oz: +origin.z.toFixed(2),
+        dx: +dir.x.toFixed(3), dz: +dir.z.toFixed(3),
+        r: +range.toFixed(2),
+        a: +angleRad.toFixed(3),
+      });
+    }
+  }
 
   // Snapshot the flame cone so encounters can detect "fire reached me"
   // without parsing projectiles. Path of Fire uses this to accept a
@@ -10483,8 +10832,20 @@ function firePlayerRicochet(playerInfo, weapon, aimPoint) {
           _rx_origin.y,
           _rx_origin.z + _rx_dir.z * range,
         );
-    combat.spawnShot(_rx_origin, endPoint, weapon.tracerColor || 0xffd8a0,
+    const _rxColor = weapon.tracerColor || 0xffd8a0;
+    combat.spawnShot(_rx_origin, endPoint, _rxColor,
       { light: false, flash: bounceIdx === 0 });
+    // Coop: broadcast each bounce leg so peers see the full ricochet path.
+    {
+      const _coopT = getCoopTransport();
+      if (_coopT.isOpen && _coopT.peers && _coopT.peers.size > 0) {
+        _coopT.send('fx-tracer-self', {
+          x1: +_rx_origin.x.toFixed(2), y1: +_rx_origin.y.toFixed(2), z1: +_rx_origin.z.toFixed(2),
+          x2: +endPoint.x.toFixed(2),   y2: +endPoint.y.toFixed(2),   z2: +endPoint.z.toFixed(2),
+          c: _rxColor | 0,
+        });
+      }
+    }
     if (!hit) return;     // open-air miss ends the shot
     const isEnemy = !!(hit.owner && hit.owner.manager && hit.owner.alive);
     if (isEnemy) {
@@ -10576,8 +10937,20 @@ function firePlayerGauss(playerInfo, weapon, aimPoint) {
         _gr_origin.y,
         _gr_origin.z + _gr_dir.z * range,
       );
-  combat.spawnShot(_gr_origin, endPoint, weapon.tracerColor || 0xa0e0ff,
+  const _grColor = weapon.tracerColor || 0xa0e0ff;
+  combat.spawnShot(_gr_origin, endPoint, _grColor,
     { light: false, flash: true });
+  // Coop: broadcast the gauss tracer so peers see the shot.
+  {
+    const _coopT = getCoopTransport();
+    if (_coopT.isOpen && _coopT.peers && _coopT.peers.size > 0) {
+      _coopT.send('fx-tracer-self', {
+        x1: +_gr_origin.x.toFixed(2), y1: +_gr_origin.y.toFixed(2), z1: +_gr_origin.z.toFixed(2),
+        x2: +endPoint.x.toFixed(2),   y2: +endPoint.y.toFixed(2),   z2: +endPoint.z.toFixed(2),
+        c: _grColor | 0,
+      });
+    }
+  }
   if (!hit) return;
   const isEnemy = !!(hit.owner && hit.owner.manager && hit.owner.alive);
   if (!isEnemy) return;
@@ -10657,15 +11030,18 @@ function firePlayerStickyExplosive(playerInfo, weapon, aimPoint) {
   const explosionDmg = (weapon.explosionDmg || 50) * (derivedStats.rangedDmgMult || 1);
   const stuckBonus  = (weapon.stuckBonusDmg || 35) * (derivedStats.rangedDmgMult || 1);
   const tracerColor = weapon.tracerColor || 0xff6020;
+  const radius = 0.14;
+  const explosionRadius = weapon.explosionRadius || 3.0;
+  const fuseSec = weapon.fuseSec || 0.6;
   projectiles.spawn({
     pos: origin,
     vel: new THREE.Vector3(dir.x * speed, 0, dir.z * speed),
     type: 'rocket',
     lifetime: 5.0,             // safety cap — sticky path overrides via fuseSec
-    radius: 0.14,
+    radius,
     color: tracerColor,
     explosion: {
-      radius: weapon.explosionRadius || 3.0,
+      radius: explosionRadius,
       damage: explosionDmg,
       shake: 0.6,
     },
@@ -10674,7 +11050,7 @@ function firePlayerStickyExplosive(playerInfo, weapon, aimPoint) {
     bounciness: 0,
     // Sticky behaviour — see projectiles.js update() for the handler.
     stickyImpact: true,
-    fuseSec: weapon.fuseSec || 0.6,
+    fuseSec,
     // Closure: applies bonus damage to the stuck enemy at detonation
     // time, BEFORE the AoE explosion fans out. Kept on the spec so
     // projectiles.js can call it without needing a damage-pipeline ref.
@@ -10707,6 +11083,26 @@ function firePlayerStickyExplosive(playerInfo, weapon, aimPoint) {
   if (sfx.fire) sfx.fire('exotic');
   runStats.noteFireWeaponClass('exotic');
   alertEnemiesFromShot(origin);
+  // Coop: broadcast a visual-only mirror projectile so other peers see
+  // the bolt fly, stick, and detonate. Damage is host-authoritative
+  // (the host's own sim applies it via the normal AoE pipeline + the
+  // snapshot then carries the kill flag). The mirror runs locally on
+  // remote peers with damage=0 and owner='remote'.
+  {
+    const _coopT = getCoopTransport();
+    if (_coopT.isOpen && _coopT.peers && _coopT.peers.size > 0) {
+      _coopT.send('fx-projectile', {
+        px: +origin.x.toFixed(2), py: +origin.y.toFixed(2), pz: +origin.z.toFixed(2),
+        vx: +(dir.x * speed).toFixed(2), vy: 0, vz: +(dir.z * speed).toFixed(2),
+        ty: 'sticky',                 // crossbow bolt — sticky+fuse profile
+        r: radius,
+        c: tracerColor | 0,
+        er: explosionRadius,
+        fs: fuseSec,
+        lt: 5.0,
+      });
+    }
+  }
 }
 
 // Charge Cannon — hold LMB to charge, release to fire at the achieved
@@ -10793,42 +11189,80 @@ function firePlayerCharge(playerInfo, weapon, aimPoint, tierIdx) {
     _vc_origin.y,
     _vc_origin.z + _vc_dir.z * beamLen,
   );
-  combat.spawnShot(_vc_origin, _vc_endPt, weapon.tracerColor || 0x40d0ff,
+  const _vcColor = weapon.tracerColor || 0x40d0ff;
+  combat.spawnShot(_vc_origin, _vc_endPt, _vcColor,
     { light: false, flash: true, thickness: tier.beamWidth });
+  // Coop: broadcast the beam tracer (with thickness) so peers see the
+  // charge cannon shot. Thickness travels on `th`; receiver passes it
+  // to combat.spawnShot so the beam reads at the right gauge.
+  {
+    const _coopT = getCoopTransport();
+    if (_coopT.isOpen && _coopT.peers && _coopT.peers.size > 0) {
+      _coopT.send('fx-tracer-self', {
+        x1: +_vc_origin.x.toFixed(2), y1: +_vc_origin.y.toFixed(2), z1: +_vc_origin.z.toFixed(2),
+        x2: +_vc_endPt.x.toFixed(2),  y2: +_vc_endPt.y.toFixed(2),  z2: +_vc_endPt.z.toFixed(2),
+        c: _vcColor | 0,
+        ...(tier.beamWidth ? { th: +tier.beamWidth.toFixed(3) } : {}),
+      });
+    }
+  }
   // Enemy-segment scan — every alive enemy whose XZ centre lies within
   // BEAM_HALF_WIDTH of the beam line AND projects onto the segment
   // (t in [0, beamLen]) takes a full-damage hit. BEAM_HALF_WIDTH is
   // tuned to enemy collision radius (≈0.4) plus a small margin so a
   // glancing line still scores; the visual tier.beamWidth is the
   // *display* thickness and not used for gameplay hit-detection.
+  //
+  // BUGFIX (2026-05-18): allHittables() returns hit MESHES, not entities.
+  // The prior loop treated each mesh as an entity (checking .alive +
+  // .group on the mesh), which is undefined on a Mesh — every candidate
+  // was silently skipped and beam weapons did zero damage. Resolve to
+  // owners via userData.owner, dedupe (a single enemy has many meshes:
+  // head, torso, limbs, blade), then run the projection check on the
+  // owner's group position.
   const BEAM_HALF_WIDTH = 0.7;
-  const candidates = allHittables();
-  // Sort by distance-along-beam so impacts trigger near→far visually.
+  const meshes = allHittables();
+  const seenOwners = new Set();
   const ordered = [];
-  for (const c of candidates) {
-    if (!c || !c.alive || !c.group) continue;
-    const dx = c.group.position.x - _vc_origin.x;
-    const dz = c.group.position.z - _vc_origin.z;
+  for (const mesh of meshes) {
+    const owner = mesh?.userData?.owner;
+    if (!owner || seenOwners.has(owner)) continue;
+    if (owner.alive === false) continue;
+    // Owner center — Echo + General store position on .group; Arboter
+    // uses .boss. Regular entities (gunmen, melees, drones, dummies)
+    // all live on .group. Skip anything without a queryable position.
+    const root = owner.group || owner.boss;
+    if (!root?.position) continue;
+    const dx = root.position.x - _vc_origin.x;
+    const dz = root.position.z - _vc_origin.z;
     const along = dx * _vc_dir.x + dz * _vc_dir.z;       // projection onto beam
     if (along < 0 || along > beamLen) continue;
     const perpX = dx - along * _vc_dir.x;
     const perpZ = dz - along * _vc_dir.z;
-    const perpDist = Math.hypot(perpX, perpZ);
-    if (perpDist > BEAM_HALF_WIDTH) continue;
-    ordered.push({ c, along });
+    if (Math.hypot(perpX, perpZ) > BEAM_HALF_WIDTH) continue;
+    seenOwners.add(owner);
+    ordered.push({ owner, root, along });
   }
   ordered.sort((a, b) => a.along - b.along);
-  for (const { c, along } of ordered) {
+  for (const { owner, root, along } of ordered) {
     runStats.addDamage(dmg);
-    const wasAlive = c.alive;
-    c.manager.applyHit(c, dmg, 'torso', _vc_dir, { weaponClass: 'exotic' });
-    if (wasAlive && !c.alive) onEnemyKilled(c);
+    const wasAlive = owner.alive !== false;
+    if (owner.manager?.applyHit) {
+      owner.manager.applyHit(owner, dmg, 'torso', _vc_dir, { weaponClass: 'exotic' });
+    } else if (typeof owner.applyHit === 'function') {
+      // Mega-boss path — owner IS the boss instance; applyHit takes
+      // a scalar damage amount.
+      owner.applyHit(dmg);
+    } else {
+      continue;
+    }
+    if (wasAlive && owner.alive === false) onEnemyKilled(owner);
     // Impact burst on every enemy hit. Anchor the burst at the
     // closest-point-on-beam to the enemy centre so the spark reads
     // as connected to the beam line rather than floating mid-enemy.
     _vc_hitPt.set(
       _vc_origin.x + _vc_dir.x * along,
-      c.group.position.y + 1.0,
+      root.position.y + 1.0,
       _vc_origin.z + _vc_dir.z * along,
     );
     combat.spawnImpact(_vc_hitPt);
@@ -12414,7 +12848,16 @@ function buildBodyLoot(enemy) {
   // surfaces the weapon-drop is now a chance roll (60%) instead
   // of a guarantee. Net: most grunts surface 0 items, the rest
   // surface a single meaningful drop.
-  const isEmptyBody = tier === 'normal' && Math.random() < 0.88;
+  // Decouple loot from horde density: divide the normal-grunt non-empty
+  // rate by BALANCE.horde.densityMult so cramming 2x the bodies into a
+  // room drops the same total loot (each grunt is half as likely to carry
+  // anything). This single gate fronts ALL normal-grunt drops below
+  // (weapon, melee, armor), so scaling it here decouples everything at
+  // once. One Math.random() call either way → coop RNG count unchanged.
+  // Boss / sub-boss tiers don't scale with density and are unaffected.
+  const _hordeMult = BALANCE.horde?.densityMult || 1;
+  const _normalNonEmpty = 0.12 / _hordeMult;   // 0.12 = base non-empty rate (1 - 0.88)
+  const isEmptyBody = tier === 'normal' && Math.random() >= _normalNonEmpty;
 
   if (!isEmptyBody) {
     // Weapon drop: 60% chance for normal grunts, 90% for sub-bosses,
@@ -12744,6 +13187,12 @@ function _onEnemyKilledImpl(enemy, opts = {}) {
       : 0;
     const credits = _baseCredits + _luckyBonus;
     const skillPts = enemy.tier === 'subBoss' ? 1 : 0;
+    // Joiner's weapon class — set by the rpc-shoot handler before
+    // applyHit dispatched the damage that produced this kill. Lets
+    // the joiner's classMastery advance on their own kills (without
+    // this, only the host's classMastery advanced, and the joiner
+    // never got mastery picks in coop).
+    const _coopWeaponClass = (typeof window !== 'undefined') ? window.__coopCurrentWeaponClass : null;
     try {
       _coopT_kill.send('rpc-grant-rewards', {
         c: credits | 0,
@@ -12754,6 +13203,9 @@ function _onEnemyKilledImpl(enemy, opts = {}) {
         // coin burst at the corpse, not at their own player.
         x: +(enemy.group?.position?.x?.toFixed(2) ?? 0),
         z: +(enemy.group?.position?.z?.toFixed(2) ?? 0),
+        // Weapon class + enemy tier so the joiner can award class XP
+        // locally — mirrors awardClassXp's tier→xp lookup.
+        ...(_coopWeaponClass ? { w: _coopWeaponClass, ti: enemy.tier || 'normal' } : {}),
       }, _coopClaimer);
     } catch (_) {}
     // Host-side team-progress for the joiner kill.
@@ -13107,6 +13559,17 @@ function _tickCoop(dt) {
   // ally rig can read them, plus a firing-event flag that fires a
   // muzzle flash + tracer on the receiver. _coopFiredThisTick is
   // set by the local fire path and consumed (cleared) here.
+  // Refresh `_localInExit` every frame from real player position so
+  // the `xt` bit on the position packet reflects current state, not
+  // "what it was the last time the player pressed E". The old behavior
+  // required peers to press E to register as in-exit, so two
+  // peers walking into the exit zone weren't both recognized as ready
+  // until BOTH had pressed E (and sometimes the host had to press
+  // again to re-check). With this update, just standing in the zone
+  // is enough; the host's first E press immediately advances.
+  if (level && level.isPlayerInExit && player?.mesh?.position) {
+    _localInExit = level.isPlayerInExit(player.mesh.position) && exitCooldown <= 0;
+  }
   _coopBroadcastT -= dt;
   if (_coopBroadcastT <= 0) {
     _coopBroadcastT = 0.2;
@@ -13450,9 +13913,9 @@ function _renderCoopHud() {
     el.id = 'coop-hud';
     Object.assign(el.style, {
       position: 'fixed', right: '10px', top: '60px', zIndex: '6',
-      background: 'rgba(12,14,20,0.85)', border: '1px solid #4a8acf',
+      background: 'rgba(12,14,20,0.85)', border: '1px solid var(--cy-cyan)',
       borderRadius: '4px', padding: '8px 12px',
-      color: '#a0c0ff', font: '12px ui-monospace, Menlo, Consolas, monospace',
+      color: 'var(--cy-cyan)', font: '12px ui-monospace, Menlo, Consolas, monospace',
       letterSpacing: '0.6px', lineHeight: '1.5', pointerEvents: 'none',
       minWidth: '200px', maxWidth: '260px', display: 'none',
       boxShadow: '0 2px 12px rgba(0,0,0,0.6), 0 0 8px rgba(80,140,255,0.3)',
@@ -13486,10 +13949,10 @@ function _renderCoopHud() {
   const room = transport.roomCode || '—';
   const role = transport.isHost ? 'HOST' : (transport.peerId ? 'JOIN' : '?');
   const lines = [
-    `<div style="color:#f2c060;font-weight:700;letter-spacing:1.4px">CO-OP · ${role} · room ${room}</div>`,
-    `<div style="color:#9b8b6a;font-size:10px">peers: ${transport.peers.size}, you=${transport.peerId || '?'}, host=${transport.hostId || '?'}</div>`,
-    `<div style="color:#6f7990;font-size:10px">you @ ${px.toFixed(1)}, ${pz.toFixed(1)} · F${lvIdx}</div>`,
-    `<div style="color:${_runSeed ? '#a0c0a0' : '#f08080'};font-size:10px">seed: ${seedHex}</div>`,
+    `<div style="color:var(--cy-amber);font-weight:700;letter-spacing:1.4px">CO-OP · ${role} · room ${room}</div>`,
+    `<div style="color:var(--cy-amber);font-size:10px">peers: ${transport.peers.size}, you=${transport.peerId || '?'}, host=${transport.hostId || '?'}</div>`,
+    `<div style="color:var(--ce-soft);font-size:10px">you @ ${px.toFixed(1)}, ${pz.toFixed(1)} · F${lvIdx}</div>`,
+    `<div style="color:${_runSeed ? 'var(--cy-mint)' : 'var(--ce-red)'};font-size:10px">seed: ${seedHex}</div>`,
   ];
   const seen = new Set();
   for (const [peerId, ghost] of coopLobby.ghosts) {
@@ -13503,14 +13966,14 @@ function _renderCoopHud() {
     const arrow = _arrowForAngle(angWorld);
     const name = transport.peers.get(peerId)?.name || 'peer';
     lines.push(
-      `<div><span style="color:#6abfff;font-size:14px">${arrow}</span> `
-      + `${_escHtml(name)} <span style="color:#6f7990">${dist.toFixed(1)}m</span> `
-      + `<span style="color:#3a4458;font-size:10px">@ ${ghost.x.toFixed(1)}, ${ghost.z.toFixed(1)}</span></div>`,
+      `<div><span style="color:var(--cy-cyan);font-size:14px">${arrow}</span> `
+      + `${_escHtml(name)} <span style="color:var(--ce-soft)">${dist.toFixed(1)}m</span> `
+      + `<span style="color:var(--ce-navy);font-size:10px">@ ${ghost.x.toFixed(1)}, ${ghost.z.toFixed(1)}</span></div>`,
     );
     _updatePeerEdgeArrow(peerId, name, dx, dz, dist);
   }
   if (transport.rtt != null) {
-    lines.push(`<div style="color:#6f7990;margin-top:2px;font-size:10px">rtt ${transport.rtt}ms</div>`);
+    lines.push(`<div style="color:var(--ce-soft);margin-top:2px;font-size:10px">rtt ${transport.rtt}ms</div>`);
   }
   // Prune stale edge arrows for peers that left.
   for (const peerId of [..._coopPeerArrows.keys()]) {
@@ -13535,8 +13998,8 @@ function _updatePeerEdgeArrow(peerId, name, dx, dz, dist) {
       position: 'absolute', transform: 'translate(-50%, -50%)',
       padding: '4px 8px',
       background: 'rgba(12,14,20,0.85)',
-      border: '1px solid #6abfff', borderRadius: '14px',
-      color: '#a0d0ff', font: '11px ui-monospace, Menlo, Consolas, monospace',
+      border: '1px solid var(--cy-cyan)', borderRadius: '14px',
+      color: 'var(--cy-cyan)', font: '11px ui-monospace, Menlo, Consolas, monospace',
       letterSpacing: '0.6px', whiteSpace: 'nowrap',
       boxShadow: '0 0 10px rgba(80,180,255,0.5)',
       pointerEvents: 'none', display: 'none',
@@ -13589,7 +14052,7 @@ function _updatePeerEdgeArrow(peerId, name, dx, dz, dist) {
   const py = cy + vy * t;
   const ang = Math.atan2(vy, vx);
   const arrow = _arrowForAngle(Math.atan2(vx, -vy));   // world-aligned 8-way glyph
-  el.innerHTML = `${arrow} <strong>${_escHtml(name)}</strong> <span style="color:#6f7990">${dist.toFixed(1)}m</span>`;
+  el.innerHTML = `${arrow} <strong>${_escHtml(name)}</strong> <span style="color:var(--ce-soft)">${dist.toFixed(1)}m</span>`;
   el.style.left = `${px}px`;
   el.style.top = `${py}px`;
   el.style.display = 'block';
@@ -13639,11 +14102,11 @@ function _renderDownedHud() {
       transform: 'translateX(-50%)', zIndex: '8',
       pointerEvents: 'none', display: 'none',
       font: '12px ui-monospace, Menlo, Consolas, monospace',
-      color: '#f0a0a0', textAlign: 'center',
+      color: 'var(--ce-red)', textAlign: 'center',
       letterSpacing: '1px', minWidth: '320px',
       padding: '10px 16px',
       background: 'rgba(20,8,10,0.85)',
-      border: '1px solid #a03038', borderRadius: '4px',
+      border: '1px solid var(--ce-red)', borderRadius: '4px',
       boxShadow: '0 0 28px rgba(208,72,104,0.45)',
     });
     document.body.appendChild(el);
@@ -13656,17 +14119,17 @@ function _renderDownedHud() {
     const rvPct = Math.max(0, Math.min(1, _localReviveT / holdTotal));
     const rvActive = _localReviveActive ? 'TEAMMATE REVIVING' : 'TEAMMATE NEEDED';
     _coopDownedHudEl.innerHTML = `
-      <div style="font-size:18px;color:#e04848;letter-spacing:4px;margin-bottom:4px">DOWN</div>
-      <div style="font-size:10px;color:#9b6a6a">${rvActive}</div>
-      <div style="margin-top:6px;background:#2a0e10;height:6px;border-radius:3px;overflow:hidden">
-        <div style="width:${(blPct * 100).toFixed(1)}%;height:100%;background:linear-gradient(90deg,#a03038,#e04848);transition:width 200ms linear"></div>
+      <div style="font-size:18px;color:var(--ce-red);letter-spacing:4px;margin-bottom:4px">DOWN</div>
+      <div style="font-size:10px;color:var(--ce-red)">${rvActive}</div>
+      <div style="margin-top:6px;background:var(--ce-black);height:6px;border-radius:3px;overflow:hidden">
+        <div style="width:${(blPct * 100).toFixed(1)}%;height:100%;background:linear-gradient(90deg,var(--ce-red),var(--ce-red));transition:width 200ms linear"></div>
       </div>
-      <div style="font-size:9px;color:#6a4040;margin-top:2px">bleedout ${_localBleedoutT.toFixed(1)}s</div>
+      <div style="font-size:9px;color:var(--ce-steel);margin-top:2px">bleedout ${_localBleedoutT.toFixed(1)}s</div>
       ${rvPct > 0 ? `
-      <div style="margin-top:8px;background:#0e2a18;height:6px;border-radius:3px;overflow:hidden">
-        <div style="width:${(rvPct * 100).toFixed(1)}%;height:100%;background:linear-gradient(90deg,#3a7a48,#6abf78);transition:width 200ms linear"></div>
+      <div style="margin-top:8px;background:var(--ce-black);height:6px;border-radius:3px;overflow:hidden">
+        <div style="width:${(rvPct * 100).toFixed(1)}%;height:100%;background:linear-gradient(90deg,var(--cy-mint),var(--cy-mint));transition:width 200ms linear"></div>
       </div>
-      <div style="font-size:9px;color:#406040;margin-top:2px">revive ${(_reviveHoldT).toFixed(1)}s / ${holdTotal}s</div>
+      <div style="font-size:9px;color:var(--ce-steel);margin-top:2px">revive ${(_reviveHoldT).toFixed(1)}s / ${holdTotal}s</div>
       ` : ''}
     `;
     _coopDownedHudEl.style.display = 'block';
@@ -13684,17 +14147,17 @@ function _renderDownedHud() {
       ? Math.max(0, Math.min(1, (targetSt.bleedoutT || 0) / total))
       : 0;
     _coopDownedHudEl.innerHTML = `
-      <div style="font-size:14px;color:#6abf78;letter-spacing:3px;margin-bottom:4px">REVIVING ${_escHtml(peerName)}</div>
-      <div style="font-size:9px;color:#406040">hold INTERACT — release to pause</div>
-      <div style="margin-top:6px;background:#0e2a18;height:8px;border-radius:3px;overflow:hidden">
-        <div style="width:${(rvPct * 100).toFixed(1)}%;height:100%;background:linear-gradient(90deg,#3a7a48,#6abf78);transition:width 100ms linear"></div>
+      <div style="font-size:14px;color:var(--cy-mint);letter-spacing:3px;margin-bottom:4px">REVIVING ${_escHtml(peerName)}</div>
+      <div style="font-size:9px;color:var(--ce-steel)">hold INTERACT — release to pause</div>
+      <div style="margin-top:6px;background:var(--ce-black);height:8px;border-radius:3px;overflow:hidden">
+        <div style="width:${(rvPct * 100).toFixed(1)}%;height:100%;background:linear-gradient(90deg,var(--cy-mint),var(--cy-mint));transition:width 100ms linear"></div>
       </div>
-      <div style="font-size:9px;color:#406040;margin-top:2px">revive ${_reviveHoldT.toFixed(1)}s / ${holdTotal}s</div>
+      <div style="font-size:9px;color:var(--ce-steel);margin-top:2px">revive ${_reviveHoldT.toFixed(1)}s / ${holdTotal}s</div>
       ${targetSt ? `
-      <div style="margin-top:6px;background:#2a0e10;height:5px;border-radius:3px;overflow:hidden">
-        <div style="width:${(blPct * 100).toFixed(1)}%;height:100%;background:linear-gradient(90deg,#a03038,#e04848);transition:width 200ms linear"></div>
+      <div style="margin-top:6px;background:var(--ce-black);height:5px;border-radius:3px;overflow:hidden">
+        <div style="width:${(blPct * 100).toFixed(1)}%;height:100%;background:linear-gradient(90deg,var(--ce-red),var(--ce-red));transition:width 200ms linear"></div>
       </div>
-      <div style="font-size:9px;color:#9b6a6a;margin-top:2px">bleedout ${(targetSt.bleedoutT || 0).toFixed(1)}s</div>
+      <div style="font-size:9px;color:var(--ce-red);margin-top:2px">bleedout ${(targetSt.bleedoutT || 0).toFixed(1)}s</div>
       ` : ''}
     `;
     _coopDownedHudEl.style.display = 'block';
@@ -13718,10 +14181,10 @@ function _renderDownedHud() {
     const range = tunables.coop?.reviveRange ?? 1.6;
     const inRange = nearDist <= range;
     _coopDownedHudEl.innerHTML = `
-      <div style="font-size:13px;color:${inRange ? '#f2c060' : '#9b8b6a'};letter-spacing:3px;margin-bottom:2px">
+      <div style="font-size:13px;color:${inRange ? 'var(--cy-amber)' : 'var(--cy-amber)'};letter-spacing:3px;margin-bottom:2px">
         ${inRange ? 'HOLD E TO REVIVE' : `${_escHtml(peerName)} DOWN — ${nearDist.toFixed(1)}m`}
       </div>
-      <div style="font-size:9px;color:#6a5a3a">bleedout ${nearPeer.st.bleedoutT.toFixed(1)}s</div>
+      <div style="font-size:9px;color:var(--ce-steel)">bleedout ${nearPeer.st.bleedoutT.toFixed(1)}s</div>
     `;
     _coopDownedHudEl.style.display = 'block';
     return;
@@ -15307,6 +15770,20 @@ function aiFireFlame(origin, dir, weapon, damageMult = 1, source = null) {
     }
   }
   combat.spawnFlameParticles(origin, dir, drawRange, angleRad);
+  // Coop: broadcast the AI's flame cone so joiners see "The Burn"
+  // (and any other AI flamer) instead of taking invisible flame damage.
+  // Per-tick send is fine — only THE BURN tends to flame this hot.
+  {
+    const _coopT = getCoopTransport();
+    if (_coopT.isOpen && _coopT.peers && _coopT.peers.size > 0) {
+      _coopT.send('fx-flame', {
+        ox: +origin.x.toFixed(2), oy: +origin.y.toFixed(2), oz: +origin.z.toFixed(2),
+        dx: +dir.x.toFixed(3), dz: +dir.z.toFixed(3),
+        r: +drawRange.toFixed(2),
+        a: +angleRad.toFixed(3),
+      });
+    }
+  }
   // Coop — joiners caught in the cone (with LoS) also take a flame
   // tick. Same cap formula as the host below; per-tick send so the
   // joiner's `damagePlayer` accumulates the fire stack the same way
@@ -15430,7 +15907,7 @@ function updateHealthHud(playerInfo) {
     }
     const bucket = pct > 0.6 ? 'g' : pct > 0.3 ? 'y' : 'r';
     if (hpFillEl._lastBucket !== bucket) {
-      hpFillEl.style.background = bucket === 'g' ? '#6abe5a' : bucket === 'y' ? '#d0a030' : '#c94a3a';
+      hpFillEl.style.background = bucket === 'g' ? 'var(--cy-mint)' : bucket === 'y' ? 'var(--cy-amber)' : 'var(--cy-amber)';
       hpFillEl._lastBucket = bucket;
     }
     if (hpRegenEl) {
@@ -15480,9 +15957,9 @@ function updateHealthHud(playerInfo) {
   if (staFillEl) {
     const pct = Math.max(0, Math.min(1, playerInfo.stamina / playerInfo.maxStamina));
     staFillEl.style.width = `${pct * 100}%`;
-    if (playerInfo.blocking) staFillEl.style.background = '#d07acc';
-    else if (pct > 0.3) staFillEl.style.background = '#6aaedc';
-    else staFillEl.style.background = '#c97a5a';
+    if (playerInfo.blocking) staFillEl.style.background = 'var(--cy-magenta)';
+    else if (pct > 0.3) staFillEl.style.background = 'var(--cy-cyan)';
+    else staFillEl.style.background = 'var(--cy-amber)';
     if (staTextEl) {
       const parry = playerInfo.parryActive ? ' · parry!' : '';
       staTextEl.textContent =
@@ -16600,7 +17077,7 @@ function updateReloadHud(weapon, effWeapon) {
       if (weapon.infiniteAmmo) {
         label = 'READY'; text = '∞'; labelColor = '';
       } else if (weapon.ammo === 0) {
-        label = 'EMPTY'; text = `${weapon.ammo}/${magSize}`; labelColor = '#c94a3a';
+        label = 'EMPTY'; text = `${weapon.ammo}/${magSize}`; labelColor = 'var(--cy-amber)';
       } else {
         label = 'READY'; text = `${weapon.ammo}/${magSize}`; labelColor = '';
       }
@@ -17163,9 +17640,9 @@ function _refreshDefibHint(targetPeerId) {
       font: '12px ui-monospace, Menlo, Consolas, monospace',
       letterSpacing: '2px', textTransform: 'uppercase',
       padding: '7px 14px',
-      background: 'linear-gradient(180deg, #2a1c08, #100a02)',
-      border: '1px solid #ffd060', borderRadius: '4px',
-      color: '#ffe080',
+      background: 'linear-gradient(180deg, var(--ce-black), var(--ce-black))',
+      border: '1px solid var(--cy-amber)', borderRadius: '4px',
+      color: 'var(--cy-amber)',
       boxShadow: '0 0 18px rgba(255,200,80,0.45)',
     });
     document.body.appendChild(el);
@@ -17219,9 +17696,9 @@ function _refreshExitWaitHud() {
       font: '12px ui-monospace, Menlo, Consolas, monospace',
       letterSpacing: '2px', textTransform: 'uppercase',
       padding: '8px 16px',
-      background: 'linear-gradient(180deg, #1a2228, #0c1014)',
-      border: '1px solid #60c0f2', borderRadius: '4px',
-      color: '#a0d8ff',
+      background: 'linear-gradient(180deg, var(--ce-navy), var(--ce-black))',
+      border: '1px solid var(--cy-cyan)', borderRadius: '4px',
+      color: 'var(--cy-cyan)',
       boxShadow: '0 0 24px rgba(80,200,255,0.4)',
       animation: 'exit-wait-pulse 1.6s ease-in-out infinite',
     });
@@ -17830,24 +18307,86 @@ function _spawnGasCloudPuff(zone) {
     peakOpacity: 0.45 + Math.random() * 0.30,
   });
 }
+// Cached hazard-zone assets — shared materials + radius-keyed
+// geometries so spawnGasZone / spawnSmokeZone don't allocate (and
+// don't trigger a shader compile) on every call. The 4 base materials
+// are stamped skipDispose so disposeZone() leaves them in the
+// WebGLPrograms cache for re-use across zones / levels. First
+// instantiation happens during _warmShaders so the compile cost lands
+// at boot, not on the first grenade throw in a fresh biome.
+const _hazardCache = {
+  gasRingMat: null, gasDomeMat: null,
+  smokeRingMat: null, smokeDomeMat: null,
+  ringGeom: new Map(), domeGeom: new Map(),
+};
+function _hazardMats(kind) {
+  const c = _hazardCache;
+  if (kind === 'gas') {
+    if (!c.gasRingMat) {
+      c.gasRingMat = new THREE.MeshBasicMaterial({
+        color: 0x60d040, transparent: true, opacity: 0.22,
+        depthWrite: false, side: THREE.DoubleSide,
+      });
+      c.gasRingMat.userData.skipDispose = true;
+      c.gasDomeMat = new THREE.MeshBasicMaterial({
+        color: 0x80e060, transparent: true, opacity: 0.18,
+        depthWrite: false,
+      });
+      c.gasDomeMat.userData.skipDispose = true;
+    }
+    return { ringMat: c.gasRingMat, domeMat: c.gasDomeMat };
+  }
+  if (!c.smokeRingMat) {
+    c.smokeRingMat = new THREE.MeshBasicMaterial({
+      color: 0x9aa4ad, transparent: true, opacity: 0.18,
+      depthWrite: false, side: THREE.DoubleSide,
+    });
+    c.smokeRingMat.userData.skipDispose = true;
+    c.smokeDomeMat = new THREE.MeshBasicMaterial({
+      color: 0xb8c0c8, transparent: true, opacity: 0.15,
+      depthWrite: false,
+    });
+    c.smokeDomeMat.userData.skipDispose = true;
+  }
+  return { ringMat: c.smokeRingMat, domeMat: c.smokeDomeMat };
+}
+function _hazardRingGeom(radius) {
+  // Quantize to 0.1 m so 3.0 / 3.0001 / 3.05 collapse to a single
+  // buffer — caps the cache at a handful of entries even if callers
+  // pass slightly-varying radii.
+  const key = Math.round(radius * 10) / 10;
+  let g = _hazardCache.ringGeom.get(key);
+  if (!g) {
+    g = new THREE.CircleGeometry(radius, 24);
+    g.userData = g.userData || {};
+    g.userData.skipDispose = true;
+    _hazardCache.ringGeom.set(key, g);
+  }
+  return g;
+}
+function _hazardDomeGeom(radius) {
+  const key = Math.round(radius * 10) / 10;
+  let g = _hazardCache.domeGeom.get(key);
+  if (!g) {
+    g = new THREE.SphereGeometry(radius, 16, 8, 0, Math.PI * 2, 0, Math.PI / 2);
+    g.userData = g.userData || {};
+    g.userData.skipDispose = true;
+    _hazardCache.domeGeom.set(key, g);
+  }
+  return g;
+}
+
 function spawnGasZone(pos, radius, duration, owner = 'player') {
   // Static dome + ring dialled down to match the smoke-grenade
   // treatment — the puff emitter (see _tickThrowableZones gas loop)
   // carries the bulk of the visual now, so the static base is just
   // a soft tint marking the zone radius.
-  const baseMat = new THREE.MeshBasicMaterial({
-    color: 0x60d040, transparent: true, opacity: 0.22,
-    depthWrite: false, side: THREE.DoubleSide,
-  });
-  const ring = new THREE.Mesh(new THREE.CircleGeometry(radius, 24), baseMat);
+  const { ringMat, domeMat } = _hazardMats('gas');
+  const ring = new THREE.Mesh(_hazardRingGeom(radius), ringMat);
   ring.rotation.x = -Math.PI / 2;
   ring.position.set(pos.x, 0.05, pos.z);
   scene.add(ring);
-  const domeMat = new THREE.MeshBasicMaterial({
-    color: 0x80e060, transparent: true, opacity: 0.18,
-    depthWrite: false,
-  });
-  const dome = new THREE.Mesh(new THREE.SphereGeometry(radius, 16, 8, 0, Math.PI * 2, 0, Math.PI / 2), domeMat);
+  const dome = new THREE.Mesh(_hazardDomeGeom(radius), domeMat);
   dome.position.set(pos.x, 0, pos.z);
   scene.add(dome);
   _gasZones.push({
@@ -17870,19 +18409,12 @@ function spawnSmokeZone(pos, radius, duration) {
   // _tickThrowableZones below) ride on top for the "actual smoke is
   // billowing" read. Opacity is dialled down vs. the old pure-static
   // version because the puffs now do the heavy visual lifting.
-  const baseMat = new THREE.MeshBasicMaterial({
-    color: 0x9aa4ad, transparent: true, opacity: 0.18,
-    depthWrite: false, side: THREE.DoubleSide,
-  });
-  const ring = new THREE.Mesh(new THREE.CircleGeometry(radius, 24), baseMat);
+  const { ringMat, domeMat } = _hazardMats('smoke');
+  const ring = new THREE.Mesh(_hazardRingGeom(radius), ringMat);
   ring.rotation.x = -Math.PI / 2;
   ring.position.set(pos.x, 0.05, pos.z);
   scene.add(ring);
-  const domeMat = new THREE.MeshBasicMaterial({
-    color: 0xb8c0c8, transparent: true, opacity: 0.15,
-    depthWrite: false,
-  });
-  const dome = new THREE.Mesh(new THREE.SphereGeometry(radius, 16, 8, 0, Math.PI * 2, 0, Math.PI / 2), domeMat);
+  const dome = new THREE.Mesh(_hazardDomeGeom(radius), domeMat);
   dome.position.set(pos.x, 0, pos.z);
   scene.add(dome);
   // Per-zone particle state — emit a fresh puff every PUFF_INTERVAL
@@ -17998,8 +18530,15 @@ function _tickThrowableZones(dt) {
       }
     }
     if (z.t >= z.life) {
-      scene.remove(z.ring); z.ring.geometry.dispose(); z.ring.material.dispose();
-      scene.remove(z.dome); z.dome.geometry.dispose(); z.dome.material.dispose();
+      // Ring/dome share the pooled _hazardCache assets (skipDispose) —
+      // remove from scene but leave the geom+mat live so the next
+      // grenade reuses the compiled program.
+      scene.remove(z.ring);
+      if (!z.ring.geometry?.userData?.skipDispose) z.ring.geometry.dispose();
+      if (!z.ring.material?.userData?.skipDispose) z.ring.material.dispose();
+      scene.remove(z.dome);
+      if (!z.dome.geometry?.userData?.skipDispose) z.dome.geometry.dispose();
+      if (!z.dome.material?.userData?.skipDispose) z.dome.material.dispose();
       // Clean up any remaining puffs at zone end (rare — the last-25%
       // emit gate should keep this empty by zone-end, but safety).
       for (const p of z.puffs) _releaseCloudPuffSlot(p.slot);
@@ -18117,8 +18656,13 @@ function _tickThrowableZones(dt) {
       sweep(melees.enemies);
     }
     if (z.t >= z.life) {
-      scene.remove(z.ring); z.ring.geometry.dispose(); z.ring.material.dispose();
-      scene.remove(z.dome); z.dome.geometry.dispose(); z.dome.material.dispose();
+      // Ring/dome share the pooled _hazardCache assets (skipDispose).
+      scene.remove(z.ring);
+      if (!z.ring.geometry?.userData?.skipDispose) z.ring.geometry.dispose();
+      if (!z.ring.material?.userData?.skipDispose) z.ring.material.dispose();
+      scene.remove(z.dome);
+      if (!z.dome.geometry?.userData?.skipDispose) z.dome.geometry.dispose();
+      if (!z.dome.material?.userData?.skipDispose) z.dome.material.dispose();
       // Clean up any remaining puffs (rare — the last-25% emit gate
       // should keep this empty by zone-end, but defensive).
       for (const p of z.puffs) _releaseCloudPuffSlot(p.slot);
@@ -18826,7 +19370,7 @@ const _flashOverlayEl = (() => {
   el.id = 'flash-overlay';
   Object.assign(el.style, {
     position: 'fixed', inset: '0', zIndex: 49,
-    background: '#ffffff', opacity: '0', pointerEvents: 'none',
+    background: 'var(--ce-white)', opacity: '0', pointerEvents: 'none',
     transition: 'opacity 0.05s linear',
   });
   document.body.appendChild(el);
@@ -19449,20 +19993,20 @@ function _showMidRunContractOffer() {
             font: 13px 'Inter', system-ui, sans-serif;
           }
           #mid-run-contract-card {
-            background: linear-gradient(180deg, #1a2228, #0c1014);
-            border: 1px solid #f2c060; border-radius: 6px;
+            background: linear-gradient(180deg, var(--ce-navy), var(--ce-black));
+            border: 1px solid var(--cy-amber); border-radius: 6px;
             padding: 24px 28px 18px;
             max-width: 880px; width: 92%;
             box-shadow: 0 0 48px rgba(242, 192, 96, 0.35);
-            color: #f2e7c9;
+            color: var(--cy-amber);
           }
           #mid-run-contract-title {
-            color: #f2c060; font-weight: 700; font-size: 14px;
+            color: var(--cy-amber); font-weight: 700; font-size: 14px;
             letter-spacing: 3px; text-transform: uppercase;
             text-align: center; margin-bottom: 4px;
           }
           #mid-run-contract-sub {
-            color: #a89070; font-size: 11px; text-align: center;
+            color: var(--cy-amber); font-size: 11px; text-align: center;
             margin-bottom: 18px; letter-spacing: 1.5px;
           }
           #mid-run-contract-cards {
@@ -19474,13 +20018,13 @@ function _showMidRunContractOffer() {
           }
           #mid-run-contract-skip {
             display: block; width: 100%; padding: 9px;
-            background: transparent; border: 1px solid #4a3a2a;
-            border-radius: 3px; color: #a89070; font: inherit;
+            background: transparent; border: 1px solid var(--ce-navy);
+            border-radius: 3px; color: var(--cy-amber); font: inherit;
             cursor: pointer; letter-spacing: 1.5px;
             text-transform: uppercase; font-size: 11px;
           }
           #mid-run-contract-skip:hover {
-            border-color: #6a4a2a; color: #c9a87a;
+            border-color: var(--ce-steel); color: var(--cy-amber);
           }
         `;
         document.head.appendChild(ss);
@@ -19769,19 +20313,19 @@ function _maybeShowLockedTrialPrompt() {
     Object.assign(prompt.style, {
       position: 'fixed', top: '50%', left: '50%',
       transform: 'translate(-50%, calc(-50% + 180px))', zIndex: '100',
-      background: 'linear-gradient(180deg, #1a1d24, #0c0e14)',
-      border: '1px solid #5a8acf', borderRadius: '4px',
+      background: 'linear-gradient(180deg, var(--ce-black), var(--ce-black))',
+      border: '1px solid var(--cy-cyan)', borderRadius: '4px',
       padding: '16px 22px', minWidth: '320px', textAlign: 'center',
-      color: '#e8dfc8', fontFamily: 'ui-monospace, SFMono-Regular, Menlo, Consolas, monospace',
+      color: 'var(--ce-soft)', fontFamily: 'ui-monospace, SFMono-Regular, Menlo, Consolas, monospace',
       boxShadow: '0 8px 24px rgba(0,0,0,0.6)',
     });
     prompt.innerHTML = `
-      <div style="font-size:11px; letter-spacing:1.4px; color:#9b8b6a; margin-bottom:6px;">FIELD TRIAL</div>
-      <div style="font-size:14px; color:#f2c060; margin-bottom:4px;">${trial.name}</div>
-      <div style="font-size:11px; color:#c9a87a; margin-bottom:12px;">Unlock permanently? Adds it to your stash and the world drop pool.</div>
+      <div style="font-size:11px; letter-spacing:1.4px; color:var(--cy-amber); margin-bottom:6px;">FIELD TRIAL</div>
+      <div style="font-size:14px; color:var(--cy-amber); margin-bottom:4px;">${trial.name}</div>
+      <div style="font-size:11px; color:var(--cy-amber); margin-bottom:12px;">Unlock permanently? Adds it to your stash and the world drop pool.</div>
       <div style="display:flex; gap:8px; justify-content:center;">
-        <button id="dup-buy" type="button" style="background:linear-gradient(180deg,#2a4a6e,#1e3450);border:1px solid #5a8acf;color:#e8dfc8;padding:6px 14px;border-radius:3px;font:inherit;font-size:11px;letter-spacing:1px;cursor:pointer;text-transform:uppercase;">Unlock — ${cost}c</button>
-        <button id="dup-skip" type="button" style="background:#1a1d24;border:1px solid #4a505a;color:#9b8b6a;padding:6px 14px;border-radius:3px;font:inherit;font-size:11px;letter-spacing:1px;cursor:pointer;text-transform:uppercase;">Skip</button>
+        <button id="dup-buy" type="button" style="background:linear-gradient(180deg,var(--ce-steel),var(--ce-navy));border:1px solid var(--cy-cyan);color:var(--ce-soft);padding:6px 14px;border-radius:3px;font:inherit;font-size:11px;letter-spacing:1px;cursor:pointer;text-transform:uppercase;">Unlock — ${cost}c</button>
+        <button id="dup-skip" type="button" style="background:var(--ce-black);border:1px solid var(--ce-steel);color:var(--cy-amber);padding:6px 14px;border-radius:3px;font:inherit;font-size:11px;letter-spacing:1px;cursor:pointer;text-transform:uppercase;">Skip</button>
       </div>
     `;
     document.body.appendChild(prompt);
@@ -20483,9 +21027,9 @@ function _refreshPickQueueHud() {
       font: '12px ui-monospace, Menlo, Consolas, monospace',
       letterSpacing: '2px', textTransform: 'uppercase',
       padding: '8px 16px',
-      background: 'linear-gradient(180deg, #1a2228, #0c1014)',
-      border: '1px solid #f2c060', borderRadius: '4px',
-      color: '#f2c060',
+      background: 'linear-gradient(180deg, var(--ce-navy), var(--ce-black))',
+      border: '1px solid var(--cy-amber)', borderRadius: '4px',
+      color: 'var(--cy-amber)',
       boxShadow: '0 0 24px rgba(255,200,80,0.4)',
       animation: 'pick-queue-pulse 2.4s ease-in-out infinite',
     });
@@ -20513,10 +21057,10 @@ function _refreshPickQueueHud() {
   }
   const parts = [];
   if (_pendingLevelUpPicks > 0) {
-    parts.push(`<span style="color:#ffe070">${_pendingLevelUpPicks}× SKILL</span>`);
+    parts.push(`<span style="color:var(--cy-amber)">${_pendingLevelUpPicks}× SKILL</span>`);
   }
   if (_pendingMasteryPicks.length > 0) {
-    parts.push(`<span style="color:#d090ff">${_pendingMasteryPicks.length}× MASTERY</span>`);
+    parts.push(`<span style="color:var(--cy-violet)">${_pendingMasteryPicks.length}× MASTERY</span>`);
   }
   _pickQueueHudEl.innerHTML = `${parts.join(' · ')} <span style="opacity:0.7;font-size:10px">— click or [K]</span>`;
   _pickQueueHudEl.style.display = 'block';
@@ -20535,11 +21079,11 @@ function _ensureLevelUpBanner() {
     style.id = 'level-up-banner-style';
     style.textContent = `
       @keyframes lvlup-glow {
-        0%   { text-shadow: 0 0 12px #ffe070, 0 0 28px #ffd040, 0 0 60px #ff9020; transform: translate(-50%, -50%) scale(0.85); opacity: 0; }
+        0%   { text-shadow: 0 0 12px var(--cy-amber), 0 0 28px var(--cy-amber), 0 0 60px var(--cy-amber); transform: translate(-50%, -50%) scale(0.85); opacity: 0; }
         12%  { transform: translate(-50%, -50%) scale(1.06); opacity: 1; }
         20%  { transform: translate(-50%, -50%) scale(1.0); }
-        80%  { text-shadow: 0 0 14px #ffe070, 0 0 32px #ffd040, 0 0 70px #ff9020; opacity: 1; }
-        100% { text-shadow: 0 0 12px #ffe070, 0 0 28px #ffd040, 0 0 60px #ff9020; transform: translate(-50%, -50%) scale(1.04); opacity: 0; }
+        80%  { text-shadow: 0 0 14px var(--cy-amber), 0 0 32px var(--cy-amber), 0 0 70px var(--cy-amber); opacity: 1; }
+        100% { text-shadow: 0 0 12px var(--cy-amber), 0 0 28px var(--cy-amber), 0 0 60px var(--cy-amber); transform: translate(-50%, -50%) scale(1.04); opacity: 0; }
       }
       /* 2026-05-06: shrunk + relocated. Banner used to sit at 38%
          center of the screen at 96px — too big, blocked the play
@@ -20554,16 +21098,16 @@ function _ensureLevelUpBanner() {
         z-index: 60; pointer-events: none;
         font-family: ui-monospace, Menlo, Consolas, monospace;
         font-weight: 700; font-size: 48px; letter-spacing: 8px;
-        color: #fff5b8;
+        color: var(--cy-amber);
         opacity: 0; display: none; user-select: none;
         text-align: center;
-        text-shadow: 0 0 12px #ffe070, 0 0 28px #ffd040, 0 0 60px #ff9020;
+        text-shadow: 0 0 12px var(--cy-amber), 0 0 28px var(--cy-amber), 0 0 60px var(--cy-amber);
       }
       #level-up-banner.show { display: block; }
       #level-up-banner .sub {
         display: block; margin-top: 4px;
         font-size: 14px; letter-spacing: 4px;
-        color: #ffd070; text-shadow: 0 0 8px #ffb030;
+        color: var(--cy-amber); text-shadow: 0 0 8px var(--cy-amber);
       }
     `;
     document.head.appendChild(style);
@@ -20620,11 +21164,11 @@ function _ensureClassLevelUpBanner() {
     style.id = 'class-level-up-banner-style';
     style.textContent = `
       @keyframes classlvlup-glow {
-        0%   { text-shadow: 0 0 12px #d090ff, 0 0 28px #a040e0, 0 0 60px #6020a0; transform: translate(-50%, -50%) scale(0.85); opacity: 0; }
+        0%   { text-shadow: 0 0 12px var(--cy-violet), 0 0 28px var(--cy-violet), 0 0 60px var(--cy-violet); transform: translate(-50%, -50%) scale(0.85); opacity: 0; }
         12%  { transform: translate(-50%, -50%) scale(1.06); opacity: 1; }
         20%  { transform: translate(-50%, -50%) scale(1.0); }
-        80%  { text-shadow: 0 0 14px #e0a0ff, 0 0 32px #a040e0, 0 0 70px #6020a0; opacity: 1; }
-        100% { text-shadow: 0 0 12px #d090ff, 0 0 28px #a040e0, 0 0 60px #6020a0; transform: translate(-50%, -50%) scale(1.04); opacity: 0; }
+        80%  { text-shadow: 0 0 14px var(--cy-violet), 0 0 32px var(--cy-violet), 0 0 70px var(--cy-violet); opacity: 1; }
+        100% { text-shadow: 0 0 12px var(--cy-violet), 0 0 28px var(--cy-violet), 0 0 60px var(--cy-violet); transform: translate(-50%, -50%) scale(1.04); opacity: 0; }
       }
       /* Same 2026-05-06 shrink as #level-up-banner — was 76px at
          38% center, now 42px at 18% top so it doesn't block the
@@ -20635,16 +21179,16 @@ function _ensureClassLevelUpBanner() {
         z-index: 60; pointer-events: none;
         font-family: ui-monospace, Menlo, Consolas, monospace;
         font-weight: 700; font-size: 42px; letter-spacing: 7px;
-        color: #f0d8ff;
+        color: var(--cy-violet);
         opacity: 0; display: none; user-select: none;
         text-align: center;
-        text-shadow: 0 0 12px #d090ff, 0 0 28px #a040e0, 0 0 60px #6020a0;
+        text-shadow: 0 0 12px var(--cy-violet), 0 0 28px var(--cy-violet), 0 0 60px var(--cy-violet);
       }
       #class-level-up-banner.show { display: block; }
       #class-level-up-banner .sub {
         display: block; margin-top: 4px;
         font-size: 13px; letter-spacing: 4px;
-        color: #d8a8ff; text-shadow: 0 0 8px #8030c0;
+        color: var(--cy-violet); text-shadow: 0 0 8px var(--cy-violet);
       }
     `;
     document.head.appendChild(style);
@@ -20811,6 +21355,10 @@ function tick() {
     if (shopUI.isOpen()) { shopUI.hide(); return true; }
     if (perkUI.isOpen()) { perkUI.toggle(); return true; }
     if (lootUI.isOpen()) { lootUI.hide(); return true; }
+    // Relics standalone (V) — previously missing from this list, so
+    // Escape silently opened the game menu over the still-visible
+    // relics panel. Routes through hide().
+    if (relicsUI?.isOpen?.()) { relicsUI.hide(); return true; }
     if (inventoryUI.visible) { inventoryUI.hide(); return true; }
     return false;
   };
@@ -21913,7 +22461,13 @@ function tick() {
         if (sorted.length === 0 && fatal) {
           const row = document.createElement('div');
           row.className = 'death-stat-row';
-          row.innerHTML = `<span class="death-stat-label">${fatal.name || 'Unknown'}</span><span class="death-stat-val">${Math.round(fatal.amount || 0)} dmg</span>`;
+          // Truncate the fatal-attacker name in case a modded enemy
+          // or megaboss carries a very long display name — long
+          // strings would push the dmg column off the row.
+          const rawName = fatal.name || 'Unknown';
+          const dispName = rawName.length > 28 ? rawName.slice(0, 27) + '…' : rawName;
+          const safeName = dispName.replace(/&/g, '&amp;').replace(/</g, '&lt;');
+          row.innerHTML = `<span class="death-stat-label" title="${rawName.replace(/"/g, '&quot;')}">${safeName}</span><span class="death-stat-val">${Math.round(fatal.amount || 0)} dmg</span>`;
           listEl.appendChild(row);
         }
       }
@@ -21960,7 +22514,7 @@ function tick() {
           breakdownEl.className = 'death-marks-breakdown';
           breakdownEl.style.cssText = `
             grid-column: 1 / -1;
-            font-size: 10px; color: #a89070;
+            font-size: 10px; color: var(--cy-amber);
             letter-spacing: 0.4px; padding-top: 2px;
           `;
           marksRow.appendChild(breakdownEl);
@@ -21968,7 +22522,7 @@ function tick() {
         const bd = runStats.marksBreakdown;
         if (bd && bd.restarted) {
           breakdownEl.innerHTML = `
-            <span style="color:#d24868;">— Restart penalty: 0 marks (would have been ${bd.raw}: ${bd.floor} floor + ${bd.damage} damage + ${bd.kills} kills, min 5)</span>
+            <span style="color:var(--ce-red);">— Restart penalty: 0 marks (would have been ${bd.raw}: ${bd.floor} floor + ${bd.damage} damage + ${bd.kills} kills, min 5)</span>
           `;
         } else if (bd) {
           breakdownEl.innerHTML = `
@@ -21990,7 +22544,7 @@ function tick() {
             bd.className = 'death-sigils-note';
             bd.style.cssText = `
               grid-column: 1 / -1;
-              font-size: 10px; color: #d24868;
+              font-size: 10px; color: var(--ce-red);
               letter-spacing: 0.4px; padding-top: 2px;
             `;
             sigilsRow.appendChild(bd);
@@ -22164,7 +22718,7 @@ function _safeRender(rawDt, modalPaused = false) {
                    && !mainMenuUI?.isOpen?.();
     if (losActive) {
       _perf.start('losMask');
-      losMask.update(player.mesh.position, level.visionBlockers());
+      losMask.update(player.mesh.position, level.visionBlockers(), player.mesh);
       postFx.setLosMask(losMask.texture, true);
       _perf.end('losMask');
     } else if (!modalPaused) {
@@ -22397,6 +22951,19 @@ function _warmShaders() {
       }
     }
   } catch (_) { /* warmup is best-effort */ }
+  // Hazard-zone shader pre-warm — gas + smoke ring/dome materials
+  // are created lazily on first spawn, which means the first grenade
+  // throw on a new biome currently stutters as the MeshBasicMaterial
+  // variants compile inline. Spawn a throwaway zone of each kind far
+  // off-screen so the compile lands during the renderer.compile pass
+  // below. The warmup teardown block (_smokeZones / _gasZones sweep)
+  // tears them down; pooled _hazardCache assets carry skipDispose so
+  // their programs persist in the WebGLPrograms cache.
+  try {
+    const FAR = new THREE.Vector3(99999, 0, 99999);
+    spawnSmokeZone(FAR, 4.0, 0.001);
+    spawnGasZone(FAR, 4.0, 0.001, 'player');
+  } catch (_) { /* warmup is best-effort */ }
   // Compile every material currently in the scene. Costs the same
   // ~100-300ms hitch we wanted to avoid in gameplay, but here it
   // happens at boot before the player can interact, so it reads as
@@ -22454,9 +23021,20 @@ function _warmShaders() {
     _fireOrbs.length = 0;
     _fireZones.length = 0;
     const disposeZone = (z) => {
-      if (z.ring) { scene.remove(z.ring); z.ring.geometry.dispose(); z.ring.material.dispose(); }
-      if (z.dome) { scene.remove(z.dome); z.dome.geometry.dispose(); z.dome.material.dispose(); }
-      if (z.rod)  { scene.remove(z.rod);  z.rod.geometry.dispose();  z.rod.material.dispose(); }
+      // Hazard ring/dome/rod assets are pooled via _hazardCache —
+      // their geom + materials carry skipDispose so the WebGLPrograms
+      // entry survives teardown for the next spawn. Disposing them
+      // here would tank the warmup. Disposal still happens for any
+      // legacy zone that doesn't carry the flag.
+      const safeDispose = (o) => {
+        if (!o) return;
+        scene.remove(o);
+        if (o.geometry && !o.geometry.userData?.skipDispose) o.geometry.dispose();
+        if (o.material && !o.material.userData?.skipDispose) o.material.dispose();
+      };
+      safeDispose(z.ring);
+      safeDispose(z.dome);
+      safeDispose(z.rod);
       // Release pooled cloud-puff slots so they're available on the
       // next level (instead of staying flagged inUse forever, which
       // would silently shrink the effective pool over multi-level

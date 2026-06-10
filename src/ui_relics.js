@@ -77,6 +77,9 @@ export class RelicsUI {
     this.root.addEventListener('mousedown', (e) => {
       if (e.target === this.root) this.hide();
     });
+    // Escape is routed through main.js's dismissTopModal — that
+    // walks the modal stack in priority order and prevents the
+    // game's pause-menu open from racing with this hide().
   }
 
   toggle() {

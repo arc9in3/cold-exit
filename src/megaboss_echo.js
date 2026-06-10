@@ -212,12 +212,141 @@ export class MegaBossEcho {
     this.beamMesh = beam;
     this.beamMat = beamMat;
 
+    // Spider chassis — 6 jointed legs splayed from the base. Each leg
+    // is thigh + shin pivoting at the base; pivots are stored on
+    // `this.legs[]` so the per-tick animator can drive a slow walk
+    // cycle while the body drifts. Outward angles spaced evenly
+    // around the base.
+    this.legs = [];
+    const legCount = 6;
+    const legMat = new THREE.MeshStandardMaterial({
+      color: 0x1a1224, metalness: 0.6, roughness: 0.5,
+      emissive: new THREE.Color(0x2a1a3a), emissiveIntensity: 0.4,
+    });
+    const legJointMat = new THREE.MeshStandardMaterial({
+      color: 0x4a2a78, metalness: 0.7, roughness: 0.3,
+      emissive: new THREE.Color(0x4a2a78), emissiveIntensity: 0.6,
+    });
+    for (let i = 0; i < legCount; i++) {
+      const theta = (i / legCount) * Math.PI * 2;
+      // Outer hip group holds the leg's outward orientation. A nested
+      // swingPivot is what the animator drives — keeps the gait
+      // independent of the orientation matrix.
+      const hipPivot = new THREE.Group();
+      hipPivot.position.set(Math.cos(theta) * 1.6, 0.55, Math.sin(theta) * 1.6);
+      hipPivot.rotation.y = -theta;     // align leg's local +X outward
+      g.add(hipPivot);
+
+      const swingPivot = new THREE.Group();
+      hipPivot.add(swingPivot);
+
+      // Thigh — slanted down-and-out from the hip. Mesh rotated so
+      // the cylinder lies along the leg's local +X.
+      const thighGeo = new THREE.CylinderGeometry(0.085, 0.07, 1.05, 8);
+      const thighMesh = new THREE.Mesh(thighGeo, legMat);
+      thighMesh.position.set(0.45, 0, 0);
+      thighMesh.rotation.z = -Math.PI / 2;
+      thighMesh.castShadow = true;
+      swingPivot.add(thighMesh);
+
+      // Knee joint — small glowing sphere where thigh meets shin.
+      const knee = new THREE.Mesh(new THREE.SphereGeometry(0.10, 10, 8), legJointMat);
+      knee.position.set(0.95, 0, 0);
+      swingPivot.add(knee);
+
+      // Shin — descends from the knee to the ground. Anchored as a
+      // child of swingPivot so it inherits the gait swing.
+      const shinGeo = new THREE.CylinderGeometry(0.06, 0.04, 1.20, 8);
+      const shinMesh = new THREE.Mesh(shinGeo, legMat);
+      shinMesh.position.set(1.20, -0.45, 0);
+      shinMesh.rotation.z = -Math.PI / 4;
+      shinMesh.castShadow = true;
+      swingPivot.add(shinMesh);
+
+      this.legs.push({
+        swingPivot,
+        baseY: hipPivot.rotation.y,   // kept for reference; not modified per tick
+        phase: i * (Math.PI * 2 / legCount),
+      });
+    }
+
+    // Arms — two articulated arms hanging from the upper core with
+    // claws on the end. Anchored on the sides at core's mid height.
+    // Each arm: shoulder pivot → upper-arm → elbow → forearm →
+    // claw cluster. Pivots stored so we can swing them per tick.
+    this.arms = [];
+    const armMat = new THREE.MeshStandardMaterial({
+      color: 0x2a1a44, metalness: 0.6, roughness: 0.4,
+      emissive: new THREE.Color(0x4a2a78), emissiveIntensity: 0.3,
+    });
+    const clawMat = new THREE.MeshStandardMaterial({
+      color: 0xb892f0, metalness: 0.7, roughness: 0.3,
+      emissive: new THREE.Color(0xb892f0), emissiveIntensity: 0.7,
+    });
+    for (let side = 0; side < 2; side++) {
+      const sgn = side === 0 ? -1 : 1;
+      const shoulder = new THREE.Group();
+      shoulder.position.set(sgn * 0.65, 3.0, 0);
+      g.add(shoulder);
+
+      // Upper arm — angled down + outward.
+      const upper = new THREE.Group();
+      shoulder.add(upper);
+      const upperGeo = new THREE.CylinderGeometry(0.13, 0.10, 1.0, 10);
+      const upperMesh = new THREE.Mesh(upperGeo, armMat);
+      upperMesh.position.set(sgn * 0.45, -0.20, 0);
+      upperMesh.rotation.z = sgn * Math.PI / 2.5;
+      upperMesh.castShadow = true;
+      upper.add(upperMesh);
+
+      // Elbow joint.
+      const elbow = new THREE.Mesh(new THREE.SphereGeometry(0.14, 12, 10), legJointMat);
+      elbow.position.set(sgn * 0.85, -0.55, 0);
+      upper.add(elbow);
+
+      // Forearm — pivots at the elbow, dangles forward + down.
+      const forearm = new THREE.Group();
+      forearm.position.set(sgn * 0.85, -0.55, 0);
+      upper.add(forearm);
+      const forearmGeo = new THREE.CylinderGeometry(0.10, 0.07, 0.95, 8);
+      const forearmMesh = new THREE.Mesh(forearmGeo, armMat);
+      forearmMesh.position.set(0, -0.45, 0);
+      forearmMesh.castShadow = true;
+      forearm.add(forearmMesh);
+
+      // Claw cluster — three fingers spreading outward.
+      const clawRoot = new THREE.Group();
+      clawRoot.position.set(0, -0.92, 0);
+      forearm.add(clawRoot);
+      for (let c = 0; c < 3; c++) {
+        const finger = new THREE.Mesh(
+          new THREE.ConeGeometry(0.05, 0.32, 6),
+          clawMat,
+        );
+        finger.position.set(0, -0.16, 0);
+        const cAng = (c - 1) * 0.45;
+        const fingerPivot = new THREE.Group();
+        fingerPivot.rotation.z = cAng;
+        fingerPivot.rotation.x = 0.18;
+        fingerPivot.add(finger);
+        clawRoot.add(fingerPivot);
+      }
+
+      this.arms.push({ shoulder, upper, forearm, sgn, phase: side * Math.PI });
+    }
+
     this.scene.add(g);
     this.group = g;
   }
 
   spawn(pos) {
-    this._buildMesh(pos.clone ? pos.clone() : pos);
+    const p = pos.clone ? pos.clone() : pos;
+    this._buildMesh(p);
+    // Remember the arena center so the drift orbits around it rather
+    // than wandering off the floor plate.
+    this._driftCenterX = p.x;
+    this._driftCenterZ = p.z;
+    this._driftAngle = Math.random() * Math.PI * 2;
     this.alive = true;
     if (this._barEl) this._barEl.style.display = 'block';
     this._bark(BARKS_INTRO[Math.floor(Math.random() * BARKS_INTRO.length)]);
@@ -239,10 +368,112 @@ export class MegaBossEcho {
       this.ringMesh.rotation.z += dt * 0.6;
       this.ringMesh.rotation.x = Math.PI / 2 + Math.sin(this._t * 0.8) * 0.18;
     }
+    this._animateLimbs();
     const hpRatio = this.maxHp ? this.hp / this.maxHp : 1;
     const targetHex = hpRatio > 0.75 ? 0xb892f0 : hpRatio > 0.35 ? 0xff70d0 : 0xff5070;
     if (this.eyeMat) this.eyeMat.color.setHex(targetHex);
     if (this.beamMat) this.beamMat.opacity = this.phase === 3 ? 0.65 : 0;
+    // Sweep beam rotation — driven by sweepAngle, which on the joiner
+    // is updated by _coopApplyHazardMirrors (snapshot-synced). Without
+    // this the joiner beam stayed at angle 0 even though the host had
+    // rotated it through phase 3.
+    if (this.phase === 3 && this.beamMesh) {
+      this.beamMesh.rotation.y = this.sweepAngle;
+    }
+  }
+
+  // Coop encode: phase-3 sweep beam angle. Host-authoritative. Echo
+  // ghosts are handled by the separate _coopEncodeGhosts; this is
+  // the BEAM portion. Returning null when phase < 3 keeps the
+  // snapshot compact for the entire first 65% of the fight.
+  _coopEncodeHazards() {
+    if (this.phase !== 3) return null;
+    return { sa: +this.sweepAngle.toFixed(3) };
+  }
+
+  // Coop apply: writes synced sweep angle so tickVisuals' beam
+  // rotation lands on the same value the host is rendering. Player-
+  // damage cone (_sweepDamageCheck on host) routes through
+  // damageRemotePlayersInCone using the host's authoritative angle,
+  // so the joiner's mirrored beam reads as "where you'll get hit".
+  _coopApplyHazardMirrors(hz) {
+    if (!hz) return;
+    if (typeof hz.sa === 'number') this.sweepAngle = hz.sa;
+  }
+
+  // Slow orbital drift around the spawn-time arena center. Host-only
+  // (joiner sees the boss position via the megaboss snapshot's x/z).
+  // Radius + angular speed both ramp with phase so the boss gets
+  // harder to pre-aim as the fight progresses.
+  _tickDrift(dt) {
+    if (!this.group || this._driftCenterX == null) return;
+    // Phase 1: tight slow drift. Phase 2/3 widen + speed up so the
+    // boss is meaningfully moving by the time ghosts are stacking.
+    const radius = this.phase === 3 ? 5.5 : this.phase === 2 ? 4.0 : 2.6;
+    const angVel = this.phase === 3 ? 0.55 : this.phase === 2 ? 0.40 : 0.28;
+    this._driftAngle = (this._driftAngle || 0) + angVel * dt;
+    const tx = this._driftCenterX + Math.cos(this._driftAngle) * radius;
+    const tz = this._driftCenterZ + Math.sin(this._driftAngle) * radius;
+    // Lerp toward the target each frame so phase transitions don't
+    // teleport — Echo glides into the wider orbit.
+    const k = 1 - Math.exp(-1.2 * dt);
+    const prevX = this.group.position.x;
+    const prevZ = this.group.position.z;
+    const nextX = prevX + (tx - prevX) * k;
+    const nextZ = prevZ + (tz - prevZ) * k;
+    this.group.position.x = nextX;
+    this.group.position.z = nextZ;
+    // Record how fast we're actually moving so _animateLimbs can dial
+    // the gait amplitude. ~0.3 m/s baseline, 2-3 m/s at phase 3.
+    const dx = nextX - prevX;
+    const dz = nextZ - prevZ;
+    const moved = Math.hypot(dx, dz) / Math.max(1e-4, dt);
+    // Smooth so gait doesn't twitch frame to frame.
+    const prevSpeed = this._driftSpeed || 0;
+    this._driftSpeed = prevSpeed + (Math.min(1.6, moved * 0.6) - prevSpeed) * (1 - Math.exp(-6 * dt));
+    // Slow facing yaw toward direction of travel so legs lead the body.
+    if (moved > 0.05) {
+      const targetYaw = Math.atan2(dx, dz);
+      const cur = this.group.rotation.y;
+      let delta = targetYaw - cur;
+      while (delta >  Math.PI) delta -= Math.PI * 2;
+      while (delta < -Math.PI) delta += Math.PI * 2;
+      this.group.rotation.y = cur + delta * (1 - Math.exp(-2.0 * dt));
+    }
+  }
+
+  // Drives the spider-leg walk cycle + arm/claw sway. Runs from both
+  // host update() and joiner tickVisuals() so the boss is animated on
+  // both sides. Body Y bob is folded in so legs + chassis stay in
+  // sync rather than drifting against each other.
+  _animateLimbs() {
+    const t = this._t || 0;
+    // Speed up the gait when the body is actually moving so a still
+    // boss reads as standing rather than perpetually marching.
+    const speed = this._driftSpeed || 0.6;
+    if (this.legs) {
+      for (const leg of this.legs) {
+        // Forward/back swing around the local vertical — sweeps the
+        // foot in an arc around the hip anchor (proper gait).
+        const swing = Math.sin(t * 1.8 + leg.phase) * 0.45 * speed;
+        leg.swingPivot.rotation.y = swing;
+        // Small Y lift during the forward half of the cycle so the
+        // foot looks like it leaves the ground.
+        const lift = Math.max(0, Math.sin(t * 1.8 + leg.phase)) * 0.18 * speed;
+        leg.swingPivot.position.y = lift;
+      }
+    }
+    if (this.arms) {
+      for (const arm of this.arms) {
+        const sway = Math.sin(t * 0.9 + arm.phase) * 0.35;
+        arm.upper.rotation.x = sway;
+        arm.forearm.rotation.x = -sway * 0.8 + Math.sin(t * 1.4 + arm.phase) * 0.15;
+      }
+    }
+    // Subtle body bob — small Y pulse so the chassis breathes.
+    if (this.group) {
+      this.group.position.y = Math.sin(t * 1.4) * 0.06;
+    }
   }
 
   // ---------- Per-tick ----------
@@ -256,6 +487,12 @@ export class MegaBossEcho {
       this.ringMesh.rotation.z += dt * 0.6;
       this.ringMesh.rotation.x = Math.PI / 2 + Math.sin(this._t * 0.8) * 0.18;
     }
+    // Drift — Echo slowly orbits the spawn center, faster in later
+    // phases so it doesn't read as static while still being trackable.
+    // Limb animation runs after the position update so the spider
+    // gait is in sync with body motion.
+    this._tickDrift(dt);
+    this._animateLimbs();
     // Eye color pulses by phase: purple → magenta → red as HP drops.
     const hpRatio = this.hp / this.maxHp;
     const targetHex = hpRatio > 0.75 ? 0xb892f0 : hpRatio > 0.35 ? 0xff70d0 : 0xff5070;

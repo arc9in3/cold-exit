@@ -29,17 +29,34 @@ export const tunables = {
   // frame so console edits take effect without a reload. Press F3
   // in-game to dump the current values to the browser console.
   lighting: {
-    hemiSky:             0x4a1575,
-    hemiGround:          0x1e1f25,
-    hemiIntensity:       0.000,
+    hemiSky:             0x6a78a0,
+    hemiGround:          0x2a2230,
+    // Ambient/fill dialled down so the key directional's shadows read.
+    // hemi 0.35 + fill 2.0 = 2.35 of directionless fill was washing out
+    // the key's contrast and flattening the scene (the code's own design
+    // comment in scene.js wants walls to fall to near-black between
+    // light sources). Now that walls cast shadows again, the key carries
+    // the depth; fill only keeps shadow sides from crushing to pure
+    // black. See the "flat look" fix 2026-06.
+    // Pass-2 lighting tune (2026-06): lifted ambient + exposure so the
+    // real CC0 PBR surface textures actually read instead of falling to
+    // near-black, and the world stops feeling uniformly dark. Key stays
+    // dominant (4.0) so the flat-look fix's contrast is preserved.
+    hemiIntensity:       0.420,
     keyColor:            0xaec4d8,
-    keyIntensity:        3.000,
+    keyIntensity:        4.000,
     fillColor:           0x191a48,
-    fillIntensity:       2.000,
+    fillIntensity:       1.600,
     rimColor:            0xf358df,
     rimIntensity:        2.000,
     fogColor:            0x22252a,
-    fogDensity:          0.0000,
+    fogDensity:          0.0170,
+    // ACES filmic tone curve exposure. Renderer toneMapping is set to
+    // ACESFilmicToneMapping at boot; this scales scene luminance into
+    // the curve. ACES darkens midtones vs the old NoToneMapping path,
+    // so exposure typically rides >1.0 to compensate for the existing
+    // light-intensity tuning. Live-tunable via F3 / console.
+    toneMappingExposure: 1.450,
     playerAuraColor:     0xffffff,
     playerAuraIntensity: 0.000,
     playerAuraDistance:  15.00,

@@ -1,6 +1,6 @@
 import * as THREE from 'three';
 import { tunables } from './tunables.js';
-import { modelForItem, gripOffsetForModelPath, rotationOverrideForModelPath, shouldMirrorInHand, scaleForModelPath } from './model_manifest.js';
+import { modelForItem, gripOffsetForModelPath, rotationOverrideForModelPath, shouldMirrorInHand, scaleForModelPath, scaleForWeapon } from './model_manifest.js';
 import { getCharacterStyle } from './prefs.js';
 import { loadModelClone, fitToRadius } from './gltf_cache.js';
 import { buildRig, initAnim, updateAnim, pokeHit, pokeRecoil, pokeDeath,
@@ -28,6 +28,7 @@ export const ANIM_TUNE = {
   visibleFactor: {
     pistol: 0.20, smg: 0.20, rifle: 0.40, shotgun: 0.45,
     sniper: 0.20, lmg: 0.35, flame: 1.50, melee: 0.90,
+    exotic: 0.30,
   },
   // Per-class grip Z offset multiplier (applied as `gripZScale * len`).
   // 0 = grip-end clones (pistol used to want this; tuner pass moved
@@ -35,26 +36,44 @@ export const ANIM_TUNE = {
   // ~0.42-0.50 keeps the back from clipping into the chest. Long
   // guns sit near 0.0-0.20 so the stock overlaps wrist + forearm.
   gripZScale: {
-    pistol: 0.00, smg: 0.22, rifle: -0.10, shotgun: -0.10,
+    // pistol: -0.30 for lowpoly_v2 pistols (2026-05-13, M1911 anchor).
+    pistol: -0.30, smg: 0.22, rifle: -0.10, shotgun: -0.10,
     sniper: 0.00, lmg: -0.10, flame: 0.24, melee: -0.10,
+    exotic: -0.10,
   },
   // Per-class size multiplier — applied as inHandModel.scale.setScalar
-  // on top of the fitToRadius initial fit. 1.0 = no change. Pistol
-  // and SMG were undersized post-fit and got bumped via the tuner
-  // pass to match the class-uniform diameter targets.
+  // on top of the fitToRadius initial fit. 1.0 = no change.
+  //
+  // Calibrated 2026-05-17 against the lowpoly_v2 pack on the GASP rig
+  // (via Playwright: equip class anchor, screenshot, compare against
+  // character silhouette). Prior values (rifle 0.4, sniper 1.0, etc.)
+  // were tuned against the old pack and rendered most rifles invisibly
+  // small or most long-arms huge after the swap.
+  // Anchors used:
+  //   pistol  M1911  (pistol_2.glb)
+  //   smg     UMP45  (subfusil_6.glb)
+  //   rifle   AK47   (fusil_5.glb)
+  //   shotgun Mossberg 500 (shotgun_2.glb)
+  //   sniper  AWP    (sniper_1.glb)
+  //   lmg     M249   (fusil_4.glb stand-in)
+  //   exotic  Flamethrower + Widowmaker (long-arm shapes win the avg)
   sizeMul: {
-    pistol: 2.4, smg: 1.5, rifle: 1.0, shotgun: 1.8,
-    sniper: 1.0, lmg: 1.0, flame: 1.25, melee: 0.85,
+    pistol: 1.0, smg: 0.8, rifle: 0.5, shotgun: 1.0,
+    sniper: 0.4, lmg: 0.5, flame: 0.3, melee: 0.85,
+    exotic: 0.4,
   },
   // Per-class GRIP X/Y offset — applied to gunMesh.position (X, Y).
   // Z is driven by gripZScale × len. Use this to nudge the visible
   // gun left/right/up/down relative to the dominant hand bone. Units
   // are world meters (post weapon-scale).
   gripOffset: {
-    pistol:  { x: -0.16, y:  0.04 }, smg:     { x: -0.15, y:  0.20 },
-    rifle:   { x: -0.13, y:  0.17 }, shotgun: { x: -0.17, y:  0.24 },
+    // pistol: tuned for lowpoly_v2 pack (2026-05-13, M1911 anchor).
+    pistol:  { x: -0.26, y:  0.02 }, smg:     { x: -0.15, y:  0.20 },
+    // rifle: tuned for lowpoly_v2 pack (2026-05-13, fusil_5 anchor).
+    rifle:   { x: -0.17, y:  0.07 }, shotgun: { x: -0.17, y:  0.24 },
     sniper:  { x: -0.11, y:  0.24 }, lmg:     { x: -0.13, y:  0.17 },
     flame:   { x:  0.00, y:  0.00 }, melee:   { x: -0.15, y:  0.02 },
+    exotic:  { x: -0.15, y:  0.10 },
   },
   // Per-class SUPPORT-HAND grip fraction along the grip→muzzle line.
   // 0 = skip support-arm IK (pistol / melee — single-handed); larger
@@ -63,6 +82,7 @@ export const ANIM_TUNE = {
   supportGrip: {
     pistol: 0.00, smg: 0.35, rifle: 1.00, shotgun: 0.50,
     sniper: 0.65, lmg: 0.45, flame: 0.50, melee:   0.00,
+    exotic: 0.45,
   },
   // Arm + body pose tunables read by _runUpperBodyIK per frame.
   // anchorOffset is a DIRECT additive shift on the gun-anchor lerp
@@ -109,6 +129,7 @@ export const ANIM_TUNE = {
     stanceYaw: {
       rifle: 0.26, shotgun: 0.26, sniper: 0.26, lmg: 0.00,
       smg: -0.63, pistol: -0.10, flame: 0.0, melee: 0.0,
+      exotic: 0.26,
     },
     // When ON, the gun-anchor inherits the dominant hand bone's
     // position + rotation DELTAS each frame — gun visibly tracks the
@@ -278,8 +299,18 @@ function _updateGunFollow(rig, state) {
 // Public hook so a future handedness flip / rig swap can clear the
 // captured reference and re-establish it on the next update tick.
 export function resetGunFollowReference(rig) {
-  if (rig) rig._gunFollowRef = null;
+  if (rig) {
+    rig._gunFollowRef = null;
+    rig._idleArmPose = null;
+  }
 }
+
+// (Removed 2026-05-17: _resolveExtraFreezeBones + _captureIdleArmPose
+// + _applyLocomotionArmFreeze. The rifle-8way run/sprint clips were
+// re-authored by the user with arms-up baked in — the mixer plays
+// them directly and the gun stays aimed. No post-mixer override
+// needed. resetGunFollowReference still clears rig._idleArmPose just
+// in case a stale snapshot lingered before the upgrade.)
 
 // Upper-body aim for the GASP rig — the locomotion clips already
 // pose the arms holding the gun forward (they're authored as
@@ -1031,7 +1062,7 @@ export function createPlayer(scene) {
         lmg: 0.75, flame: 0.7, melee: 0.7,
       };
       const cs = CLASS_SCALE[weapon.class] ?? 0.9;
-      fitToRadius(clone, len * cs * scaleForModelPath(modelUrl));
+      fitToRadius(clone, len * cs * scaleForWeapon(weapon, modelUrl));
       const r = weapon.modelRotation;
       const rotOverride = rotationOverrideForModelPath(modelUrl);
       if (rotOverride) {
@@ -1403,7 +1434,7 @@ export function createPlayer(scene) {
         // animpic and lowpoly packs were authored at different
         // baseline scales; per-FBX overrides catch outliers like
         // Makarov (too big) and P90 (too small).
-        fitToRadius(clone, len * cs * scaleForModelPath(modelUrl));
+        fitToRadius(clone, len * cs * scaleForWeapon(weapon, modelUrl));
         // Animpic weapons are authored pointing along -X in their local
         // frame, so a +90° yaw points the barrel along +Z (aim axis).
         // Per-weapon modelRotation on the tunable overrides, then a
@@ -2453,10 +2484,12 @@ export function createPlayer(scene) {
       state._rollPivotY =  HIP_H * (1 - c) - 0.22 * Math.sin(t * Math.PI);
       state._rollPivotZ = -HIP_H * s * Math.cos(yaw);
     } else {
-      group.rotation.x = THREE.MathUtils.lerp(group.rotation.x, 0, Math.min(1, dt * 14));
-      state._rollPivotX = THREE.MathUtils.lerp(state._rollPivotX || 0, 0, Math.min(1, dt * 14));
-      state._rollPivotY = THREE.MathUtils.lerp(state._rollPivotY || 0, 0, Math.min(1, dt * 14));
-      state._rollPivotZ = THREE.MathUtils.lerp(state._rollPivotZ || 0, 0, Math.min(1, dt * 14));
+      // dt-correct exponential ease — frame-rate independent recovery.
+      const rollK = 1 - Math.exp(-14 * dt);
+      group.rotation.x = THREE.MathUtils.lerp(group.rotation.x, 0, rollK);
+      state._rollPivotX = THREE.MathUtils.lerp(state._rollPivotX || 0, 0, rollK);
+      state._rollPivotY = THREE.MathUtils.lerp(state._rollPivotY || 0, 0, rollK);
+      state._rollPivotZ = THREE.MathUtils.lerp(state._rollPivotZ || 0, 0, rollK);
     }
     group.position.x += state._rollPivotX || 0;
     group.position.y += state._rollPivotY || 0;
@@ -2467,7 +2500,7 @@ export function createPlayer(scene) {
     const stanceY =
       state.mode === MODE.SLIDE ? 0.65 :
       1.0;
-    group.scale.y = THREE.MathUtils.lerp(group.scale.y, stanceY, Math.min(1, dt * 15));
+    group.scale.y = THREE.MathUtils.lerp(group.scale.y, stanceY, 1 - Math.exp(-15 * dt));
 
     // Lower the muzzle when crouched so the player can shoot under low gaps /
     // lose the line over regular low cover.
@@ -2958,6 +2991,9 @@ export function createPlayer(scene) {
             if (layeredAction) layeredAction.timeScale = layeredTimeScale;
           }
           rig.update(dt);
+          // (Run/sprint arms-up correction was previously a post-mixer
+          // bone freeze; replaced 2026-05-17 by re-authored rifle-8way
+          // run-*.glb / sprint-*.glb clips with arms baked in.)
           // Upper body IK — point the wrists at the aim target. The
           // arms came from the locomotion clip (which is a gun-pose
           // clip with arms forward); IK overwrites the arm bones to
@@ -3658,7 +3694,7 @@ export function createPlayer(scene) {
         lmg: 0.75, flame: 0.7, melee: 0.7,
       };
       const cs = CLASS_SCALE[weapon.class] ?? 0.9;
-      fitToRadius(clone, len * cs * scaleForModelPath(modelUrl));
+      fitToRadius(clone, len * cs * scaleForWeapon(weapon, modelUrl));
       const r = weapon.modelRotation;
       const rotOverride = rotationOverrideForModelPath(modelUrl);
       if (rotOverride) {

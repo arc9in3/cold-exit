@@ -306,7 +306,7 @@ export class MainMenuUI {
       debugHeader.className = 'menu-row';
       debugHeader.style.cssText = 'border-top: 1px solid rgba(155, 139, 106, 0.25); padding-top: 14px; margin-top: 8px;';
       debugHeader.innerHTML = `
-        <label style="color:#f2c060; letter-spacing: 2px;">ACCOUNT DEBUG</label>
+        <label style="color:var(--cy-amber); letter-spacing: 2px;">ACCOUNT DEBUG</label>
         <div class="menu-row-hint">Destructive — only use for testing.</div>
       `;
       this.bodyEl.appendChild(debugHeader);
@@ -326,7 +326,7 @@ export class MainMenuUI {
           try { summary = this.onGrantAllCurrencies(); }
           catch (e) { grantStatus.textContent = 'failed'; return; }
           grantStatus.textContent = summary || 'granted';
-          grantStatus.style.color = '#6abe5a';
+          grantStatus.style.color = 'var(--cy-mint)';
           setTimeout(() => { grantStatus.textContent = ''; grantStatus.style.color = ''; }, 4000);
         });
         grantRow.appendChild(grantBtn);
@@ -341,7 +341,7 @@ export class MainMenuUI {
         clearBtn.type = 'button';
         clearBtn.className = 'menu-btn';
         clearBtn.textContent = 'Clear Save Data';
-        clearBtn.style.color = '#c94a3a';
+        clearBtn.style.color = 'var(--cy-amber)';
         const clearStatus = document.createElement('span');
         clearStatus.className = 'menu-row-val';
         clearStatus.textContent = '';
@@ -355,7 +355,7 @@ export class MainMenuUI {
             armed = true;
             clearBtn.textContent = 'CONFIRM — wipe all save data?';
             clearStatus.textContent = 'click again to confirm';
-            clearStatus.style.color = '#d0a030';
+            clearStatus.style.color = 'var(--cy-amber)';
             armedTimer = setTimeout(() => {
               armed = false;
               clearBtn.textContent = 'Clear Save Data';
@@ -371,7 +371,7 @@ export class MainMenuUI {
           catch (e) { clearStatus.textContent = 'failed'; return; }
           clearBtn.textContent = 'Clear Save Data';
           clearStatus.textContent = summary || 'wiped — reload page';
-          clearStatus.style.color = '#6abe5a';
+          clearStatus.style.color = 'var(--cy-mint)';
         });
         clearRow.appendChild(clearBtn);
         clearRow.appendChild(clearStatus);
@@ -410,7 +410,7 @@ export class MainMenuUI {
     const badge = document.createElement('div');
     badge.className = 'menu-lb-source';
     badge.textContent = 'loading global scores…';
-    badge.style.cssText = 'font-size:10px;letter-spacing:1.5px;color:#9b8b6a;margin-bottom:6px;text-align:center;';
+    badge.style.cssText = 'font-size:10px;letter-spacing:1.5px;color:var(--ce-soft);margin-bottom:6px;text-align:center;';
     this.bodyEl.appendChild(badge);
     const colByKey = new Map();
     for (const c of cats) {
@@ -452,14 +452,14 @@ export class MainMenuUI {
         if (resolved === cats.length && badge.parentNode) {
           badge.textContent = anyRemote ? 'GLOBAL · live scores from cold-exit.pages.dev'
                                         : 'LOCAL · global service unavailable';
-          badge.style.color = anyRemote ? '#6abe5a' : '#a88070';
+          badge.style.color = anyRemote ? 'var(--cy-mint)' : 'var(--cy-amber)';
         }
       }).catch(() => {
         resolved += 1;
         if (resolved === cats.length && badge.parentNode) {
           badge.textContent = anyRemote ? 'GLOBAL · live scores from cold-exit.pages.dev'
                                         : 'LOCAL · global service unavailable';
-          badge.style.color = anyRemote ? '#6abe5a' : '#a88070';
+          badge.style.color = anyRemote ? 'var(--cy-mint)' : 'var(--cy-amber)';
         }
       });
     }
@@ -481,7 +481,7 @@ export class MainMenuUI {
         row.textContent = `${i + 1}. ${fmt(e)} — ${who}${tag}`;
       } else {
         row.textContent = `${i + 1}. —`;
-        row.style.color = '#6a7280';
+        row.style.color = 'var(--ce-soft-50)';
       }
       col.appendChild(row);
     }

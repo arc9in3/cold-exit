@@ -19,8 +19,7 @@
 // for `revealExit()` to flip the door + reveal the room visuals.
 
 import * as THREE from 'three';
-import { buildProp } from './props.js';
-import { sharedMaterial } from './material_pool.js';
+import { sharedMaterial, cloneForTint } from './material_pool.js';
 
 // Same constants as level.js — kept in sync. If level.js ever tweaks
 // these, this file needs to follow. They're const there too, so this
@@ -32,29 +31,6 @@ const DOOR_WIDTH = 4;
 const FULL_WALL_COLOR = 0x2a2e38;     // theme tint applied at runtime via _addObstacle
 const OUTER_WALL_COLOR = 0x1a1e24;
 const DOOR_COLOR = 0x8a3a2a;
-
-// Map level theme slot → extraction kind. The level theme has a
-// `name` (e.g. "Parking Garage") which we don't use; we sniff the
-// wall colour family instead, since that's what's actually on the
-// theme object. Industrial / dark = service-elevator + evac-van;
-// rooftop = helo-pad / chopper-lz; sewer-y dark = sewer-grate;
-// classic = evac-van.
-//
-// Falls back to evac-van if we can't classify.
-function pickExtractionKind(theme) {
-  if (!theme || typeof theme !== 'object') return 'evac-van';
-  const name = (theme.name || '').toLowerCase();
-  if (name.includes('rooftop')) return Math.random() < 0.5 ? 'helo-pad' : 'chopper-lz';
-  if (name.includes('garage'))  return Math.random() < 0.6 ? 'service-elevator' : 'evac-van';
-  if (name.includes('night'))   return 'service-elevator';
-  if (name.includes('penthouse')) return Math.random() < 0.5 ? 'helo-pad' : 'service-elevator';
-  if (name.includes('continental')) return 'evac-van';
-  // Default — never sewer-grate by default (it's a player-falls-through
-  // hazard that the rest of the game doesn't yet handle); reserved for
-  // future sewer-themed levels that opt in explicitly via theme.exitKind.
-  if (theme.exitKind) return theme.exitKind;
-  return 'evac-van';
-}
 
 // Pick a wall direction for the extraction door. Prefer the wall
 // OPPOSITE the chain entry; fall back to any wall the boss isn't
@@ -184,7 +160,7 @@ export function buildExtractionRoom(level, bossRoom, opts = {}) {
     // wall using the same color goes translucent — including walls
     // outside the chamber. Mirrors the door-material clone
     // (commit da74988) for the same reason.
-    const matObj = sharedMaterial({ color, roughness: 0.85 }).clone();
+    const matObj = cloneForTint(sharedMaterial({ color, roughness: 0.85 }));
     const mesh = new THREE.Mesh(new THREE.BoxGeometry(w, h, d), matObj);
     mesh.position.set(x, y, z);
     mesh.castShadow = false;
@@ -318,13 +294,13 @@ export function buildExtractionRoom(level, bossRoom, opts = {}) {
   // level.js): _openDoor mutates color + opacity, and a shared
   // material would leak that across every door in the level.
   const EXIT_DOOR_COLOR = 0xe8b22a;       // keycard-yellow family, slightly warmer
-  const doorMat = sharedMaterial({
+  const doorMat = cloneForTint(sharedMaterial({
     color: EXIT_DOOR_COLOR,
     roughness: 0.55,
     metalness: 0.20,
     emissive: 0x6a3d05,
     emissiveIntensity: 0.45,
-  }).clone();
+  }));
   const doorMesh = new THREE.Mesh(
     new THREE.BoxGeometry(doorW, WALL_HEIGHT, doorD),
     doorMat,
@@ -359,126 +335,101 @@ export function buildExtractionRoom(level, bossRoom, opts = {}) {
   level.obstacles.push(doorMesh);
   ownedObstacles.push(doorMesh);
 
-  // ---- Extraction prop ---------------------------------------------
-  const kind = pickExtractionKind(level.theme);
-  const extractionGroup = new THREE.Group();
-  extractionGroup.position.set(cx, 0, cz);
-  let extractionPropKind = kind;
-  // Build the prop. Each kind is a centerpiece — pinned at room centre
-  // and rotated to face the door wall (so the player walks INTO it).
-  const propBuilders = {
-    'evac-van': () => buildProp('evacVan'),
-    'helo-pad': () => buildProp('heloPad'),
-    'service-elevator': () => buildProp('serviceElevator'),
-    'sewer-grate': () => buildProp('sewerGrate'),
-    'chopper-lz': () => buildProp('chopperLz'),
-  };
-  const builder = propBuilders[kind];
-  const built = builder ? builder() : null;
-  if (built && built.group) {
-    // Face the prop's local +Z toward the door so it reads as "the way
-    // out is THIS direction." dir is the BOSS-room side the chamber
-    // attaches to; the door sits on the chamber's OPPOSITE wall (the
-    // wall facing boss). The prop's local +Z front should point at
-    // that door so the player walks INTO the prop. Earlier this map
-    // was matched to the old wrong-side wall logic and had every
-    // prop facing the FAR wall after the wall fix landed.
-    let yaw = 0;
-    if (dir === 'south') yaw = Math.PI;             // chamber south, door on N wall — face -Z
-    else if (dir === 'north') yaw = 0;              // chamber north, door on S wall — face +Z
-    else if (dir === 'east')  yaw =  Math.PI / 2;   // chamber east, door on W wall — face -X
-    else if (dir === 'west')  yaw = -Math.PI / 2;   // chamber west, door on E wall — face +X
-    built.group.rotation.y = yaw;
-    built.group.position.set(cx, 0, cz);
-    built.group.visible = false;     // hidden until reveal
-    level.scene.add(built.group);
-    level.decorations.push(built.group);
-    ownedVisuals.push(built.group);
-    // Stamp kind on the group's userData so the smoke harness can find
-    // the extraction prop.
-    built.group.userData.kind = built.kind || extractionPropKind;
-    // Block the prop's footprint so AI can't path through it. Mirror
-    // _registerProp's collision-proxy approach so wall raycasts treat
-    // the extraction prop as solid.
-    if (built.collision) {
-      const w = built.collision.w, d = built.collision.d;
-      const proxyMat = sharedMaterial({
-        type: 'basic', color: 0xffffff,
-        transparent: true, opacity: 0, depthWrite: false,
-      });
-      const proxy = new THREE.Mesh(new THREE.BoxGeometry(w, 1.6, d), proxyMat);
-      proxy.position.set(cx, 0.8, cz);
-      proxy.userData.collisionXZ = {
-        minX: cx - w / 2, maxX: cx + w / 2,
-        minZ: cz - d / 2, maxZ: cz + d / 2,
-      };
-      proxy.userData.isProp = true;
-      proxy.userData.kind = 'extraction-prop-proxy';
-      proxy.userData.propGroup = built.group;
-      proxy.visible = false;
-      level.scene.add(proxy);
-      level.obstacles.push(proxy);
-      ownedObstacles.push(proxy);
-      ownedVisuals.push(proxy);
-    }
-  }
+  // ---- Exit elevator car -------------------------------------------
+  // The extraction point is an elevator car styled to match the
+  // ENTRANCE elevator the player stepped out of at level start (see
+  // _buildElevator in level.js): a four-panel box with FULL_WALL_COLOR
+  // sides and a DOOR_COLOR doorway frame, same interior clearance. It
+  // sits snug against the chamber wall OPPOSITE the boss-exit door so
+  // its open doorway faces the player as they walk in — they extract by
+  // stepping INTO it, the mirror of stepping out at the start. Replaces
+  // the old themed centerpieces (evac-van / helo-pad / chopper-lz /
+  // sewer-grate / service-elevator) per the user call: "the exits
+  // should look like the entrance elevators." A car set against the
+  // back wall also keeps the boss-exit door's approach clear, which the
+  // old room-centre centerpiece (rotated to face the door) blocked
+  // every time — that was the "always props in front of the boss exit
+  // door" report.
+  const ELEV = 5.2;                       // interior clearance — matches _buildElevator
+  const halfE = ELEV / 2;
+  const carDoorSide = doorWallSide;       // open doorway faces the boss-exit door
+  const carBackMargin = 0.6;              // gap between car back panel and chamber wall
+  let carX = cx, carZ = cz;
+  // doorWallSide is the chamber wall holding the boss-exit door; push the
+  // car to the OPPOSITE (back) wall so the player has room to walk in.
+  if (doorWallSide === 'north')      { carX = cx; carZ = bounds.maxZ - WALL_THICK - carBackMargin - halfE; }
+  else if (doorWallSide === 'south') { carX = cx; carZ = bounds.minZ + WALL_THICK + carBackMargin + halfE; }
+  else if (doorWallSide === 'east')  { carX = bounds.minX + WALL_THICK + carBackMargin + halfE; carZ = cz; }
+  else /* west */                    { carX = bounds.maxX - WALL_THICK - carBackMargin - halfE; carZ = cz; }
 
-  // Some extraction kinds get supporting props (railings around a helo
-  // pad, crates flanking the elevator). Add those as a second pass —
-  // safe because the centerpiece is at room-centre and these go on the
-  // perimeter.
-  const supports = [];
-  if (kind === 'helo-pad' || kind === 'chopper-lz') {
-    supports.push({ kind: 'railing', count: 2 });
-    supports.push({ kind: 'crate', count: 1 });
-  } else if (kind === 'service-elevator') {
-    supports.push({ kind: 'crateRow', count: 1 });
-  } else if (kind === 'evac-van') {
-    supports.push({ kind: 'crate', count: 1 });
-    supports.push({ kind: 'barrel', count: 1 });
-  }
-  // Place each support at one of the room's free corners.
-  const corners = [
-    { x: bounds.minX + 1.2, z: bounds.minZ + 1.2 },
-    { x: bounds.maxX - 1.2, z: bounds.minZ + 1.2 },
-    { x: bounds.minX + 1.2, z: bounds.maxZ - 1.2 },
-    { x: bounds.maxX - 1.2, z: bounds.maxZ - 1.2 },
-  ].sort(() => Math.random() - 0.5);
-  let cornerIdx = 0;
-  for (const s of supports) {
-    for (let i = 0; i < (s.count || 1); i++) {
-      if (cornerIdx >= corners.length) break;
-      const c = corners[cornerIdx++];
-      const sup = buildProp(s.kind);
-      if (!sup || !sup.group) continue;
-      sup.group.position.set(c.x, 0, c.z);
-      sup.group.visible = false;
-      level.scene.add(sup.group);
-      level.decorations.push(sup.group);
-      ownedVisuals.push(sup.group);
-      sup.group.userData.kind = sup.kind || s.kind;
-      if (sup.collision) {
-        const w = sup.collision.w, d = sup.collision.d;
-        const proxyMat = sharedMaterial({
-          type: 'basic', color: 0xffffff,
-          transparent: true, opacity: 0, depthWrite: false,
-        });
-        const proxy = new THREE.Mesh(new THREE.BoxGeometry(w, 1.0, d), proxyMat);
-        proxy.position.set(c.x, 0.5, c.z);
-        proxy.userData.collisionXZ = {
-          minX: c.x - w / 2, maxX: c.x + w / 2,
-          minZ: c.z - d / 2, maxZ: c.z + d / 2,
-        };
-        proxy.userData.isProp = true;
-        proxy.userData.kind = sup.kind || s.kind;
-        proxy.userData.propGroup = sup.group;
-        proxy.visible = false;
-        level.scene.add(proxy);
-        level.obstacles.push(proxy);
-        ownedObstacles.push(proxy);
-        ownedVisuals.push(proxy);
+  // Panel builder — mirrors addWall but tags `isElevatorWall` so the
+  // door-corridor sweeps (_clearDoorCorridors / _repairDoorOverlaps)
+  // never hide a car panel, exactly like the entrance elevator's walls.
+  const addCarPanel = (px, pz, w, d, color, kind) => {
+    const matObj = cloneForTint(sharedMaterial({ color, roughness: 0.8, metalness: 0.15 }));
+    const mesh = new THREE.Mesh(new THREE.BoxGeometry(w, WALL_HEIGHT, d), matObj);
+    mesh.position.set(px, WALL_HEIGHT / 2, pz);
+    mesh.castShadow = false;
+    mesh.receiveShadow = true;
+    mesh.userData.collisionXZ = {
+      minX: px - w / 2, maxX: px + w / 2,
+      minZ: pz - d / 2, maxZ: pz + d / 2,
+    };
+    mesh.userData.kind = kind;
+    mesh.userData.isExtractionWall = true;
+    mesh.userData.isElevatorWall = true;
+    mesh.matrixAutoUpdate = false;
+    mesh.updateMatrix();
+    mesh.visible = false;                 // hidden until reveal
+    level.scene.add(mesh);
+    level.obstacles.push(mesh);
+    ownedVisuals.push(mesh);
+    ownedObstacles.push(mesh);
+    return mesh;
+  };
+  // Each side is either a solid panel or — on carDoorSide — a split
+  // doorway: two short DOOR_COLOR frame segments around a DOOR_WIDTH
+  // gap, reading as the elevator's open doors.
+  const frameLen = (ELEV - DOOR_WIDTH) / 2;   // ~0.6 each
+  const buildCarSide = (side) => {
+    const isDoor = side === carDoorSide;
+    if (side === 'north' || side === 'south') {
+      const pz = side === 'north' ? carZ - halfE : carZ + halfE;
+      if (!isDoor) { addCarPanel(carX, pz, ELEV, WALL_THICK, FULL_WALL_COLOR, 'extraction-elevator-wall'); return; }
+      if (frameLen > 0.05) {
+        addCarPanel(carX - (DOOR_WIDTH / 2 + frameLen / 2), pz, frameLen, WALL_THICK, DOOR_COLOR, 'extraction-elevator-door');
+        addCarPanel(carX + (DOOR_WIDTH / 2 + frameLen / 2), pz, frameLen, WALL_THICK, DOOR_COLOR, 'extraction-elevator-door');
+      }
+    } else {
+      const px = side === 'west' ? carX - halfE : carX + halfE;
+      if (!isDoor) { addCarPanel(px, carZ, WALL_THICK, ELEV, FULL_WALL_COLOR, 'extraction-elevator-wall'); return; }
+      if (frameLen > 0.05) {
+        addCarPanel(px, carZ - (DOOR_WIDTH / 2 + frameLen / 2), WALL_THICK, frameLen, DOOR_COLOR, 'extraction-elevator-door');
+        addCarPanel(px, carZ + (DOOR_WIDTH / 2 + frameLen / 2), WALL_THICK, frameLen, DOOR_COLOR, 'extraction-elevator-door');
       }
     }
+  };
+  buildCarSide('north'); buildCarSide('south'); buildCarSide('east'); buildCarSide('west');
+
+  // Elevator floor pad — bright EXIT-green accent inside the car so the
+  // extraction point reads at a glance against any biome.
+  {
+    const padMat = sharedMaterial({
+      color: level.theme?.floor ?? 0x2a2a2e,
+      emissive: 0x00ff88, emissiveIntensity: 0.35,
+      roughness: 0.7, metalness: 0.1,
+    });
+    const pad = new THREE.Mesh(new THREE.PlaneGeometry(ELEV - 0.4, ELEV - 0.4), padMat);
+    pad.rotation.x = -Math.PI / 2;
+    pad.position.set(carX, 0.02, carZ);     // above the chamber floor patch
+    pad.receiveShadow = true;
+    pad.userData.kind = 'extraction-elevator-floor';
+    pad.matrixAutoUpdate = false;
+    pad.updateMatrix();
+    pad.visible = false;
+    level.scene.add(pad);
+    level.decorations.push(pad);
+    ownedVisuals.push(pad);
   }
 
   // ---- Ceiling lamp -------------------------------------------------
@@ -516,11 +467,13 @@ export function buildExtractionRoom(level, bossRoom, opts = {}) {
     _exitDir: dir,
   };
 
-  // Exit bounds — slightly inset from the room walls so the trigger
-  // fires when the player's IN the room, not when they're touching the
-  // door from the wrong side. Using a circle (cx, cz, r) so the
-  // existing isPlayerInExit() distance check works without changes.
-  const exitBounds = { cx, cz, r: half - 1.2 };
+  // Exit bounds — centred on the elevator CAR (not the chamber), so the
+  // extraction fires when the player steps INTO the elevator, mirroring
+  // how they stepped OUT of the entrance elevator at the start. Radius
+  // covers the car interior with a little slack. Using a circle
+  // (cx, cz, r) so the existing isPlayerInExit() distance check works
+  // without changes.
+  const exitBounds = { cx: carX, cz: carZ, r: halfE + 0.4 };
 
   // Ceiling lamp — see comment above the synthetic room object. Built
   // here (after `room` exists) so _addCeilingLamp has cx/cz to work

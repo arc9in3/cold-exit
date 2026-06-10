@@ -1,6 +1,7 @@
 import * as THREE from 'three';
 import { tunables } from './tunables.js';
-import { buildRig, initAnim, updateAnim, pokeHit, pokeDeath } from './actor_rig.js';
+import { BALANCE } from './balance.js';
+import { buildRig, initAnim, updateAnim, pokeHit, pokeDeath, addGearOverlay } from './actor_rig.js';
 import { _nextNetId } from './gunman.js';
 import { spawnSpeechBubble } from './hud.js';
 import { aiSpatial } from './ai_spatial.js';
@@ -129,25 +130,39 @@ export class MeleeEnemyManager {
     const scale = Math.min(MAX_MELEE_SCALE,
       tierScale * (shieldProfile ? shieldProfile.scale : 1));
 
-    const bodyHex = tier === 'boss' ? 0x5a1a1a : (tier === 'subBoss' ? 0x3a1e58 : this._baseBody.getHex());
-    const headHex = tier === 'boss' ? 0x3a0f10 : (tier === 'subBoss' ? 0x22103e : this._baseHead.getHex());
+    // Shield-bearers read as a heavier steel bulwark; standard rushers
+    // keep the feral olive flesh tone. Tier overrides body+head with the
+    // authoritative boss-red / subBoss-violet palette shared with gunmen.
+    const isShield = variant === 'shieldBearer';
+    const bodyHex = tier === 'boss' ? 0x5a1a1a
+                  : tier === 'subBoss' ? 0x3a1e58
+                  : (isShield ? 0x33363c : this._baseBody.getHex());
+    const headHex = tier === 'boss' ? 0x3a0f10
+                  : tier === 'subBoss' ? 0x22103e
+                  : (isShield ? 0x1a1c20 : this._baseHead.getHex());
     const gearHex = tier === 'boss' ? 0x7a3020
                   : tier === 'subBoss' ? 0x5a1f28
-                  : (variant === 'shieldBearer' ? 0x606060 : 0x26221c);
+                  : (isShield ? 0x808a94 : 0x26221c);
+    // Legs darken from the body so shield bulwarks vs feral rushers
+    // differ from the knees down too. >>1 halves each channel.
+    const legHex = isShield ? 0x191a1d
+                 : (tier === 'boss' ? 0x2a0c0c
+                   : tier === 'subBoss' ? 0x1c0e2c : 0x1a2212);
 
     // Jointed rig — shared with gunmen + player. Melee rushers are a
     // touch stouter than gunmen so bodyColor/legColor push darker and
     // headColor picks up the tier tint.
-    const rig = buildRig({
+    const rigOpts = {
       scale: 0.77,          // matches player baseline (~1.85m)
       bodyColor: bodyHex,
       headColor: headHex,
-      legColor: 0x1a2212,
+      legColor: legHex,
       armColor: 0x141012,
       handColor: 0x2a1612,
       gearColor: gearHex,
       bootColor: 0x0a0a08,
-    });
+    };
+    const rig = buildRig(rigOpts);
     initAnim(rig);
     const group = rig.group;
     group.position.set(x, 0, z);
@@ -191,46 +206,21 @@ export class MeleeEnemyManager {
     // Off-arm is just the rig's left arm meshes — already built in.
     const offArm = rig.leftArm.shoulder.mesh;
 
-    // Visible gear cues — helmet / chest plate parented to the rig's
-    // head + chest so they track animation pose.
+    // Tactical kit overlay — helmet/visor, plate carrier, bandolier,
+    // pauldrons, hip pouches, gated by tier/variant/gearLevel. Same
+    // shared builder as gunmen (actor_rig.addGearOverlay). shieldBearer
+    // counts as a heavy variant inside the builder, so it forces the
+    // pauldron + plate-carrier read to match its bulwark silhouette.
+    // Overlay meshes parent to rig bones under group; no actor pool
+    // exists (buildRig runs fresh per spawn) so removeAll()'s
+    // group.traverse disposal cleans them up on level regen.
     const gearLevel = opts.gearLevel ?? 0;
-    // Helmet + chest plate cues sized for the slimmer cylindrical
-    // rig (half-sphere helmet, narrower plate).
-    if (tier === 'boss' || Math.random() < 0.30 + gearLevel * 0.08) {
-      const helmet = new THREE.Mesh(
-        new THREE.SphereGeometry(0.18, 14, 8, 0, Math.PI * 2, 0, Math.PI * 0.55),
-        new THREE.MeshStandardMaterial({
-          color: tier === 'boss' ? 0x6a1a1a : 0x3f4028,
-          roughness: 0.6, metalness: 0.3,
-        }),
-      );
-      helmet.position.y = 0.18;
-      helmet.castShadow = true;
-      rig.head.add(helmet);
-    }
-    if (tier === 'boss' || variant === 'shieldBearer' || Math.random() < 0.25 + gearLevel * 0.08) {
-      // Curved heavy plate matching the rig's tapered chest. Arc
-      // covers the front ~150°, stands proud of the built-in plate.
-      const plate = new THREE.Mesh(
-        new THREE.CylinderGeometry(
-          0.34, 0.30,
-          0.42,
-          14, 1,
-          true,
-          -Math.PI / 2.4,
-          Math.PI / 1.2,
-        ),
-        new THREE.MeshStandardMaterial({
-          color: tier === 'boss' ? 0x7a2222 : 0x3f4028,
-          roughness: 0.65, metalness: 0.3,
-          side: THREE.DoubleSide,
-        }),
-      );
-      plate.position.set(0, 0.24, 0);
-      plate.scale.z = 0.72;
-      plate.castShadow = true;
-      rig.chest.add(plate);
-    }
+    addGearOverlay(rig, {
+      tier,
+      variant,
+      gearLevel,
+      gearColor: gearHex,
+    });
 
     const alertMat = new THREE.MeshBasicMaterial({
       color: 0xffa030, transparent: true, opacity: 0, depthTest: false,
@@ -267,8 +257,11 @@ export class MeleeEnemyManager {
       variant,
       roomId,
       damageMult,
-      hp: tunables.meleeEnemy.maxHealth * hpMult,
-      maxHp: tunables.meleeEnemy.maxHealth * hpMult,
+      // Horde-lite HP trim (see balance.js), normal tier only — sub-boss
+      // melee counts don't scale with density, and true bosses override
+      // hp explicitly further below.
+      hp: tunables.meleeEnemy.maxHealth * hpMult * (tier === 'normal' ? (BALANCE.horde?.hpMult || 1) : 1),
+      maxHp: tunables.meleeEnemy.maxHealth * hpMult * (tier === 'normal' ? (BALANCE.horde?.hpMult || 1) : 1),
       alive: true,
       state: STATE.IDLE,
       swingT: 0,
@@ -402,13 +395,13 @@ export class MeleeEnemyManager {
       } catch (_) { /* materials may be shared via the rig pool */ }
     }
 
-    // SHINIGAMI override — 8000 HP baseline plus a per-floor ramp
+    // SHINIGAMI override — 12000 HP baseline plus a per-floor ramp
     // (15% per level past 8). Slightly larger silhouette so the
     // megaboss reads as a distinct named encounter at a glance,
     // not just "another cloaked assassin major boss".
     if (opts.archetype === 'shinigami') {
       const lvIdx = Math.max(8, opts.gearLevel | 0);
-      e.hp = 8000 * (1 + 0.15 * (lvIdx - 8));
+      e.hp = 12000 * (1 + 0.15 * (lvIdx - 8));
       e.maxHp = e.hp;
       // Bump silhouette ~12% above the boss-tier base scale.
       group.scale.set(scale * 1.12, scale * 1.12, scale * 1.12);
@@ -804,7 +797,7 @@ export class MeleeEnemyManager {
         const dp = e.deathPhys;
         if (dp && !dp.settled) {
           dp.vy -= 18 * dt;
-          const drag = 1 - Math.min(1, 3.5 * dt);
+          const drag = Math.exp(-3.5 * dt);   // frame-rate-independent decay
           dp.vx *= drag; dp.vz *= drag;
           const nx = e.group.position.x + dp.vx * dt;
           const nz = e.group.position.z + dp.vz * dt;
@@ -844,8 +837,10 @@ export class MeleeEnemyManager {
 
       if (!tunables.ai.active) {
         e.state = STATE.IDLE;
-        e.alertMat.opacity = THREE.MathUtils.lerp(e.alertMat.opacity, 0, Math.min(1, dt * 10));
-        e.telMat.opacity = THREE.MathUtils.lerp(e.telMat.opacity, 0, Math.min(1, dt * 10));
+        // dt-correct exponential ease (frame-rate independent) — the old
+        // `Math.min(1, dt * k)` alpha converged 4× slower at 120Hz than 30Hz.
+        e.alertMat.opacity = THREE.MathUtils.lerp(e.alertMat.opacity, 0, 1 - Math.exp(-10 * dt));
+        e.telMat.opacity = THREE.MathUtils.lerp(e.telMat.opacity, 0, 1 - Math.exp(-10 * dt));
         if (e.rig && !e._animSkip) updateAnim(e.rig, { speed: 0, meleeStance: true }, dt);
         continue;
       }
@@ -856,7 +851,7 @@ export class MeleeEnemyManager {
       // feel properly cancelled.
       if ((e.staggerT || 0) > 0) {
         e.staggerT = Math.max(0, e.staggerT - dt);
-        e.telMat.opacity = THREE.MathUtils.lerp(e.telMat.opacity, 0, Math.min(1, dt * 12));
+        e.telMat.opacity = THREE.MathUtils.lerp(e.telMat.opacity, 0, 1 - Math.exp(-12 * dt));
         if (e.rig && !e._animSkip) updateAnim(e.rig, { speed: 0, meleeStance: true }, dt);
         continue;
       }
@@ -864,7 +859,7 @@ export class MeleeEnemyManager {
       // Stun grenade lockdown — fully frozen for the stunT window.
       if ((e.stunT || 0) > 0) {
         e.stunT = Math.max(0, e.stunT - dt);
-        e.telMat.opacity = THREE.MathUtils.lerp(e.telMat.opacity, 0, Math.min(1, dt * 12));
+        e.telMat.opacity = THREE.MathUtils.lerp(e.telMat.opacity, 0, 1 - Math.exp(-12 * dt));
         if (e.rig && !e._animSkip) updateAnim(e.rig, { speed: 0, meleeStance: false }, dt);
         continue;
       }
@@ -997,7 +992,7 @@ export class MeleeEnemyManager {
       if (e.deepSleepT <= 0) e.deepSleepT = 0;
       // Drop the alert ring so it visually reads as un-aggroed.
       if (e.alertMat) {
-        e.alertMat.opacity = THREE.MathUtils.lerp(e.alertMat.opacity, 0, Math.min(1, dt * 10));
+        e.alertMat.opacity = THREE.MathUtils.lerp(e.alertMat.opacity, 0, 1 - Math.exp(-10 * dt));
       }
       if (e.rig && !e._animSkip) updateAnim(e.rig, { speed: 0, meleeStance: true }, dt);
       return;
@@ -1276,7 +1271,7 @@ export class MeleeEnemyManager {
     }
 
     const targetAlpha = e.state === STATE.IDLE ? 0 : (e.state === STATE.WINDUP ? 1 : 0.6);
-    e.alertMat.opacity = THREE.MathUtils.lerp(e.alertMat.opacity, targetAlpha, Math.min(1, dt * 10));
+    e.alertMat.opacity = THREE.MathUtils.lerp(e.alertMat.opacity, targetAlpha, 1 - Math.exp(-10 * dt));
 
     // Face the player when engaged. Smoothly lerp toward the target
     // yaw instead of snapping — looks far more grounded and lets
@@ -1477,9 +1472,19 @@ export class MeleeEnemyManager {
       const actualLen = Math.hypot(res.x - beforeX, res.z - beforeZ);
       if (wantedLen > 0.01 && actualLen < wantedLen * 0.3 && e.stuckT <= 0) {
         e.stuckT = 1.1;
-        // Flip sides on each stuck-cycle so a melee that bounces off a
-        // wall on one perpendicular tries the other axis next.
-        e.stuckSide = (e.stuckSide || 1) * -1;
+        // Probe both perpendiculars and deflect toward open space instead
+        // of blindly alternating — the old flip sent melees ping-ponging
+        // against the same doorjamb. Deflection uses dir (-dir2d.z,
+        // dir2d.x) * side, so side +1 maps to the (-dz, dx) probe.
+        let side = (e.stuckSide || 1) * -1;
+        if (ctx.level && typeof ctx.level._collidesAt === 'function') {
+          const pr = tunables.meleeEnemy.collisionRadius;
+          const dx = dir2d.x, dz = dir2d.z, probe = 1.0;
+          const leftBlocked  = ctx.level._collidesAt(beforeX + (-dz) * probe, beforeZ + (dx) * probe, pr);
+          const rightBlocked = ctx.level._collidesAt(beforeX + (dz) * probe, beforeZ + (-dx) * probe, pr);
+          if (leftBlocked !== rightBlocked) side = leftBlocked ? -1 : 1;
+        }
+        e.stuckSide = side;
       }
 
       // Skip windup while disengaging — the assassin is in escape
@@ -1503,7 +1508,7 @@ export class MeleeEnemyManager {
     } else if (e.state === STATE.WINDUP) {
       e.swingT -= dt;
       e.telMat.opacity = THREE.MathUtils.lerp(
-        e.telMat.opacity, 0.2 + 0.6 * (1 - e.swingT / tunables.meleeEnemy.swingWindup), Math.min(1, dt * 14),
+        e.telMat.opacity, 0.2 + 0.6 * (1 - e.swingT / tunables.meleeEnemy.swingWindup), 1 - Math.exp(-14 * dt),
       );
       if (e.swingT <= 0) {
         // Strike lands. Player iFrames negate the hit.

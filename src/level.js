@@ -1,5 +1,6 @@
 import * as THREE from 'three';
 import { tunables } from './tunables.js';
+import { BALANCE } from './balance.js';
 import { buildProp, getLevelTheme, INWARD_FACING_KINDS, DESTRUCTIBLE_HP } from './props.js';
 import { buildRig, initAnim, updateAnim } from './actor_rig.js';
 import { makeContainer, pickContainerType, pickContainerSize, buildContainerMesh } from './containers.js';
@@ -12,7 +13,7 @@ import { buildWindow } from './windows.js';
 import { buildSkybridge } from './skybridges.js';
 import { addLedge } from './ledges.js';
 import { initWallInstancer, wallInstancer } from './wall_instancer.js';
-import { sharedMaterial, disposeIfNotShared, disposeMaterialIfNotShared } from './material_pool.js';
+import { sharedMaterial, disposeIfNotShared, disposeMaterialIfNotShared, cloneForTint } from './material_pool.js';
 
 // Shopkeeper palette per kind — body / head / pants / gear tint so
 // each shop's NPC reads as a distinct role in the world. Exported so
@@ -43,6 +44,15 @@ export const KEEPER_PALETTE = {
 let FULL_WALL_COLOR = 0x2a2e38;
 let LOW_COVER_COLOR = 0x3a3a34;
 let OUTER_WALL_COLOR = 0x1a1e24;
+// Theme accent — wired into cosmetic architectural trim (perimeter
+// accent bands, pilaster strips, room-corner pillars). Re-tinted per
+// floor in generate() from theme.accent so each biome reads distinct.
+// Defaults to a muted brass that suits the pre-theme dark palette.
+let ACCENT_COLOR = 0xc9a464;
+// Slightly lifted accent for raised highlight edges (top lip of bands /
+// pilaster caps). Brightening the accent keeps the neon-noir read —
+// the band glints under the key light without a second pool color.
+let ACCENT_HI_COLOR = 0xddb878;
 const DOOR_COLOR = 0x8a3a2a;
 const DOOR_OPEN_COLOR = 0x3a5a3a;
 const EXIT_COLOR = 0x00ff88;
@@ -56,6 +66,17 @@ function _darkenHex(hex, k) {
   const b = hex & 0xff;
   const m = 1 - k;
   return ((Math.round(r * m)) << 16) | ((Math.round(g * m)) << 8) | (Math.round(b * m));
+}
+
+// Lighten a hex colour by `k` (0..1) toward white. Used for accent-
+// trim highlight edges (the lit top lip of a perimeter band reads
+// brighter than the band body).
+function _lightenHex(hex, k) {
+  const r = (hex >> 16) & 0xff;
+  const g = (hex >> 8) & 0xff;
+  const b = hex & 0xff;
+  const lift = (c) => Math.round(c + (255 - c) * k);
+  return (lift(r) << 16) | (lift(g) << 8) | lift(b);
 }
 
 const ROOM_W = 18;
@@ -349,6 +370,13 @@ export class Level {
       FULL_WALL_COLOR  = this.theme.wall;
       OUTER_WALL_COLOR = _darkenHex(this.theme.wall, 0.55);
       LOW_COVER_COLOR  = _darkenHex(this.theme.wall, 0.30);
+      // Wire theme.accent into the architectural trim. The band body
+      // sits a touch darker than the raw accent so it doesn't blow out
+      // against the dark walls; the highlight lip lifts toward white.
+      if (this.theme.accent != null) {
+        ACCENT_COLOR    = _darkenHex(this.theme.accent, 0.20);
+        ACCENT_HI_COLOR = _lightenHex(this.theme.accent, 0.25);
+      }
       if (this.ground && this.ground.material && this.ground.material.color) {
         // Hold the ground at near-black regardless of biome — the
         // void underneath the level. Per-room patches paint the
@@ -898,13 +926,11 @@ export class Level {
     // doors themselves are excluded.
     this._clearDoorCorridors();
 
-    // Perimeter-seal pass — walk every room's 4 outer edges with a
-    // sample step and verify there's a wall/door obstacle at each
-    // sample. Missed segments get plugged with a short outer-wall
-    // block. Catches the "gap that leads outside" case that could
-    // otherwise happen when a giant-room extension, perimeter-gap
-    // and interior-layout combination leaves an uncovered span.
-    this._sealRoomPerimeters();
+    // NOTE: the perimeter-seal pass moved to run LAST (after the second
+    // corridor clear, the door-overlap repair, AND the extraction build)
+    // so its void-facing plugs can never be re-nulled by a later sweep.
+    // See the _sealRoomPerimeters() call lower down, just before
+    // _buildOuterPerimeter().
 
     // Second corridor clear — the seal pass *should* honor door
     // keepouts, but if any pass after the first _clearDoorCorridors
@@ -972,6 +998,14 @@ export class Level {
       // throws, log and fall back to the legacy ring marker.
       console.warn('[level] extraction-room build failed; falling back to legacy ring:', err);
     }
+
+    // Perimeter-seal pass (R1). Runs HERE — after every door clear,
+    // overlap repair, and the extraction build — so its void-facing
+    // plugs are the final word on the map boundary and nothing nulls
+    // them afterward. Seals any edge that faces the void (incl. gaps
+    // left by a misaligned neighbour or a perimeter wall an earlier
+    // door-clear over-cleared). See _sealRoomPerimeters().
+    this._sealRoomPerimeters();
 
     // Outer bounding wall — a ring of tall outer-colour walls just
     // past the aggregate room bounds so the player can't escape to
@@ -1138,8 +1172,13 @@ export class Level {
   // verified walkable centroid on it via `_encounterSpawn` for the
   // encounter visuals to anchor to.
   _pickAndMarkEncounterRoom() {
+    // Exclude 'vault' shapes — _clearEncounterRoom strips all interior
+    // geometry, which would gut the vault's strongroom (and its inner
+    // walls) into an empty shell with a stray guaranteed-loot flag. The
+    // vault's enclosed-loot-room IS that room's gameplay, so it must not
+    // be repurposed as an encounter arena.
     const eligible = this.rooms.filter(r =>
-      r.type === 'combat' && !r.giant && r.bounds);
+      r.type === 'combat' && !r.giant && r.bounds && r.shape !== 'vault');
     if (!eligible.length) return;
     // Encounter spawn chance — base 80% per level (raised from 30%
     // because the pool is large and levels run longer than original
@@ -1330,8 +1369,23 @@ export class Level {
     const minX = b.minX + insetX, maxX = b.maxX - insetX;
     const minZ = b.minZ + insetZ, maxZ = b.maxZ - insetZ;
     const inBounds = (x, z) => x >= minX && x <= maxX && z >= minZ && z <= maxZ;
+    // Shape rooms (lShape, gallery, tJunction…) carve cut-outs out of
+    // the bounds AABB; the AABB centre can land inside a cut-out where
+    // _collidesAt passes (no wall nearby) but the player can never
+    // reach. Same gate _populateRoom uses for enemy spawns.
+    // REGRESSION: encounter disc anchored in a shape room's void.
+    const wbList = room._walkableBounds;
+    const inWalkable = (x, z) => {
+      if (!wbList || !wbList.length) return true;
+      for (let i = 0; i < wbList.length; i++) {
+        const w = wbList[i];
+        if (x >= w.minX && x <= w.maxX && z >= w.minZ && z <= w.maxZ) return true;
+      }
+      return false;
+    };
     const CLEAR = 2.0;
-    if (inBounds(baseX, baseZ) && !this._collidesAt(baseX, baseZ, CLEAR)) {
+    if (inBounds(baseX, baseZ) && inWalkable(baseX, baseZ)
+        && !this._collidesAt(baseX, baseZ, CLEAR)) {
       return { x: baseX, z: baseZ };
     }
     // Spiral outward in 1m steps + 8 angular samples. ~6m radius is
@@ -1342,6 +1396,7 @@ export class Level {
         const x = baseX + Math.cos(ang) * r;
         const z = baseZ + Math.sin(ang) * r;
         if (!inBounds(x, z)) continue;
+        if (!inWalkable(x, z)) continue;
         if (this._collidesAt(x, z, CLEAR)) continue;
         return { x, z };
       }
@@ -1577,6 +1632,11 @@ export class Level {
   // means a shape built mid-generate uses the same tint as the rect
   // walls placed in the same pass.
   _outerWallColor() { return OUTER_WALL_COLOR; }
+
+  // Live theme-accent readers for shape templates (level_shapes.js) so
+  // their cosmetic corner detailing matches the per-floor accent tint.
+  _accentColor() { return ACCENT_COLOR; }
+  _accentHiColor() { return ACCENT_HI_COLOR; }
 
   // Return the list of doorway centers (in world coords) that are
   // NOT covered by at least one walkableBounds box. Used to verify a
@@ -2024,7 +2084,7 @@ export class Level {
     // red" playtest report. Cost is negligible: ~10 doors per level,
     // each material is a small MeshStandardMaterial instance.
     if (mesh.material && typeof mesh.material.clone === 'function') {
-      mesh.material = mesh.material.clone();
+      mesh.material = cloneForTint(mesh.material);
     }
     mesh.userData.isDoor = true;
     mesh.userData.connects = [a.id, b.id];
@@ -2193,10 +2253,63 @@ export class Level {
   // boss rooms occasionally roll a second. No tier gets a bonus
   // masterwork — masterwork lives at ~0.3% in pickContainerType()
   // so it stays exceptional regardless of where the spawn lands.
+  // Shared door-corridor test (R2/R3). True if (x,z) lies in any door's
+  // keep-clear band — DOOR_WIDTH/2+1 across the mouth, 3.5m into the
+  // room — matching _clearDoorCorridors / _themeRoom's _doorBands. Every
+  // placer that drops collidable clutter (containers, cover, columns)
+  // calls this so nothing lands on a doorway approach. `pad` widens the
+  // band by the object's own half-extent so its FOOTPRINT (not just its
+  // centre) stays out of the corridor.
+  _inDoorBand(x, z, pad = 0) {
+    const halfBand = DOOR_WIDTH / 2 + 1.0 + pad;
+    const depth = 3.5 + pad;
+    for (const o of this.obstacles) {
+      if (!o.userData.isDoor) continue;
+      const dx = o.userData.cx, dz = o.userData.cz;
+      if (dx == null) continue;
+      const g = o.geometry?.parameters;
+      const horiz = (g?.width || 0) > (g?.depth || 0);
+      if (horiz) {
+        if (Math.abs(x - dx) <= halfBand && Math.abs(z - dz) <= depth) return true;
+      } else {
+        if (Math.abs(x - dx) <= depth && Math.abs(z - dz) <= halfBand) return true;
+      }
+    }
+    return false;
+  }
+
   _scatterContainers(room) {
     const b = room.bounds;
     const area = (b.maxX - b.minX) * (b.maxZ - b.minZ);
     const wbList = room._walkableBounds;
+    // Vault shape requests one guaranteed crate at its centre (risk/reward
+    // strongroom loot). Force-spawn it before the normal scatter, bypassing
+    // the per-room spawn-chance gate. See the `vault` shape in level_shapes.
+    if (room._forceContainerAt) {
+      const { x, z } = room._forceContainerAt;
+      try {
+        const container = makeContainer(pickContainerType(), 'm', this.index, { forceFull: true, rarityBias: 1.25 });
+        const group = buildContainerMesh(container, x, 0, z);
+        this.scene.add(group);
+        const { w, h, d } = container.geo;
+        const proxy = new THREE.Mesh(
+          new THREE.BoxGeometry(w, h, d),
+          sharedMaterial({ type: 'basic', color: 0xffffff, transparent: true, opacity: 0, depthWrite: false }),
+        );
+        proxy.position.set(x, h / 2, z);
+        proxy.userData.collisionXZ = { minX: x - w / 2, maxX: x + w / 2, minZ: z - d / 2, maxZ: z + d / 2 };
+        proxy.userData.isProp = true;
+        proxy.userData.containerRef = container;
+        proxy.userData.propGroup = group;
+        this.scene.add(proxy);
+        this.obstacles.push(proxy);
+        // Refresh the solid-grid cache so the normal scatter below (and
+        // later placement passes) see the vault crate in _collidesAt —
+        // without this a scattered container could overlap it.
+        this._dirtySolid();
+        this.containers.push({ container, group, x, z, r: 1.8 });
+      } catch (err) { console.warn('[level] vault container spawn failed:', err); }
+    }
     const outsideWalkable = (x, z) => {
       if (!wbList || !wbList.length) return false;
       for (const wb of wbList) {
@@ -2244,6 +2357,11 @@ export class Level {
         const z = b.minZ + inset + Math.random() * usableD;
         if (outsideWalkable(x, z)) continue;
         if (this._collidesAt(x, z, 1.6)) continue;
+        // Keep crates/chests out of every door corridor — they used to
+        // skip this entirely and land in a doorway approach (the "props
+        // in front of the exit" report). Pad by the container half-width
+        // so its footprint, not just its centre, clears the band.
+        if (this._inDoorBand(x, z, Math.max(cw, cd) / 2)) continue;
         // Honor keep-outs (boss exit, encounter spawn) so the chest
         // doesn't materialise where the exit ring will appear.
         let blocked = false;
@@ -2270,8 +2388,21 @@ export class Level {
         };
         proxy.userData.isProp = true;
         proxy.userData.containerRef = container;
+        // Link the proxy to its VISIBLE mesh so _clearDoorCorridors hides
+        // the crate (not just nulls its collision) when it lands in a
+        // door corridor. Without this, a container in the boss-exit door
+        // band had its collision cleared but the mesh stayed rendered in
+        // the doorway — the boss-exit "props in front of the door" bug.
+        // (The extraction door is built AFTER containers, so the band
+        // check above can't see it; the post-build _clearDoorCorridors
+        // is the catch, and it needs this linkage to actually hide it.)
+        proxy.userData.propGroup = group;
         this.scene.add(proxy);
         this.obstacles.push(proxy);
+        // Mark the solid grid dirty so the NEXT container's _collidesAt
+        // sees this one. Treasure rooms place 4-6 chests in a loop; with
+        // a stale grid they couldn't see each other and could overlap.
+        this._dirtySolid();
         // Interact radius — a generous 1.8m so the prompt doesn't feel
         // pixel-hunty against the visible mesh.
         this.containers.push({ container, group, x, z, r: 1.8 });
@@ -2541,7 +2672,13 @@ export class Level {
     const _doorBands = [];
     {
       const halfBand = DOOR_WIDTH / 2 + 1.0;
-      const inwardDepth = 2.5;   // band reach into both rooms
+      // Match _clearDoorCorridors' 3.5m reach (was 2.5m). The shorter
+      // band let props land in the 2.5-3.5m ring, pass placement, then
+      // get retroactively hidden by the corridor clear — a disappearing-
+      // prop artifact that also failed open if any later phase skipped
+      // the clear pass. Rejecting placement up front is prevention, not
+      // cure: nothing ever sits in the door approach.
+      const inwardDepth = 3.5;   // band reach into both rooms
       for (const o of this.obstacles) {
         if (!o.userData?.isDoor) continue;
         const dx = o.userData.cx, dz = o.userData.cz;
@@ -2557,6 +2694,50 @@ export class Level {
             minX: dx - inwardDepth, maxX: dx + inwardDepth,
             minZ: dz - halfBand, maxZ: dz + halfBand,
           });
+        }
+      }
+    }
+    // Through-path lanes — keep the straight line between every pair of
+    // doors in a room clear of collision/footprint props so the player
+    // and AI can always walk door-to-door. The door bands above only
+    // protect each door's immediate mouth; a chunky prop dropped in the
+    // middle of a room could still wall off the lane connecting two
+    // doorways (the "pathways blocked by props" report). Approximated as
+    // a tube of small AABB keepouts sampled along each segment so the
+    // existing axis-aligned overlap test in _propFootprintFree catches
+    // them. Gen-time only; a handful of extra bands per room.
+    {
+      const LANE_HALF = 1.4;   // half-width of the guaranteed walk lane
+      const STEP = 1.5;        // sample spacing along the door-to-door line
+      const byRoom = new Map();
+      for (const o of this.obstacles) {
+        if (!o.userData?.isDoor) continue;
+        const conn = o.userData.connects;
+        if (!conn) continue;
+        for (const rid of conn) {
+          let list = byRoom.get(rid);
+          if (!list) { list = []; byRoom.set(rid, list); }
+          list.push(o);
+        }
+      }
+      for (const list of byRoom.values()) {
+        for (let i = 0; i < list.length; i++) {
+          for (let j = i + 1; j < list.length; j++) {
+            const ax = list[i].userData.cx, az = list[i].userData.cz;
+            const bx = list[j].userData.cx, bz = list[j].userData.cz;
+            const dx = bx - ax, dz = bz - az;
+            const len = Math.hypot(dx, dz);
+            if (len < 0.001) continue;
+            const steps = Math.max(1, Math.round(len / STEP));
+            for (let k = 0; k <= steps; k++) {
+              const t = k / steps;
+              const px = ax + dx * t, pz = az + dz * t;
+              _doorBands.push({
+                minX: px - LANE_HALF, maxX: px + LANE_HALF,
+                minZ: pz - LANE_HALF, maxZ: pz + LANE_HALF,
+              });
+            }
+          }
         }
       }
     }
@@ -2662,6 +2843,33 @@ export class Level {
       return true;
     };
 
+    // Reject a wall-hugging candidate whose footprint punches THROUGH a
+    // wall (perimeter OR an inset shape interior wall) past a flush
+    // margin. The along/back-to-wall placers position relative to the
+    // rect bounds and _wallPropOverlap deliberately ignores walls (to
+    // allow flush contact), so in a shape room a bed/couch/pillar could
+    // bury 0.6–1.2m into a shape-wall — the "walls sometimes have props
+    // in them" report. Flush contact (penetration <= ALLOW) stays legal.
+    const WALL_EMBED_ALLOW = 0.4;
+    const _embedsWall = (px, pz, pw, pd, pyaw) => {
+      const yawAbs = Math.abs(pyaw || 0) % Math.PI;
+      let aw = pw, ad = pd;
+      const axisAligned = yawAbs < 0.05 || Math.abs(yawAbs - Math.PI / 2) < 0.05;
+      if (!axisAligned) { const m = Math.max(aw, ad); aw = m; ad = m; }
+      else if (Math.abs(yawAbs - Math.PI / 2) < 0.05) { const t = aw; aw = ad; ad = t; }
+      const minX = px - aw / 2, maxX = px + aw / 2, minZ = pz - ad / 2, maxZ = pz + ad / 2;
+      for (const o of this.obstacles) {
+        const ud = o.userData;
+        if (!ud || !ud.collisionXZ) continue;
+        if (ud.isProp || ud.isDoor || ud.containerRef) continue;   // only solid walls/cover
+        const ob = ud.collisionXZ;
+        const ox = Math.min(maxX, ob.maxX) - Math.max(minX, ob.minX);
+        const oz = Math.min(maxZ, ob.maxZ) - Math.max(minZ, ob.minZ);
+        if (ox > 0 && oz > 0 && Math.min(ox, oz) > WALL_EMBED_ALLOW) return true;
+      }
+      return false;
+    };
+
     const placeAlongWall = (prop, opts = {}) => {
       const yaw = opts.yaw;       // if provided, override rotation
       const col = prop.collision;
@@ -2692,6 +2900,7 @@ export class Level {
         const finalYaw = yaw ?? facing;
         if (!_propFitsInBounds(prop, x, z, finalYaw)) continue;
         if (col && !_wallPropOverlap(x, z, col.w, col.d, finalYaw)) continue;
+        if (col && _embedsWall(x, z, col.w, col.d, finalYaw)) continue;
         prop.group.position.set(x, 0, z);
         prop.group.rotation.y = finalYaw;
         return this._registerProp(prop);
@@ -2732,6 +2941,7 @@ export class Level {
         const finalYaw = yaw ?? facing;
         if (!_propFitsInBounds(prop, x, z, finalYaw)) continue;
         if (!_wallPropOverlap(x, z, col.w, col.d, finalYaw)) continue;
+        if (_embedsWall(x, z, col.w, col.d, finalYaw)) continue;
         prop.group.position.set(x, 0, z);
         prop.group.rotation.y = finalYaw;
         return this._registerProp(prop);
@@ -4715,6 +4925,15 @@ export class Level {
       return 'standard';
     };
 
+    // 2026-05-23: SPAWN_MULT was briefly set to 2 for coop testing.
+    // Reverted to 1 — the 2x doubled the Math.random() call count per
+    // room (variant picks), amplifying any host/joiner RNG divergence
+    // (e.g. contract modifiers, cached JS) and breaking determinism
+    // that keyAssignments + netId-based snapshot sync rely on.
+    // Symptoms when out of sync: floating dead bodies on joiner,
+    // doors visible to host but not joiner, melee kills not syncing.
+    const SPAWN_MULT = 1;
+
     if (room.type === 'combat') {
       // Enemy count ramps continuously past L4 instead of flatlining.
       // Past L4 we layer +1 melee per 3 levels and +1 gunman per 4
@@ -4728,7 +4947,13 @@ export class Level {
       const meleeLevelExtra = Math.min(3, Math.floor(Math.max(0, lv - 4) / 3));
       // Active contract spawnDensityMult — Risky 'Press Wave' multiplies
       // counts. Read live so the modifier kicks in for the current run.
-      const densityMult = window.__activeModifiers?.()?.spawnDensityMult || 1;
+      // BALANCE.horde.densityMult layers the global horde-lite baseline on
+      // top (a build constant, so coop peers stay RNG-deterministic — see
+      // balance.js). Per-enemy HP is trimmed proportionally in gunman.js /
+      // melee_enemy.js, and buildBodyLoot divides the drop rate so the
+      // extra bodies don't inflate floor loot.
+      const densityMult = (window.__activeModifiers?.()?.spawnDensityMult || 1)
+        * (BALANCE.horde?.densityMult || 1);
       // Active contract eliteChanceMult — promotes normal spawns to
       // subBoss tier with a per-enemy roll. Capped at 1 promotion per
       // 4 spawns so a 2x mult doesn't fill the room with mini-bosses.
@@ -4744,13 +4969,13 @@ export class Level {
         }
         return entry;
       };
-      const meleesN = Math.round((meleeBase + meleeBonus + meleeLevelExtra) * densityMult);
+      const meleesN = Math.round((meleeBase + meleeBonus + meleeLevelExtra) * densityMult * SPAWN_MULT);
       const gunmanChance = lv <= 1 ? 0.35 : lv <= 3 ? 0.65 : 0.85;
       const baseGunmen = Math.random() < gunmanChance
         ? (lv >= 4 && Math.random() < 0.25 ? 2 : 1)
         : 0;
       const gunmenLevelExtra = Math.min(2, Math.floor(Math.max(0, lv - 5) / 4));
-      const gunmenN = Math.round((baseGunmen + gunmenLevelExtra) * densityMult);
+      const gunmenN = Math.round((baseGunmen + gunmenLevelExtra) * densityMult * SPAWN_MULT);
       for (let i = 0; i < meleesN; i++) {
         const p = pickOpen();
         this.enemySpawns.push(_maybePromote({
@@ -4774,7 +4999,7 @@ export class Level {
         variant: subVariant,
       });
       // Level 1 sub-bosses solo; later levels get escorts.
-      const escorts = lv <= 1 ? 0 : (lv <= 3 ? 1 : 2);
+      const escorts = (lv <= 1 ? 0 : (lv <= 3 ? 1 : 2)) * SPAWN_MULT;
       for (let i = 0; i < escorts; i++) {
         const pi = pickOpen();
         this.enemySpawns.push({
@@ -4854,8 +5079,8 @@ export class Level {
       });
       // Boss room escorts scale with level — level 1 boss is the boss
       // and a single melee so the final fight is tight but survivable.
-      const bossMelees = lv <= 1 ? 1 : 2;
-      const bossDashers = lv <= 1 ? 0 : 1;
+      const bossMelees = (lv <= 1 ? 1 : 2) * SPAWN_MULT;
+      const bossDashers = (lv <= 1 ? 0 : 1) * SPAWN_MULT;
       for (let i = 0; i < bossDashers; i++) {
         const pEscort = pickOpen(2);
         this.enemySpawns.push({
@@ -5511,102 +5736,177 @@ export class Level {
   // wall/door obstacle within ~0.8m; if nothing is there, a plug
   // wall block fills the gap. Door gaps and their approach corridors
   // are explicitly excluded so the seal can never wall off a doorway.
+  // R1 — sealing invariant. Every room edge segment that faces the VOID
+  // (no other room beyond it) must be covered by a wall, except where a
+  // doorway gap legitimately sits. This runs LAST in generate() (after
+  // every door-clear / repair / extraction pass) so its plugs can never
+  // be re-nulled by a later sweep — that ordering bug was why even rect
+  // rooms ended up with a fully-open edge: a perimeter wall got cleared
+  // as "in a door corridor" and the old seal (which ran BEFORE the final
+  // clears) couldn't catch it.
+  //
+  // Why void-facing only: a SHARED edge (another room beyond it) is
+  // either a doorway connection or a back-to-back wall the perimeter
+  // builder already owns — sealing it would wall off a connection or
+  // double-wall. By probing PROBE_OUT past the edge for a neighbour we
+  // touch only the true map boundary. Void-facing edges never carry a
+  // legitimate door (doors live between rooms), so no door bookkeeping
+  // is needed beyond a defensive skip for a door touching a misaligned
+  // boundary.
+  //
+  // Shape rooms seal against their BOUNDS rectangle (not the inset shape
+  // outline): the bounding box becomes the watertight boundary and the
+  // shape's own interior walls partition the unreachable cut-outs off
+  // from play space. That's correct and far simpler than tracing every
+  // shape's silhouette.
   _sealRoomPerimeters() {
-    const STEP = 1.0;
-    const HALF_STEP = STEP / 2;
-    // checkRadius must satisfy: PLUG_LEN/2 + checkRadius < STEP, so
-    // freshly-placed plugs don't skip their own next-sample slot
-    // (which produced a picket-fence with walkable gaps).
-    //
-    // Bumped checkRadius to 0.35 so plugs are suppressed near actual
-    // existing walls, eliminating the "extra segment next to the
-    // wall" artifact — a short plug placed right against a full wall
-    // was visually reading as a separate block. With PLUG_LEN=1.25,
-    // 0.35 is the maximum that still lets adjacent plugs (1m apart)
-    // both place.
-    const checkRadius = 0.35;
-    const PLUG_LEN = STEP + 0.25;
-    // Pre-gather door centres so the sampler can skip any sample
-    // landing inside a door corridor. This is belt-and-braces: the
-    // hasWallAt check already detects door collision boxes, but if
-    // _clearDoorCorridors or a future pass nulled the door somehow,
-    // the skip keeps us from plugging a real doorway.
-    const doorKeepouts = [];
-    for (const o of this.obstacles) {
-      if (!o.userData.isDoor) continue;
-      const g = o.geometry?.parameters;
-      const halfW = (g?.width || 4) / 2 + 0.8;
-      const halfD = (g?.depth || 1.2) / 2 + 0.8;
-      doorKeepouts.push({ x: o.position.x, z: o.position.z, halfW, halfD });
-    }
-    const inDoorKeepout = (x, z) => {
-      for (const k of doorKeepouts) {
-        if (Math.abs(x - k.x) < k.halfW && Math.abs(z - k.z) < k.halfD) return true;
+    const STEP = 0.5;
+    const COVER_TOL = 0.3;
+    const PLUG_PAD = 0.25;                 // extend a merged plug past its run ends
+    const PROBE_OUT = WALL_THICK + 0.6;    // outward distance to test for a neighbour room
+    const realRooms = this.rooms.filter(r => r.id >= 0 && r.bounds);
+    const inAnotherRoom = (x, z, self) => {
+      for (const r of realRooms) {
+        if (r === self) continue;
+        const rb = r.bounds;
+        if (x >= rb.minX - 0.2 && x <= rb.maxX + 0.2 && z >= rb.minZ - 0.2 && z <= rb.maxZ + 0.2) return true;
       }
       return false;
     };
-    const hasWallAt = (x, z) => {
+    const coveredByWall = (x, z) => {
       for (const o of this.obstacles) {
-        const b = o.userData.collisionXZ;
-        if (!b) continue;
-        // Only count real perimeter-style obstacles, not tiny props
-        // / cover blocks in the room interior.
-        if (o.userData.isProp) continue;
-        if (x > b.minX - checkRadius && x < b.maxX + checkRadius
-         && z > b.minZ - checkRadius && z < b.maxZ + checkRadius) return true;
+        const cb = o.userData.collisionXZ;
+        if (!cb) continue;
+        if (o.userData.isProp) continue;   // props/cover don't count as a seal
+        if (x > cb.minX - COVER_TOL && x < cb.maxX + COVER_TOL
+         && z > cb.minZ - COVER_TOL && z < cb.maxZ + COVER_TOL) return true;
       }
       return false;
     };
-    for (const room of this.rooms) {
+    const nearDoor = (x, z) => {
+      for (const o of this.obstacles) {
+        if (!o.userData.isDoor) continue;
+        const cx = o.userData.cx, cz = o.userData.cz;
+        if (cx == null) continue;
+        if (Math.abs(x - cx) < DOOR_WIDTH / 2 + 0.8 && Math.abs(z - cz) < DOOR_WIDTH / 2 + 0.8) return true;
+      }
+      return false;
+    };
+    for (const room of realRooms) {
       const b = room.bounds;
       const sides = [
-        { fixed: 'z', fxv: b.minZ, stepAxis: 'x', from: b.minX, to: b.maxX },
-        { fixed: 'z', fxv: b.maxZ, stepAxis: 'x', from: b.minX, to: b.maxX },
-        { fixed: 'x', fxv: b.minX, stepAxis: 'z', from: b.minZ, to: b.maxZ },
-        { fixed: 'x', fxv: b.maxX, stepAxis: 'z', from: b.minZ, to: b.maxZ },
+        { fixed: 'z', fxv: b.minZ, from: b.minX, to: b.maxX, out: [0, -1] },
+        { fixed: 'z', fxv: b.maxZ, from: b.minX, to: b.maxX, out: [0, 1] },
+        { fixed: 'x', fxv: b.minX, from: b.minZ, to: b.maxZ, out: [-1, 0] },
+        { fixed: 'x', fxv: b.maxX, from: b.minZ, to: b.maxZ, out: [1, 0] },
       ];
       for (const side of sides) {
-        // Range now goes from `from` to `to` inclusive (was
-        // `from + HALF_STEP` to `< to`), so the corner endpoints
-        // are sampled. Old version skipped the first/last 0.5m of
-        // every side, leaving four corners-per-room unverified —
-        // shape-room chamfers + neighbour-room misalignments
-        // produced visible gaps + odd geometry there. checkRadius
-        // already suppresses redundant plugs next to existing
-        // walls, so re-sampling the corners is safe.
-        for (let s = side.from; s <= side.to + 0.001; s += STEP) {
-          const sc = Math.min(s, side.to);    // clamp final sample
+        // Coalesce consecutive uncovered void samples into ONE merged
+        // plug wall (a long rectangle, not a row of squares).
+        let runStart = null, runEnd = null;
+        const flushRun = () => {
+          if (runStart === null) return;
+          const center = (runStart + runEnd) / 2;
+          const len = (runEnd - runStart) + STEP + PLUG_PAD;
+          if (side.fixed === 'x') {
+            this._addObstacle(side.fxv, WALL_HEIGHT / 2, center,
+              WALL_THICK, WALL_HEIGHT, len, OUTER_WALL_COLOR);
+          } else {
+            this._addObstacle(center, WALL_HEIGHT / 2, side.fxv,
+              len, WALL_HEIGHT, WALL_THICK, OUTER_WALL_COLOR);
+          }
+          runStart = runEnd = null;
+        };
+        for (let s = side.from; s <= side.to + 1e-6; s += STEP) {
+          const sc = Math.min(s, side.to);
           const x = side.fixed === 'x' ? side.fxv : sc;
           const z = side.fixed === 'z' ? side.fxv : sc;
-          if (inDoorKeepout(x, z)) continue;
-          if (hasWallAt(x, z)) continue;
-          if (side.fixed === 'x') {
-            this._addObstacle(x, WALL_HEIGHT / 2, z,
-              WALL_THICK, WALL_HEIGHT, PLUG_LEN, OUTER_WALL_COLOR);
-          } else {
-            this._addObstacle(x, WALL_HEIGHT / 2, z,
-              PLUG_LEN, WALL_HEIGHT, WALL_THICK, OUTER_WALL_COLOR);
-          }
+          const px = x + side.out[0] * PROBE_OUT;
+          const pz = z + side.out[1] * PROBE_OUT;
+          // Shared edge (neighbour beyond) — leave the perimeter+door
+          // geometry alone. Covered or door-adjacent samples break the run.
+          if (inAnotherRoom(px, pz, room) || coveredByWall(x, z) || nearDoor(x, z)) { flushRun(); continue; }
+          if (runStart === null) runStart = sc;
+          runEnd = sc;
         }
+        flushRun();
       }
-      // Explicit 4-corner caps. After the side sweep, the corner
-      // CELL (b.minX/maxX × b.minZ/maxZ) is the most failure-prone
-      // spot: shape templates often end their perimeter walls just
-      // short of the corner, and adjacent rooms with different
-      // shapes can leave a tiny diagonal gap at the meeting cell.
-      // Drop a WALL_THICK × WALL_THICK pillar block at each corner
-      // unless something else is already there.
-      const corners = [
-        { x: b.minX, z: b.minZ },
-        { x: b.maxX, z: b.minZ },
-        { x: b.minX, z: b.maxZ },
-        { x: b.maxX, z: b.maxZ },
-      ];
-      for (const c of corners) {
-        if (inDoorKeepout(c.x, c.z)) continue;
-        if (hasWallAt(c.x, c.z)) continue;
-        this._addObstacle(c.x, WALL_HEIGHT / 2, c.z,
-          WALL_THICK, WALL_HEIGHT, WALL_THICK, OUTER_WALL_COLOR);
+    }
+  }
+
+  // Purely-cosmetic architectural detail mesh. Routes around the
+  // obstacle/instancer path entirely: the mesh is added straight to
+  // the scene and tracked in `this.decorations` (disposed in clear()),
+  // and NO `userData.collisionXZ` is ever set — so it never enters
+  // `this.obstacles`, never affects collision, raycasts (bullets / AI
+  // LoS), the navmesh, or the flood-fill connectivity invariant. This
+  // mirrors the existing decoration path used by ledges, lamps, and
+  // the rotunda chamfer accent. Returns the mesh (or null if disabled).
+  _addAccentDeco(x, y, z, w, h, d, color, opts = {}) {
+    const mat = sharedMaterial({
+      color,
+      roughness: opts.roughness ?? 0.55,
+      metalness: opts.metalness ?? 0.15,
+    });
+    const mesh = new THREE.Mesh(new THREE.BoxGeometry(w, h, d), mat);
+    mesh.position.set(x, y, z);
+    // Trim catches the key light for depth but doesn't need to cast —
+    // it's flush against a wall that already self-shadows.
+    mesh.castShadow = false;
+    mesh.receiveShadow = true;
+    mesh.userData.kind = opts.kind || 'wall-trim';
+    // Deliberately leave collisionXZ unset so solidObstacles() / the
+    // collision sweep never see this geometry.
+    mesh.matrixAutoUpdate = false;
+    mesh.updateMatrix();
+    this.scene.add(mesh);
+    this.decorations.push(mesh);
+    return mesh;
+  }
+
+  // Lay cosmetic trim onto one boundary wall span: a thin horizontal
+  // accent band partway up, a brighter highlight lip just above it,
+  // and evenly-spaced vertical pilaster strips. All decoration-only
+  // (see _addAccentDeco). `isHoriz` = the wall runs along X (its long
+  // axis is width `w`); otherwise it runs along Z (long axis `d`).
+  _addPerimeterTrim(cx, cz, w, d, isHoriz, faceThick) {
+    const len = isHoriz ? w : d;
+    if (len < 4) return;
+    // Push the trim just proud of the wall's interior face so it reads
+    // as applied moulding and never z-fights the slab.
+    const proud = 0.06;
+    const bandH = 0.28;             // band height
+    const bandY = WALL_HEIGHT * 0.62;
+    const half = faceThick / 2 + proud;
+    // Horizontal band — spans the full wall length, both interior faces.
+    // (A boundary wall is only seen from inside the map, but stamping
+    // both faces is cheap geometry and avoids a facing calculation.)
+    const bandLen = len - 0.4;
+    if (isHoriz) {
+      this._addAccentDeco(cx, bandY, cz - half, bandLen, bandH, 0.05, ACCENT_COLOR, { kind: 'wall-band' });
+      this._addAccentDeco(cx, bandY, cz + half, bandLen, bandH, 0.05, ACCENT_COLOR, { kind: 'wall-band' });
+      this._addAccentDeco(cx, bandY + bandH / 2 + 0.02, cz - half, bandLen, 0.05, 0.06, ACCENT_HI_COLOR, { kind: 'wall-band-hi' });
+      this._addAccentDeco(cx, bandY + bandH / 2 + 0.02, cz + half, bandLen, 0.05, 0.06, ACCENT_HI_COLOR, { kind: 'wall-band-hi' });
+    } else {
+      this._addAccentDeco(cx - half, bandY, cz, 0.05, bandH, bandLen, ACCENT_COLOR, { kind: 'wall-band' });
+      this._addAccentDeco(cx + half, bandY, cz, 0.05, bandH, bandLen, ACCENT_COLOR, { kind: 'wall-band' });
+      this._addAccentDeco(cx - half, bandY + bandH / 2 + 0.02, cz, 0.06, 0.05, bandLen, ACCENT_HI_COLOR, { kind: 'wall-band-hi' });
+      this._addAccentDeco(cx + half, bandY + bandH / 2 + 0.02, cz, 0.06, 0.05, bandLen, ACCENT_HI_COLOR, { kind: 'wall-band-hi' });
+    }
+    // Vertical pilaster strips at ~6m intervals — thin full-height
+    // ribs that break the slab into bays. Only on the interior face.
+    const spacing = 6;
+    const count = Math.max(1, Math.floor(len / spacing));
+    const step = len / (count + 1);
+    const pilW = 0.5, pilT = 0.07;
+    for (let i = 1; i <= count; i++) {
+      const off = -len / 2 + step * i;
+      if (isHoriz) {
+        this._addAccentDeco(cx + off, WALL_HEIGHT / 2, cz - half, pilW, WALL_HEIGHT - 0.06, pilT, OUTER_WALL_COLOR, { kind: 'pilaster', roughness: 0.8, metalness: 0.0 });
+        this._addAccentDeco(cx + off, WALL_HEIGHT / 2, cz + half, pilW, WALL_HEIGHT - 0.06, pilT, OUTER_WALL_COLOR, { kind: 'pilaster', roughness: 0.8, metalness: 0.0 });
+      } else {
+        this._addAccentDeco(cx - half, WALL_HEIGHT / 2, cz + off, pilT, WALL_HEIGHT - 0.06, pilW, OUTER_WALL_COLOR, { kind: 'pilaster', roughness: 0.8, metalness: 0.0 });
+        this._addAccentDeco(cx + half, WALL_HEIGHT / 2, cz + off, pilT, WALL_HEIGHT - 0.06, pilW, OUTER_WALL_COLOR, { kind: 'pilaster', roughness: 0.8, metalness: 0.0 });
       }
     }
   }
@@ -5640,6 +5940,12 @@ export class Level {
       const m = this._addObstacle(cx, WALL_HEIGHT / 2, cz,
         w, WALL_HEIGHT, d, OUTER_WALL_COLOR);
       if (m) m.userData.isOuter = true;
+      // Architectural trim — cosmetic band + pilasters on the four
+      // boundary slabs so they don't read as featureless walls. Pure
+      // decoration; zero collision impact (see _addPerimeterTrim /
+      // _addAccentDeco). isHoriz = the wall's long axis is X.
+      const isHoriz = w >= d;
+      this._addPerimeterTrim(cx, cz, w, d, isHoriz, isHoriz ? d : w);
     };
     spawn((x0 + x1) / 2, z0 - thick / 2, width + thick * 2, thick);  // north
     spawn((x0 + x1) / 2, z1 + thick / 2, width + thick * 2, thick);  // south
@@ -6676,7 +6982,7 @@ export class Level {
         // _openDoor mutates color/opacity here and we don't want
         // those changes leaking into other doors via shared mat.
         if (mesh.material && typeof mesh.material.clone === 'function') {
-          mesh.material = mesh.material.clone();
+          mesh.material = cloneForTint(mesh.material);
         }
       }
     };
@@ -6759,6 +7065,10 @@ export class Level {
       FULL_WALL_COLOR  = this.theme.wall;
       OUTER_WALL_COLOR = _darkenHex(this.theme.wall, 0.55);
       LOW_COVER_COLOR  = _darkenHex(this.theme.wall, 0.30);
+      if (this.theme.accent != null) {
+        ACCENT_COLOR    = _darkenHex(this.theme.accent, 0.20);
+        ACCENT_HI_COLOR = _lightenHex(this.theme.accent, 0.25);
+      }
       if (this.ground && this.ground.material && this.ground.material.color) {
         this.ground.material.color.setHex(this.theme.floor);
       }

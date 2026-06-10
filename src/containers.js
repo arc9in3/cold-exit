@@ -192,12 +192,15 @@ function rollItemForType(type, levelIdx) {
   }
   if (type === 'medical') {
     // Encounter-only consumables (e.g. cheesecake) ARE allowed in
-    // medical chests — they're themed-source loot. Just excluded
-    // from the generic randomConsumable() pool. Keeps Sleepy Beauty
-    // discoverable without diluting backpack drops.
-    const heals = ALL_CONSUMABLES.filter(c =>
+    // medical chests — they're themed-source loot. Source from the
+    // unfiltered CONSUMABLE_DEFS so cheesecake reaches the pool;
+    // ALL_CONSUMABLES has the _encounter items stripped out at
+    // export time. Without this, Sleepy Beauty has no canonical
+    // wake item and the encounter is uncompletable.
+    const allDefs = Object.values(CONSUMABLE_DEFS);
+    const heals = allDefs.filter(c =>
       c.useEffect?.kind === 'heal' || c.useEffect?.kind === 'buff');
-    const pool = heals.length ? heals : ALL_CONSUMABLES;
+    const pool = heals.length ? heals : allDefs;
     return { ...pool[Math.floor(Math.random() * pool.length)] };
   }
   if (type === 'masterwork') {

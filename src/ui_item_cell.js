@@ -48,21 +48,53 @@ export function renderItemCell(item, slotId = null, opts = {}) {
     ? `<button class="cust-btn" type="button" title="Customize">⚙</button>`
     : '';
 
-  // Right-side stat lines.
+  // Right-side stat lines. Every equippable / usable item type should
+  // surface at least one numeric stat chip so the cell isn't carried
+  // entirely by the description text. Type coverage was previously
+  // gappy — throwables, attachments, repairkits, backpacks rendered
+  // with no chips at all and just leaned on the description.
   const stats = [];
   if (item.type === 'ranged') {
     if (typeof item.damage === 'number') stats.push(`<span class="cell-stat">DMG <b>${Math.round(item.damage)}</b></span>`);
     if (typeof item.fireRate === 'number' && item.fireRate > 0) stats.push(`<span class="cell-stat">RPS <b>${Math.round(item.fireRate)}</b></span>`);
     if (typeof item.magSize === 'number') stats.push(`<span class="cell-stat">MAG <b>${item.ammo ?? item.magSize}/${item.magSize}</b></span>`);
   } else if (item.type === 'melee') {
+    // Show the basic-strike damage (combo[0].close = primary swing).
+    // Heavy / charged steps live deeper in the combo array and are
+    // surfaced on the details panel — the cell stays uncluttered.
     const step = item.combo?.[0]?.close || item.combo?.[0]?.far;
-    if (step) stats.push(`<span class="cell-stat">DMG <b>${step.damage}</b></span>`);
+    if (step?.damage != null) stats.push(`<span class="cell-stat">DMG <b>${step.damage}</b></span>`);
+    if (typeof item.staminaCost === 'number') stats.push(`<span class="cell-stat">STA <b>${item.staminaCost}</b></span>`);
   } else if (item.type === 'armor' || item.type === 'gear') {
     if (typeof item.reduction === 'number') stats.push(`<span class="cell-stat">DR <b>${Math.round(item.reduction * 100)}%</b></span>`);
     if (typeof item.pockets === 'number') stats.push(`<span class="cell-stat">+${item.pockets} <b>pocket${item.pockets > 1 ? 's' : ''}</b></span>`);
+  } else if (item.type === 'backpack') {
+    if (typeof item.pockets === 'number') stats.push(`<span class="cell-stat">+${item.pockets} <b>slots</b></span>`);
+    if (typeof item.speedMult === 'number' && Math.abs(item.speedMult - 1) > 0.001) {
+      const pct = Math.round((item.speedMult - 1) * 100);
+      stats.push(`<span class="cell-stat">MOVE <b>${pct >= 0 ? '+' : ''}${pct}%</b></span>`);
+    }
   } else if (item.type === 'consumable') {
     const e = item.useEffect;
-    if (e?.kind === 'heal') stats.push(`<span class="cell-stat">HEAL <b>${e.amount}</b></span>`);
+    if (e?.kind === 'heal' && typeof e.amount === 'number') stats.push(`<span class="cell-stat">HEAL <b>${e.amount}</b></span>`);
+    if (e?.kind === 'buff') stats.push(`<span class="cell-stat">BUFF <b>${(e.life | 0) || '∞'}s</b></span>`);
+    if (Array.isArray(e?.cures) && e.cures.length) stats.push(`<span class="cell-stat">CURE <b>${e.cures.join(', ')}</b></span>`);
+  } else if (item.type === 'throwable') {
+    if (typeof item.aoeDamage === 'number') stats.push(`<span class="cell-stat">DMG <b>${item.aoeDamage}</b></span>`);
+    if (typeof item.aoeRadius === 'number') stats.push(`<span class="cell-stat">RAD <b>${item.aoeRadius}m</b></span>`);
+    if (typeof item.maxCharges === 'number') stats.push(`<span class="cell-stat">USES <b>${item.charges ?? item.maxCharges}/${item.maxCharges}</b></span>`);
+  } else if (item.type === 'attachment') {
+    // Attachments don't carry numeric headline stats — their modifier
+    // object is read at attach time. Surface the slot + a compact
+    // hint that this is a wpn-mod so the player isn't expected to
+    // read the full description in the grid view.
+    if (item.slot) stats.push(`<span class="cell-stat">MOD <b>${item.slot}</b></span>`);
+  } else if (item.type === 'repairkit') {
+    // Repair kits expose `repairAmount` (HP restored) and may be
+    // gated by item type (weapon-only vs armor-only). Chip out both
+    // so the player can tell at a glance.
+    if (typeof item.repairAmount === 'number') stats.push(`<span class="cell-stat">REPAIR <b>+${item.repairAmount}</b></span>`);
+    if (item.repairsType) stats.push(`<span class="cell-stat">FOR <b>${item.repairsType}</b></span>`);
   } else if (item.type === 'junk') {
     if (typeof item.sellValue === 'number') stats.push(`<span class="cell-stat">SELL <b>${item.sellValue}c</b></span>`);
   }
@@ -74,9 +106,20 @@ export function renderItemCell(item, slotId = null, opts = {}) {
   const descLine = item.description
     ? `<div class="cell-desc">${item.description}</div>`
     : '';
-  const affixLine = (item.affixes && item.affixes.length)
-    ? `<div class="cell-affixes">${item.affixes.slice(0, 2).map(a => `• ${a.label}`).join('<br>')}</div>`
-    : '';
+  // Affix display — 2 visible, the rest collapsed into a "+N more"
+  // count so the player isn't surprised by hidden rolls (a 3-affix
+  // legendary used to silently drop its third). Tooltip on the
+  // overflow chip lists every rolled affix so hover gives the full
+  // picture without leaving the grid.
+  let affixLine = '';
+  if (item.affixes && item.affixes.length) {
+    const visible = item.affixes.slice(0, 2).map(a => `• ${a.label}`).join('<br>');
+    const hidden = item.affixes.length - 2;
+    const overflow = hidden > 0
+      ? `<div class="cell-affix-overflow" title="${item.affixes.map(a => a.label).join(' · ')}">+${hidden} more</div>`
+      : '';
+    affixLine = `<div class="cell-affixes">${visible}${overflow}</div>`;
+  }
   const perkLine = (item.perks && item.perks.length)
     ? `<div class="cell-perks">${item.perks.map(p =>
         `<span class="perk"><span class="perk-name">◆ ${p.name}</span></span>`
@@ -120,7 +163,7 @@ export function renderItemCell(item, slotId = null, opts = {}) {
       ${artInner}
       ${brokenTag}
       ${markTag}
-      <div class="cell-name-overlay">${item.name}</div>
+      <div class="cell-name-overlay" title="${(item.name || '').replace(/<[^>]*>/g, '').replace(/"/g, '&quot;')}">${item.name}</div>
     </div>
     <div class="cell-stats">
       ${stats.join('')}
