@@ -14,6 +14,8 @@ import { rigInstancer } from './rig_instancer.js';
 import { aiSpatial } from './ai_spatial.js';
 import { findCoverFor } from './ai_cover.js';
 import { windowLosBetween } from './ai_windows.js';
+import { assignRoles as squadAssignRoles, notifyDamage as squadNotifyDamage } from './ai_squad.js';
+import { mantleableAt } from './ledges.js';
 
 // Strip the held weapon meshes off a dead enemy — detach the primitive
 // gun box, the FBX weaponModel group, and the muzzle anchor from the
@@ -93,7 +95,12 @@ const CHATTER_LINES = [
 // along the line to the player) and 'flanker' (approaches while maintaining
 // an angular offset). Aim is intentionally worse than the player's — weapon
 // spread multiplied by `tunables.ai.spreadMultiplier`.
-const STATE = { IDLE: 'idle', ALERTED: 'alerted', FIRING: 'firing', DEAD: 'dead', SLEEP: 'sleep' };
+// Pass 2 added RETREAT (low-hp self-heal under cover) and SUPPRESS
+// (anchor pinning the player while flankers reposition). Existing
+// switch (g.state) consumers fall through to default for these new
+// values — the behaviour for them is driven from _updateRanged below.
+const STATE = { IDLE: 'idle', ALERTED: 'alerted', FIRING: 'firing', DEAD: 'dead', SLEEP: 'sleep',
+  RETREAT: 'retreat', SUPPRESS: 'suppress' };
 
 // Per-variant profile overlay. `standard` is baseline; others tweak stats and
 // enable/disable behaviors (burst settle, dash, cover reposition).
@@ -1025,6 +1032,14 @@ export class GunmanManager {
     g.hp -= damage;
     g.flashT = tunables.enemy.hitFlashTime;
     if (g.state === STATE.IDLE || g.state === STATE.SLEEP) g.state = STATE.ALERTED;
+    // Pass 2 — damage-driven squad re-assignment. >20% maxHp in one
+    // hit OR any hit on the anchor flags the squad dirty so the next
+    // assignRoles tick reshuffles. Anchor-vs-flanker swap is handled
+    // inside ai_squad via the _squadAnchorHit flag.
+    try {
+      const frac = damage / Math.max(1, g.maxHp || 1);
+      squadNotifyDamage(g, frac);
+    } catch (e) { /* fail-soft */ }
     g.loseTargetT = tunables.ai.loseTargetTime;
     // Doorway-choke awareness — track hits in a 4s rolling window.
     // Two+ hits within the window from a player in a different room
@@ -1201,6 +1216,16 @@ export class GunmanManager {
         // Spatial hash never blocks the AI tick. If rebuild fails the
         // legacy code paths take over.
         if (typeof console !== 'undefined') console.warn('[ai_spatial] rebuild failed:', e);
+      }
+      // Pass 2 — squad role assignment (host-only). Throttled to 1Hz
+      // inside ai_squad; on-damage dirty bits are honoured. Mutates
+      // gunman.role; ride-along data (_flankTarget, _squadCoverHint)
+      // is read by the per-gunman branches below.
+      try {
+        const _squadStats = squadAssignRoles(ctx.level, this.gunmen, ctx.playerPos, { dt });
+        if (typeof window !== 'undefined') window.__aiSquad = _squadStats;
+      } catch (e) {
+        if (typeof console !== 'undefined') console.warn('[ai_squad] assignRoles failed:', e);
       }
     }
     // LOD scheduler — distant idle gunmen tick at half rate. Cuts AI
@@ -1514,7 +1539,8 @@ export class GunmanManager {
         const speed = dt > 0 ? Math.hypot(dx, dz) / dt : 0;
         g._animLastX = g.group.position.x;
         g._animLastZ = g.group.position.z;
-        const aiming = g.state === STATE.ALERTED || g.state === STATE.FIRING;
+        const aiming = g.state === STATE.ALERTED || g.state === STATE.FIRING
+          || g.state === STATE.SUPPRESS || g.state === STATE.RETREAT;
         const wcls = g.weapon?.class;
         const rifleHold = wcls === 'rifle' || wcls === 'shotgun'
           || wcls === 'lmg' || wcls === 'sniper';
@@ -1985,6 +2011,126 @@ export class GunmanManager {
       return;
     }
 
+    // -------- Pass 2 RETREAT — low-hp self-heal under cover --------
+    // Trigger: hp < 25% maxHp AND a cover candidate score ≥ 0.6 within
+    // 8 m. Behaviour: walk toward _retreatTarget via flow-field, NO
+    // fire, 5 s self-heal timer. After 5 s heals 30% hp and returns
+    // to ALERTED. Aborts (back to FIRING) if hp drops < 10% during
+    // retreat OR the player closes within 4 m.
+    if (g.alive && g.state !== STATE.IDLE && g.state !== STATE.DEAD
+        && g.state !== STATE.SLEEP && g.state !== STATE.RETREAT) {
+      const hpFrac = g.hp / Math.max(1, g.maxHp || 1);
+      if (hpFrac < 0.25 && (g._retreatCdT || 0) <= 0) {
+        const candidates = findCoverFor(ctx.level,
+          g.group.position, ctx.playerPos, { maxRadius: 8 });
+        const best = candidates && candidates.length ? candidates[0] : null;
+        if (best && best.score >= 0.6) {
+          g.state = STATE.RETREAT;
+          g._retreatTarget = { x: best.x, z: best.z };
+          g._retreatT = 5.0;
+        }
+      }
+    }
+    if (g.state === STATE.RETREAT) {
+      const hpFrac = g.hp / Math.max(1, g.maxHp || 1);
+      const dxp = ctx.playerPos.x - g.group.position.x;
+      const dzp = ctx.playerPos.z - g.group.position.z;
+      const playerNear = Math.hypot(dxp, dzp) < 4;
+      // Abort: very-low hp or player crashed in close.
+      if (hpFrac < 0.10 || playerNear) {
+        g.state = STATE.FIRING;
+        g._retreatTarget = null;
+        g._retreatT = 0;
+        g._retreatCdT = 8.0;     // brief cooldown so we don't loop
+      } else {
+        // Walk via flow-field toward the retreat target.
+        const tx = g._retreatTarget?.x ?? g.group.position.x;
+        const tz = g._retreatTarget?.z ?? g.group.position.z;
+        let dirX = tx - g.group.position.x;
+        let dirZ = tz - g.group.position.z;
+        const ll = Math.hypot(dirX, dirZ);
+        if (ll > 0.001) {
+          const flow = aiSpatial.flowFieldTo(tx, tz);
+          const samp = flow && flow.sample
+            ? flow.sample(g.group.position.x, g.group.position.z)
+            : null;
+          if (samp) { dirX = samp.dx; dirZ = samp.dz; }
+          else { dirX /= ll; dirZ /= ll; }
+          const step = tunables.ai.moveSpeed * 0.95 * dt;
+          const nx = g.group.position.x + dirX * step;
+          const nz = g.group.position.z + dirZ * step;
+          const res = ctx.resolveCollision(g.group.position.x, g.group.position.z,
+            nx, nz, tunables.ai.collisionRadius);
+          g.group.position.x = res.x;
+          g.group.position.z = res.z;
+          g.group.rotation.y = Math.atan2(dirX, dirZ);
+        }
+        g._retreatT -= dt;
+        if (g._retreatT <= 0 || ll < 0.6) {
+          // Heal 30% maxHp, drop back to ALERTED, set cooldown so the
+          // gunman doesn't immediately re-trigger the next frame if it
+          // takes another hit.
+          g.hp = Math.min(g.maxHp, g.hp + (g.maxHp || 0) * 0.30);
+          g.state = STATE.ALERTED;
+          g._retreatTarget = null;
+          g._retreatT = 0;
+          g._retreatCdT = 12.0;
+          g.reactionT = 0.2;
+        }
+        // Skip the rest of _updateRanged while retreating — no fire,
+        // no flank logic, no door-seek.
+        return;
+      }
+    }
+    if (g._retreatCdT) g._retreatCdT = Math.max(0, g._retreatCdT - dt);
+
+    // -------- Pass 2 SUPPRESS — anchor pins while flankers move ----
+    // Anchor enters SUPPRESS when its squad has ≥ 1 flanker still
+    // moving toward a flank target. While in SUPPRESS the gunman fires
+    // toward the player's last-known cell with 2× spread, capped at
+    // 6 s OR exited when the flanker reaches their target (within 1 m).
+    // Implemented as a mode flag rather than swapping the FIRING gate
+    // off, so the existing fire path still runs — _suppressMode toggles
+    // the spread multiplier + aim override below.
+    if (g.alive && g.role === 'anchor'
+        && (g.state === STATE.FIRING || g.state === STATE.ALERTED)
+        && (g._suppressCdT || 0) <= 0
+        && g.manager?.gunmen) {
+      // Look for an active flanker in the gunman roster.
+      let activeFlanker = null;
+      for (const o of g.manager.gunmen) {
+        if (!o || !o.alive || o === g) continue;
+        if (o.role !== 'flanker') continue;
+        if (!o._flankTarget) continue;
+        const fdx = o.group.position.x - o._flankTarget.x;
+        const fdz = o.group.position.z - o._flankTarget.z;
+        if (Math.hypot(fdx, fdz) > 1.0) { activeFlanker = o; break; }
+      }
+      if (activeFlanker) {
+        g._suppressMode = true;
+        g._suppressT = (g._suppressT || 0) + dt;
+        if (g._suppressT > 6.0) {
+          g._suppressMode = false;
+          g._suppressT = 0;
+          g._suppressCdT = 4.0;
+        } else if (g.state !== STATE.SUPPRESS) {
+          g.state = STATE.SUPPRESS;
+        }
+      } else if (g._suppressMode) {
+        // Flanker reached cover (or no longer flanking) — exit
+        // suppress immediately.
+        g._suppressMode = false;
+        g._suppressT = 0;
+        if (g.state === STATE.SUPPRESS) g.state = STATE.FIRING;
+      }
+    } else if (g.state === STATE.SUPPRESS) {
+      // No longer eligible (e.g. role changed) — clear.
+      g._suppressMode = false;
+      g._suppressT = 0;
+      g.state = STATE.FIRING;
+    }
+    if (g._suppressCdT) g._suppressCdT = Math.max(0, g._suppressCdT - dt);
+
     // While suspicious but not yet aggroed, turn the head toward the
     // player — visible "wait, did I see something?" tell without
     // committing to a chase.
@@ -2082,6 +2228,22 @@ export class GunmanManager {
       }
       g.loseTargetT = tunables.ai.loseTargetTime;
     } else if (g.state === STATE.IDLE) {
+      // Pass 2 ledge-mantle (grafted onto main's suspicion-staged
+      // patrol): a calm enemy scans from a ledge; any suspicion (>=0.3)
+      // or an expired dwell timer drops it back inside the room so the
+      // staging logic below runs on the ground as normal.
+      if (g._mountedLedge) {
+        g._ledgeDwellT = (g._ledgeDwellT || 0) - dt;
+        if (g._ledgeDwellT <= 0 || (g.suspicion || 0) >= 0.3) {
+          const ledge = g._mountedLedge;
+          g.group.position.x = ledge.insideX;
+          g.group.position.z = ledge.insideZ;
+          g.group.position.y = 0;
+          g._mountedLedge = null;
+          g._ledgeDwellT = 0;
+          g.patrolT = 1 + Math.random() * 2;   // brief pause after dismount
+        }
+      }
       // Patrol stages — driven by g.suspicion (0..1+). Three layers
       // before crest-to-ALERTED so the player has tactile feedback
       // that the AI is registering them in stages, not a binary
@@ -2229,6 +2391,27 @@ export class GunmanManager {
             g.patrolTargetZ = g.homeZ + (Math.random() - 0.5) * 6;
             g._patrolTargetRoomId = g.roomId;
           }
+          // Pass 2 — wanderers (non-defenders) have a 30% chance per
+          // patrol leg to mantle onto a nearby ledge and scan from it.
+          // Skipped if another gunman already holds the candidate ledge.
+          if (g.role !== 'defender' && !g._mountedLedge
+              && Math.random() < 0.30 && ctx.level && ctx.level.ledges
+              && ctx.level.ledges.length) {
+            try {
+              const found = mantleableAt(ctx.level, g.group.position, g.group.rotation.y);
+              if (found && found.ledge) {
+                const taken = g.manager?.gunmen?.some(
+                  o => o !== g && o._mountedLedge === found.ledge);
+                if (!taken) {
+                  g.group.position.y = found.ledge.walkableY;
+                  g.group.position.x = found.target.x;
+                  g.group.position.z = found.target.z;
+                  g._mountedLedge = found.ledge;
+                  g._ledgeDwellT = 4 + Math.random() * 4;  // 4-8 s scan
+                }
+              }
+            } catch (e) { /* fail-soft */ }
+          }
         }
         // Compute walk direction. If the patrol target is in a
         // different room than the gunman, route through a door first.
@@ -2258,7 +2441,7 @@ export class GunmanManager {
         const tx = stepX - g.group.position.x;
         const tz = stepZ - g.group.position.z;
         const td = Math.hypot(tx, tz);
-        if (td > 0.4) {
+        if (td > 0.4 && !g._mountedLedge) {
           const pdir = { x: tx / td, z: tz / td };
           g.group.rotation.y = Math.atan2(pdir.x, pdir.z);
           const step = tunables.ai.moveSpeed * 0.35 * dt;
@@ -3263,7 +3446,8 @@ export class GunmanManager {
       // enemy is smoke-confused (they keep spraying into the cloud).
       const smokeWindow = (g.smokeConfusedT || 0) > 0;
       const stdWindow = (g.noLosT || 0) > 0.3 && (g.noLosT || 0) < 1.1;
-      if (!canSee && g.state === STATE.FIRING
+      if (!canSee
+          && (g.state === STATE.FIRING || g.state === STATE.SUPPRESS)
           && typeof g.lastKnownX === 'number'
           && (stdWindow || smokeWindow)
           && dist <= (g.weapon?.range || 0) * 1.2) {
@@ -3272,6 +3456,14 @@ export class GunmanManager {
         if (ctx.combat.hasLineOfSight(mTest, aTest, ctx.obstacles)) {
           suppressing = true;
         }
+      }
+      // Pass 2 anchor SUPPRESS — fire AT the player's last known cell
+      // even when LoS is currently clear, with deliberately worse spread.
+      // Reuses the `suppressing` aim-override below; spread inflation is
+      // applied through suppMul further down in the volley loop.
+      if (g._suppressMode && typeof g.lastKnownX === 'number'
+          && dist <= (g.weapon?.range || 0) * 1.2) {
+        suppressing = true;
       }
 
       // Final gate: only fire when we have a clean path to the aim point.
@@ -3291,7 +3483,8 @@ export class GunmanManager {
       const rangeOk = g.archetype === 'bulletHell'
         ? true
         : dist <= (g.weapon?.range || 0) * 1.2;
-      if (g.state === STATE.FIRING && g.weapon && rangeOk
+      if ((g.state === STATE.FIRING || g.state === STATE.SUPPRESS)
+          && g.weapon && rangeOk
           && (g.dazzleT || 0) <= 0) {
         const mTest = g.muzzle.getWorldPosition(_g_muzzleTest);
         if (canSee) {
