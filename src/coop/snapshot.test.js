@@ -140,6 +140,31 @@ test('yaw quantization (millirad) round-trips within 0.001 rad', () => {
     `expected ~1.234567, got ${g0.y}`);
 });
 
+test('unbounded yaw is wrapped into [-π, π] on the wire', () => {
+  // REGRESSION: host rotation.y accumulates unbounded over a session
+  // (turn deltas add up). Unwrapped values inflate the wire int and
+  // make the joiner's interp wrap loop spin O(|yaw|/π) per frame.
+  resetAll();
+  const sim = mkSim();
+  const TWO_PI = Math.PI * 2;
+  // 8 full turns plus 1.0 rad — must hit the wire as ~1.0 rad.
+  sim.gunmen.gunmen[0].group.rotation.y = TWO_PI * 8 + 1.0;
+  // Negative accumulation: -4 turns minus 2.5 rad → wraps to -2.5
+  // (already inside [-π, π] after the turns are stripped).
+  sim.gunmen.gunmen[1].group.rotation.y = -TWO_PI * 4 - 2.5;
+  const p1 = encodeOne(sim, 'A', 1);
+  const r1 = reconstructFromDelta(p1);
+  const g1 = r1.gunmen.find(g => g.n === 1);
+  const g2 = r1.gunmen.find(g => g.n === 2);
+  assert.ok(g1.y >= -Math.PI - 0.001 && g1.y <= Math.PI + 0.001,
+    `wire yaw outside [-π, π]: ${g1.y}`);
+  assert.ok(Math.abs(g1.y - 1.0) < 0.001, `expected ~1.0, got ${g1.y}`);
+  assert.ok(g2.y >= -Math.PI - 0.001 && g2.y <= Math.PI + 0.001,
+    `wire yaw outside [-π, π]: ${g2.y}`);
+  assert.ok(Math.abs(g2.y - (-2.5)) < 0.001,
+    `expected ~-2.5, got ${g2.y}`);
+});
+
 test('joiner returns null when delta references unknown baseline', () => {
   resetAll();
   const sim = mkSim();

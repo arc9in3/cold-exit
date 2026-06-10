@@ -1074,7 +1074,17 @@ function _arrEq(a, b) {
 function _quantizePosYaw(r) {
   if (typeof r.x === 'number') r.x = Math.round(r.x * POS_SCALE);
   if (typeof r.z === 'number') r.z = Math.round(r.z * POS_SCALE);
-  if (typeof r.y === 'number') r.y = Math.round(r.y * YAW_SCALE);
+  if (typeof r.y === 'number') {
+    // Normalize yaw into [-π, π] before scaling. rotation.y accumulates
+    // unbounded on the host (turn deltas add up over a long session) —
+    // without the wrap the wire integer grows without bound and the
+    // joiner's interp wrap loop (`while (dy > π) dy -= 2π`) spins
+    // O(|yaw|/π) iterations per entity per frame.
+    let y = r.y % (Math.PI * 2);
+    if (y > Math.PI) y -= Math.PI * 2;
+    else if (y < -Math.PI) y += Math.PI * 2;
+    r.y = Math.round(y * YAW_SCALE);
+  }
 }
 function _quantizePosOnly3(r) {       // drones: x/y/z all positions
   if (typeof r.x === 'number') r.x = Math.round(r.x * POS_SCALE);
