@@ -344,8 +344,15 @@ export class ProjectileManager {
         p.body.rotation.z += dt * 6;
       }
     }
-    // Reap dead entries to keep the list bounded.
-    this.projectiles = this.projectiles.filter((p) => !p.dead);
+    // Reap dead entries to keep the list bounded. In-place compaction —
+    // the old `.filter()` allocated a fresh array every frame anything
+    // was in flight, which added GC churn during grenade-heavy fights.
+    let w = 0;
+    for (let i = 0; i < this.projectiles.length; i++) {
+      const p = this.projectiles[i];
+      if (!p.dead) this.projectiles[w++] = p;
+    }
+    this.projectiles.length = w;
   }
 
   _hitsObstacle(level, fromX, fromZ, x, y, z, fromY = y) {
